@@ -1,0 +1,131 @@
+<?xml version="1.0"?>
+<robot name="articulated_arm_robot">
+
+  <!-- Base link -->
+  <link name="base_link">
+    <visual>
+      <geometry>
+        <cylinder radius="0.15" length="0.1"/>
+      </geometry>
+      <material name="gray">
+        <color rgba="0.6 0.6 0.6 1.0"/>
+      </material>
+    </visual>
+    <collision>
+      <geometry>
+        <cylinder radius="0.15" length="0.1"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <!-- Shoulder link (first arm segment) -->
+  <link name="shoulder_link">
+    <visual>
+      <geometry>
+        <cylinder radius="0.05" length="0.3"/>
+      </geometry>
+      <material name="orange">
+        <color rgba="1.0 0.5 0.0 1.0"/>
+      </material>
+      <origin rpy="0 0 0" xyz="0 0 0.15"/>
+    </visual>
+    <collision>
+      <geometry>
+        <cylinder radius="0.05" length="0.3"/>
+      </geometry>
+      <origin rpy="0 0 0" xyz="0 0 0.15"/>
+    </collision>
+  </link>
+
+  <!-- Elbow link (second arm segment) -->
+  <link name="elbow_link">
+    <visual>
+      <geometry>
+        <cylinder radius="0.04" length="0.25"/>
+      </geometry>
+      <material name="blue">
+        <color rgba="0.0 0.0 1.0 1.0"/>
+      </material>
+      <origin rpy="0 0 0" xyz="0 0 0.125"/>
+    </visual>
+    <collision>
+      <geometry>
+        <cylinder radius="0.04" length="0.25"/>
+      </geometry>
+      <origin rpy="0 0 0" xyz="0 0 0.125"/>
+    </collision>
+  </link>
+
+  <!-- Wrist link (third arm segment) -->
+  <link name="wrist_link">
+    <visual>
+      <geometry>
+        <cylinder radius="0.03" length="0.15"/>
+      </geometry>
+      <material name="green">
+        <color rgba="0.0 1.0 0.0 1.0"/>
+      </material>
+      <origin rpy="0 0 0" xyz="0 0 0.075"/>
+    </visual>
+    <collision>
+      <geometry>
+        <cylinder radius="0.03" length="0.15"/>
+      </geometry>
+      <origin rpy="0 0 0" xyz="0 0 0.075"/>
+    </collision>
+  </link>
+
+  <!-- End effector -->
+  <link name="end_effector">
+    <visual>
+      <geometry>
+        <sphere radius="0.06"/>
+      </geometry>
+      <material name="red">
+        <color rgba="1.0 0.0 0.0 1.0"/>
+      </material>
+    </visual>
+    <collision>
+      <geometry>
+        <sphere radius="0.06"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <!-- Base to shoulder joint (shoulder rotation) -->
+  <joint name="base_to_shoulder" type="revolute">
+    <parent link="base_link"/>
+    <child link="shoulder_link"/>
+    <origin xyz="0.0 0.0 0.05" rpy="0 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-3.14159" upper="3.14159" effort="100" velocity="2.0"/>
+  </joint>
+
+  <!-- Shoulder to elbow joint (shoulder pitch) -->
+  <joint name="shoulder_to_elbow" type="revolute">
+    <parent link="shoulder_link"/>
+    <child link="elbow_link"/>
+    <origin xyz="0.0 0.0 0.30" rpy="0 0 0"/>
+    <axis xyz="1 0 0"/>
+    <limit lower="-2.0" upper="2.0" effort="80" velocity="1.8"/>
+  </joint>
+
+  <!-- Elbow to wrist joint (elbow pitch) -->
+  <joint name="elbow_to_wrist" type="revolute">
+    <parent link="elbow_link"/>
+    <child link="wrist_link"/>
+    <origin xyz="0.0 0.0 0.25" rpy="0 0 0"/>
+    <axis xyz="1 0 0"/>
+    <limit lower="-2.5" upper="2.5" effort="60" velocity="1.5"/>
+  </joint>
+
+  <!-- Wrist to end effector joint (wrist rotation) -->
+  <joint name="wrist_to_end" type="revolute">
+    <parent link="wrist_link"/>
+    <child link="end_effector"/>
+    <origin xyz="0.0 0.0 0.15" rpy="0 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-1.57" upper="1.57" effort="40" velocity="1.2"/>
+  </joint>
+
+</robot>

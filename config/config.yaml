@@ -1,0 +1,17 @@
+
+ # Target Simulation speed multiplier (e.g. 1=real time, 10=10x faster)
+speed: 100
+ # Simulation timestep (seconds per step)
+timestep: 1
+ # Simulation duration (seconds, 0=unlimited)
+duration: 0
+ # Enable GUI window (true/false)
+gui: true
+ # Enable physics engine (true/false)
+physics: false
+ # Enable external data monitor (true/false)
+monitor: true
+ # Collision check frequency (times per second)
+collision_check_frequency: 1
+ # Logging level (debug/info/warning/error/critical)
+log_level: warning
