@@ -2,7 +2,7 @@ import numpy as np
 import random
 import pybullet as p
 
-from core.core_simulation import URDFObject, MeshObject
+from pybullet_fleet.core_simulation import URDFObject, MeshObject
 
 def world_to_grid(pos, spacing, offset=None):
     """
@@ -138,7 +138,7 @@ def grid_spawn(model_class, model_paths, sim_core, x_num=1, y_num=1, z_num=1,
             )
             obj_args.update(args)
             obj_args['sim_core'] = sim_core
-            # クラスか関数かで分岐
+            # Branch based on whether it's a class or function
             if hasattr(model_class, '__name__') and model_class.__name__ == 'MeshObject':
                 obj_args['mesh_path'] = model_path
                 obj = model_class.from_mesh(**obj_args)
@@ -148,7 +148,7 @@ def grid_spawn(model_class, model_paths, sim_core, x_num=1, y_num=1, z_num=1,
                 obj = model_class.from_urdf(**obj_args)
                 sim_core.robots.append(obj)
             else:
-                # factory関数（高速化用）
+                # Factory function (for speedup)
                 obj = model_class(position=[x, y, z], orientation=orientation, sim_core=sim_core)
                 sim_core.mesh_objects.append(obj)
             spawned_objects.append(obj)
@@ -195,7 +195,7 @@ def grid_spawn_mesh(model_paths, sim_core, x_num=1, y_num=1, z_num=1,
                     offset_x=0.0, offset_y=0.0, offset_z=0.0,
                     spawn_probability=1.0, orientation_euler=[0,0,0],
                     base_mass=0.0, mesh_scale=[1,1,1], rgbaColor=[1,1,1,1], max_spawn=None):
-    # 1回だけvisual/collision shapeを作成
+    # Create visual/collision shape only once
     mesh_path = model_paths[0] if isinstance(model_paths, list) else model_paths
     vis_id = p.createVisualShape(
         shapeType=p.GEOM_MESH,
@@ -217,7 +217,7 @@ def grid_spawn_mesh(model_paths, sim_core, x_num=1, y_num=1, z_num=1,
             baseOrientation=orientation
         )
         return MeshObject(body_id=body_id, mesh_path=mesh_path, visual_id=vis_id, collision_id=col_id, sim_core=sim_core)
-    # grid_spawnのmodel_class引数にfactory関数を渡す
+    # Pass factory function to grid_spawn's model_class argument
     return grid_spawn(
         model_class=mesh_object_factory,
         model_paths=[mesh_path],

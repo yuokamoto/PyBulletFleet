@@ -4,13 +4,13 @@ Read simulation parameters from YAML and run MultiRobotSimulationCore.
 """
 import sys
 import os
-sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
+
 import pybullet as p
 import numpy as np
 import time
 import random
-from core.core_simulation import MultiRobotSimulationCore, URDFObject
-from core.tools import grid_execution
+from pybullet_fleet.core_simulation import MultiRobotSimulationCore, URDFObject
+from pybullet_fleet.tools import grid_execution
 config_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '../config', 'config.yaml'))
 sim_core = MultiRobotSimulationCore.from_yaml(config_path)
 
