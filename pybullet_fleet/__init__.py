@@ -14,15 +14,15 @@ from pybullet_fleet.core_simulation import (
     LogLevelManager
 )
 
-# Robot management
+# Robot/Agent management
 from pybullet_fleet.robot import (
-    Robot,
-    RobotPose,
-    RobotSpawnParams
+    Agent,
+    Pose,
+    AgentSpawnParams
 )
 
 from pybullet_fleet.robot_manager import (
-    RobotManager,
+    AgentManager,
     GridSpawnParams
 )
 
@@ -52,11 +52,10 @@ __all__ = [
     'Pose',
     'LogLevelManager',
     
-    # Robot management
-    'Robot',
-    'RobotPose',
-    'RobotSpawnParams',
-    'RobotManager',
+    # Agent management
+    'Agent',
+    'AgentSpawnParams',
+    'AgentManager',
     'GridSpawnParams',
     
     # Utilities

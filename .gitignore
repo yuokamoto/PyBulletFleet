@@ -7,4 +7,5 @@ __pycache__/
 env/
 pip-log.txt
 pip-delete-this-directory.txt
-.DS_Store
+.DS_Storeexternal/
+.vscode/

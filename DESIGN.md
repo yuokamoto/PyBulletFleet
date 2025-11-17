@@ -66,7 +66,7 @@ Abstract base class for all simulation objects.
 
 **Responsibilities:**
 - Common interface for objects in simulation
-- Pose management (position, orientation)
+- Position and orientation management via Pose
 - Metadata storage
 
 **Subclasses:**
@@ -76,11 +76,22 @@ Abstract base class for all simulation objects.
 todo: merge with Robot class.
 
 ##### Pose
-Simple dataclass for 3D pose representation.
+Position and orientation representation for any object in the simulation.
+Compatible with ROS2 geometry_msgs/Pose and PyBullet's (position, orientation) tuples.
 
 **Attributes:**
 - `position`: np.ndarray [x, y, z]
 - `orientation`: np.ndarray (quaternion) [x, y, z, w]
+
+**Properties:**
+- `x`, `y`, `z`: Convenient accessors for position components
+
+**Methods:**
+- `from_xyz()`: Create from position only
+- `from_euler()`: Create from position and Euler angles
+- `from_pybullet()`: Create from PyBullet getBasePositionAndOrientation()
+- `as_euler()`: Get Euler angles (roll, pitch, yaw)
+- `as_position_orientation()`: Get (position, orientation) tuple
 
 ##### LogLevelManager
 Utility for managing PyBullet log verbosity.

@@ -1,0 +1,243 @@
+#!/usr/bin/env python3
+"""
+100robots_probabilistic_demo.py
+Demo using RobotManager.spawn_robots_grid_probabilistic() for probabilistic robot spawning.
+
+Features:
+- Probabilistic robot type selection (dictionary-based)
+- Automatic grid position skipping when probability < 100%
+- Mixed robot types with configurable weights
+- Centralized control via RobotManager
+- Automatic goal assignment with callbacks
+
+Example Use Cases:
+1. 70% mobile, 30% arm robots (100% coverage)
+2. 50% mobile, 20% arm, 30% empty positions (sparse warehouse)
+3. 80% mobile, 10% arm, 10% skip (variable density)
+"""
+import sys
+import os
+import random
+
+# Add parent directory to path
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+
+from pybullet_fleet.core_simulation import MultiRobotSimulationCore, SimulationParams
+from pybullet_fleet.robot import Robot, Pose, AgentSpawnParams
+from pybullet_fleet.robot_manager import RobotManager, GridSpawnParams
+
+# ========================================
+# Configuration
+# ========================================
+
+NUM_GRID_POSITIONS = 100  # Total grid positions to iterate
+GRID_SIZE = int(NUM_GRID_POSITIONS ** 0.5)
+SPACING = 2.0
+
+print(f"=== Probabilistic Robot Spawning Demo ===")
+print(f"Grid positions: {NUM_GRID_POSITIONS}")
+print(f"Grid size: {GRID_SIZE}x{GRID_SIZE}")
+print(f"Spacing: {SPACING}m")
+
+# ========================================
+# Initialize Simulation
+# ========================================
+
+config = {
+    'gui': True,
+    'time_step': 0.01,
+    'gravity': [0, 0, -9.8],
+    'monitor': False,
+    'real_time': False,
+    'fps': 60
+}
+params = SimulationParams.from_dict(config)
+sim_core = MultiRobotSimulationCore(params)
+
+print(f"\n✓ Simulation initialized")
+
+# ========================================
+# Define Robot Types with Probabilities
+# ========================================
+
+# Option 1: 75% mobile, 25% arm (100% coverage)
+# robot_type_params = {
+#     'mobile_robot': (AgentSpawnParams(
+#         urdf_path=os.path.join(os.path.dirname(__file__), '../robots/mobile_robot.urdf'),
+#         max_vel=2.0,
+#         max_accel=5.0,
+#         use_fixed_base=False,
+#         rgba_color=[0.2, 0.7, 0.2, 1.0]
+#     ), 0.75),
+#     'arm_robot': (AgentSpawnParams(
+#         urdf_path=os.path.join(os.path.dirname(__file__), '../robots/arm_robot.urdf'),
+#         use_fixed_base=True,
+#         rgba_color=[0.7, 0.2, 0.2, 1.0]
+#     ), 0.25)
+# }
+
+# Option 2: 50% mobile, 20% arm, 30% skip (sparse warehouse)
+robot_type_params = {
+    'mobile_robot': (AgentSpawnParams(
+        urdf_path=os.path.join(os.path.dirname(__file__), '../robots/mobile_robot.urdf'),
+        max_vel=2.0,
+        max_accel=5.0,
+        use_fixed_base=False,
+        rgba_color=[0.2, 0.7, 0.2, 1.0]
+    ), 0.50),
+    'arm_robot': (AgentSpawnParams(
+        urdf_path=os.path.join(os.path.dirname(__file__), '../robots/arm_robot.urdf'),
+        use_fixed_base=True,
+        rgba_color=[0.7, 0.2, 0.2, 1.0]
+    ), 0.20)
+    # Note: Remaining 30% will be automatically skipped
+}
+
+# Option 3: 40% mobile, 10% arm, 50% skip (very sparse)
+# robot_type_params = {
+#     'mobile_robot': (AgentSpawnParams(
+#         urdf_path=os.path.join(os.path.dirname(__file__), '../robots/mobile_robot.urdf'),
+#         max_vel=2.0,
+#         max_accel=5.0,
+#         use_fixed_base=False,
+#         rgba_color=[0.2, 0.7, 0.2, 1.0]
+#     ), 0.40),
+#     'arm_robot': (AgentSpawnParams(
+#         urdf_path=os.path.join(os.path.dirname(__file__), '../robots/arm_robot.urdf'),
+#         use_fixed_base=True,
+#         rgba_color=[0.7, 0.2, 0.2, 1.0]
+#     ), 0.10)
+# }
+
+print(f"\n=== Robot Type Configuration ===")
+total_prob = sum(prob for _, prob in robot_type_params.values())
+for robot_type, (params, prob) in robot_type_params.items():
+    print(f"  {robot_type}: {prob * 100:.0f}%")
+if total_prob < 1.0:
+    print(f"  (skip): {(1.0 - total_prob) * 100:.0f}%")
+print(f"  Total: {total_prob * 100:.0f}%")
+
+# ========================================
+# Create Robot Manager
+# ========================================
+
+robot_manager = RobotManager(sim_core=sim_core)
+
+# ========================================
+# Define Grid Parameters
+# ========================================
+
+grid_params = GridSpawnParams(
+    x_min=0,
+    x_max=GRID_SIZE - 1,
+    y_min=0,
+    y_max=GRID_SIZE - 1,
+    z_min=0,
+    z_max=0,
+    spacing=[SPACING, SPACING, 0.0],
+    offset=[0.0, 0.0, 0.3]
+)
+
+# ========================================
+# Spawn Robots Probabilistically
+# ========================================
+
+print(f"\n=== Spawning Robots ===")
+
+spawned_robots = robot_manager.spawn_robots_grid_probabilistic(
+    num_positions=NUM_GRID_POSITIONS,
+    grid_params=grid_params,
+    robot_type_params=robot_type_params
+)
+
+print(f"\n✓ Total robots spawned: {len(spawned_robots)}")
+print(f"✓ Positions skipped: {NUM_GRID_POSITIONS - len(spawned_robots)}")
+
+# Enable rendering after spawning
+sim_core.enable_rendering()
+
+# ========================================
+# Goal Update Logic
+# ========================================
+
+def goal_update_callback(robots, manager, dt):
+    """
+    Periodically assign random goals to mobile robots.
+    Arm robots oscillate joints.
+    """
+    import pybullet as p
+    
+    for robot in robots:
+        robot_type = robot.user_data.get('robot_type', 'unknown')
+        
+        if robot_type == 'mobile_robot':
+            # Mobile robot: assign random goal if not moving
+            if not robot.is_moving:
+                # Random goal within grid bounds
+                goal_x = random.uniform(0, GRID_SIZE * SPACING)
+                goal_y = random.uniform(0, GRID_SIZE * SPACING)
+                goal = Pose.from_xyz(goal_x, goal_y, 0.3)
+                robot.set_goal_pose(goal)
+        
+        elif robot_type == 'arm_robot':
+            # Arm robot: oscillate joints
+            if robot.is_urdf_robot() and robot.get_num_joints() > 0:
+                for j in range(robot.get_num_joints()):
+                    joint_info = robot.joint_info[j]
+                    joint_type = joint_info[2]
+                    if joint_type == p.JOINT_REVOLUTE:
+                        lower, upper = joint_info[8:10]
+                        if lower < upper:
+                            target_pos = random.uniform(lower, upper)
+                        else:
+                            target_pos = random.uniform(-1.0, 1.0)
+                        robot.set_joint_target(j, target_pos)
+
+# Register callback (update goals every 2 seconds)
+robot_manager.register_goal_update_callback(goal_update_callback)
+
+# ========================================
+# Control Loop Callback
+# ========================================
+
+def control_callback(robots, sim_core, dt):
+    """Update all robots with goals."""
+    robot_manager.update_all_with_goals(dt)
+
+# Register control callback (30 Hz)
+sim_core.register_callback(control_callback, frequency=30)
+
+# ========================================
+# Run Simulation
+# ========================================
+
+print(f"\n=== Starting simulation ===")
+print(f"Press 'q' to quit")
+
+try:
+    sim_core.run_simulation()
+except KeyboardInterrupt:
+    print("\n\n=== Simulation stopped by user ===")
+
+# ========================================
+# Final Statistics
+# ========================================
+
+print(f"\n=== Final Statistics ===")
+print(f"Total robots spawned: {robot_manager.get_robot_count()}")
+
+# Count by type
+type_counts = {}
+for robot in robot_manager.robots:
+    robot_type = robot.user_data.get('robot_type', 'unknown')
+    type_counts[robot_type] = type_counts.get(robot_type, 0) + 1
+
+print(f"Robot breakdown:")
+for robot_type, count in type_counts.items():
+    percentage = (count / NUM_GRID_POSITIONS * 100) if NUM_GRID_POSITIONS > 0 else 0
+    print(f"  {robot_type}: {count} ({percentage:.1f}%)")
+
+print(f"Positions skipped: {NUM_GRID_POSITIONS - robot_manager.get_robot_count()}")
+print(f"Moving robots: {robot_manager.get_moving_count()}")
+print(f"Simulation steps: {sim_core.step_count}")
+print(f"Simulation time: {sim_core.sim_time:.1f}s")

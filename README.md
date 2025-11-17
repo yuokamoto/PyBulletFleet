@@ -114,38 +114,103 @@ Manager for creating and coordinating multiple robots.
 
 **Key Features:**
 - Grid-based batch spawning
+- Probabilistic robot type selection
 - Automatic robot placement
 - Multi-robot management
 - Bulk goal setting
 
+**Spawning Methods:**
+- `spawn_robots_grid()`: Spawn single robot type in grid
+- `spawn_robots_grid_probabilistic()`: Spawn mixed robot types with probabilities
+
 
 ## Examples
 
-### 100robots_demo.py
+### Recommended Demos (New API)
 
-**Overview:**  
-Demonstrates 100 mixed robots (arm + mobile) in grid layout with random motion.
+#### 100robots_grid_demo.py
+**概要:**  
+シンプルな単一タイプのグリッド生成デモ。`RobotManager.spawn_robots_grid()` を使用。
 
-**Features:**
-- Load robots from URDF files
-- Simulate 100 robots simultaneously
-- Random motion (forward/rotation)
-- Grid-based placement
-- Performance monitoring
+**特徴:**
+- YAML設定ファイルベース
+- 自動グリッド配置
+- ゴールベースナビゲーション
+- 共有シェイプ最適化
 
-**Expected Behavior:**
-- 100 robots arranged in 10x10 grid
-- Mobile robots move randomly with forward/rotation
-- Arm robots move joints randomly
-- Data monitor shows FPS and step time
+**用途:** 初心者向け、単一タイプのロボット群
 
-**Note:**  
-This demo uses legacy API (`URDFObject`, `grid_spawn_*` functions). For new projects, use `Robot` and `RobotManager` instead.
+```bash
+python examples/100robots_grid_demo.py
+```
+
+#### 100robots_probabilistic_demo.py
+**概要:**  
+確率ベースの混合ロボット生成デモ。辞書設定で複数タイプを確率指定。
+
+**特徴:**
+- 辞書ベースのロボットタイプ設定
+- 確率による重み付け選択（例: 50% mobile, 20% arm, 30% スキップ）
+- 確率 < 100% 時のグリッド位置自動スキップ
+- robot.user_data でのタイプ追跡
+- 複数の設定例（100%カバー、スパース倉庫、可変密度）
+
+**用途:** 高度な用途、混合ロボットタイプ、スパース配置
+
+```bash
+python examples/100robots_probabilistic_demo.py
+```
+
+**使用例:**
+```python
+# 確率でロボットタイプを定義
+robot_type_params = {
+    'mobile_robot': (mobile_spawn_params, 0.50),  # 50% の確率
+    'arm_robot': (arm_spawn_params, 0.20)          # 20% の確率
+    # 残り 30% は自動スキップ（ロボットを配置しない）
+}
+
+robots = robot_manager.spawn_robots_grid_probabilistic(
+    num_positions=100,
+    grid_params=grid_params,
+    robot_type_params=robot_type_params
+)
+# 結果: ~50 mobile + ~20 arm + ~30 空き位置
+```
+
+#### robot_urdf_demo.py
+**概要:**  
+Robot クラスの基本チュートリアル。Mesh と URDF の両方をサポート。
+
+**特徴:**
+- Robot.from_mesh() の例
+- Robot.from_urdf() の例
+- SimObject 継承（attach/detach）
+- URDF ロボットの関節制御
+
+**用途:** Robot クラスの基本学習
+
+```bash
+python examples/robot_urdf_demo.py
+```
+
+### Legacy Demo
+
+#### 100robots_demo.py
+**概要:**  
+旧 API（URDFObject ベース）のデモ。後方互換性のための参照用。
+
+**注意:**  
+このデモはレガシー API を使用しています。新規プロジェクトでは上記のデモを使用してください。
+
+```bash
+python examples/100robots_demo.py
+```
 
 
 ## Todo
-- Merge MeshObject and URDFObject
-- Update examples to use Robot and RobotManager
+- ~~Merge MeshObject and URDFObject~~ ✅ Done (Robot class)
+- ~~Update examples to use Robot and RobotManager~~ ✅ Done
 
 ## Dependencies
 

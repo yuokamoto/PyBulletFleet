@@ -70,8 +70,25 @@ class SimObject:
         if obj not in self.attached_objects:
             self.attached_objects.append(obj)
             # Save initial relative position and orientation (pallet position/orientation in carrier coordinate system)
-            parent_pos, parent_orn = self.get_pose()
-            child_pos, child_orn = obj.get_pose()
+            parent_pose = self.get_pose()
+            child_pose = obj.get_pose()
+            
+            # Convert poses to tuples (handle both tuple and Pose object returns)
+            if isinstance(parent_pose, tuple):
+                parent_pos, parent_orn = parent_pose
+            elif hasattr(parent_pose, 'as_tuple'):
+                parent_pos, parent_orn = parent_pose.as_tuple()
+            else:
+                # Fallback: assume object with position and orientation attributes
+                parent_pos, parent_orn = parent_pose.position, parent_pose.orientation
+            
+            if isinstance(child_pose, tuple):
+                child_pos, child_orn = child_pose
+            elif hasattr(child_pose, 'as_tuple'):
+                child_pos, child_orn = child_pose.as_tuple()
+            else:
+                child_pos, child_orn = child_pose.position, child_pose.orientation
+            
             rel_pos, rel_orn = p.invertTransform(parent_pos, parent_orn)
             offset_pos, offset_orn = p.multiplyTransforms(rel_pos, rel_orn, child_pos, child_orn)
             obj._attach_offset = (offset_pos, offset_orn)

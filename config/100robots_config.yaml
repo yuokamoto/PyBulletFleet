@@ -1,0 +1,84 @@
+# ========================================
+# 100 Robots Demo Configuration
+# ========================================
+#
+# Additional configuration for 100robots demo.
+# This file is merged with config.yaml.
+#
+# ========================================
+
+# ========================================
+# Robot Parameters
+# ========================================
+
+# Number of robots to spawn
+num_robots: 100
+
+# Grid size (will be calculated as ceil(sqrt(num_robots)))
+# For 100 robots: 10x10 grid
+grid_size: 10
+
+# ========================================
+# Grid Spawn Parameters
+# ========================================
+
+# Grid boundaries (grid indices)
+grid:
+  x_min: 0
+  x_max: 9  # 10x10 grid (0-9)
+  y_min: 0
+  y_max: 9
+  z_min: 0
+  z_max: 0  # Single layer (2D)
+
+# Grid spacing [x, y, z] in meters
+spacing: [2.0, 2.0, 2.0]
+
+# Grid offset [x, y, z] in meters
+offset: [0.0, 0.0, 0.3]
+
+# ========================================
+# Robot Spawn Parameters
+# ========================================
+
+# Robot parameters
+robot:
+  urdf_path: "robots/mobile_robot.urdf"  # Robot URDF path (relative to PyBulletFleet root)
+  max_vel: 2.0        # Maximum velocity (m/s)
+  max_accel: 5.0      # Maximum acceleration (m/s²)
+  use_fixed_base: false  # If true, robot base is fixed and doesn't move
+
+# ========================================
+# Goal Assignment Parameters
+# ========================================
+
+# Goal assignment mode: 'random' or 'none'
+goal_mode: random
+
+# Random goal bounds [x_min, x_max, y_min, y_max, z_min, z_max]
+goal_bounds:
+  x_min: 0.0
+  x_max: 20.0
+  y_min: 0.0
+  y_max: 20.0
+  z_min: 0.3
+  z_max: 0.3
+
+# ========================================
+# Simulation Parameters (Override)
+# ========================================
+
+# Override base config settings for 100robots demo
+simulation:
+  speed: 1           # Real-time speed for visualization
+  gui: true          # Show GUI
+  timestep: 0.01     # 10ms timestep for smooth movement
+  physics: false     # Kinematic control
+  monitor: false     # Disable monitor for performance
+  
+# Camera settings for 100 robots
+camera:
+  distance: 40.0     # Wider view for 100 robots
+  yaw: 45
+  pitch: -45
+  target: [9.0, 9.0, 0.0]  # Center of 10x10 grid
