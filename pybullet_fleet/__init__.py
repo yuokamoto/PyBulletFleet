@@ -3,14 +3,15 @@ pybullet_fleet package
 General-purpose PyBullet simulation library for multi-robot fleets
 """
 
+# Base classes
+from pybullet_fleet.sim_object import SimObject, Pose
+
 # Core simulation classes
 from pybullet_fleet.core_simulation import (
     MultiRobotSimulationCore,
     SimulationParams,
-    SimObject,
     MeshObject,
     URDFObject,
-    Pose,
     LogLevelManager
 )
 

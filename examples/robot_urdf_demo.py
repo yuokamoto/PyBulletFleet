@@ -83,6 +83,3 @@ final_urdf_joints = [urdf_robot.get_joint_state(i)[0] for i in range(urdf_robot.
 print("\n=== Demo complete ===")
 print(f"Final mesh agent pose: {final_mesh_pos}")
 print(f"Final URDF agent joints: {final_urdf_joints}")
-
-sim_core.disconnect()
-print("Simulation disconnected.")

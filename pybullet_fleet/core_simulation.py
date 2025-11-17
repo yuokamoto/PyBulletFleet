@@ -15,6 +15,7 @@ import logging
 import os
 from pybullet_fleet.data_monitor import DataMonitor
 from pybullet_fleet.collision_visualizer import CollisionVisualizer
+from pybullet_fleet.sim_object import SimObject, Pose
 
 # Global log_level (default: 'info')
 GLOBAL_LOG_LEVEL = 'INFO'
@@ -41,98 +42,6 @@ class LogLevelManager:
         level_str = getattr(params, 'log_level', GLOBAL_LOG_LEVEL)
         LogLevelManager.set_global_log_level(level_str)
 
-
-class SimObject:
-    def __init__(self, body_id, sim_core=None):
-        self.body_id = body_id
-        self.callbacks = []
-        self.sim_core = sim_core
-        self.attached_objects = []
-
-    def get_pose(self):
-        """
-        Return current position and orientation as Pose object.
-        
-        Returns:
-            Pose object from robot.py with position and orientation
-        """
-        # Import Pose here to avoid circular dependency
-        from pybullet_fleet.robot import Pose
-        pos, orn = p.getBasePositionAndOrientation(self.body_id)
-        return Pose.from_pybullet(pos, orn)
-
-    def kinematic_teleport_base(self, position, orientation, linear_vel=None, angular_vel=None):
-        p.resetBasePositionAndOrientation(self.body_id, position, orientation)
-        if linear_vel is not None and angular_vel is not None:
-            p.resetBaseVelocity(self.body_id, linear_vel, angular_vel)
-        # Recursively apply the same coordinates and velocity to attached_objects
-        for obj in getattr(self, 'attached_objects', []):
-            # Follow using relative position and orientation from attachment
-            if hasattr(obj, '_attach_offset'):
-                offset_pos, offset_orn = obj._attach_offset
-                new_pos, new_orn = p.multiplyTransforms(position, orientation, offset_pos, offset_orn)
-                obj.kinematic_teleport_base(new_pos, new_orn, linear_vel, angular_vel)
-            else:
-                obj.kinematic_teleport_base(position, orientation, linear_vel, angular_vel)
-    def attach_object(self, obj, parentFramePosition=[0,0,0], childFramePosition=[0,0,0], jointAxis=[0,0,0], jointType=p.JOINT_FIXED, parentLinkIndex=-1, childLinkIndex=-1):
-        if obj not in self.attached_objects:
-            self.attached_objects.append(obj)
-            # Save initial relative position and orientation (pallet position/orientation in carrier coordinate system)
-            parent_pose = self.get_pose()
-            child_pose = obj.get_pose()
-            
-            # Both get_pose() now return Pose objects with as_tuple() method
-            parent_pos, parent_orn = parent_pose.as_tuple()
-            child_pos, child_orn = child_pose.as_tuple()
-            
-            rel_pos, rel_orn = p.invertTransform(parent_pos, parent_orn)
-            offset_pos, offset_orn = p.multiplyTransforms(rel_pos, rel_orn, child_pos, child_orn)
-            obj._attach_offset = (offset_pos, offset_orn)
-            mass = p.getDynamicsInfo(obj.body_id, -1)[0]
-            if mass != 0:
-                obj._constraint_id = p.createConstraint(
-                    parentBodyUniqueId=self.body_id,
-                    parentLinkIndex=parentLinkIndex,
-                    childBodyUniqueId=obj.body_id,
-                    childLinkIndex=childLinkIndex,
-                    jointType=jointType,
-                    jointAxis=jointAxis,
-                    parentFramePosition=parentFramePosition,
-                    childFramePosition=childFramePosition
-                )
-    def detach_object(self, obj):
-        if obj in self.attached_objects:
-            self.attached_objects.remove(obj)
-            mass = p.getDynamicsInfo(obj.body_id, -1)[0]
-            if mass != 0 and hasattr(obj, '_constraint_id'):
-                p.removeConstraint(obj._constraint_id)
-                obj._constraint_id = None
-
-    def register_callback(self, callback, frequency=0.25):
-        self.callbacks.append({'func': callback, 'frequency': frequency, 'last_exec': 0.0})
-
-    def execute_callbacks(self, current_time):
-        for cbinfo in self.callbacks:
-            freq = cbinfo.get('frequency', 0.25)
-            last_exec = cbinfo.get('last_exec', 0.0)
-            if current_time - last_exec >= freq:
-                cbinfo['func'](self)
-                cbinfo['last_exec'] = current_time
-
-class Pose:
-    def __init__(self, x=0, y=0, z=0, roll=0, pitch=0, yaw=0):
-        self.x = x
-        self.y = y
-        self.z = z
-        self.roll = roll
-        self.pitch = pitch
-        self.yaw = yaw
-    def as_position(self):
-        return [self.x, self.y, self.z]
-    def as_orientation(self):
-        return p.getQuaternionFromEuler([self.roll, self.pitch, self.yaw])
-    def as_position_orientation(self):
-        return self.as_position(), self.as_orientation()
 
 class MeshObject(SimObject):
     @classmethod

@@ -17,7 +17,8 @@ sim_core = MultiRobotSimulationCore.from_yaml(config_path)
 # --- Original individual callback ---
 def robot_movement_callback(robot, sim_core):
     if robot.meta_data['robot_type'] == "mobile_robot":
-        pos, orn = robot.get_pose()
+        pose = robot.get_pose()
+        pos, orn = pose.as_tuple()
         euler = p.getEulerFromQuaternion(orn)
         yaw = euler[2]
         max_linear_speed = 2.0  # m/s (same as configurable_demo.py)
