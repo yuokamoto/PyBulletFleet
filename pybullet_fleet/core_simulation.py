@@ -43,7 +43,7 @@ class LogLevelManager:
         LogLevelManager.set_global_log_level(level_str)
 
 
-class MeshObject(SimObject):
+class SimulationParams:
     @classmethod
     def from_mesh(cls, mesh_path, position, orientation, base_mass=0.0, mesh_scale=[1,1,1], rgbaColor=[1,1,1,1], sim_core=None):
         vis_id = p.createVisualShape(

@@ -2,7 +2,7 @@ import numpy as np
 import random
 import pybullet as p
 
-from pybullet_fleet.core_simulation import URDFObject, MeshObject
+from pybullet_fleet.sim_object import URDFObject, MeshObject
 
 def world_to_grid(pos, spacing, offset=None):
     """

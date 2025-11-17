@@ -168,3 +168,177 @@ class SimObject:
             if current_time - cbinfo['last_executed'] >= cbinfo['frequency']:
                 cbinfo['func'](self)
                 cbinfo['last_executed'] = current_time
+
+
+# =============================================================================
+# Legacy classes (deprecated - use Agent class instead)
+# =============================================================================
+
+class MeshObject(SimObject):
+    """
+    Deprecated: Use Agent.from_mesh() instead.
+    Legacy class for mesh-based objects.
+    """
+    @classmethod
+    def from_mesh(cls, mesh_path, position, orientation, base_mass=0.0, mesh_scale=[1,1,1], rgbaColor=[1,1,1,1], sim_core=None):
+        vis_id = p.createVisualShape(
+            shapeType=p.GEOM_MESH,
+            fileName=mesh_path,
+            meshScale=mesh_scale,
+            rgbaColor=rgbaColor
+        )
+        col_id = p.createCollisionShape(
+            shapeType=p.GEOM_MESH,
+            fileName=mesh_path,
+            meshScale=mesh_scale
+        )
+        body_id = p.createMultiBody(
+            baseMass=base_mass,
+            baseCollisionShapeIndex=col_id,
+            baseVisualShapeIndex=vis_id,
+            basePosition=position,
+            baseOrientation=orientation
+        )
+        return cls(body_id=body_id, mesh_path=mesh_path, visual_id=vis_id, collision_id=col_id, sim_core=sim_core)
+    
+    def __init__(self, body_id, mesh_path, visual_id=None, collision_id=None, sim_core=None):
+        super().__init__(body_id, sim_core=sim_core)
+        self.mesh_path = mesh_path
+        self.visual_id = visual_id
+        self.collision_id = collision_id
+    
+    def set_color(self, rgbaColor, linkIndex=-1):
+        p.changeVisualShape(self.body_id, linkIndex, rgbaColor=rgbaColor)
+
+
+class URDFObject(SimObject):
+    """
+    Deprecated: Use Agent.from_urdf() instead.
+    Legacy class for URDF-based objects with navigation capabilities.
+    """
+    @classmethod
+    def from_urdf(cls, urdf_path, position, orientation, useFixedBase=False, set_mass_zero=False, meta_data={}, sim_core=None):
+        body_id = p.loadURDF(urdf_path, position, orientation, useFixedBase=useFixedBase)
+        return cls(body_id, urdf_path, set_mass_zero=set_mass_zero, meta_data=meta_data, sim_core=sim_core)
+    
+    def __init__(self, body_id, urdf_path, set_mass_zero=False, meta_data={}, max_accel=1.0, max_speed=1.0, goal_threshold=0.01, sim_core=None):
+        import numpy as np
+        super().__init__(body_id, sim_core=sim_core)
+        self.urdf_path = urdf_path
+        self.joint_info = [p.getJointInfo(body_id, j) for j in range(p.getNumJoints(body_id))]
+        if set_mass_zero:
+            self.set_all_masses_to_zero()
+        self.meta_data = meta_data
+        self.max_accel = max_accel
+        self.max_speed = max_speed
+        self.goal_threshold = goal_threshold
+        self.target_actions = []
+        self._current_nav_index = 0
+        self._nav_velocity = np.array([0.0, 0.0, 0.0])
+        self._nav_last_update = None
+        self._motion_completed = True
+
+    def set_navigation_params(self, max_accel, max_speed, goal_threshold=None):
+        self.max_accel = max_accel
+        self.max_speed = max_speed
+        if goal_threshold is not None:
+            self.goal_threshold = goal_threshold
+
+    def set_action(self, pose_callback_list):
+        """
+        pose_callback_list: List[Tuple[Pose, Optional[Callable], Optional[float]]]
+        Example: [(Pose, callback, wait_time), (Pose, None, 0.0), ...]
+        callback is executed on arrival, wait_time is seconds to wait after reaching Pose
+        """
+        self.target_actions = pose_callback_list
+        self._current_nav_index = 0
+        self._nav_last_update = None
+        self._wait_until = None
+        self._motion_completed = False
+
+    def update_action(self, dt=0.01):
+        """
+        Move sequentially to each Pose in target_actions, considering max acceleration and max speed.
+        dt: simulation timestep
+        sim_time: simulation time (seconds). Required for wait functionality.
+        Used in pallet_carrier_demo.py. Can be replaced with Robot class.
+        """
+        import numpy as np
+        # Wait feature: if _wait_until is set, stop until sim_time reaches that time
+        sim_time = self.sim_core.sim_time if self.sim_core is not None else None
+        if self._wait_until is not None:
+            if sim_time is not None and sim_time < self._wait_until:
+                self._nav_velocity = np.array([0.0, 0.0, 0.0])
+                return
+            else:
+                self._wait_until = None
+        
+        if not self.target_actions or self._current_nav_index >= len(self.target_actions):
+            self._motion_completed = True
+            return  # Path finished
+
+        # Get current position
+        pose = self.get_pose()
+        pos, orn = pose.as_tuple()
+        current_pos = np.array(pos)
+        # nav_path extension: (Pose, callback, wait_time)
+        target_tuple = self.target_actions[self._current_nav_index]
+        if isinstance(target_tuple, Pose):
+            target_pose = target_tuple
+            callback = None
+            wait_time = 0.0
+        elif len(target_tuple) == 2:
+            target_pose, callback = target_tuple
+            wait_time = 0.0
+        else:
+            target_pose, callback, wait_time = target_tuple
+        target_pos, target_orn = target_pose.as_position_orientation()
+        target_pos = np.array(target_pos)
+        # Calculate velocity and acceleration
+        direction = target_pos - current_pos
+        distance = np.linalg.norm(direction)
+        if distance < self.goal_threshold:
+            # Goal reached: teleport if within threshold
+            self.kinematic_teleport_base(target_pos.tolist(), target_orn)
+            self._current_nav_index += 1
+            self._nav_velocity = np.array([0.0, 0.0, 0.0])
+            # Execute callback on arrival
+            if callback:
+                callback()
+            # If wait_time is specified, wait based on sim_time
+            if wait_time and sim_time is not None:
+                self._wait_until = sim_time + wait_time
+            return
+        direction = direction / (distance + 1e-6)
+        # Target speed: do not exceed the distance to the goal
+        desired_speed = min(self.max_speed, distance / dt, distance)
+        desired_velocity = direction * desired_speed
+        # Acceleration limit
+        accel = (desired_velocity - self._nav_velocity) / dt
+        accel_norm = np.linalg.norm(accel)
+        if accel_norm > self.max_accel:
+            accel = accel / (accel_norm + 1e-6) * self.max_accel
+        self._nav_velocity += accel * dt
+        speed = np.linalg.norm(self._nav_velocity)
+        if speed > self.max_speed:
+            self._nav_velocity = self._nav_velocity / (speed + 1e-6) * self.max_speed
+        # Update position
+        new_pos = current_pos + self._nav_velocity * dt
+        # Orientation matches target Pose
+        _, target_orn = target_pose.as_position_orientation()
+        self.kinematic_teleport_base(new_pos.tolist(), target_orn)
+    
+    def set_all_masses_to_zero(self):
+        p.changeDynamics(self.body_id, -1, mass=0)
+        for j in range(p.getNumJoints(self.body_id)):
+            p.changeDynamics(self.body_id, j, mass=0)
+    
+    def kinematic_teleport_joint(self, joint_index, target_pos):
+        p.resetJointState(self.body_id, joint_index, target_pos)
+    
+    def set_joint_target(self, joint_index, target_pos):
+        mass = p.getDynamicsInfo(self.body_id, joint_index)[0]
+        if mass == 0:
+            self.kinematic_teleport_joint(joint_index, target_pos)
+        else:
+            p.setJointMotorControl2(self.body_id, joint_index, p.POSITION_CONTROL, targetPosition=target_pos)

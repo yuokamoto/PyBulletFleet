@@ -4,14 +4,12 @@ General-purpose PyBullet simulation library for multi-robot fleets
 """
 
 # Base classes
-from pybullet_fleet.sim_object import SimObject, Pose
+from pybullet_fleet.sim_object import SimObject, Pose, MeshObject, URDFObject
 
 # Core simulation classes
 from pybullet_fleet.core_simulation import (
     MultiRobotSimulationCore,
     SimulationParams,
-    MeshObject,
-    URDFObject,
     LogLevelManager
 )
 
