@@ -10,19 +10,22 @@ import threading
 import time
 import json
 import os
+from typing import Dict, Any, Optional
 
 class DataMonitor:
     """Real-time data monitoring window"""
     
-    def __init__(self, title="Simulation Monitor"):
-        self.title = title
-        self.running = False
-        self.window = None
-        self.labels = {}
-        self.data_file = "/tmp/pybullet_sim_data.json"
-        self.update_interval = 0.5  # Update every 500ms
+    def __init__(self, title: str = "Simulation Monitor") -> None:
+        self.title: str = title
+        self.running: bool = False
+        self.window: Optional[tk.Tk] = None
+        self.labels: Dict[str, ttk.Label] = {}
+        self.data_file: str = "/tmp/pybullet_sim_data.json"
+        self.update_interval: float = 0.5  # Update every 500ms
+        self.status_label: Optional[ttk.Label] = None
+        self.monitor_thread: Optional[threading.Thread] = None
         
-    def start(self):
+    def start(self) -> None:
         """Start the monitor window in a separate thread"""
         if self.running:
             return
@@ -31,7 +34,7 @@ class DataMonitor:
         self.monitor_thread = threading.Thread(target=self._run_monitor, daemon=True)
         self.monitor_thread.start()
         
-    def stop(self):
+    def stop(self) -> None:
         """Stop the monitor window"""
         self.running = False
         if self.window:
@@ -41,7 +44,7 @@ class DataMonitor:
             except:
                 pass
                 
-    def _run_monitor(self):
+    def _run_monitor(self) -> None:
         """Run the tkinter monitor window"""
         self.window = tk.Tk()
         self.window.title(self.title)
@@ -91,7 +94,7 @@ class DataMonitor:
         finally:
             self.running = False
             
-    def _update_display(self):
+    def _update_display(self) -> None:
         """Update the display with latest data"""
         if not self.running:
             return

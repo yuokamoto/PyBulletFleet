@@ -5,6 +5,7 @@ Utilities for visualizing collision shapes in PyBullet.
 import pybullet as p
 import math
 import logging
+from typing import List, Tuple, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -16,12 +17,12 @@ class CollisionVisualizer:
     Optimized for fast toggle by caching debug items.
     """
     
-    def __init__(self):
-        self.debug_items = []
-        self.visible = False
-        self._cached = False  # Track if debug items are cached
+    def __init__(self) -> None:
+        self.debug_items: List[int] = []
+        self.visible: bool = False
+        self._cached: bool = False  # Track if debug items are cached
     
-    def set_visible(self, visible):
+    def set_visible(self, visible: bool) -> None:
         """
         Show or hide collision shapes (optimized toggle).
         
@@ -49,7 +50,7 @@ class CollisionVisualizer:
         self.visible = True
         logger.info(f"Collision shapes enabled ({len(self.debug_items)} debug items)")
     
-    def clear(self):
+    def clear(self) -> None:
         """Remove all collision shape debug items."""
         for item_id in self.debug_items:
             try:
@@ -59,7 +60,7 @@ class CollisionVisualizer:
         self.debug_items = []
         self._cached = False
     
-    def _redraw_cached_items(self):
+    def _redraw_cached_items(self) -> None:
         """
         Redraw collision shapes using cached data.
         NOTE: This is a simplified placeholder - in practice, we need to store
@@ -68,7 +69,7 @@ class CollisionVisualizer:
         # For fast toggle, we simply redraw (this is still faster than creating geometries)
         self.draw_all_collision_shapes()
     
-    def draw_all_collision_shapes(self, simplified=True, max_objects=1000):
+    def draw_all_collision_shapes(self, simplified: bool = True, max_objects: int = 1000) -> None:
         """
         Draw collision shapes for all bodies as debug wireframes.
         
@@ -103,7 +104,7 @@ class CollisionVisualizer:
         
         logger.info(f"Drew collision shapes for {count} objects (simplified={simplified})")
     
-    def draw_body_aabb(self, body_id, color=[0, 1, 0], base_only=True):
+    def draw_body_aabb(self, body_id: int, color: List[float] = [0, 1, 0], base_only: bool = True) -> None:
         """
         Draw only AABB for a body (fast, simplified visualization).
         
@@ -131,7 +132,7 @@ class CollisionVisualizer:
                 except:
                     pass  # Skip links without AABB
     
-    def draw_body_collision_shapes(self, body_id, color=[0, 1, 0]):
+    def draw_body_collision_shapes(self, body_id: int, color: List[float] = [0, 1, 0]) -> None:
         """
         Draw collision shapes for a specific body.
         

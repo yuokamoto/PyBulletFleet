@@ -7,16 +7,31 @@
 #
 # ========================================
 
+
+# ========================================
+# Simulation Parameters (Override)
+# ========================================
+
+# Override base config settings for 100robots demo
+speed: 100        # Real-time speed for visualization
+gui: true         # Show GUI
+timestep: 0.1     # 10ms timestep for smooth movement
+physics: false    # Kinematic control
+monitor: true     # Disable monitor for performance
+  
+# Camera settings for 100 robots
+camera:
+  camera_mode: auto              # Use auto mode for automatic camera positioning
+  camera_view_type: perspective  # Perspective view for grid visualization
+  camera_auto_scale: 1.0         # Scale factor for camera distance (larger = farther away)
+
+
 # ========================================
 # Robot Parameters
 # ========================================
 
 # Number of robots to spawn
 num_robots: 100
-
-# Grid size (will be calculated as ceil(sqrt(num_robots)))
-# For 100 robots: 10x10 grid
-grid_size: 10
 
 # ========================================
 # Grid Spawn Parameters
@@ -41,44 +56,23 @@ offset: [0.0, 0.0, 0.3]
 # Robot Spawn Parameters
 # ========================================
 
-# Robot parameters
-robot:
+# Mobile robot parameters
+mobile_robot:
   urdf_path: "robots/mobile_robot.urdf"  # Robot URDF path (relative to PyBulletFleet root)
+  initial_z: 0.3      # Initial Z position (m)
   max_vel: 2.0        # Maximum velocity (m/s)
   max_accel: 5.0      # Maximum acceleration (m/s²)
   use_fixed_base: false  # If true, robot base is fixed and doesn't move
 
-# ========================================
-# Goal Assignment Parameters
-# ========================================
+# Arm robot parameters (for mixed mode)
+arm_robot:
+  urdf_path: "robots/arm_robot.urdf"  # Arm robot URDF path
+  initial_z: 0.0      # Initial Z position (m)
+  max_vel: 0.0        # Arm robots don't move
+  max_accel: 0.0      # Arm robots don't accelerate
+  use_fixed_base: true  # Arm robots are fixed
 
-# Goal assignment mode: 'random' or 'none'
-goal_mode: random
-
-# Random goal bounds [x_min, x_max, y_min, y_max, z_min, z_max]
-goal_bounds:
-  x_min: 0.0
-  x_max: 20.0
-  y_min: 0.0
-  y_max: 20.0
-  z_min: 0.3
-  z_max: 0.3
-
-# ========================================
-# Simulation Parameters (Override)
-# ========================================
-
-# Override base config settings for 100robots demo
-simulation:
-  speed: 1           # Real-time speed for visualization
-  gui: true          # Show GUI
-  timestep: 0.01     # 10ms timestep for smooth movement
-  physics: false     # Kinematic control
-  monitor: false     # Disable monitor for performance
-  
-# Camera settings for 100 robots
-camera:
-  distance: 40.0     # Wider view for 100 robots
-  yaw: 45
-  pitch: -45
-  target: [9.0, 9.0, 0.0]  # Center of 10x10 grid
+# Mixed mode probabilities
+mixed_mode:
+  mobile_robot_prob: 0.6  # 60% mobile robots
+  arm_robot_prob: 0.4     # 40% arm robots

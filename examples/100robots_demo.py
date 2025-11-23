@@ -9,7 +9,8 @@ import pybullet as p
 import numpy as np
 import time
 import random
-from pybullet_fleet.core_simulation import MultiRobotSimulationCore, URDFObject
+from pybullet_fleet.core_simulation import MultiRobotSimulationCore
+from pybullet_fleet.sim_object import URDFObject, Pose
 from pybullet_fleet.tools import grid_execution
 config_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '../config', 'config.yaml'))
 sim_core = MultiRobotSimulationCore.from_yaml(config_path)
@@ -29,8 +30,13 @@ def robot_movement_callback(robot, sim_core):
         forward_y = forward_vel * np.sin(yaw)
         linear_vel = [forward_x, forward_y, 0]
         angular_vel = [0, 0, yaw_vel]
+        
         corrected_orn = p.getQuaternionFromEuler([0, 0, yaw])
-        robot.kinematic_teleport_base([pos[0], pos[1], 0.3], corrected_orn, linear_vel, angular_vel)
+        new_pose = Pose.from_pybullet([pos[0], pos[1], 0.3], corrected_orn)
+        robot.set_pose(new_pose)
+        
+        # Set velocity after setting pose (to override the preserved velocity)
+        p.resetBaseVelocity(robot.body_id, linear_vel, angular_vel)
     elif robot.meta_data['robot_type'] == "arm_robot":
         num_joints = p.getNumJoints(robot.body_id)
         for j in range(num_joints):
@@ -44,9 +50,9 @@ def robot_movement_callback(robot, sim_core):
                     target_pos = np.random.uniform(-1.0, 1.0)
                 robot.set_joint_target(j, target_pos)
 
-# --- Batch callback for all robots (for reference) ---
-def batch_robot_movement_callback(robots, sim_core, dt):
-    for robot in robots:
+# --- Batch callback for all sim_objects ---
+def batch_robot_movement_callback(sim_objects, sim_core, dt):
+    for robot in sim_objects:
         robot_movement_callback(robot, sim_core)
 
 num_robots = 100
@@ -57,7 +63,9 @@ selected_types = [random.choice(robot_types) for _ in range(num_robots)]
 
 # URDFObject generation with grid_execution
 
-def spawn_robot(ix, iy, iz, x, y, z, **kwargs):
+def spawn_robot(grid_index, world_pos):
+    ix, iy, iz = grid_index
+    x, y, z = world_pos
     i = ix * grid_size + iy
     if i >= num_robots:
         return
@@ -72,18 +80,12 @@ def spawn_robot(ix, iy, iz, x, y, z, **kwargs):
         set_mass_zero=True,
         meta_data={'robot_type': robot_type}
     )
-    sim_core.robots.append(urdf_obj)
+    sim_core.sim_objects.append(urdf_obj)
 
 grid_execution(
-    x_num=grid_size,
-    y_num=grid_size,
-    z_num=1,
-    spacing_x=spacing,
-    spacing_y=spacing,
-    spacing_z=0.0,
-    offset_x=0.0,
-    offset_y=0.0,
-    offset_z=0.0,
+    grid_num=[grid_size, grid_size, 1],
+    spacing=[spacing, spacing, 0.0],
+    offset=[0.0, 0.0, 0.0],
     func=spawn_robot,
     args=None
 )

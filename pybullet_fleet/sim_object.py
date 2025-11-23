@@ -4,7 +4,7 @@ Base class for simulation objects with attachment support.
 """
 import pybullet as p
 from typing import Optional, List, Callable, Tuple
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 @dataclass
@@ -91,33 +91,227 @@ class Pose:
         return p.getEulerFromQuaternion(self.orientation)
 
 
+@dataclass
+class SimObjectSpawnParams:
+    """
+    Base spawn parameters for SimObject class.
+    
+    These parameters define the physical properties, appearance, and initial state of a simulation object.
+    
+    Attributes:
+        mesh_path: Path to mesh file (obj, dae, stl, etc.) for visual representation
+        initial_pose: Initial Pose (position and orientation) in world coordinates (optional, used by from_params)
+        collision_shape_type: 'box', 'mesh', or None for collision shape (None = no collision)
+        collision_half_extents: [hx, hy, hz] for box collision
+        mesh_scale: Mesh scaling factors [sx, sy, sz]
+        rgba_color: RGBA color [r, g, b, a] (0.0-1.0)
+        mass: Object mass in kg (0.0 for static objects)
+    
+    Note:
+        initial_pose is optional and mainly used by SimObject.from_params().
+        Managers calculate positions automatically and may ignore this field.
+    """
+    mesh_path: Optional[str] = None
+    initial_pose: Optional[Pose] = None
+    collision_shape_type: str = 'box'
+    collision_half_extents: List[float] = field(default_factory=lambda: [0.5, 0.5, 0.5])
+    mesh_scale: List[float] = field(default_factory=lambda: [1.0, 1.0, 1.0])
+    rgba_color: List[float] = field(default_factory=lambda: [0.8, 0.8, 0.8, 1.0])
+    mass: float = 0.0
+
+
 class SimObject:
     """
     Base class for simulation objects (robots, pallets, obstacles).
     Supports attachment/detachment and kinematic teleportation.
+    
+    Args:
+        body_id: PyBullet body ID
+        sim_core: Reference to simulation core (optional)
+        mesh_path: Optional path to visual mesh file (obj, dae, stl, etc.)
+                   If provided, visual shape will be updated with this mesh.
     """
-    def __init__(self, body_id: int, sim_core=None):
+    def __init__(self, body_id: int, sim_core=None, mesh_path: Optional[str] = None):
         self.body_id = body_id
         self.sim_core = sim_core
         self.attached_objects: List['SimObject'] = []
         self.callbacks: List[dict] = []
+        self.mesh_path = mesh_path
+        
+        # Auto-register to sim_core if provided
+        if sim_core is not None:
+            sim_core.sim_objects.append(self)
     
+    @classmethod
+    def from_mesh(cls, mesh_path: Optional[str] = None, pose: Pose = None, 
+                  collision_shape_type: str = 'box',
+                  collision_half_extents: List[float] = None,
+                  mesh_scale: List[float] = None,
+                  rgba_color: List[float] = None,
+                  mass: float = 0.0,
+                  sim_core=None) -> 'SimObject':
+        """
+        Create a SimObject with optional visual mesh and collision.
+        
+        Args:
+            mesh_path: Path to mesh file (obj, dae, stl, etc.) or None for no visual
+            pose: Pose object (position and orientation). Defaults to origin with no rotation
+            collision_shape_type: 'box', 'mesh', or None for collision shape (None = no collision)
+            collision_half_extents: [hx, hy, hz] for box collision (required if collision_shape_type='box')
+            mesh_scale: [sx, sy, sz] mesh scaling
+            rgba_color: [r, g, b, a] color (only used when mesh_path is provided)
+            mass: Object mass (0.0 for static)
+            sim_core: Reference to simulation core
+        
+        Returns:
+            SimObject instance
+        
+        Example:
+            # With mesh and collision
+            pallet = SimObject.from_mesh(
+                mesh_path="11pallet.obj",
+                pose=Pose.from_xyz(-2, 0, 0.1),
+                collision_half_extents=[0.5, 0.4, 0.1],
+                mesh_scale=[0.5, 0.5, 0.5],
+                rgba_color=[0.8, 0.6, 0.4, 1.0],
+                sim_core=sim_core
+            )
+            
+            # Visual only (no collision)
+            decoration = SimObject.from_mesh(
+                mesh_path="decorative.obj",
+                pose=Pose.from_xyz(0, 0, 0),
+                collision_shape_type=None,
+                rgba_color=[1.0, 0.0, 0.0, 1.0],
+                sim_core=sim_core
+            )
+            
+            # Invisible collision object (no visual)
+            invisible_wall = SimObject.from_mesh(
+                mesh_path=None,  # No visual
+                pose=Pose.from_xyz(1, 0, 0),
+                collision_shape_type='box',
+                collision_half_extents=[1.0, 0.1, 2.0],
+                sim_core=sim_core
+            )
+            
+            # Pure marker (no visual, no collision)
+            marker = SimObject.from_mesh(
+                mesh_path=None,
+                pose=Pose.from_euler(2, 0, 0, yaw=1.57),
+                collision_shape_type=None,
+                sim_core=sim_core
+            )
+        """
+        if pose is None:
+            pose = Pose.from_xyz(0.0, 0.0, 0.0)
+        if mesh_scale is None:
+            mesh_scale = [1.0, 1.0, 1.0]
+        if rgba_color is None:
+            rgba_color = [0.8, 0.8, 0.8, 1.0]
+        if collision_half_extents is None:
+            collision_half_extents = [0.5, 0.5, 0.5]
+        
+        # Create collision shape
+        if collision_shape_type is None:
+            collision_id = -1  # No collision shape
+        elif collision_shape_type == 'box':
+            collision_id = p.createCollisionShape(p.GEOM_BOX, halfExtents=collision_half_extents)
+        elif collision_shape_type == 'mesh':
+            if mesh_path is None:
+                raise ValueError("mesh_path is required when collision_shape_type='mesh'")
+            collision_id = p.createCollisionShape(p.GEOM_MESH, fileName=mesh_path, meshScale=mesh_scale)
+        else:
+            # Unknown type: default to box collision
+            collision_id = p.createCollisionShape(p.GEOM_BOX, halfExtents=collision_half_extents)
+        
+        # Create visual shape
+        if mesh_path is not None:
+            # Use mesh for visual
+            visual_id = p.createVisualShape(
+                p.GEOM_MESH,
+                fileName=mesh_path,
+                meshScale=mesh_scale,
+                rgbaColor=rgba_color
+            )
+        else:
+            # No visual shape when mesh_path is None
+            visual_id = -1
+        
+        # Get position and orientation from Pose
+        position, orientation = pose.as_position_orientation()
+        
+        # Create multibody
+        body_id = p.createMultiBody(
+            baseMass=mass,
+            baseCollisionShapeIndex=collision_id,
+            baseVisualShapeIndex=visual_id,
+            basePosition=position,
+            baseOrientation=orientation
+        )
+        
+        return cls(body_id=body_id, sim_core=sim_core, mesh_path=mesh_path)
+    
+    @classmethod
+    def from_params(cls, spawn_params: SimObjectSpawnParams, sim_core=None) -> 'SimObject':
+        """
+        Create a SimObject from SimObjectSpawnParams.
+        
+        Args:
+            spawn_params: SimObjectSpawnParams instance
+            sim_core: Reference to simulation core
+        
+        Returns:
+            SimObject instance
+        
+        Example:
+            params = SimObjectSpawnParams(
+                mesh_path="pallet.obj",
+                initial_pose=Pose.from_xyz(0, 0, 0.1),
+                collision_half_extents=[0.5, 0.4, 0.1],
+                rgba_color=[0.8, 0.6, 0.4, 1.0]
+            )
+            obj = SimObject.from_params(params, sim_core)
+        """
+        return cls.from_mesh(
+            mesh_path=spawn_params.mesh_path,
+            pose=spawn_params.initial_pose,
+            collision_shape_type=spawn_params.collision_shape_type,
+            collision_half_extents=spawn_params.collision_half_extents,
+            mesh_scale=spawn_params.mesh_scale,
+            rgba_color=spawn_params.rgba_color,
+            mass=spawn_params.mass,
+            sim_core=sim_core
+        )
+        
     def get_pose(self) -> Pose:
         """Return current position and orientation as Pose object."""
         position, orientation = p.getBasePositionAndOrientation(self.body_id)
         return Pose.from_pybullet(position, orientation)
     
-    def kinematic_teleport_base(self, position, orientation, linear_vel=None, angular_vel=None):
+    def set_pose(self, pose: Pose):
+        """
+        Set position and orientation from a Pose object.
+        Preserves current velocity (useful for kinematic control with physics enabled).
+        
+        Args:
+            pose: Pose object containing position and orientation
+        """
+        # Get current velocities to preserve them
+        linear_vel, angular_vel = p.getBaseVelocity(self.body_id)
+        
+        position, orientation = pose.as_position_orientation()
         p.resetBasePositionAndOrientation(self.body_id, position, orientation)
-        if linear_vel is not None and angular_vel is not None:
-            p.resetBaseVelocity(self.body_id, linear_vel, angular_vel)
+        p.resetBaseVelocity(self.body_id, linear_vel, angular_vel)
+        
         # Recursively apply the same coordinates and velocity to attached_objects
         for obj in getattr(self, 'attached_objects', []):
             # Follow using relative position and orientation from attachment
             if hasattr(obj, '_attach_offset'):
                 offset_pos, offset_orn = obj._attach_offset
                 new_pos, new_orn = p.multiplyTransforms(position, orientation, offset_pos, offset_orn)
-                obj.kinematic_teleport_base(new_pos, new_orn, linear_vel, angular_vel)
+                new_pose = Pose.from_pybullet(new_pos, new_orn)
+                obj.set_pose(new_pose)
     
     def attach_object(self, obj: 'SimObject', parentFramePosition=[0,0,0], 
                      childFramePosition=[0,0,0], jointAxis=[0,0,0], 
@@ -299,7 +493,7 @@ class URDFObject(SimObject):
         distance = np.linalg.norm(direction)
         if distance < self.goal_threshold:
             # Goal reached: teleport if within threshold
-            self.kinematic_teleport_base(target_pos.tolist(), target_orn)
+            self.set_pose(target_pose)
             self._current_nav_index += 1
             self._nav_velocity = np.array([0.0, 0.0, 0.0])
             # Execute callback on arrival
@@ -326,7 +520,8 @@ class URDFObject(SimObject):
         new_pos = current_pos + self._nav_velocity * dt
         # Orientation matches target Pose
         _, target_orn = target_pose.as_position_orientation()
-        self.kinematic_teleport_base(new_pos.tolist(), target_orn)
+        new_pose = Pose.from_pybullet(new_pos.tolist(), target_orn)
+        self.set_pose(new_pose)
     
     def set_all_masses_to_zero(self):
         p.changeDynamics(self.body_id, -1, mass=0)

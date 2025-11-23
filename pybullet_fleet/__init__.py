@@ -14,13 +14,13 @@ from pybullet_fleet.core_simulation import (
 )
 
 # Robot/Agent management
-from pybullet_fleet.robot import (
+from pybullet_fleet.agent import (
     Agent,
     Pose,
     AgentSpawnParams
 )
 
-from pybullet_fleet.robot_manager import (
+from pybullet_fleet.agent_manager import (
     AgentManager,
     GridSpawnParams
 )

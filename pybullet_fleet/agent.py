@@ -1,57 +1,45 @@
 """
-core/robot.py
+core/agent.py
 Agent class for goal-based position control with max velocity and acceleration constraints.
 Supports both mobile (use_fixed_base=False) and fixed (use_fixed_base=True) robots.
 Supports both Mesh and URDF loading.
-Designed with ROS2 geometry_msgs/Pose compatibility in mind.
 """
 import pybullet as p
 import numpy as np
 from dataclasses import dataclass, field
 from typing import Optional, Tuple, List, Dict, Any
 
-# Import SimObject and Pose from sim_object module
-from pybullet_fleet.sim_object import SimObject, Pose
+from pybullet_fleet.sim_object import SimObject, Pose, SimObjectSpawnParams
 
 
 @dataclass
-class AgentSpawnParams:
+class AgentSpawnParams(SimObjectSpawnParams):
     """
-    Robot spawn parameters for Agent class.
+    Agent spawn parameters extending SimObjectSpawnParams.
     
-    These parameters define the physical properties, appearance, and initial state of a robot.
-    They are used by Agent.from_params() and RobotManager.spawn_robots_grid().
+    These parameters define the physical properties, appearance, and initial state of an agent.
+    They are used by Agent.from_params() and AgentManager.spawn_agents_grid().
     
     Supports both Mesh and URDF robots. Specify either mesh_path or urdf_path (not both).
     
-    Attributes:
-        mesh_path: Path to robot mesh file (for mesh-based robots)
+    Attributes (in addition to SimObjectSpawnParams):
         urdf_path: Path to robot URDF file (for URDF-based robots with joints)
-        initial_position: Initial [x, y, z] position in world coordinates (optional, used by from_params)
         max_vel: Maximum velocity in m/s (ignored if use_fixed_base=True)
         max_accel: Maximum acceleration in m/s² (ignored if use_fixed_base=True)
-        orientation_euler: Orientation in Euler angles [roll, pitch, yaw] radians
-        mesh_scale: Mesh scaling factors [sx, sy, sz] (for mesh robots only)
-        collision_half_extents: Collision box half extents [hx, hy, hz] in meters (for mesh robots only)
-        rgba_color: RGBA color [r, g, b, a] (0.0-1.0)
-        base_mass: Robot mass in kg (0.0 for kinematic control)
+        visual_mesh_path: Optional separate visual mesh path (for Agent.from_mesh)
         use_fixed_base: If True, robot base is fixed and doesn't move (default: False)
+        user_data: Optional dictionary for custom metadata (default: empty dict)
     
     Note:
-        initial_position is optional and mainly used by Agent.from_params().
-        RobotManager.spawn_robots_grid() calculates positions automatically and ignores this field.
+        initial_pose is optional and mainly used by Agent.from_params().
+        AgentManager.spawn_agents_grid() calculates positions automatically and ignores this field.
     """
-    mesh_path: Optional[str] = None
     urdf_path: Optional[str] = None
-    initial_position: Optional[List[float]] = None  # [x, y, z]
     max_vel: float = 2.0
     max_accel: float = 5.0
-    orientation_euler: List[float] = field(default_factory=lambda: [0.0, 0.0, 0.0])
-    mesh_scale: List[float] = field(default_factory=lambda: [1.0, 1.0, 1.0])
-    collision_half_extents: List[float] = field(default_factory=lambda: [0.2, 0.1, 0.2])
-    rgba_color: List[float] = field(default_factory=lambda: [0.2, 0.2, 0.2, 1.0])
-    base_mass: float = 0.0
+    visual_mesh_path: Optional[str] = None
     use_fixed_base: bool = False
+    user_data: Dict[str, Any] = field(default_factory=dict)
     
     def __post_init__(self):
         """Validate that either mesh_path or urdf_path is specified."""
@@ -68,6 +56,7 @@ class AgentSpawnParams:
         Args:
             config: Dictionary with robot parameters including:
                     - mesh_path or urdf_path (required)
+                    - initial_pose: Pose object (optional)
                     - max_vel, max_accel, use_fixed_base, etc. (optional)
         
         Returns:
@@ -76,6 +65,7 @@ class AgentSpawnParams:
         Example:
             config = {
                 'urdf_path': 'robots/mobile_robot.urdf',
+                'initial_pose': Pose.from_xyz(1.0, 2.0, 0.0),
                 'max_vel': 2.0,
                 'max_accel': 5.0,
                 'use_fixed_base': False
@@ -85,14 +75,13 @@ class AgentSpawnParams:
         return cls(
             mesh_path=config.get('mesh_path'),
             urdf_path=config.get('urdf_path'),
-            initial_position=config.get('initial_position'),
+            initial_pose=config.get('initial_pose'),
             max_vel=config.get('max_vel', 2.0),
             max_accel=config.get('max_accel', 5.0),
-            orientation_euler=config.get('orientation_euler', [0.0, 0.0, 0.0]),
             mesh_scale=config.get('mesh_scale', [1.0, 1.0, 1.0]),
             collision_half_extents=config.get('collision_half_extents', [0.2, 0.1, 0.2]),
             rgba_color=config.get('rgba_color', [0.2, 0.2, 0.2, 1.0]),
-            base_mass=config.get('base_mass', 0.0),
+            mass=config.get('mass', 0.0),
             use_fixed_base=config.get('use_fixed_base', False)
         )
 
@@ -213,9 +202,9 @@ class Agent(SimObject):
     
     @classmethod
     def from_params(cls, spawn_params: AgentSpawnParams, 
-                   sim_core=None) -> 'Robot':
+                   sim_core=None) -> 'Agent':
         """
-        Create a Robot from AgentSpawnParams.
+        Create an Agent from AgentSpawnParams.
         
         This is the recommended way to spawn robots when using AgentSpawnParams.
         Automatically detects whether to use mesh or URDF based on spawn_params.
@@ -225,12 +214,12 @@ class Agent(SimObject):
             sim_core: Reference to simulation core (optional)
         
         Returns:
-            Robot instance
+            Agent instance
         
         Example (Mesh):
             params = AgentSpawnParams(
                 mesh_path="robot.obj",
-                initial_position=[1.0, 2.0, 0.0],
+                initial_pose=Pose.from_xyz(1.0, 2.0, 0.0),
                 max_vel=3.0
             )
             robot = Agent.from_params(spawn_params=params)
@@ -238,24 +227,19 @@ class Agent(SimObject):
         Example (URDF):
             params = AgentSpawnParams(
                 urdf_path="arm_robot.urdf",
-                initial_position=[0.0, 0.0, 0.0],
+                initial_pose=Pose.from_xyz(0.0, 0.0, 0.0),
                 use_fixed_base=True
             )
             robot = Agent.from_params(spawn_params=params)
         """
         # Validate required parameters
-        if spawn_params.initial_position is None:
-            raise ValueError("spawn_params.initial_position must be provided")
-        
-        orientation = p.getQuaternionFromEuler(spawn_params.orientation_euler)
         
         # Choose mesh or URDF path
         if spawn_params.urdf_path is not None:
             # URDF robot
-            return cls.from_urdf(
+            agent = cls.from_urdf(
                 urdf_path=spawn_params.urdf_path,
-                position=spawn_params.initial_position,
-                orientation=orientation,
+                pose=spawn_params.initial_pose,
                 max_vel=spawn_params.max_vel,
                 max_accel=spawn_params.max_accel,
                 use_fixed_base=spawn_params.use_fixed_base,
@@ -263,22 +247,28 @@ class Agent(SimObject):
             )
         else:
             # Mesh robot
-            return cls.from_mesh(
+            agent = cls.from_mesh(
                 mesh_path=spawn_params.mesh_path,
-                position=spawn_params.initial_position,
-                orientation=orientation,
+                pose=spawn_params.initial_pose,
                 mesh_scale=spawn_params.mesh_scale,
                 collision_half_extents=spawn_params.collision_half_extents,
                 rgba_color=spawn_params.rgba_color,
-                base_mass=spawn_params.base_mass,
+                base_mass=spawn_params.mass,
                 max_vel=spawn_params.max_vel,
                 max_accel=spawn_params.max_accel,
                 use_fixed_base=spawn_params.use_fixed_base,
+                visual_mesh_path=spawn_params.visual_mesh_path,
                 sim_core=sim_core
             )
+        
+        # Set user_data if provided
+        if spawn_params.user_data:
+            agent.user_data.update(spawn_params.user_data)
+        
+        return agent
     
     @classmethod
-    def from_mesh(cls, mesh_path: str, position: List[float], orientation: List[float],
+    def from_mesh(cls, mesh_path: str, pose: Pose = None,
                  mesh_scale: List[float] = None,
                  collision_half_extents: List[float] = None,
                  rgba_color: List[float] = None,
@@ -286,41 +276,66 @@ class Agent(SimObject):
                  max_vel: float = 2.0,
                  max_accel: float = 5.0,
                  use_fixed_base: bool = False,
-                 sim_core=None) -> 'Robot':
+                 visual_mesh_path: Optional[str] = None,
+                 sim_core=None) -> 'Agent':
         """
         Create a mesh-based Agent.
         
+        This method extends SimObject.from_mesh() by adding Agent-specific parameters
+        (max_vel, max_accel, use_fixed_base, visual_mesh_path).
+        
         Args:
-            mesh_path: Path to robot mesh file (.obj, .dae, etc.)
-            position: Initial [x, y, z] position
-            orientation: Orientation as quaternion [x, y, z, w]
+            mesh_path: Path to robot mesh file (.obj, .dae, etc.) for collision
+            pose: Initial Pose (position and orientation). Defaults to origin
             mesh_scale: Mesh scaling [sx, sy, sz]
             collision_half_extents: Collision box half extents [hx, hy, hz]
             rgba_color: RGBA color [r, g, b, a]
             base_mass: Robot mass (kg), 0.0 for kinematic control
-            max_vel: Maximum velocity (m/s)
-            max_accel: Maximum acceleration (m/s²)
-            use_fixed_base: If True, robot base is fixed and doesn't move
+            max_vel: Maximum velocity (m/s) - Agent-specific
+            max_accel: Maximum acceleration (m/s²) - Agent-specific
+            use_fixed_base: If True, robot base is fixed and doesn't move - Agent-specific
+            visual_mesh_path: Optional path to separate visual mesh (if None, uses mesh_path) - Agent-specific
             sim_core: Reference to simulation core
         
         Returns:
-            Robot instance
+            Agent instance
         
         Example:
-            robot = Agent.from_mesh(
+            agent = Agent.from_mesh(
                 mesh_path="robot.obj",
-                position=[0, 0, 0.5],
-                orientation=[0, 0, 0, 1],
-                max_vel=2.0
+                pose=Pose.from_xyz(0, 0, 0.5),
+                max_vel=2.0,
+                visual_mesh_path="robot_visual.obj"  # Optional separate visual mesh
             )
         """
-        # Get or create shared shapes
-        visual_id, collision_id = cls.create_shared_shapes(
-            mesh_path=mesh_path,
-            mesh_scale=mesh_scale,
-            collision_half_extents=collision_half_extents,
-            rgba_color=rgba_color
+        if pose is None:
+            pose = Pose.from_xyz(0.0, 0.0, 0.0)
+        if mesh_scale is None:
+            mesh_scale = [1.0, 1.0, 1.0]
+        if collision_half_extents is None:
+            collision_half_extents = [0.2, 0.1, 0.2]
+        if rgba_color is None:
+            rgba_color = [0.2, 0.2, 0.2, 1.0]
+        
+        # Use visual_mesh_path if provided, otherwise use mesh_path
+        visual_mesh = visual_mesh_path if visual_mesh_path is not None else mesh_path
+        
+        # Create collision shape (box)
+        collision_id = p.createCollisionShape(
+            shapeType=p.GEOM_BOX,
+            halfExtents=collision_half_extents
         )
+        
+        # Create visual shape (from visual_mesh or mesh_path)
+        visual_id = p.createVisualShape(
+            shapeType=p.GEOM_MESH,
+            fileName=visual_mesh,
+            rgbaColor=rgba_color,
+            meshScale=mesh_scale
+        )
+        
+        # Get position and orientation from Pose
+        position, orientation = pose.as_position_orientation()
         
         # Create multibody
         body_id = p.createMultiBody(
@@ -331,7 +346,8 @@ class Agent(SimObject):
             baseOrientation=orientation
         )
         
-        return cls(
+        # Create agent instance with Agent-specific parameters
+        agent = cls(
             body_id=body_id,
             mesh_path=mesh_path,
             max_vel=max_vel,
@@ -339,37 +355,46 @@ class Agent(SimObject):
             use_fixed_base=use_fixed_base,
             sim_core=sim_core
         )
+        
+        # Auto-register to sim_core if provided (handled by SimObject.__init__)
+        # Note: No need to manually append here, SimObject.__init__ handles it
+        
+        return agent
     
     @classmethod
-    def from_urdf(cls, urdf_path: str, position: List[float], orientation: List[float],
+    def from_urdf(cls, urdf_path: str, pose: Pose = None,
                  max_vel: float = 2.0,
                  max_accel: float = 5.0,
                  use_fixed_base: bool = False,
-                 sim_core=None) -> 'Robot':
+                 sim_core=None) -> 'Agent':
         """
-        Create a URDF-based Robot (with joints).
+        Create a URDF-based Agent (with joints).
         
         Args:
             urdf_path: Path to robot URDF file
-            position: Initial [x, y, z] position
-            orientation: Orientation as quaternion [x, y, z, w]
+            pose: Initial Pose (position and orientation). Defaults to origin
             max_vel: Maximum velocity (m/s)
             max_accel: Maximum acceleration (m/s²)
             use_fixed_base: If True, robot base is fixed in space
             sim_core: Reference to simulation core
         
         Returns:
-            Robot instance
+            Agent instance
         
         Example:
             robot = Agent.from_urdf(
                 urdf_path="arm_robot.urdf",
-                position=[0, 0, 0],
-                orientation=[0, 0, 0, 1],
+                pose=Pose.from_xyz(0, 0, 0),
                 use_fixed_base=True
             )
             robot.set_joint_target(0, 1.57)  # Control first joint
         """
+        if pose is None:
+            pose = Pose.from_xyz(0.0, 0.0, 0.0)
+        
+        # Get position and orientation from Pose
+        position, orientation = pose.as_position_orientation()
+        
         body_id = p.loadURDF(
             urdf_path,
             position,
@@ -377,7 +402,8 @@ class Agent(SimObject):
             useFixedBase=use_fixed_base
         )
         
-        return cls(
+        # Create agent instance (SimObject.__init__ handles auto-registration)
+        agent = cls(
             body_id=body_id,
             urdf_path=urdf_path,
             max_vel=max_vel,
@@ -385,32 +411,8 @@ class Agent(SimObject):
             use_fixed_base=use_fixed_base,
             sim_core=sim_core
         )
-    
-    def get_pose(self) -> Pose:
-        """
-        Get current robot pose (compatible with ROS2 geometry_msgs/Pose).
         
-        Returns:
-            Pose object with current position and orientation
-        """
-        position, orientation = p.getBasePositionAndOrientation(self.body_id)
-        return Pose.from_pybullet(position, orientation)
-    
-    def set_pose(self, pose: Pose):
-        """
-        Directly set robot pose (teleport) via PyBullet.
-        
-        Args:
-            pose: Target Pose to teleport to
-        """
-        p.resetBasePositionAndOrientation(
-            self.body_id,
-            pose.position,
-            pose.orientation
-        )
-        # Reset velocity when teleporting
-        p.resetBaseVelocity(self.body_id, [0, 0, 0], [0, 0, 0])
-        self.velocity = [0.0, 0.0, 0.0]
+        return agent
     
     def set_goal_pose(self, goal: Pose):
         """
@@ -451,7 +453,9 @@ class Agent(SimObject):
         # Calculate direction and distance
         direction = goal_pos - current_pos
         distance = np.linalg.norm(direction)
-        
+        # Normalize direction
+        direction = direction / distance
+
         # Check if reached goal
         if distance < 0.01:  # 1cm threshold
             # Stop at goal
@@ -466,8 +470,7 @@ class Agent(SimObject):
             )
             return
         
-        # Normalize direction
-        direction = direction / distance
+
         
         # Calculate desired velocity (max velocity towards goal)
         desired_velocity = direction * self.max_vel
