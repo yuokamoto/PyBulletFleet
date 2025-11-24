@@ -18,7 +18,7 @@ gui: true         # Show GUI
 timestep: 0.1     # 10ms timestep for smooth movement
 physics: false    # Kinematic control
 monitor: true     # Disable monitor for performance
-  
+
 # Camera settings for 100 robots
 camera:
   camera_mode: auto              # Use auto mode for automatic camera positioning

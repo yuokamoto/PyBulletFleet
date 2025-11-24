@@ -39,7 +39,7 @@ The central orchestrator for PyBullet simulations.
 - Camera setup (manual/automatic positioning)
 - Visualization control (visual shapes, collision shapes, transparency)
 - Performance monitoring integration
-- Structure body tracking 
+- Structure body tracking
 - Callback management for user-defined robot updates
 - Keyboard event handling (SPACE, v, c, t keys)
 
@@ -71,7 +71,7 @@ Abstract base class for all simulation objects.
 
 **Subclasses:**
 - `MeshObject`: For static mesh-based objects
-- `URDFObject`: For URDF-based objects 
+- `URDFObject`: For URDF-based objects
 
 todo: merge with Robot class.
 
@@ -249,4 +249,3 @@ GUI window displaying simulation metrics.
 3. **Simple Shapes**: Use boxes/cylinders instead of meshes
 4. **Batch Operations**: Update all robots in single pass
 5. **Disable Monitor**: `monitor: false` in production
-

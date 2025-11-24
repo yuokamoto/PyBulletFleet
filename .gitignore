@@ -7,5 +7,33 @@ __pycache__/
 env/
 pip-log.txt
 pip-delete-this-directory.txt
-.DS_Storeexternal/
+.DS_Store
+external/
 .vscode/
+
+# Testing and coverage
+.pytest_cache/
+.coverage
+coverage.xml
+htmlcov/
+.tox/
+
+# Type checking
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# IDEs
+.idea/
+*.swp
+*.swo
+*~
+
+# Build artifacts
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# Pre-commit
+.pre-commit-config.yaml.backup

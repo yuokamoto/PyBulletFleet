@@ -1,0 +1,37 @@
+{
+  "include": [
+    "pybullet_fleet",
+    "examples"
+  ],
+  "exclude": [
+    "**/__pycache__",
+    "**/*.pyc",
+    ".git",
+    "build",
+    "dist"
+  ],
+
+  // Import validation - detect missing modules
+  "reportMissingImports": true,
+
+  // Ignore missing type stubs for external libraries (e.g., pybullet, yaml)
+  "reportMissingTypeStubs": false,
+
+  // Allow accessing members that might be None (common with PyBullet return values)
+  "reportOptionalMemberAccess": false,
+
+  // Allow argument type mismatches (e.g., default arguments with None)
+  "reportArgumentType": false,
+
+  // Allow return type mismatches (PyBullet functions often return Any type)
+  "reportReturnType": false,
+
+  "pythonVersion": "3.8",
+  "pythonPlatform": "Linux",
+
+  // Enable basic type checking (balanced between strictness and practicality)
+  "typeCheckingMode": "basic",
+
+  // Infer types from library source code when type stubs are unavailable
+  "useLibraryCodeForTypes": true
+}

@@ -1,34 +1,41 @@
 """
 core_simulation.py
 Reusable core simulation logic for multi-robot PyBullet environments.
-Integrates generation, management, transport, attach/detach, collision detection, coordinate conversion, occupied judgment, transport path generation, debugging, monitoring, and log control for various robots, pallets, and meshes.
+Integrates generation, management, transport, attach/detach, collision detection,
+coordinate conversion, occupied judgment, transport path generation, debugging,
+monitoring, and log control for various robots, pallets, and meshes.
 """
+
+import json
+import logging
+import os
+import time
+from typing import Any, Callable, Dict, List, Optional, Tuple
+
+import numpy as np
 
 # --- All imports at the top for PEP8 compliance ---
 import pybullet as p
-import numpy as np
-import time
-import json
 import yaml
-import logging
-import os
-from typing import List, Dict, Optional, Callable, Tuple, Any
-from pybullet_fleet.data_monitor import DataMonitor
+
 from pybullet_fleet.collision_visualizer import CollisionVisualizer
-from pybullet_fleet.sim_object import SimObject, Pose
+from pybullet_fleet.data_monitor import DataMonitor
+from pybullet_fleet.sim_object import SimObject
 
 # Global log_level (default: 'info')
-GLOBAL_LOG_LEVEL = 'INFO'
-if 'PYBULLET_LOG_LEVEL' in os.environ:
-    GLOBAL_LOG_LEVEL = os.environ['PYBULLET_LOG_LEVEL'].upper()
+GLOBAL_LOG_LEVEL = "INFO"
+if "PYBULLET_LOG_LEVEL" in os.environ:
+    GLOBAL_LOG_LEVEL = os.environ["PYBULLET_LOG_LEVEL"].upper()
 
-logging.basicConfig(level=logging.getLevelName(GLOBAL_LOG_LEVEL), format='%(asctime)s %(levelname)s %(message)s')
+logging.basicConfig(level=logging.getLevelName(GLOBAL_LOG_LEVEL), format="%(asctime)s %(levelname)s %(message)s")
 
 # Create module logger
 logger = logging.getLogger(__name__)
 
 
 # Log level management class
+
+
 class LogLevelManager:
     @staticmethod
     def set_global_log_level(level_str: str) -> None:
@@ -38,31 +45,32 @@ class LogLevelManager:
         logging.getLogger().setLevel(logging.getLevelName(level_name))
 
     @staticmethod
-    def set_log_level_from_params(params: 'SimulationParams') -> None:
-        level_str = getattr(params, 'log_level', GLOBAL_LOG_LEVEL)
+    def set_log_level_from_params(params: "SimulationParams") -> None:
+        level_str = getattr(params, "log_level", GLOBAL_LOG_LEVEL)
         LogLevelManager.set_global_log_level(level_str)
+
 
 class SimulationParams:
     @classmethod
-    def from_config(cls, config_path: str = "config.yaml") -> 'SimulationParams':
+    def from_config(cls, config_path: str = "config.yaml") -> "SimulationParams":
         with open(config_path, "r") as f:
             config = yaml.safe_load(f)
         return cls.from_dict(config)
-    
+
     @classmethod
-    def from_dict(cls, config: Dict[str, Any]) -> 'SimulationParams':
+    def from_dict(cls, config: Dict[str, Any]) -> "SimulationParams":
         """
         Create SimulationParams from a configuration dictionary.
-        
+
         Args:
             config: Configuration dictionary
-            
+
         Returns:
             SimulationParams instance
         """
         return cls(
             speed=config.get("speed", 1.0),
-            timestep=config.get("timestep", 1./10.),
+            timestep=config.get("timestep", 1.0 / 10.0),
             duration=config.get("duration", 1000),
             gui=config.get("gui", True),
             physics=config.get("physics", False),
@@ -76,16 +84,28 @@ class SimulationParams:
             enable_collision_shapes=config.get("enable_collision_shapes", False),
             enable_structure_transparency=config.get("enable_structure_transparency", False),
             enable_shadows=config.get("enable_shadows", True),
-            enable_gui_panel=config.get("enable_gui_panel", False)  # Default: hide GUI panel
+            enable_gui_panel=config.get("enable_gui_panel", False),  # Default: hide GUI panel
         )
 
-    def __init__(self, num_robots: int = 10, speed: float = 1.0, timestep: float = 1./240., 
-                 duration: float = 10, gui: bool = True, physics: bool = False, 
-                 monitor: bool = True, collision_check_frequency: Optional[float] = None, 
-                 log_level: str = "warn", max_steps_per_frame: int = 10, gui_min_fps: int = 30, 
-                 enable_visual_shapes: bool = True, enable_collision_shapes: bool = False, 
-                 enable_structure_transparency: bool = False, enable_shadows: bool = True, 
-                 enable_gui_panel: bool = False) -> None:
+    def __init__(
+        self,
+        num_robots: int = 10,
+        speed: float = 1.0,
+        timestep: float = 1.0 / 240.0,
+        duration: float = 10,
+        gui: bool = True,
+        physics: bool = False,
+        monitor: bool = True,
+        collision_check_frequency: Optional[float] = None,
+        log_level: str = "warn",
+        max_steps_per_frame: int = 10,
+        gui_min_fps: int = 30,
+        enable_visual_shapes: bool = True,
+        enable_collision_shapes: bool = False,
+        enable_structure_transparency: bool = False,
+        enable_shadows: bool = True,
+        enable_gui_panel: bool = False,
+    ) -> None:
         self.speed = speed if speed > 0 else 1.0  # If speed <= 0, set to 1.0
         self.timestep = timestep
         self.duration = duration
@@ -106,25 +126,25 @@ class SimulationParams:
 
 class MultiRobotSimulationCore:
     @classmethod
-    def from_yaml(cls, yaml_path: str = "config.yaml") -> 'MultiRobotSimulationCore':
+    def from_yaml(cls, yaml_path: str = "config.yaml") -> "MultiRobotSimulationCore":
         params = SimulationParams.from_config(yaml_path)
         return cls(params)
-    
+
     @classmethod
-    def from_dict(cls, config: Dict[str, Any]) -> 'MultiRobotSimulationCore':
+    def from_dict(cls, config: Dict[str, Any]) -> "MultiRobotSimulationCore":
         """
         Create MultiRobotSimulationCore from a configuration dictionary.
-        
+
         Args:
             config: Configuration dictionary
-            
+
         Returns:
             MultiRobotSimulationCore instance
         """
         params = SimulationParams.from_dict(config)
         return cls(params)
-    
-    def __init__(self, params: SimulationParams, collision_color: List[float] = [0,0,1,1]) -> None:
+
+    def __init__(self, params: SimulationParams, collision_color: List[float] = [0, 0, 1, 1]) -> None:
         # Initialize log level
         LogLevelManager.set_log_level_from_params(params)
         self.client: Optional[int] = None
@@ -150,7 +170,9 @@ class MultiRobotSimulationCore:
         self._visual_shapes_enabled: bool = True  # Default: visual shapes ON
         self._collision_shapes_enabled: bool = False  # Default: collision shapes OFF
         self._keyboard_events_registered: bool = False  # Track if keyboard events are registered
-        self._original_visual_colors: Dict[Tuple[int, int], List[float]] = {}  # Store original colors: (body_id, link_id) -> rgba
+        self._original_visual_colors: Dict[Tuple[int, int], List[float]] = (
+            {}
+        )  # Store original colors: (body_id, link_id) -> rgba
         self._structure_body_ids: set = set()  # Set of structure body IDs (not robots) - use set for O(1) lookup
         self._structure_transparent: bool = False  # Track if structure is transparent
         self._simulation_paused: bool = False  # Track if simulation is paused
@@ -160,6 +182,7 @@ class MultiRobotSimulationCore:
     def setup_monitor(self) -> None:
         # If monitor: true and console_monitor: false, start DataMonitor
         from pybullet_fleet.data_monitor import DataMonitor
+
         if self.params.monitor:
             self.data_monitor = DataMonitor("PyBullet Simulation Monitor")
             self.data_monitor.start()
@@ -171,7 +194,7 @@ class MultiRobotSimulationCore:
         Register a callback function to be called every step.
         frequency (Hz, number of times per second) can be specified. If None, called every step.
         """
-        self.callbacks.append({'func': callback, 'frequency': frequency, 'last_exec': 0.0})
+        self.callbacks.append({"func": callback, "frequency": frequency, "last_exec": 0.0})
 
     def set_collision_check_frequency(self, frequency: Optional[float] = None) -> None:
         """
@@ -185,12 +208,13 @@ class MultiRobotSimulationCore:
     def setup_pybullet(self) -> None:
         """Initialize PyBullet with GUI panels hidden."""
         self.client = p.connect(p.GUI if self.params.gui else p.DIRECT)
-        
+
         # Hide all debug UI panels immediately after connection
         if self.params.gui:
             p.configureDebugVisualizer(p.COV_ENABLE_GUI, 0)
-        
+
         import pybullet_data
+
         p.setAdditionalSearchPath(pybullet_data.getDataPath())
         p.setGravity(0, 0, -9.81 if self.params.physics else 0)
         p.setTimeStep(self.params.timestep)
@@ -226,26 +250,28 @@ class MultiRobotSimulationCore:
         """
         Register a body ID as part of the structure (not a robot).
         Structure bodies can be made transparent with 't' key.
-        
+
         Args:
             body_id (int): PyBullet body ID to register as structure
         """
         self._structure_body_ids.add(body_id)
 
-    def configure_visualizer(self, 
-                           enable_visual_shapes: Optional[bool] = None, 
-                           enable_collision_shapes: Optional[bool] = None,
-                           enable_structure_transparency: Optional[bool] = None,
-                           enable_shadows: Optional[bool] = None) -> None:
+    def configure_visualizer(
+        self,
+        enable_visual_shapes: Optional[bool] = None,
+        enable_collision_shapes: Optional[bool] = None,
+        enable_structure_transparency: Optional[bool] = None,
+        enable_shadows: Optional[bool] = None,
+    ) -> None:
         """
         Configure PyBullet visualizer settings with keyboard control.
-        
+
         Args:
             enable_visual_shapes: Initial state for visual shapes (None=use config)
             enable_collision_shapes: Initial state for collision shapes (None=use config)
             enable_structure_transparency: Initial state for structure transparency (None=use config)
             enable_shadows: Enable shadows (None=use config)
-        
+
         Keyboard shortcuts (active during simulation):
         - Press 'v' to toggle visual shapes ON/OFF
         - Press 'c' to toggle collision shapes ON/OFF
@@ -253,7 +279,7 @@ class MultiRobotSimulationCore:
         """
         if not self.params.gui:
             return
-        
+
         # Use config values if parameters are None
         if enable_visual_shapes is None:
             enable_visual_shapes = self.params.enable_visual_shapes
@@ -263,41 +289,48 @@ class MultiRobotSimulationCore:
             enable_structure_transparency = self.params.enable_structure_transparency
         if enable_shadows is None:
             enable_shadows = self.params.enable_shadows
-        
+
         # Save original colors of all visual shapes ONCE
         if not self._original_visual_colors:
             self._save_original_visual_colors()
-        
+
         # Store initial states
         self._visual_shapes_enabled = enable_visual_shapes
         self._collision_shapes_enabled = enable_collision_shapes
         self._structure_transparent = enable_structure_transparency
-        
+
         # Configure shadows
         p.configureDebugVisualizer(p.COV_ENABLE_SHADOWS, 1 if enable_shadows else 0)
-        
+
         # Apply initial visibility states
         self._set_visual_shapes_visibility(self._visual_shapes_enabled)
         self._set_collision_shapes_visibility(self._collision_shapes_enabled)
-        
+
         # Apply initial structure transparency
         if self._structure_transparent:
             self._set_structure_transparency(True)
-        
+
         # Enable keyboard event handling in step_once()
         self._keyboard_events_registered = True
-        
-        logger.info(f"Visualizer configured: visual={enable_visual_shapes}, collision={enable_collision_shapes}, "
-                   f"transparency={enable_structure_transparency}, shadows={enable_shadows}")
+
+        logger.info(
+            "Visualizer configured: visual=%s, collision=%s, transparency=%s, shadows=%s",
+            enable_visual_shapes,
+            enable_collision_shapes,
+            enable_structure_transparency,
+            enable_shadows,
+        )
         logger.info("Keyboard controls registered: SPACE=pause, v=visual, c=collision, t=transparency")
-        print(f"\n[KEYBOARD CONTROLS]")
-        print(f"  Press SPACE to pause/play simulation")
+        print("\n[KEYBOARD CONTROLS]")
+        print("  Press SPACE to pause/play simulation")
         print(f"  Press 'v' to toggle visual shapes (current: {'ON' if self._visual_shapes_enabled else 'OFF'})")
         print(f"  Press 'c' to toggle collision shapes (current: {'ON' if self._collision_shapes_enabled else 'OFF'})")
-        print(f"  Press 't' to toggle structure transparency (current: {'ON' if self._structure_transparent else 'OFF'})")
+        print("  Press 't' to toggle structure transparency " f"(current: {'ON' if self._structure_transparent else 'OFF'})")
         if len(self._structure_body_ids) > 100:
-            print(f"             ⚠️  Warning: {len(self._structure_body_ids)} structure bodies detected - toggling may be slow (not recommended)")
-
+            print(
+                "             ⚠️  Warning: %d structure bodies detected - " "toggling may be slow (not recommended)",
+                len(self._structure_body_ids),
+            )
 
     def _save_original_visual_colors(self) -> None:
         """
@@ -312,7 +345,7 @@ class MultiRobotSimulationCore:
                 rgba = shape[7]  # Original RGBA color
                 key = (body_id, link_index)
                 self._original_visual_colors[key] = rgba
-        
+
         logger.info(f"Saved original colors for {len(self._original_visual_colors)} visual shapes")
 
     def _handle_keyboard_events(self) -> None:
@@ -322,57 +355,56 @@ class MultiRobotSimulationCore:
         """
         if not self.params.gui:
             return
-        
+
         try:
             # Get keyboard events
             keys = p.getKeyboardEvents()
         except p.error:
             # PyBullet disconnected (window closed), stop handling events
             return
-        
+
         # Space key (ASCII 32) - toggle pause/play
-        if ord(' ') in keys and keys[ord(' ')] & p.KEY_WAS_TRIGGERED:
+        if ord(" ") in keys and keys[ord(" ")] & p.KEY_WAS_TRIGGERED:
             self._simulation_paused = not self._simulation_paused
             print(f"\n[PAUSE] Simulation: {'PAUSED' if self._simulation_paused else 'PLAYING'}")
-        
+
         # 'v' key (ASCII 118) - toggle visual shapes
-        if ord('v') in keys and keys[ord('v')] & p.KEY_WAS_TRIGGERED:
+        if ord("v") in keys and keys[ord("v")] & p.KEY_WAS_TRIGGERED:
             self._visual_shapes_enabled = not self._visual_shapes_enabled
             self._set_visual_shapes_visibility(self._visual_shapes_enabled)
             print(f"\n[TOGGLE] Visual shapes: {'ON' if self._visual_shapes_enabled else 'OFF'}")
-        
+
         # 'c' key (ASCII 99) - toggle collision shapes
-        if ord('c') in keys and keys[ord('c')] & p.KEY_WAS_TRIGGERED:
+        if ord("c") in keys and keys[ord("c")] & p.KEY_WAS_TRIGGERED:
             self._collision_shapes_enabled = not self._collision_shapes_enabled
             self._set_collision_shapes_visibility(self._collision_shapes_enabled)
             print(f"\n[TOGGLE] Collision shapes: {'ON' if self._collision_shapes_enabled else 'OFF'}")
-        
+
         # 't' key (ASCII 116) - toggle structure transparency
-        if ord('t') in keys and keys[ord('t')] & p.KEY_WAS_TRIGGERED:
+        if ord("t") in keys and keys[ord("t")] & p.KEY_WAS_TRIGGERED:
             num_structures = len(self._structure_body_ids)
             if num_structures > 100:
                 print(f"\n[TOGGLE] ⚠️  Warning: Toggling transparency for {num_structures} structure bodies...")
-                print(f"         This may take several seconds (not recommended for large scenes)")
-                print(f"         Consider setting 'enable_structure_transparency' in config.yaml instead")
-            
+                print("         This may take several seconds (not recommended for large scenes)")
+                print("         Consider setting 'enable_structure_transparency' in config.yaml instead")
+
             self._structure_transparent = not self._structure_transparent
             self._set_structure_transparency(self._structure_transparent)
             print(f"\n[TOGGLE] Structure transparency: {'ON' if self._structure_transparent else 'OFF'}")
             print(f"  Structure bodies affected: {num_structures}")
-
 
     def _set_visual_shapes_visibility(self, visible: bool) -> None:
         """
         Set visibility of visual shapes independently from collision shapes.
         Uses pre-saved colors for fast restoration.
         Respects structure transparency setting when restoring visibility.
-        
+
         Args:
             visible: True to show visual shapes, False to hide them
         """
         if not self.params.gui:
             return
-        
+
         # Use saved color data for FAST toggling
         for key, rgba in self._original_visual_colors.items():
             body_id, link_index = key
@@ -388,21 +420,22 @@ class MultiRobotSimulationCore:
                 else:
                     # Make transparent (alpha = 0)
                     p.changeVisualShape(body_id, link_index, rgbaColor=[rgba[0], rgba[1], rgba[2], 0.0])
-            except:
+            except Exception:
                 pass
-        
+                pass
+
         logger.info(f"Visual shapes {'enabled' if visible else 'disabled'}")
 
     def _set_collision_shapes_visibility(self, visible: bool) -> None:
         """
         Set visibility of collision shapes using CollisionVisualizer.
-        
+
         Args:
             visible: True to show collision shapes, False to hide them
         """
-        if not self.params.gui or not hasattr(self, 'collision_visualizer'):
+        if not self.params.gui or not hasattr(self, "collision_visualizer"):
             return
-        
+
         self.collision_visualizer.set_visible(visible)
         logger.info(f"Collision shapes {'enabled' if visible else 'disabled'}")
 
@@ -411,88 +444,85 @@ class MultiRobotSimulationCore:
         Set transparency of structure bodies (not robots).
         Uses pre-saved colors with modified alpha channel.
         FAST implementation using pre-saved color dictionary.
-        
+
         Args:
             transparent: True to make structure semi-transparent, False for opaque
         """
         if not self.params.gui:
             return
-        
+
         alpha = 0.3 if transparent else 1.0
-        
+
         print(f"[TRANSPARENCY] Applying alpha={alpha} to {len(self._structure_body_ids)} structure bodies...")
-        
+
         # Apply alpha only to structure bodies using pre-saved colors (FAST)
         processed = 0
         for key, rgba in self._original_visual_colors.items():
             body_id, link_index = key
-            
+
             # Only process structure bodies (O(1) lookup with set)
             if body_id not in self._structure_body_ids:
                 continue
-            
+
             try:
                 # Apply new alpha to the original color
-                p.changeVisualShape(body_id, link_index, 
-                                  rgbaColor=[rgba[0], rgba[1], rgba[2], alpha])
+                p.changeVisualShape(body_id, link_index, rgbaColor=[rgba[0], rgba[1], rgba[2], alpha])
                 processed += 1
-            except:
+            except Exception:
                 pass
-        
+
         print(f"[TRANSPARENCY] Complete: {processed} visual shapes updated")
         logger.info(f"Structure transparency {'enabled (alpha=0.3)' if transparent else 'disabled (alpha=1.0)'}")
 
-    def setup_camera(self, camera_config: Optional[Dict[str, Any]] = None, 
-                    entity_positions: Optional[List[List[float]]] = None) -> None:
+    def setup_camera(
+        self, camera_config: Optional[Dict[str, Any]] = None, entity_positions: Optional[List[List[float]]] = None
+    ) -> None:
         """
         Set up camera view based on configuration.
-        
+
         Args:
             camera_config: Dictionary with camera settings (from yaml config)
             entity_positions: List of [x, y, z] positions for auto camera calculation
         """
         if not self.params.gui:
             return  # No camera setup needed without GUI
-        
+
         if camera_config is None:
             camera_config = {}
-        
-        camera_mode = camera_config.get('camera_mode', 'none')
-        
-        if camera_mode == 'none':
+
+        camera_mode = camera_config.get("camera_mode", "none")
+
+        if camera_mode == "none":
             return  # Skip camera setup
-        
-        elif camera_mode == 'manual':
+
+        elif camera_mode == "manual":
             # Use manual camera settings
-            distance = camera_config.get('camera_distance', 10.0)
-            yaw = camera_config.get('camera_yaw', 0)
-            pitch = camera_config.get('camera_pitch', -89)
-            target = camera_config.get('camera_target', [0, 0, 0])
-            
+            distance = camera_config.get("camera_distance", 10.0)
+            yaw = camera_config.get("camera_yaw", 0)
+            pitch = camera_config.get("camera_pitch", -89)
+            target = camera_config.get("camera_target", [0, 0, 0])
+
             p.resetDebugVisualizerCamera(
-                cameraDistance=distance,
-                cameraYaw=yaw,
-                cameraPitch=pitch,
-                cameraTargetPosition=target
+                cameraDistance=distance, cameraYaw=yaw, cameraPitch=pitch, cameraTargetPosition=target
             )
-            
+
             logger.info(f"Camera set to manual mode: distance={distance:.2f}m, yaw={yaw}°, pitch={pitch}°, target={target}")
-        
-        elif camera_mode == 'auto':
+
+        elif camera_mode == "auto":
             # Calculate camera from entity positions
             if entity_positions is None or len(entity_positions) == 0:
                 logger.warning("Auto camera mode requested but no entity positions provided")
                 return
-            
+
             positions_array = np.array(entity_positions)
             center = positions_array.mean(axis=0)
             extent = positions_array.max(axis=0) - positions_array.min(axis=0)
-            
+
             # Get camera settings
-            view_type = camera_config.get('camera_view_type', 'top_down')
-            auto_scale = camera_config.get('camera_auto_scale', 0.8)
-            
-            if view_type == 'top_down':
+            view_type = camera_config.get("camera_view_type", "top_down")
+            auto_scale = camera_config.get("camera_auto_scale", 0.8)
+
+            if view_type == "top_down":
                 # Top-down orthographic view
                 distance = max(extent[0], extent[1]) * auto_scale
                 yaw = 0
@@ -502,16 +532,13 @@ class MultiRobotSimulationCore:
                 distance = max(extent[0], extent[1], extent[2]) * auto_scale
                 yaw = 45
                 pitch = -30
-            
+
             target = [center[0], center[1], center[2]]
-            
+
             p.resetDebugVisualizerCamera(
-                cameraDistance=distance,
-                cameraYaw=yaw,
-                cameraPitch=pitch,
-                cameraTargetPosition=target
+                cameraDistance=distance, cameraYaw=yaw, cameraPitch=pitch, cameraTargetPosition=target
             )
-            
+
             logger.info(f"Camera set to auto mode ({view_type}): distance={distance:.2f}m, target={target}")
             print(f"\n--- Camera View ({view_type}) ---")
             print(f"  Structure extent: [{extent[0]:.2f} x {extent[1]:.2f} x {extent[2]:.2f}] meters")
@@ -530,9 +557,14 @@ class MultiRobotSimulationCore:
             aabb_i = aabbs[i]
             for j in range(i + 1, len(self.robot_bodies)):
                 aabb_j = aabbs[j]
-                if (aabb_i[1][0] < aabb_j[0][0] or aabb_i[0][0] > aabb_j[1][0] or
-                    aabb_i[1][1] < aabb_j[0][1] or aabb_i[0][1] > aabb_j[1][1] or
-                    aabb_i[1][2] < aabb_j[0][2] or aabb_i[0][2] > aabb_j[1][2]):
+                if (
+                    aabb_i[1][0] < aabb_j[0][0]
+                    or aabb_i[0][0] > aabb_j[1][0]
+                    or aabb_i[1][1] < aabb_j[0][1]
+                    or aabb_i[0][1] > aabb_j[1][1]
+                    or aabb_i[1][2] < aabb_j[0][2]
+                    or aabb_i[0][2] > aabb_j[1][2]
+                ):
                     continue
                 pairs.append((i, j))
         return pairs
@@ -542,7 +574,7 @@ class MultiRobotSimulationCore:
             collision_color = self.collision_color
         collision_pairs = []
         collided = set()
-        
+
         try:
             # Record: save initial color
             for idx, body_id in enumerate(self.robot_bodies):
@@ -563,21 +595,21 @@ class MultiRobotSimulationCore:
                     if is_collided:
                         p.changeVisualShape(body_id, -1, rgbaColor=collision_color)
                     else:
-                        orig_color = self._robot_original_colors.get(body_id, [0,0,0,1])
+                        orig_color = self._robot_original_colors.get(body_id, [0, 0, 0, 1])
                         p.changeVisualShape(body_id, -1, rgbaColor=orig_color)
             self._last_collided = collided
             self.collision_count += len(collision_pairs)
         except p.error:
             # PyBullet disconnected, skip collision checking
             pass
-        
+
         return collision_pairs
 
     def update_monitor(self, suppress_console: bool = False) -> None:
         now = time.time()
         sim_time = self.step_count * self.params.timestep
         # --- Speed history buffer ---
-        if not hasattr(self, '_speed_history'):
+        if not hasattr(self, "_speed_history"):
             self._speed_history = []  # [(real_time, sim_time)]
         self._speed_history.append((now, sim_time))
         # Keep only history within 10 seconds
@@ -593,22 +625,29 @@ class MultiRobotSimulationCore:
             actual_speed = 0
         elapsed_time = now - self.start_time if self.start_time else 0
         monitor_data = {
-            'sim_time': sim_time,
-            'real_time': elapsed_time,
-            'target_speed': self.params.speed,
-            'actual_speed': actual_speed,
-            'time_step': self.params.timestep,
-            'frequency': 1/self.params.timestep,
-            'physics': 'enabled' if self.params.physics else 'disabled',
-            'robots': len(self.robot_bodies),
-            'collisions': self.collision_count,
-            'steps': self.step_count
+            "sim_time": sim_time,
+            "real_time": elapsed_time,
+            "target_speed": self.params.speed,
+            "actual_speed": actual_speed,
+            "time_step": self.params.timestep,
+            "frequency": 1 / self.params.timestep,
+            "physics": "enabled" if self.params.physics else "disabled",
+            "robots": len(self.robot_bodies),
+            "collisions": self.collision_count,
+            "steps": self.step_count,
         }
         # Log level control (minimum: warn, info for details, debug for all output)
         log_level = self.log_level if not suppress_console else "warn"
         logging.debug("MONITOR:")
         logging.debug(json.dumps(monitor_data, indent=2, ensure_ascii=False))
-        logging.info(f"sim_time={sim_time:.2f}, real_time={elapsed_time:.2f}, speed={actual_speed:.2f}, collisions={self.collision_count}, steps={self.step_count}")
+        logging.info(
+            "sim_time=%.2f, real_time=%.2f, speed=%.2f, collisions=%d, steps=%d",
+            sim_time,
+            elapsed_time,
+            actual_speed,
+            self.collision_count,
+            self.step_count,
+        )
         if self.collision_count > 0:
             logging.info(f"collisions={self.collision_count} at sim_time={sim_time:.2f}")
         # Also output to DataMonitor window
@@ -621,36 +660,36 @@ class MultiRobotSimulationCore:
         self.start_time = time.time()
         self.step_count = 0
         self.collision_count = 0
-        
+
         # Configure visualizer after all objects are spawned
         # This ensures transparency and other visual settings are applied correctly
         self.configure_visualizer()
-        
+
         # Enable rendering before starting simulation
         self.enable_rendering()
         try:
             start_time = time.time()
             last_step_process_time = 0.0  # Track processing time excluding sleep
-            
+
             while True:
                 loop_start = time.time()
                 current_time = time.time()
                 elapsed_time = current_time - start_time
                 if duration != 0 and elapsed_time >= duration:
                     break
-                
+
                 # Check if PyBullet connection is still active (e.g., GUI window not closed)
                 try:
                     p.getConnectionInfo()
                 except p.error:
                     logging.info("PyBullet connection lost (GUI window closed)")
                     break
-                
+
                 # Calculate target and current simulation times
                 target_sim_time = elapsed_time * self.params.speed
                 current_sim_time = self.step_count * self.params.timestep
                 time_diff = target_sim_time - current_sim_time
-                
+
                 actual_sleep = 0.0
                 if time_diff > 0:
                     # Behind target: execute multiple steps to catch up
@@ -662,14 +701,14 @@ class MultiRobotSimulationCore:
                     # Ahead of or at target: sleep until next frame
                     # Calculate sleep time: time_diff - last processing time
                     sleep_time = abs(time_diff) - last_step_process_time
-                    
+
                     # Determine minimum sleep for GUI responsiveness
                     if self.params.gui:
                         min_sleep = 1.0 / self.params.gui_min_fps
                     else:
                         # For non-GUI, use timestep as minimum
                         min_sleep = self.params.timestep
-                    
+
                     # Sleep strategy based on how much we're ahead/behind
                     if sleep_time > 0:
                         # Ahead of target: sleep exactly the calculated time (no forced minimum)
@@ -681,7 +720,7 @@ class MultiRobotSimulationCore:
 
                 # Record processing time for this iteration (excluding sleep)
                 last_step_process_time = time.time() - loop_start - actual_sleep
-                
+
         except KeyboardInterrupt:
             logging.warning("Simulation interrupted by user")
         except RuntimeError as e:
@@ -692,7 +731,7 @@ class MultiRobotSimulationCore:
         except p.error:
             logging.info("PyBullet connection lost (GUI window closed)")
         self.update_monitor()
-        
+
         # Disconnect from PyBullet if still connected
         try:
             p.getConnectionInfo()
@@ -708,37 +747,37 @@ class MultiRobotSimulationCore:
         except p.error:
             # PyBullet disconnected, skip this step
             return
-        
+
         # Handle keyboard events for visual/collision shape toggling and pause
         if self._keyboard_events_registered:
             self._handle_keyboard_events()
-        
+
         # Skip physics simulation and callbacks if paused
         if self._simulation_paused:
             return
-        
+
         # Synchronize robot_bodies from sim_objects every step
         self.robot_bodies = [obj.body_id for obj in self.sim_objects]
         self.sim_time = self.step_count * self.params.timestep
         # Global callbacks (frequency control)
         for cbinfo in self.callbacks:
-            freq = cbinfo.get('frequency', None)
-            last_exec = cbinfo.get('last_exec', 0.0)
+            freq = cbinfo.get("frequency", None)
+            last_exec = cbinfo.get("last_exec", 0.0)
             interval = 1.0 / freq if freq else 0.0
             # Judge based on self.sim_time
             if freq is None or self.sim_time - last_exec >= interval:
                 dt = self.sim_time - last_exec if last_exec > 0 else self.params.timestep
-                cbinfo['func'](self.sim_objects, self, dt)
-                cbinfo['last_exec'] = self.sim_time
+                cbinfo["func"](self.sim_objects, self, dt)
+                cbinfo["last_exec"] = self.sim_time
         # Old style: individual object callbacks executed according to frequency
         for obj in self.sim_objects:
-            if hasattr(obj, 'execute_callbacks'):
+            if hasattr(obj, "execute_callbacks"):
                 obj.execute_callbacks(self.sim_time)
-        
+
         # Check if PyBullet is still connected before stepping
         if not p.isConnected():
             raise RuntimeError("PyBullet disconnected (GUI window closed)")
-        
+
         p.stepSimulation()
         # Collision check frequency control
         freq = self.collision_check_frequency

@@ -2,22 +2,25 @@
 run_simulation_from_yaml.py
 Read simulation parameters from YAML and run MultiRobotSimulationCore.
 """
-import sys
+
 import os
 
-import pybullet as p
-import numpy as np
-import time
 import random
+
+import numpy as np
+import pybullet as p
+
 from pybullet_fleet.core_simulation import MultiRobotSimulationCore
-from pybullet_fleet.sim_object import URDFObject, Pose
+from pybullet_fleet.sim_object import Pose, URDFObject
 from pybullet_fleet.tools import grid_execution
-config_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '../config', 'config.yaml'))
+
+config_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "../config", "config.yaml"))
 sim_core = MultiRobotSimulationCore.from_yaml(config_path)
+
 
 # --- Original individual callback ---
 def robot_movement_callback(robot, sim_core):
-    if robot.meta_data['robot_type'] == "mobile_robot":
+    if robot.meta_data["robot_type"] == "mobile_robot":
         pose = robot.get_pose()
         pos, orn = pose.as_tuple()
         euler = p.getEulerFromQuaternion(orn)
@@ -30,14 +33,14 @@ def robot_movement_callback(robot, sim_core):
         forward_y = forward_vel * np.sin(yaw)
         linear_vel = [forward_x, forward_y, 0]
         angular_vel = [0, 0, yaw_vel]
-        
+
         corrected_orn = p.getQuaternionFromEuler([0, 0, yaw])
         new_pose = Pose.from_pybullet([pos[0], pos[1], 0.3], corrected_orn)
         robot.set_pose(new_pose)
-        
+
         # Set velocity after setting pose (to override the preserved velocity)
         p.resetBaseVelocity(robot.body_id, linear_vel, angular_vel)
-    elif robot.meta_data['robot_type'] == "arm_robot":
+    elif robot.meta_data["robot_type"] == "arm_robot":
         num_joints = p.getNumJoints(robot.body_id)
         for j in range(num_joints):
             info = p.getJointInfo(robot.body_id, j)
@@ -50,10 +53,12 @@ def robot_movement_callback(robot, sim_core):
                     target_pos = np.random.uniform(-1.0, 1.0)
                 robot.set_joint_target(j, target_pos)
 
+
 # --- Batch callback for all sim_objects ---
 def batch_robot_movement_callback(sim_objects, sim_core, dt):
     for robot in sim_objects:
         robot_movement_callback(robot, sim_core)
+
 
 num_robots = 100
 robot_types = ["arm_robot", "mobile_robot"]
@@ -62,6 +67,7 @@ spacing = 2.0
 selected_types = [random.choice(robot_types) for _ in range(num_robots)]
 
 # URDFObject generation with grid_execution
+
 
 def spawn_robot(grid_index, world_pos):
     ix, iy, iz = grid_index
@@ -78,16 +84,13 @@ def spawn_robot(grid_index, world_pos):
         orientation=[0, 0, 0, 1],
         useFixedBase=useFixedBase,
         set_mass_zero=True,
-        meta_data={'robot_type': robot_type}
+        meta_data={"robot_type": robot_type},
     )
     sim_core.sim_objects.append(urdf_obj)
 
+
 grid_execution(
-    grid_num=[grid_size, grid_size, 1],
-    spacing=[spacing, spacing, 0.0],
-    offset=[0.0, 0.0, 0.0],
-    func=spawn_robot,
-    args=None
+    grid_num=[grid_size, grid_size, 1], spacing=[spacing, spacing, 0.0], offset=[0.0, 0.0, 0.0], func=spawn_robot, args=None
 )
 
 # Register batch callback for all robots (for reference)

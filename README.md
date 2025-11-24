@@ -17,7 +17,7 @@ python examples/100robots_demo.py
 
 ## Overview
 
-This package provides reusable simulation components for multi-robot PyBullet environments. 
+This package provides reusable simulation components for multi-robot PyBullet environments.
 ## Features
 
 - **MultiRobotSimulationCore**: Main simulation engine with configurable rendering, and monitoring
@@ -129,7 +129,7 @@ Manager for creating and coordinating multiple robots.
 ### Recommended Demos (New API)
 
 #### 100robots_grid_demo.py
-**概要:**  
+**概要:**
 シンプルな単一タイプのグリッド生成デモ。`RobotManager.spawn_robots_grid()` を使用。
 
 **特徴:**
@@ -145,7 +145,7 @@ python examples/100robots_grid_demo.py
 ```
 
 #### 100robots_probabilistic_demo.py
-**概要:**  
+**概要:**
 確率ベースの混合ロボット生成デモ。辞書設定で複数タイプを確率指定。
 
 **特徴:**
@@ -179,7 +179,7 @@ robots = robot_manager.spawn_robots_grid_probabilistic(
 ```
 
 #### robot_urdf_demo.py
-**概要:**  
+**概要:**
 Robot クラスの基本チュートリアル。Mesh と URDF の両方をサポート。
 
 **特徴:**
@@ -197,10 +197,10 @@ python examples/robot_urdf_demo.py
 ### Legacy Demo
 
 #### 100robots_demo.py
-**概要:**  
+**概要:**
 旧 API（URDFObject ベース）のデモ。後方互換性のための参照用。
 
-**注意:**  
+**注意:**
 このデモはレガシー API を使用しています。新規プロジェクトでは上記のデモを使用してください。
 
 ```bash
@@ -214,11 +214,55 @@ python examples/100robots_demo.py
 
 ## Dependencies
 
-- Python 3.6+
+- Python 3.8+
 - PyBullet
 - NumPy
 - PyYAML
 
+## Development Setup
+
+### Install development dependencies
+
+```bash
+pip install -e ".[dev]"
+```
+
+### Pre-commit hooks
+
+Install pre-commit hooks for automatic code formatting and linting:
+
+```bash
+pip install pre-commit
+pre-commit install
+```
+
+Run manually on all files:
+
+```bash
+pre-commit run --all-files
+```
+
+### Code quality tools
+
+**Format code:**
+```bash
+black pybullet_fleet examples
+isort pybullet_fleet examples
+```
+
+**Lint code:**
+```bash
+flake8 pybullet_fleet
+```
+
+**Type check:**
+```bash
+mypy pybullet_fleet
+```
+
+### CI/CD
+
+GitHub Actions automatically runs linting and type checking on every push and pull request. Tests are currently commented out and will be enabled once test suite is created.
 
 ## Documentation
 

@@ -1,6 +1,6 @@
 <?xml version="1.0"?>
 <robot name="mobile_robot">
-  
+
   <!-- Main body -->
   <link name="base_link">
     <visual>
@@ -17,7 +17,7 @@
       </geometry>
     </collision>
   </link>
-  
+
   <!-- Left wheel -->
   <link name="left_wheel">
     <visual>
@@ -34,7 +34,7 @@
       </geometry>
     </collision>
   </link>
-  
+
   <!-- Right wheel -->
   <link name="right_wheel">
     <visual>
@@ -51,7 +51,7 @@
       </geometry>
     </collision>
   </link>
-  
+
   <!-- Sensor mast -->
   <link name="sensor_mast">
     <visual>
@@ -68,7 +68,7 @@
       </geometry>
     </collision>
   </link>
-  
+
   <!-- Camera/Sensor -->
   <link name="camera">
     <visual>
@@ -85,7 +85,7 @@
       </geometry>
     </collision>
   </link>
-  
+
   <!-- Wheel joints -->
   <joint name="base_to_left_wheel" type="continuous">
     <parent link="base_link"/>
@@ -93,14 +93,14 @@
     <origin xyz="0.2 0.3 -0.1" rpy="1.5708 0 0"/>
     <axis xyz="0 0 1"/>
   </joint>
-  
+
   <joint name="base_to_right_wheel" type="continuous">
     <parent link="base_link"/>
     <child link="right_wheel"/>
     <origin xyz="0.2 -0.3 -0.1" rpy="1.5708 0 0"/>
     <axis xyz="0 0 1"/>
   </joint>
-  
+
   <!-- Sensor mast joint -->
   <joint name="base_to_mast" type="revolute">
     <parent link="base_link"/>
@@ -109,7 +109,7 @@
     <axis xyz="0 0 1"/>
     <limit lower="-3.14159" upper="3.14159" effort="10" velocity="2.0"/>
   </joint>
-  
+
   <!-- Camera joint -->
   <joint name="mast_to_camera" type="revolute">
     <parent link="sensor_mast"/>
@@ -118,5 +118,5 @@
     <axis xyz="0 1 0"/>
     <limit lower="-1.57" upper="1.57" effort="5" velocity="1.0"/>
   </joint>
-  
+
 </robot>

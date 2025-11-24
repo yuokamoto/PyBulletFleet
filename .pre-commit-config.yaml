@@ -1,0 +1,48 @@
+# Pre-commit hooks for PyBulletFleet
+# Install: pip install pre-commit && pre-commit install
+# Run manually: pre-commit run --all-files
+
+repos:
+  # General fixes
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.5.0
+    hooks:
+      - id: trailing-whitespace          # Remove trailing whitespace
+      - id: end-of-file-fixer            # Ensure files end with a newline
+      - id: check-yaml                   # Validate YAML files
+      - id: check-merge-conflict         # Detect merge conflict markers
+      - id: check-toml                   # Validate TOML files (pyproject.toml)
+      - id: debug-statements             # Detect debug statements (pdb, breakpoint)
+      - id: check-added-large-files      # Prevent large files from being committed
+        args: ['--maxkb=1000']
+      - id: mixed-line-ending            # Detect mixed line endings (CRLF/LF)
+
+
+  # Python code formatting
+  - repo: https://github.com/psf/black
+    rev: 24.8.0
+    hooks:
+      - id: black
+        language_version: python3
+        args: ['--line-length=127']
+
+  - repo: local
+    hooks:
+      # Pyright type checking (faster and more accurate than mypy)
+      - id: pyright
+        name: pyright
+        entry: pyright
+        language: system
+        types: [python]
+        pass_filenames: false
+
+      # Flake8 style checking (runs after black)
+      - id: flake8
+        name: flake8
+        entry: flake8
+        language: system
+        types: [python]
+        args: [
+          '--max-line-length=127',
+          '--extend-ignore=E203,W503,D,Q,I,F841,W291,W293,E128,B902,E402,CNL100',
+        ]

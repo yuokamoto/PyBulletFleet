@@ -60,4 +60,3 @@ enable_collision_shapes: false       # Display collision shapes (wireframes)
 enable_structure_transparency: false # Make structure bodies semi-transparent (initial value)
 enable_shadows: false                # Enable shadows
 enable_gui_panel: false              # Show GUI control panel
-
