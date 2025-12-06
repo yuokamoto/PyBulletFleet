@@ -71,7 +71,7 @@ class SimulationParams:
         return cls(
             speed=config.get("speed", 1.0),
             timestep=config.get("timestep", 1.0 / 10.0),
-            duration=config.get("duration", 1000),
+            duration=config.get("duration", 0),
             gui=config.get("gui", True),
             physics=config.get("physics", False),
             monitor=config.get("monitor", True),
@@ -92,7 +92,7 @@ class SimulationParams:
         num_robots: int = 10,
         speed: float = 1.0,
         timestep: float = 1.0 / 240.0,
-        duration: float = 10,
+        duration: float = 0,
         gui: bool = True,
         physics: bool = False,
         monitor: bool = True,

@@ -144,6 +144,23 @@ Manager for creating and coordinating multiple robots.
 python examples/100robots_grid_demo.py
 ```
 
+#### path_following_demo.py
+**概要:**
+2つのモーションモード（全方向移動と差動駆動）を比較するデモ。
+
+**特徴:**
+- 全方向移動（Omnidirectional）: 回転せずに任意の方向に移動可能
+- 差動駆動（Differential Drive）: 目標方向に回転してから前進
+- 事前定義されたパス追従（円形と正方形）
+- 速度・加速度制限による現実的な動き
+- Pathデータクラスによるウェイポイント管理
+
+**用途:** モーションプランニング、異なる駆動方式の比較
+
+```bash
+python examples/path_following_demo.py
+```
+
 #### 100robots_probabilistic_demo.py
 **概要:**
 確率ベースの混合ロボット生成デモ。辞書設定で複数タイプを確率指定。

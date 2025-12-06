@@ -6,6 +6,7 @@ Base class for simulation objects with attachment support.
 from dataclasses import dataclass, field
 from typing import Callable, List, Optional, Tuple
 
+import numpy as np
 import pybullet as p
 
 
@@ -19,16 +20,11 @@ class Pose:
 
     Attributes:
         position: [x, y, z] in world coordinates
-        orientation: [x, y, z, w] quaternion (optional, defaults to no rotation)
+        orientation: [x, y, z, w] quaternion (defaults to no rotation)
     """
 
     position: List[float]  # [x, y, z]
-    orientation: Optional[List[float]] = None  # [x, y, z, w] quaternion
-
-    def __post_init__(self):
-        if self.orientation is None:
-            # Default: no rotation (identity quaternion)
-            self.orientation = [0.0, 0.0, 0.0, 1.0]
+    orientation: List[float] = field(default_factory=lambda: [0.0, 0.0, 0.0, 1.0])  # [x, y, z, w] quaternion
 
     # Convenient property accessors
     @property
@@ -45,6 +41,21 @@ class Pose:
     def z(self) -> float:
         """Z coordinate."""
         return self.position[2]
+
+    @property
+    def roll(self) -> float:
+        """Roll angle in radians (rotation around x-axis)."""
+        return p.getEulerFromQuaternion(self.orientation)[0]
+
+    @property
+    def pitch(self) -> float:
+        """Pitch angle in radians (rotation around y-axis)."""
+        return p.getEulerFromQuaternion(self.orientation)[1]
+
+    @property
+    def yaw(self) -> float:
+        """Yaw angle in radians (rotation around z-axis)."""
+        return p.getEulerFromQuaternion(self.orientation)[2]
 
     @classmethod
     def from_xyz(cls, x: float, y: float, z: float):
@@ -90,6 +101,175 @@ class Pose:
     def as_euler(self) -> Tuple[float, float, float]:
         """Return orientation as Euler angles (roll, pitch, yaw)."""
         return p.getEulerFromQuaternion(self.orientation)
+
+    @classmethod
+    def from_yaw(cls, x: float, y: float, z: float, yaw: float):
+        """
+        Create Pose from position and yaw angle (rotation around z-axis).
+
+        Args:
+            x, y, z: Position in world coordinates
+            yaw: Yaw angle in radians
+
+        Returns:
+            Pose instance
+        """
+        # Use PyBullet to convert yaw to quaternion (roll=0, pitch=0, yaw=yaw)
+        quaternion = p.getQuaternionFromEuler([0.0, 0.0, yaw])
+        return cls(position=[x, y, z], orientation=list(quaternion))
+
+    def to_yaw_quaternion(self, yaw: float) -> List[float]:
+        """
+        Create quaternion from yaw angle (rotation around z-axis).
+
+        Args:
+            yaw: Yaw angle in radians
+
+        Returns:
+            [x, y, z, w] quaternion
+        """
+        # Use PyBullet to convert yaw to quaternion (roll=0, pitch=0, yaw=yaw)
+        return list(p.getQuaternionFromEuler([0.0, 0.0, yaw]))
+
+
+@dataclass
+class Path:
+    """
+    Represents a path as a sequence of waypoints (Poses).
+
+    Attributes:
+        waypoints: List of Pose objects representing the path
+
+    Example:
+        # Create from Pose list (recommended)
+        path = Path([
+            Pose.from_xyz(0, 0, 0),
+            Pose.from_xyz(1, 0, 0),
+            Pose.from_xyz(1, 1, 0)
+        ])
+
+        # Create from positions
+        path = Path.from_positions([[0, 0, 0], [1, 0, 0], [1, 1, 0]])
+
+        # Create predefined shapes
+        circle = Path.create_circle(center=[0, 0], radius=1.5)
+        square = Path.create_square(center=[0, 0], side_length=2.0)
+    """
+
+    waypoints: List[Pose]
+
+    def __len__(self) -> int:
+        """Return number of waypoints."""
+        return len(self.waypoints)
+
+    def __getitem__(self, index: int) -> Pose:
+        """Get waypoint at index."""
+        return self.waypoints[index]
+
+    def __iter__(self):
+        """Iterate over waypoints."""
+        return iter(self.waypoints)
+
+    @classmethod
+    def from_positions(cls, positions: List[List[float]], orientation: Optional[List[float]] = None) -> "Path":
+        """
+        Create Path from list of positions with optional shared orientation.
+
+        Args:
+            positions: List of [x, y, z] positions
+            orientation: Optional quaternion [x, y, z, w] applied to all waypoints
+                        (default: [0, 0, 0, 1] - no rotation)
+
+        Returns:
+            Path instance
+
+        Example:
+            path = Path.from_positions([
+                [0, 0, 0],
+                [1, 0, 0],
+                [1, 1, 0]
+            ])
+        """
+        if orientation is None:
+            orientation = [0.0, 0.0, 0.0, 1.0]
+
+        waypoints = [Pose(position=list(pos), orientation=list(orientation)) for pos in positions]
+        return cls(waypoints=waypoints)
+
+    @classmethod
+    def create_square(cls, center: List[float], side_length: float, height: float = 0.0) -> "Path":
+        """
+        Create a square path.
+
+        Args:
+            center: [x, y] center position
+            side_length: Length of square sides
+            height: Z-coordinate for all waypoints
+
+        Returns:
+            Path forming a square
+
+        Example:
+            path = Path.create_square(center=[0, 0], side_length=2.0, height=0.1)
+        """
+        half = side_length / 2.0
+        cx, cy = center[0], center[1]
+
+        positions = [
+            [cx - half, cy - half, height],  # Bottom-left
+            [cx + half, cy - half, height],  # Bottom-right
+            [cx + half, cy + half, height],  # Top-right
+            [cx - half, cy + half, height],  # Top-left
+            [cx - half, cy - half, height],  # Back to start
+        ]
+
+        return cls.from_positions(positions)
+
+    @classmethod
+    def create_circle(cls, center: List[float], radius: float, num_points: int = 16, height: float = 0.0) -> "Path":
+        """
+        Create a circular path.
+
+        Args:
+            center: [x, y] center position
+            radius: Circle radius
+            num_points: Number of waypoints around the circle
+            height: Z-coordinate for all waypoints
+
+        Returns:
+            Path forming a circle
+
+        Example:
+            path = Path.create_circle(center=[0, 0], radius=1.5, num_points=20)
+        """
+        cx, cy = center[0], center[1]
+        positions = []
+
+        for i in range(num_points + 1):  # +1 to close the circle
+            angle = 2.0 * np.pi * i / num_points
+            x = cx + radius * np.cos(angle)
+            y = cy + radius * np.sin(angle)
+            positions.append([x, y, height])
+
+        return cls.from_positions(positions)
+
+    def get_total_distance(self) -> float:
+        """
+        Calculate total path length.
+
+        Returns:
+            Total distance in meters
+        """
+        if len(self.waypoints) < 2:
+            return 0.0
+
+        total = 0.0
+        for i in range(len(self.waypoints) - 1):
+            p1 = np.array(self.waypoints[i].position)
+            p2 = np.array(self.waypoints[i + 1].position)
+            total += np.linalg.norm(p2 - p1)
+
+        return total
 
 
 @dataclass
