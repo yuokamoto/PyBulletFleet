@@ -60,16 +60,16 @@ offset: [0.0, 0.0, 0.3]
 mobile_robot:
   urdf_path: "robots/mobile_robot.urdf"  # Robot URDF path (relative to PyBulletFleet root)
   initial_z: 0.3      # Initial Z position (m)
-  max_vel: 2.0        # Maximum velocity (m/s)
-  max_accel: 5.0      # Maximum acceleration (m/s²)
+  max_linear_vel: 2.0        # Maximum velocity (m/s)
+  max_linear_accel: 5.0      # Maximum acceleration (m/s²)
   use_fixed_base: false  # If true, robot base is fixed and doesn't move
 
 # Arm robot parameters (for mixed mode)
 arm_robot:
   urdf_path: "robots/arm_robot.urdf"  # Arm robot URDF path
   initial_z: 0.0      # Initial Z position (m)
-  max_vel: 0.0        # Arm robots don't move
-  max_accel: 0.0      # Arm robots don't accelerate
+  max_linear_vel: 0.0        # Arm robots don't move
+  max_linear_accel: 0.0      # Arm robots don't accelerate
   use_fixed_base: true  # Arm robots are fixed
 
 # Mixed mode probabilities

@@ -42,6 +42,19 @@ class DifferentialPhase(str, Enum):
     FORWARD = "forward"
 
 
+class Differential3DMode(str, Enum):
+    """
+    3D behavior mode for differential drive motion.
+
+    Attributes:
+        TWO_D_WITH_Z: Rotate only yaw in XY plane, then move with XY differential + Z TPI interpolation
+        FULL_3D: Rotate yaw and pitch to face 3D direction, then move along straight 3D line
+    """
+
+    TWO_D_WITH_Z = "2d_with_z"
+    FULL_3D = "full_3d"
+
+
 @dataclass
 class AgentSpawnParams(SimObjectSpawnParams):
     """
@@ -54,8 +67,8 @@ class AgentSpawnParams(SimObjectSpawnParams):
 
     Attributes (in addition to SimObjectSpawnParams):
         urdf_path: Path to robot URDF file (for URDF-based robots with joints)
-        max_vel: Maximum velocity in m/s (ignored if use_fixed_base=True)
-        max_accel: Maximum acceleration in m/s² (ignored if use_fixed_base=True)
+        max_linear_vel: Maximum velocity in m/s - float or [vx, vy, vz] (ignored if use_fixed_base=True)
+        max_linear_accel: Maximum acceleration in m/s² - float or [ax, ay, az] (ignored if use_fixed_base=True)
         max_angular_vel: Maximum angular velocity in rad/s (for differential drive)
         max_angular_accel: Maximum angular acceleration in rad/s² (for differential drive, default: 10.0)
         motion_mode: MotionMode.OMNIDIRECTIONAL (move in any direction) or MotionMode.DIFFERENTIAL (rotate then move forward)
@@ -69,11 +82,12 @@ class AgentSpawnParams(SimObjectSpawnParams):
     """
 
     urdf_path: Optional[str] = None
-    max_vel: float = 2.0
-    max_accel: float = 5.0
-    max_angular_vel: float = 3.0
-    max_angular_accel: float = 10.0
+    max_linear_vel: Union[float, List[float]] = 2.0
+    max_linear_accel: Union[float, List[float]] = 5.0
+    max_angular_vel: Union[float, List[float]] = 3.0
+    max_angular_accel: Union[float, List[float]] = 10.0
     motion_mode: Union[MotionMode, str] = MotionMode.OMNIDIRECTIONAL
+    differential_3d_mode: Union[Differential3DMode, str] = Differential3DMode.TWO_D_WITH_Z
     visual_mesh_path: Optional[str] = None
     use_fixed_base: bool = False
     user_data: Dict[str, Any] = field(default_factory=dict)
@@ -94,7 +108,7 @@ class AgentSpawnParams(SimObjectSpawnParams):
             config: Dictionary with robot parameters including:
                     - mesh_path or urdf_path (required)
                     - initial_pose: Pose object (optional)
-                    - max_vel, max_accel, use_fixed_base, etc. (optional)
+                    - max_linear_vel, max_linear_accel, use_fixed_base, etc. (optional)
 
         Returns:
             AgentSpawnParams instance
@@ -103,8 +117,8 @@ class AgentSpawnParams(SimObjectSpawnParams):
             config = {
                 'urdf_path': 'robots/mobile_robot.urdf',
                 'initial_pose': Pose.from_xyz(1.0, 2.0, 0.0),
-                'max_vel': 2.0,
-                'max_accel': 5.0,
+                'max_linear_vel': 2.0,
+                'max_linear_accel': 5.0,
                 'use_fixed_base': False
             }
             params = AgentSpawnParams.from_dict(config)
@@ -114,15 +128,21 @@ class AgentSpawnParams(SimObjectSpawnParams):
         if isinstance(motion_mode_value, str):
             motion_mode_value = MotionMode(motion_mode_value)
 
+        # Get differential_3d_mode and convert string to enum if needed
+        differential_3d_mode_value = config.get("differential_3d_mode", Differential3DMode.TWO_D_WITH_Z)
+        if isinstance(differential_3d_mode_value, str):
+            differential_3d_mode_value = Differential3DMode(differential_3d_mode_value)
+
         return cls(
             mesh_path=config.get("mesh_path"),
             urdf_path=config.get("urdf_path"),
             initial_pose=config.get("initial_pose"),
-            max_vel=config.get("max_vel", 2.0),
-            max_accel=config.get("max_accel", 5.0),
+            max_linear_vel=config.get("max_linear_vel", 2.0),
+            max_linear_accel=config.get("max_linear_accel", 5.0),
             max_angular_vel=config.get("max_angular_vel", 3.0),
             max_angular_accel=config.get("max_angular_accel", 10.0),
             motion_mode=motion_mode_value,
+            differential_3d_mode=differential_3d_mode_value,
             mesh_scale=config.get("mesh_scale", [1.0, 1.0, 1.0]),
             collision_half_extents=config.get("collision_half_extents", [0.2, 0.1, 0.2]),
             rgba_color=config.get("rgba_color", [0.2, 0.2, 0.2, 1.0]),
@@ -155,16 +175,41 @@ class Agent(SimObject):
     # Class-level shared shapes (for optimization)
     _shared_shapes: Dict[str, Tuple[int, int]] = {}
 
+    @staticmethod
+    def _normalize_vector_param(value: Union[float, List[float]], param_name: str, dim: int = 3) -> np.ndarray:
+        """
+        Normalize a parameter to a numpy array of specified dimension.
+
+        Args:
+            value: Float (applied to all dimensions) or list of floats (per-dimension)
+            param_name: Parameter name for error messages
+            dim: Number of dimensions (default: 3)
+
+        Returns:
+            Numpy array of shape (dim,)
+
+        Raises:
+            ValueError: If list length doesn't match dimension
+        """
+        if isinstance(value, (int, float)):
+            return np.array([value] * dim, dtype=float)
+        else:
+            arr = np.array(value, dtype=float)
+            if len(arr) != dim:
+                raise ValueError(f"{param_name} must be a float or a list of {dim} floats")
+            return arr
+
     def __init__(
         self,
         body_id: int,
         mesh_path: Optional[str] = None,
         urdf_path: Optional[str] = None,
-        max_vel: float = 2.0,
-        max_accel: float = 5.0,
-        max_angular_vel: float = 3.0,
-        max_angular_accel: float = 10.0,
+        max_linear_vel: Union[float, List[float]] = 2.0,
+        max_linear_accel: Union[float, List[float]] = 5.0,
+        max_angular_vel: Union[float, List[float]] = 3.0,
+        max_angular_accel: Union[float, List[float]] = 10.0,
         motion_mode: Union[MotionMode, str] = MotionMode.OMNIDIRECTIONAL,
+        differential_3d_mode: Union[Differential3DMode, str] = Differential3DMode.TWO_D_WITH_Z,
         use_fixed_base: bool = False,
         sim_core=None,
     ):
@@ -175,11 +220,12 @@ class Agent(SimObject):
             body_id: PyBullet body ID
             mesh_path: Path to robot mesh file (if mesh-based)
             urdf_path: Path to robot URDF file (if URDF-based)
-            max_vel: Maximum velocity (m/s)
-            max_accel: Maximum acceleration (m/s²)
-            max_angular_vel: Maximum angular velocity (rad/s, for differential drive)
-            max_angular_accel: Maximum angular acceleration (rad/s², for differential drive)
+            max_linear_vel: Maximum velocity (m/s) - float or [vx, vy, vz] for per-axis limits
+            max_linear_accel: Maximum acceleration (m/s²) - float or [ax, ay, az] for per-axis limits
+            max_angular_vel: Maximum angular velocity (rad/s) - float or [yaw, pitch, roll] for per-axis limits
+            max_angular_accel: Maximum angular acceleration (rad/s²) - float or [yaw, pitch, roll] for per-axis limits
             motion_mode: MotionMode.OMNIDIRECTIONAL or MotionMode.DIFFERENTIAL drive
+            differential_3d_mode: Differential3DMode.TWO_D_WITH_Z or Differential3DMode.FULL_3D
             use_fixed_base: If True, robot base is fixed and doesn't move
             sim_core: Reference to simulation core (optional)
 
@@ -193,10 +239,14 @@ class Agent(SimObject):
 
         self.mesh_path = mesh_path
         self.urdf_path = urdf_path
-        self.max_vel = max_vel
-        self.max_accel = max_accel
-        self.max_angular_vel = max_angular_vel
-        self.max_angular_accel = max_angular_accel
+
+        # Normalize max_linear_vel and max_linear_accel to numpy arrays [vx, vy, vz]
+        self.max_linear_vel = self._normalize_vector_param(max_linear_vel, "max_linear_vel", 3)
+        self.max_linear_accel = self._normalize_vector_param(max_linear_accel, "max_linear_accel", 3)
+
+        # Normalize max_angular_vel and max_angular_accel to numpy arrays [yaw, pitch, roll]
+        self.max_angular_vel = self._normalize_vector_param(max_angular_vel, "max_angular_vel", 3)
+        self.max_angular_accel = self._normalize_vector_param(max_angular_accel, "max_angular_accel", 3)
 
         self.use_fixed_base = use_fixed_base
 
@@ -217,12 +267,20 @@ class Agent(SimObject):
         self._current_waypoint_index = 0
 
         # Two-point interpolation trajectory planners (initialized by set_motion_mode) - Private
-        self._tpi_xy: Optional[List[TwoPointInterpolation]] = None  # [X, Y] trajectories (omnidirectional)
-        self._tpi_forward: Optional[TwoPointInterpolation] = None  # Forward distance trajectory (differential)
-        self._tpi_yaw: Optional[TwoAngleInterpolation] = None  # Yaw trajectory (differential rotation phase)
+        # Position trajectories [X, Y, Z] - shared by both omnidirectional and differential modes
+        self._tpi_pos: Optional[List[TwoPointInterpolation]] = None
+        # Orientation trajectories [yaw, pitch, roll] - used by differential mode during rotation phase
+        self._tpi_orientation: Optional[List[TwoAngleInterpolation]] = None
+        # Forward distance for differential mode (tracks progress along path)
+        self._tpi_forward: Optional[TwoPointInterpolation] = None
 
         # Differential drive state - Private
         self._differential_phase: DifferentialPhase = DifferentialPhase.ROTATE
+
+        # Normalize differential_3d_mode to enum
+        if isinstance(differential_3d_mode, str):
+            differential_3d_mode = Differential3DMode(differential_3d_mode)
+        self.differential_3d_mode: Differential3DMode = differential_3d_mode
 
         # User-extensible data storage
         self.user_data: Dict[str, Any] = {}
@@ -346,7 +404,7 @@ class Agent(SimObject):
             params = AgentSpawnParams(
                 mesh_path="robot.obj",
                 initial_pose=Pose.from_xyz(1.0, 2.0, 0.0),
-                max_vel=3.0
+                max_linear_vel=3.0
             )
             robot = Agent.from_params(spawn_params=params)
 
@@ -366,11 +424,12 @@ class Agent(SimObject):
             agent = cls.from_urdf(
                 urdf_path=spawn_params.urdf_path,
                 pose=spawn_params.initial_pose,
-                max_vel=spawn_params.max_vel,
-                max_accel=spawn_params.max_accel,
+                max_linear_vel=spawn_params.max_linear_vel,
+                max_linear_accel=spawn_params.max_linear_accel,
                 max_angular_vel=spawn_params.max_angular_vel,
                 max_angular_accel=spawn_params.max_angular_accel,
                 motion_mode=spawn_params.motion_mode,
+                differential_3d_mode=spawn_params.differential_3d_mode,
                 use_fixed_base=spawn_params.use_fixed_base,
                 sim_core=sim_core,
             )
@@ -383,11 +442,12 @@ class Agent(SimObject):
                 collision_half_extents=spawn_params.collision_half_extents,
                 rgba_color=spawn_params.rgba_color,
                 base_mass=spawn_params.mass,
-                max_vel=spawn_params.max_vel,
-                max_accel=spawn_params.max_accel,
+                max_linear_vel=spawn_params.max_linear_vel,
+                max_linear_accel=spawn_params.max_linear_accel,
                 max_angular_vel=spawn_params.max_angular_vel,
                 max_angular_accel=spawn_params.max_angular_accel,
                 motion_mode=spawn_params.motion_mode,
+                differential_3d_mode=spawn_params.differential_3d_mode,
                 use_fixed_base=spawn_params.use_fixed_base,
                 visual_mesh_path=spawn_params.visual_mesh_path,
                 sim_core=sim_core,
@@ -408,11 +468,12 @@ class Agent(SimObject):
         collision_half_extents: List[float] = None,
         rgba_color: List[float] = None,
         base_mass: float = 0.0,
-        max_vel: float = 2.0,
-        max_accel: float = 5.0,
-        max_angular_vel: float = 3.0,
-        max_angular_accel: float = 10.0,
+        max_linear_vel: Union[float, List[float]] = 2.0,
+        max_linear_accel: Union[float, List[float]] = 5.0,
+        max_angular_vel: Union[float, List[float]] = 3.0,
+        max_angular_accel: Union[float, List[float]] = 10.0,
         motion_mode: Union[MotionMode, str] = MotionMode.OMNIDIRECTIONAL,
+        differential_3d_mode: Union[Differential3DMode, str] = Differential3DMode.TWO_D_WITH_Z,
         use_fixed_base: bool = False,
         visual_mesh_path: Optional[str] = None,
         sim_core=None,
@@ -421,7 +482,7 @@ class Agent(SimObject):
         Create a mesh-based Agent.
 
         This method extends SimObject.from_mesh() by adding Agent-specific parameters
-        (max_vel, max_accel, use_fixed_base, visual_mesh_path).
+        (max_linear_vel, max_linear_accel, use_fixed_base, visual_mesh_path).
 
         Args:
             mesh_path: Path to robot mesh file (.obj, .dae, etc.) for collision
@@ -430,11 +491,12 @@ class Agent(SimObject):
             collision_half_extents: Collision box half extents [hx, hy, hz]
             rgba_color: RGBA color [r, g, b, a]
             base_mass: Robot mass (kg), 0.0 for kinematic control
-            max_vel: Maximum velocity (m/s) - Agent-specific
-            max_accel: Maximum acceleration (m/s²) - Agent-specific
+            max_linear_vel: Maximum velocity (m/s) - float or [vx, vy, vz] - Agent-specific
+            max_linear_accel: Maximum acceleration (m/s²) - float or [ax, ay, az] - Agent-specific
             max_angular_vel: Maximum angular velocity (rad/s) - Agent-specific
             max_angular_accel: Maximum angular acceleration (rad/s²) - Agent-specific
             motion_mode: MotionMode.OMNIDIRECTIONAL or MotionMode.DIFFERENTIAL - Agent-specific
+            differential_3d_mode: Differential3DMode for differential drive (TWO_D_WITH_Z or FULL_3D) - Agent-specific
             use_fixed_base: If True, robot base is fixed and doesn't move - Agent-specific
             visual_mesh_path: Optional path to separate visual mesh (if None, uses mesh_path) - Agent-specific
             sim_core: Reference to simulation core
@@ -446,7 +508,7 @@ class Agent(SimObject):
             agent = Agent.from_mesh(
                 mesh_path="robot.obj",
                 pose=Pose.from_xyz(0, 0, 0.5),
-                max_vel=2.0,
+                max_linear_vel=2.0,
                 motion_mode=MotionMode.DIFFERENTIAL,
                 visual_mesh_path="robot_visual.obj"  # Optional separate visual mesh
             )
@@ -487,11 +549,12 @@ class Agent(SimObject):
         agent = cls(
             body_id=body_id,
             mesh_path=mesh_path,
-            max_vel=max_vel,
-            max_accel=max_accel,
+            max_linear_vel=max_linear_vel,
+            max_linear_accel=max_linear_accel,
             max_angular_vel=max_angular_vel,
             max_angular_accel=max_angular_accel,
             motion_mode=motion_mode,
+            differential_3d_mode=differential_3d_mode,
             use_fixed_base=use_fixed_base,
             sim_core=sim_core,
         )
@@ -506,11 +569,12 @@ class Agent(SimObject):
         cls,
         urdf_path: str,
         pose: Pose = None,
-        max_vel: float = 2.0,
-        max_accel: float = 5.0,
-        max_angular_vel: float = 3.0,
-        max_angular_accel: float = 10.0,
+        max_linear_vel: Union[float, List[float]] = 2.0,
+        max_linear_accel: Union[float, List[float]] = 5.0,
+        max_angular_vel: Union[float, List[float]] = 3.0,
+        max_angular_accel: Union[float, List[float]] = 10.0,
         motion_mode: Union[MotionMode, str] = MotionMode.OMNIDIRECTIONAL,
+        differential_3d_mode: Union[Differential3DMode, str] = Differential3DMode.TWO_D_WITH_Z,
         use_fixed_base: bool = False,
         sim_core=None,
     ) -> "Agent":
@@ -520,11 +584,12 @@ class Agent(SimObject):
         Args:
             urdf_path: Path to robot URDF file
             pose: Initial Pose (position and orientation). Defaults to origin
-            max_vel: Maximum velocity (m/s)
-            max_accel: Maximum acceleration (m/s²)
+            max_linear_vel: Maximum velocity (m/s) - float or [vx, vy, vz]
+            max_linear_accel: Maximum acceleration (m/s²) - float or [ax, ay, az]
             max_angular_vel: Maximum angular velocity (rad/s)
             max_angular_accel: Maximum angular acceleration (rad/s²)
             motion_mode: MotionMode.OMNIDIRECTIONAL or MotionMode.DIFFERENTIAL
+            differential_3d_mode: Differential3DMode for differential drive (TWO_D_WITH_Z or FULL_3D)
             use_fixed_base: If True, robot base is fixed in space
             sim_core: Reference to simulation core
 
@@ -551,11 +616,12 @@ class Agent(SimObject):
         agent = cls(
             body_id=body_id,
             urdf_path=urdf_path,
-            max_vel=max_vel,
-            max_accel=max_accel,
+            max_linear_vel=max_linear_vel,
+            max_linear_accel=max_linear_accel,
             max_angular_vel=max_angular_vel,
             max_angular_accel=max_angular_accel,
             motion_mode=motion_mode,
+            differential_3d_mode=differential_3d_mode,
             use_fixed_base=use_fixed_base,
             sim_core=sim_core,
         )
@@ -601,13 +667,16 @@ class Agent(SimObject):
 
         # Create TPI instances for the new mode (actual trajectory will be calculated in set_path)
         if mode == MotionMode.OMNIDIRECTIONAL:
-            self._tpi_xy = [TwoPointInterpolation(), TwoPointInterpolation()]  # X and Y
+            # Position trajectories: X, Y, Z
+            self._tpi_pos = [TwoPointInterpolation(), TwoPointInterpolation(), TwoPointInterpolation()]
+            self._tpi_orientation = None
             self._tpi_forward = None
-            self._tpi_yaw = None
         elif mode == MotionMode.DIFFERENTIAL:
-            self._tpi_xy = None
+            # Position trajectories: X, Y, Z (shared with omnidirectional)
+            self._tpi_pos = [TwoPointInterpolation(), TwoPointInterpolation(), TwoPointInterpolation()]
+            # Orientation trajectories: yaw, pitch, roll
+            self._tpi_orientation = [TwoAngleInterpolation(), TwoAngleInterpolation(), TwoAngleInterpolation()]
             self._tpi_forward = TwoPointInterpolation()  # Forward distance
-            self._tpi_yaw = TwoAngleInterpolation()  # Rotation
             self._differential_phase = DifferentialPhase.ROTATE
 
         return True
@@ -640,8 +709,9 @@ class Agent(SimObject):
 
     def _init_omnidirectional_trajectory(self, goal: Pose):
         """
-        Initialize two-point interpolation trajectory for omnidirectional motion (X and Y axes).
+        Initialize two-point interpolation trajectory for omnidirectional motion (X, Y, Z axes).
         Reuses existing TPI instances created by set_motion_mode().
+        Uses per-axis max_linear_vel and max_linear_accel if configured.
 
         Args:
             goal: Target pose
@@ -654,21 +724,22 @@ class Agent(SimObject):
         t0 = self.sim_core.sim_time if self.sim_core is not None else 0.0
 
         # Reuse existing TPI instances (created by set_motion_mode)
-        if self._tpi_xy is None:
-            raise RuntimeError("_tpi_xy is not initialized. Call set_motion_mode() before setting path.")
+        if self._tpi_pos is None:
+            raise RuntimeError("_tpi_pos is not initialized. Call set_motion_mode() before setting path.")
 
-        for axis in range(2):  # 0=X, 1=Y
-            self._tpi_xy[axis].init(
+        # 3D: X, Y, Z with per-axis limits
+        for axis in range(3):
+            self._tpi_pos[axis].init(
                 p0=current_pos[axis],
                 pe=goal_pos[axis],
-                acc_max=self.max_accel,
-                vmax=self.max_vel,
+                acc_max=self.max_linear_accel[axis],  # Per-axis acceleration
+                vmax=self.max_linear_vel[axis],  # Per-axis velocity
                 t0=t0,
                 v0=self._current_velocity[axis],
                 ve=0.0,  # Stop at goal
-                dec_max=self.max_accel,
+                dec_max=self.max_linear_accel[axis],  # Per-axis deceleration
             )
-            self._tpi_xy[axis].calc_trajectory()  # Calculate trajectory
+            self._tpi_pos[axis].calc_trajectory()  # Calculate trajectory
 
     def _handle_goal_reached(self, current_pose: Pose):
         """
@@ -707,7 +778,7 @@ class Agent(SimObject):
         Initialize rotation trajectory for differential drive (Phase 1: Rotate to face target).
 
         Differential drive has two phases:
-        1. Rotation phase: Rotate to face the target
+        1. Rotation phase: Rotate to face the target (yaw, and pitch for full_3d mode)
         2. Forward phase: Move forward to the target
 
         Args:
@@ -717,66 +788,281 @@ class Agent(SimObject):
         current_pos = np.array(current_pose.position)
         goal_pos = np.array(goal.position)
 
-        # Calculate direction and distance
-        direction_xy = goal_pos[:2] - current_pos[:2]
-        distance_xy = np.linalg.norm(direction_xy)
+        # Calculate direction vector
+        direction_vec = goal_pos - current_pos
+
+        # Cache for forward phase
+        self._forward_start_pos = current_pos.copy()
+        self._forward_goal_pos = goal_pos.copy()
 
         # Get current simulation time
         t0 = self.sim_core.sim_time if self.sim_core is not None else 0.0
 
-        # Phase 1: Always start with rotation to face target
-        # TwoAngleInterpolation will automatically choose shortest path
-        # If already facing target, trajectory will be very short (near-zero duration)
-        current_yaw = current_pose.yaw
-        desired_yaw = np.arctan2(direction_xy[1], direction_xy[0])
+        # ========== Calculate Target Angles ==========
+        # Roll: Use the goal point's roll value directly (both modes)
+        desired_roll = goal.roll
 
+        # Calculate distances and yaw/pitch based on mode
+        if self.differential_3d_mode == Differential3DMode.FULL_3D:
+            # ========== FULL_3D MODE ==========
+            # Calculate 3D distance
+            self._forward_total_distance_3d = float(np.linalg.norm(direction_vec))
+            self._forward_total_distance_xy = None  # Not used in FULL_3D mode
+
+            # Calculate yaw and pitch from 3D direction vector
+            direction_xy = direction_vec[:2]
+            distance_xy = np.linalg.norm(direction_xy)
+
+            # Yaw: Direction in XY plane
+            desired_yaw = np.arctan2(direction_xy[1], direction_xy[0]) if distance_xy > 1e-6 else current_pose.yaw
+
+            # Pitch: Angle from XY plane to 3D direction
+            if self._forward_total_distance_3d > 1e-6:
+                desired_pitch = np.arctan2(direction_vec[2], distance_xy)
+            else:
+                desired_pitch = current_pose.pitch
+
+        else:  # TWO_D_WITH_Z MODE
+            # ========== TWO_D_WITH_Z MODE ==========
+            # Calculate XY distance and direction
+            direction_xy = direction_vec[:2]
+            distance_xy = np.linalg.norm(direction_xy)
+            self._forward_total_distance_xy = float(distance_xy)
+            self._forward_total_distance_3d = None  # Not used in TWO_D_WITH_Z mode
+
+            # Yaw: Direction in XY plane
+            desired_yaw = np.arctan2(direction_xy[1], direction_xy[0]) if distance_xy > 1e-6 else current_pose.yaw
+
+            # Pitch: Keep current value (no pitch rotation in 2D mode)
+            desired_pitch = current_pose.pitch
+
+        # ========== Initialize Rotation Trajectories ==========
         self._differential_phase = DifferentialPhase.ROTATE
 
-        # Initialize yaw trajectory using TwoAngleInterpolation for automatic angle normalization
-        self._tpi_yaw = TwoAngleInterpolation()
-        self._tpi_yaw.init(
+        # Store target roll for use in FORWARD phase
+        self._target_roll = desired_roll
+
+        # Get current angles
+        current_yaw = current_pose.yaw
+        current_pitch = current_pose.pitch
+        current_roll = current_pose.roll
+
+        # Normalize all angles to [-pi, pi] for shortest rotation
+        current_yaw = np.arctan2(np.sin(current_yaw), np.cos(current_yaw))
+        current_pitch = np.arctan2(np.sin(current_pitch), np.cos(current_pitch))
+        current_roll = np.arctan2(np.sin(current_roll), np.cos(current_roll))
+        desired_yaw = np.arctan2(np.sin(desired_yaw), np.cos(desired_yaw))
+        desired_pitch = np.arctan2(np.sin(desired_pitch), np.cos(desired_pitch))
+        desired_roll = np.arctan2(np.sin(desired_roll), np.cos(desired_roll))
+
+        # Initialize yaw trajectory (both modes)
+        self._tpi_orientation[0].init(  # Yaw
             p0=current_yaw,
             pe=desired_yaw,
-            acc_max=self.max_angular_accel,  # Angular acceleration (rad/s²)
-            vmax=self.max_angular_vel,
+            acc_max=self.max_angular_accel[0],  # Yaw angular acceleration (rad/s²)
+            vmax=self.max_angular_vel[0],  # Yaw angular velocity
             t0=t0,
             v0=0.0,  # Start from rest
             ve=0.0,  # Stop at target yaw
-            dec_max=self.max_angular_accel,
+            dec_max=self.max_angular_accel[0],
         )
+        self._tpi_orientation[0].calc_trajectory()
 
-        self._tpi_yaw.calc_trajectory()  # Calculate trajectory
-        self._tpi_forward = None  # Will be initialized after rotation completes
+        # Initialize pitch trajectory (only for FULL_3D mode)
+        if self.differential_3d_mode == Differential3DMode.FULL_3D:
+            self._tpi_orientation[1].init(  # Pitch
+                p0=current_pitch,
+                pe=desired_pitch,
+                acc_max=self.max_angular_accel[1],  # Pitch angular acceleration
+                vmax=self.max_angular_vel[1],  # Pitch angular velocity
+                t0=t0,
+                v0=0.0,
+                ve=0.0,
+                dec_max=self.max_angular_accel[1],
+            )
+            self._tpi_orientation[1].calc_trajectory()
+
+        # Initialize roll trajectory (both modes)
+        self._tpi_orientation[2].init(  # Roll
+            p0=current_roll,
+            pe=desired_roll,
+            acc_max=self.max_angular_accel[2] if len(self.max_angular_accel) > 2 else self.max_angular_accel[0],
+            vmax=self.max_angular_vel[2] if len(self.max_angular_vel) > 2 else self.max_angular_vel[0],
+            t0=t0,
+            v0=0.0,
+            ve=0.0,
+            dec_max=self.max_angular_accel[2] if len(self.max_angular_accel) > 2 else self.max_angular_accel[0],
+        )
+        self._tpi_orientation[2].calc_trajectory()
+
+        # Synchronize rotation durations based on mode
+        if self.differential_3d_mode == Differential3DMode.FULL_3D:
+            # Full 3D: Synchronize yaw, pitch, and roll
+            yaw_duration = self._tpi_orientation[0].get_end_time() - t0
+            pitch_duration = self._tpi_orientation[1].get_end_time() - t0
+            roll_duration = self._tpi_orientation[2].get_end_time() - t0
+            max_duration = max(yaw_duration, pitch_duration, roll_duration)
+
+            # Recalculate trajectories with synchronized timing if needed
+            if max_duration > 0.01:  # More than 10ms
+                # Yaw synchronization
+                if abs(yaw_duration - max_duration) > 0.01:
+                    yaw_diff = desired_yaw - current_yaw
+                    yaw_diff = np.arctan2(np.sin(yaw_diff), np.cos(yaw_diff))
+                    yaw_angle_change = abs(yaw_diff)
+                    if yaw_angle_change > 1e-6:
+                        sync_vmax_yaw = yaw_angle_change / max_duration * 2.0
+                        self._tpi_orientation[0].init(
+                            p0=current_yaw,
+                            pe=desired_yaw,
+                            acc_max=self.max_angular_accel[0],
+                            vmax=min(sync_vmax_yaw, self.max_angular_vel[0]),
+                            t0=t0,
+                            v0=0.0,
+                            ve=0.0,
+                            dec_max=self.max_angular_accel[0],
+                        )
+                        self._tpi_orientation[0].calc_trajectory()
+
+                # Pitch synchronization
+                if abs(pitch_duration - max_duration) > 0.01:
+                    pitch_angle_change = abs(desired_pitch - current_pitch)
+                    if pitch_angle_change > 1e-6:
+                        sync_vmax_pitch = pitch_angle_change / max_duration * 2.0
+                        self._tpi_orientation[1].init(
+                            p0=current_pitch,
+                            pe=desired_pitch,
+                            acc_max=self.max_angular_accel[1],
+                            vmax=min(sync_vmax_pitch, self.max_angular_vel[1]),
+                            t0=t0,
+                            v0=0.0,
+                            ve=0.0,
+                            dec_max=self.max_angular_accel[1],
+                        )
+                        self._tpi_orientation[1].calc_trajectory()
+
+                # Roll synchronization
+                if abs(roll_duration - max_duration) > 0.01:
+                    roll_diff = desired_roll - current_roll
+                    roll_diff = np.arctan2(np.sin(roll_diff), np.cos(roll_diff))
+                    roll_angle_change = abs(roll_diff)
+                    if roll_angle_change > 1e-6:
+                        sync_vmax_roll = roll_angle_change / max_duration * 2.0
+                        roll_accel = (
+                            self.max_angular_accel[2] if len(self.max_angular_accel) > 2 else self.max_angular_accel[0]
+                        )
+                        roll_vel = self.max_angular_vel[2] if len(self.max_angular_vel) > 2 else self.max_angular_vel[0]
+                        self._tpi_orientation[2].init(
+                            p0=current_roll,
+                            pe=desired_roll,
+                            acc_max=roll_accel,
+                            vmax=min(sync_vmax_roll, roll_vel),
+                            t0=t0,
+                            v0=0.0,
+                            ve=0.0,
+                            dec_max=roll_accel,
+                        )
+                        self._tpi_orientation[2].calc_trajectory()
+        else:
+            # 2D mode: Synchronize yaw and roll only (pitch stays constant)
+            yaw_duration = self._tpi_orientation[0].get_end_time() - t0
+            roll_duration = self._tpi_orientation[2].get_end_time() - t0
+            max_duration = max(yaw_duration, roll_duration)
+
+            if max_duration > 0.01:
+                # Yaw synchronization
+                if abs(yaw_duration - max_duration) > 0.01:
+                    yaw_diff = desired_yaw - current_yaw
+                    yaw_diff = np.arctan2(np.sin(yaw_diff), np.cos(yaw_diff))
+                    yaw_angle_change = abs(yaw_diff)
+                    if yaw_angle_change > 1e-6:
+                        sync_vmax_yaw = yaw_angle_change / max_duration * 2.0
+                        self._tpi_orientation[0].init(
+                            p0=current_yaw,
+                            pe=desired_yaw,
+                            acc_max=self.max_angular_accel[0],
+                            vmax=min(sync_vmax_yaw, self.max_angular_vel[0]),
+                            t0=t0,
+                            v0=0.0,
+                            ve=0.0,
+                            dec_max=self.max_angular_accel[0],
+                        )
+                        self._tpi_orientation[0].calc_trajectory()
+
+                # Roll synchronization
+                if abs(roll_duration - max_duration) > 0.01:
+                    roll_diff = desired_roll - current_roll
+                    roll_diff = np.arctan2(np.sin(roll_diff), np.cos(roll_diff))
+                    roll_angle_change = abs(roll_diff)
+                    if roll_angle_change > 1e-6:
+                        sync_vmax_roll = roll_angle_change / max_duration * 2.0
+                        roll_accel = (
+                            self.max_angular_accel[2] if len(self.max_angular_accel) > 2 else self.max_angular_accel[0]
+                        )
+                        roll_vel = self.max_angular_vel[2] if len(self.max_angular_vel) > 2 else self.max_angular_vel[0]
+                        self._tpi_orientation[2].init(
+                            p0=current_roll,
+                            pe=desired_roll,
+                            acc_max=roll_accel,
+                            vmax=min(sync_vmax_roll, roll_vel),
+                            t0=t0,
+                            v0=0.0,
+                            ve=0.0,
+                            dec_max=roll_accel,
+                        )
+                        self._tpi_orientation[2].calc_trajectory()
 
     def _init_differential_forward_distance_trajectory(self, distance: float):
         """
         Initialize forward distance trajectory for differential drive (Phase 2: Move forward).
+        For 2d_with_z mode, also initializes Z axis TPI.
 
         Args:
-            distance: Distance to travel forward
+            distance: Distance to travel forward (XY distance for 2d_with_z, 3D distance for full_3d)
         """
-        # Save starting position for forward phase
-        current_pose = self.get_pose()
-        self._forward_start_pos = np.array(current_pose.position)
-
         # Get current simulation time (from sim_core if available, otherwise 0)
         t0 = self.sim_core.sim_time if self.sim_core is not None else 0.0
+
+        # Determine which velocity/acceleration to use based on mode
+        if self.differential_3d_mode == Differential3DMode.FULL_3D:
+            # Use average of XYZ for 3D motion
+            avg_vel = np.mean(self.max_linear_vel)
+            avg_accel = np.mean(self.max_linear_accel)
+        else:  # 2d_with_z
+            # Use average of XY for 2D motion
+            avg_vel = np.mean(self.max_linear_vel[:2])
+            avg_accel = np.mean(self.max_linear_accel[:2])
 
         # Initialize forward distance trajectory
         self._tpi_forward = TwoPointInterpolation()
         self._tpi_forward.init(
             p0=0.0,  # Start at 0 distance
             pe=distance,  # End at target distance
-            acc_max=self.max_accel,
-            vmax=self.max_vel,
+            acc_max=avg_accel,
+            vmax=avg_vel,
             t0=t0,
             v0=0.0,  # Start from rest
             ve=0.0,  # Stop at goal
-            dec_max=self.max_accel,
+            dec_max=avg_accel,
         )
-
         self._tpi_forward.calc_trajectory()  # Calculate trajectory
-        self._tpi_yaw = None  # Clear rotation trajectory
+
+        # For 2d_with_z mode, initialize Z trajectory using _tpi_pos[2]
+        if self.differential_3d_mode == Differential3DMode.TWO_D_WITH_Z:
+            start_z = self._forward_start_pos[2]
+            goal_z = self._forward_goal_pos[2]
+
+            self._tpi_pos[2].init(
+                p0=start_z,
+                pe=goal_z,
+                acc_max=self.max_linear_accel[2],  # Z axis acceleration
+                vmax=self.max_linear_vel[2],  # Z axis velocity
+                t0=t0,
+                v0=0.0,  # Start from rest
+                ve=0.0,  # Stop at goal
+                dec_max=self.max_linear_accel[2],
+            )
+            self._tpi_pos[2].calc_trajectory()
 
     def _update_omnidirectional(self, dt: float):
         """
@@ -795,31 +1081,31 @@ class Agent(SimObject):
         current_time = self.sim_core.sim_time if self.sim_core is not None else 0.0
 
         # Get interpolated position and velocity from trajectories
-        if self._tpi_xy is None:
+        if self._tpi_pos is None:
             # This should not happen if set_motion_mode and set_path were called correctly
             return
 
-        pxy = []
-        vxy = []
-        for tpi in self._tpi_xy:
+        p_xyz = []
+        v_xyz = []
+        for tpi in self._tpi_pos:
             p_val, v_val, a_val = tpi.get_point(current_time)
-            pxy.append(p_val)
-            vxy.append(v_val)
+            p_xyz.append(p_val)
+            v_xyz.append(v_val)
 
         # Check if trajectory is complete using get_end_time()
-        # Use the longer of the two trajectories
-        trajectory_complete = all(current_time >= tpi.get_end_time() for tpi in self._tpi_xy)
+        # Use the longest of the three trajectories
+        trajectory_complete = all(current_time >= tpi.get_end_time() for tpi in self._tpi_pos)
 
         if trajectory_complete:
             # Reached goal - use common handler
             self._handle_goal_reached(current_pose)
             return
 
-        # Update position
-        new_pos = np.array([pxy[0], pxy[1], current_pos[2]])  # Keep Z constant
+        # Update position (full 3D)
+        new_pos = np.array([p_xyz[0], p_xyz[1], p_xyz[2]])
 
-        # Update velocity
-        self._current_velocity = np.array([vxy[0], vxy[1], 0.0])
+        # Update velocity (3D)
+        self._current_velocity = np.array([v_xyz[0], v_xyz[1], v_xyz[2]])
 
         # Set new position (omnidirectional: keep original orientation, don't rotate)
         p.resetBasePositionAndOrientation(self.body_id, new_pos.tolist(), current_pose.orientation)
@@ -843,29 +1129,80 @@ class Agent(SimObject):
         if self._differential_phase == DifferentialPhase.ROTATE:
             # Phase 1: Rotate towards target using TPI
             # Get interpolated yaw from trajectory
-            yaw_target, yaw_vel, yaw_acc = self._tpi_yaw.get_point(current_time)
+            yaw_target, yaw_vel, yaw_acc = self._tpi_orientation[0].get_point(current_time)
 
-            # Check if rotation is complete using get_end_time()
-            trajectory_complete = current_time >= self._tpi_yaw.get_end_time()
+            # For full_3d mode, also get pitch
+            if self.differential_3d_mode == Differential3DMode.FULL_3D:
+                pitch_target, pitch_vel, pitch_acc = self._tpi_orientation[1].get_point(current_time)
+                # Check if both yaw and pitch rotations are complete
+                trajectory_complete = (
+                    current_time >= self._tpi_orientation[0].get_end_time()
+                    and current_time >= self._tpi_orientation[1].get_end_time()
+                )
+            else:
+                pitch_target = 0.0
+                # Check if yaw rotation is complete
+                trajectory_complete = current_time >= self._tpi_orientation[0].get_end_time()
 
             if trajectory_complete:
                 # Rotation complete, switch to forward phase
-                # Recalculate distance (might have drifted slightly)
-                direction_xy = goal_pos[:2] - current_pos[:2]
-                distance_xy = np.linalg.norm(direction_xy)
+                # Recalculate distances (might have drifted slightly) based on mode
+                direction_vec = goal_pos - current_pos
+                self._forward_start_pos = current_pos.copy()
+                self._forward_goal_pos = goal_pos.copy()
+
+                # Calculate distance based on mode
+                if self.differential_3d_mode == Differential3DMode.FULL_3D:
+                    # FULL_3D: only need 3D distance
+                    distance_3d = np.linalg.norm(direction_vec)
+                    self._forward_total_distance_3d = float(distance_3d)
+                    forward_distance = distance_3d
+                else:  # TWO_D_WITH_Z
+                    # TWO_D_WITH_Z: only need XY distance
+                    direction_xy = direction_vec[:2]
+                    distance_xy = np.linalg.norm(direction_xy)
+                    self._forward_total_distance_xy = float(distance_xy)
+                    forward_distance = distance_xy
 
                 # Initialize forward trajectory
                 self._differential_phase = DifferentialPhase.FORWARD
-                self._init_differential_forward_distance_trajectory(distance_xy)
+                self._init_differential_forward_distance_trajectory(forward_distance)
 
-                # Set exact rotation
-                new_orientation = current_pose.to_yaw_quaternion(yaw_target)
+                # Set exact final rotation using direction vector method with target roll
+                if self.differential_3d_mode == Differential3DMode.FULL_3D:
+                    # For full_3d mode, use direction vector with target roll
+                    if self._forward_total_distance_3d > 1e-6:
+                        new_orientation = self._direction_to_quaternion(direction_vec, roll=self._target_roll)
+                    else:
+                        new_orientation = current_pose.orientation
+                else:
+                    # For 2d_with_z mode, use XY direction with target roll
+                    if self._forward_total_distance_xy > 1e-6:
+                        direction_2d = np.array([direction_xy[0], direction_xy[1], 0.0])
+                    else:
+                        direction_2d = np.array([1.0, 0.0, 0.0])
+                    new_orientation = self._direction_to_quaternion(direction_2d, roll=self._target_roll)
+
                 p.resetBasePositionAndOrientation(self.body_id, current_pos.tolist(), new_orientation)
                 return
 
-            # Apply rotation
-            # TwoAngleInterpolation automatically normalizes yaw_target to [-pi, pi]
-            new_orientation = current_pose.to_yaw_quaternion(yaw_target)
+            # Apply rotation during interpolation
+            # For full_3d mode, use direction vector method to avoid orientation artifacts
+            if self.differential_3d_mode == Differential3DMode.FULL_3D:
+                # Reconstruct direction vector from interpolated yaw and pitch
+                dx = np.cos(pitch_target) * np.cos(yaw_target)
+                dy = np.cos(pitch_target) * np.sin(yaw_target)
+                dz = np.sin(pitch_target)
+                interpolated_direction = np.array([dx, dy, dz])
+                # Use target roll (from path waypoint) during rotation
+                new_orientation = self._direction_to_quaternion(interpolated_direction, roll=self._target_roll)
+            else:
+                # For 2d_with_z mode, rotate yaw with target roll
+                # Create direction vector for yaw (in XY plane)
+                direction_2d = np.array([np.cos(yaw_target), np.sin(yaw_target), 0.0])
+                # Use target roll (from path waypoint) during rotation
+                new_orientation = self._direction_to_quaternion(direction_2d, roll=self._target_roll)
+
             p.resetBasePositionAndOrientation(self.body_id, current_pos.tolist(), new_orientation)
 
             self._current_angular_velocity = yaw_vel
@@ -873,7 +1210,7 @@ class Agent(SimObject):
 
         elif self._differential_phase == DifferentialPhase.FORWARD:
             # Phase 2: Move forward using TPI
-            # Get interpolated distance from trajectory
+            # Get interpolated distance from trajectory (scalar progress)
             distance_traveled, forward_vel, forward_acc = self._tpi_forward.get_point(current_time)
 
             # Check if forward motion is complete using get_end_time()
@@ -884,19 +1221,179 @@ class Agent(SimObject):
                 self._handle_goal_reached(current_pose)
                 return
 
-            # Calculate new position based on current yaw
-            current_yaw = current_pose.yaw
-            forward_direction = np.array([np.cos(current_yaw), np.sin(current_yaw), 0.0])
+            # Compute new position based on selected 3D mode
+            if self.differential_3d_mode == Differential3DMode.FULL_3D:
+                # Move along straight 3D line from start to goal.
+                if self._forward_total_distance_3d > 1e-6:
+                    ratio = distance_traveled / self._forward_total_distance_3d
+                else:
+                    ratio = 0.0
 
-            # Calculate new position from starting position (set in _init_differential_forward_trajectory)
-            new_pos = self._forward_start_pos + forward_direction * distance_traveled
+                new_pos = self._forward_start_pos + (self._forward_goal_pos - self._forward_start_pos) * ratio
 
-            # Update position (keep current orientation)
-            p.resetBasePositionAndOrientation(self.body_id, new_pos.tolist(), current_pose.orientation)
+                # Calculate direction_3d (needed for velocity and orientation calculation)
+                direction_3d = self._forward_goal_pos - self._forward_start_pos
 
-            # Update velocity
-            self._current_velocity = forward_direction * forward_vel
-            self._current_angular_velocity = 0.0
+                # Orientation: maintain target roll during forward motion
+                if np.linalg.norm(direction_3d) > 1e-6:
+                    new_orientation = self._direction_to_quaternion(direction_3d, roll=self._target_roll)
+                else:
+                    new_orientation = current_pose.orientation
+
+                p.resetBasePositionAndOrientation(self.body_id, new_pos.tolist(), new_orientation)
+
+                # Velocity: along the straight 3D direction
+                if self._forward_total_distance_3d > 1e-6:
+                    direction_3d_unit = direction_3d / self._forward_total_distance_3d
+                else:
+                    direction_3d_unit = np.array([0.0, 0.0, 0.0])
+
+                self._current_velocity = direction_3d_unit * forward_vel
+                self._current_angular_velocity = 0.0
+
+            else:  # "2d_with_z": yaw in XY, plus Z TPI interpolation
+                # Calculate new position based on current yaw for XY, and
+                # interpolate Z using TPI.
+                current_yaw = current_pose.yaw
+                forward_direction_xy = np.array([np.cos(current_yaw), np.sin(current_yaw)])
+
+                # XY movement follows differential forward direction from start
+                start_xy = self._forward_start_pos[:2]
+                new_xy = start_xy + forward_direction_xy * distance_traveled
+
+                # Z moves using TPI
+                if self._tpi_pos[2] is not None:
+                    new_z, vel_z, acc_z = self._tpi_pos[2].get_point(current_time)
+                else:
+                    # Fallback to linear if TPI not initialized
+                    if self._forward_total_distance_xy > 1e-6:
+                        ratio = distance_traveled / self._forward_total_distance_xy
+                    else:
+                        ratio = 0.0
+                    start_z = self._forward_start_pos[2]
+                    goal_z = self._forward_goal_pos[2]
+                    new_z = start_z + (goal_z - start_z) * ratio
+                    vel_z = 0.0
+
+                new_pos = np.array([new_xy[0], new_xy[1], new_z])
+
+                # Orientation: maintain yaw direction with target roll
+                current_yaw = current_pose.yaw
+                forward_direction_3d = np.array([np.cos(current_yaw), np.sin(current_yaw), 0.0])
+                new_orientation = self._direction_to_quaternion(forward_direction_3d, roll=self._target_roll)
+
+                # Update position and orientation
+                p.resetBasePositionAndOrientation(self.body_id, new_pos.tolist(), new_orientation)
+
+                # Velocity: XY along forward direction, Z from TPI
+                vel_xy = forward_direction_xy * forward_vel
+                self._current_velocity = np.array([vel_xy[0], vel_xy[1], vel_z])
+                self._current_angular_velocity = 0.0
+
+    def _yaw_pitch_to_quaternion(self, yaw: float, pitch: float, roll: float = 0.0) -> List[float]:
+        """
+        Convert yaw and pitch angles to quaternion that orients robot's X+ axis
+        toward the direction defined by (yaw, pitch), with specified roll.
+
+        Args:
+            yaw: Yaw angle in radians (rotation around Z axis)
+            pitch: Pitch angle in radians (rotation around Y axis)
+            roll: Roll angle in radians (rotation around X axis, default: 0.0)
+
+        Returns:
+            Quaternion [x, y, z, w]
+        """
+        # Create direction vector from yaw and pitch
+        # X+ should point in this direction
+        dx = np.cos(pitch) * np.cos(yaw)
+        dy = np.cos(pitch) * np.sin(yaw)
+        dz = np.sin(pitch)
+
+        target_dir = np.array([dx, dy, dz])
+        return self._direction_to_quaternion(target_dir, roll=roll)
+
+    def _direction_to_quaternion(self, direction: np.ndarray, roll: float = 0.0) -> List[float]:
+        """
+        Create quaternion that rotates robot's X+ axis to point along given direction,
+        with Z+ axis determined by roll angle (perpendicular to path plane).
+
+        Args:
+            direction: 3D direction vector (will be normalized) - robot's X+ axis
+            roll: Roll angle in radians - determines Z+ axis orientation
+
+        Returns:
+            Quaternion [x, y, z, w] that aligns X+ with direction and Z+ perpendicular to plane
+        """
+        # Normalize direction
+        dir_norm = direction / np.linalg.norm(direction)
+
+        # X-axis = normalized direction (forward direction)
+        x_axis = dir_norm
+
+        # Build initial frame with natural up vector
+        # Choose a temporary up vector (prefer world Z+, but avoid parallel case)
+        if abs(np.dot(x_axis, np.array([0, 0, 1]))) < 0.99:
+            temp_up = np.array([0, 0, 1])
+        else:
+            temp_up = np.array([0, 1, 0])
+
+        # Build initial Y and Z axes (before roll rotation)
+        # Y-axis points to the right, Z-axis points up (right-hand rule)
+        y_initial = np.cross(temp_up, x_axis)
+        if np.linalg.norm(y_initial) < 1e-6:
+            # Edge case: x_axis parallel to temp_up
+            y_initial = np.array([0, 1, 0]) if temp_up[0] == 1 else np.array([1, 0, 0])
+        else:
+            y_initial = y_initial / np.linalg.norm(y_initial)
+        z_initial = np.cross(x_axis, y_initial)
+
+        # Apply roll rotation around X-axis
+        # This rotates Y and Z axes while keeping X fixed
+        cos_roll = np.cos(roll)
+        sin_roll = np.sin(roll)
+        y_final = cos_roll * y_initial + sin_roll * z_initial
+        z_final = -sin_roll * y_initial + cos_roll * z_initial
+
+        # Build rotation matrix [X, Y, Z] as columns
+        rot_matrix = np.column_stack([x_axis, y_final, z_final])
+
+        # Convert rotation matrix to quaternion
+        quat = self._rotation_matrix_to_quaternion(rot_matrix)
+        return quat
+
+    def _rotation_matrix_to_quaternion(self, R: np.ndarray) -> List[float]:
+        """
+        Convert 3x3 rotation matrix to quaternion [x, y, z, w].
+        Uses the method from "Converting a Rotation Matrix to a Quaternion" by Mike Day.
+        """
+        trace = np.trace(R)
+
+        if trace > 0:
+            s = 0.5 / np.sqrt(trace + 1.0)
+            w = 0.25 / s
+            x = (R[2, 1] - R[1, 2]) * s
+            y = (R[0, 2] - R[2, 0]) * s
+            z = (R[1, 0] - R[0, 1]) * s
+        elif R[0, 0] > R[1, 1] and R[0, 0] > R[2, 2]:
+            s = 2.0 * np.sqrt(1.0 + R[0, 0] - R[1, 1] - R[2, 2])
+            w = (R[2, 1] - R[1, 2]) / s
+            x = 0.25 * s
+            y = (R[0, 1] + R[1, 0]) / s
+            z = (R[0, 2] + R[2, 0]) / s
+        elif R[1, 1] > R[2, 2]:
+            s = 2.0 * np.sqrt(1.0 + R[1, 1] - R[0, 0] - R[2, 2])
+            w = (R[0, 2] - R[2, 0]) / s
+            x = (R[0, 1] + R[1, 0]) / s
+            y = 0.25 * s
+            z = (R[1, 2] + R[2, 1]) / s
+        else:
+            s = 2.0 * np.sqrt(1.0 + R[2, 2] - R[0, 0] - R[1, 1])
+            w = (R[1, 0] - R[0, 1]) / s
+            x = (R[0, 2] + R[2, 0]) / s
+            y = (R[1, 2] + R[2, 1]) / s
+            z = 0.25 * s
+
+        return [x, y, z, w]
 
     def update(self, dt: float):
         """

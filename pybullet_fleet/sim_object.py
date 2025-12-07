@@ -4,7 +4,7 @@ Base class for simulation objects with attachment support.
 """
 
 from dataclasses import dataclass, field
-from typing import Callable, List, Optional, Tuple
+from typing import Callable, List, Optional, Tuple, Iterable
 
 import numpy as np
 import pybullet as p
@@ -197,61 +197,236 @@ class Path:
         return cls(waypoints=waypoints)
 
     @classmethod
-    def create_square(cls, center: List[float], side_length: float, height: float = 0.0) -> "Path":
-        """
-        Create a square path.
+    def create_square(
+        cls,
+        center: List[float],
+        side_length: float,
+        rpy: Optional[List[float]] = None,
+    ) -> "Path":
+        """Create a square path in 3D.
 
         Args:
-            center: [x, y] center position
+            center: [x, y, z] center position in world coordinates
             side_length: Length of square sides
-            height: Z-coordinate for all waypoints
+            rpy: Optional [roll, pitch, yaw] in radians. If None, treated as
+                 [0, 0, 0]. When non-zero, the Z+ axis of the robot will be
+                 perpendicular to the square plane.
 
-        Returns:
-            Path forming a square
-
-        Example:
-            path = Path.create_square(center=[0, 0], side_length=2.0, height=0.1)
+        Notes:
+            - When rpy is None or [0,0,0], this creates a square in the XY-plane
+              at z=center[2] with Z+ pointing upward.
+            - With non-zero RPY, the square is rotated so that its normal (Z+)
+              points in the direction specified by the roll and pitch angles.
         """
+        if len(center) != 3:
+            raise ValueError("Path.create_square: center must be [x, y, z]")
+
+        if rpy is None:
+            rpy = [0.0, 0.0, 0.0]
+        if len(rpy) != 3:
+            raise ValueError("Path.create_square: rpy must be [roll, pitch, yaw]")
+
+        roll, pitch, yaw = rpy
+
         half = side_length / 2.0
-        cx, cy = center[0], center[1]
 
-        positions = [
-            [cx - half, cy - half, height],  # Bottom-left
-            [cx + half, cy - half, height],  # Bottom-right
-            [cx + half, cy + half, height],  # Top-right
-            [cx - half, cy + half, height],  # Top-left
-            [cx - half, cy - half, height],  # Back to start
-        ]
+        # Local coordinates of square corners in the XY plane (z=0) around origin
+        local_points = np.array(
+            [
+                [-half, -half, 0.0],  # Bottom-left
+                [half, -half, 0.0],  # Bottom-right
+                [half, half, 0.0],  # Top-right
+                [-half, half, 0.0],  # Top-left
+                [-half, -half, 0.0],  # Back to start
+            ]
+        )
 
-        return cls.from_positions(positions)
+        # Build rotation matrix where Z+ is perpendicular to the plane
+        # For a square in local XY plane, the normal is local Z+ = [0, 0, 1]
+        # We want to rotate this normal by roll and pitch
+
+        # Apply rotations: first roll around X, then pitch around Y, then yaw around Z
+        cr, sr = np.cos(roll), np.sin(roll)
+        cp, sp = np.cos(pitch), np.sin(pitch)
+        cy, sy = np.cos(yaw), np.sin(yaw)
+
+        # Rotation matrix: Rz(yaw) * Ry(pitch) * Rx(roll)
+        # This is the standard Z-Y-X Euler angle rotation
+        rot_matrix = np.array(
+            [
+                [cy * cp, cy * sp * sr - sy * cr, cy * sp * cr + sy * sr],
+                [sy * cp, sy * sp * sr + cy * cr, sy * sp * cr - cy * sr],
+                [-sp, cp * sr, cp * cr],
+            ]
+        )
+
+        # Center position in world coordinates
+        center_world = np.array(center)
+
+        positions = []
+        for pt in local_points:
+            world_pt = center_world + rot_matrix.dot(pt)
+            positions.append(world_pt.tolist())
+
+        # Convert rotation matrix to quaternion for orientation
+        quat = cls._rotation_matrix_to_quaternion(rot_matrix)
+
+        return cls.from_positions(positions, orientation=quat)
+
+    @staticmethod
+    def _rotation_matrix_to_quaternion(R: np.ndarray) -> List[float]:
+        """
+        Convert 3x3 rotation matrix to quaternion [x, y, z, w].
+        """
+        trace = np.trace(R)
+
+        if trace > 0:
+            s = 0.5 / np.sqrt(trace + 1.0)
+            w = 0.25 / s
+            x = (R[2, 1] - R[1, 2]) * s
+            y = (R[0, 2] - R[2, 0]) * s
+            z = (R[1, 0] - R[0, 1]) * s
+        elif R[0, 0] > R[1, 1] and R[0, 0] > R[2, 2]:
+            s = 2.0 * np.sqrt(1.0 + R[0, 0] - R[1, 1] - R[2, 2])
+            w = (R[2, 1] - R[1, 2]) / s
+            x = 0.25 * s
+            y = (R[0, 1] + R[1, 0]) / s
+            z = (R[0, 2] + R[2, 0]) / s
+        elif R[1, 1] > R[2, 2]:
+            s = 2.0 * np.sqrt(1.0 + R[1, 1] - R[0, 0] - R[2, 2])
+            w = (R[0, 2] - R[2, 0]) / s
+            x = (R[0, 1] + R[1, 0]) / s
+            y = 0.25 * s
+            z = (R[1, 2] + R[2, 1]) / s
+        else:
+            s = 2.0 * np.sqrt(1.0 + R[2, 2] - R[0, 0] - R[1, 1])
+            w = (R[1, 0] - R[0, 1]) / s
+            x = (R[0, 2] + R[2, 0]) / s
+            y = (R[1, 2] + R[2, 1]) / s
+            z = 0.25 * s
+
+        return [x, y, z, w]
 
     @classmethod
-    def create_circle(cls, center: List[float], radius: float, num_points: int = 16, height: float = 0.0) -> "Path":
-        """
-        Create a circular path.
+    def create_circle(
+        cls,
+        center: List[float],
+        radius: float,
+        num_points: int = 16,
+        rpy: Optional[List[float]] = None,
+        start_angle: float = 0.0,
+        end_angle: float = 2.0 * np.pi,
+    ) -> "Path":
+        """Create a circular path in 3D.
 
         Args:
-            center: [x, y] center position
+            center: [x, y, z] center position in world coordinates
             radius: Circle radius
-            num_points: Number of waypoints around the circle
-            height: Z-coordinate for all waypoints
+            num_points: Number of waypoints along the arc
+            rpy: Optional [roll, pitch, yaw] in radians. If None, treated as
+                 [0, 0, 0].
+            start_angle: Start angle [rad] in the local XY-plane
+            end_angle: End angle [rad] in the local XY-plane
 
-        Returns:
-            Path forming a circle
+        Notes:
+                        - When rpy is None or [0,0,0] and (start_angle, end_angle) is
+                            (0, 2*pi), this reproduces the previous full-circle behavior
+                            (circle in the XY-plane at z=center[2]).
+                        - By changing start_angle/end_angle, a partial arc can be
+                            expressed (e.g., quarter circle, S-curve segment, etc.).
+                        - With non-zero RPY, the circle/arc is defined in a local
+                            XY-plane and then rotated/translated.
+        """
+        if len(center) != 3:
+            raise ValueError("Path.create_circle: center must be [x, y, z]")
+
+        if rpy is None:
+            rpy = [0.0, 0.0, 0.0]
+        if len(rpy) != 3:
+            raise ValueError("Path.create_circle: rpy must be [roll, pitch, yaw]")
+
+        roll, pitch, yaw = rpy
+
+        # Local circle/arc points in XY-plane with z=0
+        local_points = []
+        # Ensure we always include the end point by sampling num_points
+        # segments between start_angle and end_angle.
+        for i in range(num_points + 1):
+            t = i / float(num_points)
+            angle = start_angle + (end_angle - start_angle) * t
+            x = radius * np.cos(angle)
+            y = radius * np.sin(angle)
+            local_points.append([x, y, 0.0])
+
+        local_points = np.array(local_points)
+
+        # Build rotation matrix where Z+ is perpendicular to the circle plane
+        # Apply rotations: first roll around X, then pitch around Y, then yaw around Z
+        cr, sr = np.cos(roll), np.sin(roll)
+        cp, sp = np.cos(pitch), np.sin(pitch)
+        cy, sy = np.cos(yaw), np.sin(yaw)
+
+        # Rotation matrix: Rz(yaw) * Ry(pitch) * Rx(roll)
+        rot_matrix = np.array(
+            [
+                [cy * cp, cy * sp * sr - sy * cr, cy * sp * cr + sy * sr],
+                [sy * cp, sy * sp * sr + cy * cr, sy * sp * cr - cy * sr],
+                [-sp, cp * sr, cp * cr],
+            ]
+        )
+
+        # Center position in world coordinates
+        center_world = np.array(center)
+
+        positions = []
+        for pt in local_points:
+            world_pt = center_world + rot_matrix.dot(pt)
+            positions.append(world_pt.tolist())
+
+        # Convert rotation matrix to quaternion for orientation
+        quat = cls._rotation_matrix_to_quaternion(rot_matrix)
+
+        return cls.from_positions(positions, orientation=quat)
+
+    # --------------------------------------------------------------
+    # Path composition utilities
+    # --------------------------------------------------------------
+
+    def append(self, other: "Path") -> None:
+        """Append waypoints from another path in-place.
+
+        Note:
+            This mutates the current Path. For a non-mutating version,
+            use `combined = path1 + path2`.
+        """
+
+        self.waypoints.extend(other.waypoints)
+
+    def __add__(self, other: "Path") -> "Path":
+        """Concatenate two paths and return a new Path.
+
+        The resulting path simply has waypoints = self.waypoints + other.waypoints.
+        """
+
+        return Path(waypoints=list(self.waypoints) + list(other.waypoints))
+
+    @classmethod
+    def from_paths(cls, paths: Iterable["Path"]) -> "Path":
+        """Create a single Path by concatenating multiple paths.
 
         Example:
-            path = Path.create_circle(center=[0, 0], radius=1.5, num_points=20)
+            circle_arc = Path.create_circle(center=[0, 0, 0.5], radius=2.0,
+                                           num_points=16,
+                                           start_angle=0.0,
+                                           end_angle=np.pi/2)
+            line = Path.from_positions([[1, 1, 0.5], [3, 1, 0.5]])
+            full = Path.from_paths([circle_arc, line])
         """
-        cx, cy = center[0], center[1]
-        positions = []
 
-        for i in range(num_points + 1):  # +1 to close the circle
-            angle = 2.0 * np.pi * i / num_points
-            x = cx + radius * np.cos(angle)
-            y = cy + radius * np.sin(angle)
-            positions.append([x, y, height])
-
-        return cls.from_positions(positions)
+        waypoints: List[Pose] = []
+        for path in paths:
+            waypoints.extend(path.waypoints)
+        return cls(waypoints=waypoints)
 
     def get_total_distance(self) -> float:
         """
@@ -606,7 +781,7 @@ class URDFObject(SimObject):
         urdf_path,
         set_mass_zero=False,
         meta_data={},
-        max_accel=1.0,
+        max_linear_accel=1.0,
         max_speed=1.0,
         goal_threshold=0.01,
         sim_core=None,
@@ -619,7 +794,7 @@ class URDFObject(SimObject):
         if set_mass_zero:
             self.set_all_masses_to_zero()
         self.meta_data = meta_data
-        self.max_accel = max_accel
+        self.max_linear_accel = max_linear_accel
         self.max_speed = max_speed
         self.goal_threshold = goal_threshold
         self.target_actions = []
@@ -628,8 +803,8 @@ class URDFObject(SimObject):
         self._nav_last_update = None
         self._motion_completed = True
 
-    def set_navigation_params(self, max_accel, max_speed, goal_threshold=None):
-        self.max_accel = max_accel
+    def set_navigation_params(self, max_linear_accel, max_speed, goal_threshold=None):
+        self.max_linear_accel = max_linear_accel
         self.max_speed = max_speed
         if goal_threshold is not None:
             self.goal_threshold = goal_threshold
@@ -707,8 +882,8 @@ class URDFObject(SimObject):
         # Acceleration limit
         accel = (desired_velocity - self._nav_velocity) / dt
         accel_norm = np.linalg.norm(accel)
-        if accel_norm > self.max_accel:
-            accel = accel / (accel_norm + 1e-6) * self.max_accel
+        if accel_norm > self.max_linear_accel:
+            accel = accel / (accel_norm + 1e-6) * self.max_linear_accel
         self._nav_velocity += accel * dt
         speed = np.linalg.norm(self._nav_velocity)
         if speed > self.max_speed:

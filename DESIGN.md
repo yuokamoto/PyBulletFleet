@@ -126,13 +126,13 @@ Utility for managing PyBullet log verbosity.
 **Control Algorithm:**
 - Simple proportional controller for position
 - Linear interpolation for smooth motion
-- Velocity clamping based on max_vel and max_accel
+- Velocity clamping based on max_linear_vel and max_linear_accel
 
 ##### RobotSpawnParams
 Configuration dataclass for robot initialization.
 
 **Attributes:**
-- `max_vel`, `max_accel`: Motion limits
+- `max_linear_vel`, `max_linear_accel`: Motion limits
 - `orientation_euler`: Initial orientation
 - `base_mass`: Mass (0.0 for kinematic control)
 - `use_collision`: Enable collision detection

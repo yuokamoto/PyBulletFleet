@@ -21,6 +21,7 @@ import yaml
 from pybullet_fleet.collision_visualizer import CollisionVisualizer
 from pybullet_fleet.data_monitor import DataMonitor
 from pybullet_fleet.sim_object import SimObject
+from pybullet_fleet.agent import Agent
 
 # Global log_level (default: 'info')
 GLOBAL_LOG_LEVEL = "INFO"
@@ -759,6 +760,12 @@ class MultiRobotSimulationCore:
         # Synchronize robot_bodies from sim_objects every step
         self.robot_bodies = [obj.body_id for obj in self.sim_objects]
         self.sim_time = self.step_count * self.params.timestep
+
+        # Auto-update all Agent instances every step
+        for obj in self.sim_objects:
+            if isinstance(obj, Agent):
+                # Use fixed timestep for core agent integration
+                obj.update(self.params.timestep)
         # Global callbacks (frequency control)
         for cbinfo in self.callbacks:
             freq = cbinfo.get("frequency", None)
