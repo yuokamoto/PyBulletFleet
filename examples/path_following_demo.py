@@ -170,6 +170,10 @@ def main():
         p2 = circle_path[i + 1].position
         p.addUserDebugLine(p1, p2, [0.2, 0.4, 1.0], lineWidth=2.0, lifeTime=0)
 
+    # Visualize omnidirectional circle path orientations
+    print("Visualizing omnidirectional circle path waypoint orientations...")
+    circle_path.visualize_waypoints(axis_length=0.4, show_points=True)
+
     for i in range(len(square_path) - 1):
         p1 = square_path[i].position
         p2 = square_path[i + 1].position
@@ -181,17 +185,29 @@ def main():
         p2 = circle_path_3d[i + 1].position
         p.addUserDebugLine(p1, p2, [0.2, 1.0, 0.4], lineWidth=2.0, lifeTime=0)
 
-    # 3D square path (yellow/orange)
+    # Visualize 3D circle path orientations
+    print("Visualizing 3D circle path waypoint orientations...")
+    circle_path_3d.visualize_waypoints(axis_length=0.4, show_points=True)
+
+    # 3D square path (yellow/orange) with coordinate axes visualization
     for i in range(len(square_path_3d) - 1):
         p1 = square_path_3d[i].position
         p2 = square_path_3d[i + 1].position
         p.addUserDebugLine(p1, p2, [1.0, 0.8, 0.2], lineWidth=2.0, lifeTime=0)
+
+    # Visualize waypoint orientations (X+: red, Y+: green, Z+: blue)
+    print("\nVisualizing 3D square path waypoint orientations...")
+    square_path_3d.visualize_waypoints(axis_length=0.4, show_points=True)
 
     # 3D square path for 2d_with_z (orange)
     for i in range(len(square_path_3d_2dwithz) - 1):
         p1 = square_path_3d_2dwithz[i].position
         p2 = square_path_3d_2dwithz[i + 1].position
         p.addUserDebugLine(p1, p2, [1.0, 0.5, 0.0], lineWidth=2.0, lifeTime=0)
+
+    # Visualize 2d_with_z path orientations for comparison
+    print("Visualizing 2D+Z square path waypoint orientations...")
+    square_path_3d_2dwithz.visualize_waypoints(axis_length=0.4, show_points=True)
 
     # Set paths
     print("\nRobot configurations:")
@@ -224,7 +240,8 @@ def main():
     print("    - Note: Rotates to face target, then moves in straight 3D line")
 
     print(
-        f"\n  Differential Drive 2D with Z (Orange Mobile Robot): Following 3D square path ({len(square_path_3d_2dwithz)} waypoints)"
+        f"\n  Differential Drive 2D with Z (Orange Mobile Robot): "
+        f"Following 3D square path ({len(square_path_3d_2dwithz)} waypoints)"
     )
     print(f"    - Max velocity: {robot_diff_2dwithz.max_linear_vel} m/s")
     print(f"    - Max acceleration: {robot_diff_2dwithz.max_linear_accel} m/s²")
