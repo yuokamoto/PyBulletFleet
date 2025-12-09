@@ -31,7 +31,7 @@ from pybullet_fleet.sim_object import Path, Pose
 
 def main():
     # Create simulation
-    params = SimulationParams(gui=True, timestep=1.0 / 10.0, speed=10.0)
+    params = SimulationParams(gui=True, timestep=1.0 / 10.0, speed=3.0)
     sim = MultiRobotSimulationCore(params)
 
     # Get absolute paths

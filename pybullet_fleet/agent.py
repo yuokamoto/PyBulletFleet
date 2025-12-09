@@ -249,10 +249,10 @@ class Agent(SimObject):
         # Two-point interpolation trajectory planners (initialized by set_motion_mode) - Private
         # Position trajectories [X, Y, Z] - shared by both omnidirectional and differential modes
         self._tpi_pos: Optional[List[TwoPointInterpolation]] = None
-        # Rotation using scipy Slerp - used by differential mode
+        # Rotation using scipy Slerp combined with TPI for angle progression - used by differential mode
         self._rotation_slerp: Optional[Slerp] = None
-        self._rotation_start_time: float = 0.0
-        self._rotation_end_time: float = 0.0
+        self._tpi_rotation_angle: Optional[TwoPointInterpolation] = None  # TPI for rotation angle (0 to total_angle)
+        self._rotation_total_angle: float = 0.0  # Total rotation angle in radians
         # Forward distance for differential mode (tracks progress along path)
         self._tpi_forward: Optional[TwoPointInterpolation] = None
 
@@ -663,8 +663,9 @@ class Agent(SimObject):
         elif mode == MotionMode.DIFFERENTIAL:
             # Position trajectories: X, Y, Z (shared with omnidirectional)
             self._tpi_pos = [TwoPointInterpolation(), TwoPointInterpolation(), TwoPointInterpolation()]
-            # Rotation will use scipy Slerp (initialized in set_path)
+            # Rotation: TPI for angle progression + Slerp for quaternion interpolation
             self._rotation_slerp = None
+            self._tpi_rotation_angle = None  # Will be initialized in set_path
             self._tpi_forward = TwoPointInterpolation()  # Forward distance
             self._differential_phase = DifferentialPhase.ROTATE
 
@@ -695,40 +696,6 @@ class Agent(SimObject):
             self._init_omnidirectional_trajectory(path[0])
         elif self._motion_mode == MotionMode.DIFFERENTIAL:
             self._init_differential_rotation_trajectory(path[0])
-
-    def _init_omnidirectional_trajectory(self, goal: Pose):
-        """
-        Initialize two-point interpolation trajectory for omnidirectional motion (X, Y, Z axes).
-        Reuses existing TPI instances created by set_motion_mode().
-        Uses per-axis max_linear_vel and max_linear_accel if configured.
-
-        Args:
-            goal: Target pose
-        """
-        current_pose = self.get_pose()
-        current_pos = np.array(current_pose.position)
-        goal_pos = np.array(goal.position)
-
-        # Get current simulation time (from sim_core if available, otherwise 0)
-        t0 = self.sim_core.sim_time if self.sim_core is not None else 0.0
-
-        # Reuse existing TPI instances (created by set_motion_mode)
-        if self._tpi_pos is None:
-            raise RuntimeError("_tpi_pos is not initialized. Call set_motion_mode() before setting path.")
-
-        # 3D: X, Y, Z with per-axis limits
-        for axis in range(3):
-            self._tpi_pos[axis].init(
-                p0=current_pos[axis],
-                pe=goal_pos[axis],
-                acc_max=self.max_linear_accel[axis],  # Per-axis acceleration
-                vmax=self.max_linear_vel[axis],  # Per-axis velocity
-                t0=t0,
-                v0=self._current_velocity[axis],
-                ve=0.0,  # Stop at goal
-                dec_max=self.max_linear_accel[axis],  # Per-axis deceleration
-            )
-            self._tpi_pos[axis].calc_trajectory()  # Calculate trajectory
 
     def _handle_goal_reached(self, current_pose: Pose):
         """
@@ -764,13 +731,96 @@ class Agent(SimObject):
                 # Reset velocity in PyBullet to stop any residual motion
                 p.resetBaseVelocity(self.body_id, linearVelocity=[0, 0, 0], angularVelocity=[0, 0, 0])
 
+    def _init_omnidirectional_trajectory(self, goal: Pose):
+        """
+        Initialize two-point interpolation trajectory for omnidirectional motion (X, Y, Z axes).
+        Reuses existing TPI instances created by set_motion_mode().
+        Uses per-axis max_linear_vel and max_linear_accel if configured.
+
+        Args:
+            goal: Target pose
+        """
+        current_pose = self.get_pose()
+        current_pos = np.array(current_pose.position)
+        goal_pos = np.array(goal.position)
+
+        # Get current simulation time (from sim_core if available, otherwise 0)
+        t0 = self.sim_core.sim_time if self.sim_core is not None else 0.0
+
+        # Reuse existing TPI instances (created by set_motion_mode)
+        if self._tpi_pos is None:
+            raise RuntimeError("_tpi_pos is not initialized. Call set_motion_mode() before setting path.")
+
+        # 3D: X, Y, Z with per-axis limits
+        for axis in range(3):
+            self._tpi_pos[axis].init(
+                p0=current_pos[axis],
+                pe=goal_pos[axis],
+                acc_max=self.max_linear_accel[axis],  # Per-axis acceleration
+                vmax=self.max_linear_vel[axis],  # Per-axis velocity
+                t0=t0,
+                v0=self._current_velocity[axis],
+                ve=0.0,  # Stop at goal
+                dec_max=self.max_linear_accel[axis],  # Per-axis deceleration
+            )
+            self._tpi_pos[axis].calc_trajectory()  # Calculate trajectory
+
+    def _update_omnidirectional(self, dt: float):
+        """
+        Update robot position using omnidirectional motion (holonomic).
+        Robot can move in any direction without rotating first.
+        Uses two-point interpolation for smooth acceleration/deceleration.
+
+        Args:
+            dt: Time step (seconds)
+        """
+        current_pose = self.get_pose()
+        current_pos = np.array(current_pose.position)
+        goal_pos = np.array(self._goal_pose.position)
+
+        # Get current simulation time
+        current_time = self.sim_core.sim_time if self.sim_core is not None else 0.0
+
+        # Get interpolated position and velocity from trajectories
+        if self._tpi_pos is None:
+            # This should not happen if set_motion_mode and set_path were called correctly
+            return
+
+        p_xyz = []
+        v_xyz = []
+        for tpi in self._tpi_pos:
+            p_val, v_val, a_val = tpi.get_point(current_time)
+            p_xyz.append(p_val)
+            v_xyz.append(v_val)
+
+        # Check if trajectory is complete using get_end_time()
+        # Use the longest of the three trajectories
+        trajectory_complete = all(current_time >= tpi.get_end_time() for tpi in self._tpi_pos)
+
+        if trajectory_complete:
+            # Reached goal - use common handler
+            self._handle_goal_reached(current_pose)
+            return
+
+        # Update position (full 3D)
+        new_pos = np.array([p_xyz[0], p_xyz[1], p_xyz[2]])
+
+        # Update velocity (3D)
+        self._current_velocity = np.array([v_xyz[0], v_xyz[1], v_xyz[2]])
+
+        # Set new position (omnidirectional: keep original orientation, don't rotate)
+        p.resetBasePositionAndOrientation(self.body_id, new_pos.tolist(), current_pose.orientation)
+
     def _init_differential_rotation_trajectory(self, goal: Pose):
         """
         Initialize rotation trajectory for differential drive (Phase 1: Rotate to face target).
-        Uses scipy Slerp for smooth, shortest-path quaternion interpolation.
+        Uses TPI for angle progression with acceleration/deceleration, combined with Slerp for
+        smooth quaternion interpolation.
 
         Differential drive has two phases:
-        1. Rotation phase: Rotate to face the target using Slerp
+        1. Rotation phase: Rotate to face the target using TPI + Slerp
+           - TPI calculates angle progression considering max_angular_vel and max_angular_accel
+           - Slerp provides smooth shortest-path quaternion interpolation
         2. Forward phase: Move forward to the target
 
         Args:
@@ -823,20 +873,34 @@ class Agent(SimObject):
         r_delta = r_target * r_current.inv()
         rotation_angle = r_delta.magnitude()  # Total rotation angle in radians
 
-        # Calculate rotation duration based on max angular velocity
+        # Use TPI to calculate rotation trajectory with angular acceleration and velocity constraints
         if rotation_angle > 1e-6:
-            # Use first element of max_angular_vel for overall rotation
+            # Store total rotation angle for Slerp interpolation (ensure float type)
+            self._rotation_total_angle = float(rotation_angle)
+
+            # Use first element of max_angular_vel and max_angular_accel for overall rotation
             angular_vel = self.max_angular_vel[0]
-            rotation_duration = rotation_angle / angular_vel
+            angular_accel = self.max_angular_accel[0]
 
-            # Create Slerp interpolator
-            self._rotation_start_time = t0
-            self._rotation_end_time = t0 + rotation_duration
+            # Initialize TPI for rotation angle (from 0 to rotation_angle)
+            self._tpi_rotation_angle = TwoPointInterpolation()
+            self._tpi_rotation_angle.init(
+                p0=0.0,  # Start angle
+                pe=rotation_angle,  # End angle
+                acc_max=angular_accel,  # Angular acceleration
+                vmax=angular_vel,  # Angular velocity
+                t0=t0,
+                v0=0.0,  # Start from rest
+                ve=0.0,  # Stop at target
+                dec_max=angular_accel,
+            )
+            self._tpi_rotation_angle.calc_trajectory()
 
-            # Slerp requires Rotation objects and time array
-            key_times = np.array([self._rotation_start_time, self._rotation_end_time])
+            # Create Slerp interpolator (we'll use angle ratio from TPI to query Slerp)
+            # Slerp will be queried with ratio = current_angle / total_angle
             key_rots = R.from_quat([self._rotation_start_quat, self._rotation_target_quat])
-            self._rotation_slerp = Slerp(key_times, key_rots)
+            # Slerp with normalized time [0, 1]
+            self._rotation_slerp = Slerp([0.0, 1.0], key_rots)
         else:
             # No rotation needed, teleport to target orientation and skip to FORWARD phase
             p.resetBasePositionAndOrientation(self.body_id, current_pos.tolist(), self._rotation_target_quat.tolist())
@@ -876,57 +940,21 @@ class Agent(SimObject):
         )
         self._tpi_forward.calc_trajectory()  # Calculate trajectory
 
-    def _update_omnidirectional(self, dt: float):
-        """
-        Update robot position using omnidirectional motion (holonomic).
-        Robot can move in any direction without rotating first.
-        Uses two-point interpolation for smooth acceleration/deceleration.
-
-        Args:
-            dt: Time step (seconds)
-        """
-        current_pose = self.get_pose()
-        current_pos = np.array(current_pose.position)
-        goal_pos = np.array(self._goal_pose.position)
-
-        # Get current simulation time
-        current_time = self.sim_core.sim_time if self.sim_core is not None else 0.0
-
-        # Get interpolated position and velocity from trajectories
-        if self._tpi_pos is None:
-            # This should not happen if set_motion_mode and set_path were called correctly
-            return
-
-        p_xyz = []
-        v_xyz = []
-        for tpi in self._tpi_pos:
-            p_val, v_val, a_val = tpi.get_point(current_time)
-            p_xyz.append(p_val)
-            v_xyz.append(v_val)
-
-        # Check if trajectory is complete using get_end_time()
-        # Use the longest of the three trajectories
-        trajectory_complete = all(current_time >= tpi.get_end_time() for tpi in self._tpi_pos)
-
-        if trajectory_complete:
-            # Reached goal - use common handler
-            self._handle_goal_reached(current_pose)
-            return
-
-        # Update position (full 3D)
-        new_pos = np.array([p_xyz[0], p_xyz[1], p_xyz[2]])
-
-        # Update velocity (3D)
-        self._current_velocity = np.array([v_xyz[0], v_xyz[1], v_xyz[2]])
-
-        # Set new position (omnidirectional: keep original orientation, don't rotate)
-        p.resetBasePositionAndOrientation(self.body_id, new_pos.tolist(), current_pose.orientation)
-
     def _update_differential(self, dt: float):
         """
         Update robot position using differential drive motion (non-holonomic).
         Robot must first rotate to face the target, then move forward.
-        Uses quaternion slerp for smooth rotation and two-point interpolation for forward motion.
+        Uses TPI + Slerp for smooth rotation with acceleration/deceleration,
+        and TPI for smooth forward motion.
+
+        Rotation Phase:
+        - TPI calculates angle progression (0 to total_angle) with angular acceleration/deceleration
+        - Slerp interpolates quaternion using angle ratio from TPI
+        - Provides smooth angular velocity profile respecting max_angular_vel and max_angular_accel
+
+        Forward Phase:
+        - TPI calculates distance progression with linear acceleration/deceleration
+        - Maintains fixed orientation from rotation phase
 
         Args:
             dt: Time step (seconds)
@@ -939,10 +967,21 @@ class Agent(SimObject):
         current_time = self.sim_core.sim_time if self.sim_core is not None else 0.0
 
         if self._differential_phase == DifferentialPhase.ROTATE:
-            # Phase 1: Rotate towards target using scipy Slerp
+            # Phase 1: Rotate towards target using TPI + Slerp
+            # TPI controls angle progression with acceleration/deceleration
+            # Slerp provides smooth quaternion interpolation
 
-            # Check if rotation is complete
-            if current_time >= self._rotation_end_time:
+            # Get current angle from TPI trajectory
+            if self._tpi_rotation_angle is None:
+                # Fallback: no rotation needed
+                self._differential_phase = DifferentialPhase.FORWARD
+                self._init_differential_forward_distance_trajectory(self._forward_total_distance_3d)
+                return
+
+            current_angle, angular_vel, angular_accel = self._tpi_rotation_angle.get_point(current_time)
+
+            # Check if rotation is complete using TPI end time
+            if current_time >= self._tpi_rotation_angle.get_end_time():
                 # Rotation complete, switch to forward phase
                 # Set exact final rotation (target quaternion)
                 p.resetBasePositionAndOrientation(self.body_id, current_pos.tolist(), self._rotation_target_quat.tolist())
@@ -952,28 +991,21 @@ class Agent(SimObject):
                 self._init_differential_forward_distance_trajectory(self._forward_total_distance_3d)
                 return
 
-            # Apply Slerp interpolation
-            # Get interpolated rotation at current time
-            if self._rotation_slerp is not None:
-                r_interpolated = self._rotation_slerp(current_time)
+            # Apply Slerp interpolation with TPI-calculated angle ratio
+            # Ratio = current_angle / total_angle (normalized to [0, 1])
+            if self._rotation_slerp is not None and self._rotation_total_angle > 1e-6:
+                angle_ratio = current_angle / self._rotation_total_angle
+                angle_ratio = np.clip(angle_ratio, 0.0, 1.0)  # Ensure [0, 1] range
+
+                r_interpolated = self._rotation_slerp(angle_ratio)
                 new_orientation = r_interpolated.as_quat().tolist()
                 p.resetBasePositionAndOrientation(self.body_id, current_pos.tolist(), new_orientation)
             else:
                 # Fallback: use target orientation directly
                 p.resetBasePositionAndOrientation(self.body_id, current_pos.tolist(), self._rotation_target_quat.tolist())
 
-            # Calculate angular velocity (approximate from time derivative)
-            # For simplicity, use average angular velocity
-            r_current = R.from_quat(self._rotation_start_quat)
-            r_target = R.from_quat(self._rotation_target_quat)
-            r_delta = r_target * r_current.inv()
-            elapsed_time = current_time - self._rotation_start_time
-            total_duration = self._rotation_end_time - self._rotation_start_time
-            if total_duration > 1e-6:
-                self._current_angular_velocity = r_delta.magnitude() / total_duration
-            else:
-                self._current_angular_velocity = 0.0
-
+            # Update angular velocity from TPI
+            self._current_angular_velocity = angular_vel
             self._current_velocity = np.array([0.0, 0.0, 0.0])
 
         elif self._differential_phase == DifferentialPhase.FORWARD:
