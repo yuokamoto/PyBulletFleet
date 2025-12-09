@@ -316,8 +316,11 @@ class Path:
                 # Calculate orientation with X+ pointing in travel direction, Z+ perpendicular to plane
                 quat = cls._calculate_orientation_for_plane(direction, plane_normal)
             else:
-                # Fallback for duplicate points
-                quat = [0.0, 0.0, 0.0, 1.0]
+                # For duplicate points (e.g., closing point of path), use previous waypoint's orientation
+                if i > 0:
+                    quat = waypoints[-1].orientation
+                else:
+                    quat = [0.0, 0.0, 0.0, 1.0]
 
             waypoints.append(Pose(position=pos, orientation=quat))
 
@@ -659,11 +662,15 @@ class SimObjectSpawnParams:
         collision_half_extents: [hx, hy, hz] for box collision
         mesh_scale: Mesh scaling factors [sx, sy, sz]
         rgba_color: RGBA color [r, g, b, a] (0.0-1.0)
-        mass: Object mass in kg (0.0 for static objects)
+        mass: Object mass in kg (1.0 default, use 0.0 for kinematic control)
 
     Note:
         initial_pose is optional and mainly used by SimObject.from_params().
         Managers calculate positions automatically and may ignore this field.
+
+        For URDF robots:
+        - mass=1.0 (default): Uses URDF file's mass values
+        - mass=0.0: Override all links to mass=0 (kinematic control, no physics)
     """
 
     mesh_path: Optional[str] = None
@@ -672,7 +679,7 @@ class SimObjectSpawnParams:
     collision_half_extents: List[float] = field(default_factory=lambda: [0.5, 0.5, 0.5])
     mesh_scale: List[float] = field(default_factory=lambda: [1.0, 1.0, 1.0])
     rgba_color: List[float] = field(default_factory=lambda: [0.8, 0.8, 0.8, 1.0])
-    mass: float = 0.0
+    mass: float = 1.0
 
 
 class SimObject:

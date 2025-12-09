@@ -4,10 +4,15 @@ Path Following Demo
 
 Demonstrates two motion modes:
 1. Omnidirectional: Robot can move in any direction without rotating first
-2. Differential Drive: Robot must rotate to face target, then move forward
+2. Differential Drive: Robot must rotate to face target (3D pitch/yaw), then move forward in 3D
 
-Both robots follow predefined paths (circle and square) with realistic
-velocity and acceleration constraints.
+Four robots demonstrate:
+- Blue (Omni): 2D circle path
+- Red (Diff): 2D square path
+- Green (Omni): Tilted 3D circle path
+- Yellow (Diff): 3D square path with pitch control
+
+All robots use realistic velocity and acceleration constraints.
 """
 
 import os
@@ -19,14 +24,14 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 import numpy as np
 import pybullet as p
 
-from pybullet_fleet.agent import Agent, AgentSpawnParams, Differential3DMode
+from pybullet_fleet.agent import Agent, AgentSpawnParams
 from pybullet_fleet.core_simulation import MultiRobotSimulationCore, SimulationParams
 from pybullet_fleet.sim_object import Path, Pose
 
 
 def main():
     # Create simulation
-    params = SimulationParams(gui=True, timestep=1.0 / 10.0, speed=1.0)
+    params = SimulationParams(gui=True, timestep=1.0 / 10.0, speed=10.0)
     sim = MultiRobotSimulationCore(params)
 
     # Get absolute paths
@@ -46,7 +51,7 @@ def main():
         mesh_scale=[0.5, 0.25, 0.3],  # Rectangular: longer in X direction
         collision_half_extents=[0.25, 0.125, 0.15],
         rgba_color=[0.2, 0.4, 1.0, 1.0],  # Blue
-        mass=1.0,
+        mass=0.0,  # Kinematic control (no physics simulation)
         max_linear_vel=2.0,  # Faster max speed
         max_linear_accel=0.5,  # MUCH slower acceleration for visible effect
         motion_mode="omnidirectional",
@@ -60,7 +65,7 @@ def main():
         urdf_path=urdf_path,
         initial_pose=Pose.from_xyz(4.0, 0.0, 0.3),  # Larger square
         use_fixed_base=False,
-        mass=1.0,
+        mass=0.0,  # Kinematic control (no physics simulation)
         max_linear_vel=2.0,  # Faster max speed
         max_linear_accel=0.5,  # MUCH slower acceleration for visible effect
         max_angular_vel=1.0,  # Slower rotation
@@ -75,44 +80,26 @@ def main():
         mesh_scale=[0.4, 0.2, 0.25],
         collision_half_extents=[0.2, 0.1, 0.125],
         rgba_color=[0.2, 1.0, 0.4, 1.0],  # Green
-        mass=1.0,
+        mass=0.0,  # Kinematic control (no physics simulation)
         max_linear_vel=2.0,
         max_linear_accel=0.5,
         motion_mode="omnidirectional",
     )
     robot_omni_3d = Agent.from_params(omni3d_params, sim_core=sim)
 
-    # Robot 4: Differential Drive with full_3d mode (yellow) - follows 3D square path
-    # This robot uses straight 3D line motion after yaw alignment
+    # Robot 4: Differential Drive (yellow) - follows 3D square path
+    # Uses straight 3D line motion with pitch control
     diff_full3d_params = AgentSpawnParams(
         urdf_path=urdf_path,
         initial_pose=Pose.from_xyz(0.0, 6.0, 0.3),
         use_fixed_base=False,
-        mass=1.0,
+        mass=0.0,  # Kinematic control (no physics simulation)
         max_linear_vel=2.0,
         max_linear_accel=0.5,
         max_angular_vel=1.0,
         motion_mode="differential",
     )
     robot_diff_full3d = Agent.from_params(diff_full3d_params, sim_core=sim)
-    # Set full_3d mode for straight 3D line motion
-    robot_diff_full3d.differential_3d_mode = Differential3DMode.FULL_3D
-
-    # Robot 5: Differential Drive with 2d_with_z mode (orange) - follows same 3D square path as Robot 4
-    # This robot uses XY differential motion + Z interpolation for comparison with full_3d mode
-    diff_2dwithz_params = AgentSpawnParams(
-        urdf_path=urdf_path,
-        initial_pose=Pose.from_xyz(-3.0, 6.0, 0.3),  # Offset to left of Robot 4
-        use_fixed_base=False,
-        mass=1.0,
-        max_linear_vel=2.0,
-        max_linear_accel=0.5,
-        max_angular_vel=1.0,
-        motion_mode="differential",
-    )
-    robot_diff_2dwithz = Agent.from_params(diff_2dwithz_params, sim_core=sim)
-    # Keep default 2d_with_z mode (explicitly set for clarity)
-    robot_diff_2dwithz.differential_3d_mode = Differential3DMode.TWO_D_WITH_Z
 
     # Create paths
     print("Creating paths...")
@@ -157,13 +144,6 @@ def main():
         rpy=[roll_3d, pitch_3d, 0.0],
     )
 
-    # 3D square path for 2d_with_z differential robot (same orientation, offset to left)
-    square_path_3d_2dwithz = Path.create_square(
-        center=[-1.5, 7.5, 1.5],  # Offset to left
-        side_length=4.24,
-        rpy=[roll_3d, pitch_3d, 0.0],  # Same orientation as yellow robot
-    )
-
     # Add debug visualization for paths
     for i in range(len(circle_path) - 1):
         p1 = circle_path[i].position
@@ -199,16 +179,6 @@ def main():
     print("\nVisualizing 3D square path waypoint orientations...")
     square_path_3d.visualize_waypoints(axis_length=0.4, show_points=True)
 
-    # 3D square path for 2d_with_z (orange)
-    for i in range(len(square_path_3d_2dwithz) - 1):
-        p1 = square_path_3d_2dwithz[i].position
-        p2 = square_path_3d_2dwithz[i + 1].position
-        p.addUserDebugLine(p1, p2, [1.0, 0.5, 0.0], lineWidth=2.0, lifeTime=0)
-
-    # Visualize 2d_with_z path orientations for comparison
-    print("Visualizing 2D+Z square path waypoint orientations...")
-    square_path_3d_2dwithz.visualize_waypoints(axis_length=0.4, show_points=True)
-
     # Set paths
     print("\nRobot configurations:")
     print(f"  Omnidirectional (Blue Rectangle): Following circle path ({len(circle_path)} waypoints)")
@@ -223,7 +193,6 @@ def main():
     print(f"    - Max angular velocity: {robot_diff.max_angular_vel} rad/s")
     print(f"    - Total distance: {square_path.get_total_distance():.2f} m")
     print("    - Note: Rotates to face target, then moves forward")
-    print(f"    - Mode: {robot_diff.differential_3d_mode} (yaw rotation + XY differential + Z interpolation)")
 
     print(f"\n  Omnidirectional 3D (Green Rectangle): Following tilted circle path ({len(circle_path_3d)} waypoints)")
     print(f"    - Max velocity: {robot_omni_3d.max_linear_vel} m/s")
@@ -231,30 +200,17 @@ def main():
     print(f"    - Total distance: {circle_path_3d.get_total_distance():.2f} m")
     print("    - Note: Smooth 3D motion along tilted circle")
 
-    print(f"\n  Differential Drive Full 3D (Yellow Mobile Robot): Following 3D square path ({len(square_path_3d)} waypoints)")
+    print(f"\n  Differential Drive 3D (Yellow Mobile Robot): Following 3D square path ({len(square_path_3d)} waypoints)")
     print(f"    - Max velocity: {robot_diff_full3d.max_linear_vel} m/s")
     print(f"    - Max acceleration: {robot_diff_full3d.max_linear_accel} m/s²")
     print(f"    - Max angular velocity: {robot_diff_full3d.max_angular_vel} rad/s")
     print(f"    - Total distance: {square_path_3d.get_total_distance():.2f} m")
-    print(f"    - Mode: {robot_diff_full3d.differential_3d_mode} (straight 3D line motion after yaw alignment)")
-    print("    - Note: Rotates to face target, then moves in straight 3D line")
-
-    print(
-        f"\n  Differential Drive 2D with Z (Orange Mobile Robot): "
-        f"Following 3D square path ({len(square_path_3d_2dwithz)} waypoints)"
-    )
-    print(f"    - Max velocity: {robot_diff_2dwithz.max_linear_vel} m/s")
-    print(f"    - Max acceleration: {robot_diff_2dwithz.max_linear_accel} m/s²")
-    print(f"    - Max angular velocity: {robot_diff_2dwithz.max_angular_vel} rad/s")
-    print(f"    - Total distance: {square_path_3d_2dwithz.get_total_distance():.2f} m")
-    print(f"    - Mode: {robot_diff_2dwithz.differential_3d_mode} (XY differential + Z interpolation)")
-    print("    - Note: Rotates to face XY target, moves with XY differential + Z interpolation")
+    print("    - Note: Rotates to face target (3D pitch/yaw), then moves in straight 3D line")
 
     robot_omni.set_path(circle_path.waypoints)
     robot_diff.set_path(square_path.waypoints)
     robot_omni_3d.set_path(circle_path_3d.waypoints)
     robot_diff_full3d.set_path(square_path_3d.waypoints)
-    robot_diff_2dwithz.set_path(square_path_3d_2dwithz.waypoints)
 
     # Add text labels
     p.addUserDebugText(
@@ -270,11 +226,7 @@ def main():
     )
 
     p.addUserDebugText(
-        "Differential Full 3D\n(Straight 3D Lines)", [0.0, 7.5, 3.5], textColorRGB=[1.0, 0.8, 0.2], textSize=1.5, lifeTime=0
-    )
-
-    p.addUserDebugText(
-        "Differential 2D+Z\n(XY Diff + Z Interp)", [-1.5, 7.5, 3.5], textColorRGB=[1.0, 0.5, 0.0], textSize=1.5, lifeTime=0
+        "Differential 3D\n(Straight 3D Lines)", [0.0, 7.5, 3.5], textColorRGB=[1.0, 0.8, 0.2], textSize=1.5, lifeTime=0
     )
 
     # Set camera to view both robots
@@ -292,9 +244,8 @@ def main():
     print("Watch the SMOOTH acceleration and deceleration:")
     print("  - Blue (omnidirectional): Smooth accel/decel, orientation FIXED (2D circle)")
     print("  - Green (omnidirectional 3D): Smooth accel/decel along tilted 3D circle")
-    print("  - Red (differential 2d_with_z): Smooth rotation + smooth forward motion (2D XY + Z interpolation)")
-    print("  - Yellow (differential full_3d): Smooth rotation + straight 3D line motion")
-    print("  - Orange (differential 2d_with_z): XY differential + Z interpolation (compare with yellow!)")
+    print("  - Red (differential): Smooth rotation + smooth forward motion (2D square)")
+    print("  - Yellow (differential 3D): Smooth 3D rotation + straight 3D line motion")
 
     # Movement callback with velocity display
     step_counter = [0]  # Use list to allow modification in nested function
@@ -308,20 +259,17 @@ def main():
             diff_vel = robot_diff.get_velocity()
             omni3d_vel = robot_omni_3d.get_velocity()
             diff_full3d_vel = robot_diff_full3d.get_velocity()
-            diff_2dwithz_vel = robot_diff_2dwithz.get_velocity()
             omni_speed = np.linalg.norm(omni_vel[:2])
             diff_speed = np.linalg.norm(diff_vel[:2])
             omni3d_speed = np.linalg.norm(omni3d_vel)
             diff_full3d_speed = np.linalg.norm(diff_full3d_vel)
-            diff_2dwithz_speed = np.linalg.norm(diff_2dwithz_vel)
 
             print(
                 f"[t={step_counter[0]*dt:.1f}s] "
                 f"Omni2D: {omni_speed:.3f} | "
                 f"Omni3D: {omni3d_speed:.3f} | "
                 f"Diff2D: {diff_speed:.3f} | "
-                f"Full3D: {diff_full3d_speed:.3f} | "
-                f"2D+Z: {diff_2dwithz_speed:.3f}"
+                f"Full3D: {diff_full3d_speed:.3f}"
             )
 
     # Register callback and run simulation
