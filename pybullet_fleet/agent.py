@@ -245,6 +245,8 @@ class Agent(SimObject):
         # Path following - Private internal state
         self._path: List[Pose] = []  # Empty list when no path (simpler than None)
         self._current_waypoint_index = 0
+        self._final_target_orientation: Optional[np.ndarray] = None  # Final orientation to align to
+        self._align_final_orientation: bool = False  # Whether to align to final orientation
 
         # Two-point interpolation trajectory planners (initialized by set_motion_mode) - Private
         # Position trajectories [X, Y, Z] - shared by both omnidirectional and differential modes
@@ -671,12 +673,16 @@ class Agent(SimObject):
 
         return True
 
-    def set_path(self, path: List[Pose]):
+    def set_path(self, path: List[Pose], auto_approach: bool = True, final_orientation_align: bool = True):
         """
         Set a path (list of waypoints) for the robot to follow.
 
         Args:
             path: List of Pose waypoints to follow in sequence
+            auto_approach: If True, automatically add straight-line approach from current position
+                          to first waypoint if distance > threshold (default: True)
+            final_orientation_align: If True, add final rotation to match last waypoint's orientation
+                                    after reaching the position (default: True)
         """
         if self.use_fixed_base:
             print(f"[Agent] Warning: Cannot set path for fixed-base robot (body_id={self.body_id})")
@@ -686,16 +692,50 @@ class Agent(SimObject):
             print("[Agent] Warning: Empty path provided")
             return
 
-        self._path = path
+        # Get current position
+        current_pose = self.get_pose()
+        current_pos = np.array(current_pose.position)
+        first_waypoint_pos = np.array(path[0].position)
+
+        # Check if we need to add approach waypoint
+        distance_to_first = np.linalg.norm(first_waypoint_pos - current_pos)
+        approach_threshold = 0.5  # meters - add approach if farther than this
+
+        final_path = []
+
+        # Add approach waypoint if needed
+        if auto_approach and distance_to_first > approach_threshold:
+            # Create approach waypoint at first path position with current orientation
+            approach_waypoint = Pose(
+                position=path[0].position, orientation=current_pose.orientation  # Keep current orientation during approach
+            )
+            final_path.append(approach_waypoint)
+            print(f"[Agent] Added approach waypoint (distance: {distance_to_first:.2f}m)")
+
+        # Add all path waypoints
+        final_path.extend(path)
+
+        # Add final orientation alignment if requested
+        if final_orientation_align and len(path) > 0:
+            last_waypoint = path[-1]
+            # Check if final waypoint orientation differs from current
+            # (This will be checked when we reach the last position)
+            self._final_target_orientation = np.array(last_waypoint.orientation)
+            self._align_final_orientation = True
+        else:
+            self._final_target_orientation = None
+            self._align_final_orientation = False
+
+        self._path = final_path
         self._current_waypoint_index = 0
-        self._goal_pose = path[0]
+        self._goal_pose = final_path[0]
         self._is_moving = True
 
         # Initialize trajectory based on motion mode
         if self._motion_mode == MotionMode.OMNIDIRECTIONAL:
-            self._init_omnidirectional_trajectory(path[0])
+            self._init_omnidirectional_trajectory(final_path[0])
         elif self._motion_mode == MotionMode.DIFFERENTIAL:
-            self._init_differential_rotation_trajectory(path[0])
+            self._init_differential_rotation_trajectory(final_path[0])
 
     def _handle_goal_reached(self, current_pose: Pose):
         """
@@ -725,11 +765,41 @@ class Agent(SimObject):
                 elif self._motion_mode == MotionMode.DIFFERENTIAL:
                     self._init_differential_rotation_trajectory(self._goal_pose)
             else:
-                # Path complete - stop all motion in PyBullet
-                self._path = []  # Clear path (was None)
-                self._goal_pose = None
-                # Reset velocity in PyBullet to stop any residual motion
-                p.resetBaseVelocity(self.body_id, linearVelocity=[0, 0, 0], angularVelocity=[0, 0, 0])
+                # Path complete - check if we need final orientation alignment
+                if self._align_final_orientation and self._final_target_orientation is not None:
+                    # Start final rotation to match target orientation
+                    print("[Agent] Path complete, aligning to final orientation...")
+                    self._start_final_orientation_alignment()
+                else:
+                    # Path complete - stop all motion in PyBullet
+                    self._path = []  # Clear path (was None)
+                    self._goal_pose = None
+                    # Reset velocity in PyBullet to stop any residual motion
+                    p.resetBaseVelocity(self.body_id, linearVelocity=[0, 0, 0], angularVelocity=[0, 0, 0])
+                    print(f"[Agent] Path complete (body_id={self.body_id})")
+
+    def _start_final_orientation_alignment(self):
+        """Start rotation to align with final target orientation after reaching last position."""
+        current_pose = self.get_pose()
+
+        # Create a goal pose at current position with target orientation
+        final_goal = Pose(position=current_pose.position, orientation=self._final_target_orientation.tolist())
+
+        # Set as goal and start rotation trajectory
+        self._goal_pose = final_goal
+        self._is_moving = True
+
+        # Use differential rotation trajectory for the final alignment
+        # (even for omnidirectional robots, we just rotate in place)
+        if self._motion_mode == MotionMode.DIFFERENTIAL:
+            self._init_differential_rotation_trajectory(final_goal)
+        else:
+            # For omnidirectional, we also use rotation trajectory but skip forward phase
+            self._init_differential_rotation_trajectory(final_goal)
+
+        # Mark that we're done with the path (just doing final rotation)
+        self._path = []
+        self._align_final_orientation = False  # Don't repeat this
 
     def _init_omnidirectional_trajectory(self, goal: Pose):
         """
@@ -851,18 +921,62 @@ class Agent(SimObject):
         self._rotation_start_quat = np.array(current_pose.orientation)  # [x, y, z, w]
 
         # Calculate target orientation:
-        # - X-axis (robot forward) should point along path direction
-        # - Z-axis (robot up) should match goal pose Z-axis
+        # For differential drive:
+        # - X-axis (robot forward) MUST point along path direction (highest priority)
+        # - Roll (rotation around X-axis) has two modes:
+        #   1. If goal point's X-axis is aligned with movement direction: use goal's roll
+        #   2. Otherwise: minimize roll (natural orientation with Z pointing up)
         if self._forward_total_distance_3d > 1e-6:
-            # Path direction (will be robot's X-axis)
+            # Path direction (will be robot's X-axis) - this has highest priority
             x_axis_target = direction_vec / self._forward_total_distance_3d
 
-            # Get goal pose Z-axis
+            # Get goal pose orientation axes
             goal_rotation = R.from_quat(goal.orientation)
-            z_axis_goal = goal_rotation.as_matrix()[:, 2]  # Extract Z column from rotation matrix
+            goal_rot_matrix = goal_rotation.as_matrix()
+            x_axis_goal = goal_rot_matrix[:, 0]  # Goal's X-axis
+            z_axis_goal = goal_rot_matrix[:, 2]  # Goal's Z-axis (desired up direction)
 
-            # Calculate target quaternion from X and Z axes
-            self._rotation_target_quat = np.array(self._direction_and_up_to_quaternion(x_axis_target, z_axis_goal))
+            # Check if goal's X-axis is aligned with movement direction
+            # Use dot product to measure alignment (1.0 = perfectly aligned)
+            alignment = np.dot(x_axis_goal, x_axis_target)
+
+            # Threshold: cos(18°) ≈ 0.95 (allow up to 18 degrees deviation)
+            if alignment > 0.95:
+                # Goal's X-axis is aligned with movement direction
+                # Use goal's complete orientation (including roll around X-axis)
+                self._rotation_target_quat = np.array(goal.orientation)
+                print(f"[Agent] Differential: Using goal's complete orientation (alignment={alignment:.3f})")
+            else:
+                # Goal's X-axis is NOT aligned with movement direction
+                # Build orientation with X pointing in movement direction
+                # and minimize roll (Z should point mostly up)
+
+                # Y-axis = Z_goal × X_target (right-hand rule)
+                y_axis = np.cross(z_axis_goal, x_axis_target)
+                y_norm_magnitude = np.linalg.norm(y_axis)
+
+                if y_norm_magnitude < 1e-6:
+                    # X and Z are parallel (or nearly so)
+                    # Keep X-axis, choose a perpendicular Y-axis
+                    if abs(x_axis_target[2]) < 0.9:
+                        # X is not vertical, use world up × X
+                        y_axis = np.cross(np.array([0, 0, 1]), x_axis_target)
+                    else:
+                        # X is nearly vertical, use world Y × X
+                        y_axis = np.cross(np.array([0, 1, 0]), x_axis_target)
+                    y_axis = y_axis / np.linalg.norm(y_axis)
+                else:
+                    y_axis = y_axis / y_norm_magnitude
+
+                # Recompute Z-axis to ensure orthogonality: Z = X × Y
+                z_axis_final = np.cross(x_axis_target, y_axis)
+
+                # Build rotation matrix with [X, Y, Z] as columns
+                rotation_matrix = np.column_stack([x_axis_target, y_axis, z_axis_final])
+
+                # Convert to quaternion
+                r = R.from_matrix(rotation_matrix)
+                self._rotation_target_quat = np.array(r.as_quat())  # [x, y, z, w]
         else:
             # No movement needed, use goal orientation directly
             self._rotation_target_quat = np.array(goal.orientation)
@@ -1138,6 +1252,8 @@ class Agent(SimObject):
         self._current_velocity = np.array([0.0, 0.0, 0.0])
         self._current_angular_velocity = 0.0
         self._differential_phase = DifferentialPhase.ROTATE
+        self._final_target_orientation = None
+        self._align_final_orientation = False
 
     # ========================================
     # URDF-specific methods (joint control)

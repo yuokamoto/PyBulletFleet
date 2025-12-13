@@ -6,11 +6,12 @@ Demonstrates two motion modes:
 1. Omnidirectional: Robot can move in any direction without rotating first
 2. Differential Drive: Robot must rotate to face target (3D pitch/yaw), then move forward in 3D
 
-Four robots demonstrate:
+Five robots demonstrate:
 - Blue (Omni): 2D circle path
 - Red (Diff): 2D square path
-- Green (Omni): Tilted 3D circle path
-- Yellow (Diff): 3D square path with pitch control
+- Green (Omni3D): Tilted 3D circle path
+- Yellow (Diff3D): 3D square path with pitch control
+- Magenta (Climb): Climbing path with auto-approach and final orientation alignment
 
 All robots use realistic velocity and acceleration constraints.
 """
@@ -101,6 +102,21 @@ def main():
     )
     robot_diff_full3d = Agent.from_params(diff_full3d_params, sim_core=sim)
 
+    # Robot 5: Differential Drive (magenta/purple) - climbing path demo
+    # Starts far from path, demonstrates auto-approach and final orientation alignment
+    climb_params = AgentSpawnParams(
+        urdf_path=urdf_path,
+        initial_pose=Pose.from_xyz(-10.0, -10.0, 0.3),  # Far from path start
+        use_fixed_base=False,
+        mass=0.0,  # Kinematic control
+        max_linear_vel=2.0,
+        max_linear_accel=0.5,
+        max_angular_vel=1.0,
+        max_angular_accel=5.0,
+        motion_mode="differential",
+    )
+    robot_climb = Agent.from_params(climb_params, sim_core=sim)
+
     # Create paths
     print("Creating paths...")
 
@@ -144,40 +160,100 @@ def main():
         rpy=[roll_3d, pitch_3d, 0.0],
     )
 
-    # Add debug visualization for paths
-    for i in range(len(circle_path) - 1):
-        p1 = circle_path[i].position
-        p2 = circle_path[i + 1].position
-        p.addUserDebugLine(p1, p2, [0.2, 0.4, 1.0], lineWidth=2.0, lifeTime=0)
+    # Climbing path for the 5th robot: horizontal → climb → horizontal
+    # Simple 4-point path demonstrating auto-approach and final orientation
 
-    # Visualize omnidirectional circle path orientations
-    print("Visualizing omnidirectional circle path waypoint orientations...")
-    circle_path.visualize_waypoints(axis_length=0.4, show_points=True)
+    # Calculate orientation for point 3 where Z+ should be perpendicular to the slope
+    # Slope direction: from point 2 to point 3
+    p2 = np.array([-3.0, 0.0, 0.5])
+    p3 = np.array([2.0, 0.0, 3.5])
+    slope_direction = p3 - p2  # [5.0, 0.0, 3.0]
 
-    for i in range(len(square_path) - 1):
-        p1 = square_path[i].position
-        p2 = square_path[i + 1].position
-        p.addUserDebugLine(p1, p2, [1.0, 0.2, 0.2], lineWidth=2.0, lifeTime=0)
+    # For Z+ to be perpendicular to the slope (slope normal):
+    # The slope is in XZ plane, so normal is perpendicular to slope direction
+    # Normal vector: rotate slope direction by 90° in XZ plane
+    # If slope direction is [dx, 0, dz], normal is [-dz, 0, dx]
+    slope_normal = np.array([-slope_direction[2], 0.0, slope_direction[0]])
+    slope_normal = slope_normal / np.linalg.norm(slope_normal)
 
-    # 3D circle path (green)
-    for i in range(len(circle_path_3d) - 1):
-        p1 = circle_path_3d[i].position
-        p2 = circle_path_3d[i + 1].position
-        p.addUserDebugLine(p1, p2, [0.2, 1.0, 0.4], lineWidth=2.0, lifeTime=0)
+    # Calculate pitch angle for Z+ to point in slope_normal direction
+    # slope_normal = [nx, 0, nz], we want Z+ axis to align with this
+    # pitch = arctan2(nx, nz) (rotation around Y axis)
+    slope_pitch = np.arctan2(slope_normal[0], slope_normal[2])
 
-    # Visualize 3D circle path orientations
-    print("Visualizing 3D circle path waypoint orientations...")
-    circle_path_3d.visualize_waypoints(axis_length=0.4, show_points=True)
+    # Create waypoints with simple orientations
+    climbing_waypoints = [
+        Pose.from_euler(-8.0, 0.0, 0.5, roll=0, pitch=0, yaw=0),  # Point 1: Ground start, Z+ = world up
+        Pose.from_euler(-3.0, 0.0, 0.5, roll=0, pitch=0, yaw=0),  # Point 2: Slope start, Z+ = world up
+        Pose.from_euler(2.0, 0.0, 3.5, roll=0, pitch=slope_pitch, yaw=0),  # Point 3: Slope end, Z+ ⊥ slope
+        Pose.from_euler(7.0, 0.0, 3.5, roll=0, pitch=0, yaw=0),  # Point 4: Elevated end, Z+ = world up
+    ]
 
-    # 3D square path (yellow/orange) with coordinate axes visualization
-    for i in range(len(square_path_3d) - 1):
-        p1 = square_path_3d[i].position
-        p2 = square_path_3d[i + 1].position
-        p.addUserDebugLine(p1, p2, [1.0, 0.8, 0.2], lineWidth=2.0, lifeTime=0)
+    climb_path = Path(waypoints=climbing_waypoints)
 
-    # Visualize waypoint orientations (X+: red, Y+: green, Z+: blue)
-    print("\nVisualizing 3D square path waypoint orientations...")
-    square_path_3d.visualize_waypoints(axis_length=0.4, show_points=True)
+    # Visualize paths using Path.visualize() method
+    print("Visualizing paths...")
+
+    # Blue circle for omnidirectional robot
+    circle_path.visualize(
+        line_color=[0.2, 0.4, 1.0],
+        line_width=2.0,
+        show_waypoints=True,
+        show_axes=True,
+        axis_length=0.4,
+        show_points=True,
+    )
+
+    # Red square for differential robot
+    square_path.visualize(
+        line_color=[1.0, 0.2, 0.2],
+        line_width=2.0,
+    )
+
+    # Green 3D circle
+    circle_path_3d.visualize(
+        line_color=[0.2, 1.0, 0.4],
+        line_width=2.0,
+        show_waypoints=True,
+        show_axes=True,
+        axis_length=0.4,
+        show_points=True,
+    )
+
+    # Yellow 3D square
+    square_path_3d.visualize(
+        line_color=[1.0, 0.8, 0.2],
+        line_width=2.0,
+        show_waypoints=True,
+        show_axes=True,
+        axis_length=0.4,
+        show_points=True,
+    )
+
+    # Climbing path visualization with different colors for each segment
+    # Segment 1: Cyan (ground start → slope start)
+    p.addUserDebugLine(
+        climbing_waypoints[0].position, climbing_waypoints[1].position, [0.0, 1.0, 1.0], lineWidth=3.0, lifeTime=0
+    )
+
+    # Segment 2: Magenta (slope start → slope end, diagonal climb)
+    p.addUserDebugLine(
+        climbing_waypoints[1].position, climbing_waypoints[2].position, [1.0, 0.2, 1.0], lineWidth=3.0, lifeTime=0
+    )
+
+    # Segment 3: Orange (slope end → elevated end)
+    p.addUserDebugLine(
+        climbing_waypoints[2].position, climbing_waypoints[3].position, [1.0, 0.6, 0.2], lineWidth=3.0, lifeTime=0
+    )
+
+    # Show waypoint orientations for climb path
+    climb_path.visualize(
+        show_lines=False,
+        show_waypoints=True,
+        show_axes=True,
+        axis_length=0.4,
+        show_points=True,
+    )
 
     # Set paths
     print("\nRobot configurations:")
@@ -207,10 +283,27 @@ def main():
     print(f"    - Total distance: {square_path_3d.get_total_distance():.2f} m")
     print("    - Note: Rotates to face target (3D pitch/yaw), then moves in straight 3D line")
 
+    print(f"\n  Climbing Path Demo (Magenta Mobile Robot): Following climbing path ({len(climb_path)} waypoints)")
+    print(f"    - Max velocity: {robot_climb.max_linear_vel} m/s")
+    print(f"    - Max acceleration: {robot_climb.max_linear_accel} m/s²")
+    print(f"    - Max angular velocity: {robot_climb.max_angular_vel} rad/s")
+    print(f"    - Total distance: {climb_path.get_total_distance():.2f} m")
+    print(f"    - Starting position: {robot_climb.get_pose().position}")
+    print(f"    - Path start: {climb_path.waypoints[0].position}")
+    distance_to_path = np.linalg.norm(np.array(robot_climb.get_pose().position) - np.array(climb_path.waypoints[0].position))
+    print(f"    - Distance to path start: {distance_to_path:.2f}m")
+    print("    - Note: Auto-approach enabled, final orientation alignment enabled")
+    print("    - Path: Ground (cyan) → Climb (magenta) → Elevated (orange)")
+
     robot_omni.set_path(circle_path.waypoints)
     robot_diff.set_path(square_path.waypoints)
     robot_omni_3d.set_path(circle_path_3d.waypoints)
     robot_diff_full3d.set_path(square_path_3d.waypoints)
+    robot_climb.set_path(
+        climb_path.waypoints,
+        auto_approach=True,  # Automatically add approach waypoint
+        final_orientation_align=True,  # Rotate to final orientation after reaching position
+    )
 
     # Add text labels
     p.addUserDebugText(
@@ -229,9 +322,25 @@ def main():
         "Differential 3D\n(Straight 3D Lines)", [0.0, 7.5, 3.5], textColorRGB=[1.0, 0.8, 0.2], textSize=1.5, lifeTime=0
     )
 
-    # Set camera to view both robots
+    p.addUserDebugText(
+        "Climbing Path Demo\n(Auto-Approach + Final Orientation)",
+        [-2.5, 0.0, 5.0],
+        textColorRGB=[1.0, 0.2, 1.0],
+        textSize=1.5,
+        lifeTime=0,
+    )
+
+    p.addUserDebugText(
+        "Start Position\n(Far from path)",
+        [-10.0, -10.0, 1.5],
+        textColorRGB=[1.0, 1.0, 0.2],
+        textSize=1.2,
+        lifeTime=0,
+    )
+
+    # Set camera to view all 5 robots
     p.resetDebugVisualizerCamera(
-        cameraDistance=18.0, cameraYaw=45, cameraPitch=-25, cameraTargetPosition=[0, 0, 1.5]  # Zoom out for all paths
+        cameraDistance=25.0, cameraYaw=45, cameraPitch=-30, cameraTargetPosition=[-2, 0, 2]  # Zoom out for all paths
     )
 
     print("\nSimulation started! Press Ctrl+C to exit.")
@@ -246,6 +355,7 @@ def main():
     print("  - Green (omnidirectional 3D): Smooth accel/decel along tilted 3D circle")
     print("  - Red (differential): Smooth rotation + smooth forward motion (2D square)")
     print("  - Yellow (differential 3D): Smooth 3D rotation + straight 3D line motion")
+    print("  - Magenta (climb): Auto-approach → Ground → Climb → Elevated → Final orientation")
 
     # Movement callback with velocity display
     step_counter = [0]  # Use list to allow modification in nested function
@@ -259,17 +369,20 @@ def main():
             diff_vel = robot_diff.get_velocity()
             omni3d_vel = robot_omni_3d.get_velocity()
             diff_full3d_vel = robot_diff_full3d.get_velocity()
+            climb_vel = robot_climb.get_velocity()
             omni_speed = np.linalg.norm(omni_vel[:2])
             diff_speed = np.linalg.norm(diff_vel[:2])
             omni3d_speed = np.linalg.norm(omni3d_vel)
             diff_full3d_speed = np.linalg.norm(diff_full3d_vel)
+            climb_speed = np.linalg.norm(climb_vel)
 
             print(
                 f"[t={step_counter[0]*dt:.1f}s] "
                 f"Omni2D: {omni_speed:.3f} | "
                 f"Omni3D: {omni3d_speed:.3f} | "
                 f"Diff2D: {diff_speed:.3f} | "
-                f"Full3D: {diff_full3d_speed:.3f}"
+                f"Full3D: {diff_full3d_speed:.3f} | "
+                f"Climb: {climb_speed:.3f}"
             )
 
     # Register callback and run simulation

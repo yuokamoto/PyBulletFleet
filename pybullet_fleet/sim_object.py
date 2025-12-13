@@ -544,6 +544,70 @@ class Path:
 
         return total
 
+    def visualize(
+        self,
+        show_lines: bool = True,
+        line_color: List[float] = None,
+        line_width: float = 2.0,
+        show_waypoints: bool = False,
+        show_axes: bool = False,
+        axis_length: float = 0.3,
+        show_points: bool = False,
+        point_size: float = 0.05,
+        lifetime: float = 0.0,
+    ) -> List[int]:
+        """
+        Visualize path with lines and optional waypoint markers.
+
+        Args:
+            show_lines: If True, draw lines connecting waypoints
+            line_color: RGB color for path lines [r, g, b] (0-1 range), None for default
+            line_width: Width of path lines
+            show_waypoints: If True, show waypoint coordinate axes and points
+            show_axes: If True, draw X, Y, Z axes at each waypoint
+            axis_length: Length of coordinate axes in meters
+            show_points: If True, draw spheres at waypoint positions
+            point_size: Radius of waypoint spheres in meters
+            lifetime: Debug line lifetime (0 = permanent until reset)
+
+        Returns:
+            List of debug item IDs (for later removal if needed)
+
+        Example:
+            # Just show path lines
+            path = Path.create_circle(center=[0, 0, 0.5], radius=2.0)
+            path.visualize(line_color=[1, 0, 0])
+
+            # Show path with waypoint orientations
+            path.visualize(show_waypoints=True, show_axes=True)
+        """
+        debug_ids = []
+
+        # Draw path lines
+        if show_lines and len(self.waypoints) >= 2:
+            # Default color if not specified
+            if line_color is None:
+                line_color = [0.5, 0.5, 0.5]
+
+            for i in range(len(self.waypoints) - 1):
+                p1 = self.waypoints[i].position
+                p2 = self.waypoints[i + 1].position
+                debug_id = p.addUserDebugLine(p1, p2, lineColorRGB=line_color, lineWidth=line_width, lifeTime=lifetime)
+                debug_ids.append(debug_id)
+
+        # Draw waypoint markers if requested
+        if show_waypoints:
+            waypoint_ids = self.visualize_waypoints(
+                show_axes=show_axes,
+                axis_length=axis_length,
+                show_points=show_points,
+                point_size=point_size,
+                lifetime=lifetime,
+            )
+            debug_ids.extend(waypoint_ids)
+
+        return debug_ids
+
     def visualize_waypoints(
         self,
         show_axes: bool = True,
