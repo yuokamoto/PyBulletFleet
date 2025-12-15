@@ -13,6 +13,7 @@ Features:
 - 100 robots spawned in a 10×10 grid (3m spacing)
 - Each robot patrols a 5m×5m×5m cube around its spawn position
 - Random mix of omnidirectional and differential drive (50/50)
+- Random forward/backward direction for differential drive only (50/50) - tests both orientations
 - All robots move in parallel, creating synchronized swarm behavior
 - Color-coded by motion mode (blue=omni, red=differential)
 - Realistic acceleration/deceleration constraints
@@ -26,11 +27,12 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import numpy as np
 import pybullet as p
+import random
 
-from pybullet_fleet.agent import AgentSpawnParams, MotionMode
+from pybullet_fleet.agent import AgentSpawnParams, MotionMode, MovementDirection
 from pybullet_fleet.agent_manager import AgentManager, GridSpawnParams
 from pybullet_fleet.core_simulation import MultiRobotSimulationCore, SimulationParams
-from pybullet_fleet.sim_object import Path, Pose
+from pybullet_fleet.geometry import Path, Pose
 
 
 def create_cube_patrol_path(
@@ -100,6 +102,7 @@ def main():
     print("  - 100 robots in 10×10 grid (3m spacing)")
     print("  - Each robot patrols 5m×5m×5m cube around its spawn position")
     print("  - Random mix: 50% omnidirectional, 50% differential drive")
+    print("  - Random direction for differential only: 50% forward, 50% backward")
     print("  - Patrol: bottom XY → climb → top XY → descend → repeat")
     print("  - Color coding: Blue=omni, Red=differential")
     print("=" * 70)
@@ -181,6 +184,9 @@ def main():
 
     # Set patrol path for each robot (centered at their spawn position)
     print("\nSetting patrol paths (each robot patrols 5m×5m×5m cube, corners only)...")
+    num_forward = 0
+    num_backward = 0
+    num_omni_skipped = 0
     for robot in manager.objects:
         # Get robot's spawn position
         spawn_pos = robot.get_pose().position
@@ -191,7 +197,18 @@ def main():
             cube_size=5.0,
         )
 
-        robot.set_path(robot_patrol_path.waypoints)
+        # Randomly choose FORWARD or BACKWARD movement direction (only for differential drive)
+        if robot.motion_mode == MotionMode.DIFFERENTIAL:
+            direction = random.choice([MovementDirection.FORWARD, MovementDirection.BACKWARD])
+            if direction == MovementDirection.FORWARD:
+                num_forward += 1
+            else:
+                num_backward += 1
+            robot.set_path(robot_patrol_path.waypoints, direction=direction)
+        else:
+            # Omnidirectional: direction parameter is ignored, use default
+            num_omni_skipped += 1
+            robot.set_path(robot_patrol_path.waypoints)
 
         # Visualize the path for each robot
         robot_patrol_path.visualize(
@@ -205,6 +222,9 @@ def main():
         )
 
     print("✓ All robots assigned to individual patrol paths (with visualization)")
+    print(f"  - Differential drive - Forward: {num_forward} robots")
+    print(f"  - Differential drive - Backward: {num_backward} robots")
+    print(f"  - Omnidirectional (direction N/A): {num_omni_skipped} robots")
 
     # Set camera to view the grid center
     # Grid center from offset + middle of the grid

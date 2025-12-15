@@ -27,7 +27,7 @@ import pybullet as p
 
 from pybullet_fleet.agent import Agent, AgentSpawnParams
 from pybullet_fleet.core_simulation import MultiRobotSimulationCore, SimulationParams
-from pybullet_fleet.sim_object import Path, Pose
+from pybullet_fleet.geometry import Path, Pose
 
 
 def main():

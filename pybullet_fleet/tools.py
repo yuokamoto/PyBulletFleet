@@ -1,9 +1,152 @@
 import random
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Union, TYPE_CHECKING
+import logging
 
+import numpy as np
 import pybullet as p
 
 from pybullet_fleet.sim_object import MeshObject, URDFObject
+
+if TYPE_CHECKING:
+    from pybullet_fleet.geometry import Pose
+
+# Create logger for this module
+logger = logging.getLogger(__name__)
+
+
+def resolve_link_index(body_id: int, link: Union[int, str]) -> int:
+    """
+    Resolve link name to index.
+
+    Args:
+        body_id: PyBullet body ID
+        link: Link index (int) or name (str). -1 or "base_link" for base link.
+
+    Returns:
+        Link index (int). Returns -1 if link is "base_link" or if link name not found.
+
+    Example:
+        >>> index = resolve_link_index(robot.body_id, "sensor_mast")
+        >>> index = resolve_link_index(robot.body_id, 2)  # Also accepts int
+        >>> index = resolve_link_index(robot.body_id, "base_link")  # Returns -1
+    """
+    if isinstance(link, int):
+        return link
+
+    # Handle special case for base link
+    if link.lower() == "base_link":
+        return -1
+
+    # Search for link by name
+    num_joints = p.getNumJoints(body_id)
+    for i in range(num_joints):
+        joint_info = p.getJointInfo(body_id, i)
+        link_name = joint_info[12].decode("utf-8")  # Link name is at index 12
+        if link_name == link:
+            return i
+
+    # Link not found
+    logger.warning(f"Link '{link}' not found on body {body_id}, using base link (-1)")
+    return -1
+
+
+def calculate_approach_pose(
+    target_position: List[float], current_position: List[float], approach_offset: float, keep_height: bool = True
+) -> "Pose":
+    """
+    Calculate approach pose for pick/drop operations.
+
+    Args:
+        target_position: Target position [x, y, z]
+        current_position: Current agent position [x, y, z]
+        approach_offset: Distance from target for approach pose
+        keep_height: Whether to keep current height (default: True)
+
+    Returns:
+        Pose object representing the approach pose
+
+    Example:
+        >>> approach = calculate_approach_pose(
+        ...     target_position=[5, 0, 0.1],
+        ...     current_position=[0, 0, 0.3],
+        ...     approach_offset=1.0
+        ... )
+    """
+    from pybullet_fleet.geometry import Pose
+
+    target_pos = np.array(target_position)
+    current_pos = np.array(current_position)
+
+    # Calculate direction from current to target (in XY plane only)
+    direction_xy = target_pos[:2] - current_pos[:2]
+    direction_norm = np.linalg.norm(direction_xy)
+
+    if direction_norm > 1e-6:
+        direction_xy = direction_xy / direction_norm
+        yaw = np.arctan2(direction_xy[1], direction_xy[0])
+    else:
+        yaw = 0.0
+
+    # Calculate approach position (offset away from target)
+    approach_xy = target_pos[:2] - direction_xy * approach_offset
+
+    # Use current height or target height
+    z = current_pos[2] if keep_height else target_pos[2]
+    approach_pos = [approach_xy[0], approach_xy[1], z]
+
+    # Approach orientation: face the target with horizontal orientation
+    return Pose.from_euler(x=approach_pos[0], y=approach_pos[1], z=approach_pos[2], roll=0.0, pitch=0.0, yaw=yaw)
+
+
+def calculate_offset_pose(
+    target_position: List[float], current_position: List[float], offset: float, keep_height: bool = True
+) -> "Pose":
+    """
+    Calculate pose at specified offset distance from target.
+
+    Similar to calculate_approach_pose, but can be used for any offset calculation
+    (e.g., pick_offset, drop_offset).
+
+    Args:
+        target_position: Target position [x, y, z]
+        current_position: Current agent position [x, y, z]
+        offset: Distance from target (positive = away from target)
+        keep_height: Whether to keep current height (default: True)
+
+    Returns:
+        Pose object at the offset position
+
+    Example:
+        >>> pick_pose = calculate_offset_pose(
+        ...     target_position=[5, 0, 0.1],
+        ...     current_position=[0, 0, 0.3],
+        ...     offset=0.3  # 0.3m away from target
+        ... )
+    """
+    from pybullet_fleet.geometry import Pose
+
+    target_pos = np.array(target_position)
+    current_pos = np.array(current_position)
+
+    # Calculate direction from current to target
+    direction = target_pos - current_pos
+    direction[2] = 0  # Project to XY plane
+
+    if np.linalg.norm(direction) > 1e-6:
+        direction = direction / np.linalg.norm(direction)
+        yaw = np.arctan2(direction[1], direction[0])
+    else:
+        yaw = 0.0
+
+    # Calculate offset position
+    offset_pos = target_pos - direction * offset
+
+    # Use current height or target height
+    if keep_height:
+        offset_pos[2] = current_pos[2]
+
+    # Orientation: face the target
+    return Pose.from_euler(x=offset_pos[0], y=offset_pos[1], z=offset_pos[2], roll=0.0, pitch=0.0, yaw=yaw)
 
 
 def world_to_grid(pos: List[float], spacing: List[float], offset: Optional[List[float]] = None) -> List[int]:

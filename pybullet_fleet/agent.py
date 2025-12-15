@@ -5,8 +5,8 @@ Supports both mobile (use_fixed_base=False) and fixed (use_fixed_base=True) robo
 Supports both Mesh and URDF loading.
 """
 
+import logging
 from dataclasses import dataclass, field
-from enum import Enum
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 import numpy as np
@@ -15,33 +15,13 @@ from scipy.spatial.transform import Rotation as R
 from scipy.spatial.transform import Slerp
 from two_point_interpolation import TwoPointInterpolation
 
-from pybullet_fleet.sim_object import Pose, SimObject, SimObjectSpawnParams
+from pybullet_fleet.geometry import Pose
+from pybullet_fleet.sim_object import SimObject, SimObjectSpawnParams
+from pybullet_fleet.action import Action
+from pybullet_fleet.types import MotionMode, DifferentialPhase, MovementDirection, ActionStatus
 
-
-class MotionMode(str, Enum):
-    """
-    Motion mode for robot movement control.
-
-    Attributes:
-        OMNIDIRECTIONAL: Robot can move in any direction without rotating first (holonomic)
-        DIFFERENTIAL: Robot must rotate to face target, then move forward (non-holonomic)
-    """
-
-    OMNIDIRECTIONAL = "omnidirectional"
-    DIFFERENTIAL = "differential"
-
-
-class DifferentialPhase(str, Enum):
-    """
-    Phase for differential drive motion control.
-
-    Attributes:
-        ROTATE: Robot is rotating to face the target direction
-        FORWARD: Robot is moving forward towards the target
-    """
-
-    ROTATE = "rotate"
-    FORWARD = "forward"
+# Create logger for this module
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -247,6 +227,7 @@ class Agent(SimObject):
         self._current_waypoint_index = 0
         self._final_target_orientation: Optional[np.ndarray] = None  # Final orientation to align to
         self._align_final_orientation: bool = False  # Whether to align to final orientation
+        self._movement_direction: MovementDirection = MovementDirection.FORWARD  # Movement direction (differential mode only)
 
         # Two-point interpolation trajectory planners (initialized by set_motion_mode) - Private
         # Position trajectories [X, Y, Z] - shared by both omnidirectional and differential modes
@@ -267,6 +248,19 @@ class Agent(SimObject):
 
         # User-extensible data storage
         self.user_data: Dict[str, Any] = {}
+
+        # Action queue system for high-level task execution
+        self._action_queue: List[Action] = []
+        self._current_action: Optional[Action] = None
+
+        # Override pickable default for Agent (robots are not pickable by default)
+        self.pickable = False
+
+        # Path visualization settings
+        self.path_visualize: bool = False  # Enable/disable path visualization
+        self.path_visualize_color: Optional[List[float]] = None  # RGB color (None = default [0, 1, 1])
+        self.path_visualize_width: float = 2.0  # Line width
+        self._path_debug_ids: List[int] = []  # Store debug line IDs for cleanup
 
         # Initialize motion mode and TPI instances (must be after all attributes are set)
         # Note: This will set _motion_mode and create TPI instances
@@ -644,10 +638,7 @@ class Agent(SimObject):
             True if mode was changed successfully, False if robot is moving
         """
         if self._is_moving:
-            print(
-                "[Agent] Warning: Cannot change motion mode while robot is moving "
-                f"(body_id={self.body_id}). Call stop() first."
-            )
+            logger.warning("Cannot change motion mode while robot is moving " f"(body_id={self.body_id}). Call stop() first.")
             return False
 
         # Normalize to enum
@@ -673,7 +664,46 @@ class Agent(SimObject):
 
         return True
 
-    def set_path(self, path: List[Pose], auto_approach: bool = True, final_orientation_align: bool = True):
+    def _clear_path_visualization(self):
+        """Clear all path visualization debug lines."""
+        for debug_id in self._path_debug_ids:
+            try:
+                p.removeUserDebugItem(debug_id)
+            except Exception:  # noqa: B902
+                pass  # Ignore errors if item was already removed
+        self._path_debug_ids.clear()
+
+    def _visualize_path(self, path: List[Pose]):
+        """
+        Visualize a path as debug lines in PyBullet.
+
+        Args:
+            path: List of waypoints to visualize
+        """
+        if not self.path_visualize or len(path) < 2:
+            return
+
+        # Default color: cyan [0, 1, 1]
+        color = self.path_visualize_color if self.path_visualize_color is not None else [0, 1, 1]
+        width = self.path_visualize_width
+
+        # Draw lines between consecutive waypoints
+        for i in range(len(path) - 1):
+            start_pos = path[i].position
+            end_pos = path[i + 1].position
+
+            debug_id = p.addUserDebugLine(
+                start_pos, end_pos, lineColorRGB=color, lineWidth=width, lifeTime=0  # Permanent until manually removed
+            )
+            self._path_debug_ids.append(debug_id)
+
+    def set_path(
+        self,
+        path: List[Pose],
+        auto_approach: bool = True,
+        final_orientation_align: bool = True,
+        direction: Union[MovementDirection, str] = MovementDirection.FORWARD,
+    ):
         """
         Set a path (list of waypoints) for the robot to follow.
 
@@ -683,14 +713,23 @@ class Agent(SimObject):
                           to first waypoint if distance > threshold (default: True)
             final_orientation_align: If True, add final rotation to match last waypoint's orientation
                                     after reaching the position (default: True)
+            direction: Movement direction - MovementDirection.FORWARD (face movement direction) or
+                      MovementDirection.BACKWARD (maintain current orientation, move backward).
+                      Can also accept string "forward" or "backward" for convenience.
+                      Note: Only used in differential drive mode (MotionMode.DIFFERENTIAL).
+                            In omnidirectional mode, this parameter is ignored.
         """
         if self.use_fixed_base:
-            print(f"[Agent] Warning: Cannot set path for fixed-base robot (body_id={self.body_id})")
+            logger.warning(f"Cannot set path for fixed-base robot (body_id={self.body_id})")
             return
 
         if len(path) == 0:
-            print("[Agent] Warning: Empty path provided")
+            logger.warning("Empty path provided")
             return
+
+        # Normalize direction to enum
+        if isinstance(direction, str):
+            direction = MovementDirection(direction)
 
         # Get current position
         current_pose = self.get_pose()
@@ -705,12 +744,10 @@ class Agent(SimObject):
 
         # Add approach waypoint if needed
         if auto_approach and distance_to_first > approach_threshold:
-            # Create approach waypoint at first path position with current orientation
-            approach_waypoint = Pose(
-                position=path[0].position, orientation=current_pose.orientation  # Keep current orientation during approach
-            )
-            final_path.append(approach_waypoint)
-            print(f"[Agent] Added approach waypoint (distance: {distance_to_first:.2f}m)")
+            # Add current position as approach waypoint
+            # This creates a path: current_pose -> path[0] -> path[1] -> ...
+            final_path.append(current_pose)
+            logger.debug(f"Added approach waypoint at current position (distance to first: {distance_to_first:.2f}m)")
 
         # Add all path waypoints
         final_path.extend(path)
@@ -730,6 +767,11 @@ class Agent(SimObject):
         self._current_waypoint_index = 0
         self._goal_pose = final_path[0]
         self._is_moving = True
+        self._movement_direction = direction  # Store movement direction
+
+        # Clear previous path visualization and visualize new path
+        self._clear_path_visualization()
+        self._visualize_path(final_path)
 
         # Initialize trajectory based on motion mode
         if self._motion_mode == MotionMode.OMNIDIRECTIONAL:
@@ -748,6 +790,11 @@ class Agent(SimObject):
         # Teleport to exact goal position before updating waypoint
         p.resetBasePositionAndOrientation(self.body_id, self._goal_pose.position, current_pose.orientation)
 
+        logger.debug(f"Agent {self.body_id} reached waypoint at position {self._goal_pose.position[:2]}")
+        r = R.from_quat(current_pose.orientation)
+        yaw_current = r.as_euler("xyz", degrees=False)[2]
+        logger.debug(f"  Current orientation: yaw={np.degrees(yaw_current):.1f}°, quat={current_pose.orientation}")
+
         # Stop moving
         self._current_velocity = np.array([0.0, 0.0, 0.0])
         self._current_angular_velocity = 0.0
@@ -757,6 +804,7 @@ class Agent(SimObject):
         if self._path:  # Simpler: empty list is falsy
             self._current_waypoint_index += 1
             if self._current_waypoint_index < len(self._path):
+                logger.debug(f"Agent {self.body_id} moving to next waypoint {self._current_waypoint_index}")
                 self._goal_pose = self._path[self._current_waypoint_index]
                 self._is_moving = True
                 # Initialize trajectory based on motion mode
@@ -768,7 +816,7 @@ class Agent(SimObject):
                 # Path complete - check if we need final orientation alignment
                 if self._align_final_orientation and self._final_target_orientation is not None:
                     # Start final rotation to match target orientation
-                    print("[Agent] Path complete, aligning to final orientation...")
+                    logger.info("Path complete, aligning to final orientation...")
                     self._start_final_orientation_alignment()
                 else:
                     # Path complete - stop all motion in PyBullet
@@ -776,7 +824,7 @@ class Agent(SimObject):
                     self._goal_pose = None
                     # Reset velocity in PyBullet to stop any residual motion
                     p.resetBaseVelocity(self.body_id, linearVelocity=[0, 0, 0], angularVelocity=[0, 0, 0])
-                    print(f"[Agent] Path complete (body_id={self.body_id})")
+                    logger.info(f"Path complete (body_id={self.body_id})")
 
     def _start_final_orientation_alignment(self):
         """Start rotation to align with final target orientation after reaching last position."""
@@ -879,7 +927,9 @@ class Agent(SimObject):
         self._current_velocity = np.array([v_xyz[0], v_xyz[1], v_xyz[2]])
 
         # Set new position (omnidirectional: keep original orientation, don't rotate)
-        p.resetBasePositionAndOrientation(self.body_id, new_pos.tolist(), current_pose.orientation)
+        # Use set_pose() to ensure attached objects are updated
+        new_pose = Pose(position=new_pos.tolist(), orientation=current_pose.orientation)
+        self.set_pose(new_pose)
 
     def _init_differential_rotation_trajectory(self, goal: Pose):
         """
@@ -888,10 +938,12 @@ class Agent(SimObject):
         smooth quaternion interpolation.
 
         Differential drive has two phases:
-        1. Rotation phase: Rotate to face the target using TPI + Slerp
+        1. Rotation phase: Rotate to align X-axis with movement direction using TPI + Slerp
            - TPI calculates angle progression considering max_angular_vel and max_angular_accel
            - Slerp provides smooth shortest-path quaternion interpolation
-        2. Forward phase: Move forward to the target
+           - FORWARD: X+ points towards target (robot faces target)
+           - BACKWARD: X- points towards target (robot faces away, X+ points away from target)
+        2. Forward phase: Move along the path (position interpolates from start to goal regardless of direction)
 
         Args:
             goal: Target pose
@@ -899,6 +951,10 @@ class Agent(SimObject):
         current_pose = self.get_pose()
         current_pos = np.array(current_pose.position)
         goal_pos = np.array(goal.position)
+
+        logger.debug(f"Agent {self.body_id} initializing differential rotation trajectory")
+        logger.debug(f"  Current pos: {current_pos[:2]}, Goal pos: {goal_pos[:2]}")
+        logger.debug(f"  Goal orientation (quat): {goal.orientation}")
 
         # Calculate direction vector
         direction_vec = goal_pos - current_pos
@@ -914,6 +970,7 @@ class Agent(SimObject):
         # Calculate 3D distance
         self._forward_total_distance_3d = float(np.linalg.norm(direction_vec))
 
+        # Forward movement: rotate to face target (or opposite for backward)
         # Calculate target orientation
         self._differential_phase = DifferentialPhase.ROTATE
 
@@ -922,13 +979,22 @@ class Agent(SimObject):
 
         # Calculate target orientation:
         # For differential drive:
-        # - X-axis (robot forward) MUST point along path direction (highest priority)
+        # - FORWARD: X-axis (robot forward) points along path direction
+        # - BACKWARD: X-axis points opposite to path direction (X- towards target)
         # - Roll (rotation around X-axis) has two modes:
         #   1. If goal point's X-axis is aligned with movement direction: use goal's roll
         #   2. Otherwise: minimize roll (natural orientation with Z pointing up)
         if self._forward_total_distance_3d > 1e-6:
-            # Path direction (will be robot's X-axis) - this has highest priority
-            x_axis_target = direction_vec / self._forward_total_distance_3d
+            # Path direction (normalized)
+            movement_direction_vec = direction_vec / self._forward_total_distance_3d
+
+            # Determine X-axis direction based on forward/backward movement
+            if self._movement_direction == MovementDirection.BACKWARD:
+                # Backward: X-axis points opposite to movement (robot faces away from target)
+                x_axis_target = -movement_direction_vec
+            else:
+                # Forward: X-axis points along movement (robot faces target)
+                x_axis_target = movement_direction_vec
 
             # Get goal pose orientation axes
             goal_rotation = R.from_quat(goal.orientation)
@@ -940,12 +1006,18 @@ class Agent(SimObject):
             # Use dot product to measure alignment (1.0 = perfectly aligned)
             alignment = np.dot(x_axis_goal, x_axis_target)
 
+            logger.debug(f"Agent {self.body_id} checking orientation alignment:")
+            logger.debug(f"  Movement direction: {x_axis_target}")
+            logger.debug(f"  Goal's X-axis: {x_axis_goal}")
+            logger.debug(f"  Alignment: {alignment:.3f} (threshold: 0.95)")
+
             # Threshold: cos(18°) ≈ 0.95 (allow up to 18 degrees deviation)
             if alignment > 0.95:
                 # Goal's X-axis is aligned with movement direction
                 # Use goal's complete orientation (including roll around X-axis)
                 self._rotation_target_quat = np.array(goal.orientation)
-                print(f"[Agent] Differential: Using goal's complete orientation (alignment={alignment:.3f})")
+                logger.debug(f"Agent {self.body_id} using goal's complete orientation")
+                logger.info(f"Using goal's complete orientation (alignment={alignment:.3f})")
             else:
                 # Goal's X-axis is NOT aligned with movement direction
                 # Build orientation with X pointing in movement direction
@@ -978,14 +1050,17 @@ class Agent(SimObject):
                 r = R.from_matrix(rotation_matrix)
                 self._rotation_target_quat = np.array(r.as_quat())  # [x, y, z, w]
         else:
-            # No movement needed, use goal orientation directly
-            self._rotation_target_quat = np.array(goal.orientation)
+            # No movement needed - this happens when waypoint is at current position
+            # Keep current orientation (don't rotate to waypoint orientation)
+            self._rotation_target_quat = self._rotation_start_quat
 
         # Calculate rotation angle between quaternions
         r_current = R.from_quat(self._rotation_start_quat)
         r_target = R.from_quat(self._rotation_target_quat)
         r_delta = r_target * r_current.inv()
         rotation_angle = r_delta.magnitude()  # Total rotation angle in radians
+
+        logger.debug(f"Agent {self.body_id} rotation: {rotation_angle:.3f} rad ({np.degrees(rotation_angle):.1f}°)")
 
         # Use TPI to calculate rotation trajectory with angular acceleration and velocity constraints
         if rotation_angle > 1e-6:
@@ -1098,7 +1173,8 @@ class Agent(SimObject):
             if current_time >= self._tpi_rotation_angle.get_end_time():
                 # Rotation complete, switch to forward phase
                 # Set exact final rotation (target quaternion)
-                p.resetBasePositionAndOrientation(self.body_id, current_pos.tolist(), self._rotation_target_quat.tolist())
+                final_pose = Pose(position=current_pos.tolist(), orientation=self._rotation_target_quat.tolist())
+                self.set_pose(final_pose)
 
                 # Initialize forward trajectory
                 self._differential_phase = DifferentialPhase.FORWARD
@@ -1113,17 +1189,22 @@ class Agent(SimObject):
 
                 r_interpolated = self._rotation_slerp(angle_ratio)
                 new_orientation = r_interpolated.as_quat().tolist()
-                p.resetBasePositionAndOrientation(self.body_id, current_pos.tolist(), new_orientation)
+                new_pose = Pose(position=current_pos.tolist(), orientation=new_orientation)
+                self.set_pose(new_pose)
             else:
                 # Fallback: use target orientation directly
-                p.resetBasePositionAndOrientation(self.body_id, current_pos.tolist(), self._rotation_target_quat.tolist())
+                fallback_pose = Pose(position=current_pos.tolist(), orientation=self._rotation_target_quat.tolist())
+                self.set_pose(fallback_pose)
 
             # Update angular velocity from TPI
             self._current_angular_velocity = angular_vel
             self._current_velocity = np.array([0.0, 0.0, 0.0])
 
+            # Log current yaw during rotation (debug level)
+            logger.debug(f"Agent {self.body_id} rotating, current yaw: {self.get_pose().yaw:.1f}°")
+
         elif self._differential_phase == DifferentialPhase.FORWARD:
-            # Phase 2: Move forward using TPI
+            # Phase 2: Move forward/backward using TPI
             # Get interpolated distance from trajectory (scalar progress)
             distance_traveled, forward_vel, forward_acc = self._tpi_forward.get_point(current_time)
 
@@ -1143,15 +1224,18 @@ class Agent(SimObject):
             # Position: interpolate along 3D line
             new_pos = self._forward_start_pos + direction_3d * ratio
 
-            # Orientation: Keep the target orientation from rotation phase (no need to recalculate)
+            # Orientation: use orientation from rotation phase
+            # (For FORWARD: X+ towards target, for BACKWARD: X- towards target)
             new_orientation = self._rotation_target_quat.tolist()
 
-            # Velocity: along 3D direction
+            # Velocity: along 3D direction (same for both forward and backward)
+            # Note: Position interpolates from start to goal regardless of orientation
             direction_3d_unit = direction_3d / total_distance if total_distance > 1e-6 else np.array([0.0, 0.0, 0.0])
             self._current_velocity = direction_3d_unit * forward_vel
 
-            # Update position/orientation and reset angular velocity
-            p.resetBasePositionAndOrientation(self.body_id, new_pos.tolist(), new_orientation)
+            # Update position/orientation - use set_pose() to update attached objects
+            new_pose = Pose(position=new_pos.tolist(), orientation=new_orientation)
+            self.set_pose(new_pose)
             self._current_angular_velocity = 0.0
 
     def _direction_and_up_to_quaternion(self, x_axis: np.ndarray, z_axis: np.ndarray) -> List[float]:
@@ -1201,6 +1285,108 @@ class Agent(SimObject):
         r = R.from_matrix(rotation_matrix)
         return r.as_quat().tolist()  # [x, y, z, w]
 
+    # ============================================================================
+    # Action Queue System
+    # ============================================================================
+
+    def add_action(self, action: Action):
+        """
+        Add an action to the execution queue.
+
+        Actions are executed sequentially in the order they are added.
+
+        Args:
+            action: Action instance to add to queue
+
+        Example:
+            agent.add_action(MoveAction(path=my_path))
+            agent.add_action(WaitAction(duration=5.0))
+        """
+        self._action_queue.append(action)
+        logger.info(f"Added {action.__class__.__name__} to queue (queue size: {len(self._action_queue)})")
+
+    def add_action_sequence(self, actions: List[Action]):
+        """
+        Add multiple actions to the execution queue.
+
+        Args:
+            actions: List of Action instances to add
+
+        Example:
+            agent.add_action_sequence([
+                MoveAction(path=path1),
+                PickAction(target_object_id=obj.body_id),
+                MoveAction(path=path2),
+                DropAction(drop_position=[10, 5, 0])
+            ])
+        """
+        self._action_queue.extend(actions)
+        logger.info(f"Added {len(actions)} actions to queue (queue size: {len(self._action_queue)})")
+
+    def clear_actions(self):
+        """
+        Clear all actions from the queue and cancel current action.
+        """
+        self._action_queue.clear()
+        if self._current_action is not None:
+            self._current_action.cancel()
+            self._current_action = None
+        logger.info("Cleared all actions")
+
+    def get_current_action(self) -> Optional[Action]:
+        """
+        Get the currently executing action.
+
+        Returns:
+            Current Action instance, or None if no action is executing
+        """
+        return self._current_action
+
+    def get_action_queue_size(self) -> int:
+        """
+        Get the number of actions waiting in the queue.
+
+        Returns:
+            Number of actions in queue
+        """
+        return len(self._action_queue)
+
+    def _update_actions(self, dt: float):
+        """
+        Update action execution system.
+
+        This is called internally by update() to process the action queue.
+
+        Args:
+            dt: Time step (seconds)
+        """
+        # If no current action, try to get next one from queue
+        if self._current_action is None:
+            if self._action_queue:
+                self._current_action = self._action_queue.pop(0)
+                logger.info(
+                    f"Starting {self._current_action.__class__.__name__} " f"(remaining in queue: {len(self._action_queue)})"
+                )
+            else:
+                return  # No actions to execute
+
+        # Execute current action
+        is_complete = self._current_action.execute(self, dt)
+
+        if is_complete:
+            action_name = self._current_action.__class__.__name__
+            status = self._current_action.status
+
+            if status == ActionStatus.COMPLETED:
+                logger.info(f"{action_name} completed successfully")
+            elif status == ActionStatus.FAILED:
+                logger.error(f"{action_name} failed: {self._current_action.error_message}")
+            elif status == ActionStatus.CANCELLED:
+                logger.warning(f"{action_name} was cancelled")
+
+            # Move to next action
+            self._current_action = None
+
     def update(self, dt: float):
         """
         Update robot position towards goal with velocity/acceleration constraints.
@@ -1209,11 +1395,16 @@ class Agent(SimObject):
         - MotionMode.OMNIDIRECTIONAL: Move in any direction without rotating first (smooth trajectories)
         - MotionMode.DIFFERENTIAL: Rotate to face target, then move forward (smooth trajectories)
 
+        Also processes action queue for high-level task execution.
+
         Note: This does nothing if the robot has a fixed base.
 
         Args:
             dt: Time step (seconds)
         """
+        # Process action queue first (actions may set goals/paths)
+        self._update_actions(dt)
+
         if self.use_fixed_base:
             return
 
@@ -1254,6 +1445,8 @@ class Agent(SimObject):
         self._differential_phase = DifferentialPhase.ROTATE
         self._final_target_orientation = None
         self._align_final_orientation = False
+        self._movement_direction = MovementDirection.FORWARD
+        self._clear_path_visualization()  # Clear visualization when stopping
 
     # ========================================
     # URDF-specific methods (joint control)
@@ -1280,11 +1473,11 @@ class Agent(SimObject):
             robot.set_joint_target(0, 1.57)  # Move first joint to 90 degrees
         """
         if not self.is_urdf_robot():
-            print("[Agent] Warning: set_joint_target() only works for URDF robots")
+            logger.warning("set_joint_target() only works for URDF robots")
             return
 
         if joint_index >= len(self.joint_info):
-            print(f"[Agent] Warning: joint_index {joint_index} out of range (max: {len(self.joint_info)-1})")
+            logger.warning(f"joint_index {joint_index} out of range (max: {len(self.joint_info)-1})")
             return
 
         p.setJointMotorControl2(
@@ -1309,7 +1502,7 @@ class Agent(SimObject):
             pos, vel = robot.get_joint_state(0)
         """
         if not self.is_urdf_robot():
-            print("[Agent] Warning: get_joint_state() only works for URDF robots")
+            logger.warning("get_joint_state() only works for URDF robots")
             return (0.0, 0.0)
 
         joint_state = p.getJointState(self.body_id, joint_index)
@@ -1327,11 +1520,11 @@ class Agent(SimObject):
             robot.set_all_joint_targets([0.0, 1.57, -1.57, 0.0])
         """
         if not self.is_urdf_robot():
-            print("[Agent] Warning: set_all_joint_targets() only works for URDF robots")
+            logger.warning("set_all_joint_targets() only works for URDF robots")
             return
 
         if len(target_positions) != len(self.joint_info):
-            print(f"[Agent] Warning: Expected {len(self.joint_info)} targets, got {len(target_positions)}")
+            logger.warning(f"Expected {len(self.joint_info)} targets, got {len(target_positions)}")
             return
 
         for i, target in enumerate(target_positions):
