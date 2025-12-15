@@ -50,11 +50,72 @@ def resolve_link_index(body_id: int, link: Union[int, str]) -> int:
     return -1
 
 
+def calculate_offset_pose(
+    target_position: List[float], current_position: List[float], offset: float, keep_height: bool = True
+) -> "Pose":
+    """
+    Calculate pose at specified offset distance from target.
+
+    This unified function can be used for various offset calculations:
+    - Approach poses (approach_offset): Position before reaching target
+    - Pick poses (pick_offset): Position where pick operation occurs
+    - Drop poses (drop_offset): Position where drop operation occurs
+
+    Args:
+        target_position: Target position [x, y, z]
+        current_position: Current agent position [x, y, z]
+        offset: Distance from target (positive = away from target, 0 = at target)
+        keep_height: Whether to keep current height (default: True)
+
+    Returns:
+        Pose object at the offset position, oriented to face the target
+
+    Example:
+        >>> # Approach pose (1.5m away from target)
+        >>> approach = calculate_offset_pose([5, 0, 0.1], [0, 0, 0.3], offset=1.5)
+        >>>
+        >>> # Pick pose (0.3m away from target)
+        >>> pick = calculate_offset_pose([5, 0, 0.1], [0, 0, 0.3], offset=0.3)
+        >>>
+        >>> # At target position (0m offset)
+        >>> drop = calculate_offset_pose([5, 0, 0.1], [0, 0, 0.3], offset=0.0)
+    """
+    from pybullet_fleet.geometry import Pose
+
+    target_pos = np.array(target_position)
+    current_pos = np.array(current_position)
+
+    # Calculate direction from current to target
+    direction = target_pos - current_pos
+    direction[2] = 0  # Project to XY plane
+
+    direction_norm = np.linalg.norm(direction)
+    if direction_norm > 1e-6:
+        direction = direction / direction_norm
+        yaw = np.arctan2(direction[1], direction[0])
+    else:
+        yaw = 0.0
+
+    # Calculate offset position (away from target by offset distance)
+    offset_pos = target_pos - direction * offset
+
+    # Use current height or target height
+    z = current_pos[2] if keep_height else target_pos[2]
+    offset_pos[2] = z
+
+    # Orientation: face the target with horizontal orientation
+    return Pose.from_euler(x=offset_pos[0], y=offset_pos[1], z=offset_pos[2], roll=0.0, pitch=0.0, yaw=yaw)
+
+
 def calculate_approach_pose(
     target_position: List[float], current_position: List[float], approach_offset: float, keep_height: bool = True
 ) -> "Pose":
     """
     Calculate approach pose for pick/drop operations.
+
+    .. deprecated::
+        This function is deprecated and kept for backward compatibility.
+        Use :func:`calculate_offset_pose` instead.
 
     Args:
         target_position: Target position [x, y, z]
@@ -66,87 +127,13 @@ def calculate_approach_pose(
         Pose object representing the approach pose
 
     Example:
-        >>> approach = calculate_approach_pose(
-        ...     target_position=[5, 0, 0.1],
-        ...     current_position=[0, 0, 0.3],
-        ...     approach_offset=1.0
-        ... )
+        >>> # Old way (deprecated but still works)
+        >>> approach = calculate_approach_pose([5, 0, 0.1], [0, 0, 0.3], approach_offset=1.0)
+        >>>
+        >>> # New way (recommended)
+        >>> approach = calculate_offset_pose([5, 0, 0.1], [0, 0, 0.3], offset=1.0)
     """
-    from pybullet_fleet.geometry import Pose
-
-    target_pos = np.array(target_position)
-    current_pos = np.array(current_position)
-
-    # Calculate direction from current to target (in XY plane only)
-    direction_xy = target_pos[:2] - current_pos[:2]
-    direction_norm = np.linalg.norm(direction_xy)
-
-    if direction_norm > 1e-6:
-        direction_xy = direction_xy / direction_norm
-        yaw = np.arctan2(direction_xy[1], direction_xy[0])
-    else:
-        yaw = 0.0
-
-    # Calculate approach position (offset away from target)
-    approach_xy = target_pos[:2] - direction_xy * approach_offset
-
-    # Use current height or target height
-    z = current_pos[2] if keep_height else target_pos[2]
-    approach_pos = [approach_xy[0], approach_xy[1], z]
-
-    # Approach orientation: face the target with horizontal orientation
-    return Pose.from_euler(x=approach_pos[0], y=approach_pos[1], z=approach_pos[2], roll=0.0, pitch=0.0, yaw=yaw)
-
-
-def calculate_offset_pose(
-    target_position: List[float], current_position: List[float], offset: float, keep_height: bool = True
-) -> "Pose":
-    """
-    Calculate pose at specified offset distance from target.
-
-    Similar to calculate_approach_pose, but can be used for any offset calculation
-    (e.g., pick_offset, drop_offset).
-
-    Args:
-        target_position: Target position [x, y, z]
-        current_position: Current agent position [x, y, z]
-        offset: Distance from target (positive = away from target)
-        keep_height: Whether to keep current height (default: True)
-
-    Returns:
-        Pose object at the offset position
-
-    Example:
-        >>> pick_pose = calculate_offset_pose(
-        ...     target_position=[5, 0, 0.1],
-        ...     current_position=[0, 0, 0.3],
-        ...     offset=0.3  # 0.3m away from target
-        ... )
-    """
-    from pybullet_fleet.geometry import Pose
-
-    target_pos = np.array(target_position)
-    current_pos = np.array(current_position)
-
-    # Calculate direction from current to target
-    direction = target_pos - current_pos
-    direction[2] = 0  # Project to XY plane
-
-    if np.linalg.norm(direction) > 1e-6:
-        direction = direction / np.linalg.norm(direction)
-        yaw = np.arctan2(direction[1], direction[0])
-    else:
-        yaw = 0.0
-
-    # Calculate offset position
-    offset_pos = target_pos - direction * offset
-
-    # Use current height or target height
-    if keep_height:
-        offset_pos[2] = current_pos[2]
-
-    # Orientation: face the target
-    return Pose.from_euler(x=offset_pos[0], y=offset_pos[1], z=offset_pos[2], roll=0.0, pitch=0.0, yaw=yaw)
+    return calculate_offset_pose(target_position, current_position, approach_offset, keep_height)
 
 
 def world_to_grid(pos: List[float], spacing: List[float], offset: Optional[List[float]] = None) -> List[int]:

@@ -10,7 +10,7 @@ import pybullet as p
 import pybullet_data
 
 from pybullet_fleet.agent import Agent
-from pybullet_fleet.sim_object import Path, Pose
+from pybullet_fleet.geometry import Path, Pose
 
 
 def main():
@@ -77,7 +77,7 @@ def main():
 
     # Set path
     robot.set_path(path.waypoints)
-    print(f"\nPath set. Robot state:")
+    print("\nPath set. Robot state:")
     print(f"  is_moving: {robot.is_moving}")
     print(f"  current_waypoint_index: {robot.current_waypoint_index}")
     print(f"  goal_pose: {robot.goal_pose.position if robot.goal_pose else None}")

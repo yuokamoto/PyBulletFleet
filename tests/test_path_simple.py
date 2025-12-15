@@ -8,7 +8,7 @@ import pybullet as p
 import pybullet_data
 
 from pybullet_fleet.agent import Agent
-from pybullet_fleet.sim_object import Path, Pose
+from pybullet_fleet.geometry import Path, Pose
 
 
 def main():
