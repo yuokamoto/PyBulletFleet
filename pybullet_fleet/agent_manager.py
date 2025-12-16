@@ -288,26 +288,40 @@ class SimObjectManager(Generic[T]):
 
 class AgentManager(SimObjectManager[Agent]):
     """
-    Extended manager class for agents with movement control.
+    Extended manager class for agents with goal management.
 
     This class extends SimObjectManager with agent-specific features:
     - Pose goal assignment to individual agents
-    - Update all agents in a single call
     - Callback system for custom goal update logic
     - Query moving/stopped agents
 
-    Note: Agent-specific state is stored in each Agent.user_data dict
+    Note:
+    - Agent.update() is automatically called by MultiRobotSimulationCore every step
+    - AgentManager focuses on goal management, not movement updates
+    - Agent-specific state is stored in each Agent.user_data dict
     """
 
-    def __init__(self, sim_core=None):
+    def __init__(self, sim_core=None, auto_register: bool = True, update_frequency: float = 30.0):
         """
         Initialize AgentManager.
 
         Args:
             sim_core: Reference to simulation core (optional)
+            auto_register: If True and sim_core is provided, automatically register
+                         goal update callback to simulation loop (default: True)
+            update_frequency: Goal update frequency in Hz when auto_register=True (default: 30.0)
         """
         super().__init__(sim_core)
         self._goal_update_callback: Optional[Callable] = None  # User-defined goal logic
+
+        # Auto-register goal update callback if sim_core is provided
+        if sim_core is not None and auto_register:
+            # Create wrapper to match sim_core callback signature: callback(robots, sim_core, dt)
+            def _goal_update_wrapper(robots, core, dt):
+                self.update_goals(dt)
+
+            sim_core.register_callback(_goal_update_wrapper, frequency=update_frequency)
+            print(f"[AgentManager] Auto-registered goal update callback at {update_frequency} Hz")
 
     def spawn_agents_grid(self, num_agents: int, grid_params: GridSpawnParams, spawn_params: AgentSpawnParams) -> List[Agent]:
         """
@@ -394,16 +408,6 @@ class AgentManager(SimObjectManager[Agent]):
         else:
             print(f"[AgentManager] Warning: Unknown agent body_id {body_id}")
 
-    def update_all(self, dt: float):
-        """
-        Update all agents (move towards goals with velocity constraints).
-
-        Args:
-            dt: Time step (seconds)
-        """
-        for agent in self.objects:
-            agent.update(dt)
-
     def stop_all(self):
         """Stop all agents and clear their goals."""
         for agent in self.objects:
@@ -417,7 +421,7 @@ class AgentManager(SimObjectManager[Agent]):
         """
         Register a callback for custom goal update logic.
 
-        The callback will be called during update_all_with_goals() and should have signature:
+        The callback will be called during update_goals() and should have signature:
             callback(agents: List[Agent], manager: AgentManager, dt: float) -> None
 
         Example:
@@ -436,13 +440,12 @@ class AgentManager(SimObjectManager[Agent]):
         """
         self._goal_update_callback = callback
 
-    def update_all_with_goals(self, dt: float):
+    def update_goals(self, dt: float):
         """
-        Update all agents and call goal update callback if registered.
+        Call goal update callback if registered.
 
-        This is a convenience method that:
-        1. Calls the goal update callback (if registered)
-        2. Updates all agent positions
+        This method only handles goal updates. Agent position updates are
+        automatically handled by MultiRobotSimulationCore.step_once().
 
         Args:
             dt: Time step (seconds)
@@ -450,9 +453,6 @@ class AgentManager(SimObjectManager[Agent]):
         # Call user-defined goal update logic
         if self._goal_update_callback is not None:
             self._goal_update_callback(self.objects, self, dt)
-
-        # Update all agent positions
-        self.update_all(dt)
 
     def setup_camera(self, camera_config: Optional[Dict] = None) -> None:
         """

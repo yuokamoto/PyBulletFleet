@@ -149,30 +149,35 @@ Configuration dataclass for robot initialization.
 
 #### Key Classes:
 
-##### RobotManager
-High-level manager for multiple Robot instances.
+##### AgentManager
+High-level manager for multiple Agent instances.
 
 **Responsibilities:**
-- Batch robot spawning (grid-based layout)
-- Centralized robot collection management
-- Bulk operations (update all, set goals for all)
+- Batch agent spawning (grid-based layout)
+- Centralized agent collection management
+- Goal management and update callbacks
 - Grid position calculation
 
 **Key Methods:**
-- `spawn_robots_grid(mesh_path, num_robots, grid_params, spawn_params)`: Create robots in grid pattern
-- `update_all_robots(dt)`: Update all managed robots
-- `get_robots()`: Access robot collection
+- `spawn_agents_grid(num_agents, grid_params, spawn_params)`: Create agents in grid pattern
+- `register_goal_update_callback(callback)`: Register custom goal logic
+- `update_goals(dt)`: Execute goal update callback (called automatically by MultiRobotSimulationCore)
+- `get_agents()`: Access agent collection
+
+**Note:**
+- Agent.update() is automatically called by MultiRobotSimulationCore.step_once()
+- AgentManager focuses on goal management, not movement updates
 
 ##### GridSpawnParams
-Configuration for grid-based robot placement.
+Configuration for grid-based agent placement.
 
 **Attributes:**
 - `x_min`, `x_max`, `y_min`, `z_max, `y_min`, `z_max`: Grid boundaries
-- `spacing`: [x, y, z] spacing between robots
+- `spacing`: [x, y, z] spacing between agents
 - `offset`: [x, y, z] global offset
 
 **Grid Calculation:**
-- Automatically distributes robots evenly within bounds
+- Automatically distributes agents evenly within bounds
 - Uses ceiling(sqrt(n)) for grid dimensions
 - Handles non-perfect squares
 
