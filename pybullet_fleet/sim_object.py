@@ -4,7 +4,7 @@ Base class for simulation objects with attachment support.
 """
 
 from dataclasses import dataclass, field
-from typing import Callable, List, Optional
+from typing import Callable, List, Optional, Dict, Tuple
 
 import numpy as np
 import pybullet as p
@@ -60,6 +60,9 @@ class SimObject:
         pickable: Whether this object can be picked by robots (default: True)
     """
 
+    # Class-level shared shapes cache (for optimization)
+    _shared_shapes: Dict[str, Tuple[int, int]] = {}
+
     def __init__(self, body_id: int, sim_core=None, mesh_path: Optional[str] = None, pickable: bool = True):
         self.body_id = body_id
         self.sim_core = sim_core
@@ -77,6 +80,71 @@ class SimObject:
         # Auto-register to sim_core if provided
         if sim_core is not None:
             sim_core.sim_objects.append(self)
+
+    @classmethod
+    def create_shared_shapes(
+        cls,
+        mesh_path: str,
+        mesh_scale: List[float] = None,
+        collision_shape_type: str = "box",
+        collision_half_extents: List[float] = None,
+        rgba_color: List[float] = None,
+    ) -> Tuple[int, int]:
+        """
+        Create shared visual and collision shapes for fast object spawning.
+
+        This method caches shapes by their parameters, so multiple objects with
+        identical parameters will reuse the same PyBullet shape IDs.
+
+        Args:
+            mesh_path: Path to mesh file
+            mesh_scale: Mesh scaling [x, y, z]
+            collision_shape_type: "box", "mesh", or None
+            collision_half_extents: Collision box half extents [x, y, z]
+            rgba_color: RGBA color [r, g, b, a]
+
+        Returns:
+            (visual_id, collision_id) tuple
+        """
+        # Set defaults
+        if mesh_scale is None:
+            mesh_scale = [1.0, 1.0, 1.0]
+        if collision_half_extents is None:
+            collision_half_extents = [0.5, 0.5, 0.5]
+        if rgba_color is None:
+            rgba_color = [0.8, 0.8, 0.8, 1.0]
+
+        # Create unique cache key from all parameters
+        shape_key = (
+            f"{mesh_path}_{collision_shape_type}_{tuple(collision_half_extents)}_{tuple(mesh_scale)}_{tuple(rgba_color)}"
+        )
+
+        # Check if shapes already exist in cache
+        if shape_key in cls._shared_shapes:
+            return cls._shared_shapes[shape_key]
+
+        # Create collision shape
+        if collision_shape_type is None:
+            collision_id = -1  # No collision shape
+        elif collision_shape_type == "box":
+            collision_id = p.createCollisionShape(p.GEOM_BOX, halfExtents=collision_half_extents)
+        elif collision_shape_type == "mesh":
+            if mesh_path is None:
+                raise ValueError("mesh_path is required when collision_shape_type='mesh'")
+            collision_id = p.createCollisionShape(p.GEOM_MESH, fileName=mesh_path, meshScale=mesh_scale)
+        else:
+            # Unknown type: default to box collision
+            collision_id = p.createCollisionShape(p.GEOM_BOX, halfExtents=collision_half_extents)
+
+        # Create visual shape
+        if mesh_path is not None:
+            visual_id = p.createVisualShape(p.GEOM_MESH, fileName=mesh_path, meshScale=mesh_scale, rgbaColor=rgba_color)
+        else:
+            visual_id = -1
+
+        # Cache the shapes for future reuse
+        cls._shared_shapes[shape_key] = (visual_id, collision_id)
+        return visual_id, collision_id
 
     @classmethod
     def from_mesh(
@@ -154,26 +222,14 @@ class SimObject:
         if collision_half_extents is None:
             collision_half_extents = [0.5, 0.5, 0.5]
 
-        # Create collision shape
-        if collision_shape_type is None:
-            collision_id = -1  # No collision shape
-        elif collision_shape_type == "box":
-            collision_id = p.createCollisionShape(p.GEOM_BOX, halfExtents=collision_half_extents)
-        elif collision_shape_type == "mesh":
-            if mesh_path is None:
-                raise ValueError("mesh_path is required when collision_shape_type='mesh'")
-            collision_id = p.createCollisionShape(p.GEOM_MESH, fileName=mesh_path, meshScale=mesh_scale)
-        else:
-            # Unknown type: default to box collision
-            collision_id = p.createCollisionShape(p.GEOM_BOX, halfExtents=collision_half_extents)
-
-        # Create visual shape
-        if mesh_path is not None:
-            # Use mesh for visual
-            visual_id = p.createVisualShape(p.GEOM_MESH, fileName=mesh_path, meshScale=mesh_scale, rgbaColor=rgba_color)
-        else:
-            # No visual shape when mesh_path is None
-            visual_id = -1
+        # Use create_shared_shapes() to get or create cached shapes
+        visual_id, collision_id = cls.create_shared_shapes(
+            mesh_path=mesh_path,
+            mesh_scale=mesh_scale,
+            collision_shape_type=collision_shape_type,
+            collision_half_extents=collision_half_extents,
+            rgba_color=rgba_color,
+        )
 
         # Get position and orientation from Pose
         position, orientation = pose.as_position_orientation()

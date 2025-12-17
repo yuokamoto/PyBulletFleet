@@ -324,45 +324,6 @@ class Agent(SimObject):
         return self._goal_pose
 
     @classmethod
-    def create_shared_shapes(
-        cls,
-        mesh_path: str,
-        mesh_scale: List[float] = None,
-        collision_half_extents: List[float] = None,
-        rgba_color: List[float] = None,
-    ) -> Tuple[int, int]:
-        """
-        Create shared visual and collision shapes for fast robot spawning.
-
-        Args:
-            mesh_path: Path to robot mesh file
-            mesh_scale: Mesh scaling [x, y, z]
-            collision_half_extents: Collision box half extents [x, y, z]
-            rgba_color: RGBA color [r, g, b, a]
-
-        Returns:
-            (visual_id, collision_id) tuple
-        """
-        if mesh_path in cls._shared_shapes:
-            return cls._shared_shapes[mesh_path]
-
-        if mesh_scale is None:
-            mesh_scale = [1.0, 1.0, 1.0]
-        if collision_half_extents is None:
-            collision_half_extents = [0.2, 0.1, 0.2]
-        if rgba_color is None:
-            rgba_color = [0.2, 0.2, 0.2, 1.0]
-
-        # Create visual shape
-        visual_id = p.createVisualShape(shapeType=p.GEOM_MESH, fileName=mesh_path, rgbaColor=rgba_color, meshScale=mesh_scale)
-
-        # Create collision shape (simple box)
-        collision_id = p.createCollisionShape(shapeType=p.GEOM_BOX, halfExtents=collision_half_extents)
-
-        cls._shared_shapes[mesh_path] = (visual_id, collision_id)
-        return visual_id, collision_id
-
-    @classmethod
     def from_params(cls, spawn_params: AgentSpawnParams, sim_core=None) -> "Agent":
         """
         Create an Agent from AgentSpawnParams.
@@ -499,12 +460,14 @@ class Agent(SimObject):
         # Use visual_mesh_path if provided, otherwise use mesh_path
         visual_mesh = visual_mesh_path if visual_mesh_path is not None else mesh_path
 
-        # Create collision shape (box)
-        collision_id = p.createCollisionShape(shapeType=p.GEOM_BOX, halfExtents=collision_half_extents)
-
-        # Create visual shape (from visual_mesh or mesh_path)
-        visual_id = p.createVisualShape(
-            shapeType=p.GEOM_MESH, fileName=visual_mesh, rgbaColor=rgba_color, meshScale=mesh_scale
+        # Use parent class's create_shared_shapes() for optimization
+        # This dramatically reduces OpenGL object count when spawning many robots
+        visual_id, collision_id = cls.create_shared_shapes(
+            mesh_path=visual_mesh,
+            mesh_scale=mesh_scale,
+            collision_shape_type="box",
+            collision_half_extents=collision_half_extents,
+            rgba_color=rgba_color
         )
 
         # Get position and orientation from Pose
