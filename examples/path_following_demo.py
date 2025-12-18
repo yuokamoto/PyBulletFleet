@@ -28,6 +28,7 @@ import pybullet as p
 from pybullet_fleet.agent import Agent, AgentSpawnParams
 from pybullet_fleet.core_simulation import MultiRobotSimulationCore, SimulationParams
 from pybullet_fleet.geometry import Path, Pose
+from pybullet_fleet.sim_object import ShapeParams
 
 
 def main():
@@ -47,11 +48,14 @@ def main():
     # Use rectangular shape so orientation is visible
     # SLOW ACCELERATION for clear smooth motion visualization
     omnidirectional_params = AgentSpawnParams(
-        mesh_path=mesh_path,
+        visual_shape=ShapeParams(
+            shape_type="mesh",
+            mesh_path=mesh_path,
+            mesh_scale=[0.5, 0.25, 0.3],  # Rectangular: longer in X direction
+            rgba_color=[0.2, 0.4, 1.0, 1.0],  # Blue
+        ),
+        collision_shape=ShapeParams(shape_type="box", half_extents=[0.25, 0.125, 0.15]),
         initial_pose=Pose.from_xyz(-4.0, 0.0, 0.5),  # Larger circle
-        mesh_scale=[0.5, 0.25, 0.3],  # Rectangular: longer in X direction
-        collision_half_extents=[0.25, 0.125, 0.15],
-        rgba_color=[0.2, 0.4, 1.0, 1.0],  # Blue
         mass=0.0,  # Kinematic control (no physics simulation)
         max_linear_vel=2.0,  # Faster max speed
         max_linear_accel=0.5,  # MUCH slower acceleration for visible effect
@@ -76,11 +80,11 @@ def main():
 
     # Robot 3: Omnidirectional (green) - rectangular cube, follows 3D circle path
     omni3d_params = AgentSpawnParams(
-        mesh_path=mesh_path,
+        visual_shape=ShapeParams(
+            shape_type="mesh", mesh_path=mesh_path, mesh_scale=[0.4, 0.2, 0.25], rgba_color=[0.2, 1.0, 0.4, 1.0]  # Green
+        ),
+        collision_shape=ShapeParams(shape_type="box", half_extents=[0.2, 0.1, 0.125]),
         initial_pose=Pose.from_xyz(0.0, -6.0, 2.0),
-        mesh_scale=[0.4, 0.2, 0.25],
-        collision_half_extents=[0.2, 0.1, 0.125],
-        rgba_color=[0.2, 1.0, 0.4, 1.0],  # Green
         mass=0.0,  # Kinematic control (no physics simulation)
         max_linear_vel=2.0,
         max_linear_accel=0.5,
@@ -360,7 +364,7 @@ def main():
     # Movement callback with velocity display
     step_counter = [0]  # Use list to allow modification in nested function
 
-    def robot_movement_callback(sim_objects, sim_core, dt):
+    def robot_movement_callback(sim_core, dt):
         """Update robot movement each step and display velocities"""
         # Print velocities every 10 steps (1 second at 10Hz)
         step_counter[0] += 1

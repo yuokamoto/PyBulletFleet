@@ -288,40 +288,37 @@ class SimObjectManager(Generic[T]):
 
 class AgentManager(SimObjectManager[Agent]):
     """
-    Extended manager class for agents with goal management.
+    Extended manager class for agents with update callback system.
 
     This class extends SimObjectManager with agent-specific features:
+    - Grid-based agent spawning with AgentSpawnParams
     - Pose goal assignment to individual agents
-    - Callback system for custom goal update logic
+    - Callback system for custom update logic (goals, state tracking, etc.)
     - Query moving/stopped agents
+
+    Key Features:
+    - Auto-registers update callback to simulation loop
+    - Callback receives (agents, manager, dt) for easy agent operations
+    - Configurable update frequency
+    - Direct access to manager methods within callback
 
     Note:
     - Agent.update() is automatically called by MultiRobotSimulationCore every step
-    - AgentManager focuses on goal management, not movement updates
-    - Agent-specific state is stored in each Agent.user_data dict
+    - AgentManager callbacks are for high-level logic (goals, coordination, etc.)
+    - Agent-specific state can be stored in each Agent.user_data dict
     """
 
-    def __init__(self, sim_core=None, auto_register: bool = True, update_frequency: float = 30.0):
+    def __init__(self, sim_core=None, update_frequency: float = 10.0):
         """
         Initialize AgentManager.
 
         Args:
             sim_core: Reference to simulation core (optional)
-            auto_register: If True and sim_core is provided, automatically register
-                         goal update callback to simulation loop (default: True)
-            update_frequency: Goal update frequency in Hz when auto_register=True (default: 30.0)
+            update_frequency: Default update callback frequency in Hz (default: 10.0)
         """
         super().__init__(sim_core)
-        self._goal_update_callback: Optional[Callable] = None  # User-defined goal logic
-
-        # Auto-register goal update callback if sim_core is provided
-        if sim_core is not None and auto_register:
-            # Create wrapper to match sim_core callback signature: callback(robots, sim_core, dt)
-            def _goal_update_wrapper(robots, core, dt):
-                self.update_goals(dt)
-
-            sim_core.register_callback(_goal_update_wrapper, frequency=update_frequency)
-            print(f"[AgentManager] Auto-registered goal update callback at {update_frequency} Hz")
+        self._callbacks: List[Dict[str, Any]] = []  # List of registered callbacks
+        self._update_frequency: float = update_frequency  # Default callback frequency in Hz
 
     def spawn_agents_grid(self, num_agents: int, grid_params: GridSpawnParams, spawn_params: AgentSpawnParams) -> List[Agent]:
         """
@@ -369,10 +366,6 @@ class AgentManager(SimObjectManager[Agent]):
             ]
             manager.spawn_agents_grid_mixed(100, grid_params, spawn_params_list)
         """
-        # Validate all spawn_params before spawning
-        for i, (params, prob) in enumerate(spawn_params_list):
-            if params.mesh_path is None and params.urdf_path is None:
-                raise ValueError(f"spawn_params_list[{i}]: Neither mesh_path nor urdf_path provided")
 
         return self._spawn_grid_mixed_impl(
             num_objects=num_agents,
@@ -417,42 +410,72 @@ class AgentManager(SimObjectManager[Agent]):
         """Get number of agents currently moving."""
         return sum(1 for agent in self.objects if agent.is_moving)
 
-    def register_goal_update_callback(self, callback: Callable[[List[Agent], "AgentManager", float], None]):
+    def register_callback(self, callback: Callable[["AgentManager", float], None], frequency: Optional[float] = None):
         """
-        Register a callback for custom goal update logic.
+        Register a callback for custom agent update logic.
 
-        The callback will be called during update_goals() and should have signature:
-            callback(agents: List[Agent], manager: AgentManager, dt: float) -> None
+        Multiple callbacks can be registered, each with their own frequency.
+        This method automatically registers with sim_core if available.
 
-        Example:
-            def my_goal_logic(agents, manager, dt):
-                for agent in agents:
-                    if not agent.is_moving and not agent.static:
-                        # Set new goal based on custom logic
-                        agent.set_goal_pose(some_goal)
-                        # Use agent.user_data for custom state
-                        agent.user_data['last_goal_time'] = time.time()
+        The callback provides access to the AgentManager instance, making it easy to:
+        - Access all agents via manager.objects
+        - Use manager methods (set_goal_pose, query states, etc.)
+        - Store manager-level state in agent.user_data
 
-            manager.register_goal_update_callback(my_goal_logic)
+        The callback should have signature:
+            callback(manager: AgentManager, dt: float) -> None
 
         Args:
-            callback: Function to call for goal updates
-        """
-        self._goal_update_callback = callback
+            callback: Function to call for agent updates
+            frequency: Update frequency in Hz. If None, uses the default frequency
+                      from __init__ (default: None)
 
-    def update_goals(self, dt: float):
-        """
-        Call goal update callback if registered.
+        Example (Goal management):
+            def goal_update_logic(manager, dt):
+                for agent in manager.objects:
+                    if not agent.is_moving:
+                        # Set new goal for stopped agents
+                        new_goal = calculate_next_goal(agent)
+                        agent.set_goal_pose(new_goal)
 
-        This method only handles goal updates. Agent position updates are
-        automatically handled by MultiRobotSimulationCore.step_once().
+            manager.register_callback(goal_update_logic, frequency=4.0)
 
-        Args:
-            dt: Time step (seconds)
+        Example (State tracking):
+            def state_tracker(manager, dt):
+                for agent in manager.objects:
+                    # Track agent statistics
+                    if 'total_distance' not in agent.user_data:
+                        agent.user_data['total_distance'] = 0.0
+                    agent.user_data['total_distance'] += np.linalg.norm(agent.velocity) * dt
+
+            manager.register_callback(state_tracker, frequency=10.0)
+
+        Comparison with sim_core.register_callback():
+        - AgentManager callback: Provides manager reference and filtered agent list
+        - sim_core callback: Provides sim_core reference for all objects
+        - Use AgentManager for agent-specific operations
+        - Use sim_core for general simulation-wide operations
         """
-        # Call user-defined goal update logic
-        if self._goal_update_callback is not None:
-            self._goal_update_callback(self.objects, self, dt)
+        # Use default frequency if not specified
+        if frequency is None:
+            frequency = self._update_frequency
+
+        # Store callback info
+        self._callbacks.append({"func": callback, "frequency": frequency})
+
+        # Register with sim_core (let sim_core handle frequency management)
+        if self.sim_core is not None:
+            # Create wrapper to match sim_core callback signature
+            def _callback_wrapper(core, dt):
+                callback(self, dt)
+
+            self.sim_core.register_callback(_callback_wrapper, frequency=frequency)
+            print(f"[AgentManager] Registered callback at {frequency} Hz (total: {len(self._callbacks)} callback(s))")
+        else:
+            print(
+                f"[AgentManager] Warning: sim_core not set, callback registered but not active. "
+                f"Total: {len(self._callbacks)} callback(s)"
+            )
 
     def setup_camera(self, camera_config: Optional[Dict] = None) -> None:
         """

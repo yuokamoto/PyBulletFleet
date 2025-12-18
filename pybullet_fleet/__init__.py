@@ -20,7 +20,7 @@ from pybullet_fleet.core_simulation import LogLevelManager, MultiRobotSimulation
 from pybullet_fleet.sim_object import MeshObject, SimObject, URDFObject
 
 # Utilities
-from pybullet_fleet.tools import grid_to_world, world_to_grid
+from pybullet_fleet.tools import grid_to_world, world_to_grid, normalize_vector_param
 
 __all__ = [
     # Type definitions
@@ -46,4 +46,5 @@ __all__ = [
     # Utilities
     "grid_to_world",
     "world_to_grid",
+    "normalize_vector_param",
 ]

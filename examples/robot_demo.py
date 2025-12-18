@@ -18,7 +18,7 @@ import pybullet as p
 
 from pybullet_fleet.agent import Agent
 from pybullet_fleet.core_simulation import MultiRobotSimulationCore, SimulationParams
-from pybullet_fleet.sim_object import Pose, SimObject
+from pybullet_fleet.sim_object import Pose, SimObject, ShapeParams
 
 # Initialize simulation
 params = SimulationParams(gui=True, timestep=0.01)
@@ -27,11 +27,11 @@ sim_core = MultiRobotSimulationCore(params)
 # 1. SimObject with mesh (pallet visual)
 pallet_mesh_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "../mesh/11pallet.obj"))
 pallet_sim = SimObject.from_mesh(
-    mesh_path=pallet_mesh_path,
+    visual_shape=ShapeParams(
+        shape_type="mesh", mesh_path=pallet_mesh_path, mesh_scale=[0.5, 0.5, 0.5], rgba_color=[0.8, 0.6, 0.4, 1.0]
+    ),
+    collision_shape=ShapeParams(shape_type="box", half_extents=[0.5, 0.4, 0.1]),
     pose=Pose.from_xyz(-2, 0, 0.1),
-    collision_half_extents=[0.5, 0.4, 0.1],
-    mesh_scale=[0.5, 0.5, 0.5],
-    rgba_color=[0.8, 0.6, 0.4, 1.0],
     sim_core=sim_core,
 )
 
@@ -44,13 +44,12 @@ box_sim = SimObject(body_id=box_body, sim_core=sim_core)
 # 3. Agent with mesh (mobile robot with cube visual)
 cube_mesh_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "../mesh/cube.obj"))
 cube_agent = Agent.from_mesh(
-    mesh_path=cube_mesh_path,
+    visual_shape=ShapeParams(
+        shape_type="mesh", mesh_path=cube_mesh_path, mesh_scale=[0.3, 0.3, 0.3], rgba_color=[0.0, 1.0, 0.0, 1.0]
+    ),
+    collision_shape=ShapeParams(shape_type="box", half_extents=[0.3, 0.3, 0.3]),
     pose=Pose.from_xyz(0, 0, 0.5),
     max_linear_vel=1.5,
-    mesh_scale=[0.3, 0.3, 0.3],
-    collision_half_extents=[0.3, 0.3, 0.3],
-    rgba_color=[0.0, 1.0, 0.0, 1.0],
-    visual_mesh_path=cube_mesh_path,
     sim_core=sim_core,
 )
 
@@ -67,7 +66,7 @@ p.resetDebugVisualizerCamera(10.0, 45, -25, [0.5, 0.5, 0.5])
 
 
 # Callbacks
-def cube_random_movement_callback(sim_objects, sim_core, dt):
+def cube_random_movement_callback(sim_core, dt):
     """Update cube with random goals."""
     workspace_bounds = {"x_min": -3, "x_max": 4, "y_min": -2, "y_max": 4, "z": 0.5}
     if sim_core.step_count % 10 == 0:
@@ -75,10 +74,9 @@ def cube_random_movement_callback(sim_objects, sim_core, dt):
         random_y = np.random.uniform(workspace_bounds["y_min"], workspace_bounds["y_max"])
         random_goal = Pose.from_xyz(random_x, random_y, workspace_bounds["z"])
         cube_agent.set_goal_pose(random_goal)
-    cube_agent.update(dt)
 
 
-def arm_joint_control_callback(sim_objects, sim_core, dt):
+def arm_joint_control_callback(sim_core, dt):
     """Control arm joints with sinusoidal motion."""
     if sim_core.step_count % 10 == 0:
         t = sim_core.sim_time

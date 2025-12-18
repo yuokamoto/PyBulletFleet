@@ -185,13 +185,13 @@ agent_manager.setup_camera(camera_config)
 # ========================================
 
 
-def batch_agent_movement_callback(sim_objects, sim_core, dt):
+def batch_agent_movement_callback(sim_core, dt):
     """
     Callback for mixed robot types.
     - Mobile robots: random forward/backward movement with rotation
     - Arm robots: random joint movements
     """
-    for obj in sim_objects:
+    for obj in sim_core.sim_objects:
         if not isinstance(obj, Agent):
             continue
 

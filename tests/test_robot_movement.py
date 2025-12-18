@@ -3,13 +3,15 @@
 Simple test to verify robot spawning and movement
 """
 
+import os
 import time
 
 import pybullet as p
 import pybullet_data
 
 from pybullet_fleet.agent import Agent
-from pybullet_fleet.sim_object import Pose
+from pybullet_fleet.geometry import Pose
+from pybullet_fleet.sim_object import ShapeParams
 
 # Connect to PyBullet
 physicsClient = p.connect(p.GUI)
@@ -21,13 +23,14 @@ planeId = p.loadURDF("plane.urdf")
 
 # Test 1: Create a simple cube robot
 print("Creating robot...")
+mesh_path = os.path.join(os.path.dirname(__file__), "../mesh/cube.obj")
 robot = Agent.from_mesh(
-    mesh_path="mesh/cube.obj",
+    visual_shape=ShapeParams(
+        shape_type="mesh", mesh_path=mesh_path, mesh_scale=[0.3, 0.3, 0.3], rgba_color=[1.0, 0.0, 0.0, 1.0]  # Red
+    ),
+    collision_shape=ShapeParams(shape_type="box", half_extents=[0.15, 0.15, 0.15]),
     pose=Pose.from_xyz(0.0, 0.0, 0.5),
-    mesh_scale=[0.3, 0.3, 0.3],
-    collision_half_extents=[0.15, 0.15, 0.15],
-    rgba_color=[1.0, 0.0, 0.0, 1.0],  # Red
-    base_mass=1.0,
+    mass=1.0,
     max_linear_vel=1.0,
     max_linear_accel=2.0,
     motion_mode="omnidirectional",

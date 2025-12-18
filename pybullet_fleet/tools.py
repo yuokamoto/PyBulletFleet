@@ -14,6 +14,42 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def normalize_vector_param(value: Union[float, List[float]], param_name: str, dim: int = 3) -> np.ndarray:
+    """
+    Normalize a parameter to a numpy array of specified dimension.
+
+    This is a utility function for handling parameters that can be either:
+    - A single float (applied to all dimensions)
+    - A list of floats (one per dimension)
+
+    Commonly used for velocity/acceleration limits that can be uniform or per-axis.
+
+    Args:
+        value: Float (applied to all dimensions) or list of floats (per-dimension)
+        param_name: Parameter name for error messages
+        dim: Number of dimensions (default: 3)
+
+    Returns:
+        Numpy array of shape (dim,)
+
+    Raises:
+        ValueError: If list length doesn't match dimension
+
+    Example:
+        >>> normalize_vector_param(2.0, "max_vel", 3)
+        array([2., 2., 2.])
+        >>> normalize_vector_param([1.0, 2.0, 3.0], "max_vel", 3)
+        array([1., 2., 3.])
+    """
+    if isinstance(value, (int, float)):
+        return np.array([value] * dim, dtype=float)
+    else:
+        arr = np.array(value, dtype=float)
+        if len(arr) != dim:
+            raise ValueError(f"{param_name} must be a float or a list of {dim} floats")
+        return arr
+
+
 def resolve_link_index(body_id: int, link: Union[int, str]) -> int:
     """
     Resolve link name to index.
@@ -331,7 +367,7 @@ def grid_spawn(
             if hasattr(model_class, "__name__") and model_class.__name__ == "MeshObject":
                 obj_args["mesh_path"] = model_path
                 obj = model_class.from_mesh(**obj_args)
-                sim_core.mesh_objects.append(obj)
+                sim_core.sim_objects.append(obj)
             elif hasattr(model_class, "__name__") and model_class.__name__ == "URDFObject":
                 obj_args["urdf_path"] = model_path
                 obj = model_class.from_urdf(**obj_args)
@@ -339,7 +375,7 @@ def grid_spawn(
             else:
                 # Factory function (for speedup)
                 obj = model_class(position=[x, y, z], orientation=orientation, sim_core=sim_core)
-                sim_core.mesh_objects.append(obj)
+                sim_core.sim_objects.append(obj)
             spawned_objects.append(obj)
             spawn_count[0] += 1
 

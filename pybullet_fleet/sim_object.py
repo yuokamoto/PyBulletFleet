@@ -13,38 +13,98 @@ from .geometry import Pose
 
 
 @dataclass
-class SimObjectSpawnParams:
+class ShapeParams:
     """
-    Base spawn parameters for SimObject class.
+    Parameters for visual or collision shape.
 
-    These parameters define the physical properties, appearance, and initial state of a simulation object.
+    Similar to URDF's <visual> and <collision> tags, this allows full control
+    over shape type, geometry, appearance, and frame offset.
 
     Attributes:
-        mesh_path: Path to mesh file (obj, dae, stl, etc.) for visual representation
-        initial_pose: Initial Pose (position and orientation) in world coordinates (optional, used by from_params)
-        collision_shape_type: 'box', 'mesh', or None for collision shape (None = no collision)
-        collision_half_extents: [hx, hy, hz] for box collision
-        mesh_scale: Mesh scaling factors [sx, sy, sz]
-        rgba_color: RGBA color [r, g, b, a] (0.0-1.0)
-        mass: Object mass in kg (1.0 default, use 0.0 for kinematic control)
+        shape_type: Shape type - "box", "sphere", "cylinder", "mesh", or None (no shape)
+        mesh_path: Path to mesh file (required if shape_type="mesh")
+        mesh_scale: Mesh scaling [sx, sy, sz] (for mesh shapes)
+        half_extents: Box half extents [hx, hy, hz] (for box shapes)
+        radius: Sphere/cylinder radius (for sphere/cylinder shapes)
+        height: Cylinder height (for cylinder shapes)
+        rgba_color: RGBA color [r, g, b, a] (for visual shapes, ignored for collision)
+        frame_pose: Shape offset as Pose object (relative to body frame)
+
+    Example:
+        # Box visual
+        visual = ShapeParams(
+            shape_type="box",
+            half_extents=[0.5, 0.3, 0.2],
+            rgba_color=[0.8, 0.2, 0.2, 1.0]
+        )
+
+        # Mesh collision
+        collision = ShapeParams(
+            shape_type="mesh",
+            mesh_path="collision.obj",
+            mesh_scale=[1.0, 1.0, 1.0]
+        )
+
+        # Sphere with offset
+        sphere = ShapeParams(
+            shape_type="sphere",
+            radius=0.5,
+            rgba_color=[0.0, 1.0, 0.0, 1.0],
+            frame_pose=Pose.from_xyz(0, 0, 0.5)
+        )
+    """
+
+    shape_type: Optional[str] = None  # "box", "sphere", "cylinder", "mesh", or None
+    mesh_path: Optional[str] = None
+    mesh_scale: List[float] = field(default_factory=lambda: [1.0, 1.0, 1.0])
+    half_extents: List[float] = field(default_factory=lambda: [0.5, 0.5, 0.5])
+    radius: float = 0.5
+    height: float = 1.0
+    rgba_color: List[float] = field(default_factory=lambda: [0.8, 0.8, 0.8, 1.0])
+    frame_pose: Optional[Pose] = None
+
+
+@dataclass
+class SimObjectSpawnParams:
+    """
+    Parameters for spawning a SimObject.
+
+    Attributes:
+        visual_shape: Visual shape parameters (ShapeParams or None)
+        collision_shape: Collision shape parameters (ShapeParams or None)
+        initial_pose: Initial Pose (position and orientation) in world coordinates
+        mass: Object mass in kg (0.0 for static objects, >0 for dynamic)
+        pickable: Whether this object can be picked by robots (default: True)
 
     Note:
         initial_pose is optional and mainly used by SimObject.from_params().
         Managers calculate positions automatically and may ignore this field.
 
-        For URDF robots:
-        - mass=1.0 (default): Uses URDF file's mass values
-        - mass=0.0: Override all links to mass=0 (kinematic control, no physics)
+    Example:
+        # Box visual + sphere collision
+        params = SimObjectSpawnParams(
+            visual_shape=ShapeParams(
+                shape_type="box",
+                half_extents=[0.5, 0.3, 0.2],
+                rgba_color=[1.0, 0.0, 0.0, 1.0]
+            ),
+            collision_shape=ShapeParams(
+                shape_type="sphere",
+                radius=0.3
+            ),
+            initial_pose=Pose.from_xyz(0, 0, 1),
+            mass=1.0
+        )
     """
 
-    mesh_path: Optional[str] = None
+    visual_shape: Optional[ShapeParams] = None
+    collision_shape: Optional[ShapeParams] = None
     initial_pose: Optional[Pose] = None
-    collision_shape_type: str = "box"
-    collision_half_extents: List[float] = field(default_factory=lambda: [0.5, 0.5, 0.5])
-    mesh_scale: List[float] = field(default_factory=lambda: [1.0, 1.0, 1.0])
-    rgba_color: List[float] = field(default_factory=lambda: [0.8, 0.8, 0.8, 1.0])
-    mass: float = 1.0
-    pickable: bool = True  # Can this object be picked by robots
+    mass: float = 0.0
+    pickable: bool = True
+    visual_mesh_path: Optional[str] = None
+    visual_frame_pose: Optional[Pose] = None
+    collision_frame_pose: Optional[Pose] = None
 
 
 class SimObject:
@@ -84,157 +144,192 @@ class SimObject:
     @classmethod
     def create_shared_shapes(
         cls,
-        mesh_path: str,
-        mesh_scale: List[float] = None,
-        collision_shape_type: str = "box",
-        collision_half_extents: List[float] = None,
-        rgba_color: List[float] = None,
+        visual_shape: Optional[ShapeParams] = None,
+        collision_shape: Optional[ShapeParams] = None,
     ) -> Tuple[int, int]:
         """
         Create shared visual and collision shapes for fast object spawning.
 
-        This method caches shapes by their parameters, so multiple objects with
-        identical parameters will reuse the same PyBullet shape IDs.
+        This method caches mesh shapes by their parameters, so multiple objects with
+        identical mesh parameters will reuse the same PyBullet shape IDs.
+
+        Note: Primitive shapes (box, sphere, cylinder) are NOT cached, as PyBullet
+        handles them very efficiently and caching adds unnecessary overhead.
 
         Args:
-            mesh_path: Path to mesh file
-            mesh_scale: Mesh scaling [x, y, z]
-            collision_shape_type: "box", "mesh", or None
-            collision_half_extents: Collision box half extents [x, y, z]
-            rgba_color: RGBA color [r, g, b, a]
+            visual_shape: ShapeParams for visual geometry
+            collision_shape: ShapeParams for collision geometry
 
         Returns:
             (visual_id, collision_id) tuple
-        """
-        # Set defaults
-        if mesh_scale is None:
-            mesh_scale = [1.0, 1.0, 1.0]
-        if collision_half_extents is None:
-            collision_half_extents = [0.5, 0.5, 0.5]
-        if rgba_color is None:
-            rgba_color = [0.8, 0.8, 0.8, 1.0]
-
-        # Create unique cache key from all parameters
-        shape_key = (
-            f"{mesh_path}_{collision_shape_type}_{tuple(collision_half_extents)}_{tuple(mesh_scale)}_{tuple(rgba_color)}"
-        )
-
-        # Check if shapes already exist in cache
-        if shape_key in cls._shared_shapes:
-            return cls._shared_shapes[shape_key]
-
-        # Create collision shape
-        if collision_shape_type is None:
-            collision_id = -1  # No collision shape
-        elif collision_shape_type == "box":
-            collision_id = p.createCollisionShape(p.GEOM_BOX, halfExtents=collision_half_extents)
-        elif collision_shape_type == "mesh":
-            if mesh_path is None:
-                raise ValueError("mesh_path is required when collision_shape_type='mesh'")
-            collision_id = p.createCollisionShape(p.GEOM_MESH, fileName=mesh_path, meshScale=mesh_scale)
-        else:
-            # Unknown type: default to box collision
-            collision_id = p.createCollisionShape(p.GEOM_BOX, halfExtents=collision_half_extents)
-
-        # Create visual shape
-        if mesh_path is not None:
-            visual_id = p.createVisualShape(p.GEOM_MESH, fileName=mesh_path, meshScale=mesh_scale, rgbaColor=rgba_color)
-        else:
-            visual_id = -1
-
-        # Cache the shapes for future reuse
-        cls._shared_shapes[shape_key] = (visual_id, collision_id)
-        return visual_id, collision_id
-
-    @classmethod
-    def from_mesh(
-        cls,
-        mesh_path: Optional[str] = None,
-        pose: Pose = None,
-        collision_shape_type: str = "box",
-        collision_half_extents: List[float] = None,
-        mesh_scale: List[float] = None,
-        rgba_color: List[float] = None,
-        mass: float = 0.0,
-        pickable: bool = True,
-        sim_core=None,
-    ) -> "SimObject":
-        """
-        Create a SimObject with optional visual mesh and collision.
-
-        Args:
-            mesh_path: Path to mesh file (obj, dae, stl, etc.) or None for no visual
-            pose: Pose object (position and orientation). Defaults to origin with no rotation
-            collision_shape_type: 'box', 'mesh', or None for collision shape (None = no collision)
-            collision_half_extents: [hx, hy, hz] for box collision (required if collision_shape_type='box')
-            mesh_scale: [sx, sy, sz] mesh scaling
-            rgba_color: [r, g, b, a] color (only used when mesh_path is provided)
-            mass: Object mass (0.0 for static)
-            pickable: Whether this object can be picked by robots (default: True)
-            sim_core: Reference to simulation core
-
-        Returns:
-            SimObject instance
 
         Example:
-            # With mesh and collision
-            pallet = SimObject.from_mesh(
-                mesh_path="11pallet.obj",
-                pose=Pose.from_xyz(-2, 0, 0.1),
-                collision_half_extents=[0.5, 0.4, 0.1],
-                mesh_scale=[0.5, 0.5, 0.5],
-                rgba_color=[0.8, 0.6, 0.4, 1.0],
-                sim_core=sim_core
-            )
-
-            # Visual only (no collision)
-            decoration = SimObject.from_mesh(
-                mesh_path="decorative.obj",
-                pose=Pose.from_xyz(0, 0, 0),
-                collision_shape_type=None,
-                rgba_color=[1.0, 0.0, 0.0, 1.0],
-                sim_core=sim_core
-            )
-
-            # Invisible collision object (no visual)
-            invisible_wall = SimObject.from_mesh(
-                mesh_path=None,  # No visual
-                pose=Pose.from_xyz(1, 0, 0),
-                collision_shape_type='box',
-                collision_half_extents=[1.0, 0.1, 2.0],
-                sim_core=sim_core
-            )
-
-            # Pure marker (no visual, no collision)
-            marker = SimObject.from_mesh(
-                mesh_path=None,
-                pose=Pose.from_euler(2, 0, 0, yaw=1.57),
-                collision_shape_type=None,
-                sim_core=sim_core
+            visual_id, collision_id = create_shared_shapes(
+                visual_shape=ShapeParams(
+                    shape_type="mesh",
+                    mesh_path="visual.obj",
+                    mesh_scale=[1.0, 1.0, 1.0],
+                    rgba_color=[0.8, 0.2, 0.2, 1.0]
+                ),
+                collision_shape=ShapeParams(
+                    shape_type="box",
+                    half_extents=[0.5, 0.3, 0.2]
+                )
             )
         """
-        if pose is None:
-            pose = Pose.from_xyz(0.0, 0.0, 0.0)
-        if mesh_scale is None:
-            mesh_scale = [1.0, 1.0, 1.0]
-        if rgba_color is None:
-            rgba_color = [0.8, 0.8, 0.8, 1.0]
-        if collision_half_extents is None:
-            collision_half_extents = [0.5, 0.5, 0.5]
+        # Only cache mesh shapes (primitives are cheap to create)
+        visual_needs_cache = visual_shape and visual_shape.shape_type == "mesh"
+        collision_needs_cache = collision_shape and collision_shape.shape_type == "mesh"
 
-        # Use create_shared_shapes() to get or create cached shapes
-        visual_id, collision_id = cls.create_shared_shapes(
-            mesh_path=mesh_path,
-            mesh_scale=mesh_scale,
-            collision_shape_type=collision_shape_type,
-            collision_half_extents=collision_half_extents,
-            rgba_color=rgba_color,
+        # Create cache key only for mesh shapes
+        if visual_needs_cache or collision_needs_cache:
+            visual_key = cls._shape_params_to_key(visual_shape) if visual_needs_cache else "none"
+            collision_key = cls._shape_params_to_key(collision_shape) if collision_needs_cache else "none"
+            shape_key = f"v:{visual_key}_c:{collision_key}"
+
+            # Check cache
+            if shape_key in cls._shared_shapes:
+                return cls._shared_shapes[shape_key]
+
+        # Create visual shape
+        visual_id = cls._create_visual_shape(visual_shape) if visual_shape and visual_shape.shape_type else -1
+
+        # Create collision shape
+        collision_id = cls._create_collision_shape(collision_shape) if collision_shape and collision_shape.shape_type else -1
+
+        # Cache only if at least one is a mesh shape
+        if visual_needs_cache or collision_needs_cache:
+            cls._shared_shapes[shape_key] = (visual_id, collision_id)
+
+        return visual_id, collision_id
+
+    @staticmethod
+    def _shape_params_to_key(shape: ShapeParams) -> str:
+        """Convert ShapeParams to a unique cache key string."""
+        frame_pos = shape.frame_pose.position if shape.frame_pose else [0, 0, 0]
+        frame_orn = shape.frame_pose.orientation if shape.frame_pose else [0, 0, 0, 1]
+
+        return (
+            f"{shape.shape_type}_{shape.mesh_path}_{tuple(shape.mesh_scale)}_"
+            f"{tuple(shape.half_extents)}_{shape.radius}_{shape.height}_"
+            f"{tuple(shape.rgba_color)}_{tuple(frame_pos)}_{tuple(frame_orn)}"
         )
 
-        # Get position and orientation from Pose
-        position, orientation = pose.as_position_orientation()
+    @staticmethod
+    def _create_visual_shape(shape: ShapeParams) -> int:
+        """Create a PyBullet visual shape from ShapeParams."""
+        # Get frame offset
+        frame_position = [0.0, 0.0, 0.0]
+        frame_orientation = [0.0, 0.0, 0.0, 1.0]
+        if shape.frame_pose:
+            frame_position, frame_orientation = shape.frame_pose.as_position_orientation()
 
-        # Create multibody
+        if shape.shape_type == "mesh":
+            if not shape.mesh_path:
+                raise ValueError("mesh_path is required for shape_type='mesh'")
+            return p.createVisualShape(
+                p.GEOM_MESH,
+                fileName=shape.mesh_path,
+                meshScale=shape.mesh_scale,
+                rgbaColor=shape.rgba_color,
+                visualFramePosition=frame_position,
+                visualFrameOrientation=frame_orientation,
+            )
+        elif shape.shape_type == "box":
+            return p.createVisualShape(
+                p.GEOM_BOX,
+                halfExtents=shape.half_extents,
+                rgbaColor=shape.rgba_color,
+                visualFramePosition=frame_position,
+                visualFrameOrientation=frame_orientation,
+            )
+        elif shape.shape_type == "sphere":
+            return p.createVisualShape(
+                p.GEOM_SPHERE,
+                radius=shape.radius,
+                rgbaColor=shape.rgba_color,
+                visualFramePosition=frame_position,
+                visualFrameOrientation=frame_orientation,
+            )
+        elif shape.shape_type == "cylinder":
+            return p.createVisualShape(
+                p.GEOM_CYLINDER,
+                radius=shape.radius,
+                length=shape.height,
+                rgbaColor=shape.rgba_color,
+                visualFramePosition=frame_position,
+                visualFrameOrientation=frame_orientation,
+            )
+        else:
+            raise ValueError(f"Unknown visual shape_type: {shape.shape_type}")
+
+    @staticmethod
+    def _create_collision_shape(shape: ShapeParams) -> int:
+        """Create a PyBullet collision shape from ShapeParams."""
+        # Get frame offset
+        frame_position = [0.0, 0.0, 0.0]
+        frame_orientation = [0.0, 0.0, 0.0, 1.0]
+        if shape.frame_pose:
+            frame_position, frame_orientation = shape.frame_pose.as_position_orientation()
+
+        if shape.shape_type == "mesh":
+            if not shape.mesh_path:
+                raise ValueError("mesh_path is required for shape_type='mesh'")
+            return p.createCollisionShape(
+                p.GEOM_MESH,
+                fileName=shape.mesh_path,
+                meshScale=shape.mesh_scale,
+                collisionFramePosition=frame_position,
+                collisionFrameOrientation=frame_orientation,
+            )
+        elif shape.shape_type == "box":
+            return p.createCollisionShape(
+                p.GEOM_BOX,
+                halfExtents=shape.half_extents,
+                collisionFramePosition=frame_position,
+                collisionFrameOrientation=frame_orientation,
+            )
+        elif shape.shape_type == "sphere":
+            return p.createCollisionShape(
+                p.GEOM_SPHERE,
+                radius=shape.radius,
+                collisionFramePosition=frame_position,
+                collisionFrameOrientation=frame_orientation,
+            )
+        elif shape.shape_type == "cylinder":
+            return p.createCollisionShape(
+                p.GEOM_CYLINDER,
+                radius=shape.radius,
+                height=shape.height,
+                collisionFramePosition=frame_position,
+                collisionFrameOrientation=frame_orientation,
+            )
+        else:
+            raise ValueError(f"Unknown collision shape_type: {shape.shape_type}")
+
+    @classmethod
+    def _create_body_from_shapes(
+        cls,
+        visual_id: int,
+        collision_id: int,
+        pose: Pose,
+        mass: float = 0.0,
+    ) -> int:
+        """
+        Create a PyBullet multibody from pre-created visual and collision shapes.
+
+        This is a helper method to reduce code duplication between SimObject and Agent.
+
+        Args:
+            visual_id: Visual shape ID from create_shared_shapes()
+            collision_id: Collision shape ID from create_shared_shapes()
+            pose: Initial Pose (position and orientation)
+            mass: Body mass (kg)
+
+        Returns:
+            PyBullet body ID
+        """
+        position, orientation = pose.as_position_orientation()
         body_id = p.createMultiBody(
             baseMass=mass,
             baseCollisionShapeIndex=collision_id,
@@ -242,8 +337,70 @@ class SimObject:
             basePosition=position,
             baseOrientation=orientation,
         )
+        return body_id
 
-        return cls(body_id=body_id, sim_core=sim_core, mesh_path=mesh_path, pickable=pickable)
+    @classmethod
+    def from_mesh(
+        cls,
+        visual_shape: Optional[ShapeParams] = None,
+        collision_shape: Optional[ShapeParams] = None,
+        pose: Pose = None,
+        mass: float = 0.0,
+        pickable: bool = True,
+        sim_core=None,
+    ) -> "SimObject":
+        """
+        Create a SimObject with optional visual and collision shapes.
+
+        Args:
+            visual_shape: ShapeParams for visual geometry
+            collision_shape: ShapeParams for collision geometry
+            pose: Initial Pose (position and orientation)
+            mass: Object mass (0.0 for static)
+            pickable: Whether object can be picked by robots
+            sim_core: Reference to simulation core
+
+        Returns:
+            SimObject instance
+
+        Example:
+            # Box visual + sphere collision
+            obj = SimObject.from_mesh(
+                visual_shape=ShapeParams(
+                    shape_type="box",
+                    half_extents=[0.5, 0.3, 0.2],
+                    rgba_color=[0.8, 0.2, 0.2, 1.0]
+                ),
+                collision_shape=ShapeParams(
+                    shape_type="sphere",
+                    radius=0.4
+                ),
+                pose=Pose.from_xyz(0, 0, 1),
+                mass=1.0,
+                sim_core=sim_core
+            )
+        """
+        if pose is None:
+            pose = Pose.from_xyz(0.0, 0.0, 0.0)
+
+        # Use create_shared_shapes() to get or create cached shapes
+        visual_id, collision_id = cls.create_shared_shapes(
+            visual_shape=visual_shape,
+            collision_shape=collision_shape,
+        )
+
+        # Create multibody using helper method
+        body_id = cls._create_body_from_shapes(
+            visual_id=visual_id,
+            collision_id=collision_id,
+            pose=pose,
+            mass=mass,
+        )
+
+        # Store mesh_path if available for backward compatibility
+        stored_mesh_path = visual_shape.mesh_path if (visual_shape and visual_shape.shape_type == "mesh") else None
+
+        return cls(body_id=body_id, sim_core=sim_core, mesh_path=stored_mesh_path, pickable=pickable)
 
     @classmethod
     def from_params(cls, spawn_params: SimObjectSpawnParams, sim_core=None) -> "SimObject":
@@ -259,20 +416,25 @@ class SimObject:
 
         Example:
             params = SimObjectSpawnParams(
-                mesh_path="pallet.obj",
+                visual_shape=ShapeParams(
+                    shape_type="mesh",
+                    mesh_path="pallet.obj",
+                    mesh_scale=[0.5, 0.5, 0.5],
+                    rgba_color=[0.8, 0.6, 0.4, 1.0]
+                ),
+                collision_shape=ShapeParams(
+                    shape_type="box",
+                    half_extents=[0.5, 0.4, 0.1]
+                ),
                 initial_pose=Pose.from_xyz(0, 0, 0.1),
-                collision_half_extents=[0.5, 0.4, 0.1],
-                rgba_color=[0.8, 0.6, 0.4, 1.0]
+                mass=1.0
             )
             obj = SimObject.from_params(params, sim_core)
         """
         return cls.from_mesh(
-            mesh_path=spawn_params.mesh_path,
+            visual_shape=spawn_params.visual_shape,
+            collision_shape=spawn_params.collision_shape,
             pose=spawn_params.initial_pose,
-            collision_shape_type=spawn_params.collision_shape_type,
-            collision_half_extents=spawn_params.collision_half_extents,
-            mesh_scale=spawn_params.mesh_scale,
-            rgba_color=spawn_params.rgba_color,
             mass=spawn_params.mass,
             pickable=spawn_params.pickable,
             sim_core=sim_core,

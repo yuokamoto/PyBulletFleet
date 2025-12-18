@@ -211,6 +211,60 @@ Robot クラスの基本チュートリアル。Mesh と URDF の両方をサポ
 python examples/robot_urdf_demo.py
 ```
 
+#### shape_params_demo.py
+**概要:**
+新しい ShapeParams API を使用したデモ。URDF single-linkと同等の柔軟な形状制御。
+
+**特徴:**
+- プリミティブ形状のサポート（box, sphere, cylinder, mesh）
+- ビジュアルとコリジョンの独立制御
+- 形状ごとの色、スケール、フレームオフセット
+- URDFと同等の柔軟性
+
+**用途:** 高度な形状制御、プリミティブ形状の使用
+
+**使用例:**
+```python
+from pybullet_fleet.sim_object import SimObject, ShapeParams
+from pybullet_fleet.geometry import Pose
+
+# Box visual + Sphere collision
+obj = SimObject.from_mesh(
+    visual_shape=ShapeParams(
+        shape_type="box",
+        half_extents=[0.5, 0.3, 0.2],
+        rgba_color=[1.0, 0.0, 0.0, 1.0]
+    ),
+    collision_shape=ShapeParams(
+        shape_type="sphere",
+        radius=0.3
+    ),
+    pose=Pose.from_xyz(0, 0, 1),
+    mass=1.0
+)
+
+# Mesh with rotated frame
+agent = Agent.from_mesh(
+    visual_shape=ShapeParams(
+        shape_type="mesh",
+        mesh_path="robot.obj",
+        mesh_scale=[1.0, 1.0, 1.0],
+        rgba_color=[0.2, 0.2, 0.2, 1.0],
+        frame_pose=Pose.from_euler(0, 0, 0, roll=np.pi/2, yaw=np.pi/2)
+    ),
+    collision_shape=ShapeParams(
+        shape_type="box",
+        half_extents=[0.2, 0.1, 0.2]
+    ),
+    pose=Pose.from_xyz(0, 0, 0.5),
+    max_linear_vel=2.0
+)
+```
+
+```bash
+python examples/shape_params_demo.py
+```
+
 ### Legacy Demo
 
 #### 100robots_demo.py

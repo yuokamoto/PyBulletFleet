@@ -10,6 +10,7 @@ Demonstrates:
 5. Action sequencing: Execute multiple actions in order
 """
 
+import os
 import logging
 import numpy as np
 import pybullet as p
@@ -17,7 +18,7 @@ import pybullet as p
 from pybullet_fleet.agent import Agent, AgentSpawnParams, MotionMode
 from pybullet_fleet.core_simulation import MultiRobotSimulationCore, SimulationParams
 from pybullet_fleet.geometry import Pose, Path
-from pybullet_fleet.sim_object import SimObject, SimObjectSpawnParams
+from pybullet_fleet.sim_object import SimObject, SimObjectSpawnParams, ShapeParams
 from pybullet_fleet.action import MoveAction, WaitAction, PickAction, DropAction
 
 # Setup logging
@@ -48,10 +49,10 @@ def main():
     print("=" * 70 + "\n")
 
     # Spawn differential drive agent (blue)
+    urdf_path = os.path.join(os.path.dirname(__file__), "../robots/mobile_robot.urdf")
     agent_params = AgentSpawnParams(
-        urdf_path="robots/mobile_robot.urdf",
+        urdf_path=urdf_path,
         initial_pose=Pose.from_xyz(0, 0, 0.3),
-        rgba_color=[0.2, 0.5, 1.0, 1.0],  # Blue
         motion_mode=MotionMode.DIFFERENTIAL,
         max_linear_vel=2.0,
         max_linear_accel=5.0,
@@ -65,13 +66,18 @@ def main():
     agent.path_visualize = False
     agent.path_visualize_width = 3.0
 
+    # Get mesh paths (absolute)
+    mesh_dir = os.path.join(os.path.dirname(__file__), "../mesh")
+    pallet_mesh_path = os.path.join(mesh_dir, "11pallet.obj")
+    cube_mesh_path = os.path.join(mesh_dir, "cube.obj")
+
     # Spawn pickable object (pallet, rotated 90 degrees for horizontal placement)
     pallet_params = SimObjectSpawnParams(
-        mesh_path="mesh/11pallet.obj",
+        visual_shape=ShapeParams(
+            shape_type="mesh", mesh_path=pallet_mesh_path, mesh_scale=[0.5, 0.5, 0.5], rgba_color=[0.8, 0.6, 0.4, 1.0]
+        ),
+        collision_shape=ShapeParams(shape_type="box", half_extents=[0.5, 0.4, 0.1]),
         initial_pose=Pose.from_euler(5, 0, 0.1, roll=np.pi / 2, pitch=0, yaw=0),  # Rotated 90° around X-axis
-        collision_half_extents=[0.5, 0.4, 0.1],
-        mesh_scale=[0.5, 0.5, 0.5],
-        rgba_color=[0.8, 0.6, 0.4, 1.0],
         mass=0.0,  # Kinematic (no physics)
         pickable=True,  # Can be picked up
     )
@@ -79,11 +85,14 @@ def main():
 
     # Spawn dropoff marker (not pickable)
     dropoff_marker_params = SimObjectSpawnParams(
-        mesh_path="mesh/cube.obj",
+        visual_shape=ShapeParams(
+            shape_type="mesh",
+            mesh_path=cube_mesh_path,
+            mesh_scale=[0.2, 0.2, 0.01],
+            rgba_color=[0.0, 1.0, 0.0, 0.5],  # Green, transparent
+        ),
+        collision_shape=None,  # No collision
         initial_pose=Pose.from_xyz(5, 5, 0.05),
-        collision_shape_type=None,  # No collision
-        mesh_scale=[0.2, 0.2, 0.01],
-        rgba_color=[0.0, 1.0, 0.0, 0.5],  # Green, transparent
         mass=0.0,
         pickable=False,  # Cannot be picked
     )
@@ -160,11 +169,8 @@ def main():
     last_status_time = [0.0]  # Use list to allow modification in callback
 
     # Callback for status display
-    def status_display_callback(sim_objects, sim_core, dt):
+    def status_display_callback(sim_core, dt):
         """Display action status periodically."""
-        # Note: agent.update() is automatically called by sim_core.step_once()
-        # so we don't need to call it here
-
         # Print status every 2 seconds
         if sim_core.sim_time - last_status_time[0] >= 2.0:
             current_action = agent.get_current_action()

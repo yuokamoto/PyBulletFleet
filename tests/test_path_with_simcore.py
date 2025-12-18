@@ -10,6 +10,7 @@ import pybullet as p
 from pybullet_fleet.agent import Agent, AgentSpawnParams
 from pybullet_fleet.core_simulation import MultiRobotSimulationCore, SimulationParams
 from pybullet_fleet.geometry import Path, Pose
+from pybullet_fleet.sim_object import ShapeParams
 
 
 def main():
@@ -29,11 +30,11 @@ def main():
     # Create robot using from_params with sim_core
     print("\nSpawning robot with Agent.from_params()...")
     robot_params = AgentSpawnParams(
-        mesh_path=mesh_path,
+        visual_shape=ShapeParams(
+            shape_type="mesh", mesh_path=mesh_path, mesh_scale=[0.5, 0.5, 0.5], rgba_color=[1.0, 0.0, 0.0, 1.0]  # Red
+        ),
+        collision_shape=ShapeParams(shape_type="box", half_extents=[0.25, 0.25, 0.25]),
         initial_pose=Pose.from_xyz(0.0, 0.0, 0.5),
-        mesh_scale=[0.5, 0.5, 0.5],
-        collision_half_extents=[0.25, 0.25, 0.25],
-        rgba_color=[1.0, 0.0, 0.0, 1.0],  # Red
         mass=1.0,
         max_linear_vel=1.0,
         max_linear_accel=2.0,
@@ -85,15 +86,6 @@ def main():
     print("\nSimulation started! Robot should be visible as a red cube.")
     print("Press Ctrl+C to exit.")
 
-    # Movement callback (similar to 100robots_grid_demo.py)
-    def robot_movement_callback(sim_objects, sim_core, dt):
-        """Update robot movement each step"""
-        for obj in sim_objects:
-            if isinstance(obj, Agent):
-                obj.update(dt)
-
-    # Register callback and run simulation (like 100robots_grid_demo.py)
-    sim.register_callback(robot_movement_callback, frequency=None)  # Call every step
     sim.run_simulation()
 
 

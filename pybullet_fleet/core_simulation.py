@@ -192,8 +192,22 @@ class MultiRobotSimulationCore:
 
     def register_callback(self, callback: Callable, frequency: Optional[float] = None) -> None:
         """
-        Register a callback function to be called every step.
-        frequency (Hz, number of times per second) can be specified. If None, called every step.
+        Register a callback function to be called during simulation.
+
+        Args:
+            callback: Function with signature callback(sim_core, dt) -> None
+                     - sim_core: Reference to MultiRobotSimulationCore instance
+                     - dt: Time elapsed since last callback execution (seconds)
+            frequency: Callback frequency in Hz. If None, called every simulation step.
+
+        Example:
+            def my_callback(sim_core, dt):
+                for obj in sim_core.sim_objects:
+                    if isinstance(obj, Agent):
+                        # Update agent logic
+                        pass
+
+            sim_core.register_callback(my_callback, frequency=10.0)  # 10 Hz
         """
         self.callbacks.append({"func": callback, "frequency": frequency, "last_exec": 0.0})
 
@@ -761,11 +775,12 @@ class MultiRobotSimulationCore:
         self.robot_bodies = [obj.body_id for obj in self.sim_objects]
         self.sim_time = self.step_count * self.params.timestep
 
-        # Auto-update all Agent instances every step
+        # Update all simulation objects that have update() method
+        # Agent instances are automatically updated every step for movement control
         for obj in self.sim_objects:
             if isinstance(obj, Agent):
-                # Use fixed timestep for core agent integration
                 obj.update(self.params.timestep)
+
         # Global callbacks (frequency control)
         for cbinfo in self.callbacks:
             freq = cbinfo.get("frequency", None)
@@ -774,12 +789,8 @@ class MultiRobotSimulationCore:
             # Judge based on self.sim_time
             if freq is None or self.sim_time - last_exec >= interval:
                 dt = self.sim_time - last_exec if last_exec > 0 else self.params.timestep
-                cbinfo["func"](self.sim_objects, self, dt)
+                cbinfo["func"](self, dt)
                 cbinfo["last_exec"] = self.sim_time
-        # Old style: individual object callbacks executed according to frequency
-        for obj in self.sim_objects:
-            if hasattr(obj, "execute_callbacks"):
-                obj.execute_callbacks(self.sim_time)
 
         # Check if PyBullet is still connected before stepping
         if not p.isConnected():

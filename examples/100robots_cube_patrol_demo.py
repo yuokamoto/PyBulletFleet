@@ -140,7 +140,6 @@ def main():
     # Define two robot types with equal probability (50/50 split)
     spawn_params_omni = AgentSpawnParams(
         urdf_path=urdf_path,
-        rgba_color=[0.2, 0.4, 1.0, 1.0],  # Blue for omnidirectional
         mass=0.0,  # Kinematic control
         max_linear_vel=2.0,
         max_linear_accel=1.0,
@@ -152,7 +151,6 @@ def main():
 
     spawn_params_diff = AgentSpawnParams(
         urdf_path=urdf_path,
-        rgba_color=[1.0, 0.2, 0.2, 1.0],  # Red for differential
         mass=0.0,  # Kinematic control
         max_linear_vel=2.0,
         max_linear_accel=1.0,
@@ -264,7 +262,7 @@ def main():
     # Velocity monitoring callback
     step_counter = [0]
 
-    def monitoring_callback(sim_objects, sim_core, dt):
+    def monitoring_callback(sim_core, dt):
         """Monitor and display statistics every 5 seconds"""
         step_counter[0] += 1
 
