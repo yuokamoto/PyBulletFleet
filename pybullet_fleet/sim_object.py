@@ -105,6 +105,7 @@ class SimObjectSpawnParams:
     visual_mesh_path: Optional[str] = None
     visual_frame_pose: Optional[Pose] = None
     collision_frame_pose: Optional[Pose] = None
+    is_structure: bool = False  # If True, automatically registers as structure body
 
 
 class SimObject:
@@ -431,7 +432,7 @@ class SimObject:
             )
             obj = SimObject.from_params(params, sim_core)
         """
-        return cls.from_mesh(
+        obj = cls.from_mesh(
             visual_shape=spawn_params.visual_shape,
             collision_shape=spawn_params.collision_shape,
             pose=spawn_params.initial_pose,
@@ -439,6 +440,12 @@ class SimObject:
             pickable=spawn_params.pickable,
             sim_core=sim_core,
         )
+
+        # Auto-register as structure if is_structure flag is set
+        if spawn_params.is_structure and sim_core is not None:
+            sim_core.register_structure_body(obj.body_id)
+
+        return obj
 
     def get_pose(self) -> Pose:
         """Return current position and orientation as Pose object."""
