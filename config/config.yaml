@@ -30,10 +30,15 @@ physics: false
 monitor: true
 
 # Collision check frequency (times per second)
-collision_check_frequency: 1
+# collision_check_frequency: 0.1
+# Ignore collisions with structure (True/False)
+ignore_structure_collision: true
+
+# Enable profiling output (True/False)
+enable_profiling: false
 
 # Logging level (debug/info/warning/error/critical)
-log_level: warning
+log_level: debug
 
 # ========================================
 # Camera Settings

@@ -16,6 +16,8 @@ import numpy as np
 
 # --- All imports at the top for PEP8 compliance ---
 import pybullet as p
+import pybullet_data
+
 import yaml
 
 from pybullet_fleet.collision_visualizer import CollisionVisualizer
@@ -85,6 +87,8 @@ class SimulationParams:
             enable_structure_transparency=config.get("enable_structure_transparency", False),
             enable_shadows=config.get("enable_shadows", True),
             enable_gui_panel=config.get("enable_gui_panel", False),  # Default: hide GUI panel
+            ignore_structure_collision=config.get("ignore_structure_collision", True),
+            enable_profiling=config.get("enable_profiling", False),
         )
 
     def __init__(
@@ -104,6 +108,8 @@ class SimulationParams:
         enable_structure_transparency: bool = False,
         enable_shadows: bool = True,
         enable_gui_panel: bool = False,
+        ignore_structure_collision: bool = True,
+        enable_profiling: bool = False,
     ) -> None:
         self.speed = speed if speed > 0 else 1.0  # If speed <= 0, set to 1.0
         self.timestep = timestep
@@ -120,6 +126,8 @@ class SimulationParams:
         self.enable_structure_transparency = enable_structure_transparency
         self.enable_shadows = enable_shadows
         self.enable_gui_panel = enable_gui_panel
+        self.ignore_structure_collision = ignore_structure_collision
+        self.enable_profiling = enable_profiling
 
 
 class MultiRobotSimulationCore:
@@ -172,7 +180,11 @@ class MultiRobotSimulationCore:
         )  # Store original colors: (body_id, link_id) -> rgba
         self._structure_body_ids: set = set()  # Set of structure body IDs (not robots) - use set for O(1) lookup
         self._structure_transparent: bool = False  # Track if structure is transparent
+        self.ignore_structure_collision: bool = (
+            params.ignore_structure_collision
+        )  # If True, skip collision checks with structure objects
         self._simulation_paused: bool = False  # Track if simulation is paused
+        self.enable_profiling: bool = params.enable_profiling  # Optional profiling output
         self.setup_pybullet()
         self.setup_monitor()
 
@@ -223,8 +235,6 @@ class MultiRobotSimulationCore:
         # Hide all debug UI panels immediately after connection
         if self.params.gui:
             p.configureDebugVisualizer(p.COV_ENABLE_GUI, 0)
-
-        import pybullet_data
 
         p.setAdditionalSearchPath(pybullet_data.getDataPath())
         p.setGravity(0, 0, -9.81 if self.params.physics else 0)
@@ -564,38 +574,76 @@ class MultiRobotSimulationCore:
     def get_aabbs(self) -> List[Tuple[Tuple[float, float, float], Tuple[float, float, float]]]:
         return [p.getAABB(body_id) for body_id in self.robot_bodies]
 
-    def filter_aabb_pairs(self) -> List[Tuple[int, int]]:
-        aabbs = self.get_aabbs()
-        pairs = []
-        for i in range(len(self.robot_bodies)):
-            aabb_i = aabbs[i]
-            for j in range(i + 1, len(self.robot_bodies)):
-                aabb_j = aabbs[j]
-                if (
-                    aabb_i[1][0] < aabb_j[0][0]
-                    or aabb_i[0][0] > aabb_j[1][0]
-                    or aabb_i[1][1] < aabb_j[0][1]
-                    or aabb_i[0][1] > aabb_j[1][1]
-                    or aabb_i[1][2] < aabb_j[0][2]
-                    or aabb_i[0][2] > aabb_j[1][2]
-                ):
-                    continue
-                pairs.append((i, j))
-        return pairs
+    def filter_aabb_pairs(self, ignore_structure: Optional[bool] = None) -> List[Tuple[int, int]]:
+        # If ignoring structure collisions, only consider non-structure bodies (robots) for AABB pairing
+        if ignore_structure is None:
+            ignore_structure = self.ignore_structure_collision
 
-    def check_collisions(self, collision_color: Optional[List[float]] = None) -> List[Tuple[int, int]]:
+        if ignore_structure:
+            # Only use robot bodies (not in _structure_body_ids)
+            robot_indices = [i for i, bid in enumerate(self.robot_bodies) if bid not in self._structure_body_ids]
+            robot_body_ids = [self.robot_bodies[i] for i in robot_indices]
+            aabbs = [p.getAABB(bid) for bid in robot_body_ids]
+        else:
+            robot_indices = list(range(len(self.robot_bodies)))
+            robot_body_ids = self.robot_bodies
+            aabbs = self.get_aabbs()
+
+        cell_size = 1.0  # You may want to tune this based on robot/structure size
+        grid = {}
+        index_to_cell = []
+        for idx, aabb in enumerate(aabbs):
+            center = [0.5 * (aabb[0][d] + aabb[1][d]) for d in range(3)]
+            cell = tuple(int(center[d] // cell_size) for d in range(3))
+            index_to_cell.append(cell)
+            grid.setdefault(cell, []).append(idx)
+        neighbor_offsets = [(dx, dy, dz) for dx in (-1, 0, 1) for dy in (-1, 0, 1) for dz in (-1, 0, 1)]
+        pairs = set()
+        for idx, cell in enumerate(index_to_cell):
+            id_i = robot_body_ids[idx]
+            for offset in neighbor_offsets:
+                neighbor_cell = (cell[0] + offset[0], cell[1] + offset[1], cell[2] + offset[2])
+                for jdx in grid.get(neighbor_cell, []):
+                    if jdx <= idx:
+                        continue
+                    id_j = robot_body_ids[jdx]
+                    # Always skip structure-structure pairs (should not occur if ignore_structure is True)
+                    if id_i in self._structure_body_ids and id_j in self._structure_body_ids:
+                        continue
+                    aabb_i = aabbs[idx]
+                    aabb_j = aabbs[jdx]
+                    if (
+                        aabb_i[1][0] < aabb_j[0][0]
+                        or aabb_i[0][0] > aabb_j[1][0]
+                        or aabb_i[1][1] < aabb_j[0][1]
+                        or aabb_i[0][1] > aabb_j[1][1]
+                        or aabb_i[1][2] < aabb_j[0][2]
+                        or aabb_i[0][2] > aabb_j[1][2]
+                    ):
+                        continue
+                    # Map back to original robot_bodies indices for compatibility
+                    pairs.add((robot_indices[idx], robot_indices[jdx]))
+        return list(pairs)
+
+    def check_collisions(
+        self, collision_color: Optional[List[float]] = None, ignore_structure: Optional[bool] = None
+    ) -> List[Tuple[int, int]]:
+        t0 = time.perf_counter()
         if collision_color is None:
             collision_color = self.collision_color
         collision_pairs = []
         collided = set()
 
+        # Determine ignore_structure flag
+        if ignore_structure is None:
+            ignore_structure = self.ignore_structure_collision
+
         try:
             # Record: save initial color
             for idx, body_id in enumerate(self.robot_bodies):
                 if body_id not in self._robot_original_colors:
-                    # Get current color (assumed as default value since PyBullet API cannot retrieve it)
                     self._robot_original_colors[body_id] = [0.0, 0.0, 0.0, 1]
-            for i, j in self.filter_aabb_pairs():
+            for i, j in self.filter_aabb_pairs(ignore_structure=ignore_structure):
                 contact_points = p.getContactPoints(self.robot_bodies[i], self.robot_bodies[j])
                 if contact_points:
                     collision_pairs.append((i, j))
@@ -755,6 +803,7 @@ class MultiRobotSimulationCore:
             pass
 
     def step_once(self) -> None:
+        t_step = time.perf_counter()
         # Check if PyBullet is still connected
         try:
             p.getConnectionInfo()
@@ -770,17 +819,21 @@ class MultiRobotSimulationCore:
         if self._simulation_paused:
             return
 
+        t_update = time.perf_counter()
         # Synchronize robot_bodies from sim_objects every step
         self.robot_bodies = [obj.body_id for obj in self.sim_objects]
         self.sim_time = self.step_count * self.params.timestep
 
         # Update all simulation objects that have update() method
         # Agent instances are automatically updated every step for movement control
+        t0 = time.perf_counter()
         for obj in self.sim_objects:
             if isinstance(obj, Agent):
                 obj.update(self.params.timestep)
+        t1 = time.perf_counter()
 
         # Global callbacks (frequency control)
+        t_cb0 = time.perf_counter()
         for cbinfo in self.callbacks:
             freq = cbinfo.get("frequency", None)
             last_exec = cbinfo.get("last_exec", 0.0)
@@ -790,23 +843,45 @@ class MultiRobotSimulationCore:
                 dt = self.sim_time - last_exec if last_exec > 0 else self.params.timestep
                 cbinfo["func"](self, dt)
                 cbinfo["last_exec"] = self.sim_time
+        t_cb1 = time.perf_counter()
 
         # Check if PyBullet is still connected before stepping
         if not p.isConnected():
             raise RuntimeError("PyBullet disconnected (GUI window closed)")
 
+        t_sim0 = time.perf_counter()
         p.stepSimulation()
+        t_sim1 = time.perf_counter()
+
         # Collision check frequency control
+        t_col0 = time.perf_counter()
         freq = self.collision_check_frequency
         interval = 1.0 / freq if freq else 0.0
         # Collision check also judged based on self.sim_time
         if freq is None or self.sim_time - self.last_collision_check >= interval:
             self.check_collisions()
             self.last_collision_check = self.sim_time
+        t_col1 = time.perf_counter()
+
         self.step_count += 1
         # Monitor: every step if GUI enabled, otherwise every second
+        t_mon0 = time.perf_counter()
         if self.monitor_enabled:
             interval = self.params.timestep if self.params.gui else 1.0
             if self.sim_time - self.last_monitor_update > interval:
                 self.update_monitor()
                 self.last_monitor_update = self.sim_time
+        t_mon1 = time.perf_counter()
+
+        t_end = time.perf_counter()
+        # Print profiling info if enabled
+        if self.enable_profiling and self.step_count % 1 == 0:
+            logger.debug(
+                f"[PROFILE] step {self.step_count}: "
+                f"Agent.update={1000*(t1-t0):.2f}ms, "
+                f"Callbacks={1000*(t_cb1-t_cb0):.2f}ms, "
+                f"stepSimulation={1000*(t_sim1-t_sim0):.2f}ms, "
+                f"Collisions={1000*(t_col1-t_col0):.2f}ms, "
+                f"Monitor={1000*(t_mon1-t_mon0):.2f}ms, "
+                f"Total={1000*(t_end-t_step):.2f}ms"
+            )

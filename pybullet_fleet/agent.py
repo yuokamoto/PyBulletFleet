@@ -8,6 +8,7 @@ Supports both Mesh and URDF loading.
 import logging
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple, Union
+import time
 
 import numpy as np
 import pybullet as p
@@ -155,6 +156,8 @@ class AgentSpawnParams(SimObjectSpawnParams):
 
 
 class Agent(SimObject):
+    # Profiling flag (class variable)
+    PROFILE_UPDATE = False
     """
     Agent class with goal-based position control.
 
@@ -1415,6 +1418,10 @@ class Agent(SimObject):
             self._current_action = None
 
     def update(self, dt: float):
+        t0 = None
+        elapsed = None
+        if Agent.PROFILE_UPDATE:
+            t0 = time.perf_counter()
         """
         Update robot position towards goal with velocity/acceleration constraints.
 
@@ -1450,7 +1457,12 @@ class Agent(SimObject):
         elif self._motion_mode == MotionMode.DIFFERENTIAL:
             self._update_differential(dt)
         else:
-            raise ValueError(f"Unknown motion_mode: {self._motion_mode}")
+            logger.warning(f"Unknown motion mode: {self._motion_mode}")
+
+        if Agent.PROFILE_UPDATE and t0 is not None:
+            elapsed = (time.perf_counter() - t0) * 1000.0  # ms
+            if elapsed > 10.0:
+                logger.info(f"Agent.update() took {elapsed:.2f} ms (body_id={self.body_id})")
 
     def get_velocity(self) -> np.ndarray:
         """

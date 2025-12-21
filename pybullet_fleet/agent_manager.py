@@ -6,7 +6,7 @@ Management classes for simulation objects and agents.
 """
 
 import random
-
+import time
 from dataclasses import dataclass, replace
 from typing import Any, Callable, Dict, Generic, List, Optional, Tuple, TypeVar
 
@@ -333,6 +333,22 @@ class SimObjectManager(Generic[T]):
                 pool_idx += 1
             grid_idx += 1
         return spawned_objects
+
+    def spawn_objects_batch(self, params_list: List[SimObjectSpawnParams]) -> List[T]:
+        """
+        Batch API to spawn multiple SimObject instances at once.
+        params_list: List of SimObjectSpawnParams for each SimObject
+        Returns: List of created SimObject instances
+        """
+        start = time.perf_counter()
+        objects = []
+        for params in params_list:
+            obj = SimObject.from_params(params, sim_core=self.sim_core)
+            self.add_object(obj)
+            objects.append(obj)
+        elapsed = time.perf_counter() - start
+        print(f"[SimObjectManager] spawn_objects_batch: {len(params_list)} objects in {elapsed:.3f} sec")
+        return objects
 
     def get_pose(self, object_index: int) -> Optional[Pose]:
         """
