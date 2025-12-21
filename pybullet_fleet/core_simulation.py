@@ -81,7 +81,6 @@ class SimulationParams:
             max_steps_per_frame=config.get("max_steps_per_frame", 10),
             gui_min_fps=config.get("gui_min_fps", 30),
             # Visualizer settings
-            enable_visual_shapes=config.get("enable_visual_shapes", True),
             enable_collision_shapes=config.get("enable_collision_shapes", False),
             enable_structure_transparency=config.get("enable_structure_transparency", False),
             enable_shadows=config.get("enable_shadows", True),
@@ -101,7 +100,6 @@ class SimulationParams:
         log_level: str = "warn",
         max_steps_per_frame: int = 10,
         gui_min_fps: int = 30,
-        enable_visual_shapes: bool = True,
         enable_collision_shapes: bool = False,
         enable_structure_transparency: bool = False,
         enable_shadows: bool = True,
@@ -118,7 +116,6 @@ class SimulationParams:
         self.max_steps_per_frame = max_steps_per_frame  # Maximum simulation steps per rendering frame
         self.gui_min_fps = gui_min_fps  # Minimum FPS for GUI responsiveness (default: 30 FPS = 33ms)
         # Visualizer settings
-        self.enable_visual_shapes = enable_visual_shapes
         self.enable_collision_shapes = enable_collision_shapes
         self.enable_structure_transparency = enable_structure_transparency
         self.enable_shadows = enable_shadows
@@ -168,7 +165,6 @@ class MultiRobotSimulationCore:
         self.collision_color: List[float] = collision_color
         self._rendering_enabled: bool = False  # Track rendering state
         self.collision_visualizer: CollisionVisualizer = CollisionVisualizer()  # Collision shape visualizer
-        self._visual_shapes_enabled: bool = True  # Default: visual shapes ON
         self._collision_shapes_enabled: bool = False  # Default: collision shapes OFF
         self._keyboard_events_registered: bool = False  # Track if keyboard events are registered
         self._original_visual_colors: Dict[Tuple[int, int], List[float]] = (
@@ -273,7 +269,6 @@ class MultiRobotSimulationCore:
 
     def configure_visualizer(
         self,
-        enable_visual_shapes: Optional[bool] = None,
         enable_collision_shapes: Optional[bool] = None,
         enable_structure_transparency: Optional[bool] = None,
         enable_shadows: Optional[bool] = None,
@@ -282,13 +277,11 @@ class MultiRobotSimulationCore:
         Configure PyBullet visualizer settings with keyboard control.
 
         Args:
-            enable_visual_shapes: Initial state for visual shapes (None=use config)
             enable_collision_shapes: Initial state for collision shapes (None=use config)
             enable_structure_transparency: Initial state for structure transparency (None=use config)
             enable_shadows: Enable shadows (None=use config)
 
         Keyboard shortcuts (active during simulation):
-        - Press 'v' to toggle visual shapes ON/OFF
         - Press 'c' to toggle collision shapes ON/OFF
         - Press 't' to toggle structure transparency ON/OFF
         """
@@ -296,8 +289,6 @@ class MultiRobotSimulationCore:
             return
 
         # Use config values if parameters are None
-        if enable_visual_shapes is None:
-            enable_visual_shapes = self.params.enable_visual_shapes
         if enable_collision_shapes is None:
             enable_collision_shapes = self.params.enable_collision_shapes
         if enable_structure_transparency is None:
@@ -310,7 +301,6 @@ class MultiRobotSimulationCore:
             self._save_original_visual_colors()
 
         # Store initial states
-        self._visual_shapes_enabled = enable_visual_shapes
         self._collision_shapes_enabled = enable_collision_shapes
         self._structure_transparent = enable_structure_transparency
 
@@ -318,19 +308,17 @@ class MultiRobotSimulationCore:
         p.configureDebugVisualizer(p.COV_ENABLE_SHADOWS, 1 if enable_shadows else 0)
 
         # Apply initial visibility states
-        self._set_visual_shapes_visibility(self._visual_shapes_enabled)
+        # self._set_visual_shapes_visibility(self._visual_shapes_enabled)
         self._set_collision_shapes_visibility(self._collision_shapes_enabled)
 
         # Apply initial structure transparency
-        if self._structure_transparent:
-            self._set_structure_transparency(True)
+        self._set_structure_transparency(self._structure_transparent)
 
         # Enable keyboard event handling in step_once()
         self._keyboard_events_registered = True
 
         logger.info(
-            "Visualizer configured: visual=%s, collision=%s, transparency=%s, shadows=%s",
-            enable_visual_shapes,
+            "Visualizer configured: collision=%s, transparency=%s, shadows=%s",
             enable_collision_shapes,
             enable_structure_transparency,
             enable_shadows,
@@ -338,7 +326,6 @@ class MultiRobotSimulationCore:
         logger.info("Keyboard controls registered: SPACE=pause, v=visual, c=collision, t=transparency")
         print("\n[KEYBOARD CONTROLS]")
         print("  Press SPACE to pause/play simulation")
-        print(f"  Press 'v' to toggle visual shapes (current: {'ON' if self._visual_shapes_enabled else 'OFF'})")
         print(f"  Press 'c' to toggle collision shapes (current: {'ON' if self._collision_shapes_enabled else 'OFF'})")
         print("  Press 't' to toggle structure transparency " f"(current: {'ON' if self._structure_transparent else 'OFF'})")
         if len(self._structure_body_ids) > 100:
@@ -383,11 +370,11 @@ class MultiRobotSimulationCore:
             self._simulation_paused = not self._simulation_paused
             print(f"\n[PAUSE] Simulation: {'PAUSED' if self._simulation_paused else 'PLAYING'}")
 
-        # 'v' key (ASCII 118) - toggle visual shapes
-        if ord("v") in keys and keys[ord("v")] & p.KEY_WAS_TRIGGERED:
-            self._visual_shapes_enabled = not self._visual_shapes_enabled
-            self._set_visual_shapes_visibility(self._visual_shapes_enabled)
-            print(f"\n[TOGGLE] Visual shapes: {'ON' if self._visual_shapes_enabled else 'OFF'}")
+        # # 'v' key (ASCII 118) - toggle visual shapes
+        # if ord("v") in keys and keys[ord("v")] & p.KEY_WAS_TRIGGERED:
+        #     self._visual_shapes_enabled = not self._visual_shapes_enabled
+        #     self._set_visual_shapes_visibility(self._visual_shapes_enabled)
+        #     print(f"\n[TOGGLE] Visual shapes: {'ON' if self._visual_shapes_enabled else 'OFF'}")
 
         # 'c' key (ASCII 99) - toggle collision shapes
         if ord("c") in keys and keys[ord("c")] & p.KEY_WAS_TRIGGERED:
@@ -404,55 +391,67 @@ class MultiRobotSimulationCore:
                 print("         Consider setting 'enable_structure_transparency' in config.yaml instead")
 
             self._structure_transparent = not self._structure_transparent
+            # self._set_transparency(self._structure_transparent)
             self._set_structure_transparency(self._structure_transparent)
             print(f"\n[TOGGLE] Structure transparency: {'ON' if self._structure_transparent else 'OFF'}")
             print(f"  Structure bodies affected: {num_structures}")
 
-    def _set_visual_shapes_visibility(self, visible: bool) -> None:
-        """
-        Set visibility of visual shapes independently from collision shapes.
-        Uses pre-saved colors for fast restoration.
-        Respects structure transparency setting when restoring visibility.
+    # def _set_visual_shapes_visibility(self, visible: bool) -> None:
+    #     """
+    #     Set visibility of visual shapes independently from collision shapes.
+    #     Uses pre-saved colors for fast restoration.
+    #     Respects structure transparency setting when restoring visibility.
 
-        Args:
-            visible: True to show visual shapes, False to hide them
-        """
-        if not self.params.gui:
-            return
+    #     Args:
+    #         visible: True to show visual shapes, False to hide them
+    #     """
+    #     if not self.params.gui:
+    #         return
 
-        # Use saved color data for FAST toggling
-        for key, rgba in self._original_visual_colors.items():
-            body_id, link_index = key
-            try:
-                if visible:
-                    # Check if this body is a structure and transparency is enabled
-                    if body_id in self._structure_body_ids and self._structure_transparent:
-                        # Restore with transparency
-                        p.changeVisualShape(body_id, link_index, rgbaColor=[rgba[0], rgba[1], rgba[2], 0.3])
-                    else:
-                        # Restore original color with full opacity
-                        p.changeVisualShape(body_id, link_index, rgbaColor=[rgba[0], rgba[1], rgba[2], 1.0])
-                else:
-                    # Make transparent (alpha = 0)
-                    p.changeVisualShape(body_id, link_index, rgbaColor=[rgba[0], rgba[1], rgba[2], 0.0])
-            except Exception:
-                pass
-                pass
+    #     # Use saved color data for FAST toggling
+    #     for key, rgba in self._original_visual_colors.items():
+    #         body_id, link_index = key
+    #         try:
+    #             if visible:
+    #                 # Check if this body is a structure and transparency is enabled
+    #                 if body_id in self._structure_body_ids and self._structure_transparent:
+    #                     # Restore with transparency
+    #                     p.changeVisualShape(body_id, link_index, rgbaColor=[rgba[0], rgba[1], rgba[2], 0.3])
+    #                 else:
+    #                     # Restore original color with full opacity
+    #                     p.changeVisualShape(body_id, link_index, rgbaColor=[rgba[0], rgba[1], rgba[2], 1.0])
+    #             else:
+    #                 # Make transparent (alpha = 0)
+    #                 p.changeVisualShape(body_id, link_index, rgbaColor=[rgba[0], rgba[1], rgba[2], 0.0])
+    #         except Exception:
+    #             pass
+    #             pass
 
-        logger.info(f"Visual shapes {'enabled' if visible else 'disabled'}")
+    #     logger.info(f"Visual shapes {'enabled' if visible else 'disabled'}")
 
     def _set_collision_shapes_visibility(self, visible: bool) -> None:
         """
-        Set visibility of collision shapes using CollisionVisualizer.
+        Set visibility of collision shapes using PyBullet's configureDebugVisualizer.
 
         Args:
             visible: True to show collision shapes, False to hide them
         """
-        if not self.params.gui or not hasattr(self, "collision_visualizer"):
+        if not self.params.gui:
             return
 
-        self.collision_visualizer.set_visible(visible)
-        logger.info(f"Collision shapes {'enabled' if visible else 'disabled'}")
+        # Use PyBullet's configureDebugVisualizer for robust collision shape toggling
+        try:
+            p.configureDebugVisualizer(3, 1 if visible else 0)
+            logger.info(f"Collision shapes {'enabled' if visible else 'disabled'} (PyBullet visualizer)")
+        except Exception as e:
+            logger.warning(f"Failed to toggle collision shapes with PyBullet visualizer: {e}")
+
+    # def _set_transparency(self, transparent: bool) -> None:
+    #     try:
+    #         p.configureDebugVisualizer(4, 1 if transparent else 0)
+    #         logger.info(f"Transparency {'enabled' if transparent else 'disabled'} (PyBullet visualizer)")
+    #     except Exception as e:
+    #         logger.warning(f"Failed to toggle transparency with PyBullet visualizer: {e}")
 
     def _set_structure_transparency(self, transparent: bool) -> None:
         """
