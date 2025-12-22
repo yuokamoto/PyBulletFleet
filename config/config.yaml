@@ -60,8 +60,13 @@ camera_target: [5, 5, 0]   # Target position [x, y, z]
 # Visualizer Settings
 # ========================================
 
+
 enable_visual_shapes: true           # Display visual shapes (meshes)
 enable_collision_shapes: false       # Display collision shapes (wireframes)
 enable_structure_transparency: false # Make structure bodies semi-transparent (initial value)
 enable_shadows: false                # Enable shadows
 enable_gui_panel: false              # Show GUI control panel
+
+# --- Feature Option ---
+# If true, robot color will change on collision (default: false)
+enable_collision_color_change: false

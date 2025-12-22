@@ -54,6 +54,7 @@ class LogLevelManager:
 
 
 class SimulationParams:
+
     @classmethod
     def from_config(cls, config_path: str = "config.yaml") -> "SimulationParams":
         with open(config_path, "r") as f:
@@ -89,6 +90,7 @@ class SimulationParams:
             enable_gui_panel=config.get("enable_gui_panel", False),  # Default: hide GUI panel
             ignore_structure_collision=config.get("ignore_structure_collision", True),
             enable_profiling=config.get("enable_profiling", False),
+            enable_collision_color_change=config.get("enable_collision_color_change", False),
         )
 
     def __init__(
@@ -110,6 +112,7 @@ class SimulationParams:
         enable_gui_panel: bool = False,
         ignore_structure_collision: bool = True,
         enable_profiling: bool = False,
+        enable_collision_color_change: bool = False,
     ) -> None:
         self.speed = speed if speed > 0 else 1.0  # If speed <= 0, set to 1.0
         self.timestep = timestep
@@ -128,6 +131,7 @@ class SimulationParams:
         self.enable_gui_panel = enable_gui_panel
         self.ignore_structure_collision = ignore_structure_collision
         self.enable_profiling = enable_profiling
+        self.enable_collision_color_change = enable_collision_color_change
 
 
 class MultiRobotSimulationCore:
@@ -649,16 +653,21 @@ class MultiRobotSimulationCore:
                     collision_pairs.append((i, j))
                     collided.add(i)
                     collided.add(j)
-            # Color update (collision: blue, normal: original)
-            for idx, body_id in enumerate(self.robot_bodies):
-                was_collided = idx in self._last_collided
-                is_collided = idx in collided
-                if was_collided != is_collided:
-                    if is_collided:
-                        p.changeVisualShape(body_id, -1, rgbaColor=collision_color)
-                    else:
-                        orig_color = self._robot_original_colors.get(body_id, [0, 0, 0, 1])
-                        p.changeVisualShape(body_id, -1, rgbaColor=orig_color)
+            # Log collision events
+            if collision_pairs:
+                for i, j in collision_pairs:
+                    logger.info(f"Collision detected: robot {i} <-> robot {j}")
+            # Color update (collision: blue, normal: original) only if enabled
+            if self.params.enable_collision_color_change:
+                for idx, body_id in enumerate(self.robot_bodies):
+                    was_collided = idx in self._last_collided
+                    is_collided = idx in collided
+                    if was_collided != is_collided:
+                        if is_collided:
+                            p.changeVisualShape(body_id, -1, rgbaColor=collision_color)
+                        else:
+                            orig_color = self._robot_original_colors.get(body_id, [0, 0, 0, 1])
+                            p.changeVisualShape(body_id, -1, rgbaColor=orig_color)
             self._last_collided = collided
             self.collision_count += len(collision_pairs)
         except p.error:

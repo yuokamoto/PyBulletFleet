@@ -5,6 +5,7 @@ Base class for simulation objects with attachment support.
 
 from dataclasses import dataclass, field
 from typing import Callable, List, Optional, Dict, Tuple
+import logging  # for debug logging
 
 import numpy as np
 import pybullet as p
@@ -468,6 +469,9 @@ class SimObject:
         p.resetBaseVelocity(self.body_id, linear_vel, angular_vel)
 
         # Recursively apply the same coordinates and velocity to attached_objects
+        logging.debug(
+            f"set_pose: body_id={self.body_id} attached_objects(before)={[o.body_id for o in self.attached_objects]}"
+        )
         for obj in self.attached_objects:
             # Follow using relative position and orientation from attachment
             # _attach_offset is always initialized with default (0,0,0) if not set
@@ -476,6 +480,10 @@ class SimObject:
             )
             new_pose = Pose.from_pybullet(new_pos, new_orn)
             obj.set_pose(new_pose)
+            logging.debug(
+                f"attached_object set pose　body_id={self.body_id}: obj_body_id={obj.body_id} "
+                f"position={obj._attach_offset.position} orientation={obj._attach_offset.orientation}"
+            )
 
     def attach_object(
         self,
@@ -513,16 +521,29 @@ class SimObject:
             relative_pose = Pose(position=[0.0, 0.0, 0.0], orientation=[0.0, 0.0, 0.0, 1.0])
 
         # Check if object is pickable
+
         if not obj.pickable:
-            print(f"[SimObject] Cannot attach: object {obj.body_id} is not pickable")
+            logging.info(f"[SimObject] Cannot attach: object {obj.body_id} is not pickable")
+            return False
+
+        # Prevent attaching an object that is already attached to another SimObject
+
+        if obj.is_attached():
+            logging.info(
+                f"[SimObject] Cannot attach: object {obj.body_id} is already attached to "
+                f"another SimObject (body_id={obj._attached_to.body_id if obj._attached_to else None})"
+            )
             return False
 
         if obj in self.attached_objects:
-            print(f"[SimObject] Object {obj.body_id} already attached")
+            logging.info(f"[SimObject] Object {obj.body_id} already attached")
             return False
 
         # Add to attached list
         self.attached_objects.append(obj)
+        logging.debug(
+            f"attach_object: obj={obj.body_id} relative_pose={relative_pose.position} orientation={relative_pose.orientation}"
+        )
 
         # Get parent link position and orientation
         if parent_link_index == -1:
@@ -535,6 +556,10 @@ class SimObject:
         obj._attach_offset = relative_pose
         obj._attached_to = self
         obj._attached_link_index = parent_link_index
+        logging.debug(
+            f"attach_object: obj={obj.body_id} _attach_offset.position={obj._attach_offset.position} "
+            f"_attach_offset.orientation={obj._attach_offset.orientation}"
+        )
 
         # Create constraint if object has mass (physics-based attachment)
         mass = p.getDynamicsInfo(obj.body_id, -1)[0]
@@ -552,7 +577,7 @@ class SimObject:
                 childFrameOrientation=[0, 0, 0, 1],
             )
 
-        print(f"[SimObject] Attached object {obj.body_id} to link {parent_link_index}")
+        logging.info(f"[SimObject] Attached object {obj.body_id} to link {parent_link_index}")
         return True
 
     def detach_object(self, obj: "SimObject") -> bool:
@@ -568,12 +593,19 @@ class SimObject:
         Example:
             agent.detach_object(pallet)
         """
+
         if obj not in self.attached_objects:
-            print(f"[SimObject] Object {obj.body_id} is not attached")
+            logging.info(f"[SimObject] Object {obj.body_id} is not attached")
             return False
 
         # Remove from attached list
         self.attached_objects.remove(obj)
+
+        # Debug: show attached_objects after removal
+        logging.debug(
+            f"detach_object: body_id={self.body_id} detached={obj.body_id} "
+            f"attached_objects(after)={[o.body_id for o in self.attached_objects]}"
+        )
 
         # Remove constraint if it exists
         if obj._constraint_id is not None:
@@ -585,7 +617,7 @@ class SimObject:
         obj._attached_to = None
         obj._attached_link_index = -1
 
-        print(f"[SimObject] Detached object {obj.body_id}")
+        logging.info(f"[SimObject] Detached object {obj.body_id}")
         return True
 
     def get_attached_objects(self) -> List["SimObject"]:
