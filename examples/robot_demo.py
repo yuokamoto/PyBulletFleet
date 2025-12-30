@@ -81,7 +81,7 @@ def arm_joint_control_callback(sim_core, dt):
     if sim_core.step_count % 10 == 0:
         t = sim_core.sim_time
         joint_targets = [0.5 * np.sin(t + j * 0.5) for j in range(arm_agent.get_num_joints())]
-        arm_agent.set_all_joint_targets(joint_targets)
+        arm_agent.set_all_joints_targets(joint_targets)
 
 
 # Register and run

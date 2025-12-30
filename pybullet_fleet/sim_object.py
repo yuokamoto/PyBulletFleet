@@ -133,6 +133,13 @@ class SimObject:
         self.mesh_path = mesh_path
         self.pickable = pickable
 
+        # Assign unique ID from sim_core if available
+        if sim_core is not None and hasattr(sim_core, "_next_object_id"):
+            self.object_id = sim_core._next_object_id
+            sim_core._next_object_id += 1
+        else:
+            self.object_id = -1  # No ID if not registered to sim_core
+
         # Attachment state (initialized with default zero offset)
         self._attach_offset: Pose = Pose(position=[0.0, 0.0, 0.0], orientation=[0.0, 0.0, 0.0, 1.0])
         self._constraint_id: Optional[int] = None

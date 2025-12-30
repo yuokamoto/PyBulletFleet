@@ -86,6 +86,33 @@ def resolve_link_index(body_id: int, link: Union[int, str]) -> int:
     return -1
 
 
+def resolve_joint_index(body_id: int, joint: Union[int, str]) -> int:
+    """
+    Resolve joint name to index.
+
+    Args:
+        body_id: PyBullet body ID
+        joint: Joint index (int) or name (str)
+
+    Returns:
+        Joint index (int). Returns -1 if joint name not found.
+
+    Example:
+        >>> idx = resolve_joint_index(robot.body_id, "elbow_joint")
+        >>> idx = resolve_joint_index(robot.body_id, 2)
+    """
+    if isinstance(joint, int):
+        return joint
+    num_joints = p.getNumJoints(body_id)
+    for i in range(num_joints):
+        joint_info = p.getJointInfo(body_id, i)
+        joint_name = joint_info[1].decode("utf-8")  # Joint name is at index 1
+        if joint_name == joint:
+            return i
+    logger.warning(f"Joint '{joint}' not found on body {body_id}, returning -1")
+    return -1
+
+
 def calculate_offset_pose(
     target_position: List[float], current_position: List[float], offset: float, keep_height: bool = True
 ) -> "Pose":

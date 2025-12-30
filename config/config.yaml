@@ -15,7 +15,7 @@
 speed: 100
 
 # Simulation timestep (seconds per step)
-timestep: 0.1
+timestep: 0.01
 
 # Simulation duration (seconds, 0=unlimited)
 duration: 0
@@ -59,7 +59,6 @@ camera_target: [5, 5, 0]   # Target position [x, y, z]
 # ========================================
 # Visualizer Settings
 # ========================================
-
 
 enable_visual_shapes: true           # Display visual shapes (meshes)
 enable_collision_shapes: false       # Display collision shapes (wireframes)

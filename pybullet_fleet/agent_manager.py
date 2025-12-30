@@ -81,6 +81,10 @@ class SimObjectManager(Generic[T]):
 
         Args:
             obj: SimObject or Agent instance to add
+
+        Note:
+            Objects are automatically registered to sim_core.sim_objects
+            via SimObject.__init__(), so we don't register them here again.
         """
         self.objects.append(obj)
         self.object_ids[obj.body_id] = obj

@@ -11,7 +11,6 @@ Demonstrates:
 """
 
 import os
-import logging
 import numpy as np
 import pybullet as p
 
@@ -21,13 +20,10 @@ from pybullet_fleet.geometry import Pose, Path
 from pybullet_fleet.sim_object import SimObject, SimObjectSpawnParams, ShapeParams
 from pybullet_fleet.action import MoveAction, WaitAction, PickAction, DropAction
 
-# Setup logging
-logging.basicConfig(level=logging.DEBUG, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
-
 
 def main():
-    # Initialize simulation
-    params = SimulationParams(gui=True, timestep=0.1, speed=3)
+    # Initialize simulation with DEBUG logging
+    params = SimulationParams(gui=True, timestep=0.1, speed=3, log_level="info")
     sim = MultiRobotSimulationCore(params)
 
     # Camera setup

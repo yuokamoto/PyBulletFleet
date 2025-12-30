@@ -21,6 +21,7 @@ from two_point_interpolation import TwoPointInterpolation
 from .action import Action
 from .types import MotionMode, DifferentialPhase, MovementDirection, ActionStatus
 from .tools import normalize_vector_param
+from pybullet_fleet.tools import resolve_joint_index
 
 # Create logger for this module
 logger = logging.getLogger(__name__)
@@ -156,6 +157,7 @@ class AgentSpawnParams(SimObjectSpawnParams):
 
 
 class Agent(SimObject):
+
     # Profiling flag (class variable)
     PROFILE_UPDATE = False
     """
@@ -1051,8 +1053,8 @@ class Agent(SimObject):
                 self._rotation_target_quat = np.array(r.as_quat())  # [x, y, z, w]
         else:
             # No movement needed - this happens when waypoint is at current position
-            # Keep current orientation (don't rotate to waypoint orientation)
-            self._rotation_target_quat = self._rotation_start_quat
+            # For rotation in place, use the goal's orientation
+            self._rotation_target_quat = np.array(goal.orientation)
 
         # Calculate rotation angle between quaternions
         r_current = R.from_quat(self._rotation_start_quat)
@@ -1381,6 +1383,15 @@ class Agent(SimObject):
         """
         return len(self._action_queue)
 
+    def is_action_queue_empty(self) -> bool:
+        """
+        Check if action queue is empty and no action is currently executing.
+
+        Returns:
+            True if no actions are queued or executing, False otherwise
+        """
+        return len(self._action_queue) == 0 and self._current_action is None
+
     def _update_actions(self, dt: float):
         """
         Update action execution system.
@@ -1439,25 +1450,26 @@ class Agent(SimObject):
         # Process action queue first (actions may set goals/paths)
         self._update_actions(dt)
 
-        if self.use_fixed_base:
-            return
+        if not self.use_fixed_base:
+            if not self._is_moving or self._goal_pose is None:
+                # Ensure robot is completely stopped when not following a path
+                # Reset velocity to zero every frame to counteract physics (gravity, etc.)
+                p.resetBaseVelocity(self.body_id, linearVelocity=[0, 0, 0], angularVelocity=[0, 0, 0])
+                # Also fix position to prevent any drift from physics simulation
+                current_pos, current_orn = p.getBasePositionAndOrientation(self.body_id)
+                p.resetBasePositionAndOrientation(self.body_id, current_pos, current_orn)
+                return
 
-        if not self._is_moving or self._goal_pose is None:
-            # Ensure robot is completely stopped when not following a path
-            # Reset velocity to zero every frame to counteract physics (gravity, etc.)
-            p.resetBaseVelocity(self.body_id, linearVelocity=[0, 0, 0], angularVelocity=[0, 0, 0])
-            # Also fix position to prevent any drift from physics simulation
-            current_pos, current_orn = p.getBasePositionAndOrientation(self.body_id)
-            p.resetBasePositionAndOrientation(self.body_id, current_pos, current_orn)
-            return
+            # Dispatch to appropriate motion controller
+            if self._motion_mode == MotionMode.OMNIDIRECTIONAL:
+                self._update_omnidirectional(dt)
+            elif self._motion_mode == MotionMode.DIFFERENTIAL:
+                self._update_differential(dt)
+            else:
+                logger.warning(f"Unknown motion mode: {self._motion_mode}")
 
-        # Dispatch to appropriate motion controller
-        if self._motion_mode == MotionMode.OMNIDIRECTIONAL:
-            self._update_omnidirectional(dt)
-        elif self._motion_mode == MotionMode.DIFFERENTIAL:
-            self._update_differential(dt)
-        else:
-            logger.warning(f"Unknown motion mode: {self._motion_mode}")
+        if self.is_urdf_robot():
+            self.update_attached_objects_kinematics()
 
         if Agent.PROFILE_UPDATE and t0 is not None:
             elapsed = (time.perf_counter() - t0) * 1000.0  # ms
@@ -1499,6 +1511,75 @@ class Agent(SimObject):
         """Get number of joints (0 for mesh robots)."""
         return len(self.joint_info)
 
+    def get_joint_state(self, joint_index: int) -> Tuple[float, float]:
+        """
+        Get joint state (position and velocity).
+
+        Args:
+            joint_index: Joint index (0-based)
+
+        Returns:
+            (position, velocity) tuple
+
+        Example:
+            pos, vel = robot.get_joint_state(0)
+        """
+        if not self.is_urdf_robot():
+            logger.warning("get_joint_state() only works for URDF robots")
+            return (0.0, 0.0)
+
+        joint_state = p.getJointState(self.body_id, joint_index)
+        return (joint_state[0], joint_state[1])  # position, velocity
+
+    def get_joint_state_by_name(self, joint_name: str) -> tuple:
+        """
+        Get (position, velocity) for a single joint by name.
+        Returns (position, velocity) or (0.0, 0.0) if not found.
+        """
+        idx = resolve_joint_index(self.body_id, joint_name)
+        if idx == -1:
+            logger.warning(f"Joint name '{joint_name}' not found.")
+            return (0.0, 0.0)
+        return self.get_joint_state(idx)
+
+    def get_all_joints_state(self) -> list:
+        """
+        Return a list of (position, velocity) for all joints.
+        Example: [(pos0, vel0), (pos1, vel1), ...]
+        """
+        if not self.is_urdf_robot():
+            logger.warning("get_all_joints_state() only works for URDF robots")
+            return []
+        return [self.get_joint_state(i) for i in range(self.get_num_joints())]
+
+    def get_all_joints_state_by_name(self) -> dict:
+        """
+        Return a dict of {joint_name: (position, velocity)} for all joints.
+        Example: {joint_name: (pos, vel), ...}
+        """
+        if not self.is_urdf_robot():
+            logger.warning("get_all_joints_state_by_name() only works for URDF robots")
+            return {}
+        joint_names = [self.joint_info[i]["jointName"] for i in range(self.get_num_joints())]
+        result = {}
+        for name in joint_names:
+            result[name] = self.get_joint_state_by_name(name)
+        return result
+
+    def get_joints_state_by_name(self, joint_names: list) -> dict:
+        """
+        Return a dict of {joint_name: (position, velocity)} for the specified joint_names.
+        Example: {joint_name: (pos, vel), ...}
+        """
+        result = {}
+        for name in joint_names:
+            idx = resolve_joint_index(self.body_id, name)
+            if idx == -1:
+                logger.warning(f"Joint name '{name}' not found.")
+                continue
+            result[name] = self.get_joint_state(idx)
+        return result
+
     def set_joint_target(self, joint_index: int, target_position: float, max_force: float = 500.0):
         """
         Set target position for a joint (for URDF robots only).
@@ -1527,27 +1608,17 @@ class Agent(SimObject):
             force=max_force,
         )
 
-    def get_joint_state(self, joint_index: int) -> Tuple[float, float]:
+    def set_joint_target_by_name(self, joint_name: str, target_position: float, max_force: float = 500.0):
         """
-        Get joint state (position and velocity).
-
-        Args:
-            joint_index: Joint index (0-based)
-
-        Returns:
-            (position, velocity) tuple
-
-        Example:
-            pos, vel = robot.get_joint_state(0)
+        Set target position for a joint by joint name.
         """
-        if not self.is_urdf_robot():
-            logger.warning("get_joint_state() only works for URDF robots")
-            return (0.0, 0.0)
+        joint_index = resolve_joint_index(self.body_id, joint_name)
+        if joint_index == -1:
+            logger.warning(f"Joint name '{joint_name}' not found.")
+            return
+        self.set_joint_target(joint_index, target_position, max_force)
 
-        joint_state = p.getJointState(self.body_id, joint_index)
-        return (joint_state[0], joint_state[1])  # position, velocity
-
-    def set_all_joint_targets(self, target_positions: List[float], max_force: float = 500.0):
+    def set_all_joints_targets(self, target_positions: List[float], max_force: float = 500.0):
         """
         Set target positions for all joints at once.
 
@@ -1556,10 +1627,10 @@ class Agent(SimObject):
             max_force: Maximum force to apply
 
         Example:
-            robot.set_all_joint_targets([0.0, 1.57, -1.57, 0.0])
+            robot.set_all_joints_targets([0.0, 1.57, -1.57, 0.0])
         """
         if not self.is_urdf_robot():
-            logger.warning("set_all_joint_targets() only works for URDF robots")
+            logger.warning("set_all_joints_targets() only works for URDF robots")
             return
 
         if len(target_positions) != len(self.joint_info):
@@ -1568,6 +1639,143 @@ class Agent(SimObject):
 
         for i, target in enumerate(target_positions):
             self.set_joint_target(i, target, max_force)
+
+    def set_joints_targets_by_name(self, joint_targets: dict, max_force: float = 500.0):
+        """
+        Set multiple joint targets by dict {joint_name: target_position} (partial update allowed).
+        """
+        for joint_name, target in joint_targets.items():
+            joint_index = resolve_joint_index(self.body_id, joint_name)
+            if joint_index == -1:
+                logger.warning(f"Joint name '{joint_name}' not found.")
+                continue
+            self.set_joint_target(joint_index, target, max_force)
+
+    def set_joints_targets(self, targets: Union[list, dict], max_force: float = 500.0):
+        """
+        Set joint targets (accepts both list and dict).
+
+        Args:
+            targets: List of target positions for all joints, or dict {joint_name: position}
+            max_force: Maximum force to apply
+
+        Example:
+            # Using list
+            robot.set_joints_targets([0.0, 1.57, -1.57, 0.0])
+
+            # Using dict
+            robot.set_joints_targets({"joint1": 1.57, "joint2": -1.57})
+        """
+        if isinstance(targets, dict):
+            self.set_joints_targets_by_name(targets, max_force)
+        else:
+            self.set_all_joints_targets(targets, max_force)
+
+    def is_joint_at_target(self, joint_index: int, target: float, tolerance: float = 0.01) -> bool:
+        """
+        Check if a single joint (by index) is within tolerance of the target position.
+        """
+        if not self.is_urdf_robot():
+            logger.warning("is_joint_at_target() only works for URDF robots")
+            return False
+        if joint_index < 0 or joint_index >= len(self.joint_info):
+            logger.warning(f"joint_index {joint_index} out of range (max: {len(self.joint_info)-1})")
+            return False
+        pos, _ = self.get_joint_state(joint_index)
+        return abs(pos - target) <= tolerance
+
+    def is_joint_at_target_by_name(self, joint_name: str, target: float, tolerance: float = 0.01) -> bool:
+        """
+        Check if a single joint (by name) is within tolerance of the target position.
+        """
+        joint_index = resolve_joint_index(self.body_id, joint_name)
+        if joint_index == -1:
+            return False
+        return self.is_joint_at_target(joint_index, target, tolerance)
+
+    def are_all_joints_at_targets(self, target_positions: list, tolerance: Union[float, list] = 0.01) -> bool:
+        """
+        target_positions: list of target positions for each joint
+        tolerance: float or list of tolerances for each joint
+        Returns True if all joints are within tolerance of their targets, False otherwise
+        """
+        if not self.is_urdf_robot():
+            logger.warning("are_all_joints_at_targets() only works for URDF robots")
+            return False
+        if len(target_positions) == 0:
+            return True
+        if isinstance(tolerance, (list, tuple)):
+            tol_list = list(tolerance)
+        else:
+            tol_list = [tolerance] * len(target_positions)
+        for i, target in enumerate(target_positions):
+            tol = tol_list[i] if i < len(tol_list) else tol_list[-1]
+            if not self.is_joint_at_target(i, target, tol):
+                return False
+        return True
+
+    def are_joints_at_targets_by_name(self, joint_targets: dict, tolerance: Union[float, list, dict] = 0.01) -> bool:
+        """
+        Check if all specified joints (by name) are within tolerance of their target positions.
+        Args:
+            joint_targets: dict {joint_name: target}
+            tolerance: float (all), list/tuple (joint_targets order), or dict (joint_name: tol)
+        Returns:
+            True if all joints are within tolerance, False otherwise
+        """
+        if isinstance(tolerance, dict):
+            tol_map = tolerance
+        elif isinstance(tolerance, (list, tuple)):
+            tol_map = {jn: tolerance[i] for i, jn in enumerate(joint_targets.keys())}
+        else:
+            tol_map = {jn: tolerance for jn in joint_targets.keys()}
+        for joint_name, target in joint_targets.items():
+            tol = tol_map.get(joint_name, 0.01)
+            if not self.is_joint_at_target_by_name(joint_name, target, tol):
+                return False
+        return True
+
+    def are_joints_at_targets(self, targets: Union[list, dict], tolerance: Union[float, list, dict] = 0.01) -> bool:
+        """
+        Check if joints are at target positions (accepts both list and dict).
+
+        Args:
+            targets: List of target positions for all joints, or dict {joint_name: position}
+            tolerance: Tolerance value(s) - float, list, or dict
+
+        Returns:
+            True if all joints are within tolerance, False otherwise
+
+        Example:
+            # Using list
+            if robot.are_joints_at_targets([0.0, 1.57, -1.57, 0.0], tolerance=0.01):
+                print("Reached target")
+
+            # Using dict
+            if robot.are_joints_at_targets({"joint1": 1.57, "joint2": -1.57}, tolerance=0.01):
+                print("Reached target")
+        """
+        if isinstance(targets, dict):
+            return self.are_joints_at_targets_by_name(targets, tolerance)
+        else:
+            return self.are_all_joints_at_targets(targets, tolerance)
+
+    def update_attached_objects_kinematics(self):
+        """
+        For URDF robots: update attached objects' pose to follow the parent link (kinematics attach).
+        This is called every step for kinematic (mass=0) attached objects.
+        """
+        for obj in self.attached_objects:
+            # Only update if attached to a link (not base) and no constraint (mass=0)
+            if obj._attached_link_index >= 0 and getattr(obj, "_constraint_id", None) is None:
+                # 親リンクのワールド座標を取得
+                link_state = p.getLinkState(self.body_id, obj._attached_link_index)
+                parent_pos, parent_orn = link_state[0], link_state[1]
+                # 相対オフセットを適用
+                new_pos, new_orn = p.multiplyTransforms(
+                    parent_pos, parent_orn, obj._attach_offset.position, obj._attach_offset.orientation
+                )
+                obj.set_pose(Pose.from_pybullet(new_pos, new_orn))
 
     def __repr__(self):
         pose = self.get_pose()

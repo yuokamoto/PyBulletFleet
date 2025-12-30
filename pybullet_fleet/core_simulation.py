@@ -6,7 +6,6 @@ coordinate conversion, occupied judgment, transport path generation, debugging,
 monitoring, and log control for various robots, pallets, and meshes.
 """
 
-import json
 import logging
 import os
 import time
@@ -166,6 +165,8 @@ class MultiRobotSimulationCore:
         self.step_count: int = 0
         self.sim_time: float = 0.0  # Simulation time
         self.start_time: Optional[float] = None
+        self._next_object_id: int = 0  # Counter for unique object IDs
+        self._last_logged_collision_count: int = 0  # Track last logged collision count
         self.monitor_enabled: bool = params.monitor
         self.last_monitor_update: float = 0
         self.callbacks: List[Dict[str, Any]] = []  # List of callback functions
@@ -194,7 +195,6 @@ class MultiRobotSimulationCore:
 
     def setup_monitor(self) -> None:
         # If monitor: true and console_monitor: false, start DataMonitor
-        from pybullet_fleet.data_monitor import DataMonitor
 
         if self.params.monitor:
             self.data_monitor = DataMonitor("PyBullet Simulation Monitor")
@@ -707,20 +707,18 @@ class MultiRobotSimulationCore:
             "collisions": self.collision_count,
             "steps": self.step_count,
         }
-        # Log level control (minimum: warn, info for details, debug for all output)
-        log_level = self.log_level if not suppress_console else "warn"
-        logging.debug("MONITOR:")
-        logging.debug(json.dumps(monitor_data, indent=2, ensure_ascii=False))
-        logging.info(
-            "sim_time=%.2f, real_time=%.2f, speed=%.2f, collisions=%d, steps=%d",
+        logging.debug(
+            "[MONITOR] sim_time=%.2f, real_time=%.2f, speed=%.2f, collisions=%d, steps=%d",
             sim_time,
             elapsed_time,
             actual_speed,
             self.collision_count,
             self.step_count,
         )
-        if self.collision_count > 0:
-            logging.info(f"collisions={self.collision_count} at sim_time={sim_time:.2f}")
+        # Log only when collision count increases (new collision detected)
+        if self.collision_count > self._last_logged_collision_count:
+            logging.info(f"NEW COLLISION: total={self.collision_count} at sim_time={sim_time:.2f}")
+            self._last_logged_collision_count = self.collision_count
         # Also output to DataMonitor window
         if self.data_monitor:
             self.data_monitor.write_data(monitor_data)
