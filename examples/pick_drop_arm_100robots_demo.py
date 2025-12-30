@@ -214,24 +214,9 @@ print("  Cycle 1: Pick from right (0.3, 0, 0.1) -> Drop on left (-0.3, 0, 0.1)")
 print("  Cycle 2: Pick from left (-0.3, 0, 0.1) -> Drop on right (0.3, 0, 0.1)")
 print("=" * 60 + "\n")
 
-# DEBUG: Test with only first robot
-print("DEBUG: Testing with first robot only")
-arm_agent = arm_agents[0]
-box_sim = arm_agent.user_data["box"]
-action_sequence = create_action_sequence(arm_agent, box_sim)
-print(f"DEBUG: Created action sequence with {len(action_sequence)} actions")
-arm_agent.add_action_sequence(action_sequence)
-print(f"DEBUG: Queue length: {len(arm_agent._action_queue)}")
-print("✓ Configured actions for robot 0\n")
-
-# # Setup all robots
-# for idx, arm_agent in enumerate(arm_agents):
-#     box_sim = arm_agent.user_data['box']
-#     arm_agent.add_action_sequence(create_action_sequence(arm_agent, box_sim))
-#     if (idx + 1) % 20 == 0:
-#         print(f"  Configured actions for {idx + 1}/{NUM_ROBOTS} robots...")
-
-# print(f"✓ All {len(arm_agents)} robots configured!\n")
+# Setup all robots using helper method
+agent_manager.add_action_sequence_all(lambda robot: create_action_sequence(robot, robot.user_data["box"]))
+print(f"✓ All {len(arm_agents)} robots configured!\n")
 
 # Register callback with AgentManager to repeat sequences
 agent_manager.register_callback(action_repeat_callback, frequency=10.0)

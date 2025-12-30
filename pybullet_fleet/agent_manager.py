@@ -8,7 +8,7 @@ Management classes for simulation objects and agents.
 import random
 import time
 from dataclasses import dataclass, replace
-from typing import Any, Callable, Dict, Generic, List, Optional, Tuple, TypeVar
+from typing import Any, Callable, Dict, Generic, List, Optional, Tuple, TypeVar, Union
 
 from .agent import Agent, AgentSpawnParams, Pose
 from .sim_object import SimObject, SimObjectSpawnParams
@@ -73,7 +73,8 @@ class SimObjectManager(Generic[T]):
         """
         self.sim_core = sim_core
         self.objects: List[T] = []
-        self.object_ids: Dict[int, T] = {}  # body_id -> object mapping
+        self.body_ids: Dict[int, T] = {}  # body_id -> object mapping (PyBullet layer)
+        self.object_ids: Dict[int, T] = {}  # object_id -> object mapping (Manager layer)
 
     def add_object(self, obj: T) -> None:
         """
@@ -87,7 +88,9 @@ class SimObjectManager(Generic[T]):
             via SimObject.__init__(), so we don't register them here again.
         """
         self.objects.append(obj)
-        self.object_ids[obj.body_id] = obj
+        self.body_ids[obj.body_id] = obj
+        if obj.object_id >= 0:  # Only register if object_id is valid
+            self.object_ids[obj.object_id] = obj
 
     def spawn_objects_grid(
         self, num_objects: int, grid_params: GridSpawnParams, spawn_params: SimObjectSpawnParams
@@ -514,27 +517,168 @@ class AgentManager(SimObjectManager[Agent]):
         else:
             print(f"[AgentManager] Warning: Invalid agent index {agent_index}")
 
-    def set_goal_pose_by_id(self, body_id: int, goal: Pose):
+    def set_goal_pose_by_body_id(self, body_id: int, goal: Pose):
         """
         Set goal pose for an agent by its PyBullet body ID.
+
+        Note:
+            This method uses PyBullet's internal body_id for compatibility
+            with direct PyBullet API usage. For manager-level operations,
+            prefer using set_goal_pose_by_object_id() instead.
 
         Args:
             body_id: PyBullet body ID
             goal: Target Pose
         """
-        if body_id in self.object_ids:
-            self.object_ids[body_id].set_goal_pose(goal)
+        if body_id in self.body_ids:
+            self.body_ids[body_id].set_goal_pose(goal)
         else:
             print(f"[AgentManager] Warning: Unknown agent body_id {body_id}")
+
+    def set_goal_pose_by_object_id(self, object_id: int, goal: Pose):
+        """
+        Set goal pose for an agent by its simulation object ID.
+
+        This is the preferred method for manager-level operations, as it uses
+        the simulation's unique object_id rather than PyBullet's internal body_id.
+
+        Args:
+            object_id: Simulation object ID (from SimObject.object_id)
+            goal: Target Pose
+        """
+        if object_id in self.object_ids:
+            self.object_ids[object_id].set_goal_pose(goal)
+        else:
+            print(f"[AgentManager] Warning: Unknown agent object_id {object_id}")
 
     def stop_all(self):
         """Stop all agents and clear their goals."""
         for agent in self.objects:
             agent.stop()
 
+    def set_goal_pose_all(self, goal_factory: Callable[[Agent], Pose]) -> None:
+        """
+        Set goal pose for all agents using a factory function.
+
+        This helper method simplifies bulk goal assignment by applying
+        a factory function to each agent. The factory can use agent-specific
+        data (current pose, user_data, etc.) to create customized goals.
+
+        Args:
+            goal_factory: Function that takes an Agent and returns a Pose
+
+        Example:
+            # Set all agents to move to their designated home positions
+            def get_home_goal(robot):
+                return robot.user_data['home_position']
+
+            manager.set_goal_pose_all(get_home_goal)
+
+            # Move all agents 5 meters forward from their current position
+            def move_forward(robot):
+                current_pos = robot.get_pose().position
+                return Pose.from_xyz(current_pos[0] + 5, current_pos[1], current_pos[2])
+
+            manager.set_goal_pose_all(move_forward)
+
+        Note:
+            This is a convenience wrapper around individual set_goal_pose calls.
+            No performance benefit over explicit loops, but improves code clarity.
+        """
+        for agent in self.objects:
+            goal = goal_factory(agent)
+            agent.set_goal_pose(goal)
+
+    def set_joints_targets_all(self, targets_factory: Callable[[Agent], Union[list, dict]], max_force: float = 500.0) -> None:
+        """
+        Set joint targets for all agents using a factory function.
+
+        This helper method simplifies bulk joint control by applying
+        a factory function to each agent. Useful for coordinated multi-robot
+        arm movements.
+
+        Args:
+            targets_factory: Function that takes an Agent and returns joint targets
+                           (list of positions or dict of {joint_name: position})
+            max_force: Maximum force for joint control (default: 500.0)
+
+        Example:
+            # Set all robot arms to neutral position
+            def get_neutral_joints(robot):
+                return [0.0, 0.0, 0.0, 0.0]
+
+            manager.set_joints_targets_all(get_neutral_joints)
+
+            # Set custom positions based on robot index
+            def get_custom_joints(robot):
+                idx = robot.user_data.get('index', 0)
+                return [idx * 0.1, 0.0, 0.0, 0.0]
+
+            manager.set_joints_targets_all(get_custom_joints, max_force=1000.0)
+
+        Note:
+            Only applicable to agents with controllable joints (robot arms, etc.).
+            Mobile robots without arm joints will ignore this command.
+        """
+        for agent in self.objects:
+            targets = targets_factory(agent)
+            agent.set_joints_targets(targets, max_force=max_force)
+
     def get_moving_count(self) -> int:
         """Get number of agents currently moving."""
         return sum(1 for agent in self.objects if agent.is_moving)
+
+    def add_action_sequence_all(self, action_factory: Callable[[Agent], List[Any]]) -> None:
+        """
+        Apply action sequence to all agents using a factory function.
+
+        This helper method simplifies bulk action assignment by applying
+        a factory function to each agent. The factory can use agent-specific
+        data (pose, user_data, etc.) to create customized action sequences.
+
+        Args:
+            action_factory: Function that takes an Agent and returns a list of Actions
+
+        Example:
+            def create_pick_drop_sequence(robot):
+                target = robot.user_data['target_object']
+                return [
+                    PickAction(target_object_id=target.body_id),
+                    MoveAction(path=Path.from_positions([[10, 10, 0]])),
+                    DropAction(drop_position=[10, 10, 0])
+                ]
+
+            # Apply to all agents at once
+            manager.add_action_sequence_all(create_pick_drop_sequence)
+
+        Note:
+            This is a convenience wrapper. Internally it still loops through agents,
+            so there's no performance benefit over explicit loops. The main advantage
+            is code clarity and reduced boilerplate.
+        """
+        for agent in self.objects:
+            actions = action_factory(agent)
+            agent.add_action_sequence(actions)
+
+    def add_action_all(self, action_factory: Callable[[Agent], Any]) -> None:
+        """
+        Add a single action to all agents using a factory function.
+
+        Similar to add_action_sequence_all, but adds a single action instead of a sequence.
+
+        Args:
+            action_factory: Function that takes an Agent and returns a single Action
+
+        Example:
+            def create_move_action(robot):
+                goal_pos = robot.user_data['next_position']
+                return MoveAction(path=Path.from_positions([goal_pos]))
+
+            manager.add_action_all(create_move_action)
+        """
+        for agent in self.objects:
+            action = action_factory(agent)
+            agent.add_action(action)
 
     def register_callback(self, callback: Callable[["AgentManager", float], None], frequency: Optional[float] = None):
         """

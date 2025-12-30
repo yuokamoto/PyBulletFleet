@@ -319,10 +319,8 @@ def action_coordination_callback(manager: AgentManager, dt: float):
             print(f"[Cycle {state.cycle_count}] All robots completed A->B. Starting B->A...")
             print(f"{'='*60}\n")
 
-            # Assign B->A sequence to all robots
-            for robot in manager.objects:
-                pallet = robot.user_data["pallet"]
-                robot.add_action_sequence(create_action_sequence_B_to_A(robot, pallet))
+            # Assign B->A sequence to all robots using helper method
+            manager.add_action_sequence_all(lambda robot: create_action_sequence_B_to_A(robot, robot.user_data["pallet"]))
 
         else:
             # Switch to A -> B
@@ -331,10 +329,8 @@ def action_coordination_callback(manager: AgentManager, dt: float):
             print(f"[Cycle {state.cycle_count}] All robots completed B->A. Starting A->B...")
             print(f"{'='*60}\n")
 
-            # Assign A->B sequence to all robots
-            for robot in manager.objects:
-                pallet = robot.user_data["pallet"]
-                robot.add_action_sequence(create_action_sequence_A_to_B(robot, pallet))
+            # Assign A->B sequence to all robots using helper method
+            manager.add_action_sequence_all(lambda robot: create_action_sequence_A_to_B(robot, robot.user_data["pallet"]))
 
 
 # Setup initial sequence for all robots (A -> B)
@@ -342,12 +338,9 @@ print("=== Setting up Initial Action Sequences (A -> B) ===")
 print(f"Direction: Area A {AREA_A_CENTER} -> Area B {AREA_B_CENTER}")
 print("=" * 60 + "\n")
 
-for idx, robot in enumerate(mobile_agents):
-    pallet = robot.user_data["pallet"]
-    robot.add_action_sequence(create_action_sequence_A_to_B(robot, pallet))
-
-    if (idx + 1) % 20 == 0:
-        print(f"  Configured actions for {idx + 1}/{NUM_ROBOTS} robots...")
+# Use helper method for bulk action assignment
+agent_manager.add_action_sequence_all(lambda robot: create_action_sequence_A_to_B(robot, robot.user_data["pallet"]))
+print(f"✓ All {len(mobile_agents)} robots configured!\n")
 
 print(f"✓ All {len(mobile_agents)} robots configured!\n")
 
