@@ -22,9 +22,11 @@ from .action import Action
 from .types import MotionMode, DifferentialPhase, MovementDirection, ActionStatus
 from .tools import normalize_vector_param
 from pybullet_fleet.tools import resolve_joint_index
+from .logging_utils import get_lazy_logger
 
 # Create logger for this module
 logger = logging.getLogger(__name__)
+lazy_logger = get_lazy_logger(__name__)
 
 
 @dataclass
@@ -771,10 +773,14 @@ class Agent(SimObject):
         # Teleport to exact goal position before updating waypoint
         p.resetBasePositionAndOrientation(self.body_id, self._goal_pose.position, current_pose.orientation)
 
-        logger.debug(f"Agent {self.body_id} reached waypoint at position {self._goal_pose.position[:2]}")
-        r = R.from_quat(current_pose.orientation)
-        yaw_current = r.as_euler("xyz", degrees=False)[2]
-        logger.debug(f"  Current orientation: yaw={np.degrees(yaw_current):.1f}°, quat={current_pose.orientation}")
+        lazy_logger.debug(lambda: f"Agent {self.body_id} reached waypoint at position {self._goal_pose.position[:2]}")
+        lazy_logger.debug(
+            lambda: (
+                f"  Current orientation: yaw="
+                f"{np.degrees(R.from_quat(current_pose.orientation).as_euler('xyz', degrees=False)[2]):.1f}°, "
+                f"quat={current_pose.orientation}"
+            )
+        )
 
         # Stop moving
         self._current_velocity = np.array([0.0, 0.0, 0.0])
@@ -954,9 +960,9 @@ class Agent(SimObject):
         current_pos = np.array(current_pose.position)
         goal_pos = np.array(goal.position)
 
-        logger.debug(f"Agent {self.body_id} initializing differential rotation trajectory")
-        logger.debug(f"  Current pos: {current_pos[:2]}, Goal pos: {goal_pos[:2]}")
-        logger.debug(f"  Goal orientation (quat): {goal.orientation}")
+        lazy_logger.debug(lambda: f"Agent {self.body_id} initializing differential rotation trajectory")
+        lazy_logger.debug(lambda: f"  Current pos: {current_pos[:2]}, Goal pos: {goal_pos[:2]}")
+        lazy_logger.debug(lambda: f"  Goal orientation (quat): {goal.orientation}")
 
         # Calculate direction vector
         direction_vec = goal_pos - current_pos
@@ -1008,10 +1014,10 @@ class Agent(SimObject):
             # Use dot product to measure alignment (1.0 = perfectly aligned)
             alignment = np.dot(x_axis_goal, x_axis_target)
 
-            logger.debug(f"Agent {self.body_id} checking orientation alignment:")
-            logger.debug(f"  Movement direction: {x_axis_target}")
-            logger.debug(f"  Goal's X-axis: {x_axis_goal}")
-            logger.debug(f"  Alignment: {alignment:.3f} (threshold: 0.95)")
+            lazy_logger.debug(lambda: f"Agent {self.body_id} checking orientation alignment:")
+            lazy_logger.debug(lambda: f"  Movement direction: {x_axis_target}")
+            lazy_logger.debug(lambda: f"  Goal's X-axis: {x_axis_goal}")
+            lazy_logger.debug(lambda: f"  Alignment: {alignment:.3f} (threshold: 0.95)")
 
             # Threshold: cos(18°) ≈ 0.95 (allow up to 18 degrees deviation)
             if alignment > 0.95:
@@ -1452,12 +1458,12 @@ class Agent(SimObject):
 
         if not self.use_fixed_base:
             if not self._is_moving or self._goal_pose is None:
-                # Ensure robot is completely stopped when not following a path
-                # Reset velocity to zero every frame to counteract physics (gravity, etc.)
-                p.resetBaseVelocity(self.body_id, linearVelocity=[0, 0, 0], angularVelocity=[0, 0, 0])
-                # Also fix position to prevent any drift from physics simulation
-                current_pos, current_orn = p.getBasePositionAndOrientation(self.body_id)
-                p.resetBasePositionAndOrientation(self.body_id, current_pos, current_orn)
+                # # Ensure robot is completely stopped when not following a path
+                # # Reset velocity to zero every frame to counteract physics (gravity, etc.)
+                # p.resetBaseVelocity(self.body_id, linearVelocity=[0, 0, 0], angularVelocity=[0, 0, 0])
+                # # Also fix position to prevent any drift from physics simulation
+                # current_pos, current_orn = p.getBasePositionAndOrientation(self.body_id)
+                # p.resetBasePositionAndOrientation(self.body_id, current_pos, current_orn)
                 return
 
             # Dispatch to appropriate motion controller

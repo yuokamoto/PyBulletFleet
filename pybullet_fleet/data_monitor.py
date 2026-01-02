@@ -16,8 +16,9 @@ from typing import Dict, Optional
 class DataMonitor:
     """Real-time data monitoring window"""
 
-    def __init__(self, title: str = "Simulation Monitor") -> None:
+    def __init__(self, title: str = "Simulation Monitor", enable_gui: bool = True) -> None:
         self.title: str = title
+        self.enable_gui: bool = enable_gui
         self.running: bool = False
         self.window: Optional[tk.Tk] = None
         self.labels: Dict[str, ttk.Label] = {}
@@ -32,8 +33,11 @@ class DataMonitor:
             return
 
         self.running = True
-        self.monitor_thread = threading.Thread(target=self._run_monitor, daemon=True)
-        self.monitor_thread.start()
+
+        # Only start GUI thread if GUI is enabled
+        if self.enable_gui:
+            self.monitor_thread = threading.Thread(target=self._run_monitor, daemon=True)
+            self.monitor_thread.start()
 
     def stop(self) -> None:
         """Stop the monitor window"""

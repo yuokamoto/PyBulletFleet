@@ -1,0 +1,159 @@
+======================================================================
+SimObject Overhead Analysis v3+CPU - Process Isolated
+======================================================================
+
+Configuration:
+  Test objects: 10000
+  Repetitions: 3
+  Max production objects: 10000
+  Acceptable memory overhead (@10000): +100MB
+  Acceptable spawn time (@10000): <5.0s (TOTAL)
+  Acceptable update time (@10000): <10.0ms (TOTAL)
+
+======================================================================
+Test A: Direct PyBullet (Baseline)
+======================================================================
+  Rep 1/3... done
+  Rep 2/3... done
+  Rep 3/3... done
+
+Direct PyBullet:
+  Spawn time: 3.017s (±1.372s, min=1.848, max=4.582)
+  Update time: 98.47ms (±42.87ms, min=70.74, max=154.88)
+    ├─ get_pose: 52.56ms (±24.43ms)
+    └─ set_pose: 45.90ms (±18.46ms)
+  RSS delta: 85.02MB (±0.11MB)
+  tracemalloc delta: 0.35MB (±0.00MB)
+  RSS - tracemalloc: 84.67MB (±0.11MB)
+  CPU time (spawn): 2.970s (±0.877s)  util~98.4%
+  CPU time (update): 0.100s (±0.045s)  util~96.9%
+  CPU time (total): 3.070s (±0.921s)
+
+======================================================================
+Test B: SimObject Wrapper
+======================================================================
+  Rep 1/3... done
+  Rep 2/3... done
+  Rep 3/3... done
+
+SimObject Wrapper:
+  Spawn time: 2.712s (±0.426s, min=2.477, max=3.303)
+  Update time: 177.72ms (±18.95ms, min=170.76, max=206.52)
+    ├─ get_pose: 95.12ms (±2.66ms)
+    └─ set_pose: 81.74ms (±17.72ms)
+  RSS delta: 146.90MB (±0.11MB)
+  tracemalloc delta: 7.51MB (±0.01MB)
+  RSS - tracemalloc: 139.38MB (±0.11MB)
+  CPU time (spawn): 2.720s (±0.363s)  util~100.3%
+  CPU time (update): 0.180s (±0.021s)  util~101.3%
+  CPU time (total): 2.890s (±0.352s)
+  Cache size: median=0, min=0, max=0
+
+======================================================================
+Test C: SimObjectManager (Bulk)
+======================================================================
+  Rep 1/3... done
+  Rep 2/3... done
+  Rep 3/3... done
+
+SimObjectManager:
+  Spawn time: 5.823s (±1.928s, min=3.608, max=7.450)
+  Update time: 242.89ms (±121.07ms, min=100.31, max=341.08)
+  RSS delta: 149.72MB (±0.07MB)
+  tracemalloc delta: 8.17MB (±0.00MB)
+  RSS - tracemalloc: 141.55MB (±0.07MB)
+  CPU time (spawn): 4.970s (±0.852s)  util~85.3%
+  CPU time (update): 0.180s (±0.049s)  util~78.2%
+  CPU time (total): 5.160s (±0.901s)
+
+======================================================================
+Test D: Agent Wrapper
+======================================================================
+  Rep 1/3... done
+  Rep 2/3... done
+  Rep 3/3... done
+
+Agent Wrapper:
+  Spawn time: 4.580s (±0.669s, min=4.168, max=5.477)
+  Update time: 252.60ms (±93.15ms, min=142.14, max=327.30)
+    ├─ get_pose: 94.41ms (±32.56ms)
+    └─ set_pose: 158.19ms (±61.86ms)
+  RSS delta: 191.62MB (±0.06MB)
+  tracemalloc delta: 41.85MB (±0.00MB)
+  RSS - tracemalloc: 149.77MB (±0.06MB)
+  CPU time (spawn): 4.580s (±0.433s)  util~97.4%
+  CPU time (update): 0.250s (±0.076s)  util~99.0%
+  CPU time (total): 4.880s (±0.492s)
+
+======================================================================
+Test E: AgentManager (Bulk)
+======================================================================
+  Rep 1/3... done
+  Rep 2/3... done
+  Rep 3/3... done
+
+AgentManager:
+  Spawn time: 4.177s (±1.848s, min=4.107, max=7.342)
+  Update time: 239.10ms (±82.26ms, min=174.34, max=337.68)
+    ├─ get_pose: 91.34ms (±38.99ms)
+    └─ set_pose: 147.76ms (±46.27ms)
+  RSS delta: 194.10MB (±0.14MB)
+  tracemalloc delta: 42.51MB (±0.00MB)
+  RSS - tracemalloc: 151.59MB (±0.14MB)
+  CPU time (spawn): 4.190s (±1.840s)  util~99.7%
+  CPU time (update): 0.230s (±0.072s)  util~97.7%
+  CPU time (total): 4.420s (±1.910s)
+
+======================================================================
+Overhead Analysis - Median Values
+======================================================================
+
+SimObject vs Direct PyBullet:
+  Spawn overhead (wall): +-0.305s
+  Spawn overhead (CPU):  +-0.250s
+  Update overhead (wall): +79.25ms
+  Update overhead (CPU):  +0.080s
+  Memory overhead (RSS):  +61.89MB  (6.34KB/obj)
+
+Agent vs Direct PyBullet:
+  Spawn overhead (wall): +1.563s
+  Update overhead (wall): +154.13ms
+    ├─ get_pose overhead: +-4.06ms
+    └─ set_pose overhead: +158.19ms (vs 0 baseline)
+  Memory overhead (RSS):  +106.61MB  (10.92KB/obj)
+
+======================================================================
+Extrapolation (REFERENCE) to 10000 objects
+======================================================================
+
+Spawn time (TOTAL):
+  Baseline: 3.02s
+  SimObject: 2.71s
+  Agent: 4.58s
+
+Update time (get+set pose, TOTAL per step):
+  Baseline (get only): 98.47ms
+  SimObject (get only): 177.72ms
+  Agent (get+set): 252.60ms
+    ├─ Agent get_pose: 94.41ms
+    └─ Agent set_pose: 158.19ms
+
+Memory overhead (RSS delta, TOTAL):
+  SimObject: +61.89MB
+  Agent: +106.61MB
+
+======================================================================
+Decision Framework (TOTAL @ production scale)
+======================================================================
+
+SimObject:
+  1) Spawn time:  ✅ PASS  (2.71s <= 5.0s)
+  2) Memory overhead: ✅ PASS  (+61.89MB <= +100MB)
+  3) Update time: ❌ FAIL  (177.72ms <= 10.0ms)
+
+Agent:
+  1) Spawn time:  ✅ PASS  (4.58s <= 5.0s)
+  2) Memory overhead: ❌ FAIL  (+106.61MB <= +100MB)
+  3) Update time: ❌ FAIL  (252.60ms <= 10.0ms)
+
+======================================================================

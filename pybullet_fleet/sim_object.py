@@ -5,12 +5,19 @@ Base class for simulation objects with attachment support.
 
 from dataclasses import dataclass, field
 from typing import Callable, List, Optional, Dict, Tuple
-import logging  # for debug logging
+import logging
 
 import numpy as np
 import pybullet as p
 
 from .geometry import Pose
+from .logging_utils import get_lazy_logger
+
+# Standard logger for info/warning/error
+logger = logging.getLogger(__name__)
+
+# Lazy logger for debug messages (avoids expensive string formatting when disabled)
+lazy_logger = get_lazy_logger(__name__)
 
 
 @dataclass
@@ -125,7 +132,9 @@ class SimObject:
     # Class-level shared shapes cache (for optimization)
     _shared_shapes: Dict[str, Tuple[int, int]] = {}
 
-    def __init__(self, body_id: int, sim_core=None, mesh_path: Optional[str] = None, pickable: bool = True):
+    def __init__(
+        self, body_id: int, sim_core=None, mesh_path: Optional[str] = None, pickable: bool = True, mass: float = None
+    ):
         self.body_id = body_id
         self.sim_core = sim_core
         self.attached_objects: List["SimObject"] = []
@@ -145,6 +154,20 @@ class SimObject:
         self._constraint_id: Optional[int] = None
         self._attached_to: Optional["SimObject"] = None  # Which object is this attached to
         self._attached_link_index: int = -1  # Which link is this attached to
+
+        # Mass (for optimization - query from PyBullet if not provided)
+        if mass is not None:
+            self.mass = mass
+        else:
+            # Query from PyBullet (getDynamicsInfo returns mass at index 0)
+            self.mass = p.getDynamicsInfo(self.body_id, -1)[0]
+
+        # Kinematic flag (mass=0 means kinematic/static object)
+        self.is_kinematic = self.mass == 0.0
+
+        # Pose caching for performance optimization
+        self._cached_pose: Optional[Pose] = None
+        self._cached_pose_sim_time: float = -1.0  # Simulation time when pose was cached
 
         # Auto-register to sim_core if provided
         if sim_core is not None:
@@ -409,7 +432,7 @@ class SimObject:
         # Store mesh_path if available for backward compatibility
         stored_mesh_path = visual_shape.mesh_path if (visual_shape and visual_shape.shape_type == "mesh") else None
 
-        return cls(body_id=body_id, sim_core=sim_core, mesh_path=stored_mesh_path, pickable=pickable)
+        return cls(body_id=body_id, sim_core=sim_core, mesh_path=stored_mesh_path, pickable=pickable, mass=mass)
 
     @classmethod
     def from_params(cls, spawn_params: SimObjectSpawnParams, sim_core=None) -> "SimObject":
@@ -456,28 +479,73 @@ class SimObject:
         return obj
 
     def get_pose(self) -> Pose:
-        """Return current position and orientation as Pose object."""
-        position, orientation = p.getBasePositionAndOrientation(self.body_id)
-        return Pose.from_pybullet(position, orientation)
+        """
+        Return current position and orientation as Pose object.
 
-    def set_pose(self, pose: Pose):
+        Performance optimization: Caches the pose within the same simulation timestep
+        to avoid redundant PyBullet API calls. Cache is automatically invalidated when
+        sim_time advances or when set_pose() is called.
+        """
+        # Check if we have a valid cached pose for the current simulation time
+        current_sim_time = self.sim_core.sim_time if self.sim_core is not None else -1.0
+
+        if self._cached_pose is not None and current_sim_time >= 0 and self._cached_pose_sim_time == current_sim_time:
+            # Return cached pose (avoids PyBullet API call)
+            return self._cached_pose
+
+        # Cache miss: Query PyBullet and update cache
+        position, orientation = p.getBasePositionAndOrientation(self.body_id)
+        self._cached_pose = Pose.from_pybullet(position, orientation)
+        self._cached_pose_sim_time = current_sim_time
+
+        return self._cached_pose
+
+    def set_pose(self, pose: Pose, preserve_velocity: bool = True):
         """
         Set position and orientation from a Pose object.
-        Preserves current velocity (useful for kinematic control with physics enabled).
 
         Args:
             pose: Pose object containing position and orientation
+            preserve_velocity: If True, preserve current velocity after setting pose.
+                             If False, velocity is reset to zero (default behavior of PyBullet).
+                             For kinematic objects (mass=0), velocity preservation has no effect,
+                             so this is automatically set to False for performance.
         """
-        # Get current velocities to preserve them
-        linear_vel, angular_vel = p.getBaseVelocity(self.body_id)
-
         position, orientation = pose.as_position_orientation()
-        p.resetBasePositionAndOrientation(self.body_id, position, orientation)
-        p.resetBaseVelocity(self.body_id, linear_vel, angular_vel)
+
+        # Optimization: Skip velocity operations for kinematic objects
+        # Use cached is_kinematic flag to avoid PyBullet API calls
+        if preserve_velocity and not self.is_kinematic:
+            # Get current velocities to preserve them (for dynamic objects only)
+            linear_vel, angular_vel = p.getBaseVelocity(self.body_id)
+            p.resetBasePositionAndOrientation(self.body_id, position, orientation)
+            p.resetBaseVelocity(self.body_id, linear_vel, angular_vel)
+        else:
+            # Fast path: Just set position without velocity operations
+            # (kinematic objects or explicitly requested to skip velocity preservation)
+            p.resetBasePositionAndOrientation(self.body_id, position, orientation)
+
+        # Optimization 3: Update pose cache by modifying existing object (avoid object creation)
+        # This is faster than creating new Pose objects when cache exists
+        if self._cached_pose is not None:
+            # Reuse existing Pose object - just update its internal lists
+            self._cached_pose.position[0] = position[0]
+            self._cached_pose.position[1] = position[1]
+            self._cached_pose.position[2] = position[2]
+            self._cached_pose.orientation[0] = orientation[0]
+            self._cached_pose.orientation[1] = orientation[1]
+            self._cached_pose.orientation[2] = orientation[2]
+            self._cached_pose.orientation[3] = orientation[3]
+        else:
+            # Create new Pose object for cache
+            self._cached_pose = Pose.from_pybullet(position, orientation)
+
+        # Update cache timestamp to current sim_time
+        self._cached_pose_sim_time = self.sim_core.sim_time if self.sim_core is not None else -1.0
 
         # Recursively apply the same coordinates and velocity to attached_objects
-        logging.debug(
-            f"set_pose: body_id={self.body_id} attached_objects(before)={[o.body_id for o in self.attached_objects]}"
+        lazy_logger.debug(
+            lambda: f"set_pose: body_id={self.body_id} attached_objects(before)={[o.body_id for o in self.attached_objects]}"
         )
         for obj in self.attached_objects:
             # Follow using relative position and orientation from attachment
@@ -486,9 +554,9 @@ class SimObject:
                 position, orientation, obj._attach_offset.position, obj._attach_offset.orientation
             )
             new_pose = Pose.from_pybullet(new_pos, new_orn)
-            obj.set_pose(new_pose)
-            logging.debug(
-                f"attached_object set pose　body_id={self.body_id}: obj_body_id={obj.body_id} "
+            obj.set_pose(new_pose, preserve_velocity=preserve_velocity)
+            lazy_logger.debug(
+                lambda obj=obj: f"attached_object set pose　body_id={self.body_id}: obj_body_id={obj.body_id} "
                 f"position={obj._attach_offset.position} orientation={obj._attach_offset.orientation}"
             )
 
@@ -530,26 +598,29 @@ class SimObject:
         # Check if object is pickable
 
         if not obj.pickable:
-            logging.info(f"[SimObject] Cannot attach: object {obj.body_id} is not pickable")
+            logger.info(f"[SimObject] Cannot attach: object {obj.body_id} is not pickable")
             return False
 
         # Prevent attaching an object that is already attached to another SimObject
 
         if obj.is_attached():
-            logging.info(
+            logger.info(
                 f"[SimObject] Cannot attach: object {obj.body_id} is already attached to "
                 f"another SimObject (body_id={obj._attached_to.body_id if obj._attached_to else None})"
             )
             return False
 
         if obj in self.attached_objects:
-            logging.info(f"[SimObject] Object {obj.body_id} already attached")
+            logger.info(f"[SimObject] Object {obj.body_id} already attached")
             return False
 
         # Add to attached list
         self.attached_objects.append(obj)
-        logging.debug(
-            f"attach_object: obj={obj.body_id} relative_pose={relative_pose.position} orientation={relative_pose.orientation}"
+        lazy_logger.debug(
+            lambda: (
+                f"attach_object: obj={obj.body_id} relative_pose={relative_pose.position} "
+                f"orientation={relative_pose.orientation}"
+            )
         )
 
         # Get parent link position and orientation
@@ -563,8 +634,8 @@ class SimObject:
         obj._attach_offset = relative_pose
         obj._attached_to = self
         obj._attached_link_index = parent_link_index
-        logging.debug(
-            f"attach_object: obj={obj.body_id} _attach_offset.position={obj._attach_offset.position} "
+        lazy_logger.debug(
+            lambda: f"attach_object: obj={obj.body_id} _attach_offset.position={obj._attach_offset.position} "
             f"_attach_offset.orientation={obj._attach_offset.orientation}"
         )
 
@@ -584,7 +655,7 @@ class SimObject:
                 childFrameOrientation=[0, 0, 0, 1],
             )
 
-        logging.info(f"[SimObject] Attached object {obj.body_id} to link {parent_link_index}")
+        logger.info(f"[SimObject] Attached object {obj.body_id} to link {parent_link_index}")
         return True
 
     def detach_object(self, obj: "SimObject") -> bool:
@@ -602,15 +673,15 @@ class SimObject:
         """
 
         if obj not in self.attached_objects:
-            logging.info(f"[SimObject] Object {obj.body_id} is not attached")
+            logger.info(f"[SimObject] Object {obj.body_id} is not attached")
             return False
 
         # Remove from attached list
         self.attached_objects.remove(obj)
 
         # Debug: show attached_objects after removal
-        logging.debug(
-            f"detach_object: body_id={self.body_id} detached={obj.body_id} "
+        lazy_logger.debug(
+            lambda: f"detach_object: body_id={self.body_id} detached={obj.body_id} "
             f"attached_objects(after)={[o.body_id for o in self.attached_objects]}"
         )
 
@@ -624,7 +695,7 @@ class SimObject:
         obj._attached_to = None
         obj._attached_link_index = -1
 
-        logging.info(f"[SimObject] Detached object {obj.body_id}")
+        logger.info(f"[SimObject] Detached object {obj.body_id}")
         return True
 
     def get_attached_objects(self) -> List["SimObject"]:

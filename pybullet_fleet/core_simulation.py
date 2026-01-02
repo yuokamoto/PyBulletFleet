@@ -78,6 +78,7 @@ class SimulationParams:
             gui=config.get("gui", True),
             physics=config.get("physics", False),
             monitor=config.get("monitor", True),
+            enable_monitor_gui=config.get("enable_monitor_gui", True),
             collision_check_frequency=config.get("collision_check_frequency", None),
             log_level=config.get("log_level", "warn"),
             max_steps_per_frame=config.get("max_steps_per_frame", 10),
@@ -101,6 +102,7 @@ class SimulationParams:
         gui: bool = True,
         physics: bool = False,
         monitor: bool = True,
+        enable_monitor_gui: bool = True,
         collision_check_frequency: Optional[float] = None,
         log_level: str = "warn",
         max_steps_per_frame: int = 10,
@@ -119,6 +121,7 @@ class SimulationParams:
         self.gui = gui
         self.physics = physics
         self.monitor = monitor
+        self.enable_monitor_gui = enable_monitor_gui
         self.collision_check_frequency = collision_check_frequency
         self.log_level = log_level
         self.max_steps_per_frame = max_steps_per_frame  # Maximum simulation steps per rendering frame
@@ -197,7 +200,7 @@ class MultiRobotSimulationCore:
         # If monitor: true and console_monitor: false, start DataMonitor
 
         if self.params.monitor:
-            self.data_monitor = DataMonitor("PyBullet Simulation Monitor")
+            self.data_monitor = DataMonitor("PyBullet Simulation Monitor", enable_gui=self.params.enable_monitor_gui)
             self.data_monitor.start()
         else:
             self.data_monitor = None
