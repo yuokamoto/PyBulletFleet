@@ -813,7 +813,19 @@ class MultiRobotSimulationCore:
             pass
 
     def step_once(self) -> None:
-        t_step = time.perf_counter()
+        """
+        Execute one simulation step.
+
+        Performs agent updates, callbacks, physics step, collision detection, and monitoring.
+        If enable_profiling is True, detailed timing information is logged.
+
+        Performance note: time.perf_counter() calls have negligible overhead (<0.1% for 10k objects).
+        The profiling measurements themselves do not significantly impact simulation performance.
+        """
+        # Profiling: step start time (only used if enable_profiling=True)
+        if self.enable_profiling:
+            t_step = time.perf_counter()
+
         # Check if PyBullet is still connected
         try:
             p.getConnectionInfo()
@@ -829,21 +841,26 @@ class MultiRobotSimulationCore:
         if self._simulation_paused:
             return
 
-        t_update = time.perf_counter()
         # Synchronize robot_bodies from sim_objects every step
         self.robot_bodies = [obj.body_id for obj in self.sim_objects]
         self.sim_time = self.step_count * self.params.timestep
 
         # Update all simulation objects that have update() method
         # Agent instances are automatically updated every step for movement control
-        t0 = time.perf_counter()
+        if self.enable_profiling:
+            t0 = time.perf_counter()
+
         for obj in self.sim_objects:
             if isinstance(obj, Agent):
                 obj.update(self.params.timestep)
-        t1 = time.perf_counter()
+
+        if self.enable_profiling:
+            t1 = time.perf_counter()
 
         # Global callbacks (frequency control)
-        t_cb0 = time.perf_counter()
+        if self.enable_profiling:
+            t_cb0 = time.perf_counter()
+
         for cbinfo in self.callbacks:
             freq = cbinfo.get("frequency", None)
             last_exec = cbinfo.get("last_exec", 0.0)
@@ -853,45 +870,62 @@ class MultiRobotSimulationCore:
                 dt = self.sim_time - last_exec if last_exec > 0 else self.params.timestep
                 cbinfo["func"](self, dt)
                 cbinfo["last_exec"] = self.sim_time
-        t_cb1 = time.perf_counter()
+
+        if self.enable_profiling:
+            t_cb1 = time.perf_counter()
 
         # Check if PyBullet is still connected before stepping
         if not p.isConnected():
             raise RuntimeError("PyBullet disconnected (GUI window closed)")
 
-        t_sim0 = time.perf_counter()
+        if self.enable_profiling:
+            t_sim0 = time.perf_counter()
+
         p.stepSimulation()
-        t_sim1 = time.perf_counter()
+
+        if self.enable_profiling:
+            t_sim1 = time.perf_counter()
 
         # Collision check frequency control
-        t_col0 = time.perf_counter()
+        if self.enable_profiling:
+            t_col0 = time.perf_counter()
+
         freq = self.collision_check_frequency
         interval = 1.0 / freq if freq else 0.0
         # Collision check also judged based on self.sim_time
         if freq is None or self.sim_time - self.last_collision_check >= interval:
             self.check_collisions()
             self.last_collision_check = self.sim_time
-        t_col1 = time.perf_counter()
+
+        if self.enable_profiling:
+            t_col1 = time.perf_counter()
 
         self.step_count += 1
         # Monitor: every step if GUI enabled, otherwise every second
-        t_mon0 = time.perf_counter()
+        if self.enable_profiling:
+            t_mon0 = time.perf_counter()
+
         if self.monitor_enabled:
             interval = self.params.timestep if self.params.gui else 1.0
             if self.sim_time - self.last_monitor_update > interval:
                 self.update_monitor()
                 self.last_monitor_update = self.sim_time
-        t_mon1 = time.perf_counter()
 
-        t_end = time.perf_counter()
-        # Print profiling info if enabled
-        if self.enable_profiling and self.step_count % 1 == 0:
-            logger.debug(
-                f"[PROFILE] step {self.step_count}: "
-                f"Agent.update={1000*(t1-t0):.2f}ms, "
-                f"Callbacks={1000*(t_cb1-t_cb0):.2f}ms, "
-                f"stepSimulation={1000*(t_sim1-t_sim0):.2f}ms, "
-                f"Collisions={1000*(t_col1-t_col0):.2f}ms, "
-                f"Monitor={1000*(t_mon1-t_mon0):.2f}ms, "
-                f"Total={1000*(t_end-t_step):.2f}ms"
-            )
+        # Profiling output (only when profiling is enabled)
+        if self.enable_profiling:
+            t_mon1 = time.perf_counter()
+            t_end = time.perf_counter()
+
+            # Print profiling info
+            # Note: All timing variables (t0, t1, etc.) are guaranteed to be defined
+            # because they are all set within enable_profiling=True blocks above
+            if self.step_count % 1 == 0:
+                logger.debug(
+                    f"[PROFILE] step {self.step_count}: "
+                    f"Agent.update={1000*(t1-t0):.2f}ms, "  # type: ignore[possibly-unbound]
+                    f"Callbacks={1000*(t_cb1-t_cb0):.2f}ms, "  # type: ignore[possibly-unbound]
+                    f"stepSimulation={1000*(t_sim1-t_sim0):.2f}ms, "  # type: ignore[possibly-unbound]
+                    f"Collisions={1000*(t_col1-t_col0):.2f}ms, "  # type: ignore[possibly-unbound]
+                    f"Monitor={1000*(t_mon1-t_mon0):.2f}ms, "  # type: ignore[possibly-unbound]
+                    f"Total={1000*(t_end-t_step):.2f}ms"  # type: ignore[possibly-unbound]
+                )

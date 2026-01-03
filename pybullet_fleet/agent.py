@@ -573,6 +573,7 @@ class Agent(SimObject):
 
         # Override mass if explicitly set to 0.0 (kinematic control)
         # mass=1.0 (default) means use URDF's mass values
+        # Note: After Agent instance creation, self.is_kinematic will be set by SimObject.__init__
         if mass == 0.0:
             # Kinematic control: set mass to 0 for all links
             # This prevents gravity and inertia from affecting the robot
@@ -581,7 +582,7 @@ class Agent(SimObject):
             for joint_idx in range(num_joints):
                 p.changeDynamics(body_id, joint_idx, mass=0.0)
 
-        # Create agent instance (SimObject.__init__ handles auto-registration)
+        # Create agent instance (SimObject.__init__ handles auto-registration and sets self.is_kinematic)
         agent = cls(
             body_id=body_id,
             urdf_path=urdf_path,
