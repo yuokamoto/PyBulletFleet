@@ -1,7 +1,102 @@
 #!/usr/bin/env python3
 """
-simple_agent_profile.py
-Agent.update()の簡単なプロファイリング（セグフォルト回避版）
+simple_agent_profile.py (ARCHIVED - 非推奨)
+Agent 操作のシンプルなプロファイリングツール
+
+⚠️ 非推奨: このファイルは archive に移動されました。
+✅ 推奨: ../profiling/agent_update.py を使用してください。
+
+移行理由:
+    このファイルの機能は agent_update.py に統合されました。
+    
+    旧版の問題:
+    - ❌ agent_update.py と機能が重複（Stationary vs Moving）
+    - ❌ test_with_without_goal() が test_stationary_vs_moving() と重複
+    - ❌ 2つのファイルでメンテナンスコストが増加
+    
+    新版の利点:
+    - ✅ 全ての Agent 分析が1箇所に集約
+    - ✅ Motion Mode 比較も追加
+    - ✅ メンテナンスポイントが減少
+
+移行ガイド:
+    # 旧版（このファイル）
+    python benchmark/archive/simple_agent_profile.py --agents=1000
+    
+    # 新版（推奨）- 全テスト実行
+    python benchmark/profiling/agent_update.py --agents=1000 --test=all
+    
+    # Stationary vs Moving のみ
+    python benchmark/profiling/agent_update.py --agents=1000 --test=stationary
+    
+    # Motion Mode 比較のみ
+    python benchmark/profiling/agent_update.py --agents=1000 --test=motion_modes
+
+参考用として残す理由:
+    - シンプルな実装例として教育的価値がある
+    - cProfile 不使用のアプローチの参考
+
+---
+
+概要（旧版）:
+    Agent の基本操作（spawn, update, get_pose, set_pose）を簡潔に測定します。
+    cProfile を使わずに perf_counter() で直接測定するため、オーバーヘッドが最小です。
+
+測定項目:
+    1. Stationary vs Moving: 静止中と移動中の Agent.update() コスト比較
+    2. Spawn Performance: エージェント生成の時間
+    3. Get/Set Pose: 姿勢の取得・設定の時間
+    4. Basic Operations: 基本操作の時間測定
+
+使い方:
+    # 基本実行（全テスト）
+    python simple_agent_profile.py
+    
+    # 特定のテストのみ
+    python simple_agent_profile.py --test=stationary
+    python simple_agent_profile.py --test=spawn
+    python simple_agent_profile.py --test=pose
+
+出力例:
+    Test 1: Stationary vs Moving Agents (1000 agents)
+    ======================================================================
+    
+    Stationary agents:
+      Total time: 15.20 ms
+      Per agent: 15.20 μs
+    
+    Moving agents:
+      Total time: 120.50 ms
+      Per agent: 120.50 μs
+    
+    Overhead ratio (moving/stationary): 7.93x
+    Potential savings if 50% stationary: 67.85 ms
+    
+    Test 2: Spawn Performance
+    ======================================================================
+    
+    Total spawn time: 2.345 s
+    Per agent: 2.345 ms
+    
+    Test 3: Get/Set Pose Performance
+    ======================================================================
+    
+    get_pose(): 12.3 μs per call
+    set_pose(): 45.6 μs per call
+
+特徴:
+    - cProfile 不使用（オーバーヘッド最小）
+    - セグフォルト回避版（安定動作）
+    - シンプルで理解しやすい
+
+使い分け:
+    - 簡単な性能確認 → このツール
+    - 詳細な関数レベル分析 → agent_update.py --test=cprofile
+    - 内部メソッドの測定 → agent_update.py --test=manual
+
+関連ファイル:
+    - agent_update.py: Agent.update() の詳細プロファイリング
+    - agent_manager_set_goal.py: ゴール設定のプロファイリング
 """
 import os
 import sys
@@ -21,7 +116,7 @@ def test_stationary_vs_moving(num_agents: int = 1000):
     print(f"Test 1: Stationary vs Moving Agents ({num_agents} agents)")
     print(f"{'='*70}\n")
 
-    robot_urdf = os.path.join(os.path.dirname(__file__), "../robots/simple_cube.urdf")
+    robot_urdf = os.path.join(os.path.dirname(__file__), "../../robots/simple_cube.urdf")
 
     # Test 1: Stationary agents (no goal)
     if p.isConnected():
@@ -113,7 +208,7 @@ def test_motion_modes(num_agents: int = 1000):
     print(f"Test 2: Motion Mode Comparison ({num_agents} agents)")
     print(f"{'='*70}\n")
 
-    robot_urdf = os.path.join(os.path.dirname(__file__), "../robots/simple_cube.urdf")
+    robot_urdf = os.path.join(os.path.dirname(__file__), "../../robots/simple_cube.urdf")
 
     results = {}
 
@@ -189,7 +284,7 @@ def test_with_without_goal(num_agents: int = 1000):
     p.resetSimulation()
     p.setGravity(0, 0, -9.81)
 
-    robot_urdf = os.path.join(os.path.dirname(__file__), "../robots/simple_cube.urdf")
+    robot_urdf = os.path.join(os.path.dirname(__file__), "../../robots/simple_cube.urdf")
 
     agents = []
     for i in range(num_agents):

@@ -15,7 +15,9 @@
 speed: 100
 
 # Simulation timestep (seconds per step)
-timestep: 0.01
+# Default: 0.1 for kinematics simulation (finer resolution not needed)
+# For physics simulation: use 0.01 or smaller
+timestep: 0.1
 
 # Simulation duration (seconds, 0=unlimited)
 duration: 0
@@ -36,6 +38,38 @@ ignore_structure_collision: true
 
 # Enable profiling output (True/False)
 enable_profiling: false
+
+# ========================================
+# Performance Optimization Settings
+# ========================================
+
+# Enable 2D collision optimization (9 neighbors instead of 27)
+# This is the GLOBAL DEFAULT - individual objects can override this setting
+# 
+# Recommended usage:
+#   - false (default): Full 3D collision detection for all objects
+#   - true: 2D optimization for all objects (ASRS, warehouse, etc.)
+#   
+# Per-object override:
+#   AgentSpawnParams(collision_check_2d=True)   # 2D for this agent
+#   SimObjectSpawnParams(collision_check_2d=False)  # 3D for this object
+#   
+# Performance impact: ~67% faster collision checks when using 2D mode
+# 
+# Example mixed scenario:
+#   - AGVs: collision_check_2d=True (2D, 9 neighbors)
+#   - Drones: collision_check_2d=False (3D, 27 neighbors)
+#   - Lifted pallets: collision_check_2d=False (3D, 27 neighbors)
+collision_check_2d: false
+
+# Enable monitor GUI (visualization)
+# Recommended: false for headless performance testing
+# Default: true (GUI enabled when monitor=true)
+enable_monitor_gui: true
+
+# ========================================
+# Logging Settings
+# ========================================
 
 # Logging level (debug/info/warning/error/critical)
 log_level: debug

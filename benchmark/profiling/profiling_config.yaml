@@ -1,0 +1,78 @@
+# ========================================
+# Profiling Configuration
+# ========================================
+#
+# Optimized settings for profiling tools.
+# This config inherits from ../../config/config.yaml defaults
+# and overrides settings for profiling-specific use cases.
+#
+# ========================================
+
+# ========================================
+# Simulation Parameters
+# ========================================
+
+# Target simulation speed multiplier
+# 0 = maximum speed (no sleep, no real-time sync)
+speed: 0
+
+# Simulation timestep (seconds per step)
+# Default: 0.1 for kinematics (finer resolution not needed)
+timestep: 0.1
+
+# Simulation duration (seconds, 0=unlimited)
+duration: 0
+
+# Enable GUI window (false for profiling - no rendering overhead)
+gui: false
+
+# Enable physics engine (false for kinematics-only profiling)
+physics: false
+
+# Enable external data monitor (true for data collection)
+monitor: true
+
+# Enable monitor GUI (false for profiling - no GUI overhead)
+enable_monitor_gui: false
+
+# Collision check frequency (times per second)
+# null = check every step (recommended for accurate profiling)
+collision_check_frequency: null
+
+# Ignore collisions with structure (True/False)
+ignore_structure_collision: true
+
+# Enable profiling output (False - profiling tools use return_profiling)
+enable_profiling: false
+
+# ========================================
+# Performance Optimization Settings
+# ========================================
+
+# Enable 2D collision optimization (9 neighbors instead of 27)
+# false = Full 3D collision detection (default for profiling)
+collision_check_2d: false
+
+# ========================================
+# Logging Settings
+# ========================================
+
+# Logging level for profiling (reduce noise)
+# Options: debug, info, warning, error, critical
+log_level: warning
+
+# ========================================
+# Camera Settings (not used in profiling)
+# ========================================
+
+camera_mode: none
+
+# ========================================
+# Visualizer Settings (not used in profiling)
+# ========================================
+
+enable_visual_shapes: false
+enable_collision_shapes: false
+enable_structure_transparency: false
+enable_shadows: false
+enable_gui_panel: false

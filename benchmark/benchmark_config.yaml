@@ -1,0 +1,92 @@
+# Benchmark Configuration
+# This file controls performance-critical parameters for benchmarking
+
+# Simulation Parameters
+simulation:
+  timestep: 0.1  # Simulation timestep in seconds (default: 0.1 = 10 Hz)
+  speed: 0.0  # Simulation speed multiplier (0.0 = maximum speed, no sleep)
+  duration: 10.0  # Default simulation duration in seconds
+  physics: false  # Enable physics engine (false = kinematic only, faster)
+
+  # Collision Detection
+  collision_check_frequency: 10.0  # Collision check frequency in Hz (null = every step)
+                                   # Set to 0 to disable collision checks completely
+                                   # Use this to measure baseline performance without collision overhead
+  collision_check_2d: false  # 2D collision (9 neighbors) vs 3D (27 neighbors)
+  ignore_structure_collision: true  # Ignore collisions with structure objects
+
+  # Performance Monitoring
+  enable_profiling: true  # Enable detailed profiling output
+  enable_monitor_gui: false  # Disable GUI monitor for headless benchmarking
+  log_level: "WARN"  # Log level: DEBUG, INFO, WARN, ERROR (DEBUG shows profiling)
+
+# Agent Configuration
+agents:
+  num_agents: 1000  # Default number of agents to spawn
+  urdf_path: "../robots/simple_cube.urdf"  # Path to robot URDF (relative to benchmark/)
+  motion_mode: "OMNIDIRECTIONAL"  # OMNIDIRECTIONAL, DIFFERENTIAL, ACKERMANN
+  max_linear_vel: 2.0  # Maximum linear velocity (m/s)
+  max_angular_vel: 3.0  # Maximum angular velocity (rad/s)
+  mass: 0.0  # Agent mass (0.0 = kinematic control, faster)
+  moving_agents_ratio: 0.1  # Ratio of agents with random goals (0.0-1.0)
+  max_moving_agents: 100  # Maximum number of agents with goals
+
+# Grid Spawn Configuration
+spawn:
+  spacing: [1.0, 1.0, 0.0]  # Grid spacing in [x, y, z] meters
+  offset: [0.0, 0.0, 0.1]  # Spawn offset from grid origin
+
+# Benchmark Test Configuration
+benchmark:
+  repetitions: 3  # Number of repetitions for statistical analysis
+  gui: false  # Enable GUI for visualization (slower)
+  output_dir: "results"  # Output directory for benchmark results
+
+# Performance Test Scenarios
+# Uncomment and modify these scenarios to test different configurations
+scenarios:
+  # Baseline: No collision checks (maximum performance)
+  no_collision:
+    simulation:
+      collision_check_frequency: 0  # Disable collision checks (0 = disabled)
+    agents:
+      num_agents: 1000
+    benchmark:
+      repetitions: 3
+
+  # Standard: Full 3D collision checks every step
+  collision_3d_full:
+    simulation:
+      collision_check_frequency: null  # Every step
+      collision_check_2d: false  # 3D (27 neighbors)
+    agents:
+      num_agents: 1000
+    benchmark:
+      repetitions: 3
+
+  # Optimized: 2D collision checks at 10 Hz
+  collision_2d_10hz:
+    simulation:
+      collision_check_frequency: 10.0  # 10 Hz
+      collision_check_2d: true  # 2D (9 neighbors)
+    agents:
+      num_agents: 1000
+    benchmark:
+      repetitions: 3
+
+  # Stress test: 5000 agents
+  stress_5k_agents:
+    simulation:
+      collision_check_frequency: 10.0
+      collision_check_2d: true
+    agents:
+      num_agents: 5000
+    benchmark:
+      repetitions: 1  # Single run for stress test
+
+# Notes:
+# - collision_check_frequency: 0 or null to disable collision checks entirely
+# - collision_check_2d: true (9 neighbors, ~67% faster) vs false (27 neighbors, accurate)
+# - timestep: Larger timesteps = fewer steps per second = faster simulation
+# - physics: false (kinematic) is significantly faster than true (full physics)
+# - enable_profiling: true enables detailed timing breakdown in logs (requires log_level: DEBUG)

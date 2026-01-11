@@ -9,7 +9,7 @@ monitoring, and log control for various robots, pallets, and meshes.
 import logging
 import os
 import time
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import numpy as np
 
@@ -91,6 +91,7 @@ class SimulationParams:
             ignore_structure_collision=config.get("ignore_structure_collision", True),
             enable_profiling=config.get("enable_profiling", False),
             enable_collision_color_change=config.get("enable_collision_color_change", False),
+            collision_check_2d=config.get("collision_check_2d", False),  # Default: 3D collision (27 neighbors)
         )
 
     def __init__(
@@ -114,8 +115,9 @@ class SimulationParams:
         ignore_structure_collision: bool = True,
         enable_profiling: bool = False,
         enable_collision_color_change: bool = False,
+        collision_check_2d: bool = False,  # Default False: full 3D collision (27 neighbors)
     ) -> None:
-        self.speed = speed if speed > 0 else 1.0  # If speed <= 0, set to 1.0
+        self.speed = speed  # speed=0 means maximum speed (no sleep)
         self.timestep = timestep
         self.duration = duration
         self.gui = gui
@@ -134,6 +136,7 @@ class SimulationParams:
         self.ignore_structure_collision = ignore_structure_collision
         self.enable_profiling = enable_profiling
         self.enable_collision_color_change = enable_collision_color_change
+        self.collision_check_2d = collision_check_2d  # Store 2D/3D collision check mode
 
 
 class MultiRobotSimulationCore:
@@ -193,6 +196,7 @@ class MultiRobotSimulationCore:
         )  # If True, skip collision checks with structure objects
         self._simulation_paused: bool = False  # Track if simulation is paused
         self.enable_profiling: bool = params.enable_profiling  # Optional profiling output
+        self.profiling_log_frequency: int = 10  # Log profiling info every N steps (default: 10)
         self.setup_pybullet()
         self.setup_monitor()
 
@@ -234,6 +238,21 @@ class MultiRobotSimulationCore:
         if frequency is None:
             frequency = 1
         self.collision_check_frequency = frequency
+
+    def set_profiling_log_frequency(self, frequency: int = 10) -> None:
+        """
+        Set the frequency for profiling log output (in steps).
+        
+        Args:
+            frequency: Log profiling info every N steps (default: 10)
+                      - 1: Every step (high overhead, detailed)
+                      - 10: Every 10 steps (low overhead, recommended)
+                      - 100: Every 100 steps (minimal overhead)
+        
+        Note: Profiling must be enabled (enable_profiling=True) for logs to appear.
+        """
+        self.profiling_log_frequency = max(1, frequency)
+        logger.info(f"Profiling log frequency set to every {self.profiling_log_frequency} steps")
 
     def setup_pybullet(self) -> None:
         """Initialize PyBullet with GUI panels hidden."""
@@ -581,11 +600,32 @@ class MultiRobotSimulationCore:
     def get_aabbs(self) -> List[Tuple[Tuple[float, float, float], Tuple[float, float, float]]]:
         return [p.getAABB(body_id) for body_id in self.robot_bodies]
 
-    def filter_aabb_pairs(self, ignore_structure: Optional[bool] = None) -> List[Tuple[int, int]]:
+    def filter_aabb_pairs(
+        self, ignore_structure: Optional[bool] = None, return_profiling: bool = False
+    ) -> Union[List[Tuple[int, int]], Tuple[List[Tuple[int, int]], Dict[str, float]]]:
+        """
+        Filter AABB pairs for collision detection.
+        
+        Args:
+            ignore_structure: If True, ignore structure collisions
+            return_profiling: If True, return (pairs, timings) tuple
+        
+        Returns:
+            List of (i, j) index pairs, or (pairs, timings) if return_profiling=True
+            timings dict contains: get_aabbs, spatial_hashing, aabb_filtering (in ms)
+            If return_profiling=False, returns (pairs, {}) for consistent unpacking
+        """
+        # Profiling timings (always create dict for consistent return type)
+        timings: Dict[str, float] = {}
+        
         # If ignoring structure collisions, only consider non-structure bodies (robots) for AABB pairing
         if ignore_structure is None:
             ignore_structure = self.ignore_structure_collision
 
+        # 1. Get AABBs
+        if return_profiling:
+            t0 = time.perf_counter()
+        
         if ignore_structure:
             # Only use robot bodies (not in _structure_body_ids)
             robot_indices = [i for i, bid in enumerate(self.robot_bodies) if bid not in self._structure_body_ids]
@@ -595,8 +635,32 @@ class MultiRobotSimulationCore:
             robot_indices = list(range(len(self.robot_bodies)))
             robot_body_ids = self.robot_bodies
             aabbs = self.get_aabbs()
+        
+        if return_profiling:
+            timings["get_aabbs"] = (time.perf_counter() - t0) * 1000  # ms
 
-        cell_size = 1.0  # You may want to tune this based on robot/structure size
+        # 2. Spatial hashing (grid construction)
+        if return_profiling:
+            t0 = time.perf_counter()
+        
+        # Dynamic cell size based on AABB extents
+        # Use the median AABB extent to determine optimal cell size
+        if aabbs:
+            extents = []
+            for aabb in aabbs:
+                extent_x = aabb[1][0] - aabb[0][0]
+                extent_y = aabb[1][1] - aabb[0][1]
+                extent_z = aabb[1][2] - aabb[0][2]
+                # Use max extent for conservative cell sizing
+                extents.append(max(extent_x, extent_y, extent_z))
+            
+            # Cell size = 2x median extent (ensures objects in adjacent cells can collide)
+            median_extent = sorted(extents)[len(extents) // 2]
+            cell_size = max(median_extent * 2.0, 0.5)  # Minimum 0.5m to avoid too many cells
+        else:
+            cell_size = 1.0  # Fallback
+        
+        # Build spatial hash grid
         grid = {}
         index_to_cell = []
         for idx, aabb in enumerate(aabbs):
@@ -604,19 +668,53 @@ class MultiRobotSimulationCore:
             cell = tuple(int(center[d] // cell_size) for d in range(3))
             index_to_cell.append(cell)
             grid.setdefault(cell, []).append(idx)
-        neighbor_offsets = [(dx, dy, dz) for dx in (-1, 0, 1) for dy in (-1, 0, 1) for dz in (-1, 0, 1)]
+        
+        # Precompute collision check mode for each object
+        collision_modes = []
+        for idx in robot_indices:
+            obj = self.sim_objects[idx] if idx < len(self.sim_objects) else None
+            # None = use global default, True = 2D, False = 3D
+            mode = obj.collision_check_2d if (obj and obj.collision_check_2d is not None) else self.params.collision_check_2d
+            collision_modes.append(mode)
+        
+        if return_profiling:
+            timings["spatial_hashing"] = (time.perf_counter() - t0) * 1000  # ms
+        
+        # 3. AABB overlap filtering
+        if return_profiling:
+            t0 = time.perf_counter()
+        
+        # Neighbor offsets (always use full 3D set, we'll filter per-pair later)
+        all_neighbor_offsets = [
+            (dx, dy, dz) for dx in (-1, 0, 1) for dy in (-1, 0, 1) for dz in (-1, 0, 1)
+        ]
+        
         pairs = set()
         for idx, cell in enumerate(index_to_cell):
             id_i = robot_body_ids[idx]
-            for offset in neighbor_offsets:
+            use_2d_i = collision_modes[idx]
+            
+            for offset in all_neighbor_offsets:
+                # Skip Z-axis neighbors if object i uses 2D mode
+                if use_2d_i and offset[2] != 0:
+                    continue
+                
                 neighbor_cell = (cell[0] + offset[0], cell[1] + offset[1], cell[2] + offset[2])
                 for jdx in grid.get(neighbor_cell, []):
                     if jdx <= idx:
                         continue
                     id_j = robot_body_ids[jdx]
-                    # Always skip structure-structure pairs (should not occur if ignore_structure is True)
+                    use_2d_j = collision_modes[jdx]
+                    
+                    # Skip this pair if object j uses 2D mode and offset has Z component
+                    if use_2d_j and offset[2] != 0:
+                        continue
+                    
+                    # Always skip structure-structure pairs
                     if id_i in self._structure_body_ids and id_j in self._structure_body_ids:
                         continue
+                    
+                    # AABB overlap test
                     aabb_i = aabbs[idx]
                     aabb_j = aabbs[jdx]
                     if (
@@ -630,12 +728,34 @@ class MultiRobotSimulationCore:
                         continue
                     # Map back to original robot_bodies indices for compatibility
                     pairs.add((robot_indices[idx], robot_indices[jdx]))
-        return list(pairs)
+        
+        if return_profiling:
+            timings["aabb_filtering"] = (time.perf_counter() - t0) * 1000  # ms
+        
+        return list(pairs), timings
 
     def check_collisions(
-        self, collision_color: Optional[List[float]] = None, ignore_structure: Optional[bool] = None
-    ) -> List[Tuple[int, int]]:
+        self, collision_color: Optional[List[float]] = None, ignore_structure: Optional[bool] = None, 
+        return_profiling: bool = False
+    ) -> Union[List[Tuple[int, int]], Tuple[List[Tuple[int, int]], Dict[str, float]]]:
+        """
+        Check for collisions between robots.
+        
+        Args:
+            collision_color: RGB color for collision visualization
+            ignore_structure: If True, ignore structure collisions
+            return_profiling: If True, return (pairs, timings) tuple
+        
+        Returns:
+            List of collision pairs, or (pairs, timings) if return_profiling=True
+            timings dict contains: get_aabbs, spatial_hashing, aabb_filtering, contact_points, total (in ms)
+            If return_profiling=False, returns (pairs, {}) for consistent unpacking
+        """
         t0 = time.perf_counter()
+        
+        # Profiling timings (always create dict for consistent return type)
+        timings: Dict[str, float] = {}
+        
         if collision_color is None:
             collision_color = self.collision_color
         collision_pairs = []
@@ -650,12 +770,27 @@ class MultiRobotSimulationCore:
             for idx, body_id in enumerate(self.robot_bodies):
                 if body_id not in self._robot_original_colors:
                     self._robot_original_colors[body_id] = [0.0, 0.0, 0.0, 1]
-            for i, j in self.filter_aabb_pairs(ignore_structure=ignore_structure):
+            
+            # Get candidate pairs (always get timings for consistent unpacking)
+            candidate_pairs, filter_timings = self.filter_aabb_pairs(
+                ignore_structure=ignore_structure, return_profiling=return_profiling
+            )
+            timings.update(filter_timings)
+            
+            if return_profiling:
+                t_contact0 = time.perf_counter()
+            
+            # Contact point checks
+            for i, j in candidate_pairs:
                 contact_points = p.getContactPoints(self.robot_bodies[i], self.robot_bodies[j])
                 if contact_points:
                     collision_pairs.append((i, j))
                     collided.add(i)
                     collided.add(j)
+            
+            if return_profiling:
+                timings["contact_points"] = (time.perf_counter() - t_contact0) * 1000  # ms
+            
             # Log collision events
             if collision_pairs:
                 for i, j in collision_pairs:
@@ -677,7 +812,10 @@ class MultiRobotSimulationCore:
             # PyBullet disconnected, skip collision checking
             pass
 
-        return collision_pairs
+        if return_profiling:
+            timings["total"] = (time.perf_counter() - t0) * 1000  # ms
+        
+        return collision_pairs, timings
 
     def update_monitor(self, suppress_console: bool = False) -> None:
         now = time.time()
@@ -744,10 +882,10 @@ class MultiRobotSimulationCore:
             last_step_process_time = 0.0  # Track processing time excluding sleep
 
             while True:
-                loop_start = time.time()
-                current_time = time.time()
-                elapsed_time = current_time - start_time
-                if duration != 0 and elapsed_time >= duration:
+                current_sim_time = self.step_count * self.params.timestep
+                
+                # Check duration based on simulation time (not real time)
+                if duration > 0 and current_sim_time >= duration:
                     break
 
                 # Check if PyBullet connection is still active (e.g., GUI window not closed)
@@ -757,41 +895,50 @@ class MultiRobotSimulationCore:
                     logging.info("PyBullet connection lost (GUI window closed)")
                     break
 
-                # Calculate target and current simulation times
-                target_sim_time = elapsed_time * self.params.speed
-                current_sim_time = self.step_count * self.params.timestep
-                time_diff = target_sim_time - current_sim_time
-
-                actual_sleep = 0.0
-                if time_diff > 0:
-                    # Behind target: execute multiple steps to catch up
-                    steps_needed = int(time_diff / self.params.timestep)
-                    steps_needed = max(1, min(steps_needed, self.params.max_steps_per_frame))
-                    for _ in range(steps_needed):
-                        self.step_once()
+                # Speed=0: Run as fast as possible (no synchronization, no sleep)
+                if self.params.speed <= 0:
+                    self.step_once()
                 else:
-                    # Ahead of or at target: sleep until next frame
-                    # Calculate sleep time: time_diff - last processing time
-                    sleep_time = abs(time_diff) - last_step_process_time
+                    # Speed>0: Synchronize with real time
+                    loop_start = time.time()
+                    current_time = time.time()
+                    elapsed_time = current_time - start_time
 
-                    # Determine minimum sleep for GUI responsiveness
-                    if self.params.gui:
-                        min_sleep = 1.0 / self.params.gui_min_fps
+                    # Calculate target and current simulation times
+                    target_sim_time = elapsed_time * self.params.speed
+                    time_diff = target_sim_time - current_sim_time
+
+                    actual_sleep = 0.0
+                    
+                    if time_diff > 0:
+                        # Behind target: execute multiple steps to catch up
+                        steps_needed = int(time_diff / self.params.timestep)
+                        steps_needed = max(1, min(steps_needed, self.params.max_steps_per_frame))
+                        for _ in range(steps_needed):
+                            self.step_once()
                     else:
-                        # For non-GUI, use timestep as minimum
-                        min_sleep = self.params.timestep
+                        # Ahead of or at target: sleep until next frame
+                        # Calculate sleep time: time_diff - last processing time
+                        sleep_time = abs(time_diff) - last_step_process_time
 
-                    # Sleep strategy based on how much we're ahead/behind
-                    if sleep_time > 0:
-                        # Ahead of target: sleep exactly the calculated time (no forced minimum)
-                        actual_sleep = sleep_time
-                    elif sleep_time > -min_sleep:
-                        # Ahead of target but less than min_sleep: sleep minimum for GUI responsiveness
-                        actual_sleep = min_sleep
-                    time.sleep(actual_sleep)
+                        # Determine minimum sleep for GUI responsiveness
+                        if self.params.gui:
+                            min_sleep = 1.0 / self.params.gui_min_fps
+                        else:
+                            # For non-GUI, use timestep as minimum
+                            min_sleep = self.params.timestep
 
-                # Record processing time for this iteration (excluding sleep)
-                last_step_process_time = time.time() - loop_start - actual_sleep
+                        # Sleep strategy based on how much we're ahead/behind
+                        if sleep_time > 0:
+                            # Ahead of target: sleep exactly the calculated time (no forced minimum)
+                            actual_sleep = sleep_time
+                        elif sleep_time > -min_sleep:
+                            # Ahead of target but less than min_sleep: sleep minimum for GUI responsiveness
+                            actual_sleep = min_sleep
+                        time.sleep(actual_sleep)
+
+                    # Record processing time for this iteration (excluding sleep)
+                    last_step_process_time = time.time() - loop_start - actual_sleep
 
         except KeyboardInterrupt:
             logging.warning("Simulation interrupted by user")
@@ -812,18 +959,35 @@ class MultiRobotSimulationCore:
             # Already disconnected
             pass
 
-    def step_once(self) -> None:
+    def step_once(self, return_profiling: bool = False) -> Optional[Dict[str, float]]:
         """
         Execute one simulation step.
 
         Performs agent updates, callbacks, physics step, collision detection, and monitoring.
         If enable_profiling is True, detailed timing information is logged.
 
+        Args:
+            return_profiling: If True, return timing breakdown dictionary instead of logging.
+                             Useful for external profiling tools.
+
+        Returns:
+            If return_profiling=True, returns dict with timing breakdown in milliseconds:
+                {
+                    'agent_update': float,
+                    'callbacks': float,
+                    'step_simulation': float,
+                    'collision_check': float,
+                    'monitor_update': float,
+                    'total': float,
+                }
+            Otherwise returns None.
+
         Performance note: time.perf_counter() calls have negligible overhead (<0.1% for 10k objects).
         The profiling measurements themselves do not significantly impact simulation performance.
         """
-        # Profiling: step start time (only used if enable_profiling=True)
-        if self.enable_profiling:
+        # Profiling: step start time (measure even if return_profiling=True)
+        measure_timing = self.enable_profiling or return_profiling
+        if measure_timing:
             t_step = time.perf_counter()
 
         # Check if PyBullet is still connected
@@ -847,18 +1011,18 @@ class MultiRobotSimulationCore:
 
         # Update all simulation objects that have update() method
         # Agent instances are automatically updated every step for movement control
-        if self.enable_profiling:
+        if measure_timing:
             t0 = time.perf_counter()
 
         for obj in self.sim_objects:
             if isinstance(obj, Agent):
                 obj.update(self.params.timestep)
 
-        if self.enable_profiling:
+        if measure_timing:
             t1 = time.perf_counter()
 
         # Global callbacks (frequency control)
-        if self.enable_profiling:
+        if measure_timing:
             t_cb0 = time.perf_counter()
 
         for cbinfo in self.callbacks:
@@ -871,38 +1035,48 @@ class MultiRobotSimulationCore:
                 cbinfo["func"](self, dt)
                 cbinfo["last_exec"] = self.sim_time
 
-        if self.enable_profiling:
+        if measure_timing:
             t_cb1 = time.perf_counter()
 
         # Check if PyBullet is still connected before stepping
         if not p.isConnected():
             raise RuntimeError("PyBullet disconnected (GUI window closed)")
 
-        if self.enable_profiling:
+        if measure_timing:
             t_sim0 = time.perf_counter()
 
         p.stepSimulation()
 
-        if self.enable_profiling:
+        if measure_timing:
             t_sim1 = time.perf_counter()
 
         # Collision check frequency control
-        if self.enable_profiling:
+        if measure_timing:
             t_col0 = time.perf_counter()
 
+        collision_timings: Dict[str, float] = {}
         freq = self.collision_check_frequency
-        interval = 1.0 / freq if freq else 0.0
-        # Collision check also judged based on self.sim_time
-        if freq is None or self.sim_time - self.last_collision_check >= interval:
-            self.check_collisions()
+        # freq = None: check every step
+        # freq = 0: disabled (never check)
+        # freq > 0: check at specified frequency (Hz)
+        if freq is None:
+            # Check every step
+            _, collision_timings = self.check_collisions(return_profiling=self.enable_profiling)
             self.last_collision_check = self.sim_time
+        elif freq > 0:
+            # Check at specified frequency
+            interval = 1.0 / freq
+            if self.sim_time - self.last_collision_check >= interval:
+                _, collision_timings = self.check_collisions(return_profiling=self.enable_profiling)
+                self.last_collision_check = self.sim_time
+        # else: freq = 0, skip collision checks entirely
 
-        if self.enable_profiling:
+        if measure_timing:
             t_col1 = time.perf_counter()
 
         self.step_count += 1
         # Monitor: every step if GUI enabled, otherwise every second
-        if self.enable_profiling:
+        if measure_timing:
             t_mon0 = time.perf_counter()
 
         if self.monitor_enabled:
@@ -911,21 +1085,43 @@ class MultiRobotSimulationCore:
                 self.update_monitor()
                 self.last_monitor_update = self.sim_time
 
-        # Profiling output (only when profiling is enabled)
-        if self.enable_profiling:
+        if measure_timing:
             t_mon1 = time.perf_counter()
             t_end = time.perf_counter()
 
-            # Print profiling info
+        # Return profiling data if requested
+        if return_profiling:
+            return {
+                'agent_update': 1000 * (t1 - t0),  # type: ignore[possibly-unbound]
+                'callbacks': 1000 * (t_cb1 - t_cb0),  # type: ignore[possibly-unbound]
+                'step_simulation': 1000 * (t_sim1 - t_sim0),  # type: ignore[possibly-unbound]
+                'collision_check': 1000 * (t_col1 - t_col0),  # type: ignore[possibly-unbound]
+                'monitor_update': 1000 * (t_mon1 - t_mon0),  # type: ignore[possibly-unbound]
+                'total': 1000 * (t_end - t_step),  # type: ignore[possibly-unbound]
+            }
+
+        # Profiling output (only when profiling is enabled and not returning data)
+        if self.enable_profiling:
+            # Print profiling info at specified frequency
             # Note: All timing variables (t0, t1, etc.) are guaranteed to be defined
-            # because they are all set within enable_profiling=True blocks above
-            if self.step_count % 1 == 0:
+            # because they are all set within measure_timing=True blocks above
+            if self.step_count % self.profiling_log_frequency == 0:
+                # Build collision detail string if available
+                collision_detail = ""
+                if collision_timings:
+                    collision_detail = (
+                        f" [GetAABBs={collision_timings.get('get_aabbs', 0):.2f}ms, "
+                        f"SpatialHash={collision_timings.get('spatial_hashing', 0):.2f}ms, "
+                        f"AABBFilter={collision_timings.get('aabb_filtering', 0):.2f}ms, "
+                        f"ContactPts={collision_timings.get('contact_points', 0):.2f}ms]"
+                    )
+                
                 logger.debug(
                     f"[PROFILE] step {self.step_count}: "
                     f"Agent.update={1000*(t1-t0):.2f}ms, "  # type: ignore[possibly-unbound]
                     f"Callbacks={1000*(t_cb1-t_cb0):.2f}ms, "  # type: ignore[possibly-unbound]
                     f"stepSimulation={1000*(t_sim1-t_sim0):.2f}ms, "  # type: ignore[possibly-unbound]
-                    f"Collisions={1000*(t_col1-t_col0):.2f}ms, "  # type: ignore[possibly-unbound]
+                    f"Collisions={1000*(t_col1-t_col0):.2f}ms{collision_detail}, "  # type: ignore[possibly-unbound]
                     f"Monitor={1000*(t_mon1-t_mon0):.2f}ms, "  # type: ignore[possibly-unbound]
                     f"Total={1000*(t_end-t_step):.2f}ms"  # type: ignore[possibly-unbound]
                 )

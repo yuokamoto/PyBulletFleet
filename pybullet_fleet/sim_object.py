@@ -114,6 +114,7 @@ class SimObjectSpawnParams:
     visual_frame_pose: Optional[Pose] = None
     collision_frame_pose: Optional[Pose] = None
     is_structure: bool = False  # If True, automatically registers as structure body
+    collision_check_2d: Optional[bool] = None  # If None, use global default; if True/False, override per-object
 
 
 class SimObject:
@@ -133,7 +134,13 @@ class SimObject:
     _shared_shapes: Dict[str, Tuple[int, int]] = {}
 
     def __init__(
-        self, body_id: int, sim_core=None, mesh_path: Optional[str] = None, pickable: bool = True, mass: float = None
+        self,
+        body_id: int,
+        sim_core=None,
+        mesh_path: Optional[str] = None,
+        pickable: bool = True,
+        mass: float = None,
+        collision_check_2d: Optional[bool] = None,
     ):
         self.body_id = body_id
         self.sim_core = sim_core
@@ -141,6 +148,7 @@ class SimObject:
         self.callbacks: List[dict] = []
         self.mesh_path = mesh_path
         self.pickable = pickable
+        self.collision_check_2d = collision_check_2d  # None = use global default, True/False = override
 
         # Assign unique ID from sim_core if available
         if sim_core is not None and hasattr(sim_core, "_next_object_id"):
@@ -380,6 +388,7 @@ class SimObject:
         mass: float = 0.0,
         pickable: bool = True,
         sim_core=None,
+        collision_check_2d: Optional[bool] = None,
     ) -> "SimObject":
         """
         Create a SimObject with optional visual and collision shapes.
@@ -432,7 +441,14 @@ class SimObject:
         # Store mesh_path if available for backward compatibility
         stored_mesh_path = visual_shape.mesh_path if (visual_shape and visual_shape.shape_type == "mesh") else None
 
-        return cls(body_id=body_id, sim_core=sim_core, mesh_path=stored_mesh_path, pickable=pickable, mass=mass)
+        return cls(
+            body_id=body_id,
+            sim_core=sim_core,
+            mesh_path=stored_mesh_path,
+            pickable=pickable,
+            mass=mass,
+            collision_check_2d=collision_check_2d,
+        )
 
     @classmethod
     def from_params(cls, spawn_params: SimObjectSpawnParams, sim_core=None) -> "SimObject":
@@ -470,6 +486,7 @@ class SimObject:
             mass=spawn_params.mass,
             pickable=spawn_params.pickable,
             sim_core=sim_core,
+            collision_check_2d=spawn_params.collision_check_2d,
         )
 
         # Auto-register as structure if is_structure flag is set

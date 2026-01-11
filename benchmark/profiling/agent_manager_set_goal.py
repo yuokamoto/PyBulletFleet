@@ -1,6 +1,55 @@
 #!/usr/bin/env python3
 """
-Profile AgentManager.set_goal_pose() to identify bottleneck.
+agent_manager_set_goal.py
+AgentManager.set_goal_pose() のプロファイリングツール
+
+概要:
+    AgentManager.set_goal_pose() は複数エージェントにゴールを設定する操作です。
+    このツールは cProfile で関数レベルの詳細を分析し、ボトルネックを特定します。
+
+測定内容:
+    - agent_manager.set_goal_pose() のオーバーヘッド
+    - agent.set_goal_pose() の実行時間
+    - agent.set_path() の内部処理
+    - _init_differential_rotation_trajectory() の時間（最大のボトルネック）
+    - _init_differential_forward_distance_trajectory() の時間
+
+使い方:
+    # 基本実行（1000エージェント）
+    python agent_manager_set_goal.py --agents=1000
+    
+    # 少数エージェントでテスト
+    python agent_manager_set_goal.py --agents=100
+    
+    # 大規模テスト
+    python agent_manager_set_goal.py --agents=5000
+
+出力例:
+    ncalls  tottime  cumtime  関数
+      1000    0.001    0.109  agent_manager.set_goal_pose()
+      1000    0.000    0.108  agent.set_goal_pose()
+      1000    0.007    0.107  agent.set_path()
+      1000    0.022    0.092  _init_differential_rotation_trajectory()  ← ボトルネック（84%）
+      1000    0.003    0.032  _init_differential_forward_distance_trajectory()
+
+分析結果の読み方:
+    - tottime: 関数自身の処理時間
+    - cumtime: 関数 + 内部呼び出しの合計時間
+    - cumtime - tottime = 子関数の処理時間
+    
+    例: agent_manager.set_goal_pose()
+      - cumtime: 0.109秒（全体）
+      - tottime: 0.001秒（自身のオーバーヘッド、0.9%）
+      - 残り 99.1% は子関数（agent.set_goal_pose）
+
+最適化のヒント:
+    - _init_differential_rotation_trajectory が 84% を占める
+    - Rotation行列計算（scipy）と軌道補間が重い
+    - キャッシングや事前計算で改善可能
+
+関連ファイル:
+    - agent_update.py: Agent.update() の詳細プロファイリング
+    - collision_check.py: 衝突検出の詳細プロファイリング
 """
 import os
 import sys
@@ -25,10 +74,15 @@ def profile_set_goal_pose(num_agents=1000):
     if p.isConnected():
         p.disconnect()
 
-    params = SimulationParams(gui=False, timestep=0.01)
-    sim_core = MultiRobotSimulationCore(params)
+    p.connect(p.DIRECT)  # Force DIRECT mode (no GUI, no X11)
     p.resetSimulation()
     p.setGravity(0, 0, -9.81)
+
+    # Load from profiling config
+    config_path = os.path.join(os.path.dirname(__file__), "profiling_config.yaml")
+    params = SimulationParams.from_config(config_path)
+    
+    sim_core = MultiRobotSimulationCore(params)
 
     # Spawn agents
     manager = AgentManager(sim_core=sim_core)
@@ -44,7 +98,7 @@ def profile_set_goal_pose(num_agents=1000):
         offset=[0.0, 0.0, 0.1],
     )
 
-    robot_urdf = os.path.join(os.path.dirname(__file__), "../robots/simple_cube.urdf")
+    robot_urdf = os.path.join(os.path.dirname(__file__), "../../robots/simple_cube.urdf")
     agent_spawn_params = AgentSpawnParams(
         urdf_path=robot_urdf,
         motion_mode=MotionMode.DIFFERENTIAL,

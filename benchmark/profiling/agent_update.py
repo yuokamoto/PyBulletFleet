@@ -1,12 +1,89 @@
 #!/usr/bin/env python3
 """
-profile_agent_update.py
-Agent.update()の詳細プロファイリング
+agent_update.py
+Agent.update() の詳細パフォーマンス分析ツール
 
-目的:
-- Agent.update()の内部でどの処理が遅いか特定
-- PyBullet API呼び出しの頻度と時間を測定
-- 最適化ポイントを明確化
+概要:
+    Agent.update() は毎フレーム全エージェントに対して呼ばれる最も頻繁な処理です。
+    このツールは5種類の分析手法でボトルネックを特定します。
+
+分析手法:
+    1. cProfile分析 (--test=cprofile)
+       - 関数レベルの詳細分析
+       - 全関数の呼び出し時間を自動記録
+       - ボトルネック候補の特定に最適
+       - 注意: PyBullet との相性問題で稀に segfault が発生する可能性あり
+    
+    2. 手動タイミング分析 (--test=manual)
+       - 特定メソッドのみを計測（オーバーヘッド最小）
+       - 統計情報（平均、中央値、最大値）
+       - 最適化効果の検証に最適
+       - 推奨: 安定性重視の場合はこちらを使用
+    
+    3. PyBullet API呼び出し分析 (--test=pybullet)
+       - PyBullet C++ API の呼び出し回数と時間
+       - Python/C++境界のコストを測定
+       - API使用パターンの最適化に最適
+    
+    4. 静止 vs 移動のコスト比較 (--test=stationary)
+       - ゴールなし（静止中）とゴールあり（移動中）のupdate()コスト比較
+       - 移動・関節変化の更新処理の有無による性能差を測定
+       - 静止エージェントが多い場合の最適化効果を確認
+    
+    5. Motion Mode比較 (--test=motion_modes)
+       - DIFFERENTIAL vs OMNIDIRECTIONAL の性能比較
+       - モード選択の参考データ
+
+トラブルシューティング:
+    - Segmentation Fault が発生する場合:
+      → --test=manual または --test=stationary を使用
+      → cProfile と PyBullet の C++ 拡張の相性問題が原因
+    
+    - "Xft: locking error too many file unlocks" が表示される場合:
+      → 無視して OK（X11 GUI が無効化されており実害なし）
+      → または環境変数 export QT_X11_NO_MITSHM=1 を設定
+
+使い方:
+    # 全ての分析を実行（cProfile を含む）
+    python agent_update.py --agents=1000 --updates=100
+    
+    # cProfile のみ（ボトルネック探し）
+    python agent_update.py --agents=1000 --test=cprofile
+    
+    # 手動タイミングのみ（詳細測定、推奨）
+    python agent_update.py --agents=1000 --updates=100 --test=manual
+    
+    # PyBullet API 分析のみ
+    python agent_update.py --agents=100 --updates=10 --test=pybullet
+    
+    # 静止 vs 移動のみ
+    python agent_update.py --agents=1000 --test=stationary
+    
+    # Motion Mode 比較のみ
+    python agent_update.py --agents=1000 --test=motion_modes
+
+出力例:
+    Manual Timing:
+        Component                 Mean (μs)    Median (μs)  Max (μs)     
+        ----------------------------------------------------------------------
+        total                     120.50       118.30       250.10       
+        update_differential       80.20        78.50        180.00       
+        update_actions            35.10        34.00        90.00        
+    
+    PyBullet API:
+        Function                                  Calls      Total (ms)   Avg (μs)    
+        ---------------------------------------------------------------------------
+        resetBasePositionAndOrientation           1000       45.20        45.20       
+        getBasePositionAndOrientation             2000       30.50        15.25       
+    
+    Stationary vs Moving:
+        Overhead ratio (moving/stationary): 7.93x
+        Potential savings if 50% stationary: 67.85 ms
+
+関連ファイル:
+    - agent_manager_set_goal.py: set_goal_pose() のプロファイリング
+    - step_breakdown.py: シミュレーション全体のステップ分解
+    - collision_check.py: 衝突検出のプロファイリング
 """
 import os
 import sys
@@ -26,16 +103,23 @@ from pybullet_fleet.geometry import Pose
 
 def create_test_agents(num_agents: int, motion_mode: MotionMode = MotionMode.DIFFERENTIAL):
     """テスト用のAgentを生成"""
+    # Ensure clean disconnect and use DIRECT mode to avoid X11/GUI issues
     if p.isConnected():
         p.disconnect()
-
-    params = SimulationParams(gui=False, timestep=0.01)
-    sim_core = MultiRobotSimulationCore(params)
+    
+    # Connect in DIRECT mode (no GUI, prevents Xft locking errors and segfaults)
+    p.connect(p.DIRECT)
 
     p.resetSimulation()
     p.setGravity(0, 0, -9.81)
+    
+    # Create sim_core after PyBullet is connected - Load from profiling config
+    config_path = os.path.join(os.path.dirname(__file__), "profiling_config.yaml")
+    params = SimulationParams.from_config(config_path)
+    
+    sim_core = MultiRobotSimulationCore(params)
 
-    robot_urdf = os.path.join(os.path.dirname(__file__), "../robots/simple_cube.urdf")
+    robot_urdf = os.path.join(os.path.dirname(__file__), "../../robots/simple_cube.urdf")
 
     agents = []
     for i in range(num_agents):
@@ -61,13 +145,14 @@ def create_test_agents(num_agents: int, motion_mode: MotionMode = MotionMode.DIF
     return agents, sim_core
 
 
-def profile_with_cprofile(num_agents: int = 1000, num_updates: int = 1):
+def profile_with_cprofile(num_agents: int = 1000, num_updates: int = 1, motion_mode: MotionMode = MotionMode.DIFFERENTIAL):
     """cProfileでプロファイリング"""
+    mode_name = "DIFFERENTIAL" if motion_mode == MotionMode.DIFFERENTIAL else "OMNIDIRECTIONAL"
     print(f"\n{'='*70}")
-    print(f"cProfile Profiling: {num_agents} agents, {num_updates} update(s)")
+    print(f"cProfile Profiling ({mode_name}): {num_agents} agents, {num_updates} update(s)")
     print(f"{'='*70}\n")
 
-    agents, sim_core = create_test_agents(num_agents)
+    agents, sim_core = create_test_agents(num_agents, motion_mode)
 
     # Warm-up
     for agent in agents:
@@ -261,7 +346,16 @@ def count_pybullet_calls(num_agents: int = 100, num_updates: int = 10):
 
 
 def analyze_stationary_vs_moving(num_agents: int = 1000):
-    """静止中 vs 移動中のAgent.update()コスト比較"""
+    """静止中 vs 移動中のAgent.update()コスト比較
+    
+    ゴールが設定されていないエージェント（静止中）と、
+    ゴールに向かって移動中のエージェントで、update() の処理時間を比較します。
+    
+    静止中: 移動・関節変化の更新処理をスキップ（早期リターン）
+    移動中: 軌道追従、速度計算、姿勢更新などの全処理を実行
+    
+    多数のエージェントが静止している場合の最適化効果を確認できます。
+    """
     print(f"\n{'='*70}")
     print(f"Stationary vs Moving Analysis: {num_agents} agents")
     print(f"{'='*70}\n")
@@ -271,13 +365,18 @@ def analyze_stationary_vs_moving(num_agents: int = 1000):
     # Create stationary agents (no goal)
     if p.isConnected():
         p.disconnect()
-
-    params = SimulationParams(gui=False, timestep=0.01)
-    sim_core2 = MultiRobotSimulationCore(params)
+    
+    p.connect(p.DIRECT)  # Force DIRECT mode
     p.resetSimulation()
     p.setGravity(0, 0, -9.81)
 
-    robot_urdf = os.path.join(os.path.dirname(__file__), "../robots/simple_cube.urdf")
+    # Load from profiling config
+    config_path = os.path.join(os.path.dirname(__file__), "profiling_config.yaml")
+    params = SimulationParams.from_config(config_path)
+    
+    sim_core2 = MultiRobotSimulationCore(params)
+
+    robot_urdf = os.path.join(os.path.dirname(__file__), "../../robots/simple_cube.urdf")
     agents_stationary = []
     for i in range(num_agents):
         x = (i % 100) * 0.5
@@ -332,6 +431,56 @@ def analyze_stationary_vs_moving(num_agents: int = 1000):
     }
 
 
+def analyze_motion_modes(num_agents: int = 1000):
+    """DIFFERENTIAL vs OMNIDIRECTIONAL モード比較"""
+    print(f"\n{'='*70}")
+    print(f"Motion Mode Comparison: {num_agents} agents")
+    print(f"{'='*70}\n")
+
+    results = {}
+
+    for mode in [MotionMode.DIFFERENTIAL, MotionMode.OMNIDIRECTIONAL]:
+        agents, sim_core = create_test_agents(num_agents, mode)
+
+        # Measure update time (3 iterations for stability)
+        times = []
+        for _ in range(3):
+            t0 = time.perf_counter()
+            for agent in agents:
+                agent.update(dt=0.01)
+            elapsed = (time.perf_counter() - t0) * 1000.0
+            times.append(elapsed)
+
+        avg_time = sum(times) / len(times)
+        per_agent = avg_time / num_agents * 1000.0  # μs
+
+        mode_name = "DIFFERENTIAL" if mode == MotionMode.DIFFERENTIAL else "OMNIDIRECTIONAL"
+        print(f"{mode_name}:")
+        print(f"  Total time: {avg_time:.2f} ms")
+        print(f"  Per agent: {per_agent:.2f} μs")
+        print()
+
+        results[mode_name] = {
+            "total_ms": avg_time,
+            "per_agent_us": per_agent,
+        }
+
+        p.disconnect()
+
+    diff_time = results["DIFFERENTIAL"]["total_ms"]
+    omni_time = results["OMNIDIRECTIONAL"]["total_ms"]
+    ratio = diff_time / omni_time
+    
+    print(f"Performance ratio (DIFFERENTIAL/OMNIDIRECTIONAL): {ratio:.2f}x")
+    
+    if ratio > 1.0:
+        print(f"  → OMNIDIRECTIONAL is {ratio:.2f}x faster")
+    else:
+        print(f"  → DIFFERENTIAL is {1/ratio:.2f}x faster")
+
+    return results
+
+
 def main():
     """メイン実行"""
     import argparse
@@ -340,7 +489,10 @@ def main():
     parser.add_argument("--agents", type=int, default=1000, help="Number of agents")
     parser.add_argument("--updates", type=int, default=100, help="Number of update iterations")
     parser.add_argument(
-        "--test", choices=["all", "cprofile", "manual", "pybullet", "stationary"], default="all", help="Which test to run"
+        "--test", 
+        choices=["all", "cprofile", "manual", "pybullet", "stationary", "motion_modes"], 
+        default="all", 
+        help="Which test to run"
     )
 
     args = parser.parse_args()
@@ -352,6 +504,9 @@ def main():
     if args.test in ["all", "stationary"]:
         analyze_stationary_vs_moving(args.agents)
 
+    if args.test in ["all", "motion_modes"]:
+        analyze_motion_modes(args.agents)
+
     if args.test in ["all", "manual"]:
         profile_manual_timing(args.agents, args.updates)
 
@@ -359,7 +514,24 @@ def main():
         count_pybullet_calls(min(args.agents, 100), min(args.updates, 10))
 
     if args.test in ["all", "cprofile"]:
-        profile_with_cprofile(args.agents, num_updates=1)
+        # Run cProfile for both motion modes
+        print("\n" + "=" * 70)
+        print("cProfile Comparison: DIFFERENTIAL vs OMNIDIRECTIONAL")
+        print("=" * 70)
+        
+        stats_diff = profile_with_cprofile(args.agents, num_updates=1, motion_mode=MotionMode.DIFFERENTIAL)
+        stats_omni = profile_with_cprofile(args.agents, num_updates=1, motion_mode=MotionMode.OMNIDIRECTIONAL)
+        
+        print("\n" + "=" * 70)
+        print("Key Differences:")
+        print("=" * 70)
+        print("\nDIFFERENTIAL mode calls update_differential()")
+        print("OMNIDIRECTIONAL mode calls update_omnidirectional()")
+        print("\nLook for differences in:")
+        print("  - _update_differential vs _update_omnidirectional")
+        print("  - resetBaseVelocity call patterns")
+        print("  - Computation complexity differences")
+
 
     print("\n" + "=" * 70)
     print("Profiling Complete!")
