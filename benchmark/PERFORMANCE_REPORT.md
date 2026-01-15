@@ -25,111 +25,6 @@
 
 ---
 
-## Executive Summary
-
-This report documents the performance improvements achieved through systematic collision detection optimization in PyBullet Fleet simulation engine.
-
-### Key Achievements
-- **75.2% reduction** in total step time for 1000 agents (18.70ms → 4.64ms)
-- **67.2% reduction** in collision check time (11.01ms → 3.61ms)
-- **6.6x real-time** performance for 100 agents
-- **Near-linear scaling** up to 500 agents
-
----
-
-## Optimization History
-
-### Phase 1: Monitor GUI Separation
-**Goal:** Enable headless data collection without GUI overhead
-
-**Changes:**
-- Added `enable_monitor_gui` parameter to `SimulationParams`
-- Decoupled data recording from visualization
-- Default: `monitor=True, enable_monitor_gui=False`
-
-**Result:** No performance impact, improved flexibility
-
----
-
-### Phase 2: Maximum Speed Mode
-**Goal:** Remove real-time synchronization overhead
-
-**Changes:**
-- Fixed `speed=0` handling (was incorrectly converted to 1.0)
-- Removed sleep() calls when `speed=0`
-- Changed duration check from real-time to simulation-time
-- Removed unnecessary `time.time()` calls in hot path
-
-**Result:** Enabled accurate performance measurement
-
----
-
-### Phase 3: Collision Detection Bottleneck Analysis
-**Goal:** Identify performance bottleneck
-
-**Findings:**
-```
-Component Breakdown (1000 agents, before optimization):
-  Collision Check:    18.87ms (71.3%)  ← BOTTLENECK
-  Step Simulation:     0.57ms (12.3%)
-  Agent Update:        0.34ms ( 7.3%)
-  Sync Robot Bodies:   0.09ms ( 2.0%)
-  Monitor Update:      0.02ms ( 0.4%)
-  Other:               0.01ms ( 0.7%)
-  ────────────────────────────────────
-  Total:              26.47ms (100.0%)
-```
-
-**Conclusion:** Collision checking consumed 70%+ of execution time
-
----
-
-### Phase 4: Spatial Hashing Optimization (First Pass)
-**Goal:** Reduce neighbor checks for 2D simulations
-
-**Changes:**
-- Reduced neighbor offsets from 27 (3³) to 9 (3²)
-- Only check XY plane neighbors (Z-axis fixed)
-- Fixed cell_size = 1.0m (robot spacing)
-
-**Results:**
-```
-Before:  Collision=18.87ms (71.3%), Total=26.47ms
-After:   Collision=11.01ms (58.9%), Total=18.70ms
-Improvement: 29.3% faster overall, 41.7% faster collision checks
-```
-
----
-
-### Phase 5: Dynamic Cell Size + Configurable 2D/3D Mode
-**Goal:** Adapt to varying robot sizes and user requirements
-
-**Changes:**
-1. **Dynamic cell_size calculation:**
-   ```python
-   # Calculate from AABB median extent
-   extents = [max(aabb[1][i] - aabb[0][i] for i in range(3)) for aabb in aabbs]
-   median_extent = sorted(extents)[len(extents) // 2]
-   cell_size = max(median_extent * 2.0, 0.5)  # Min 0.5m
-   ```
-
-2. **Configurable collision_check_2d parameter:**
-   ```python
-   if self.params.collision_check_2d:
-       neighbor_offsets = [(dx, dy, 0) for dx in (-1, 0, 1) for dy in (-1, 0, 1)]  # 9 neighbors
-   else:
-       neighbor_offsets = [(dx, dy, dz) for dx in (-1, 0, 1) for dy in (-1, 0, 1) for dz in (-1, 0, 1)]  # 27 neighbors
-   ```
-
-**Results:**
-```
-Before (fixed cell_size):  Collision=11.01ms, Total=18.70ms
-After (dynamic cell_size): Collision= 3.61ms, Total= 4.64ms
-Improvement: 67.2% faster collision, 75.2% faster overall
-```
-
----
-
 ## Performance Benchmark Results
 
 ### Test Configuration
@@ -312,22 +207,28 @@ params = SimulationParams(
 
 ## Recommendations
 
-### For Different Use Cases
+**For comprehensive optimization guidance, see [`PERFORMANCE_OPTIMIZATION_GUIDE.md`](PERFORMANCE_OPTIMIZATION_GUIDE.md)**
+
+### Quick Reference
 
 **Real-time visualization (RTF > 1.0):**
 - Limit to **< 200 agents** for smooth 60 FPS rendering
-- Use `speed=1.0` with GUI enabled
-- Consider reducing physics timestep
+- Configuration: `speed=1.0`, `gui=True`, `collision_check_frequency=10.0`
 
 **Offline batch simulation:**
-- Use `speed=0` with `enable_monitor_gui=False`
 - Can handle **1000+ agents** at 0.45x RTF
-- Collect data for post-processing
+- Configuration: `speed=0`, `gui=False`, `collision_check_2d=True`
 
 **Large-scale testing (>2000 agents):**
-- Consider distributed simulation
-- Or accept <0.3x RTF for comprehensive testing
-- Use profiling to identify specific bottlenecks
+- Accept <0.3x RTF for comprehensive testing
+- Consider distributed simulation for >5000 agents
+- Or reduce collision check frequency to 1 Hz
+
+**See [`PERFORMANCE_OPTIMIZATION_GUIDE.md`](PERFORMANCE_OPTIMIZATION_GUIDE.md) for:**
+- Detailed configuration examples
+- Parameter tuning guidelines
+- Use case recommendations
+- Troubleshooting tips
 
 ---
 

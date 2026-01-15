@@ -9,7 +9,7 @@ simulation:
   physics: false  # Enable physics engine (false = kinematic only, faster)
 
   # Collision Detection
-  collision_check_frequency: 10.0  # Collision check frequency in Hz (null = every step)
+  collision_check_frequency: null  # Collision check frequency in Hz (null = every step)
                                    # Set to 0 to disable collision checks completely
                                    # Use this to measure baseline performance without collision overhead
   collision_check_2d: false  # 2D collision (9 neighbors) vs 3D (27 neighbors)

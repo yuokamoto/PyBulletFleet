@@ -160,9 +160,6 @@ class AgentSpawnParams(SimObjectSpawnParams):
 
 
 class Agent(SimObject):
-
-    # Profiling flag (class variable)
-    PROFILE_UPDATE = False
     """
     Agent class with goal-based position control.
 
@@ -1435,11 +1432,7 @@ class Agent(SimObject):
             # Move to next action
             self._current_action = None
 
-    def update(self, dt: float):
-        t0 = None
-        elapsed = None
-        if Agent.PROFILE_UPDATE:
-            t0 = time.perf_counter()
+    def update(self, dt: float) -> bool:
         """
         Update robot position towards goal with velocity/acceleration constraints.
 
@@ -1453,6 +1446,9 @@ class Agent(SimObject):
 
         Args:
             dt: Time step (seconds)
+        
+        Returns:
+            True if the robot moved (position or orientation changed), False otherwise
         """
         # Process action queue first (actions may set goals/paths)
         self._update_actions(dt)
@@ -1465,7 +1461,7 @@ class Agent(SimObject):
                 # # Also fix position to prevent any drift from physics simulation
                 # current_pos, current_orn = p.getBasePositionAndOrientation(self.body_id)
                 # p.resetBasePositionAndOrientation(self.body_id, current_pos, current_orn)
-                return
+                return False  # No movement if not moving
 
             # Dispatch to appropriate motion controller
             if self._motion_mode == MotionMode.OMNIDIRECTIONAL:
@@ -1477,11 +1473,10 @@ class Agent(SimObject):
 
         if self.is_urdf_robot():
             self.update_attached_objects_kinematics()
-
-        if Agent.PROFILE_UPDATE and t0 is not None:
-            elapsed = (time.perf_counter() - t0) * 1000.0  # ms
-            if elapsed > 10.0:
-                logger.info(f"Agent.update() took {elapsed:.2f} ms (body_id={self.body_id})")
+        
+        # Movement detection is handled by set_pose() in _update_omnidirectional() and _update_differential()
+        # Return True to indicate update was called (actual movement is tracked by sim_core)
+        return True
 
     def get_velocity(self) -> np.ndarray:
         """

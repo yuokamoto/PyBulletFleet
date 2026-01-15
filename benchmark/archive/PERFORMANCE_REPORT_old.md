@@ -1,50 +1,35 @@
 # PyBullet Fleet - Performance Optimization Report
 
-**Date:** 2026-01-04  
+**Date:** 2026-01-04
 **Version:** Latest (after collision optimization)
 
 ---
 
-## Executive Summary
+## Test Environment
 
-This report documents the performance improvements achieved through systematic collision detection optimization in PyBullet Fleet simulation engine.
+### Hardware Specifications
+- **CPU**: Intel Core i7-1185G7 (11th Gen)
+  - Cores: 4 cores / 8 threads
+  - Base Clock: 3.00 GHz
+  - Max Turbo: 4.80 GHz
+- **Memory**: 32 GB RAM
+- **GPU**: Intel Iris Xe Graphics (integrated)
+- **Storage**: NVMe SSD
 
-### Key Achievements
-- **75.2% reduction** in total step time for 1000 agents (18.70ms → 4.64ms)
-- **67.2% reduction** in collision check time (11.01ms → 3.61ms)
-- **6.6x real-time** performance for 100 agents
-- **Near-linear scaling** up to 500 agents
+### Software Environment
+- **OS**: Ubuntu 20.04.1 LTS (Linux 5.15.0-139-generic)
+- **Architecture**: x86_64
+- **Python**: 3.8+
+- **PyBullet**: Latest
+- **Simulation Mode**: DIRECT (headless, no GUI)
 
 ---
 
 ## Optimization History
 
-### Phase 1: Monitor GUI Separation
-**Goal:** Enable headless data collection without GUI overhead
-
-**Changes:**
-- Added `enable_monitor_gui` parameter to `SimulationParams`
-- Decoupled data recording from visualization
-- Default: `monitor=True, enable_monitor_gui=False`
-
-**Result:** No performance impact, improved flexibility
-
 ---
 
-### Phase 2: Maximum Speed Mode
-**Goal:** Remove real-time synchronization overhead
-
-**Changes:**
-- Fixed `speed=0` handling (was incorrectly converted to 1.0)
-- Removed sleep() calls when `speed=0`
-- Changed duration check from real-time to simulation-time
-- Removed unnecessary `time.time()` calls in hot path
-
-**Result:** Enabled accurate performance measurement
-
----
-
-### Phase 3: Collision Detection Bottleneck Analysis
+### Phase 1: Collision Detection Bottleneck Analysis
 **Goal:** Identify performance bottleneck
 
 **Findings:**
@@ -64,7 +49,7 @@ Component Breakdown (1000 agents, before optimization):
 
 ---
 
-### Phase 4: Spatial Hashing Optimization (First Pass)
+### Phase 2: Spatial Hashing Optimization (First Pass)
 **Goal:** Reduce neighbor checks for 2D simulations
 
 **Changes:**
@@ -81,7 +66,7 @@ Improvement: 29.3% faster overall, 41.7% faster collision checks
 
 ---
 
-### Phase 5: Dynamic Cell Size + Configurable 2D/3D Mode
+### Phase 3: Dynamic Cell Size + Configurable 2D/3D Mode
 **Goal:** Adapt to varying robot sizes and user requirements
 
 **Changes:**
@@ -265,10 +250,10 @@ params = SimulationParams(
 1. **Collision Check (77.8%)** - Still dominant but acceptable
    - Spatial hashing is near-optimal for current density
    - Further optimization requires algorithmic changes (e.g., BVH)
-   
+
 2. **Step Simulation (12.3%)** - PyBullet internal overhead
    - Cannot optimize without PyBullet modifications
-   
+
 3. **Agent Update (7.3%)** - Navigation and control logic
    - Can be parallelized if needed
 
@@ -351,6 +336,6 @@ Further improvements require either:
 
 ---
 
-**Report Generated:** 2026-01-04  
-**Author:** Performance Optimization Team  
+**Report Generated:** 2026-01-04
+**Author:** Performance Optimization Team
 **Review Status:** Final

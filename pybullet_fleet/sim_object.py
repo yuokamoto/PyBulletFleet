@@ -173,13 +173,15 @@ class SimObject:
         # Kinematic flag (mass=0 means kinematic/static object)
         self.is_kinematic = self.mass == 0.0
 
-        # Pose caching for performance optimization
-        self._cached_pose: Optional[Pose] = None
+        # Pose caching for performance optimization (also used for movement detection)
+        initial_pos, initial_orn = p.getBasePositionAndOrientation(self.body_id)
+        self._cached_pose: Pose = Pose.from_pybullet(initial_pos, initial_orn)
         self._cached_pose_sim_time: float = -1.0  # Simulation time when pose was cached
 
         # Auto-register to sim_core if provided
         if sim_core is not None:
-            sim_core.sim_objects.append(self)
+            # Centralized registration via add_object() for consistency
+            sim_core.add_object(self)
 
     @classmethod
     def create_shared_shapes(
@@ -517,7 +519,7 @@ class SimObject:
 
         return self._cached_pose
 
-    def set_pose(self, pose: Pose, preserve_velocity: bool = True):
+    def set_pose(self, pose: Pose, preserve_velocity: bool = True) -> bool:
         """
         Set position and orientation from a Pose object.
 
@@ -527,8 +529,25 @@ class SimObject:
                              If False, velocity is reset to zero (default behavior of PyBullet).
                              For kinematic objects (mass=0), velocity preservation has no effect,
                              so this is automatically set to False for performance.
+        
+        Returns:
+            True if the object moved (position or orientation changed), False otherwise
         """
         position, orientation = pose.as_position_orientation()
+
+        # Detect movement using cached pose (no PyBullet API call needed)
+        last_pos, last_orn = self._cached_pose.as_position_orientation()
+        pos_diff = np.linalg.norm(np.array(position) - np.array(last_pos))
+        
+        # Quaternion angular distance: min(|q1 - q2|, |q1 + q2|) to handle q = -q equivalence
+        orn_arr = np.array(orientation)
+        last_orn_arr = np.array(last_orn)
+        orn_diff = min(
+            np.linalg.norm(orn_arr - last_orn_arr),
+            np.linalg.norm(orn_arr + last_orn_arr)
+        )
+        
+        moved = (pos_diff > 1e-6 or orn_diff > 1e-6)
 
         # Optimization: Skip velocity operations for kinematic objects
         # Use cached is_kinematic flag to avoid PyBullet API calls
@@ -541,9 +560,20 @@ class SimObject:
             # Fast path: Just set position without velocity operations
             # (kinematic objects or explicitly requested to skip velocity preservation)
             p.resetBasePositionAndOrientation(self.body_id, position, orientation)
+        
+        # Notify sim_core if movement detected
+        if moved and self.sim_core is not None:
+            self.sim_core._mark_object_moved(self.object_id)
+            
+            # Update AABB and spatial grid immediately for kinematic objects (optimization)
+            # Physics objects are updated in step_once() to batch PyBullet calls
+            if self.object_id in self.sim_core._kinematic_objects:
+                self.sim_core._update_object_aabb(self.object_id, self.body_id)
+                # Update spatial grid if cell_size is initialized
+                if self.sim_core._cached_cell_size is not None:
+                    self.sim_core._update_object_spatial_grid(self.object_id)
 
-        # Optimization 3: Update pose cache by modifying existing object (avoid object creation)
-        # This is faster than creating new Pose objects when cache exists
+        # Update pose cache (reuse existing Pose object to avoid allocation)
         if self._cached_pose is not None:
             # Reuse existing Pose object - just update its internal lists
             self._cached_pose.position[0] = position[0]
@@ -576,6 +606,8 @@ class SimObject:
                 lambda obj=obj: f"attached_object set pose　body_id={self.body_id}: obj_body_id={obj.body_id} "
                 f"position={obj._attach_offset.position} orientation={obj._attach_offset.orientation}"
             )
+        
+        return moved  # Return movement detection result
 
     def attach_object(
         self,

@@ -2,6 +2,57 @@
 
 This directory contains performance benchmarking tools and results for PyBullet Fleet simulation engine.
 
+## Performance Optimization Workflow
+
+```mermaid
+flowchart TD
+    Start([Start: Need Performance?]) --> Benchmark
+    
+    Benchmark[🎯 run_benchmark.py<br/>Measure overall performance<br/>RTF, Step Time, Memory]
+    
+    Benchmark -->|RTF OK?| Done([✅ Done])
+    Benchmark -->|RTF Low?| Profile
+    
+    Profile[🔍 Profiling Tools<br/>simulation_profiler.py<br/>Identify bottlenecks]
+    
+    Profile --> Analyze{What's slow?}
+    
+    Analyze -->|Collision 70-80%| CollisionExp[🧪 collision_optimization.py<br/>Test optimization ideas]
+    Analyze -->|Agent Update| AgentExp[🧪 agent_update.py<br/>Analyze update methods]
+    Analyze -->|Other| GenericExp[🧪 experiments/<br/>Test hypotheses]
+    
+    CollisionExp --> Implement[⚙️ Implement<br/>Best approach]
+    AgentExp --> Implement
+    GenericExp --> Implement
+    
+    Implement --> Profile2[🔍 Profile Again<br/>Verify improvement]
+    Profile2 --> Benchmark2[🎯 Benchmark Again<br/>Measure impact]
+    Benchmark2 -->|Improved?| Done
+    Benchmark2 -->|Still slow?| Profile
+    
+    style Benchmark fill:#4A90E2,color:#fff
+    style Profile fill:#F39C12,color:#fff
+    style CollisionExp fill:#9B59B6,color:#fff
+    style AgentExp fill:#9B59B6,color:#fff
+    style GenericExp fill:#9B59B6,color:#fff
+    style Implement fill:#27AE60,color:#fff
+    style Done fill:#2ECC71,color:#fff
+```
+
+**Workflow Summary:**
+1. **Benchmark** → Measure overall performance (RTF, step time)
+2. **Profile** → Identify bottlenecks (which component is slow?)
+3. **Experiment** → Test optimization ideas (A/B testing)
+4. **Implement** → Apply best approach
+5. **Verify** → Profile & benchmark again
+
+**Tool Categories:**
+- 🎯 **Benchmarking:** `run_benchmark.py`, `performance_benchmark.py`
+- 🔍 **Profiling:** `profiling/simulation_profiler.py`, `collision_check.py`, `agent_update.py`
+- 🧪 **Experiments:** `experiments/collision_optimization.py`, `performance_analysis.py`
+
+---
+
 ## Directory Structure
 
 ```
@@ -28,8 +79,10 @@ benchmark/
 │
 # Experiments (optimization validation and hypothesis testing)
 ├── experiments/
+│   ├── README.md                      # Experiments documentation
 │   ├── performance_analysis.py        # Component performance comparison
-│   ├── collision_optimization.py      # Collision check optimization tests
+│   ├── collision_optimization.py      # Collision detection optimization tests
+│   ├── list_filtering_benchmark.py    # List filtering micro-benchmark
 │   └── getaabb_performance.py         # AABB retrieval performance tests
 │
 # Archive (deprecated/development tools)
@@ -325,8 +378,6 @@ no_collision:
     collision_check_frequency: 0  # Completely disabled
 ```
 - **Use case**: Baseline performance measurement
-- **RTF**: ~23x (1000 agents)
-- **Step time**: ~4ms
 
 **2. `collision_2d_10hz` - Balanced (Recommended)**
 ```yaml
@@ -336,9 +387,6 @@ collision_2d_10hz:
     collision_check_2d: true         # 2D optimization
 ```
 - **Use case**: Ground robots (AGVs), production setting
-- **RTF**: ~7.5x (1000 agents)
-- **Step time**: ~13ms
-- **Performance**: 3x faster than `collision_3d_full`
 
 **3. `collision_3d_full` - Maximum Accuracy**
 ```yaml
@@ -348,22 +396,10 @@ collision_3d_full:
     collision_check_2d: false        # 3D (27 neighbors)
 ```
 - **Use case**: Drones, 3D movement, safety-critical scenarios
-- **RTF**: ~2.5x (1000 agents)
-- **Step time**: ~40ms
-
-#### Performance Comparison
-
-| Scenario | RTF | Step Time | Speedup vs 3D |
-|----------|-----|-----------|---------------|
-| `no_collision` | 23.38x | 4.28ms | 9.7x |
-| `collision_2d_10hz` | 7.58x | 13.20ms | 3.0x |
-| `collision_3d_full` | 2.51x | 39.83ms | 1.0x |
-
-*(Tested with 1000 agents, 10s simulation)*
 
 #### Creating Custom Scenarios
 
-Add your own scenarios to `benchmark_config.yaml`:
+Add your own scenarios to `benchmark_config.yaml`. Below are examples:
 
 ```yaml
 scenarios:
@@ -406,8 +442,6 @@ simulation:
   physics: true                    # Full physics
 ```
 
-
-
 **Usage:**
 - Default config: `benchmark/benchmark_config.yaml`
 - Custom config: `--config path/to/config.yaml`
@@ -436,147 +470,21 @@ Located in `benchmark/profiling/` - these tools provide detailed CPU time and me
 ---
 
 ## Experiments
-Located in `benchmark/experiments/` - these scripts validate optimization hypotheses and compare different implementation approaches.
 
-### `performance_analysis.py`
-
-**Purpose:** Compare performance of different wrapper layers
-
-**Features:**
-- Tests direct PyBullet vs SimObject vs Manager APIs
-- Process isolation for clean measurements
-- CPU time and memory tracking
-- Statistical analysis with median, mean, stdev
-
-**Usage:**
-```bash
-# Run all performance tests
-python benchmark/experiments/performance_analysis.py
-
-# Test specific component
-python benchmark/experiments/performance_analysis.py --test simobject
-```
-
-**Tests:**
-- `test_simobject_wrapper()` - SimObject spawn/update performance
-- `test_simobject_manager()` - SimObjectManager bulk operations
-- `test_agent_wrapper()` - Agent spawn/update performance
-- `test_agent_manager()` - AgentManager bulk operations
-
----
-
-### `collision_optimization.py`
-
-**Purpose:** Test and compare collision detection optimization approaches
-
-**Features:**
-- Compare current vs optimized implementations
-- Measure actual performance differences
-- Validate optimization hypotheses
-
-**Usage:**
-```bash
-python benchmark/experiments/collision_optimization.py
-```
-
-**Tests:**
-- Current list comprehension approach
-- Set difference optimization
-- Single-pass iteration
-- Pre-computed set optimization
-
----
-
-### `getaabb_performance.py`
-
-**Purpose:** Test if `p.getAABB()` is a performance bottleneck
-
-**Features:**
-- Isolated testing of PyBullet AABB retrieval
-- Measure per-call and batch performance
-
-**Usage:**
-```bash
-python benchmark/experiments/getaabb_performance.py
-```
-
----
-
-## Experiments
+**For detailed experiment documentation, see [`experiments/README.md`](experiments/README.md)**
 
 Located in `benchmark/experiments/` - these scripts validate optimization hypotheses and compare different implementation approaches.
 
-### `performance_analysis.py`
+### Quick Overview
 
-**Purpose:** Compare performance of different wrapper layers
+| Tool | Purpose | Typical Use Case |
+|------|---------|------------------|
+| `performance_analysis.py` | Compare wrapper layers | Is SimObject overhead significant? |
+| `collision_optimization.py` | Test collision algorithms | Spatial hash vs brute force? |
+| `list_filtering_benchmark.py` | Python list filtering | List comp vs for loop? |
+| `getaabb_performance.py` | Test AABB retrieval | Is getAABB() a bottleneck? |
 
-**Features:**
-- Tests direct PyBullet vs SimObject vs Manager APIs
-- Process isolation for clean measurements
-- CPU time and memory tracking
-- Statistical analysis with median, mean, stdev
-
-**Usage:**
-```bash
-# Run all performance tests
-python benchmark/experiments/performance_analysis.py
-
-# Test specific component
-python benchmark/experiments/performance_analysis.py --test simobject
-```
-
-**Tests:**
-- `test_simobject_wrapper()` - SimObject spawn/update performance
-- `test_simobject_manager()` - SimObjectManager bulk operations
-- `test_agent_wrapper()` - Agent spawn/update performance
-- `test_agent_manager()` - AgentManager bulk operations
-
----
-
-### `collision_optimization.py`
-
-**Purpose:** Test and compare collision detection optimization approaches
-
-**Features:**
-- Compare current vs optimized implementations
-- Measure actual performance differences
-- Validate optimization hypotheses
-
-**Usage:**
-```bash
-python benchmark/experiments/collision_optimization.py
-```
-
-**Tests:**
-- Current list comprehension approach
-- Set difference optimization
-- Single-pass iteration
-- Pre-computed set optimization
-
----
-
-### `getaabb_performance.py`
-
-**Purpose:** Test if `p.getAABB()` is a performance bottleneck
-
-**Features:**
-- Isolated testing of PyBullet AABB retrieval
-- Measure per-call and batch performance
-
-**Usage:**
-```bash
-python benchmark/experiments/getaabb_performance.py
-```
-
----
-
-## Archive
-
-### `archive/update_benchmark.py`
-
-**Purpose:** Legacy script used during development to add config support to `performance_benchmark.py`
-
-**Status:** ⚠️ Deprecated - config support is now built-in
+**👉 For detailed documentation, usage examples, and experiment methodology, see [`experiments/README.md`](experiments/README.md)**
 
 ---
 
@@ -586,44 +494,27 @@ See [`PERFORMANCE_REPORT.md`](PERFORMANCE_REPORT.md) for detailed performance an
 
 ---
 
-## Performance Optimization Guide
+## Performance Optimization
 
-### Key Parameters
+**For comprehensive optimization guidance, see [`PERFORMANCE_OPTIMIZATION_GUIDE.md`](PERFORMANCE_OPTIMIZATION_GUIDE.md)**
 
-**For maximum performance:**
+### Quick Tips
+
+**Maximum Performance (Offline):**
 ```python
-from pybullet_fleet.core_simulation import SimulationParams
-
-params = SimulationParams(
-    speed=0,                    # No sleep, maximum speed
-    enable_monitor_gui=False,   # Headless data collection
-    collision_check_2d=True,    # 2D optimization (9 neighbors vs 27)
-    enable_profiling=False      # Disable profiling overhead (for production)
-)
+params = SimulationParams(speed=0, gui=False, collision_check_2d=True, enable_profiling=False)
 ```
 
-**For development/debugging:**
+**Real-Time Visualization:**
 ```python
-params = SimulationParams(
-    speed=1.0,                  # Real-time synchronization
-    enable_monitor_gui=True,    # Enable visualization
-    collision_check_2d=False,   # Full 3D collision (if needed)
-    enable_profiling=True       # Enable performance logging
-)
+params = SimulationParams(speed=1.0, gui=True, collision_check_frequency=10.0)
 ```
 
-### Configuration File Example
-
-```yaml
-# config/asrs_config.yaml
-simulation:
-  timestep: 0.01
-  gravity: [0, 0, -9.81]
-  speed: 0                      # Maximum speed for benchmarking
-  collision_check_2d: true      # 2D optimization (recommended for ASRS)
-  enable_monitor_gui: false     # Headless for performance
-  enable_profiling: false       # Disable for production
-```
+**See the optimization guide for:**
+- Detailed parameter explanations
+- Use case recommendations
+- Troubleshooting tips
+- Configuration examples
 
 ---
 
@@ -633,107 +524,21 @@ simulation:
 
 **Definition:** How many seconds of simulation time can be executed in 1 second of wall-clock time
 
-**Interpretation:**
-- `RTF = 1.0`: Real-time (1s simulation = 1s wall time)
-- `RTF > 1.0`: Faster than real-time (e.g., 2.0x = 2s simulation in 1s wall time)
-- `RTF < 1.0`: Slower than real-time (e.g., 0.5x = 1s simulation takes 2s wall time)
-
 **Assessment:**
 - ✅ Excellent: RTF > 2.0
 - ⚠️ Good: RTF 1.0 - 2.0
 - ❌ Poor: RTF < 1.0
 
-### Step Time
-
-**Definition:** Average time to execute one simulation step
-
-**Target:**
-- **Real-time visualization (60 FPS):** < 16.7ms per step
-- **Real-time control (100 Hz):** < 10ms per step
-- **Offline processing:** No strict requirement
-
-**Bottlenecks (typical):**
-1. **Collision Check (70-80%):** Spatial hashing optimization applied
-2. **Step Simulation (10-15%):** PyBullet physics engine
-3. **Agent Update (5-10%):** Navigation and control logic
-
----
-
-## Benchmark Results Summary
-
-Based on latest optimization (2026-01-04):
-
-| Agents | RTF  | Step Time | Assessment |
-|--------|------|-----------|------------|
-| 100    | 6.61x | 1.51ms   | ✅ Excellent |
-| 250    | 2.34x | 4.27ms   | ⚠️ Good |
-| 500    | 0.93x | 10.80ms  | ❌ Acceptable |
-| 1000   | 0.45x | 22.27ms  | ❌ Poor |
-| 2000   | 0.24x | 41.96ms  | ❌ Poor |
-
-**Scalability:**
-- Near-linear scaling up to 500 agents
-- Slightly super-linear (O(n^1.2)) above 500 agents
-- Memory scales linearly (~10KB per agent)
-
 **See `PERFORMANCE_REPORT.md` for detailed analysis.**
-
----
-
-## Troubleshooting
-
-### Low RTF / High Step Time
-
-**Check profiling output:**
-```bash
-python benchmark/profile_simulation_profiler.py --agents 1000 --steps 100
-```
-
-**Common issues:**
-1. **Collision check > 80%:** Ensure `collision_check_2d=True` for 2D simulations
-2. **GUI overhead:** Use `enable_monitor_gui=False` for headless mode
-3. **Too many agents:** Consider reducing agent count or distributed simulation
-
-### Memory Growth
-
-**Monitor memory usage:**
-```bash
-python benchmark/performance_benchmark.py --agents 2000 --duration 60
-```
-
-**Expected:**
-- ~10KB per agent (linear scaling)
-- If super-linear: Check for memory leaks in custom callbacks
-
-### Inconsistent Results
-
-**Use repetitions for statistical confidence:**
-```bash
-python benchmark/performance_benchmark.py --agents 1000 --repetitions 10
-```
-
-**Check for:**
-- Background processes consuming CPU
-- Thermal throttling on long runs
-- Swap usage (insufficient RAM)
-
----
-
-## Contributing
-
-When adding new benchmarks:
-
-1. **Save results to `benchmark/results/`**
-2. **Use JSON format for machine-readable output**
-3. **Include statistical analysis (mean, median, stdev)**
-4. **Document in this README**
-5. **Update `PERFORMANCE_REPORT.md` if significant changes**
 
 ---
 
 ## See Also
 
-- `PERFORMANCE_REPORT.md` - Detailed optimization report
+- [`PERFORMANCE_OPTIMIZATION_GUIDE.md`](PERFORMANCE_OPTIMIZATION_GUIDE.md) - Comprehensive optimization guide
+- [`PERFORMANCE_REPORT.md`](PERFORMANCE_REPORT.md) - Detailed performance analysis
+- [`profiling/README.md`](profiling/README.md) - Profiling tools documentation
+- [`experiments/README.md`](experiments/README.md) - Optimization experiments
 - `../docs/` - General documentation
 - `../tests/` - Unit and integration tests
 - `../example/` - Usage examples with performance notes

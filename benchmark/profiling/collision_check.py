@@ -200,15 +200,6 @@ def profile_collision_check_builtin(num_agents: int, num_iterations: int = 100):
         print(f"  StdDev: {s['stdev']:>8.3f}ms")
         print(f"  Range:  [{s['min']:>6.3f}, {s['max']:>6.3f}]ms")
 
-    # Additional info
-    print("\n" + "=" * 70)
-    print("Advantages of Built-in Profiling:")
-    print("  ✅ No implementation duplication (no manual copy)")
-    print("  ✅ Always measures the latest implementation")
-    print("  ✅ Accurate dynamic cell size, 2D/3D mode measurement")
-    print("  ✅ Minimal overhead (return_profiling flag only)")
-    print("=" * 70)
-
     # Cleanup
     p.disconnect()
 
