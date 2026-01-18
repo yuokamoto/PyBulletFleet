@@ -592,7 +592,7 @@ class SimObject:
             # Update AABB and spatial grid immediately for kinematic objects (optimization)
             # Physics objects are updated in step_once() to batch PyBullet calls
             if self.object_id in self.sim_core._kinematic_objects:
-                self.sim_core._update_object_aabb(self.object_id, self.body_id)
+                self.sim_core._update_object_aabb(self.object_id)
                 # Update spatial grid if cell_size is initialized
                 if self.sim_core._cached_cell_size is not None:
                     self.sim_core._update_object_spatial_grid(self.object_id)
