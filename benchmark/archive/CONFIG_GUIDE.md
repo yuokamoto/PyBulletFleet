@@ -45,7 +45,7 @@ simulation:
   log_level: "DEBUG"  # ログレベル
   collision_check_frequency: null  # 衝突判定頻度（Hz、null=毎ステップ）
   collision_check_2d: false  # 2D衝突判定（9近傍、falseだと3D 27近傍）
-  ignore_structure_collision: true  # 構造物との衝突を無視
+  ignore_static_collision: true  # 構造物との衝突を無視
 ```
 
 ### Collision Check Frequency

@@ -527,7 +527,7 @@ diff before.txt after.txt
 **対策:**
 - `collision_check_2d=True` で2Dモードを有効化（67%削減）
 - `collision_check_frequency=10.0` で頻度を下げる（10Hz）
-- `ignore_structure_collision=True` で構造物との衝突を無視
+- `ignore_static_collision=True` で構造物との衝突を無視
 
 **検証:**
 ```bash

@@ -72,7 +72,7 @@ simulation:
   # Collision detection (2D optimized)
   collision_check_2d: true      # 2D mode (9 neighbors vs 27)
   collision_check_frequency: 10.0  # 10 Hz (balanced)
-  ignore_structure_collision: true # Skip structure-structure collisions
+  ignore_static_collision: true # Skip structure-structure collisions
   
   # Monitoring (headless)
   monitor: true
@@ -178,7 +178,7 @@ simulation:
   # 2D collision (ground robots)
   collision_check_2d: true
   collision_check_frequency: 10.0
-  ignore_structure_collision: true
+  ignore_static_collision: true
   
   # Monitoring
   monitor: true
@@ -209,7 +209,7 @@ simulation:
   # 3D collision (drones)
   collision_check_2d: false
   collision_check_frequency: 30.0  # Higher frequency for safety
-  ignore_structure_collision: false
+  ignore_static_collision: false
   
   # Monitoring
   monitor: true

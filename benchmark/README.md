@@ -335,7 +335,7 @@ simulation:
   physics: false                       # Enable physics (usually false for benchmarks)
   collision_check_frequency: null      # Hz, null=every step, 0=disabled
   collision_check_2d: false            # 2D mode (9 neighbors vs 27)
-  ignore_structure_collision: true     # Ignore structure collisions
+  ignore_static_collision: true     # Ignore structure collisions
 
 scenarios:
   no_collision:

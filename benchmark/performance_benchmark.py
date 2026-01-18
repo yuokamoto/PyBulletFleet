@@ -171,7 +171,7 @@ def run_benchmark(
         log_level=sim_config.get("log_level", "WARN"),  # Quiet for benchmark
         collision_check_frequency=sim_config.get("collision_check_frequency", None),
         collision_check_2d=sim_config.get("collision_check_2d", False),
-        ignore_structure_collision=sim_config.get("ignore_structure_collision", True),
+        ignore_static_collision=sim_config.get("ignore_static_collision", sim_config.get("ignore_structure_collision", True)),
     )
 
     sim_core = MultiRobotSimulationCore(params)

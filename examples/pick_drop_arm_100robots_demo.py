@@ -21,7 +21,7 @@ from pybullet_fleet.sim_object import Pose, SimObject, ShapeParams
 from pybullet_fleet.action import JointAction, PickAction, DropAction, WaitAction
 
 # Simulation setup
-params = SimulationParams(gui=True, timestep=0.01, ignore_structure_collision=True, log_level="debug")
+params = SimulationParams(gui=True, timestep=0.01, ignore_static_collision=True, log_level="debug")
 sim_core = MultiRobotSimulationCore(params)
 
 # Create AgentManager

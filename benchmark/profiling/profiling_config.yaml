@@ -40,7 +40,7 @@ enable_monitor_gui: false
 collision_check_frequency: null
 
 # Ignore collisions with structure (True/False)
-ignore_structure_collision: true
+ignore_static_collision: true
 
 # Enable profiling output (False - profiling tools use return_profiling)
 enable_profiling: false

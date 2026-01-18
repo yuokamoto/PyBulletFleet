@@ -69,3 +69,20 @@ class ActionStatus(Enum):
     COMPLETED = "completed"
     FAILED = "failed"
     CANCELLED = "cancelled"
+
+
+class SpatialHashCellSizeMode(Enum):
+    """
+    Collision detection spatial hash cell size calculation mode.
+    
+    Determines how the spatial hash grid cell size is calculated for
+    efficient broad-phase collision detection.
+    
+    Attributes:
+        CONSTANT: Fixed cell size provided by user (fastest, requires manual tuning)
+        AUTO_ADAPTIVE: Recalculate on object add/remove (adaptive, some overhead)
+        AUTO_INITIAL: Calculate once at simulation start (default, balanced performance)
+    """
+    CONSTANT = "constant"
+    AUTO_ADAPTIVE = "auto_adaptive"
+    AUTO_INITIAL = "auto_initial"

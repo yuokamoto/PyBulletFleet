@@ -39,7 +39,7 @@ print("- Arm manipulation for pick and drop")
 print("- Combined mobility and manipulation\n")
 
 # Simulation setup
-params = SimulationParams(gui=True, timestep=0.1, ignore_structure_collision=True)
+params = SimulationParams(gui=True, timestep=0.1, ignore_static_collision=True)
 sim_core = MultiRobotSimulationCore(params)
 
 # Spawn mobile manipulator

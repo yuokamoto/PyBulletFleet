@@ -113,7 +113,7 @@ class SimObjectSpawnParams:
     visual_mesh_path: Optional[str] = None
     visual_frame_pose: Optional[Pose] = None
     collision_frame_pose: Optional[Pose] = None
-    is_structure: bool = False  # If True, automatically registers as structure body
+    is_static: bool = False  # If True, automatically registers as static body (never moves)
     collision_check_2d: Optional[bool] = None  # If None, use global default; if True/False, override per-object
 
 
@@ -141,6 +141,7 @@ class SimObject:
         pickable: bool = True,
         mass: float = None,
         collision_check_2d: Optional[bool] = None,
+        is_static: bool = False,
     ):
         self.body_id = body_id
         self.sim_core = sim_core
@@ -149,6 +150,7 @@ class SimObject:
         self.mesh_path = mesh_path
         self.pickable = pickable
         self.collision_check_2d = collision_check_2d  # None = use global default, True/False = override
+        self._is_static = is_static  # Private: Whether this object is static (never moves)
 
         # Assign unique ID from sim_core if available
         if sim_core is not None and hasattr(sim_core, "_next_object_id"):
@@ -391,6 +393,7 @@ class SimObject:
         pickable: bool = True,
         sim_core=None,
         collision_check_2d: Optional[bool] = None,
+        is_static: bool = False,
     ) -> "SimObject":
         """
         Create a SimObject with optional visual and collision shapes.
@@ -450,6 +453,7 @@ class SimObject:
             pickable=pickable,
             mass=mass,
             collision_check_2d=collision_check_2d,
+            is_static=is_static,
         )
 
     @classmethod
@@ -489,13 +493,24 @@ class SimObject:
             pickable=spawn_params.pickable,
             sim_core=sim_core,
             collision_check_2d=spawn_params.collision_check_2d,
+            is_static=spawn_params.is_static,
         )
 
-        # Auto-register as structure if is_structure flag is set
-        if spawn_params.is_structure and sim_core is not None:
-            sim_core.register_structure_body(obj.body_id)
+        # Auto-register as static if is_static flag is set
+        if spawn_params.is_static and sim_core is not None:
+            sim_core.register_static_body(obj.body_id)
 
         return obj
+
+    @property
+    def is_static(self) -> bool:
+        """
+        Whether this object is registered as static (never moves).
+        
+        This property is read-only from outside. To change static status,
+        use sim_core.register_static_object() or sim_core.unregister_static_object().
+        """
+        return self._is_static
 
     def get_pose(self) -> Pose:
         """
@@ -533,6 +548,15 @@ class SimObject:
         Returns:
             True if the object moved (position or orientation changed), False otherwise
         """
+        # Static objects should never move - warn and return early
+        if self.is_static:
+            logger.warning(
+                f"Attempting to move static object {self.object_id} (body {self.body_id}). "
+                "Static objects are registered as immovable structures and should not be moved. "
+                "If this object needs to move, do not register it as static."
+            )
+            return False
+        
         position, orientation = pose.as_position_orientation()
 
         # Detect movement using cached pose (no PyBullet API call needed)

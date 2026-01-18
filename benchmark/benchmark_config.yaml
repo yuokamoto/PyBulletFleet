@@ -13,7 +13,7 @@ simulation:
                                    # Set to 0 to disable collision checks completely
                                    # Use this to measure baseline performance without collision overhead
   collision_check_2d: false  # 2D collision (9 neighbors) vs 3D (27 neighbors)
-  ignore_structure_collision: true  # Ignore collisions with structure objects
+  ignore_static_collision: true  # Ignore collisions with structure objects
 
   # Performance Monitoring
   enable_profiling: true  # Enable detailed profiling output

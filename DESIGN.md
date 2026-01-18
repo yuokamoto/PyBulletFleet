@@ -48,7 +48,7 @@ The central orchestrator for PyBullet simulations.
 - `run_simulation(robot_update_callback, final_callback)`: Main simulation loop
 - `setup_camera()`: Camera positioning
 - `configure_visualizer()`: Visual settings configuration
-- `register_structure_body(body_id)`: Track static structure elements
+- `register_static_body(body_id)`: Track static structure elements
 - `_handle_keyboard_events()`: Process keyboard inputs
 
 
