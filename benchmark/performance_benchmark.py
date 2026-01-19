@@ -153,7 +153,7 @@ def run_benchmark(
 
     # Load config
     if config_path is None:
-        config_path = os.path.join(os.path.dirname(__file__), "benchmark_config.yaml")
+        config_path = os.path.join(os.path.dirname(__file__), "configs", "general.yaml")
 
     config = load_config(config_path, scenario)
     sim_config = config.get("simulation", {})

@@ -49,6 +49,7 @@ scenarios:
   no_collision:
     simulation:
       collision_check_frequency: 0  # Disable collision checks (0 = disabled)
+      physics: false  # Kinematic mode for maximum speed
     agents:
       num_agents: 1000
     benchmark:
@@ -59,6 +60,7 @@ scenarios:
     simulation:
       collision_check_frequency: null  # Every step
       collision_check_2d: false  # 3D (27 neighbors)
+      physics: false  # Kinematic mode for maximum speed
     agents:
       num_agents: 1000
     benchmark:

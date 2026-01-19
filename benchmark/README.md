@@ -60,7 +60,16 @@ benchmark/
 ├── README.md                          # This file (includes configuration guide)
 ├── PERFORMANCE_REPORT.md              # Detailed performance analysis report
 ├── COLLISION_BENCHMARK_RESULTS.md     # Collision detection performance results
-├── benchmark_config.yaml              # Centralized benchmark configuration
+│
+# Benchmark Configuration Files
+├── configs/                           # Benchmark-specific configurations
+│   ├── README.md                      # Config files documentation
+│   ├── general.yaml                   # General benchmark config (default)
+│   ├── collision_physics_off.yaml     # Collision: Physics OFF (recommended)
+│   ├── collision_physics_on.yaml      # Collision: Physics ON
+│   └── collision_hybrid.yaml          # Collision: Hybrid mode
+│
+# Benchmark Results
 ├── results/                           # Benchmark results (JSON files)
 │   ├── benchmark_results_*.json       # Individual test results
 │   └── benchmark_sweep_*.json         # Sweep test results

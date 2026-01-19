@@ -193,9 +193,9 @@ def main():
 
     # Config files to test
     configs = [
-        "config/benchmark_physics_off_closest.yaml",
-        "config/benchmark_physics_on_contact.yaml",
-        "config/benchmark_hybrid.yaml",
+        "configs/collision_physics_off.yaml",
+        "configs/collision_physics_on.yaml",
+        "configs/collision_hybrid.yaml",
     ]
 
     # Test parameters
