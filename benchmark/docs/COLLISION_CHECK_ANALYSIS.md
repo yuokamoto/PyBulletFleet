@@ -102,11 +102,11 @@ class SimObject:
 class Agent(SimObject):
     def update(self, dt):
         moved = self._move_logic(dt)
-        
+
         if moved and self.check_collision_on_update:
             # 即座に衝突チェック（このオブジェクトのみ）
             self.sim_core.check_collision_for_object(self.object_id)
-        
+
         return moved
 ```
 
@@ -305,14 +305,14 @@ Step 1:
   Agent3.update() ──→ 移動を_moved_this_stepに記録
   ...
   Agent50.update() ─→ 移動を_moved_this_stepに記録
-  
+
   ↓ (全エージェント更新完了)
-  
+
   check_collisions() ──→ 【1回のみ】
     - _moved_this_stepの全オブジェクトをまとめてチェック
     - Spatial hashを効率的に利用
     - 重複ペアチェックなし
-    
+
 処理回数: 1回/ステップ
 計算量: O(moved × neighbors)
 
@@ -324,15 +324,15 @@ Step 1:
 Step 1:
   Agent1.update() ──→ 移動
     └─→ check_collisions() [1回目]
-  
+
   Agent2.update() ──→ 移動
     └─→ check_collisions() [2回目]  ← Agent1-2ペアを重複チェック
-  
+
   Agent3.update() ──→ 移動
     └─→ check_collisions() [3回目]  ← Agent1-3, 2-3ペアを重複チェック
-  
+
   ...
-  
+
   Agent50.update() ─→ 移動
     └─→ check_collisions() [50回目] ← 1-50, 2-50, ..., 49-50ペアを重複チェック
 

@@ -40,6 +40,38 @@ ignore_static_collision: true
 enable_profiling: false
 
 # ========================================
+# Collision Detection Settings
+# ========================================
+
+# Collision detection method:
+#   - "closest_points": Distance-based (recommended for kinematics/physics=false)
+#   - "contact_points": Physics contact manifold (recommended for physics=true)
+#   - "hybrid": Mixed (contact_points for physics, closest_points for kinematic)
+# 
+# Auto-selection (if not specified):
+#   physics=false → "closest_points"
+#   physics=true  → "contact_points"
+# 
+# Design philosophy:
+#   - closest_points: Stable with resetBasePositionAndOrientation, supports safety margin
+#   - contact_points: Fast but requires stepSimulation(), unstable for kinematic-kinematic
+#   - hybrid: Advanced use, slower due to branching
+collision_detection_method: "closest_points"
+
+# Collision safety margin (meters)
+# Used by getClosestPoints() to detect near-misses before actual contact
+# 
+# Recommended values:
+#   - 0.01-0.02: Tight spaces (1-2cm clearance)
+#   - 0.02-0.05: Normal operation (2-5cm safety buffer) [DEFAULT]
+#   - 0.05-0.10: Conservative (5-10cm extra safety for high-speed)
+#   - 0.0: Contact detection only (touching)
+# 
+# Note: Only affects CLOSEST_POINTS and HYBRID modes
+#       CONTACT_POINTS always detects actual contact (margin=0)
+collision_margin: 0.02
+
+# ========================================
 # Performance Optimization Settings
 # ========================================
 

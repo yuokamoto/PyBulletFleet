@@ -23,7 +23,7 @@ from pybullet_fleet.collision_visualizer import CollisionVisualizer
 from pybullet_fleet.data_monitor import DataMonitor
 from pybullet_fleet.sim_object import SimObject
 from pybullet_fleet.agent import Agent
-from pybullet_fleet.types import SpatialHashCellSizeMode
+from pybullet_fleet.types import SpatialHashCellSizeMode, CollisionDetectionMethod
 
 # Global log_level (default: 'info')
 GLOBAL_LOG_LEVEL = "INFO"
@@ -95,6 +95,12 @@ class SimulationParams:
             collision_check_2d=config.get("collision_check_2d", False),  # Default: 3D collision (27 neighbors)
             spatial_hash_cell_size_mode=SpatialHashCellSizeMode(config.get("spatial_hash_cell_size_mode", "auto_initial")),
             spatial_hash_cell_size=config.get("spatial_hash_cell_size", None),
+            # Collision detection method - auto-select based on physics mode
+            collision_detection_method=CollisionDetectionMethod(
+                config.get("collision_detection_method", 
+                          "contact_points" if config.get("physics", False) else "closest_points")
+            ),
+            collision_margin=config.get("collision_margin", 0.02),  # Safety clearance (meters)
         )
 
     def __init__(
@@ -121,6 +127,8 @@ class SimulationParams:
         collision_check_2d: bool = False,  # Default False: full 3D collision (27 neighbors)
         spatial_hash_cell_size_mode: SpatialHashCellSizeMode = SpatialHashCellSizeMode.AUTO_INITIAL,
         spatial_hash_cell_size: Optional[float] = None,  # Used when mode=CONSTANT
+        collision_detection_method: Optional[CollisionDetectionMethod] = None,  # Auto-select based on physics
+        collision_margin: float = 0.02,  # Safety clearance for getClosestPoints (meters, default: 2cm)
     ) -> None:
         self.speed = speed  # speed=0 means maximum speed (no sleep)
         self.timestep = timestep
@@ -144,6 +152,17 @@ class SimulationParams:
         self.collision_check_2d = collision_check_2d  # Store 2D/3D collision check mode
         self.spatial_hash_cell_size_mode = spatial_hash_cell_size_mode
         self.spatial_hash_cell_size = spatial_hash_cell_size  # Fixed cell size (for mode=CONSTANT)
+        
+        # Auto-select collision detection method based on physics mode if not explicitly set
+        if collision_detection_method is None:
+            # Physics ON: use CONTACT_POINTS (actual contact manifold)
+            # Physics OFF: use CLOSEST_POINTS (distance-based, kinematics-safe)
+            collision_detection_method = (
+                CollisionDetectionMethod.CONTACT_POINTS if physics 
+                else CollisionDetectionMethod.CLOSEST_POINTS
+            )
+        self.collision_detection_method = collision_detection_method
+        self.collision_margin = collision_margin  # Safety clearance for collision detection
 
 
 class MultiRobotSimulationCore:
@@ -1501,10 +1520,49 @@ class MultiRobotSimulationCore:
                 if obj_i is None or obj_j is None:
                     continue
                 
-                contact_points = p.getContactPoints(obj_i.body_id, obj_j.body_id)
+                # Select collision detection method based on configuration
+                has_collision = False
+                
+                if self.params.collision_detection_method == CollisionDetectionMethod.CONTACT_POINTS:
+                    # Method 1: getContactPoints (physics mode, actual contact manifold)
+                    # Best for: physics simulation, requires stepSimulation()
+                    # Note: May be unstable for kinematic-kinematic pairs
+                    contact_points = p.getContactPoints(obj_i.body_id, obj_j.body_id)
+                    has_collision = len(contact_points) > 0
+                    
+                elif self.params.collision_detection_method == CollisionDetectionMethod.CLOSEST_POINTS:
+                    # Method 2: getClosestPoints (kinematics mode, distance-based)
+                    # Best for: kinematics motion, safety margin detection
+                    # Works with: Physics ON/OFF, stable with resetBasePositionAndOrientation
+                    closest_points = p.getClosestPoints(
+                        obj_i.body_id, 
+                        obj_j.body_id, 
+                        distance=self.params.collision_margin  # Safety clearance
+                    )
+                    has_collision = len(closest_points) > 0
+                    
+                elif self.params.collision_detection_method == CollisionDetectionMethod.HYBRID:
+                    # Method 3: Hybrid (physics uses getContactPoints, kinematic uses getClosestPoints)
+                    # Best for: Mixed physics/kinematics with different detection needs
+                    is_physics_i = obj_id_i in self._physics_objects
+                    is_physics_j = obj_id_j in self._physics_objects
+                    
+                    if is_physics_i or is_physics_j:
+                        # At least one is physics object - use getContactPoints
+                        contact_points = p.getContactPoints(obj_i.body_id, obj_j.body_id)
+                        has_collision = len(contact_points) > 0
+                    else:
+                        # Both are kinematic - use getClosestPoints with safety margin
+                        closest_points = p.getClosestPoints(
+                            obj_i.body_id, 
+                            obj_j.body_id, 
+                            distance=self.params.collision_margin
+                        )
+                        has_collision = len(closest_points) > 0
+                
                 pair = (obj_id_i, obj_id_j)
                 
-                if contact_points:
+                if has_collision:
                     # Collision detected
                     if pair not in self._active_collision_pairs:
                         # New collision
@@ -1882,7 +1940,13 @@ class MultiRobotSimulationCore:
         if measure_timing:
             t_sim0 = time.perf_counter()
 
-        p.stepSimulation()
+        # stepSimulation() control based on physics mode
+        # Physics ON: Call stepSimulation() every step (rigid body integration, contact resolution)
+        # Physics OFF: Skip stepSimulation() for pure kinematics (position updates via reset API)
+        if self.params.physics:
+            p.stepSimulation()
+        # Note: Even in Physics OFF mode, collision detection still works via getClosestPoints()
+        # which queries geometry directly without requiring stepSimulation()
 
         if measure_timing:
             t_sim1 = time.perf_counter()

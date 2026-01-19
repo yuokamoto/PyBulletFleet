@@ -86,3 +86,38 @@ class SpatialHashCellSizeMode(Enum):
     CONSTANT = "constant"
     AUTO_ADAPTIVE = "auto_adaptive"
     AUTO_INITIAL = "auto_initial"
+
+
+class CollisionDetectionMethod(Enum):
+    """
+    Collision detection method for narrow-phase collision checking.
+    
+    Determines which PyBullet API to use for detecting actual contacts
+    between objects after broad-phase filtering (AABB + spatial hashing).
+    
+    Design Philosophy (from design document):
+    - Physics OFF (kinematics): Use CLOSEST_POINTS for safety margin detection
+    - Physics ON (physics): Use CONTACT_POINTS for actual contact logging
+    
+    Attributes:
+        CLOSEST_POINTS: Use getClosestPoints() - distance-based, kinematics-safe (RECOMMENDED DEFAULT)
+                       Best for: kinematics motion, safety clearance, collision avoidance
+                       Works with: Physics ON/OFF, stable with resetBasePositionAndOrientation
+        
+        CONTACT_POINTS: Use getContactPoints() - physics contact manifold (PHYSICS MODE)
+                       Best for: physics simulation, actual contact logging, debug/reproduction
+                       Requires: stepSimulation() to be called regularly
+                       Note: Unstable for kinematic-kinematic pairs
+        
+        HYBRID: Use getContactPoints for physics, getClosestPoints for kinematic (ADVANCED)
+               Best for: Mixed physics/kinematics with different detection needs
+               Slower due to branching overhead
+    
+    Recommended defaults:
+        - physics_enabled=False → CLOSEST_POINTS (default)
+        - physics_enabled=True  → CONTACT_POINTS or HYBRID
+    """
+    CLOSEST_POINTS = "closest_points"  # Default for kinematics
+    CONTACT_POINTS = "contact_points"  # For physics simulation
+    HYBRID = "hybrid"                  # Advanced mixed mode
+

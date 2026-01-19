@@ -1,0 +1,52 @@
+# ========================================
+# Hybrid Mode (Advanced Mixed Operation)
+# ========================================
+# 
+# Recommended for:
+#   - Mixed physics/kinematic scenarios
+#   - Some objects need physics, others just collision check
+#   - Advanced use cases with different detection needs
+# 
+# Key features:
+#   - Physics objects: getContactPoints() (actual contact)
+#   - Kinematic objects: getClosestPoints() (safety margin)
+#   - Slower due to branching overhead
+#   - Requires careful tuning
+# ========================================
+
+# Simulation Parameters
+speed: 1.0                   # Real-time recommended for mixed mode
+timestep: 0.00416666         # 1/240s (physics timestep)
+duration: 0                  # Unlimited
+gui: true
+physics: true                # 🔴 Physics ON (required for hybrid)
+monitor: true
+ignore_static_collision: true
+enable_profiling: false
+
+# Collision Detection - Hybrid Mode
+collision_detection_method: "hybrid"  # 🔴 Mixed approach
+collision_margin: 0.05                # 🔴 5cm safety for kinematic pairs
+
+# Performance Optimization
+collision_check_2d: false
+enable_monitor_gui: true
+
+# Logging
+log_level: info
+
+# Camera
+camera_mode: manual
+camera_view_type: perspective
+camera_distance: 20.0
+camera_yaw: 45
+camera_pitch: -30
+camera_target: [5, 5, 0]
+
+# Visualizer
+enable_visual_shapes: true
+enable_collision_shapes: false
+enable_structure_transparency: false
+enable_shadows: true
+enable_gui_panel: false
+enable_collision_color_change: true

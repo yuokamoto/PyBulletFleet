@@ -1,0 +1,30 @@
+# ========================================
+# Benchmark: Physics ON + CONTACT_POINTS
+# ========================================
+# Physics mode with contact manifold detection
+# ========================================
+
+speed: 0                     # Maximum speed (no sleep)
+timestep: 0.00416666         # 1/240s
+duration: 10.0               # 10 seconds
+gui: false                   # Headless for benchmarking
+physics: true                # 🔴 Physics ON
+monitor: false
+ignore_static_collision: true
+enable_profiling: true       # 🔴 Enable profiling
+
+# Collision Detection
+collision_detection_method: "contact_points"
+collision_margin: 0.0        # Not used in contact_points mode
+
+# Optimization
+collision_check_2d: false
+enable_monitor_gui: false
+log_level: error             # Suppress logs for clean benchmark output
+
+# Visualizer (disabled for performance)
+enable_collision_shapes: false
+enable_structure_transparency: false
+enable_shadows: false
+enable_gui_panel: false
+enable_collision_color_change: false

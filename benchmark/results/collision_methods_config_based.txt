@@ -1,0 +1,104 @@
+pybullet build time: Jan 29 2025 23:19:57
+======================================================================
+CONFIG-BASED COLLISION DETECTION COMPARISON
+======================================================================
+
+Comparing different config files:
+  1. Physics OFF + CLOSEST_POINTS (kinematics)
+  2. Physics ON + CONTACT_POINTS (physics)
+  3. Physics ON + HYBRID (mixed)
+
+======================================================================
+Config: benchmark_physics_off_closest.yaml
+======================================================================
+Physics: False
+Collision method: closest_points
+Collision margin: 0.02m
+Objects: 100
+Steps: 500
+Creating test scene...
+Warming up...
+Active collisions after warmup: 35
+
+Running benchmark...
+  Step 0: total=1.683ms, collision=1.379ms (35 collisions)
+  Step 100: total=1.401ms, collision=1.169ms (20 collisions)
+  Step 200: total=1.334ms, collision=1.100ms (6 collisions)
+  Step 300: total=1.494ms, collision=1.198ms (3 collisions)
+  Step 400: total=1.573ms, collision=1.235ms (0 collisions)
+
+Results:
+  Average step time: 1.511ms
+  Average collision time: 1.244ms
+  Average active collisions: 8.7
+
+======================================================================
+Config: benchmark_physics_on_contact.yaml
+======================================================================
+Physics: True
+Collision method: contact_points
+Collision margin: 0.0m
+Objects: 100
+Steps: 500
+Creating test scene...
+Warming up...
+Active collisions after warmup: 7
+
+Running benchmark...
+  Step 0: total=2.966ms, collision=1.582ms (7 collisions)
+  Step 100: total=2.980ms, collision=1.912ms (5 collisions)
+  Step 200: total=2.145ms, collision=1.210ms (5 collisions)
+  Step 300: total=2.156ms, collision=1.121ms (4 collisions)
+  Step 400: total=2.382ms, collision=1.188ms (2 collisions)
+
+Results:
+  Average step time: 2.640ms
+  Average collision time: 1.408ms
+  Average active collisions: 4.2
+
+======================================================================
+Config: benchmark_hybrid.yaml
+======================================================================
+Physics: True
+Collision method: hybrid
+Collision margin: 0.02m
+Objects: 100
+Steps: 500
+Creating test scene...
+Warming up...
+Active collisions after warmup: 32
+
+Running benchmark...
+  Step 0: total=1.778ms, collision=1.251ms (32 collisions)
+  Step 100: total=2.476ms, collision=1.493ms (22 collisions)
+  Step 200: total=2.177ms, collision=1.517ms (10 collisions)
+  Step 300: total=1.964ms, collision=1.209ms (6 collisions)
+  Step 400: total=1.912ms, collision=1.172ms (2 collisions)
+
+Results:
+  Average step time: 1.998ms
+  Average collision time: 1.270ms
+  Average active collisions: 10.9
+
+======================================================================
+SUMMARY
+======================================================================
+
+Config                                   Method          Step (ms)    Collision (ms)  Collisions
+------------------------------------------------------------------------------------------
+benchmark_physics_off_closest.yaml       closest_points       1.511         1.244             8.7
+benchmark_physics_on_contact.yaml        contact_points       2.640         1.408 (1.00x)      4.2
+benchmark_hybrid.yaml                    hybrid               1.998         1.270 (0.90x)     10.9
+
+======================================================================
+CONCLUSION
+======================================================================
+
+✅ Fastest collision detection: CLOSEST_POINTS
+   Config: benchmark_physics_off_closest.yaml
+   Average time: 1.244ms
+
+📊 Physics OFF vs ON:
+   Physics OFF: 1.244ms (CLOSEST_POINTS)
+   Physics ON:  1.339ms (CONTACT_POINTS/HYBRID)
+   Difference:  1.08x
