@@ -8,7 +8,159 @@ Unlike profiling tools (which measure what is happening), experiments validate o
 
 ## Available Experiments
 
-### `performance_analysis.py`
+### Collision Detection Experiments
+
+#### `collision_detection_methods_benchmark.py` 📊 **Reference**
+
+**Purpose:** Compare PyBullet collision detection APIs (getContactPoints vs getClosestPoints)
+
+**Features:**
+- Basic API performance comparison
+- Static object collision detection
+- Baseline reference for PyBullet API overhead
+- Simple, isolated test environment
+
+**Usage:**
+```bash
+python benchmark/experiments/collision_detection_methods_benchmark.py
+```
+
+**Tests:**
+- `getContactPoints()` only (physics contact manifold)
+- `getClosestPoints()` only (distance-based detection)
+- Hybrid approach (closest for kinematics, contact for physics)
+
+**Expected Output:**
+```
+======================================================================
+Collision Detection Methods Benchmark (100 objects, 500 steps)
+======================================================================
+Method                    Avg Time     Collisions
+----------------------  -----------  ------------
+getContactPoints           1.41ms          4.2
+getClosestPoints           1.24ms          8.7
+Hybrid                     1.27ms         10.9
+======================================================================
+```
+
+**Related Docs:** `../COLLISION_BENCHMARK_RESULTS.md`, `../../docs/COLLISION_DETECTION_DESIGN.md`
+
+---
+
+#### `collision_methods_config_based.py` ⭐ **Recommended**
+
+**Purpose:** Compare collision detection using production config files (Physics ON/OFF/Hybrid)
+
+**Features:**
+- Real-world config-based testing
+- Full PyBulletFleet simulation
+- Moving robots with collision avoidance
+- Physics engine integration testing
+- Most realistic performance benchmark
+
+**Usage:**
+```bash
+python benchmark/experiments/collision_methods_config_based.py
+```
+
+**Tested Configurations:**
+- Physics OFF + CLOSEST_POINTS (kinematics mode, fastest)
+- Physics ON + CONTACT_POINTS (physics mode)
+- Physics ON + HYBRID (mixed mode)
+
+**Expected Output:**
+```
+======================================================================
+Config-Based Collision Benchmark (100 objects, 500 steps)
+======================================================================
+Configuration           Method          Collision Time    Total Step
+----------------------  --------------  ----------------  -----------
+Physics OFF (Fastest)   closest_points      1.24ms          1.51ms
+Physics ON              contact_points      1.41ms          2.64ms
+Physics ON Hybrid       hybrid              1.27ms          2.00ms
+======================================================================
+Recommendation: Physics OFF mode is 1.75x faster
+```
+
+**Related Docs:** `../COLLISION_BENCHMARK_RESULTS.md`, `../../docs/COLLISION_DETECTION_DESIGN.md`
+
+---
+
+#### `collision_method_comparison.py`
+
+**Purpose:** Compare collision detection algorithms (Spatial Hashing vs Brute Force)
+
+**Features:**
+- Algorithm-level comparison (not just API)
+- Spatial hashing O(N) vs brute force O(N²)
+- AABB filtering vs direct contact checks
+- Large-scale simulation testing
+
+**Usage:**
+```bash
+python benchmark/experiments/collision_method_comparison.py
+```
+
+**Tests:**
+- Spatial Hashing (current implementation)
+- Brute Force (all pairs)
+- PyBullet getClosestPoints (all pairs)
+- PyBullet getContactPoints (all pairs)
+
+---
+
+#### `collision_optimization.py`
+
+**Purpose:** Test and compare collision detection optimization approaches
+
+**Features:**
+- Brute-force O(n²) vs spatial hashing comparison
+- Grid cell size optimization
+- 2D vs 3D collision checking overhead (9 vs 27 neighbors)
+- AABB filtering efficiency
+- PyBullet API overhead measurement
+
+**Usage:**
+```bash
+# Run all collision optimization tests
+python benchmark/experiments/collision_optimization.py
+
+# Test with specific agent count
+python benchmark/experiments/collision_optimization.py --agents 1000
+
+# Test specific method
+python benchmark/experiments/collision_optimization.py --method spatial_hash
+```
+
+**Tests:**
+- Brute-force pairwise collision detection
+- Spatial hashing with different cell sizes
+- 2D (9 neighbors) vs 3D (27 neighbors) comparison
+- AABB filtering vs contact point detection
+- PyBullet getAABB() and getContactPoints() overhead
+
+**Expected Output:**
+```
+======================================================================
+Collision Optimization Comparison (500 agents)
+======================================================================
+Method                    Time (ms)    Speedup    Collisions
+----------------------  -----------  ---------  ------------
+Brute Force O(n²)          125.3ms       1.00x          42
+Spatial Hash (1.0m)         15.2ms       8.24x          42
+Spatial Hash (2.0m)         12.8ms       9.79x          42
+2D (9 neighbors)             8.3ms      15.10x          42
+3D (27 neighbors)           12.8ms       9.79x          42
+======================================================================
+```
+
+**Status:** ⚠️ Template created - implementation in progress
+
+---
+
+### General Performance Experiments
+
+#### `performance_analysis.py`
 
 **Purpose:** Compare performance of different wrapper layers
 
@@ -171,4 +323,4 @@ Conclusion: getAABB is NOT a bottleneck
 
 ---
 
-**Last Updated:** 2026-01-12
+**Last Updated:** 2026-01-19

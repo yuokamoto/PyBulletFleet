@@ -7,29 +7,29 @@ This directory contains performance benchmarking tools and results for PyBullet 
 ```mermaid
 flowchart TD
     Start([Start: Need Performance?]) --> Benchmark
-    
+
     Benchmark[🎯 run_benchmark.py<br/>Measure overall performance<br/>RTF, Step Time, Memory]
-    
+
     Benchmark -->|RTF OK?| Done([✅ Done])
     Benchmark -->|RTF Low?| Profile
-    
+
     Profile[🔍 Profiling Tools<br/>simulation_profiler.py<br/>Identify bottlenecks]
-    
+
     Profile --> Analyze{What's slow?}
-    
+
     Analyze -->|Collision 70-80%| CollisionExp[🧪 collision_optimization.py<br/>Test optimization ideas]
     Analyze -->|Agent Update| AgentExp[🧪 agent_update.py<br/>Analyze update methods]
     Analyze -->|Other| GenericExp[🧪 experiments/<br/>Test hypotheses]
-    
+
     CollisionExp --> Implement[⚙️ Implement<br/>Best approach]
     AgentExp --> Implement
     GenericExp --> Implement
-    
+
     Implement --> Profile2[🔍 Profile Again<br/>Verify improvement]
     Profile2 --> Benchmark2[🎯 Benchmark Again<br/>Measure impact]
     Benchmark2 -->|Improved?| Done
     Benchmark2 -->|Still slow?| Profile
-    
+
     style Benchmark fill:#4A90E2,color:#fff
     style Profile fill:#F39C12,color:#fff
     style CollisionExp fill:#9B59B6,color:#fff
@@ -59,6 +59,7 @@ flowchart TD
 benchmark/
 ├── README.md                          # This file (includes configuration guide)
 ├── PERFORMANCE_REPORT.md              # Detailed performance analysis report
+├── COLLISION_BENCHMARK_RESULTS.md     # Collision detection performance results
 ├── benchmark_config.yaml              # Centralized benchmark configuration
 ├── results/                           # Benchmark results (JSON files)
 │   ├── benchmark_results_*.json       # Individual test results
@@ -71,8 +72,9 @@ benchmark/
 # Profiling Tools (detailed CPU/memory analysis)
 ├── profiling/
 │   ├── README.md                      # Profiling tools documentation
-│   ├── simulation_profiler.py              # Step-by-step profiling
+│   ├── simulation_profiler.py         # Step-by-step profiling
 │   ├── collision_check.py             # Collision check profiling
+│   ├── collision_mode_comparison.py   # Physics ON/OFF profiling
 │   ├── agent_update.py                # Agent update profiling (5 analysis methods)
 │   ├── agent_manager_set_goal.py      # AgentManager goal setting profiling
 │   └── parse_profile.py               # Log parser for profiling data
@@ -80,10 +82,13 @@ benchmark/
 # Experiments (optimization validation and hypothesis testing)
 ├── experiments/
 │   ├── README.md                      # Experiments documentation
-│   ├── performance_analysis.py        # Component performance comparison
-│   ├── collision_optimization.py      # Collision detection optimization tests
-│   ├── list_filtering_benchmark.py    # List filtering micro-benchmark
-│   └── getaabb_performance.py         # AABB retrieval performance tests
+│   ├── collision_detection_methods_benchmark.py  # PyBullet API comparison
+│   ├── collision_methods_config_based.py         # Config-based comparison (recommended)
+│   ├── collision_method_comparison.py            # Algorithm comparison
+│   ├── collision_optimization.py                 # Optimization tests
+│   ├── performance_analysis.py                   # Component performance comparison
+│   ├── list_filtering_benchmark.py               # List filtering micro-benchmark
+│   └── getaabb_performance.py                    # AABB retrieval performance tests
 │
 # Archive (deprecated/development tools)
 └── archive/
