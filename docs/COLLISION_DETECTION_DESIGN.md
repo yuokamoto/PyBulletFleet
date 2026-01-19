@@ -1,7 +1,7 @@
 # PyBullet Collision Detection Design
 
-**Based on**: "PyBullet Collision / Overlap 判定設計まとめ.docx"  
-**Date**: 2026-01-19  
+**Based on**: "PyBullet Collision / Overlap 判定設計まとめ.docx"
+**Date**: 2026-01-19
 **Version**: 1.0
 
 ## Executive Summary
@@ -279,7 +279,7 @@ Kinematic objects (mass=0, updated via `resetBasePositionAndOrientation()`) **ca
 
 **Never rely on `getContactPoints()` for kinematic motion**
 
-✅ **Use `getClosestPoints()`** for kinematics  
+✅ **Use `getClosestPoints()`** for kinematics
 ✅ **Use `getContactPoints()`** only for physics logging
 
 ---
@@ -409,7 +409,74 @@ This approach is **battle-tested**, **scales well**, and **breaks rarely**.
 
 ---
 
+## Implementation Flow Diagram
+
+### Physics OFF Mode (Kinematics)
+```
+User Code
+    ↓
+fleet.step()
+    ↓
+┌─────────────────────────────────────┐
+│ Multi-Robot Simulation Step        │
+├─────────────────────────────────────┤
+│ 1. Update robot poses (kinematic)   │
+│    - resetBasePositionAndOrientation│
+│    - No stepSimulation() call       │
+│                                     │
+│ 2. Update AABB cache (if moved)     │
+│    - getAABB() for moved objects    │
+│    - Spatial hash update            │
+│                                     │
+│ 3. Broad-phase collision detection  │
+│    - Grid-based AABB overlap        │
+│    - Generate candidate pairs       │
+│                                     │
+│ 4. Narrow-phase collision check     │
+│    - getClosestPoints(margin=0.02)  │
+│    - Distance-based detection       │
+│    - Returns near-miss pairs        │
+│                                     │
+│ 5. Return collision results         │
+│    - List of (obj_i, obj_j, dist)   │
+└─────────────────────────────────────┘
+```
+
+### Physics ON Mode (Dynamics)
+```
+User Code
+    ↓
+fleet.step()
+    ↓
+┌─────────────────────────────────────┐
+│ Multi-Robot Simulation Step        │
+├─────────────────────────────────────┤
+│ 1. stepSimulation()                 │
+│    - Integrate forces/velocities    │
+│    - Solve contacts/constraints     │
+│    - Update contact cache           │
+│                                     │
+│ 2. Update AABB cache                │
+│    - getAABB() for all objects      │
+│    - Spatial hash update            │
+│                                     │
+│ 3. Broad-phase collision detection  │
+│    - Grid-based AABB overlap        │
+│    - Generate candidate pairs       │
+│                                     │
+│ 4. Narrow-phase collision check     │
+│    - getContactPoints()             │
+│    - Contact manifold query         │
+│    - Returns actual contacts        │
+│                                     │
+│ 5. Return collision results         │
+│    - List of (obj_i, obj_j, depth)  │
+└─────────────────────────────────────┘
+```
+
+---
+
 **For implementation details, see**:
 - `pybullet_fleet/core_simulation.py` - Main implementation
 - `pybullet_fleet/types.py` - `CollisionDetectionMethod` enum
-- `benchmark/COLLISION_METHODS_REALISTIC_ANALYSIS.md` - Performance analysis
+- `benchmark/COLLISION_BENCHMARK_RESULTS.md` - Performance comparison
