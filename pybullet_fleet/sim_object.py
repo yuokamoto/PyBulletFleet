@@ -12,6 +12,7 @@ import pybullet as p
 
 from .geometry import Pose
 from .logging_utils import get_lazy_logger
+from .types import CollisionMode
 
 # Standard logger for info/warning/error
 logger = logging.getLogger(__name__)
@@ -113,8 +114,7 @@ class SimObjectSpawnParams:
     visual_mesh_path: Optional[str] = None
     visual_frame_pose: Optional[Pose] = None
     collision_frame_pose: Optional[Pose] = None
-    is_static: bool = False  # If True, automatically registers as static body (never moves)
-    collision_check_2d: Optional[bool] = None  # If None, use global default; if True/False, override per-object
+    collision_mode: CollisionMode = CollisionMode.NORMAL_3D  # Collision detection mode
 
 
 class SimObject:
@@ -140,8 +140,7 @@ class SimObject:
         mesh_path: Optional[str] = None,
         pickable: bool = True,
         mass: float = None,
-        collision_check_2d: Optional[bool] = None,
-        is_static: bool = False,
+        collision_mode: CollisionMode = CollisionMode.NORMAL_3D,
     ):
         self.body_id = body_id
         self.sim_core = sim_core
@@ -149,8 +148,7 @@ class SimObject:
         self.callbacks: List[dict] = []
         self.mesh_path = mesh_path
         self.pickable = pickable
-        self.collision_check_2d = collision_check_2d  # None = use global default, True/False = override
-        self._is_static = is_static  # Private: Whether this object is static (never moves)
+        self.collision_mode = collision_mode  # Collision detection mode
 
         # Assign unique ID from sim_core if available
         if sim_core is not None and hasattr(sim_core, "_next_object_id"):
@@ -179,6 +177,13 @@ class SimObject:
         initial_pos, initial_orn = p.getBasePositionAndOrientation(self.body_id)
         self._cached_pose: Pose = Pose.from_pybullet(initial_pos, initial_orn)
         self._cached_pose_sim_time: float = -1.0  # Simulation time when pose was cached
+
+        # Disable PyBullet physics collision if collision_mode is DISABLED
+        if self.collision_mode == CollisionMode.DISABLED:
+            # setCollisionFilterGroupMask: (bodyId, linkId, collisionFilterGroup, collisionFilterMask)
+            # Setting mask=0 disables collision with all objects
+            p.setCollisionFilterGroupMask(self.body_id, -1, 0, 0)
+            logger.debug(f"Disabled PyBullet collision for object {self.object_id} (body {self.body_id})")
 
         # Auto-register to sim_core if provided
         if sim_core is not None:
@@ -392,8 +397,7 @@ class SimObject:
         mass: float = 0.0,
         pickable: bool = True,
         sim_core=None,
-        collision_check_2d: Optional[bool] = None,
-        is_static: bool = False,
+        collision_mode: CollisionMode = CollisionMode.NORMAL_3D,
     ) -> "SimObject":
         """
         Create a SimObject with optional visual and collision shapes.
@@ -452,8 +456,7 @@ class SimObject:
             mesh_path=stored_mesh_path,
             pickable=pickable,
             mass=mass,
-            collision_check_2d=collision_check_2d,
-            is_static=is_static,
+            collision_mode=collision_mode,
         )
 
     @classmethod
@@ -492,25 +495,61 @@ class SimObject:
             mass=spawn_params.mass,
             pickable=spawn_params.pickable,
             sim_core=sim_core,
-            collision_check_2d=spawn_params.collision_check_2d,
-            is_static=spawn_params.is_static,
+            collision_mode=spawn_params.collision_mode,
         )
-
-        # Auto-register as static if is_static flag is set
-        if spawn_params.is_static and sim_core is not None:
-            sim_core.register_static_body(obj.body_id)
 
         return obj
 
     @property
     def is_static(self) -> bool:
         """
-        Whether this object is registered as static (never moves).
+        Whether this object is static (never moves).
         
-        This property is read-only from outside. To change static status,
-        use sim_core.register_static_object() or sim_core.unregister_static_object().
+        Returns True if collision_mode is STATIC.
+        This property is read-only. To change collision mode,
+        use set_collision_mode() method.
         """
-        return self._is_static
+        return self.collision_mode == CollisionMode.STATIC
+    
+    def set_collision_mode(self, mode: CollisionMode) -> None:
+        """
+        Change collision detection mode for this object.
+        
+        This method updates the collision mode and notifies sim_core to
+        update all collision-related caches (AABB, spatial grid, etc.).
+        
+        Args:
+            mode: New CollisionMode
+        
+        Example:
+            # Change to static
+            obj.set_collision_mode(CollisionMode.STATIC)
+            
+            # Disable collision
+            obj.set_collision_mode(CollisionMode.DISABLED)
+            
+            # Enable 2D collision
+            obj.set_collision_mode(CollisionMode.NORMAL_2D)
+        """
+        if self.collision_mode == mode:
+            return  # No change
+        
+        old_mode = self.collision_mode
+        self.collision_mode = mode
+        
+        # Update PyBullet collision filter if switching to/from DISABLED
+        if mode == CollisionMode.DISABLED:
+            # Disable PyBullet collision
+            p.setCollisionFilterGroupMask(self.body_id, -1, 0, 0)
+        elif old_mode == CollisionMode.DISABLED:
+            # Re-enable PyBullet collision (default group=1, mask=-1)
+            p.setCollisionFilterGroupMask(self.body_id, -1, 1, -1)
+        
+        # Notify sim_core to update collision system
+        if self.sim_core is not None:
+            self.sim_core._update_object_collision_mode(self.object_id, old_mode, mode)
+        
+        logger.info(f"Object {self.object_id}: collision_mode changed from {old_mode.value} -> {mode.value}")
 
     def get_pose(self) -> Pose:
         """
@@ -549,11 +588,11 @@ class SimObject:
             True if the object moved (position or orientation changed), False otherwise
         """
         # Static objects should never move - warn and return early
-        if self.is_static:
+        if self.collision_mode == CollisionMode.STATIC:
             logger.warning(
                 f"Attempting to move static object {self.object_id} (body {self.body_id}). "
-                "Static objects are registered as immovable structures and should not be moved. "
-                "If this object needs to move, do not register it as static."
+                "Static objects (CollisionMode.STATIC) should not be moved. "
+                "If this object needs to move, change collision_mode to NORMAL_3D/NORMAL_2D."
             )
             return False
         

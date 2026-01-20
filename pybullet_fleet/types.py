@@ -88,6 +88,61 @@ class SpatialHashCellSizeMode(Enum):
     AUTO_INITIAL = "auto_initial"
 
 
+class CollisionMode(Enum):
+    """
+    Collision detection mode for individual objects.
+    
+    Determines how an object participates in collision detection:
+    - Spatial dimension (2D vs 3D)
+    - Movement type (static vs dynamic)
+    - Collision detection enablement
+    
+    Attributes:
+        NORMAL_3D: Normal 3D collision detection (default)
+                   - Full 3D AABB overlap check
+                   - Checks all 27 spatial hash neighbors (3x3x3)
+                   - For dynamic/kinematic objects that move in 3D space
+        
+        NORMAL_2D: 2D collision detection (Z-axis ignored)
+                   - 2D AABB overlap check (X, Y only)
+                   - Checks only 9 spatial hash neighbors (3x3x1, Z=0)
+                   - For ground vehicles, 2D robots
+        
+        STATIC: Static object mode (never moves, but has collision)
+                - Registered in collision system during spawn
+                - Never updates AABB/spatial grid (performance optimization)
+                - Can be made transparent with 't' key
+                - Examples: walls, shelves, structures
+        
+        DISABLED: Collision detection completely disabled (ghost object)
+                  - No AABB calculation
+                  - No spatial grid registration
+                  - No collision checking
+                  - PyBullet physics collision also disabled
+                  - Examples: decorative objects, visual markers, UI elements
+    
+    Note: The actual collision filtering (e.g., ignore_static) is done at
+          core_simulation level, not in this mode definition.
+    
+    Example:
+        # Normal 3D robot
+        robot = SimObject(..., collision_mode=CollisionMode.NORMAL_3D)
+        
+        # 2D ground vehicle
+        vehicle = SimObject(..., collision_mode=CollisionMode.NORMAL_2D)
+        
+        # Static structure
+        wall = SimObject(..., collision_mode=CollisionMode.STATIC)
+        
+        # Ghost object (no collision)
+        decoration = SimObject(..., collision_mode=CollisionMode.DISABLED)
+    """
+    NORMAL_3D = "normal_3d"
+    NORMAL_2D = "normal_2d"
+    STATIC = "static"
+    DISABLED = "disabled"
+
+
 class CollisionDetectionMethod(Enum):
     """
     Collision detection method for narrow-phase collision checking.

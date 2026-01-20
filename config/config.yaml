@@ -75,24 +75,63 @@ collision_margin: 0.02
 # Performance Optimization Settings
 # ========================================
 
-# Enable 2D collision optimization (9 neighbors instead of 27)
-# This is the GLOBAL DEFAULT - individual objects can override this setting
-# 
-# Recommended usage:
-#   - false (default): Full 3D collision detection for all objects
-#   - true: 2D optimization for all objects (ASRS, warehouse, etc.)
+# Spatial hash cell size mode for collision detection
+# Options: "auto_adaptive", "auto_initial", "constant"
+# - auto_adaptive: Recalculate cell size when objects are added/removed (recommended)
+# - auto_initial: Calculate once at initialization
+# - constant: Use fixed cell size (set spatial_hash_cell_size)
+# spatial_hash_cell_size_mode: "auto_adaptive"
+
+# Fixed cell size (only used when spatial_hash_cell_size_mode="constant")
+# spatial_hash_cell_size: 2.0
+
+# ========================================
+# Per-Object Collision Mode
+# ========================================
+
+# CollisionMode is set per-object via spawn parameters, not globally
+# Default mode: NORMAL_3D (full 3D collision detection)
+#
+# Available modes:
+#   - NORMAL_3D: Full 3D collision (27 neighbors) - DEFAULT
+#   - NORMAL_2D: 2D collision only (9 neighbors, XY plane) - for ground robots
+#   - STATIC: One-time AABB registration, never updated - for fixed structures
+#   - DISABLED: No collision detection at all - for visualization objects
+#
+# Example usage in code:
+#   from pybullet_fleet.types import CollisionMode
 #   
-# Per-object override:
-#   AgentSpawnParams(collision_check_2d=True)   # 2D for this agent
-#   SimObjectSpawnParams(collision_check_2d=False)  # 3D for this object
+#   # Ground robot (2D) - via spawn parameters
+#   params = AgentSpawnParams(
+#       urdf_path="robot.urdf",
+#       collision_mode=CollisionMode.NORMAL_2D,  # 2D collision (9 neighbors)
+#   )
+#   agent = Agent.from_params(params, sim_core)
 #   
-# Performance impact: ~67% faster collision checks when using 2D mode
-# 
-# Example mixed scenario:
-#   - AGVs: collision_check_2d=True (2D, 9 neighbors)
-#   - Drones: collision_check_2d=False (3D, 27 neighbors)
-#   - Lifted pallets: collision_check_2d=False (3D, 27 neighbors)
-collision_check_2d: false
+#   # Drone (3D) - default is NORMAL_3D
+#   params = AgentSpawnParams(
+#       urdf_path="drone.urdf",
+#       # collision_mode not specified → uses default NORMAL_3D
+#   )
+#   
+#   # Structure (static) - direct creation
+#   structure = SimObject(
+#       body_id=body_id,
+#       sim_core=sim_core,
+#       collision_mode=CollisionMode.STATIC,
+#       is_static=True
+#   )
+#   
+#   # Marker (no collision)
+#   marker = SimObject(
+#       body_id=body_id,
+#       sim_core=sim_core,
+#       collision_mode=CollisionMode.DISABLED
+#   )
+#
+# Migration from v1.x:
+#   OLD: collision_check_2d=True (global setting)
+#   NEW: collision_mode=CollisionMode.NORMAL_2D (per-object parameter in spawn params)
 
 # Enable monitor GUI (visualization)
 # Recommended: false for headless performance testing

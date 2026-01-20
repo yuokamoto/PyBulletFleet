@@ -65,7 +65,6 @@ class AgentSpawnParams(SimObjectSpawnParams):
     motion_mode: Union[MotionMode, str] = MotionMode.OMNIDIRECTIONAL
     use_fixed_base: bool = False
     user_data: Dict[str, Any] = field(default_factory=dict)
-    collision_check_2d: Optional[bool] = None  # None = use simulation default, True = 2D (9 neighbors), False = 3D (27 neighbors)
 
     def __post_init__(self):
         """Validate agent spawn parameters."""

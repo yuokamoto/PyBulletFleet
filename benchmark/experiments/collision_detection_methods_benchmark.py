@@ -48,7 +48,6 @@ def create_test_objects(
         timestep=0.01,
         speed=0,  # Fast as possible
         duration=0,
-        collision_check_2d=False,
         ignore_static_collision=True,
     )
     sim = MultiRobotSimulationCore(params)

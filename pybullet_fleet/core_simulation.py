@@ -23,7 +23,7 @@ from pybullet_fleet.collision_visualizer import CollisionVisualizer
 from pybullet_fleet.data_monitor import DataMonitor
 from pybullet_fleet.sim_object import SimObject
 from pybullet_fleet.agent import Agent
-from pybullet_fleet.types import SpatialHashCellSizeMode, CollisionDetectionMethod
+from pybullet_fleet.types import SpatialHashCellSizeMode, CollisionDetectionMethod, CollisionMode
 
 # Global log_level (default: 'info')
 GLOBAL_LOG_LEVEL = "INFO"
@@ -92,7 +92,6 @@ class SimulationParams:
             ignore_static_collision=config.get("ignore_static_collision", True),
             enable_profiling=config.get("enable_profiling", False),
             enable_collision_color_change=config.get("enable_collision_color_change", False),
-            collision_check_2d=config.get("collision_check_2d", False),  # Default: 3D collision (27 neighbors)
             spatial_hash_cell_size_mode=SpatialHashCellSizeMode(config.get("spatial_hash_cell_size_mode", "auto_initial")),
             spatial_hash_cell_size=config.get("spatial_hash_cell_size", None),
             # Collision detection method - auto-select based on physics mode
@@ -125,7 +124,6 @@ class SimulationParams:
         ignore_static_collision: bool = True,
         enable_profiling: bool = False,
         enable_collision_color_change: bool = False,
-        collision_check_2d: bool = False,  # Default False: full 3D collision (27 neighbors)
         spatial_hash_cell_size_mode: SpatialHashCellSizeMode = SpatialHashCellSizeMode.AUTO_INITIAL,
         spatial_hash_cell_size: Optional[float] = None,  # Used when mode=CONSTANT
         collision_detection_method: Optional[CollisionDetectionMethod] = None,  # Auto-select based on physics
@@ -150,7 +148,6 @@ class SimulationParams:
         self.ignore_static_collision = ignore_static_collision
         self.enable_profiling = enable_profiling
         self.enable_collision_color_change = enable_collision_color_change
-        self.collision_check_2d = collision_check_2d  # Store 2D/3D collision check mode
         self.spatial_hash_cell_size_mode = spatial_hash_cell_size_mode
         self.spatial_hash_cell_size = spatial_hash_cell_size  # Fixed cell size (for mode=CONSTANT)
 
@@ -237,13 +234,14 @@ class MultiRobotSimulationCore:
         self._physics_objects: set = set()  # object_ids with physics enabled (can move via collisions)
         self._kinematic_objects: set = set()  # object_ids that move only via set_pose/update
         self._static_objects: set = set()  # object_ids that never move (static structures)
+        self._disabled_collision_objects: set = set()  # object_ids with collision completely disabled
 
         # --- Collision detection cache ---
-        self._cached_collision_modes: Dict[int, bool] = {}  # object_id -> use_2d (True=2D, False=3D)
+        self._cached_collision_modes: Dict[int, CollisionMode] = {}  # object_id -> CollisionMode
         self._cached_cell_size: Optional[float] = None  # Cached cell size for spatial hashing
-        self._cached_non_static_dict: Dict[int, Tuple[SimObject, bool]] = (
+        self._cached_non_static_dict: Dict[int, Tuple[SimObject, CollisionMode]] = (
             {}
-        )  # object_id -> (SimObject, collision_mode) for O(1) add/remove
+        )  # object_id -> (SimObject, collision_mode) for O(1) add/remove (excludes STATIC and DISABLED)
 
         # Incremental AABB and spatial grid cache
         self._cached_aabbs_dict: Dict[int, Tuple[Tuple[float, float, float], Tuple[float, float, float]]] = (
@@ -372,157 +370,6 @@ class MultiRobotSimulationCore:
             self._rendering_enabled = True
             logger.info("Rendering enabled for simulation")
 
-    def register_static_object(self, object_id: int) -> None:
-        """
-        Register an object ID as static (never moves).
-        Static objects can be made transparent with 't' key and are excluded from certain collision checks.
-
-        Args:
-            object_id (int): Object ID to register as static
-
-        Example:
-            obj = SimObject(body_id, sim_core)
-            sim_core.register_static_object(obj.object_id)
-        """
-        # Check if object exists in simulation
-        obj = self._sim_objects_dict.get(object_id)
-        if obj is None:
-            logger.warning(f"Cannot register static object {object_id}: object not found in simulation")
-            return
-
-        # Check if already registered as static
-        if object_id in self._static_objects:
-            logger.debug(f"Object {object_id} is already registered as static")
-            return
-
-        # Mark object as static (access private variable directly - this is the only place allowed)
-        obj._is_static = True
-
-        # Register as static using existing movement type registration
-        # This will handle all the cache updates properly
-        self._register_object_movement_type(obj)
-
-        # Update collision mode cache (handles non-static dict removal automatically)
-        self._update_collision_mode_cache(obj)
-
-        # Remove from AABB cache and spatial grid (static objects don't need collision tracking)
-        self._remove_object_aabb(object_id)
-
-        # Mark as moved for collision recalculation with new static status
-        self._moved_this_step.add(object_id)
-        logger.info(f"Registered object {object_id} as static (marked for collision recalculation)")
-
-    def unregister_static_object(self, object_id: int) -> None:
-        """
-        Unregister an object from static status (allow it to move).
-
-        This removes the object from static objects set and re-registers it
-        based on its mass and kinematic properties.
-
-        Args:
-            object_id (int): Object ID to unregister from static status
-
-        Example:
-            # Initially registered as static
-            sim_core.register_static_object(obj.object_id)
-
-            # Later, allow it to move
-            sim_core.unregister_static_object(obj.object_id)
-        """
-        # Check if object exists in simulation
-        obj = self._sim_objects_dict.get(object_id)
-        if obj is None:
-            logger.warning(f"Cannot unregister static object {object_id}: object not found in simulation")
-            return
-
-        # Check if object is actually registered as static
-        if object_id not in self._static_objects:
-            logger.debug(f"Object {object_id} is not registered as static")
-            return
-
-        # Remove from static objects set
-        self._static_objects.discard(object_id)
-
-        # Mark object as non-static (access private variable directly)
-        obj._is_static = False
-
-        # Re-register movement type using existing helper (handles physics/kinematic logic)
-        self._register_object_movement_type(obj)
-
-        # Update collision mode cache and add to non-static dict (now that object is non-static)
-        self._update_collision_mode_cache(obj)
-
-        # Add to AABB cache and spatial grid (will be updated on next movement or collision check)
-        self._update_object_aabb(object_id)
-
-        # Mark as moved for collision recalculation with new non-static status
-        self._moved_this_step.add(object_id)
-
-        logger.info(f"Unregistered object {object_id} from static status (marked for collision recalculation)")
-
-    def register_static_body(self, body_id: int) -> None:
-        """
-        Register a body ID as static (never moves).
-        Static bodies can be made transparent with 't' key.
-
-        This is a convenience wrapper around register_static_object() that accepts body_id.
-        For better performance, prefer using register_static_object(object_id) directly.
-
-        Args:
-            body_id (int): PyBullet body ID to register as static
-
-        Example:
-            body_id = p.loadURDF(...)
-            obj = SimObject(body_id, sim_core)
-            sim_core.register_static_body(body_id)  # Convenience API
-            # or
-            sim_core.register_static_object(obj.object_id)  # Preferred (faster)
-        """
-        # Find object_id for this body_id (O(N) lookup)
-        object_id = None
-        for obj_id, obj in self._sim_objects_dict.items():
-            if obj.body_id == body_id:
-                object_id = obj_id
-                break
-
-        if object_id is None:
-            logger.warning(f"Cannot register static body {body_id}: object not found in simulation")
-            return
-
-        # Delegate to object_id version (avoids code duplication)
-        self.register_static_object(object_id)
-
-    def unregister_static_body(self, body_id: int) -> None:
-        """
-        Unregister a body ID from static status (allow it to move).
-
-        This is a convenience wrapper around unregister_static_object() that accepts body_id.
-        For better performance, prefer using unregister_static_object(object_id) directly.
-
-        Args:
-            body_id (int): PyBullet body ID to unregister from static status
-
-        Example:
-            body_id = p.loadURDF(...)
-            obj = SimObject(body_id, sim_core)
-            sim_core.register_static_body(body_id)
-            # Later...
-            sim_core.unregister_static_body(body_id)  # Allow movement
-        """
-        # Find object_id for this body_id (O(N) lookup)
-        object_id = None
-        for obj_id, obj in self._sim_objects_dict.items():
-            if obj.body_id == body_id:
-                object_id = obj_id
-                break
-
-        if object_id is None:
-            logger.warning(f"Cannot unregister static body {body_id}: object not found in simulation")
-            return
-
-        # Delegate to object_id version (avoids code duplication)
-        self.unregister_static_object(object_id)
-
     def _calculate_cell_size_from_aabbs(
         self, aabbs: Optional[List[Tuple[Tuple[float, float, float], Tuple[float, float, float]]]] = None
     ) -> Optional[float]:
@@ -584,15 +431,17 @@ class MultiRobotSimulationCore:
         self._moved_this_step.add(object_id)
         logger.debug(f"Object {object_id} marked as moved")
 
-    def _update_object_aabb(self, object_id: int) -> None:
+    def _update_object_aabb(self, object_id: int, update_grid: bool = True) -> None:
         """
         Update AABB for a single object immediately.
-        Also updates spatial grid if cell_size is initialized.
+        Optionally updates spatial grid if cell_size is initialized.
 
         Called when kinematic objects move or physics objects are updated.
 
         Args:
             object_id: The object_id to update
+            update_grid: If True, also update spatial grid (default: True)
+                        Set to False to avoid circular calls from _update_object_spatial_grid
         """
         obj = self._sim_objects_dict.get(object_id)
         if obj is None:
@@ -603,13 +452,13 @@ class MultiRobotSimulationCore:
             self._cached_aabbs_dict[object_id] = p.getAABB(obj.body_id)
             logger.debug(f"Updated AABB for object {object_id}")
 
-            # Also update spatial grid if cell_size is initialized
-            if self._cached_cell_size is not None:
+            # Also update spatial grid if requested and cell_size is initialized
+            if update_grid and self._cached_cell_size is not None:
                 self._update_object_spatial_grid(object_id)
         except p.error:
             logger.warning(f"Failed to update AABB for object {object_id} (body {obj.body_id})")
 
-    def _remove_object_aabb(self, object_id: int) -> None:
+    def _remove_object_aabb(self, object_id: int, update_grid: bool = True) -> None:
         """
         Remove AABB and spatial grid entry for an object.
         Used when objects become static (no longer need collision tracking).
@@ -623,7 +472,8 @@ class MultiRobotSimulationCore:
             logger.debug(f"Removed object {object_id} from AABB cache")
 
         # Remove from spatial grid using unified method
-        self._update_object_spatial_grid(object_id, remove_only=True)
+        if update_grid:
+            self._update_object_spatial_grid(object_id, remove_only=True)
 
     def _update_object_spatial_grid(self, object_id: int, remove_only: bool = False) -> None:
         """
@@ -671,7 +521,8 @@ class MultiRobotSimulationCore:
             if obj is None:
                 logger.warning(f"Cannot update spatial grid for object {object_id}: object not found")
                 return
-            self._update_object_aabb(object_id)
+            # Update AABB without triggering spatial grid update (avoid circular call)
+            self._update_object_aabb(object_id, update_grid=False)
             if object_id not in self._cached_aabbs_dict:
                 logger.warning(f"Cannot update spatial grid for object {object_id}: AABB update failed")
                 return
@@ -696,56 +547,154 @@ class MultiRobotSimulationCore:
     def _register_object_movement_type(self, obj: SimObject) -> None:
         """
         Register an object's movement type for optimization.
+        
+        Movement types:
+        - STATIC: Never moves (registered via obj.is_static)
+        - PHYSICS: Moves via physics engine (mass > 0, not kinematic)
+        - KINEMATIC: Moves via set_pose() (mass == 0 or is_kinematic=True)
+        
+        Note: Collision mode (DISABLED) is handled in collision system methods,
+              not here (this only handles movement classification).
 
         Args:
             obj: The SimObject instance to register
         """
         object_id = obj.object_id
 
-        # Check if object is marked as static
+        # Register based on movement type (not collision mode)
         if obj.is_static:
+            # STATIC: Never moves
             self._static_objects.add(object_id)
-            logger.debug(f"Object {object_id} registered as static")
+            logger.debug(f"Object {object_id} registered as static (movement type)")
         else:
-            # Determine if object has physics enabled (can move via collisions)
+            # Dynamic objects: Determine if physics-enabled or kinematic
             is_physics = obj.mass > 0 and not obj.is_kinematic
 
             if is_physics:
                 self._physics_objects.add(object_id)
-                logger.debug(f"Object {object_id} registered as physics-enabled")
+                logger.debug(f"Object {object_id} registered as physics-enabled (movement type)")
             else:
                 self._kinematic_objects.add(object_id)
-                logger.debug(f"Object {object_id} registered as kinematic")
+                logger.debug(f"Object {object_id} registered as kinematic (movement type)")
 
-    def _update_collision_mode_cache(self, obj: SimObject) -> None:
+    def _update_object_collision_mode(self, object_id: int, old_mode: CollisionMode, new_mode: CollisionMode) -> None:
         """
-        Update cached collision mode for an object.
-        Automatically manages non-static dict based on object's static status.
-
-        Called when:
-        - Object is added to simulation
-        - Object's collision_check_2d is changed
-        - Object's static status changes (register/unregister_static_object)
-
+        Update collision system when object's collision mode changes.
+        
+        Called by SimObject.set_collision_mode() when mode is changed.
+        Handles all cache updates (AABB, spatial grid, movement tracking).
+        
         Args:
-            obj: The SimObject instance
+            object_id: Object ID
+            old_mode: Previous CollisionMode
+            new_mode: New CollisionMode
         """
-        object_id = obj.object_id
-        mode = obj.collision_check_2d if obj.collision_check_2d is not None else self.params.collision_check_2d
-        self._cached_collision_modes[object_id] = mode
-
-        # Manage non-static dict based on object's static status
-        if obj.is_static:
-            # Object is static - remove from non-static dict if present
-            if object_id in self._cached_non_static_dict:
-                self._cached_non_static_dict.pop(object_id)
-                logger.debug(f"Removed static object {object_id} from non-static cache")
+        obj = self._sim_objects_dict.get(object_id)
+        if obj is None:
+            logger.warning(f"Cannot update collision mode for object {object_id}: not found")
+            return
+        
+        # Remove from old movement type sets
+        self._static_objects.discard(object_id)
+        self._physics_objects.discard(object_id)
+        self._kinematic_objects.discard(object_id)
+        
+        # Re-register with new mode
+        self._register_object_movement_type(obj)
+        
+        # Update collision mode cache
+        self._cached_collision_modes[object_id] = new_mode
+        
+        # Handle collision system updates based on mode transition
+        # Structure: First check old_mode, then check new_mode within each case
+        
+        if old_mode == CollisionMode.DISABLED:
+            # DISABLED -> *: Need to add object to collision system
+            if new_mode == CollisionMode.DISABLED:
+                # No change
+                pass
+            elif new_mode == CollisionMode.STATIC:
+                # DISABLED -> STATIC: Add to collision system (STATIC not in non_static_dict)
+                self._add_object_to_collision_system(object_id)
+            else:
+                # DISABLED -> NORMAL_3D/2D: Add to collision system and non_static_dict
+                self._cached_non_static_dict[object_id] = (obj, new_mode)
+                self._add_object_to_collision_system(object_id)
+        
+        elif old_mode == CollisionMode.STATIC:
+            # STATIC -> *: STATIC already has AABB/grid
+            if new_mode == CollisionMode.DISABLED:
+                # STATIC -> DISABLED: Remove from collision system
+                self._remove_object_from_collision_system(object_id)
+            elif new_mode == CollisionMode.STATIC:
+                # No change
+                pass
+            else:
+                # STATIC -> NORMAL_3D/2D: Add to non_static_dict, mark as moved
+                self._cached_non_static_dict[object_id] = (obj, new_mode)
+                self._moved_this_step.add(object_id)
+        
         else:
-            # Object is non-static - add/update in non-static dict
-            self._cached_non_static_dict[object_id] = (obj, mode)
-            logger.debug(f"Updated non-static object {object_id} in cache")
+            # NORMAL_3D/2D -> *: Currently in non_static_dict
+            if new_mode == CollisionMode.DISABLED:
+                # NORMAL -> DISABLED: Remove from collision system and non_static_dict
+                self._cached_non_static_dict.pop(object_id, None)
+                self._remove_object_from_collision_system(object_id)
+            elif new_mode == CollisionMode.STATIC:
+                # NORMAL -> STATIC: Remove from non_static_dict, keep AABB/grid
+                self._cached_non_static_dict.pop(object_id, None)
+            else:
+                # NORMAL_3D <-> NORMAL_2D: Just update mode in non_static_dict
+                self._cached_non_static_dict[object_id] = (obj, new_mode)
+                self._moved_this_step.add(object_id)
+        
+        logger.info(f"Updated collision mode for object {object_id}: {old_mode.value} -> {new_mode.value}")
 
-        logger.debug(f"Collision mode for object {object_id}: {'2D' if mode else '3D'}, static={obj.is_static}")
+    def _add_object_to_collision_system(self, object_id: int) -> None:
+        """
+        Add object to collision detection system.
+        
+        Updates AABB cache, spatial grid, and marks as moved.
+        Called when object is added or when collision mode changes from DISABLED to NORMAL/STATIC.
+        
+        Note: This method should NEVER be called for DISABLED collision mode objects.
+              When transitioning from DISABLED to enabled mode, removes from _disabled_collision_objects.
+        
+        Args:
+            object_id: Object ID to add
+        """
+        # Remove from disabled set (transitioning from DISABLED to enabled mode)
+        self._disabled_collision_objects.discard(object_id)
+        
+        self._update_object_aabb(object_id, update_grid=True)
+        self._moved_this_step.add(object_id)
+        logger.debug(f"Added object {object_id} to collision system")
+    
+    def _remove_object_from_collision_system(self, object_id: int) -> None:
+        """
+        Remove object from collision detection system.
+        
+        Removes AABB cache, spatial grid entry, and movement tracking.
+        If object is transitioning to DISABLED mode, adds to _disabled_collision_objects.
+        If object is being completely removed, cleans up _disabled_collision_objects.
+        
+        Used when object is removed or when collision mode changes to disable collision.
+        
+        Args:
+            object_id: Object ID to remove
+        """
+        obj = self._sim_objects_dict.get(object_id)
+        if obj is not None and obj.collision_mode == CollisionMode.DISABLED:
+            # Object exists and is DISABLED: Add to disabled set
+            self._disabled_collision_objects.add(object_id)
+            logger.debug(f"Removed object {object_id} from collision system (now DISABLED)")
+        else:
+            # Object removed or transitioning to non-DISABLED mode: Remove from disabled set
+            self._disabled_collision_objects.discard(object_id)
+            logger.debug(f"Removed object {object_id} from collision system")
+        
+        self._remove_object_aabb(object_id)
+        self._moved_this_step.discard(object_id)
 
     def set_collision_spatial_hash_cell_size_mode(
         self, mode: Optional[SpatialHashCellSizeMode] = None, cell_size: Optional[float] = None
@@ -863,29 +812,32 @@ class MultiRobotSimulationCore:
 
         self.sim_objects.append(obj)
         self._sim_objects_dict[obj.object_id] = obj
-
-        # Update collision mode cache (also handles list cache updates)
-        self._update_collision_mode_cache(obj)
-
-        # Register movement type based on object properties
+        
+        # Store collision mode in cache
+        self._cached_collision_modes[obj.object_id] = obj.collision_mode
+        
+        # Register movement type based on collision mode
         self._register_object_movement_type(obj)
-
-        # Update AABB immediately for newly added object
-        # This eliminates the need for safety fallback in filter_aabb_pairs()
-        self._update_object_aabb(obj.object_id)
-
+        
+        # Add to collision system based on collision mode
+        if obj.collision_mode == CollisionMode.DISABLED:
+            # DISABLED: No collision detection at all
+            # Add to disabled set, no AABB, no spatial grid, no tracking
+            self._disabled_collision_objects.add(obj.object_id)
+        
+        elif obj.collision_mode == CollisionMode.STATIC:
+            # STATIC: Add AABB/grid once, never update
+            # Static objects are excluded from _cached_non_static_dict
+            self._add_object_to_collision_system(obj.object_id)
+        
+        else:
+            # NORMAL_3D or NORMAL_2D: Add to non-static dict and collision system
+            self._cached_non_static_dict[obj.object_id] = (obj, obj.collision_mode)
+            self._add_object_to_collision_system(obj.object_id)
+        
         # Trigger cell_size recalculation in auto_adaptive mode
         if self.params.spatial_hash_cell_size_mode == SpatialHashCellSizeMode.AUTO_ADAPTIVE:
             self.set_collision_spatial_hash_cell_size_mode()
-
-        # Add to spatial grid if cell_size is initialized
-        # Note: cell_size is calculated on first filter_aabb_pairs() call
-        if self._cached_cell_size is not None:
-            self._update_object_spatial_grid(obj.object_id)
-
-        # Mark as moved for initial collision check
-        # In ignore_static mode, static-static pairs won't be checked (handled in filter logic)
-        self._moved_this_step.add(obj.object_id)
 
         # Save original color once when object is added (for collision visualization)
         if obj.body_id not in self._robot_original_colors:
@@ -929,15 +881,13 @@ class MultiRobotSimulationCore:
         self._physics_objects.discard(obj_id)
         self._kinematic_objects.discard(obj_id)
         self._static_objects.discard(obj_id)
+        self._disabled_collision_objects.discard(obj_id)
 
         # Remove from collision mode cache
         self._cached_collision_modes.pop(obj_id, None)
 
-        # Remove from AABB cache
-        self._cached_aabbs_dict.pop(obj_id, None)
-
-        # Remove from spatial grid using unified method
-        self._update_object_spatial_grid(obj_id, remove_only=True)
+        # Remove from collision system (AABB, spatial grid)
+        self._remove_object_from_collision_system(obj_id)
 
         # Remove from non-static dict (O(1) dict removal)
         self._cached_non_static_dict.pop(obj_id, None)
@@ -1368,19 +1318,23 @@ class MultiRobotSimulationCore:
             # but they may be added during spawn or mode changes
             if ignore_static and obj_id_i in self._static_objects:
                 continue
+            
+            # Skip disabled collision objects
+            if obj_id_i in self._disabled_collision_objects:
+                continue
 
             # Get cell for this moved object
             cell_i = self._cached_object_to_cell.get(obj_id_i)
             if cell_i is None:
                 continue
 
-            use_2d_i = self._cached_collision_modes.get(obj_id_i, False)
+            mode_i = self._cached_collision_modes.get(obj_id_i, CollisionMode.NORMAL_3D)
             aabb_i = self._cached_aabbs_dict.get(obj_id_i)
             if aabb_i is None:
                 continue
 
             # Choose appropriate neighbor offsets based on collision mode (2D: 9 neighbors, 3D: 27 neighbors)
-            offsets = self._NEIGHBOR_OFFSETS_2D if use_2d_i else self._NEIGHBOR_OFFSETS_3D
+            offsets = self._NEIGHBOR_OFFSETS_2D if mode_i == CollisionMode.NORMAL_2D else self._NEIGHBOR_OFFSETS_3D
 
             # Check neighbors in same and adjacent cells
             for offset in offsets:
@@ -1393,6 +1347,10 @@ class MultiRobotSimulationCore:
 
                     # Skip if j is static in ignore_static mode
                     if ignore_static and obj_id_j in self._static_objects:
+                        continue
+                    
+                    # Skip disabled collision objects
+                    if obj_id_j in self._disabled_collision_objects:
                         continue
 
                     # Create sorted pair to avoid duplicates (i < j)
@@ -1407,10 +1365,10 @@ class MultiRobotSimulationCore:
                     if obj_j is None:
                         continue
 
-                    use_2d_j = self._cached_collision_modes.get(obj_id_j, False)
+                    mode_j = self._cached_collision_modes.get(obj_id_j, CollisionMode.NORMAL_3D)
 
                     # Skip this pair if object j uses 2D mode and offset has Z component
-                    if use_2d_j and offset[2] != 0:
+                    if mode_j == CollisionMode.NORMAL_2D and offset[2] != 0:
                         continue
 
                     # AABB overlap test
