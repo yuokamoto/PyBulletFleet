@@ -184,13 +184,13 @@ agent_manager.setup_camera({
 def random_movement_callback(sim_core, dt):
     """Random movement for different agent types."""
     import random
-    
+
     for obj in sim_core.sim_objects:
         if not isinstance(obj, Agent):
             continue
-        
+
         agent_type = obj.user_data.get("type", "unknown")
-        
+
         if random.random() < 0.02:  # 2% chance to update goal
             if agent_type == "agv":
                 # AGVs move on ground (Z=0.3)
@@ -208,7 +208,7 @@ def random_movement_callback(sim_core, dt):
                 )
             else:
                 continue
-            
+
             agent.set_goal_pose(new_goal)
 
 sim_core.register_callback(random_movement_callback)

@@ -504,39 +504,39 @@ class SimObject:
     def is_static(self) -> bool:
         """
         Whether this object is static (never moves).
-        
+
         Returns True if collision_mode is STATIC.
         This property is read-only. To change collision mode,
         use set_collision_mode() method.
         """
         return self.collision_mode == CollisionMode.STATIC
-    
+
     def set_collision_mode(self, mode: CollisionMode) -> None:
         """
         Change collision detection mode for this object.
-        
+
         This method updates the collision mode and notifies sim_core to
         update all collision-related caches (AABB, spatial grid, etc.).
-        
+
         Args:
             mode: New CollisionMode
-        
+
         Example:
             # Change to static
             obj.set_collision_mode(CollisionMode.STATIC)
-            
+
             # Disable collision
             obj.set_collision_mode(CollisionMode.DISABLED)
-            
+
             # Enable 2D collision
             obj.set_collision_mode(CollisionMode.NORMAL_2D)
         """
         if self.collision_mode == mode:
             return  # No change
-        
+
         old_mode = self.collision_mode
         self.collision_mode = mode
-        
+
         # Update PyBullet collision filter if switching to/from DISABLED
         if mode == CollisionMode.DISABLED:
             # Disable PyBullet collision
@@ -544,11 +544,11 @@ class SimObject:
         elif old_mode == CollisionMode.DISABLED:
             # Re-enable PyBullet collision (default group=1, mask=-1)
             p.setCollisionFilterGroupMask(self.body_id, -1, 1, -1)
-        
+
         # Notify sim_core to update collision system
         if self.sim_core is not None:
             self.sim_core._update_object_collision_mode(self.object_id, old_mode, mode)
-        
+
         logger.info(f"Object {self.object_id}: collision_mode changed from {old_mode.value} -> {mode.value}")
 
     def get_pose(self) -> Pose:
@@ -583,7 +583,7 @@ class SimObject:
                              If False, velocity is reset to zero (default behavior of PyBullet).
                              For kinematic objects (mass=0), velocity preservation has no effect,
                              so this is automatically set to False for performance.
-        
+
         Returns:
             True if the object moved (position or orientation changed), False otherwise
         """
@@ -595,22 +595,19 @@ class SimObject:
                 "If this object needs to move, change collision_mode to NORMAL_3D/NORMAL_2D."
             )
             return False
-        
+
         position, orientation = pose.as_position_orientation()
 
         # Detect movement using cached pose (no PyBullet API call needed)
         last_pos, last_orn = self._cached_pose.as_position_orientation()
         pos_diff = np.linalg.norm(np.array(position) - np.array(last_pos))
-        
+
         # Quaternion angular distance: min(|q1 - q2|, |q1 + q2|) to handle q = -q equivalence
         orn_arr = np.array(orientation)
         last_orn_arr = np.array(last_orn)
-        orn_diff = min(
-            np.linalg.norm(orn_arr - last_orn_arr),
-            np.linalg.norm(orn_arr + last_orn_arr)
-        )
-        
-        moved = (pos_diff > 1e-6 or orn_diff > 1e-6)
+        orn_diff = min(np.linalg.norm(orn_arr - last_orn_arr), np.linalg.norm(orn_arr + last_orn_arr))
+
+        moved = pos_diff > 1e-6 or orn_diff > 1e-6
 
         # Optimization: Skip velocity operations for kinematic objects
         # Use cached is_kinematic flag to avoid PyBullet API calls
@@ -623,11 +620,11 @@ class SimObject:
             # Fast path: Just set position without velocity operations
             # (kinematic objects or explicitly requested to skip velocity preservation)
             p.resetBasePositionAndOrientation(self.body_id, position, orientation)
-        
+
         # Notify sim_core if movement detected
         if moved and self.sim_core is not None:
             self.sim_core._mark_object_moved(self.object_id)
-            
+
             # Update AABB and spatial grid immediately for kinematic objects (optimization)
             # Physics objects are updated in step_once() to batch PyBullet calls
             if self.object_id in self.sim_core._kinematic_objects:
@@ -669,7 +666,7 @@ class SimObject:
                 lambda obj=obj: f"attached_object set pose　body_id={self.body_id}: obj_body_id={obj.body_id} "
                 f"position={obj._attach_offset.position} orientation={obj._attach_offset.orientation}"
             )
-        
+
         return moved  # Return movement detection result
 
     def attach_object(

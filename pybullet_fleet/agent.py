@@ -1445,7 +1445,7 @@ class Agent(SimObject):
 
         Args:
             dt: Time step (seconds)
-        
+
         Returns:
             True if the robot moved (position or orientation changed), False otherwise
         """
@@ -1472,7 +1472,7 @@ class Agent(SimObject):
 
         if self.is_urdf_robot():
             self.update_attached_objects_kinematics()
-        
+
         # Movement detection is handled by set_pose() in _update_omnidirectional() and _update_differential()
         # Return True to indicate update was called (actual movement is tracked by sim_core)
         return True

@@ -547,12 +547,12 @@ class MultiRobotSimulationCore:
     def _register_object_movement_type(self, obj: SimObject) -> None:
         """
         Register an object's movement type for optimization.
-        
+
         Movement types:
         - STATIC: Never moves (registered via obj.is_static)
         - PHYSICS: Moves via physics engine (mass > 0, not kinematic)
         - KINEMATIC: Moves via set_pose() (mass == 0 or is_kinematic=True)
-        
+
         Note: Collision mode (DISABLED) is handled in collision system methods,
               not here (this only handles movement classification).
 
@@ -580,10 +580,10 @@ class MultiRobotSimulationCore:
     def _update_object_collision_mode(self, object_id: int, old_mode: CollisionMode, new_mode: CollisionMode) -> None:
         """
         Update collision system when object's collision mode changes.
-        
+
         Called by SimObject.set_collision_mode() when mode is changed.
         Handles all cache updates (AABB, spatial grid, movement tracking).
-        
+
         Args:
             object_id: Object ID
             old_mode: Previous CollisionMode
@@ -593,21 +593,21 @@ class MultiRobotSimulationCore:
         if obj is None:
             logger.warning(f"Cannot update collision mode for object {object_id}: not found")
             return
-        
+
         # Remove from old movement type sets
         self._static_objects.discard(object_id)
         self._physics_objects.discard(object_id)
         self._kinematic_objects.discard(object_id)
-        
+
         # Re-register with new mode
         self._register_object_movement_type(obj)
-        
+
         # Update collision mode cache
         self._cached_collision_modes[object_id] = new_mode
-        
+
         # Handle collision system updates based on mode transition
         # Structure: First check old_mode, then check new_mode within each case
-        
+
         if old_mode == CollisionMode.DISABLED:
             # DISABLED -> *: Need to add object to collision system
             if new_mode == CollisionMode.DISABLED:
@@ -620,7 +620,7 @@ class MultiRobotSimulationCore:
                 # DISABLED -> NORMAL_3D/2D: Add to collision system and non_static_dict
                 self._cached_non_static_dict[object_id] = (obj, new_mode)
                 self._add_object_to_collision_system(object_id)
-        
+
         elif old_mode == CollisionMode.STATIC:
             # STATIC -> *: STATIC already has AABB/grid
             if new_mode == CollisionMode.DISABLED:
@@ -633,7 +633,7 @@ class MultiRobotSimulationCore:
                 # STATIC -> NORMAL_3D/2D: Add to non_static_dict, mark as moved
                 self._cached_non_static_dict[object_id] = (obj, new_mode)
                 self._moved_this_step.add(object_id)
-        
+
         else:
             # NORMAL_3D/2D -> *: Currently in non_static_dict
             if new_mode == CollisionMode.DISABLED:
@@ -647,39 +647,39 @@ class MultiRobotSimulationCore:
                 # NORMAL_3D <-> NORMAL_2D: Just update mode in non_static_dict
                 self._cached_non_static_dict[object_id] = (obj, new_mode)
                 self._moved_this_step.add(object_id)
-        
+
         logger.info(f"Updated collision mode for object {object_id}: {old_mode.value} -> {new_mode.value}")
 
     def _add_object_to_collision_system(self, object_id: int) -> None:
         """
         Add object to collision detection system.
-        
+
         Updates AABB cache, spatial grid, and marks as moved.
         Called when object is added or when collision mode changes from DISABLED to NORMAL/STATIC.
-        
+
         Note: This method should NEVER be called for DISABLED collision mode objects.
               When transitioning from DISABLED to enabled mode, removes from _disabled_collision_objects.
-        
+
         Args:
             object_id: Object ID to add
         """
         # Remove from disabled set (transitioning from DISABLED to enabled mode)
         self._disabled_collision_objects.discard(object_id)
-        
+
         self._update_object_aabb(object_id, update_grid=True)
         self._moved_this_step.add(object_id)
         logger.debug(f"Added object {object_id} to collision system")
-    
+
     def _remove_object_from_collision_system(self, object_id: int) -> None:
         """
         Remove object from collision detection system.
-        
+
         Removes AABB cache, spatial grid entry, and movement tracking.
         If object is transitioning to DISABLED mode, adds to _disabled_collision_objects.
         If object is being completely removed, cleans up _disabled_collision_objects.
-        
+
         Used when object is removed or when collision mode changes to disable collision.
-        
+
         Args:
             object_id: Object ID to remove
         """
@@ -692,7 +692,7 @@ class MultiRobotSimulationCore:
             # Object removed or transitioning to non-DISABLED mode: Remove from disabled set
             self._disabled_collision_objects.discard(object_id)
             logger.debug(f"Removed object {object_id} from collision system")
-        
+
         self._remove_object_aabb(object_id)
         self._moved_this_step.discard(object_id)
 
@@ -812,29 +812,29 @@ class MultiRobotSimulationCore:
 
         self.sim_objects.append(obj)
         self._sim_objects_dict[obj.object_id] = obj
-        
+
         # Store collision mode in cache
         self._cached_collision_modes[obj.object_id] = obj.collision_mode
-        
+
         # Register movement type based on collision mode
         self._register_object_movement_type(obj)
-        
+
         # Add to collision system based on collision mode
         if obj.collision_mode == CollisionMode.DISABLED:
             # DISABLED: No collision detection at all
             # Add to disabled set, no AABB, no spatial grid, no tracking
             self._disabled_collision_objects.add(obj.object_id)
-        
+
         elif obj.collision_mode == CollisionMode.STATIC:
             # STATIC: Add AABB/grid once, never update
             # Static objects are excluded from _cached_non_static_dict
             self._add_object_to_collision_system(obj.object_id)
-        
+
         else:
             # NORMAL_3D or NORMAL_2D: Add to non-static dict and collision system
             self._cached_non_static_dict[obj.object_id] = (obj, obj.collision_mode)
             self._add_object_to_collision_system(obj.object_id)
-        
+
         # Trigger cell_size recalculation in auto_adaptive mode
         if self.params.spatial_hash_cell_size_mode == SpatialHashCellSizeMode.AUTO_ADAPTIVE:
             self.set_collision_spatial_hash_cell_size_mode()
@@ -1318,7 +1318,7 @@ class MultiRobotSimulationCore:
             # but they may be added during spawn or mode changes
             if ignore_static and obj_id_i in self._static_objects:
                 continue
-            
+
             # Skip disabled collision objects
             if obj_id_i in self._disabled_collision_objects:
                 continue
@@ -1348,7 +1348,7 @@ class MultiRobotSimulationCore:
                     # Skip if j is static in ignore_static mode
                     if ignore_static and obj_id_j in self._static_objects:
                         continue
-                    
+
                     # Skip disabled collision objects
                     if obj_id_j in self._disabled_collision_objects:
                         continue
