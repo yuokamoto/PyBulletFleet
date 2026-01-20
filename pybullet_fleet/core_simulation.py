@@ -97,8 +97,9 @@ class SimulationParams:
             spatial_hash_cell_size=config.get("spatial_hash_cell_size", None),
             # Collision detection method - auto-select based on physics mode
             collision_detection_method=CollisionDetectionMethod(
-                config.get("collision_detection_method", 
-                          "contact_points" if config.get("physics", False) else "closest_points")
+                config.get(
+                    "collision_detection_method", "contact_points" if config.get("physics", False) else "closest_points"
+                )
             ),
             collision_margin=config.get("collision_margin", 0.02),  # Safety clearance (meters)
         )
@@ -152,14 +153,13 @@ class SimulationParams:
         self.collision_check_2d = collision_check_2d  # Store 2D/3D collision check mode
         self.spatial_hash_cell_size_mode = spatial_hash_cell_size_mode
         self.spatial_hash_cell_size = spatial_hash_cell_size  # Fixed cell size (for mode=CONSTANT)
-        
+
         # Auto-select collision detection method based on physics mode if not explicitly set
         if collision_detection_method is None:
             # Physics ON: use CONTACT_POINTS (actual contact manifold)
             # Physics OFF: use CLOSEST_POINTS (distance-based, kinematics-safe)
             collision_detection_method = (
-                CollisionDetectionMethod.CONTACT_POINTS if physics 
-                else CollisionDetectionMethod.CLOSEST_POINTS
+                CollisionDetectionMethod.CONTACT_POINTS if physics else CollisionDetectionMethod.CLOSEST_POINTS
             )
         self.collision_detection_method = collision_detection_method
         self.collision_margin = collision_margin  # Safety clearance for collision detection
@@ -170,11 +170,11 @@ class MultiRobotSimulationCore:
     _NEIGHBOR_OFFSETS_3D = tuple(
         (dx, dy, dz) for dx in (-1, 0, 1) for dy in (-1, 0, 1) for dz in (-1, 0, 1)
     )  # 27 neighbors for 3D collision detection
-    
+
     _NEIGHBOR_OFFSETS_2D = tuple(
         (dx, dy, 0) for dx in (-1, 0, 1) for dy in (-1, 0, 1)
     )  # 9 neighbors for 2D collision detection (Z=0 only)
-    
+
     @classmethod
     def from_yaml(cls, yaml_path: str = "config.yaml") -> "MultiRobotSimulationCore":
         params = SimulationParams.from_config(yaml_path)
@@ -231,28 +231,32 @@ class MultiRobotSimulationCore:
         self._simulation_paused: bool = False  # Track if simulation is paused
         self.enable_profiling: bool = params.enable_profiling  # Optional profiling output
         self._profiling_log_frequency: int = 10  # Log profiling info every N steps (default: 10)
-        
+
         # --- Movement tracking and collision optimization ---
         self._moved_this_step: set = set()  # object_ids that moved this step
         self._physics_objects: set = set()  # object_ids with physics enabled (can move via collisions)
         self._kinematic_objects: set = set()  # object_ids that move only via set_pose/update
         self._static_objects: set = set()  # object_ids that never move (static structures)
-        
+
         # --- Collision detection cache ---
         self._cached_collision_modes: Dict[int, bool] = {}  # object_id -> use_2d (True=2D, False=3D)
         self._cached_cell_size: Optional[float] = None  # Cached cell size for spatial hashing
-        self._cached_non_static_dict: Dict[int, Tuple[SimObject, bool]] = {}  # object_id -> (SimObject, collision_mode) for O(1) add/remove
-        
+        self._cached_non_static_dict: Dict[int, Tuple[SimObject, bool]] = (
+            {}
+        )  # object_id -> (SimObject, collision_mode) for O(1) add/remove
+
         # Incremental AABB and spatial grid cache
-        self._cached_aabbs_dict: Dict[int, Tuple[Tuple[float, float, float], Tuple[float, float, float]]] = {}  # object_id -> AABB
+        self._cached_aabbs_dict: Dict[int, Tuple[Tuple[float, float, float], Tuple[float, float, float]]] = (
+            {}
+        )  # object_id -> AABB
         self._cached_spatial_grid: Dict[Tuple[int, int, int], Set[int]] = {}  # Spatial hash grid: cell -> {object_ids}
         self._cached_object_to_cell: Dict[int, Tuple[int, int, int]] = {}  # object_id -> cell mapping
         self._aabb_cache_valid: bool = False  # Flag indicating if AABB cache is valid
         self._last_ignore_static: Optional[bool] = None  # Track last ignore_static value to detect mode changes
-        
+
         # Incremental collision tracking
         self._active_collision_pairs: Set[Tuple[int, int]] = set()  # Currently colliding object_id pairs (sorted: i < j)
-        
+
         self.setup_pybullet()
         self.setup_monitor()
 
@@ -289,23 +293,23 @@ class MultiRobotSimulationCore:
     def set_collision_check_frequency(self, frequency: Optional[float] = None) -> None:
         """
         Set the frequency (Hz, number of times per second) for collision detection.
-        
+
         Args:
             frequency: Collision check frequency in Hz (times per second)
                       - None: Check every step (highest accuracy, highest cost)
                       - 0: Disable collision checking (no collision detection)
                       - > 0: Check at specified frequency (e.g., 1.0 = once per second)
-        
+
         Example:
             sim.set_collision_check_frequency(None)  # Every step
             sim.set_collision_check_frequency(1.0)   # 1 Hz (once per second)
             sim.set_collision_check_frequency(10.0)  # 10 Hz
             sim.set_collision_check_frequency(0)     # Disable
-        
+
         Note: Higher frequency increases computational cost but improves collision detection accuracy.
         """
         self.collision_check_frequency = frequency
-        
+
         # Log the setting for clarity
         if frequency is None:
             logger.info("Collision check frequency set to: EVERY STEP (highest accuracy)")
@@ -317,13 +321,13 @@ class MultiRobotSimulationCore:
     def set_profiling_log_frequency(self, frequency: int = 10) -> None:
         """
         Set the frequency for profiling log output (in steps).
-        
+
         Args:
             frequency: Log profiling info every N steps (default: 10)
                       - 1: Every step (high overhead, detailed)
                       - 10: Every 10 steps (low overhead, recommended)
                       - 100: Every 100 steps (minimal overhead)
-        
+
         Note: Profiling must be enabled (enable_profiling=True) for logs to appear.
         """
         self._profiling_log_frequency = max(1, frequency)
@@ -375,7 +379,7 @@ class MultiRobotSimulationCore:
 
         Args:
             object_id (int): Object ID to register as static
-        
+
         Example:
             obj = SimObject(body_id, sim_core)
             sim_core.register_static_object(obj.object_id)
@@ -385,43 +389,43 @@ class MultiRobotSimulationCore:
         if obj is None:
             logger.warning(f"Cannot register static object {object_id}: object not found in simulation")
             return
-        
+
         # Check if already registered as static
         if object_id in self._static_objects:
             logger.debug(f"Object {object_id} is already registered as static")
             return
-        
+
         # Mark object as static (access private variable directly - this is the only place allowed)
         obj._is_static = True
-        
+
         # Register as static using existing movement type registration
         # This will handle all the cache updates properly
         self._register_object_movement_type(obj)
-        
+
         # Update collision mode cache (handles non-static dict removal automatically)
         self._update_collision_mode_cache(obj)
-        
+
         # Remove from AABB cache and spatial grid (static objects don't need collision tracking)
         self._remove_object_aabb(object_id)
-        
+
         # Mark as moved for collision recalculation with new static status
         self._moved_this_step.add(object_id)
         logger.info(f"Registered object {object_id} as static (marked for collision recalculation)")
-    
+
     def unregister_static_object(self, object_id: int) -> None:
         """
         Unregister an object from static status (allow it to move).
-        
+
         This removes the object from static objects set and re-registers it
         based on its mass and kinematic properties.
 
         Args:
             object_id (int): Object ID to unregister from static status
-        
+
         Example:
             # Initially registered as static
             sim_core.register_static_object(obj.object_id)
-            
+
             # Later, allow it to move
             sim_core.unregister_static_object(obj.object_id)
         """
@@ -430,43 +434,43 @@ class MultiRobotSimulationCore:
         if obj is None:
             logger.warning(f"Cannot unregister static object {object_id}: object not found in simulation")
             return
-        
+
         # Check if object is actually registered as static
         if object_id not in self._static_objects:
             logger.debug(f"Object {object_id} is not registered as static")
             return
-        
+
         # Remove from static objects set
         self._static_objects.discard(object_id)
-        
+
         # Mark object as non-static (access private variable directly)
         obj._is_static = False
-        
+
         # Re-register movement type using existing helper (handles physics/kinematic logic)
         self._register_object_movement_type(obj)
-        
+
         # Update collision mode cache and add to non-static dict (now that object is non-static)
         self._update_collision_mode_cache(obj)
-        
+
         # Add to AABB cache and spatial grid (will be updated on next movement or collision check)
         self._update_object_aabb(object_id)
-        
+
         # Mark as moved for collision recalculation with new non-static status
         self._moved_this_step.add(object_id)
-        
+
         logger.info(f"Unregistered object {object_id} from static status (marked for collision recalculation)")
-    
+
     def register_static_body(self, body_id: int) -> None:
         """
         Register a body ID as static (never moves).
         Static bodies can be made transparent with 't' key.
-        
+
         This is a convenience wrapper around register_static_object() that accepts body_id.
         For better performance, prefer using register_static_object(object_id) directly.
 
         Args:
             body_id (int): PyBullet body ID to register as static
-        
+
         Example:
             body_id = p.loadURDF(...)
             obj = SimObject(body_id, sim_core)
@@ -480,24 +484,24 @@ class MultiRobotSimulationCore:
             if obj.body_id == body_id:
                 object_id = obj_id
                 break
-        
+
         if object_id is None:
             logger.warning(f"Cannot register static body {body_id}: object not found in simulation")
             return
-        
+
         # Delegate to object_id version (avoids code duplication)
         self.register_static_object(object_id)
 
     def unregister_static_body(self, body_id: int) -> None:
         """
         Unregister a body ID from static status (allow it to move).
-        
+
         This is a convenience wrapper around unregister_static_object() that accepts body_id.
         For better performance, prefer using unregister_static_object(object_id) directly.
 
         Args:
             body_id (int): PyBullet body ID to unregister from static status
-        
+
         Example:
             body_id = p.loadURDF(...)
             obj = SimObject(body_id, sim_core)
@@ -511,32 +515,31 @@ class MultiRobotSimulationCore:
             if obj.body_id == body_id:
                 object_id = obj_id
                 break
-        
+
         if object_id is None:
             logger.warning(f"Cannot unregister static body {body_id}: object not found in simulation")
             return
-        
+
         # Delegate to object_id version (avoids code duplication)
         self.unregister_static_object(object_id)
 
     def _calculate_cell_size_from_aabbs(
-        self, 
-        aabbs: Optional[List[Tuple[Tuple[float, float, float], Tuple[float, float, float]]]] = None
+        self, aabbs: Optional[List[Tuple[Tuple[float, float, float], Tuple[float, float, float]]]] = None
     ) -> Optional[float]:
         """
         Calculate optimal cell size from AABBs using median extent.
-        
+
         Args:
             aabbs: List of AABB tuples ((min_x, min_y, min_z), (max_x, max_y, max_z)).
                    If None, uses self._cached_aabbs_dict.values() (default: None)
-        
+
         Returns:
             Calculated cell_size, or None if no AABBs available
-        
+
         Example:
             # Use cached AABBs
             cell_size = sim._calculate_cell_size_from_aabbs()
-            
+
             # Use custom AABBs
             custom_aabbs = [p.getAABB(body_id) for body_id in body_ids]
             cell_size = sim._calculate_cell_size_from_aabbs(custom_aabbs)
@@ -544,50 +547,50 @@ class MultiRobotSimulationCore:
         # Use cached AABBs if not provided
         if aabbs is None:
             aabbs = list(self._cached_aabbs_dict.values())
-        
+
         if not aabbs:
             return None
-        
+
         extents = []
         for aabb in aabbs:
             extent_x = aabb[1][0] - aabb[0][0]
             extent_y = aabb[1][1] - aabb[0][1]
             extent_z = aabb[1][2] - aabb[0][2]
             extents.append(max(extent_x, extent_y, extent_z))
-        
+
         median_extent = sorted(extents)[len(extents) // 2]
         cell_size = max(median_extent * 2.0, 0.5)
-        
+
         return cell_size
-    
+
     def _rebuild_spatial_grid(self) -> None:
         """Rebuild entire spatial grid using current cell_size and AABBs."""
         self._cached_spatial_grid.clear()
         self._cached_object_to_cell.clear()
-        
+
         for object_id in self._cached_aabbs_dict.keys():
             self._update_object_spatial_grid(object_id)
-        
+
         logger.debug(f"Collision spatial hash: Rebuilt grid with {len(self._cached_spatial_grid)} cells")
 
     def _mark_object_moved(self, object_id: int) -> None:
         """
         Mark an object as moved in the current step.
         Called by SimObject.set_pose() when movement is detected.
-        
+
         Args:
             object_id: The object_id that moved
         """
         self._moved_this_step.add(object_id)
         logger.debug(f"Object {object_id} marked as moved")
-    
+
     def _update_object_aabb(self, object_id: int) -> None:
         """
         Update AABB for a single object immediately.
         Also updates spatial grid if cell_size is initialized.
-        
+
         Called when kinematic objects move or physics objects are updated.
-        
+
         Args:
             object_id: The object_id to update
         """
@@ -595,22 +598,22 @@ class MultiRobotSimulationCore:
         if obj is None:
             logger.warning(f"Cannot update AABB for object {object_id}: object not found")
             return
-        
+
         try:
             self._cached_aabbs_dict[object_id] = p.getAABB(obj.body_id)
             logger.debug(f"Updated AABB for object {object_id}")
-            
+
             # Also update spatial grid if cell_size is initialized
             if self._cached_cell_size is not None:
                 self._update_object_spatial_grid(object_id)
         except p.error:
             logger.warning(f"Failed to update AABB for object {object_id} (body {obj.body_id})")
-    
+
     def _remove_object_aabb(self, object_id: int) -> None:
         """
         Remove AABB and spatial grid entry for an object.
         Used when objects become static (no longer need collision tracking).
-        
+
         Args:
             object_id: The object_id to remove from AABB cache
         """
@@ -618,31 +621,31 @@ class MultiRobotSimulationCore:
         if object_id in self._cached_aabbs_dict:
             self._cached_aabbs_dict.pop(object_id)
             logger.debug(f"Removed object {object_id} from AABB cache")
-        
+
         # Remove from spatial grid using unified method
         self._update_object_spatial_grid(object_id, remove_only=True)
-    
+
     def _update_object_spatial_grid(self, object_id: int, remove_only: bool = False) -> None:
         """
         Update an object's position in the spatial grid.
-        
+
         This unified method handles:
         - Initial addition: old_cell=None → add to new cell
         - Movement update: old_cell exists → remove from old, add to new
         - Removal: remove_only=True → remove from current cell only
-        
+
         Args:
             object_id: The object_id to update in spatial grid
             remove_only: If True, only remove from grid without adding to new cell
                         Used when objects become static or are deleted
-        
+
         Example:
             # First time (add)
             sim._update_object_spatial_grid(obj_id)  # Adds to grid
-            
+
             # After movement (update)
             sim._update_object_spatial_grid(obj_id)  # Removes from old cell, adds to new
-            
+
             # Remove from grid
             sim._update_object_spatial_grid(obj_id, remove_only=True)  # Only removes
         """
@@ -655,13 +658,13 @@ class MultiRobotSimulationCore:
                 if not self._cached_spatial_grid[old_cell]:
                     del self._cached_spatial_grid[old_cell]
             del self._cached_object_to_cell[object_id]
-        
+
         # If remove_only, skip addition and return
         if remove_only:
             if old_cell is not None:
                 logger.debug(f"Removed object {object_id} from spatial grid cell {old_cell}")
             return
-        
+
         # For add/update: ensure AABB exists
         if object_id not in self._cached_aabbs_dict:
             obj = self._sim_objects_dict.get(object_id)
@@ -672,18 +675,18 @@ class MultiRobotSimulationCore:
             if object_id not in self._cached_aabbs_dict:
                 logger.warning(f"Cannot update spatial grid for object {object_id}: AABB update failed")
                 return
-        
+
         if self._cached_cell_size is None:
             return
-        
+
         # Calculate new cell and add object
         aabb = self._cached_aabbs_dict[object_id]
         center = [0.5 * (aabb[0][d] + aabb[1][d]) for d in range(3)]
         cell = tuple(int(center[d] // self._cached_cell_size) for d in range(3))
-        
+
         self._cached_object_to_cell[object_id] = cell
         self._cached_spatial_grid.setdefault(cell, set()).add(object_id)
-        
+
         # Log appropriate message based on whether this is add or update
         if old_cell is None:
             logger.debug(f"Added object {object_id} to spatial grid cell {cell}")
@@ -693,44 +696,44 @@ class MultiRobotSimulationCore:
     def _register_object_movement_type(self, obj: SimObject) -> None:
         """
         Register an object's movement type for optimization.
-        
+
         Args:
             obj: The SimObject instance to register
         """
         object_id = obj.object_id
-        
+
         # Check if object is marked as static
         if obj.is_static:
             self._static_objects.add(object_id)
             logger.debug(f"Object {object_id} registered as static")
         else:
             # Determine if object has physics enabled (can move via collisions)
-            is_physics = (obj.mass > 0 and not obj.is_kinematic)
-            
+            is_physics = obj.mass > 0 and not obj.is_kinematic
+
             if is_physics:
                 self._physics_objects.add(object_id)
                 logger.debug(f"Object {object_id} registered as physics-enabled")
             else:
                 self._kinematic_objects.add(object_id)
                 logger.debug(f"Object {object_id} registered as kinematic")
-    
+
     def _update_collision_mode_cache(self, obj: SimObject) -> None:
         """
         Update cached collision mode for an object.
         Automatically manages non-static dict based on object's static status.
-        
+
         Called when:
         - Object is added to simulation
         - Object's collision_check_2d is changed
         - Object's static status changes (register/unregister_static_object)
-        
+
         Args:
             obj: The SimObject instance
         """
         object_id = obj.object_id
         mode = obj.collision_check_2d if obj.collision_check_2d is not None else self.params.collision_check_2d
         self._cached_collision_modes[object_id] = mode
-        
+
         # Manage non-static dict based on object's static status
         if obj.is_static:
             # Object is static - remove from non-static dict if present
@@ -741,37 +744,35 @@ class MultiRobotSimulationCore:
             # Object is non-static - add/update in non-static dict
             self._cached_non_static_dict[object_id] = (obj, mode)
             logger.debug(f"Updated non-static object {object_id} in cache")
-        
+
         logger.debug(f"Collision mode for object {object_id}: {'2D' if mode else '3D'}, static={obj.is_static}")
 
     def set_collision_spatial_hash_cell_size_mode(
-        self, 
-        mode: Optional[SpatialHashCellSizeMode] = None,
-        cell_size: Optional[float] = None
+        self, mode: Optional[SpatialHashCellSizeMode] = None, cell_size: Optional[float] = None
     ) -> Optional[float]:
         """
         Set collision detection spatial hash cell size mode and recalculate/rebuild grid.
-        
+
         This method allows dynamic mode switching and always recalculates the cell_size
         based on the spatial_hash_cell_size_mode setting (or override via parameters).
-        
+
         Args:
             mode: Override spatial_hash_cell_size_mode for this calculation (optional)
             cell_size: Override spatial_hash_cell_size when mode=CONSTANT (optional)
-        
+
         Returns:
             The calculated cell_size, or None if no AABBs are available
-        
+
         Example:
             # Recalculate with current mode
             sim_core.set_collision_spatial_hash_cell_size_mode()
-            
+
             # Switch to constant mode with specific size
             sim_core.set_collision_spatial_hash_cell_size_mode(
                 mode=SpatialHashCellSizeMode.CONSTANT,
                 cell_size=3.0
             )
-            
+
             # Switch to auto_adaptive mode
             sim_core.set_collision_spatial_hash_cell_size_mode(
                 mode=SpatialHashCellSizeMode.AUTO_ADAPTIVE
@@ -782,11 +783,11 @@ class MultiRobotSimulationCore:
             old_mode = self.params.spatial_hash_cell_size_mode
             self.params.spatial_hash_cell_size_mode = mode
             logger.debug(f"Updated mode: {old_mode} -> {mode}")
-        
+
         if cell_size is not None:
             old_size = self.params.spatial_hash_cell_size
             self.params.spatial_hash_cell_size = cell_size
-            
+
             # Warn if cell_size is provided but mode is not CONSTANT
             current_mode = self.params.spatial_hash_cell_size_mode
             if current_mode != SpatialHashCellSizeMode.CONSTANT:
@@ -796,10 +797,10 @@ class MultiRobotSimulationCore:
                 )
             else:
                 logger.debug(f"Updated cell_size: {old_size} -> {cell_size}")
-        
+
         mode = self.params.spatial_hash_cell_size_mode
         old_cell_size = self._cached_cell_size
-        
+
         # Calculate cell_size based on mode
         if mode == SpatialHashCellSizeMode.CONSTANT:
             # CONSTANT mode: use user-provided value
@@ -813,7 +814,7 @@ class MultiRobotSimulationCore:
                 cell_size = self.params.spatial_hash_cell_size
             self._cached_cell_size = cell_size
             logger.info(f"Collision spatial hash: Using constant cell size: {cell_size:.3f}m")
-        
+
         elif mode in [SpatialHashCellSizeMode.AUTO_ADAPTIVE, SpatialHashCellSizeMode.AUTO_INITIAL]:
             # AUTO modes: Calculate from median AABB extent
             cell_size = self._calculate_cell_size_from_aabbs()
@@ -831,27 +832,27 @@ class MultiRobotSimulationCore:
             logger.error(f"Unknown spatial_hash_cell_size_mode: {mode}, using default 1.0m")
             cell_size = 1.0
             self._cached_cell_size = cell_size
-        
+
         # Rebuild spatial grid with new cell_size
         self._rebuild_spatial_grid()
-        
+
         return cell_size
 
     def add_object(self, obj: SimObject) -> None:
         """
         Add an object to simulation and register it with all necessary caches.
-        
+
         This method centralizes object registration logic for consistency and maintainability.
         Called automatically by SimObject.__init__() when sim_core is provided.
-        
+
         Args:
             obj: The SimObject instance to add
-        
+
         Example:
             # Manual addition (not recommended - SimObject does this automatically)
             obj = SimObject(body_id=body_id, sim_core=None)
             sim_core.add_object(obj)
-            
+
             # Automatic addition (recommended)
             obj = SimObject(body_id=body_id, sim_core=sim_core)  # Calls add_object() internally
         """
@@ -859,33 +860,33 @@ class MultiRobotSimulationCore:
         if obj in self.sim_objects:
             logger.warning(f"Object {obj.object_id} already added to simulation")
             return
-        
+
         self.sim_objects.append(obj)
         self._sim_objects_dict[obj.object_id] = obj
-        
+
         # Update collision mode cache (also handles list cache updates)
         self._update_collision_mode_cache(obj)
-        
+
         # Register movement type based on object properties
         self._register_object_movement_type(obj)
-        
+
         # Update AABB immediately for newly added object
         # This eliminates the need for safety fallback in filter_aabb_pairs()
         self._update_object_aabb(obj.object_id)
-        
+
         # Trigger cell_size recalculation in auto_adaptive mode
         if self.params.spatial_hash_cell_size_mode == SpatialHashCellSizeMode.AUTO_ADAPTIVE:
             self.set_collision_spatial_hash_cell_size_mode()
-        
+
         # Add to spatial grid if cell_size is initialized
         # Note: cell_size is calculated on first filter_aabb_pairs() call
         if self._cached_cell_size is not None:
             self._update_object_spatial_grid(obj.object_id)
-        
+
         # Mark as moved for initial collision check
         # In ignore_static mode, static-static pairs won't be checked (handled in filter logic)
         self._moved_this_step.add(obj.object_id)
-        
+
         # Save original color once when object is added (for collision visualization)
         if obj.body_id not in self._robot_original_colors:
             try:
@@ -897,69 +898,65 @@ class MultiRobotSimulationCore:
                     self._robot_original_colors[obj.body_id] = [0.0, 0.0, 0.0, 1.0]
             except (p.error, IndexError):
                 self._robot_original_colors[obj.body_id] = [0.0, 0.0, 0.0, 1.0]
-        
+
         logger.debug(f"Added object {obj.object_id} (body {obj.body_id}) to simulation")
 
     def remove_object(self, obj: SimObject) -> None:
         """
         Remove an object from simulation and clean up all caches.
-        
+
         Args:
             obj: The SimObject instance to remove
-        
+
         Example:
             obj = sim_core.spawn_robot(...)
             # ... later ...
             sim_core.remove_object(obj)
         """
         obj_id = obj.object_id
-        
+
         # Remove from sim_objects list and dict
         try:
             self.sim_objects.remove(obj)
         except ValueError:
             logger.warning(f"Object {obj_id} not found in sim_objects")
             return
-        
+
         self._sim_objects_dict.pop(obj_id, None)
-        
+
         # Remove from movement tracking sets
         self._moved_this_step.discard(obj_id)
         self._physics_objects.discard(obj_id)
         self._kinematic_objects.discard(obj_id)
         self._static_objects.discard(obj_id)
-        
+
         # Remove from collision mode cache
         self._cached_collision_modes.pop(obj_id, None)
-        
+
         # Remove from AABB cache
         self._cached_aabbs_dict.pop(obj_id, None)
-        
+
         # Remove from spatial grid using unified method
         self._update_object_spatial_grid(obj_id, remove_only=True)
-        
+
         # Remove from non-static dict (O(1) dict removal)
         self._cached_non_static_dict.pop(obj_id, None)
-        
+
         # Remove from active collision pairs
-        self._active_collision_pairs = {
-            (i, j) for i, j in self._active_collision_pairs 
-            if i != obj_id and j != obj_id
-        }
-        
+        self._active_collision_pairs = {(i, j) for i, j in self._active_collision_pairs if i != obj_id and j != obj_id}
+
         # Remove PyBullet body
         if obj.body_id is not None:
             try:
                 p.removeBody(obj.body_id)
             except p.error:
                 logger.warning(f"Failed to remove PyBullet body {obj.body_id}")
-        
+
         # Trigger cell_size recalculation in auto_adaptive mode
         if self.params.spatial_hash_cell_size_mode == SpatialHashCellSizeMode.AUTO_ADAPTIVE:
             self.set_collision_spatial_hash_cell_size_mode()
-        
-        logger.info(f"Removed object {obj_id} (body {obj.body_id}) from simulation")
 
+        logger.info(f"Removed object {obj_id} (body {obj.body_id}) from simulation")
 
     def configure_visualizer(
         self,
@@ -1164,10 +1161,10 @@ class MultiRobotSimulationCore:
 
         # Apply alpha only to static bodies using pre-saved colors (FAST)
         # Convert object_ids to body_ids for visual shape manipulation
-        static_body_ids = {self._sim_objects_dict[obj_id].body_id 
-                          for obj_id in self._static_objects 
-                          if obj_id in self._sim_objects_dict}
-        
+        static_body_ids = {
+            self._sim_objects_dict[obj_id].body_id for obj_id in self._static_objects if obj_id in self._sim_objects_dict
+        }
+
         processed = 0
         for key, rgba in self._original_visual_colors.items():
             body_id, link_index = key
@@ -1264,32 +1261,34 @@ class MultiRobotSimulationCore:
         return [p.getAABB(obj.body_id) for obj in self.sim_objects]
 
     def filter_aabb_pairs(
-        self, ignore_static: Optional[bool] = None, return_profiling: bool = False
+        self, ignore_static: Optional[bool] = None, moved_objects: Optional[Set[int]] = None, return_profiling: bool = False
     ) -> Tuple[List[Tuple[int, int]], Optional[Dict[str, float]]]:
         """
         Filter AABB pairs for collision detection with moved-based optimization.
-        Only checks pairs involving objects in moved_this_step.
-        
+        Only checks pairs involving moved objects.
+
         Args:
             ignore_static: If True, skip collision checks with static objects
+            moved_objects: Set of object IDs that moved since last check.
+                          If None, uses self._moved_this_step (default behavior)
             return_profiling: If True, include timing information in return value
-        
+
         Returns:
             Tuple of (pairs, timings):
             - pairs: List of (obj_id_i, obj_id_j) tuples for candidate collision pairs
             - timings: dict with get_aabbs, spatial_hashing, aabb_filtering (in ms) if return_profiling=True, else None
-        
+
         Example:
             # Without profiling
             pairs, _ = sim.filter_aabb_pairs()
-            
+
             # With profiling
             pairs, timings = sim.filter_aabb_pairs(return_profiling=True)
             print(f"AABB filtering took {timings['total']:.2f}ms")
         """
         # Profiling timings (always create dict for consistent return type)
         timings: Dict[str, float] = {}
-        
+
         if ignore_static is None:
             ignore_static = self.ignore_static_collision
 
@@ -1303,17 +1302,17 @@ class MultiRobotSimulationCore:
             # Clear existing collision pairs (will be recalculated with new filter rules)
             self._active_collision_pairs.clear()
             logger.debug(f"ignore_static mode changed to {ignore_static}, resetting collision state and marking all as moved")
-        
+
         # Update last mode (do this after the check)
         self._last_ignore_static = ignore_static
 
         # 2. Incremental AABB update
         if return_profiling:
             t0 = time.perf_counter()
-        
+
         # AABB cache is maintained incrementally by:
         # - add_object(): updates AABB for new objects
-        # - remove_object(): removes AABB for deleted objects  
+        # - remove_object(): removes AABB for deleted objects
         # - set_pose(): updates AABB for kinematic objects when moved
         # - step_once(): updates AABB for physics objects after physics step
         # Only rebuild if cache was explicitly invalidated (mode change)
@@ -1324,97 +1323,101 @@ class MultiRobotSimulationCore:
                 self._cached_aabbs_dict[obj.object_id] = p.getAABB(obj.body_id)
             # Mark cache as valid after update
             self._aabb_cache_valid = True
-        
+
         if return_profiling:
             timings["get_aabbs"] = (time.perf_counter() - t0) * 1000  # ms
 
         # 3. Cell size calculation and spatial grid initialization
         if return_profiling:
             t0 = time.perf_counter()
-        
+
         # Initialize collision spatial hash if not yet initialized
         if self._cached_cell_size is None:
             self.set_collision_spatial_hash_cell_size_mode()
-        
+
         # Spatial grid is now maintained incrementally by:
         # - add_object(): adds new objects to grid
         # - remove_object(): removes objects from grid
         # - set_pose(): updates kinematic objects' grid cells
         # - step_once(): updates physics objects' grid cells
         # Initial construction is handled above when cell_size is first calculated
-        
+
         if return_profiling:
             timings["spatial_hashing"] = (time.perf_counter() - t0) * 1000  # ms
-        
+
         # 4. AABB overlap filtering (OPTIMIZED: only check pairs involving moved objects)
         if return_profiling:
             t0 = time.perf_counter()
-        
+
+        # Use provided moved_objects or default to self._moved_this_step
+        if moved_objects is None:
+            moved_objects = self._moved_this_step
+
         pairs = set()
         processed_pairs = set()  # Track (obj_id_i, obj_id_j) to avoid duplicates
-        
+
         # OPTIMIZATION: Only iterate through moved objects instead of all objects
         # This dramatically reduces computation when few objects move (e.g., 10 moved out of 1000 total)
-        for obj_id_i in self._moved_this_step:
+        for obj_id_i in moved_objects:
             obj_i = self._sim_objects_dict.get(obj_id_i)
             if obj_i is None:
                 continue
-            
+
             # Skip static objects in ignore_static mode
             # Note: In most cases, moved_this_step won't contain static objects,
             # but they may be added during spawn or mode changes
             if ignore_static and obj_id_i in self._static_objects:
                 continue
-            
+
             # Get cell for this moved object
             cell_i = self._cached_object_to_cell.get(obj_id_i)
             if cell_i is None:
                 continue
-            
+
             use_2d_i = self._cached_collision_modes.get(obj_id_i, False)
             aabb_i = self._cached_aabbs_dict.get(obj_id_i)
             if aabb_i is None:
                 continue
-            
+
             # Choose appropriate neighbor offsets based on collision mode (2D: 9 neighbors, 3D: 27 neighbors)
             offsets = self._NEIGHBOR_OFFSETS_2D if use_2d_i else self._NEIGHBOR_OFFSETS_3D
-            
+
             # Check neighbors in same and adjacent cells
             for offset in offsets:
                 neighbor_cell = (cell_i[0] + offset[0], cell_i[1] + offset[1], cell_i[2] + offset[2])
-                
+
                 for obj_id_j in self._cached_spatial_grid.get(neighbor_cell, set()):
                     # Skip self-pairs
                     if obj_id_j == obj_id_i:
                         continue
-                    
+
                     # Skip if j is static in ignore_static mode
                     if ignore_static and obj_id_j in self._static_objects:
                         continue
-                    
+
                     # Create sorted pair to avoid duplicates (i < j)
                     pair_key = (min(obj_id_i, obj_id_j), max(obj_id_i, obj_id_j))
-                    
+
                     # Skip already processed pairs
                     if pair_key in processed_pairs:
                         continue
                     processed_pairs.add(pair_key)
-                    
+
                     obj_j = self._sim_objects_dict.get(obj_id_j)
                     if obj_j is None:
                         continue
-                    
+
                     use_2d_j = self._cached_collision_modes.get(obj_id_j, False)
-                    
+
                     # Skip this pair if object j uses 2D mode and offset has Z component
                     if use_2d_j and offset[2] != 0:
                         continue
-                    
+
                     # AABB overlap test
                     aabb_j = self._cached_aabbs_dict.get(obj_id_j)
                     if aabb_j is None:
                         continue
-                    
+
                     # Check if AABBs overlap (continue if NO overlap)
                     if (
                         aabb_i[1][0] < aabb_j[0][0]
@@ -1425,10 +1428,10 @@ class MultiRobotSimulationCore:
                         or aabb_i[0][2] > aabb_j[1][2]
                     ):
                         continue  # No overlap, skip this pair
-                    
+
                     # AABBs overlap - add to candidate pairs
                     pairs.add(pair_key)
-        
+
         if return_profiling:
             timings["aabb_filtering"] = (time.perf_counter() - t0) * 1000  # ms
             return list(pairs), timings
@@ -1436,38 +1439,46 @@ class MultiRobotSimulationCore:
             return list(pairs), None
 
     def check_collisions(
-        self, collision_color: Optional[List[float]] = None, ignore_static: Optional[bool] = None, 
-        return_profiling: bool = False
+        self,
+        collision_color: Optional[List[float]] = None,
+        ignore_static: Optional[bool] = None,
+        return_profiling: bool = False,
     ) -> Tuple[List[Tuple[int, int]], Optional[Dict[str, float]]]:
         """
         Check for collisions between robots using incremental updates.
-        
+
         Only re-checks collision pairs involving moved objects for efficiency.
         Maintains _active_collision_pairs as persistent state.
-        
+
         Args:
             collision_color: RGB color for collision visualization
             ignore_static: If True, ignore structure collisions
             return_profiling: If True, include timing information in return value
-        
+
         Returns:
             Tuple of (pairs, timings):
             - pairs: List of currently active collision pairs (obj_id_i, obj_id_j)
             - timings: dict with get_aabbs, spatial_hashing, aabb_filtering, contact_points, total (in ms) if return_profiling=True, else None
-        
+
         Example:
             # Without profiling
             active_pairs, _ = sim.check_collisions()
-            
+
             # With profiling
             active_pairs, timings = sim.check_collisions(return_profiling=True)
             print(f"Collision check took {timings['total']:.2f}ms")
         """
         t0 = time.perf_counter()
-        
+
         # Profiling timings (always create dict for consistent return type)
         timings: Dict[str, float] = {}
-        
+
+        # Clear movement tracking from previous collision check
+        # This accumulates all movements since the last collision check,
+        # which is important when collision_check_frequency < step_frequency
+        moved_since_last_check = self._moved_this_step.copy()
+        self._moved_this_step.clear()
+
         if collision_color is None:
             collision_color = self.collision_color
         collision_pairs = []
@@ -1479,25 +1490,26 @@ class MultiRobotSimulationCore:
 
         try:
             # Get candidate pairs (moved-based optimization)
+            # Pass moved_since_last_check as argument instead of using self._moved_this_step
             if return_profiling:
                 candidate_pairs, filter_timings = self.filter_aabb_pairs(
-                    ignore_static=ignore_static, return_profiling=True
+                    ignore_static=ignore_static, moved_objects=moved_since_last_check, return_profiling=True
                 )
                 if filter_timings:
                     timings.update(filter_timings)
             else:
                 candidate_pairs, _ = self.filter_aabb_pairs(
-                    ignore_static=ignore_static, return_profiling=False
+                    ignore_static=ignore_static, moved_objects=moved_since_last_check, return_profiling=False
                 )
-            
+
             if return_profiling:
                 t_contact0 = time.perf_counter()
-            
+
             # --- Incremental collision detection ---
             # candidate_pairs already contains only pairs involving moved objects (filtered in filter_aabb_pairs)
             # We just need to add existing collision pairs for resolution detection
             pairs_to_check = set(candidate_pairs)
-            
+
             # Also re-check existing collision pairs involving moved objects
             # (to detect when collisions are resolved)
             # Skip static-static pairs (they never change after initial check)
@@ -1505,48 +1517,46 @@ class MultiRobotSimulationCore:
                 # Skip if both objects are static (no need to re-check)
                 if obj_id_i in self._static_objects and obj_id_j in self._static_objects:
                     continue
-                
+
                 # Re-check if at least one object moved
-                if obj_id_i in self._moved_this_step or obj_id_j in self._moved_this_step:
+                if obj_id_i in moved_since_last_check or obj_id_j in moved_since_last_check:
                     pairs_to_check.add((obj_id_i, obj_id_j))
-            
+
             # Check contact points for all pairs
             new_collisions = set()
             resolved_collisions = set()
-            
+
             for obj_id_i, obj_id_j in pairs_to_check:
                 obj_i = self._sim_objects_dict.get(obj_id_i)
                 obj_j = self._sim_objects_dict.get(obj_id_j)
                 if obj_i is None or obj_j is None:
                     continue
-                
+
                 # Select collision detection method based on configuration
                 has_collision = False
-                
+
                 if self.params.collision_detection_method == CollisionDetectionMethod.CONTACT_POINTS:
                     # Method 1: getContactPoints (physics mode, actual contact manifold)
                     # Best for: physics simulation, requires stepSimulation()
                     # Note: May be unstable for kinematic-kinematic pairs
                     contact_points = p.getContactPoints(obj_i.body_id, obj_j.body_id)
                     has_collision = len(contact_points) > 0
-                    
+
                 elif self.params.collision_detection_method == CollisionDetectionMethod.CLOSEST_POINTS:
                     # Method 2: getClosestPoints (kinematics mode, distance-based)
                     # Best for: kinematics motion, safety margin detection
                     # Works with: Physics ON/OFF, stable with resetBasePositionAndOrientation
                     closest_points = p.getClosestPoints(
-                        obj_i.body_id, 
-                        obj_j.body_id, 
-                        distance=self.params.collision_margin  # Safety clearance
+                        obj_i.body_id, obj_j.body_id, distance=self.params.collision_margin  # Safety clearance
                     )
                     has_collision = len(closest_points) > 0
-                    
+
                 elif self.params.collision_detection_method == CollisionDetectionMethod.HYBRID:
                     # Method 3: Hybrid (physics uses getContactPoints, kinematic uses getClosestPoints)
                     # Best for: Mixed physics/kinematics with different detection needs
                     is_physics_i = obj_id_i in self._physics_objects
                     is_physics_j = obj_id_j in self._physics_objects
-                    
+
                     if is_physics_i or is_physics_j:
                         # At least one is physics object - use getContactPoints
                         contact_points = p.getContactPoints(obj_i.body_id, obj_j.body_id)
@@ -1554,35 +1564,37 @@ class MultiRobotSimulationCore:
                     else:
                         # Both are kinematic - use getClosestPoints with safety margin
                         closest_points = p.getClosestPoints(
-                            obj_i.body_id, 
-                            obj_j.body_id, 
-                            distance=self.params.collision_margin
+                            obj_i.body_id, obj_j.body_id, distance=self.params.collision_margin
                         )
                         has_collision = len(closest_points) > 0
-                
+
                 pair = (obj_id_i, obj_id_j)
-                
+
                 if has_collision:
                     # Collision detected
                     if pair not in self._active_collision_pairs:
                         # New collision
                         new_collisions.add(pair)
                         self._active_collision_pairs.add(pair)
-                        logger.info(f"NEW COLLISION: object {obj_id_i} (body {obj_i.body_id}) <-> object {obj_id_j} (body {obj_j.body_id})")
+                        logger.info(
+                            f"NEW COLLISION: object {obj_id_i} (body {obj_i.body_id}) <-> object {obj_id_j} (body {obj_j.body_id})"
+                        )
                 else:
                     # No collision
                     if pair in self._active_collision_pairs:
                         # Collision resolved
                         resolved_collisions.add(pair)
                         self._active_collision_pairs.discard(pair)
-                        logger.info(f"COLLISION RESOLVED: object {obj_id_i} (body {obj_i.body_id}) <-> object {obj_id_j} (body {obj_j.body_id})")
-            
+                        logger.info(
+                            f"COLLISION RESOLVED: object {obj_id_i} (body {obj_i.body_id}) <-> object {obj_id_j} (body {obj_j.body_id})"
+                        )
+
             if return_profiling:
                 timings["contact_points"] = (time.perf_counter() - t_contact0) * 1000  # ms
-            
+
             # Update collision count (track total new collisions)
             self.collision_count += len(new_collisions)
-            
+
             # Color update (collision: blue, normal: original) only if enabled
             if self.params.enable_collision_color_change:
                 # Get all currently colliding objects
@@ -1590,14 +1602,14 @@ class MultiRobotSimulationCore:
                 for obj_id_i, obj_id_j in self._active_collision_pairs:
                     currently_colliding.add(obj_id_i)
                     currently_colliding.add(obj_id_j)
-                
+
                 # Update colors for new collisions (set to collision_color)
                 for obj_id_i, obj_id_j in new_collisions:
                     for obj_id in (obj_id_i, obj_id_j):
                         obj = self._sim_objects_dict.get(obj_id)
                         if obj is not None:
                             p.changeVisualShape(obj.body_id, -1, rgbaColor=collision_color)
-                
+
                 # Update colors for resolved collisions (restore original color)
                 # Only restore if object is not involved in any other collision
                 for obj_id_i, obj_id_j in resolved_collisions:
@@ -1607,7 +1619,7 @@ class MultiRobotSimulationCore:
                             if obj is not None:
                                 orig_color = self._robot_original_colors.get(obj.body_id, [0, 0, 0, 1])
                                 p.changeVisualShape(obj.body_id, -1, rgbaColor=orig_color)
-            
+
         except p.error:
             # PyBullet disconnected, skip collision checking
             pass
@@ -1617,20 +1629,20 @@ class MultiRobotSimulationCore:
             return list(self._active_collision_pairs), timings
         else:
             return list(self._active_collision_pairs), None
-    
+
     def get_active_collision_pairs(self) -> List[Tuple[int, int]]:
         """
         Get currently active collision pairs.
-        
+
         Returns:
             List of (object_id_i, object_id_j) tuples for all active collisions.
             Pairs are sorted such that object_id_i < object_id_j.
-        
+
         Example:
             # Check if any collisions are active
             if sim_core.get_active_collision_pairs():
                 print("Collisions detected!")
-            
+
             # Get detailed collision info
             for obj_id_i, obj_id_j in sim_core.get_active_collision_pairs():
                 obj_i = sim_core._sim_objects_dict[obj_id_i]
@@ -1689,20 +1701,20 @@ class MultiRobotSimulationCore:
     def initialize_simulation(self) -> None:
         """
         Initialize simulation state before running.
-        
+
         This method prepares the simulation for execution by:
         - Resetting simulation counters (step_count, collision_count, sim_time)
         - Clearing movement tracking state
         - Configuring visualizer settings (transparency, collision shapes)
         - Enabling rendering for GUI mode
-        
+
         Called automatically by run_simulation(), but can also be called manually
         for custom simulation loops or when restarting simulation.
-        
+
         Example:
             # Automatic (recommended)
             sim.run_simulation(duration=10.0)
-            
+
             # Manual initialization for custom loop
             sim.initialize_simulation()
             while custom_condition:
@@ -1716,50 +1728,50 @@ class MultiRobotSimulationCore:
         self.last_collision_check = 0.0
         self.last_monitor_update = 0.0
         self._last_logged_collision_count = 0
-        
+
         # Clear movement tracking from any previous simulation
         self._moved_this_step.clear()
-        
+
         # Clear active collision pairs (fresh start)
         self._active_collision_pairs.clear()
-        
+
         # Configure visualizer after all objects are spawned
         # This ensures transparency and other visual settings are applied correctly
         self.configure_visualizer()
-        
+
         # Enable rendering before starting simulation
         self.enable_rendering()
-        
+
         logger.info(f"Simulation initialized: {len(self.sim_objects)} objects, timestep={self.params.timestep}s")
 
     def run_simulation(self, duration: Optional[float] = None) -> None:
         """
         Run the simulation for a specified duration.
-        
+
         Args:
             duration: Simulation duration in seconds (simulation time, not real time).
                      If None, uses self.params.duration. If duration <= 0, runs indefinitely.
-        
+
         Example:
             # Run for 10 seconds (simulation time)
             sim.run_simulation(duration=10.0)
-            
+
             # Run indefinitely (until Ctrl+C or GUI closed)
             sim.run_simulation(duration=0)
         """
         if duration is None:
             duration = self.params.duration
-        
+
         # Initialize simulation state (counters, visualizer, rendering)
         self.initialize_simulation()
-        
+
         try:
             start_time = time.time()
             last_step_process_time = 0.0  # Track processing time excluding sleep
 
             while True:
                 current_sim_time = self.step_count * self.params.timestep
-                
+
                 # Check duration based on simulation time (not real time)
                 if duration > 0 and current_sim_time >= duration:
                     break
@@ -1785,7 +1797,7 @@ class MultiRobotSimulationCore:
                     time_diff = target_sim_time - current_sim_time
 
                     actual_sleep = 0.0
-                    
+
                     if time_diff > 0:
                         # Behind target: execute multiple steps to catch up
                         steps_needed = int(time_diff / self.params.timestep)
@@ -1881,13 +1893,12 @@ class MultiRobotSimulationCore:
         if self._simulation_paused:
             return
 
-        # Clear movement tracking from previous step
-        self._moved_this_step.clear()
-        
         # Physics objects are always considered as potentially moved (conservative approach)
         # This avoids expensive pose comparison every step
+        # Note: _moved_this_step is cleared in check_collisions() to accumulate movements
+        # across multiple steps when collision_check_frequency < step_frequency
         self._moved_this_step.update(self._physics_objects)
-        
+
         # Update AABBs and spatial grid for physics objects immediately after physics step (batch operation)
         # Kinematic objects update their AABBs and spatial grid in set_pose() for immediate consistency
         for obj_id in self._physics_objects:
@@ -1993,12 +2004,12 @@ class MultiRobotSimulationCore:
         # Return profiling data if requested
         if return_profiling:
             return {
-                'agent_update': 1000 * (t1 - t0),  # type: ignore[possibly-unbound]
-                'callbacks': 1000 * (t_cb1 - t_cb0),  # type: ignore[possibly-unbound]
-                'step_simulation': 1000 * (t_sim1 - t_sim0),  # type: ignore[possibly-unbound]
-                'collision_check': 1000 * (t_col1 - t_col0),  # type: ignore[possibly-unbound]
-                'monitor_update': 1000 * (t_mon1 - t_mon0),  # type: ignore[possibly-unbound]
-                'total': 1000 * (t_end - t_step),  # type: ignore[possibly-unbound]
+                "agent_update": 1000 * (t1 - t0),  # type: ignore[possibly-unbound]
+                "callbacks": 1000 * (t_cb1 - t_cb0),  # type: ignore[possibly-unbound]
+                "step_simulation": 1000 * (t_sim1 - t_sim0),  # type: ignore[possibly-unbound]
+                "collision_check": 1000 * (t_col1 - t_col0),  # type: ignore[possibly-unbound]
+                "monitor_update": 1000 * (t_mon1 - t_mon0),  # type: ignore[possibly-unbound]
+                "total": 1000 * (t_end - t_step),  # type: ignore[possibly-unbound]
             }
 
         # Profiling output (only when profiling is enabled and not returning data)
@@ -2016,7 +2027,7 @@ class MultiRobotSimulationCore:
                         f"AABBFilter={collision_timings.get('aabb_filtering', 0):.2f}ms, "
                         f"ContactPts={collision_timings.get('contact_points', 0):.2f}ms]"
                     )
-                
+
                 logger.debug(
                     f"[PROFILE] step {self.step_count}: "
                     f"Agent.update={1000*(t1-t0):.2f}ms, "  # type: ignore[possibly-unbound]
