@@ -6,9 +6,10 @@ collision_method_comparison.py
 概要:
     複数の衝突検出手法を比較します：
     1. Spatial Hashing (Current): 空間分割 + AABB filtering + getContactPoints
-    2. Brute Force: 全ペア総当たり + getContactPoints
+    2. Brute Force AABB: 全ペア総当たり + AABB overlap + getContactPoints
     3. PyBullet getClosestPoints: PyBullet標準のgetClosestPoints API
-    4. PyBullet getContactPoints (all pairs): 全ペアでgetContactPoints呼び出し
+    4. getContactPoints() [No Args]: 引数なしで全衝突を一括取得
+    5. getContactPoints(A,B) [Pairwise]: 全ペアで個別にgetContactPoints呼び出し
 
 各手法の特徴:
     Spatial Hashing (Current):
@@ -17,9 +18,9 @@ collision_method_comparison.py
         - 最終的に getContactPoints で正確な衝突判定
         - 大規模シミュレーション向け
     
-    Brute Force:
+    Brute Force AABB:
         - O(N²) すべてのペアをチェック
-        - AABB filtering なし
+        - AABB overlap check を実施
         - 小規模シミュレーション (<100 objects) では高速
         - シンプルな実装
     
@@ -28,17 +29,23 @@ collision_method_comparison.py
         - 距離閾値を指定可能
         - 正確だが全ペアチェックが必要
     
-    PyBullet getContactPoints (all pairs):
-        - PyBullet の標準的な衝突判定
+    getContactPoints() [No Args]:
+        - 引数なしで呼び出し、すべての接触点を一括取得
+        - PyBullet内部で管理されている全衝突情報を取得
+        - API呼び出し回数が1回で済む（最も効率的な可能性）
+        - O(1) API calls
+    
+    getContactPoints(A,B) [Pairwise]:
+        - 全ペアで個別にgetContactPoints呼び出し
         - 最も信頼性が高い
-        - 全ペアチェックで O(N²)
+        - 全ペアチェックで O(N²) API calls
 
 使い方:
     # すべての手法を比較
     python collision_method_comparison.py --agents=100,500,1000 --methods=all
     
-    # 特定の手法のみ
-    python collision_method_comparison.py --agents=1000 --methods=spatial,brute
+    # 特定の手法のみ（引数なし版との比較）
+    python collision_method_comparison.py --agents=1000 --methods=spatial,contact,pairwise
     
     # 詳細プロファイリング付き
     python collision_method_comparison.py --agents=1000 --profile
@@ -173,7 +180,7 @@ def method_spatial_hashing(sim_core) -> Tuple[List, float]:
 
 
 def method_brute_force(sim_core) -> Tuple[List, float]:
-    """Method 2: Brute Force (all pairs with getContactPoints)"""
+    """Method 2: Brute Force AABB (all pairs with AABB overlap check)"""
     t0 = time.perf_counter()
     
     collision_pairs = []
@@ -181,9 +188,19 @@ def method_brute_force(sim_core) -> Tuple[List, float]:
     
     for i in range(len(objects)):
         for j in range(i + 1, len(objects)):
-            contact_points = p.getContactPoints(objects[i].body_id, objects[j].body_id)
-            if contact_points:
-                collision_pairs.append((i, j))
+            # AABB overlap check
+            aabb_a = p.getAABB(objects[i].body_id)
+            aabb_b = p.getAABB(objects[j].body_id)
+            
+            # Check AABB overlap
+            if (aabb_a[0][0] <= aabb_b[1][0] and aabb_a[1][0] >= aabb_b[0][0] and
+                aabb_a[0][1] <= aabb_b[1][1] and aabb_a[1][1] >= aabb_b[0][1] and
+                aabb_a[0][2] <= aabb_b[1][2] and aabb_a[1][2] >= aabb_b[0][2]):
+                
+                # Detailed collision check
+                contact_points = p.getContactPoints(objects[i].body_id, objects[j].body_id)
+                if contact_points:
+                    collision_pairs.append((i, j))
     
     elapsed = (time.perf_counter() - t0) * 1000
     return collision_pairs, elapsed
@@ -213,9 +230,49 @@ def method_get_closest_points(sim_core, distance_threshold: float = 0.01) -> Tup
 
 
 def method_get_contact_points_all(sim_core) -> Tuple[List, float]:
-    """Method 4: PyBullet getContactPoints (all pairs, standard method)"""
-    # This is the same as brute force for comparison
-    return method_brute_force(sim_core)
+    """Method 4: PyBullet getContactPoints (no args - batch all contacts)"""
+    t0 = time.perf_counter()
+    
+    # 引数なしでgetContactPoints()を呼び出すと、すべての接触点を一括取得
+    all_contacts = p.getContactPoints()
+    
+    # body_id のペアを抽出（重複を避けるためsetを使用）
+    collision_pairs_set = set()
+    objects = sim_core.sim_objects
+    body_id_to_index = {obj.body_id: i for i, obj in enumerate(objects)}
+    
+    for contact in all_contacts:
+        body_a = contact[1]  # bodyUniqueIdA
+        body_b = contact[2]  # bodyUniqueIdB
+        
+        # シミュレーション内のオブジェクトのみを対象
+        if body_a in body_id_to_index and body_b in body_id_to_index:
+            idx_a = body_id_to_index[body_a]
+            idx_b = body_id_to_index[body_b]
+            # 順序を正規化してペアを追加
+            pair = (min(idx_a, idx_b), max(idx_a, idx_b))
+            collision_pairs_set.add(pair)
+    
+    collision_pairs = list(collision_pairs_set)
+    elapsed = (time.perf_counter() - t0) * 1000
+    return collision_pairs, elapsed
+
+
+def method_get_contact_points_pairwise(sim_core) -> Tuple[List, float]:
+    """Method 5: PyBullet getContactPoints (pairwise calls)"""
+    t0 = time.perf_counter()
+    
+    collision_pairs = []
+    objects = sim_core.sim_objects
+    
+    for i in range(len(objects)):
+        for j in range(i + 1, len(objects)):
+            contact_points = p.getContactPoints(objects[i].body_id, objects[j].body_id)
+            if contact_points:
+                collision_pairs.append((i, j))
+    
+    elapsed = (time.perf_counter() - t0) * 1000
+    return collision_pairs, elapsed
 
 
 def benchmark_method(method_name: str, method_func, sim_core, num_iterations: int) -> Dict[str, Any]:
@@ -284,7 +341,7 @@ def main():
     parser.add_argument("--agents", type=str, default="100,500,1000", 
                        help="Comma-separated list of agent counts")
     parser.add_argument("--methods", type=str, default="all",
-                       help="Methods to test: all, spatial, brute, closest, contact")
+                       help="Methods to test: all, spatial, brute, closest, contact, pairwise")
     parser.add_argument("--iterations", type=int, default=100,
                        help="Iterations per configuration")
     parser.add_argument("--profile", action="store_true",
@@ -297,9 +354,10 @@ def main():
     # Define methods
     all_methods = {
         "spatial": ("Spatial Hashing (Current)", method_spatial_hashing),
-        "brute": ("Brute Force", method_brute_force),
+        "brute": ("Brute Force AABB", method_brute_force),
         "closest": ("PyBullet getClosestPoints", method_get_closest_points),
-        "contact": ("PyBullet getContactPoints", method_get_contact_points_all),
+        "contact": ("getContactPoints() [No Args]", method_get_contact_points_all),
+        "pairwise": ("getContactPoints(A,B) [Pairwise]", method_get_contact_points_pairwise),
     }
     
     # Select methods
