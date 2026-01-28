@@ -23,7 +23,7 @@ from pybullet_fleet.action import MoveAction, WaitAction, PickAction, DropAction
 
 def main():
     # Initialize simulation with DEBUG logging
-    params = SimulationParams(gui=True, timestep=0.1, speed=3, log_level="info")
+    params = SimulationParams(gui=True, timestep=0.1, speed=3, log_level="info", physics=False)
     sim = MultiRobotSimulationCore(params)
 
     # Camera setup

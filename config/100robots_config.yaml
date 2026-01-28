@@ -16,7 +16,7 @@
 speed: 100        # Real-time speed for visualization
 gui: true         # Show GUI
 timestep: 0.1     # 10ms timestep for smooth movement
-physics: false    # Kinematic control
+physics: true    # Kinematic control
 monitor: true     # Disable monitor for performance
 
 # Camera settings for 100 robots

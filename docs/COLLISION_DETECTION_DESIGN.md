@@ -1,38 +1,19 @@
 # PyBullet Collision Detection Design
 
-**Based on**: "PyBullet Collision / Overlap 判定設計まとめ.docx"
 **Date**: 2026-01-20
 **Version**: 2.0 (Updated with CollisionMode system)
-
-## Executive Summary
-
-PyBulletFleet implements a **multi-mode collision detection system** with per-object collision control:
-
-- **CollisionMode.NORMAL_3D**: Full 3D collision detection (27 neighbors)
-- **CollisionMode.NORMAL_2D**: 2D-only collision detection (9 neighbors, XY plane)
-- **CollisionMode.STATIC**: One-time AABB registration (never updated)
-- **CollisionMode.DISABLED**: Collision completely disabled (no PyBullet collision, no custom detection)
-
-This design prioritizes **collision avoidance** over **collision resolution**, making it ideal for warehouse automation, path planning, and safety verification.
-
----
 
 ## Design Philosophy
 
 ### Core Principles
 
-1. **"Will it collide?" > "Did it collide?"**
-   - Focus on predictive safety margins, not reactive contact resolution
-   - Clearance-based detection (safety distance) preferred over penetration detection
-
-2. **Kinematics First, Physics When Needed**
+1. **Kinematics First, Physics When Needed**
    - Main use case: Kinematic motion planning and collision avoidance
    - Secondary use case: Physics-based verification and debugging
 
 3. **Per-Object Collision Control**
    - Each object can have different collision modes
    - Runtime collision mode changes supported
-   - No global 2D/3D toggle (deprecated)
 
 4. **Reproducibility, Stability, Scalability**
    - Deterministic results across runs
@@ -422,137 +403,7 @@ Benchmarks must use:
 
 ---
 
-## Migration Guide
-
-### From Old API (v1.x → v2.0)
-
-#### 1. Global `collision_check_2d` → Per-Object `collision_mode`
-
-**Before** (global 2D/3D toggle):
-```python
-params = SimulationParams(
-    collision_check_2d=True,  # ❌ DEPRECATED: Global setting
-)
-```
-
-**After** (per-object mode):
-```python
-# Simulation params (no global 2D setting)
-params = SimulationParams(
-    physics=False,
-    collision_detection_method=CollisionDetectionMethod.CLOSEST_POINTS,
-)
-
-# Per-object collision mode
-robot = SimObject(
-    body_id=body_id,
-    sim_core=sim_core,
-    collision_mode=CollisionMode.NORMAL_2D,  # ✅ Per-object 2D
-)
-```
-
-#### 2. Explicit Collision Detection Method
-
-**Before** (implicit physics assumption):
-```python
-params = SimulationParams(
-    physics=False,  # But collision detection assumes physics...
-)
-```
-
-**After** (explicit kinematics mode):
-```python
-params = SimulationParams(
-    physics=False,
-    collision_detection_method=CollisionDetectionMethod.CLOSEST_POINTS,  # Auto-selected, but explicit is better
-    collision_margin=0.02,  # NEW: Safety clearance
-)
-```
-
-#### 3. Static Objects
-
-**Before** (manual registration):
-```python
-# Old API had register_static_object() method
-sim_core.register_static_object(obj)
-```
-
-**After** (CollisionMode.STATIC):
-```python
-structure = SimObject(
-    body_id=body_id,
-    sim_core=sim_core,
-    collision_mode=CollisionMode.STATIC,  # ✅ Built-in static mode
-    is_static=True,  # Also set is_static flag
-)
-```
-
-#### 4. Disabling Collision
-
-**Before** (no built-in support):
-```python
-# Had to manually exclude objects or use workarounds
-```
-
-**After** (CollisionMode.DISABLED):
-```python
-# At creation
-marker = SimObject(
-    body_id=body_id,
-    sim_core=sim_core,
-    collision_mode=CollisionMode.DISABLED,  # ✅ No collision
-)
-
-# Runtime toggle
-obj.set_collision_mode(CollisionMode.DISABLED)  # Disable
-obj.set_collision_mode(CollisionMode.NORMAL_3D)  # Re-enable
-```
-
-### Config File Migration
-
-**Old `config.yaml`** (v1.x):
-```yaml
-simulation:
-  physics: false
-  collision_check_2d: true  # ❌ DEPRECATED: Global setting
-```
-
-**New `config.yaml`** (v2.0):
-```yaml
-simulation:
-  physics: false
-  collision_detection_method: "closest_points"  # Explicit (recommended)
-  collision_margin: 0.02  # NEW: Safety margin
-  # collision_check_2d removed - use per-object collision_mode instead
-```
-
-**Benchmark config migration**:
-```yaml
-# OLD
-scenarios:
-  collision_2d_10hz:
-    simulation:
-      collision_check_2d: true  # ❌ REMOVED
-
-# NEW
-scenarios:
-  collision_10hz:
-    simulation:
-      collision_check_frequency: 10.0
-    # Per-object collision_mode set in code, not config
-```
-
----
-
 ## FAQ
-
-### Q: Can I use PyBullet without calling `stepSimulation()`?
-
-**A**: Yes! PyBullet is both:
-1. **Physics Engine** (requires `stepSimulation()`)
-2. **Collision Geometry Engine** (works without `stepSimulation()`)
-
-For pure kinematics, you only use (2), which is perfectly valid.
 
 ### Q: Why not always use `getClosestPoints()`?
 
@@ -561,14 +412,6 @@ For pure kinematics, you only use (2), which is perfectly valid.
 - More accurate (actual contact manifold with normals, depths)
 
 But for kinematics, `getClosestPoints()` is required for stability.
-
-### Q: What happened to `collision_check_2d` parameter?
-
-**A**: **Removed in v2.0**. Use per-object `collision_mode` instead:
-- Old: `collision_check_2d=True` (global setting for all objects)
-- New: `collision_mode=CollisionMode.NORMAL_2D` (per-object setting)
-
-This allows mixed 2D/3D collision in the same simulation (e.g., ground robots + drones).
 
 ### Q: How do I disable collision for specific objects?
 
@@ -597,16 +440,6 @@ obj.set_collision_mode(CollisionMode.NORMAL_3D)
 ```
 
 All caches (AABB, spatial grid, movement tracking) are automatically updated.
-
-### Q: How do I debug "missing" collisions?
-
-**Checklist**:
-1. ✅ Check `collision_detection_method` matches physics mode
-2. ✅ Verify `collision_margin` is appropriate (not too small)
-3. ✅ Ensure `stepSimulation()` is called if using `CONTACT_POINTS`
-4. ✅ Check objects are not both static (static-static ignored if `ignore_static_collision=True`)
-5. ✅ Verify objects are not in DISABLED mode
-6. ✅ Check AABB/spatial grid is up to date
 
 ---
 
@@ -707,3 +540,241 @@ fleet.step()
 - `docs/COLLISION_MODE_REDESIGN.md` - CollisionMode system design rationale
 - `docs/spatial_hash_cell_size_modes.md` - Spatial hashing optimization
 - `benchmark/PERFORMANCE_OPTIMIZATION_GUIDE.md` - Performance tuning guide
+
+---
+
+## Multi-Cell Registration for Large Objects
+
+**Date**: 2026-01-21  
+**Feature**: Automatic multi-cell spatial grid registration
+
+### Problem Statement
+
+Objects were previously registered to only a **single grid cell** (based on center point). This caused collision detection failures when:
+
+- Large objects (AABB >> cell_size) span multiple cells
+- Small robots near the edge of large objects are in different cells
+- The spatial hash grid couldn't find neighbors across cell boundaries
+
+**Example Failure Case**:
+```
+Grid cell size: 2.0m
+Large wall AABB: 5.0m × 5.0m (center at Cell B)
+Small robot: 0.5m × 0.5m (in Cell A)
+
+[Cell A] [Cell B (wall center)] [Cell C]
+  Robot                            
+
+→ Robot only checks Cell A neighbors
+→ Wall is in Cell B → NOT checked
+→ Collision NOT detected ❌
+```
+
+### Solution: Automatic Multi-Cell Registration
+
+Objects are now **automatically** registered to multiple cells based on their size:
+
+1. **Size-based detection**: Objects with `max(extent_x, extent_y) > cell_size × threshold` use multi-cell
+2. **No manual configuration**: The system automatically determines registration mode
+3. **Configurable threshold**: Adjust sensitivity via `multi_cell_threshold` parameter (default: 1.5)
+
+**How it works**:
+```python
+# Threshold calculation
+threshold_size = cell_size × multi_cell_threshold
+# Example: 2.0m × 1.5 = 3.0m
+
+# Automatic decision
+if object_extent > threshold_size:
+    register_to_all_overlapping_cells()  # Multi-cell
+else:
+    register_to_single_cell()  # Normal
+```
+
+### Configuration
+
+#### SimulationParams
+```python
+params = SimulationParams(
+    spatial_hash_cell_size=2.0,  # 2m cells
+    multi_cell_threshold=1.5,    # Objects > 3m use multi-cell
+)
+```
+
+#### Behavior Examples
+
+| Object Size | Cell Size | Threshold | Cells Used | Mode |
+|-------------|-----------|-----------|------------|------|
+| 0.8m        | 1.0m      | 1.5       | 1          | Single |
+| 1.2m        | 1.0m      | 1.5       | 1          | Single |
+| 2.0m        | 1.0m      | 1.5       | 4 (2×2)    | Multi |
+| 5.0m        | 2.0m      | 1.5       | 9 (3×3)    | Multi |
+
+#### Config File
+```yaml
+# config.yaml
+spatial_hash_cell_size: 2.0
+multi_cell_threshold: 1.5  # Default: 1.5
+```
+
+### Implementation Details
+
+#### New Methods
+
+**`_should_use_multi_cell_registration(object_id: int) -> bool`**
+```python
+# Automatically determines if multi-cell is needed
+extent_x = aabb_max[0] - aabb_min[0]
+extent_y = aabb_max[1] - aabb_min[1]
+max_extent = max(extent_x, extent_y)  # XY plane only (2D compatible)
+
+return max_extent > (self._cached_cell_size * self.params.multi_cell_threshold)
+```
+
+**`_get_overlapping_cells(object_id: int) -> List[Tuple[int, int, int]]`**
+```python
+# Calculates all cells that overlap with object's AABB
+# Returns: [(x_min, y_min, z_min), ..., (x_max, y_max, z_max)]
+```
+
+#### Modified Data Structures
+
+```python
+# Before: Single cell per object
+_cached_object_to_cell: Dict[int, Tuple[int, int, int]]
+
+# After: Multiple cells per object
+_cached_object_to_cell: Dict[int, List[Tuple[int, int, int]]]
+```
+
+#### Collision Detection Integration
+
+```python
+# _get_potential_collision_pairs_spatial_hash()
+for obj_id_i in moved_objects:
+    cells_i = self._cached_object_to_cell.get(obj_id_i, [])
+    
+    # Check neighbors in ALL cells this object occupies
+    for cell_i in cells_i:
+        for offset in neighbor_offsets:
+            neighbor_cell = (cell_i[0] + offset[0], ...)
+            
+            # Find neighbors and check AABB overlap
+            for obj_id_j in self._cached_spatial_grid.get(neighbor_cell, set()):
+                # ... collision check
+                pairs.add((min(i, j), max(i, j)))  # Auto-deduplication
+```
+
+### Performance Impact
+
+#### Memory Usage
+```python
+# Example: 5m×5m wall, 2m cells → 3×3 = 9 cells
+# Single cell mode: 1 object = 1 registration
+# Multi-cell mode:   1 object = 9 registrations
+
+# 100 large walls:
+# Additional memory: 100 × (9-1) × 8 bytes ≈ 6.4 KB
+# → Negligible impact
+```
+
+#### Computational Cost
+- **Registration**: O(num_overlapping_cells) = O(1) for constant-size objects
+- **Collision detection**: Duplicate pairs auto-filtered by `set()`
+- **Update frequency**: Only when object moves or is added/removed
+
+**Benchmark results**: No measurable performance degradation for typical scenarios (100-1000 objects)
+
+### Design Rationale
+
+#### Why Automatic vs Manual Flag?
+
+**Considered**: Adding `enable_multi_cell: bool` flag to SimObject
+
+**Chosen**: Automatic size-based detection
+
+**Reasons**:
+1. ✅ User doesn't need to configure each object
+2. ✅ AABB changes automatically trigger re-evaluation
+3. ✅ No configuration mistakes
+4. ✅ Simpler API
+
+#### Why 1.5x Default Threshold?
+
+- **1.0x**: Too conservative, many objects at cell boundaries unnecessarily use multi-cell
+- **1.5x**: Balanced - catches objects that clearly span multiple cells
+- **2.0x**: Too aggressive, may miss some moderately large objects
+
+#### Why XY Plane Only?
+
+```python
+max_extent = max(extent_x, extent_y)  # Ignore Z
+```
+
+**Reason**: Compatible with `CollisionMode.NORMAL_2D`, where Z-axis is typically height/elevation and doesn't affect horizontal collision detection.
+
+### Usage Examples
+
+#### Basic Usage (Fully Automatic)
+```python
+# No code changes needed!
+sim_core = MultiRobotSimulationCore(params)
+
+# Add large wall (5m × 5m)
+wall = sim_core.add_structure(
+    mesh_path="wall.obj",
+    scale=[5.0, 5.0, 1.0],
+    collision_mode=CollisionMode.STATIC
+)
+# → Automatically registered to 9 cells ✓
+
+# Add small robot (0.5m × 0.5m)
+robot = agent_manager.spawn_agent(spawn_params)
+# → Automatically registered to 1 cell ✓
+
+# Collision detection works correctly ✓
+```
+
+#### Custom Threshold
+```python
+# Conservative (more multi-cell objects)
+params = SimulationParams(
+    spatial_hash_cell_size=2.0,
+    multi_cell_threshold=1.2,  # Objects > 2.4m use multi-cell
+)
+
+# Aggressive (fewer multi-cell objects)
+params = SimulationParams(
+    spatial_hash_cell_size=2.0,
+    multi_cell_threshold=2.0,  # Objects > 4.0m use multi-cell
+)
+```
+
+### Testing
+
+**Test files**:
+- `tests/test_multi_cell_internal.py` - Internal functionality test
+- `examples/collision_features_demo.py` - Visual demonstration (multi-cell + 2D/3D modes)
+
+**Run tests**:
+```bash
+python tests/test_multi_cell_internal.py
+```
+
+**Expected output**:
+```
+Robot 0 (ID=1):
+  AABB extent: 0.80m
+  Should use multi-cell: False ✓
+  Registered to 1 cell(s) ✓
+
+Distribution:
+  4 object(s) registered to 1 cell(s) ✓
+```
+
+### Related Files
+
+- `pybullet_fleet/core_simulation.py` - Implementation (`_should_use_multi_cell_registration`, `_get_overlapping_cells`)
+- `pybullet_fleet/types.py` - Type definitions
+- `tests/test_multi_cell_internal.py` - Unit tests
+- `examples/collision_features_demo.py` - Demonstration

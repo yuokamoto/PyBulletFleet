@@ -26,7 +26,7 @@ from pybullet_fleet.action import MoveAction, PickAction, DropAction, WaitAction
 from pybullet_fleet.geometry import Path
 
 # Simulation setup
-params = SimulationParams(gui=True, timestep=0.1, ignore_static_collision=True)
+params = SimulationParams(gui=True, timestep=0.1, ignore_static_collision=True, speed=10, physics=False)
 sim_core = MultiRobotSimulationCore(params)
 
 # Create AgentManager

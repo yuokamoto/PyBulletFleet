@@ -33,7 +33,7 @@ from pybullet_fleet.sim_object import ShapeParams
 
 def main():
     # Create simulation
-    params = SimulationParams(gui=True, timestep=1.0 / 10.0, speed=3.0)
+    params = SimulationParams(gui=True, timestep=1.0 / 10.0, speed=10.0, physics=False)
     sim = MultiRobotSimulationCore(params)
 
     # Get absolute paths

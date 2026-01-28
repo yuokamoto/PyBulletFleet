@@ -88,7 +88,7 @@ def main():
     np.random.seed(42)
 
     # Create simulation
-    params = SimulationParams(gui=True, timestep=1.0 / 60.0, speed=5.0)
+    params = SimulationParams(gui=True, timestep=0.1, speed=0.0, physics=False)
     sim = MultiRobotSimulationCore(params)
 
     # Get absolute path to URDF

@@ -137,6 +137,7 @@ if mode == "mixed":
         use_fixed_base=arm_robot_config.get("use_fixed_base", True),
         max_linear_vel=arm_robot_config.get("max_linear_vel", 0.0),
         max_linear_accel=arm_robot_config.get("max_linear_accel", 0.0),
+        mass=arm_robot_config.get("mass", 1.0),  # Use URDF mass (1.0) for physics simulation
         user_data={"robot_type": "arm_robot"},
     )
 

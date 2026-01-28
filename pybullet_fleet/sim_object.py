@@ -195,6 +195,7 @@ class SimObject:
         cls,
         visual_shape: Optional[ShapeParams] = None,
         collision_shape: Optional[ShapeParams] = None,
+        physics_client_id: int = 0,
     ) -> Tuple[int, int]:
         """
         Create shared visual and collision shapes for fast object spawning.
@@ -208,6 +209,7 @@ class SimObject:
         Args:
             visual_shape: ShapeParams for visual geometry
             collision_shape: ShapeParams for collision geometry
+            physics_client_id: PyBullet physics client ID
 
         Returns:
             (visual_id, collision_id) tuple
@@ -223,7 +225,8 @@ class SimObject:
                 collision_shape=ShapeParams(
                     shape_type="box",
                     half_extents=[0.5, 0.3, 0.2]
-                )
+                ),
+                physics_client_id=sim_core.client
             )
         """
         # Only cache mesh shapes (primitives are cheap to create)
@@ -241,10 +244,10 @@ class SimObject:
                 return cls._shared_shapes[shape_key]
 
         # Create visual shape
-        visual_id = cls._create_visual_shape(visual_shape) if visual_shape and visual_shape.shape_type else -1
+        visual_id = cls._create_visual_shape(visual_shape, physics_client_id) if visual_shape and visual_shape.shape_type else -1
 
         # Create collision shape
-        collision_id = cls._create_collision_shape(collision_shape) if collision_shape and collision_shape.shape_type else -1
+        collision_id = cls._create_collision_shape(collision_shape, physics_client_id) if collision_shape and collision_shape.shape_type else -1
 
         # Cache only if at least one is a mesh shape
         if visual_needs_cache or collision_needs_cache:
@@ -265,7 +268,7 @@ class SimObject:
         )
 
     @staticmethod
-    def _create_visual_shape(shape: ShapeParams) -> int:
+    def _create_visual_shape(shape: ShapeParams, physics_client_id: int) -> int:
         """Create a PyBullet visual shape from ShapeParams."""
         # Get frame offset
         frame_position = [0.0, 0.0, 0.0]
@@ -283,6 +286,7 @@ class SimObject:
                 rgbaColor=shape.rgba_color,
                 visualFramePosition=frame_position,
                 visualFrameOrientation=frame_orientation,
+                physicsClientId=physics_client_id,
             )
         elif shape.shape_type == "box":
             return p.createVisualShape(
@@ -291,6 +295,7 @@ class SimObject:
                 rgbaColor=shape.rgba_color,
                 visualFramePosition=frame_position,
                 visualFrameOrientation=frame_orientation,
+                physicsClientId=physics_client_id,
             )
         elif shape.shape_type == "sphere":
             return p.createVisualShape(
@@ -299,6 +304,7 @@ class SimObject:
                 rgbaColor=shape.rgba_color,
                 visualFramePosition=frame_position,
                 visualFrameOrientation=frame_orientation,
+                physicsClientId=physics_client_id,
             )
         elif shape.shape_type == "cylinder":
             return p.createVisualShape(
@@ -308,12 +314,13 @@ class SimObject:
                 rgbaColor=shape.rgba_color,
                 visualFramePosition=frame_position,
                 visualFrameOrientation=frame_orientation,
+                physicsClientId=physics_client_id,
             )
         else:
             raise ValueError(f"Unknown visual shape_type: {shape.shape_type}")
 
     @staticmethod
-    def _create_collision_shape(shape: ShapeParams) -> int:
+    def _create_collision_shape(shape: ShapeParams, physics_client_id: int) -> int:
         """Create a PyBullet collision shape from ShapeParams."""
         # Get frame offset
         frame_position = [0.0, 0.0, 0.0]
@@ -330,6 +337,7 @@ class SimObject:
                 meshScale=shape.mesh_scale,
                 collisionFramePosition=frame_position,
                 collisionFrameOrientation=frame_orientation,
+                physicsClientId=physics_client_id,
             )
         elif shape.shape_type == "box":
             return p.createCollisionShape(
@@ -337,6 +345,7 @@ class SimObject:
                 halfExtents=shape.half_extents,
                 collisionFramePosition=frame_position,
                 collisionFrameOrientation=frame_orientation,
+                physicsClientId=physics_client_id,
             )
         elif shape.shape_type == "sphere":
             return p.createCollisionShape(
@@ -344,6 +353,7 @@ class SimObject:
                 radius=shape.radius,
                 collisionFramePosition=frame_position,
                 collisionFrameOrientation=frame_orientation,
+                physicsClientId=physics_client_id,
             )
         elif shape.shape_type == "cylinder":
             return p.createCollisionShape(
@@ -352,6 +362,7 @@ class SimObject:
                 height=shape.height,
                 collisionFramePosition=frame_position,
                 collisionFrameOrientation=frame_orientation,
+                physicsClientId=physics_client_id,
             )
         else:
             raise ValueError(f"Unknown collision shape_type: {shape.shape_type}")
@@ -363,6 +374,7 @@ class SimObject:
         collision_id: int,
         pose: Pose,
         mass: float = 0.0,
+        physics_client_id: int = 0,
     ) -> int:
         """
         Create a PyBullet multibody from pre-created visual and collision shapes.
@@ -374,6 +386,7 @@ class SimObject:
             collision_id: Collision shape ID from create_shared_shapes()
             pose: Initial Pose (position and orientation)
             mass: Body mass (kg)
+            physics_client_id: PyBullet physics client ID
 
         Returns:
             PyBullet body ID
@@ -385,6 +398,7 @@ class SimObject:
             baseVisualShapeIndex=visual_id,
             basePosition=position,
             baseOrientation=orientation,
+            physicsClientId=physics_client_id,
         )
         return body_id
 
@@ -433,10 +447,14 @@ class SimObject:
         if pose is None:
             pose = Pose.from_xyz(0.0, 0.0, 0.0)
 
+        # Get physics client ID from sim_core
+        physics_client_id = sim_core.client if sim_core is not None else 0
+
         # Use create_shared_shapes() to get or create cached shapes
         visual_id, collision_id = cls.create_shared_shapes(
             visual_shape=visual_shape,
             collision_shape=collision_shape,
+            physics_client_id=physics_client_id,
         )
 
         # Create multibody using helper method
@@ -445,6 +463,7 @@ class SimObject:
             collision_id=collision_id,
             pose=pose,
             mass=mass,
+            physics_client_id=physics_client_id,
         )
 
         # Store mesh_path if available for backward compatibility
@@ -852,14 +871,29 @@ class MeshObject(SimObject):
     def from_mesh(
         cls, mesh_path, position, orientation, base_mass=0.0, mesh_scale=[1, 1, 1], rgbaColor=[1, 1, 1, 1], sim_core=None
     ):
-        vis_id = p.createVisualShape(shapeType=p.GEOM_MESH, fileName=mesh_path, meshScale=mesh_scale, rgbaColor=rgbaColor)
-        col_id = p.createCollisionShape(shapeType=p.GEOM_MESH, fileName=mesh_path, meshScale=mesh_scale)
+        # Get physics client ID from sim_core
+        physics_client_id = sim_core.client if sim_core is not None else 0
+        
+        vis_id = p.createVisualShape(
+            shapeType=p.GEOM_MESH, 
+            fileName=mesh_path, 
+            meshScale=mesh_scale, 
+            rgbaColor=rgbaColor,
+            physicsClientId=physics_client_id
+        )
+        col_id = p.createCollisionShape(
+            shapeType=p.GEOM_MESH, 
+            fileName=mesh_path, 
+            meshScale=mesh_scale,
+            physicsClientId=physics_client_id
+        )
         body_id = p.createMultiBody(
             baseMass=base_mass,
             baseCollisionShapeIndex=col_id,
             baseVisualShapeIndex=vis_id,
             basePosition=position,
             baseOrientation=orientation,
+            physicsClientId=physics_client_id,
         )
         return cls(body_id=body_id, mesh_path=mesh_path, visual_id=vis_id, collision_id=col_id, sim_core=sim_core)
 

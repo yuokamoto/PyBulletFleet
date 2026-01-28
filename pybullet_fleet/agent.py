@@ -19,7 +19,7 @@ from .geometry import Pose
 from .sim_object import SimObject, SimObjectSpawnParams, ShapeParams
 from two_point_interpolation import TwoPointInterpolation
 from .action import Action
-from .types import MotionMode, DifferentialPhase, MovementDirection, ActionStatus
+from .types import MotionMode, DifferentialPhase, MovementDirection, ActionStatus, CollisionMode
 from .tools import normalize_vector_param
 from pybullet_fleet.tools import resolve_joint_index
 from .logging_utils import get_lazy_logger
@@ -404,6 +404,7 @@ class Agent(SimObject):
                 max_angular_accel=spawn_params.max_angular_accel,
                 motion_mode=spawn_params.motion_mode,
                 use_fixed_base=spawn_params.use_fixed_base,
+                collision_mode=spawn_params.collision_mode,
                 sim_core=sim_core,
             )
         else:
@@ -419,6 +420,7 @@ class Agent(SimObject):
                 max_angular_accel=spawn_params.max_angular_accel,
                 motion_mode=spawn_params.motion_mode,
                 use_fixed_base=spawn_params.use_fixed_base,
+                collision_mode=spawn_params.collision_mode,
                 sim_core=sim_core,
             )
 
@@ -441,6 +443,7 @@ class Agent(SimObject):
         max_angular_accel: Union[float, List[float]] = 10.0,
         motion_mode: Union[MotionMode, str] = MotionMode.OMNIDIRECTIONAL,
         use_fixed_base: bool = False,
+        collision_mode: CollisionMode = CollisionMode.NORMAL_3D,
         sim_core=None,
     ) -> "Agent":
         """
@@ -514,6 +517,9 @@ class Agent(SimObject):
             use_fixed_base=use_fixed_base,
             sim_core=sim_core,
         )
+        
+        # Set collision mode (must be done after __init__ which calls add_object)
+        agent.set_collision_mode(collision_mode)
 
         return agent
 
@@ -529,6 +535,7 @@ class Agent(SimObject):
         max_angular_accel: Union[float, List[float]] = 10.0,
         motion_mode: Union[MotionMode, str] = MotionMode.OMNIDIRECTIONAL,
         use_fixed_base: bool = False,
+        collision_mode: CollisionMode = CollisionMode.NORMAL_3D,
         sim_core=None,
     ) -> "Agent":
         """
@@ -590,6 +597,9 @@ class Agent(SimObject):
             use_fixed_base=use_fixed_base,
             sim_core=sim_core,
         )
+        
+        # Set collision mode (must be done after __init__ which calls add_object)
+        agent.set_collision_mode(collision_mode)
 
         return agent
 

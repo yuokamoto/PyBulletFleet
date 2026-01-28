@@ -13,7 +13,7 @@ from pybullet_fleet.core_simulation import MultiRobotSimulationCore, SimulationP
 from pybullet_fleet.sim_object import Pose, SimObject, ShapeParams
 
 # Simulation setup
-params = SimulationParams(gui=True, timestep=0.01)
+params = SimulationParams(gui=True, timestep=0.01, physics=True)
 sim_core = MultiRobotSimulationCore(params)
 
 # Spawn robot arm (fixed base)
