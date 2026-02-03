@@ -507,7 +507,7 @@ class PickAction(Action):
 
                 # Create move action for approach (move forward)
                 approach_path = Path([self.approach_pose])
-                self._approach_action = MoveAction(path=approach_path, auto_approach=False, final_orientation_align=True)
+                self._approach_action = MoveAction(path=approach_path, auto_approach=True, final_orientation_align=True)
                 self._phase = PickPhase.APPROACHING
                 self._log_phase_transition(PickPhase.APPROACHING, agent)
                 self._log_info(f"Target object {self._target_object.body_id} found, approaching...", agent_id=agent.object_id)
@@ -533,7 +533,7 @@ class PickAction(Action):
                 forward_path = Path([self._pick_pose])
 
                 self._forward_action = MoveAction(
-                    path=forward_path, auto_approach=False, final_orientation_align=False, direction=MovementDirection.FORWARD
+                    path=forward_path, auto_approach=True, final_orientation_align=False, direction=MovementDirection.FORWARD
                 )
                 current_pos = agent.get_pose().position
                 pick_pos = self._pick_pose.position
@@ -592,7 +592,7 @@ class PickAction(Action):
                     retreat_path = Path([self.approach_pose])
                     self._retreat_action = MoveAction(
                         path=retreat_path,
-                        auto_approach=False,
+                        auto_approach=True,
                         final_orientation_align=False,  # Keep current orientation
                         direction=MovementDirection.BACKWARD,  # Move backward
                     )
@@ -813,7 +813,7 @@ class DropAction(Action):
 
                 # Create move action for approach (move forward)
                 approach_path = Path([self.approach_pose])
-                self._approach_action = MoveAction(path=approach_path, auto_approach=False, final_orientation_align=True)
+                self._approach_action = MoveAction(path=approach_path, auto_approach=True, final_orientation_align=True)
                 self._phase = DropPhase.APPROACHING
                 self._log_phase_transition(DropPhase.APPROACHING, agent)
                 self._log_info("Approaching drop position...", agent_id=agent.object_id)
@@ -836,7 +836,7 @@ class DropAction(Action):
             if self._forward_action is None:
                 forward_path = Path([self._drop_pose])
                 self._forward_action = MoveAction(
-                    path=forward_path, auto_approach=False, final_orientation_align=False, direction=MovementDirection.FORWARD
+                    path=forward_path, auto_approach=True, final_orientation_align=False, direction=MovementDirection.FORWARD
                 )
                 current_pos = agent.get_pose().position
                 drop_pos = self._drop_pose.position
@@ -907,7 +907,7 @@ class DropAction(Action):
                 retreat_path = Path([self.approach_pose])
                 self._retreat_action = MoveAction(
                     path=retreat_path,
-                    auto_approach=False,
+                    auto_approach=True,
                     final_orientation_align=False,  # Keep current orientation
                     direction=MovementDirection.BACKWARD,  # Move backward
                 )

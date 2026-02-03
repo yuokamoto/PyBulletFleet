@@ -91,6 +91,7 @@ class SimulationParams:
             enable_gui_panel=config.get("enable_gui_panel", False),  # Default: hide GUI panel
             ignore_static_collision=config.get("ignore_static_collision", True),
             enable_profiling=config.get("enable_profiling", False),
+            profiling_interval=config.get("profiling_interval", 100),
             enable_collision_color_change=config.get("enable_collision_color_change", False),
             spatial_hash_cell_size_mode=SpatialHashCellSizeMode(config.get("spatial_hash_cell_size_mode", "auto_initial")),
             spatial_hash_cell_size=config.get("spatial_hash_cell_size", None),
@@ -102,6 +103,7 @@ class SimulationParams:
             ),
             collision_margin=config.get("collision_margin", 0.02),  # Safety clearance (meters)
             multi_cell_threshold=config.get("multi_cell_threshold", 1.5),  # Multi-cell registration threshold
+            camera_config=config.get("camera", {}),  # Camera configuration
         )
 
     def __init__(
@@ -124,12 +126,14 @@ class SimulationParams:
         enable_gui_panel: bool = False,
         ignore_static_collision: bool = True,
         enable_profiling: bool = False,
+        profiling_interval: int = 100,
         enable_collision_color_change: bool = False,
         spatial_hash_cell_size_mode: SpatialHashCellSizeMode = SpatialHashCellSizeMode.AUTO_INITIAL,
         spatial_hash_cell_size: Optional[float] = None,  # Used when mode=CONSTANT
         collision_detection_method: Optional[CollisionDetectionMethod] = None,  # Auto-select based on physics
         collision_margin: float = 0.02,  # Safety clearance for getClosestPoints (meters, default: 2cm)
         multi_cell_threshold: float = 1.5,  # Threshold multiplier for multi-cell registration (>= 1.0)
+        camera_config: Optional[Dict[str, Any]] = None,  # Camera configuration from config file
     ) -> None:
         self.speed = speed  # speed=0 means maximum speed (no sleep)
         self.timestep = timestep
@@ -149,6 +153,7 @@ class SimulationParams:
         self.enable_gui_panel = enable_gui_panel
         self.ignore_static_collision = ignore_static_collision
         self.enable_profiling = enable_profiling
+        self.profiling_interval = profiling_interval  # Steps between profiling reports
         self.enable_collision_color_change = enable_collision_color_change
         self.spatial_hash_cell_size_mode = spatial_hash_cell_size_mode
         self.spatial_hash_cell_size = spatial_hash_cell_size  # Fixed cell size (for mode=CONSTANT)
@@ -163,6 +168,7 @@ class SimulationParams:
             )
         self.collision_detection_method = collision_detection_method
         self.collision_margin = collision_margin  # Safety clearance for collision detection
+        self.camera_config = camera_config if camera_config is not None else {}  # Camera configuration
 
 
 class MultiRobotSimulationCore:
@@ -200,6 +206,7 @@ class MultiRobotSimulationCore:
         self.client: Optional[int] = None
         self.sim_objects: List[SimObject] = []  # List of all simulation objects (Agent, SimObject, etc.)
         self._sim_objects_dict: Dict[int, SimObject] = {}  # Dict for O(1) lookup: object_id -> SimObject
+        self.agents: List[Agent] = []  # List of Agent instances only for O(M) iteration in step_once()
         self._last_collided: set = set()
         self._robot_original_colors: Dict[int, List[float]] = {}  # body_id: rgbaColor
         self.collision_count: int = 0
@@ -229,8 +236,20 @@ class MultiRobotSimulationCore:
             params.ignore_static_collision
         )  # If True, skip collision checks with static objects
         self._simulation_paused: bool = False  # Track if simulation is paused
-        self.enable_profiling: bool = params.enable_profiling  # Optional profiling output
-        self._profiling_log_frequency: int = 10  # Log profiling info every N steps (default: 10)
+        
+        # --- Profiling configuration ---
+        self.enable_profiling: bool = params.enable_profiling  # Master profiling switch
+        self._profiling_interval: int = params.profiling_interval  # Report average every N steps
+        
+        # --- Profiling statistics ---
+        self._profiling_stats: Dict[str, List[float]] = {
+            'agent_update': [],
+            'callbacks': [],
+            'step_simulation': [],
+            'collision_check': [],
+            'monitor_update': [],
+            'total': []
+        }
 
         # --- Movement tracking and collision optimization ---
         self._moved_this_step: set = set()  # object_ids that moved this step
@@ -921,6 +940,10 @@ class MultiRobotSimulationCore:
         self.sim_objects.append(obj)
         self._sim_objects_dict[obj.object_id] = obj
 
+        # Add to agents list if this is an Agent instance (for O(M) iteration)
+        if isinstance(obj, Agent):
+            self.agents.append(obj)
+
         # Store collision mode in cache
         self._cached_collision_modes[obj.object_id] = obj.collision_mode
 
@@ -983,6 +1006,13 @@ class MultiRobotSimulationCore:
             return
 
         self._sim_objects_dict.pop(obj_id, None)
+
+        # Remove from agents list if this is an Agent instance
+        if isinstance(obj, Agent):
+            try:
+                self.agents.remove(obj)
+            except ValueError:
+                pass  # Already removed or not in list
 
         # Remove from movement tracking sets
         self._moved_this_step.discard(obj_id)
@@ -1254,8 +1284,9 @@ class MultiRobotSimulationCore:
         if not self.params.gui:
             return  # No camera setup needed without GUI
 
+        # Use self.params.camera_config if camera_config is not provided
         if camera_config is None:
-            camera_config = {}
+            camera_config = self.params.camera_config
 
         camera_mode = camera_config.get("camera_mode", "none")
 
@@ -1277,9 +1308,17 @@ class MultiRobotSimulationCore:
 
         elif camera_mode == "auto":
             # Calculate camera from entity positions
+            # If entity_positions is None, calculate from all simulation objects
             if entity_positions is None or len(entity_positions) == 0:
-                logger.warning("Auto camera mode requested but no entity positions provided")
-                return
+                if len(self.sim_objects) == 0:
+                    logger.warning("Auto camera mode requested but no objects in simulation")
+                    return
+                # Calculate positions from all simulation objects
+                entity_positions = []
+                for obj in self.sim_objects:
+                    pose = obj.get_pose()
+                    entity_positions.append(pose.position)
+                logger.info(f"Auto camera: calculated from {len(entity_positions)} objects")
 
             positions_array = np.array(entity_positions)
             center = positions_array.mean(axis=0)
@@ -1751,6 +1790,11 @@ class MultiRobotSimulationCore:
         else:
             actual_speed = 0
         elapsed_time = now - self.start_time if self.start_time else 0
+        
+        # Use len(self.agents) for O(1) agent count instead of O(N) iteration
+        num_agents = len(self.agents)
+        num_objects = len(self.sim_objects) - num_agents
+        
         monitor_data = {
             "sim_time": sim_time,
             "real_time": elapsed_time,
@@ -1759,15 +1803,20 @@ class MultiRobotSimulationCore:
             "time_step": self.params.timestep,
             "frequency": 1 / self.params.timestep,
             "physics": "enabled" if self.params.physics else "disabled",
-            "robots": len(self.sim_objects),
+            "agents": num_agents,
+            "objects": num_objects,
+            "active_collisions": len(self._active_collision_pairs),
             "collisions": self.collision_count,
             "steps": self.step_count,
         }
         logging.debug(
-            "[MONITOR] sim_time=%.2f, real_time=%.2f, speed=%.2f, collisions=%d, steps=%d",
+            "[MONITOR] sim_time=%.2f, real_time=%.2f, speed=%.2f, agents=%d, objects=%d, active_collisions=%d, total_collisions=%d, steps=%d",
             sim_time,
             elapsed_time,
             actual_speed,
+            num_agents,
+            num_objects,
+            len(self._active_collision_pairs),
             self.collision_count,
             self.step_count,
         )
@@ -1849,6 +1898,7 @@ class MultiRobotSimulationCore:
         try:
             start_time = time.time()
             last_step_process_time = 0.0  # Track processing time excluding sleep
+            last_pause_state = False  # Track pause state to detect resume
 
             while True:
                 current_sim_time = self.step_count * self.params.timestep
@@ -1868,15 +1918,22 @@ class MultiRobotSimulationCore:
                 if self.params.speed <= 0:
                     self.step_once()
                 else:
-                    # Speed>0: Synchronize with real time
+                    # Speed>0: Synchronize with real time using absolute time calculation
                     loop_start = time.time()
                     current_time = time.time()
+                    
+                    # Detect pause state change: reset start_time on resume
+                    if last_pause_state and not self._simulation_paused:
+                        # Just resumed from pause: reset start_time to avoid jump
+                        start_time = current_time - current_sim_time / self.params.speed
+                        logger.info("Resumed from pause: start_time reset for smooth continuation")
+                    last_pause_state = self._simulation_paused
+                    
+                    # Calculate target sim_time using absolute time (stable control)
                     elapsed_time = current_time - start_time
-
-                    # Calculate target and current simulation times
                     target_sim_time = elapsed_time * self.params.speed
                     time_diff = target_sim_time - current_sim_time
-
+                    
                     actual_sleep = 0.0
 
                     if time_diff > 0:
@@ -1995,15 +2052,15 @@ class MultiRobotSimulationCore:
 
         # Update all simulation objects that have update() method
         # Agent instances are automatically updated every step for movement control
+        # OPTIMIZATION: Use self.agents list for O(M) iteration instead of O(N) with isinstance() check
         if measure_timing:
             t0 = time.perf_counter()
 
-        for obj in self.sim_objects:
-            if isinstance(obj, Agent):
-                moved = obj.update(self.params.timestep)
-                # Track kinematic agent movement
-                if moved and obj.object_id in self._kinematic_objects:
-                    self._moved_this_step.add(obj.object_id)
+        for agent in self.agents:
+            moved = agent.update(self.params.timestep)
+            # Track kinematic agent movement
+            if moved and agent.object_id in self._kinematic_objects:
+                self._moved_this_step.add(agent.object_id)
 
         if measure_timing:
             t1 = time.perf_counter()
@@ -2095,26 +2152,50 @@ class MultiRobotSimulationCore:
 
         # Profiling output (only when profiling is enabled and not returning data)
         if self.enable_profiling:
-            # Print profiling info at specified frequency
-            # Note: All timing variables (t0, t1, etc.) are guaranteed to be defined
-            # because they are all set within measure_timing=True blocks above
-            if self.step_count % self._profiling_log_frequency == 0:
-                # Build collision detail string if available
-                collision_detail = ""
-                if collision_timings:
-                    collision_detail = (
-                        f" [GetAABBs={collision_timings.get('get_aabbs', 0):.2f}ms, "
-                        f"SpatialHash={collision_timings.get('spatial_hashing', 0):.2f}ms, "
-                        f"AABBFilter={collision_timings.get('aabb_filtering', 0):.2f}ms, "
-                        f"ContactPts={collision_timings.get('contact_points', 0):.2f}ms]"
-                    )
+            # Collect statistics for averaging
+            self._profiling_stats['agent_update'].append(1000*(t1-t0))  # type: ignore[possibly-unbound]
+            self._profiling_stats['callbacks'].append(1000*(t_cb1-t_cb0))  # type: ignore[possibly-unbound]
+            self._profiling_stats['step_simulation'].append(1000*(t_sim1-t_sim0))  # type: ignore[possibly-unbound]
+            self._profiling_stats['collision_check'].append(1000*(t_col1-t_col0))  # type: ignore[possibly-unbound]
+            self._profiling_stats['monitor_update'].append(1000*(t_mon1-t_mon0))  # type: ignore[possibly-unbound]
+            self._profiling_stats['total'].append(1000*(t_end-t_step))  # type: ignore[possibly-unbound]
+            
+            # Print average statistics every N steps
+            if self.step_count % self._profiling_interval == 0 and len(self._profiling_stats['total']) > 0:
+                self._print_profiling_summary()
 
-                logger.debug(
-                    f"[PROFILE] step {self.step_count}: "
-                    f"Agent.update={1000*(t1-t0):.2f}ms, "  # type: ignore[possibly-unbound]
-                    f"Callbacks={1000*(t_cb1-t_cb0):.2f}ms, "  # type: ignore[possibly-unbound]
-                    f"stepSimulation={1000*(t_sim1-t_sim0):.2f}ms, "  # type: ignore[possibly-unbound]
-                    f"Collisions={1000*(t_col1-t_col0):.2f}ms{collision_detail}, "  # type: ignore[possibly-unbound]
-                    f"Monitor={1000*(t_mon1-t_mon0):.2f}ms, "  # type: ignore[possibly-unbound]
-                    f"Total={1000*(t_end-t_step):.2f}ms"  # type: ignore[possibly-unbound]
-                )
+    def _print_profiling_summary(self) -> None:
+        """Print profiling statistics summary (average over last N steps)."""
+        import statistics
+        
+        if not self._profiling_stats['total']:
+            return
+        
+        # Calculate statistics for each component
+        components = ['agent_update', 'callbacks', 'step_simulation', 'collision_check', 'monitor_update', 'total']
+        stats_info = []
+        
+        total_avg = statistics.mean(self._profiling_stats['total'])
+        num_samples = len(self._profiling_stats['total'])
+        
+        for comp in components:
+            data = self._profiling_stats[comp]
+            if not data:
+                continue
+            
+            avg = statistics.mean(data)
+            
+            # Calculate percentage of total
+            percentage = (avg / total_avg * 100) if total_avg > 0 else 0
+            
+            stats_info.append(f"{comp}={avg:.2f}ms ({percentage:.1f}%)")
+        
+        logger.info(
+            f"[PROFILING] Last {num_samples} steps average: " +
+            ", ".join(stats_info)
+        )
+        
+        # Clear statistics for next interval
+        for comp in components:
+            self._profiling_stats[comp].clear()
+

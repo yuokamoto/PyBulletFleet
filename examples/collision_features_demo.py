@@ -275,15 +275,15 @@ def create_demo_objects(sim_core: MultiRobotSimulationCore):
 
 def setup_camera(sim_core: MultiRobotSimulationCore):
     """Setup camera for optimal viewing."""
-    import pybullet as p
-    
     # Top-down view to see all objects
-    p.resetDebugVisualizerCamera(
-        cameraDistance=25.0,
-        cameraYaw=0,
-        cameraPitch=-45,
-        cameraTargetPosition=[0, 0, 0],
-        physicsClientId=sim_core.client
+    sim_core.setup_camera(
+        camera_config={
+            "camera_mode": "manual",
+            "camera_distance": 25.0,
+            "camera_yaw": 0,
+            "camera_pitch": -45,
+            "camera_target": [0, 0, 0],
+        }
     )
 
 
@@ -348,7 +348,6 @@ def main():
     print("  - Center: Large red object (multi-cell registration)")
     print("\nControls:")
     print("  - Press 'c' to toggle collision shape visualization")
-    print("  - Press 't' to toggle structure transparency")
     print("  - Press SPACE to pause/resume simulation")
     print("=" * 70)
     

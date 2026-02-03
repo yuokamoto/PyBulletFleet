@@ -216,7 +216,7 @@ def create_action_sequence_B_to_A(robot, pallet):
     area_a_pos = robot.user_data["area_a_position"]
 
     # Calculate drop position (in front of robot at Area A)
-    drop_position = [area_a_pos[0] + PALLET_OFFSET[0], area_a_pos[1] + PALLET_OFFSET[1], PALLET_OFFSET[2]]
+    drop_position = [area_a_pos[0] - PALLET_OFFSET[0], area_a_pos[1] + PALLET_OFFSET[1], PALLET_OFFSET[2]]
 
     actions = [
         # 1. Pick pallet
@@ -379,10 +379,19 @@ area_b_marker = SimObject.from_mesh(
 p.addUserDebugText("AREA A", [AREA_A_CENTER[0], AREA_A_CENTER[1], 2.0], textColorRGB=[0, 1, 0], textSize=2.0, lifeTime=0)
 p.addUserDebugText("AREA B", [AREA_B_CENTER[0], AREA_B_CENTER[1], 2.0], textColorRGB=[0, 0, 1], textSize=2.0, lifeTime=0)
 
-# Camera setup - view between two areas
-camera_target = [(AREA_A_CENTER[0] + AREA_B_CENTER[0]) / 2, (AREA_A_CENTER[1] + AREA_B_CENTER[1]) / 2, 0]
-camera_distance = 40.0
-p.resetDebugVisualizerCamera(camera_distance, 45, -30, camera_target)
+# Auto camera setup - calculate from agent positions
+# Include both agent positions and area centers for optimal view
+agent_positions = [agent.get_pose().position for agent in mobile_agents]
+# Add area centers to ensure both areas are visible
+agent_positions.extend([AREA_A_CENTER, AREA_B_CENTER])
+sim_core.setup_camera(
+    camera_config={
+        "camera_mode": "auto",
+        "camera_view_type": "perspective",
+        "camera_auto_scale": 1.3,  # Zoom out to see both areas
+    },
+    entity_positions=agent_positions,
+)
 
 # Run simulation
 print("Starting simulation...")

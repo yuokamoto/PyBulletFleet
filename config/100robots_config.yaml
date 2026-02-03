@@ -16,14 +16,19 @@
 speed: 100        # Real-time speed for visualization
 gui: true         # Show GUI
 timestep: 0.1     # 10ms timestep for smooth movement
-physics: true    # Kinematic control
+physics: false    # Kinematic control
 monitor: true     # Disable monitor for performance
+log_level: info   # Show INFO level logs for profiling
+
+# Profiling configuration
+enable_profiling: true
+profiling_interval: 100  # Print average every 100 steps
 
 # Camera settings for 100 robots
 camera:
   camera_mode: auto              # Use auto mode for automatic camera positioning
   camera_view_type: perspective  # Perspective view for grid visualization
-  camera_auto_scale: 1.0         # Scale factor for camera distance (larger = farther away)
+  camera_auto_scale: 0.5         # Scale factor for camera distance (larger = farther away)
 
 
 # ========================================

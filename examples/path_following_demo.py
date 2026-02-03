@@ -29,11 +29,12 @@ from pybullet_fleet.agent import Agent, AgentSpawnParams
 from pybullet_fleet.core_simulation import MultiRobotSimulationCore, SimulationParams
 from pybullet_fleet.geometry import Path, Pose
 from pybullet_fleet.sim_object import ShapeParams
+from pybullet_fleet.types import MotionMode
 
 
 def main():
     # Create simulation
-    params = SimulationParams(gui=True, timestep=1.0 / 10.0, speed=10.0, physics=False)
+    params = SimulationParams(gui=True, timestep=0.1, speed=3.0, physics=False)
     sim = MultiRobotSimulationCore(params)
 
     # Get absolute paths
@@ -59,7 +60,7 @@ def main():
         mass=0.0,  # Kinematic control (no physics simulation)
         max_linear_vel=2.0,  # Faster max speed
         max_linear_accel=0.5,  # MUCH slower acceleration for visible effect
-        motion_mode="omnidirectional",
+        motion_mode=MotionMode.OMNIDIRECTIONAL,
     )
     robot_omni = Agent.from_params(omnidirectional_params, sim_core=sim)
 
@@ -74,7 +75,7 @@ def main():
         max_linear_vel=2.0,  # Faster max speed
         max_linear_accel=0.5,  # MUCH slower acceleration for visible effect
         max_angular_vel=1.0,  # Slower rotation
-        motion_mode="differential",
+        motion_mode=MotionMode.DIFFERENTIAL,
     )
     robot_diff = Agent.from_params(differential_params, sim_core=sim)
 
@@ -88,7 +89,7 @@ def main():
         mass=0.0,  # Kinematic control (no physics simulation)
         max_linear_vel=2.0,
         max_linear_accel=0.5,
-        motion_mode="omnidirectional",
+        motion_mode=MotionMode.OMNIDIRECTIONAL,
     )
     robot_omni_3d = Agent.from_params(omni3d_params, sim_core=sim)
 
@@ -102,7 +103,7 @@ def main():
         max_linear_vel=2.0,
         max_linear_accel=0.5,
         max_angular_vel=1.0,
-        motion_mode="differential",
+        motion_mode=MotionMode.DIFFERENTIAL,
     )
     robot_diff_full3d = Agent.from_params(diff_full3d_params, sim_core=sim)
 
@@ -117,7 +118,7 @@ def main():
         max_linear_accel=0.5,
         max_angular_vel=1.0,
         max_angular_accel=5.0,
-        motion_mode="differential",
+        motion_mode=MotionMode.DIFFERENTIAL,
     )
     robot_climb = Agent.from_params(climb_params, sim_core=sim)
 
@@ -342,9 +343,16 @@ def main():
         lifeTime=0,
     )
 
-    # Set camera to view all 5 robots
-    p.resetDebugVisualizerCamera(
-        cameraDistance=25.0, cameraYaw=45, cameraPitch=-30, cameraTargetPosition=[-2, 0, 2]  # Zoom out for all paths
+    # Auto camera setup - calculate from all 5 robot positions
+    all_robots = [robot_omni, robot_diff, robot_omni_3d, robot_diff_full3d, robot_climb]
+    agent_positions = [robot.get_pose().position for robot in all_robots]
+    sim.setup_camera(
+        camera_config={
+            "camera_mode": "auto",
+            "camera_view_type": "perspective",
+            "camera_auto_scale": 0.7,  # Zoom out for all paths
+        },
+        entity_positions=agent_positions,
     )
 
     print("\nSimulation started! Press Ctrl+C to exit.")

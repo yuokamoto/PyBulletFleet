@@ -75,16 +75,6 @@ arm_agents = agent_manager.spawn_agents_grid(num_agents=NUM_ROBOTS, grid_params=
 
 print(f"✓ Successfully spawned {len(arm_agents)} robots using AgentManager")
 
-# DEBUG: Check if agents are in sim_core.sim_objects
-agent_count = sum(1 for obj in sim_core.sim_objects if isinstance(obj, Agent))
-simobject_count = sum(1 for obj in sim_core.sim_objects if isinstance(obj, SimObject) and not isinstance(obj, Agent))
-print(f"DEBUG: sim_core.sim_objects contains {agent_count} Agent instances")
-print(f"DEBUG: sim_core.sim_objects contains {simobject_count} SimObject instances (non-Agent)")
-print(f"DEBUG: Total sim_objects count: {len(sim_core.sim_objects)}")
-print(f"DEBUG: arm_agents list length: {len(arm_agents)}")
-print(f"DEBUG: First agent body_id: {arm_agents[0].body_id}")
-print(f"DEBUG: First agent in sim_core.sim_objects: {arm_agents[0] in sim_core.sim_objects}\n")
-
 # Spawn boxes for each robot
 print("=== Spawning Boxes for Each Robot ===")
 for idx, arm_agent in enumerate(arm_agents):
@@ -222,10 +212,16 @@ print(f"✓ All {len(arm_agents)} robots configured!\n")
 agent_manager.register_callback(action_repeat_callback, frequency=10.0)
 print("✓ Registered AgentManager callback for automatic action repeat\n")
 
-# Camera setup - view the entire grid from above
-grid_center = [(GRID_SIZE - 1) * SPACING / 2, (GRID_SIZE - 1) * SPACING / 2, 0]
-camera_distance = GRID_SIZE * SPACING * 0.8  # Adjust to see entire grid
-p.resetDebugVisualizerCamera(camera_distance, 45, -30, grid_center)
+# Auto camera setup - calculate from agent positions
+agent_positions = [agent.get_pose().position for agent in arm_agents]
+sim_core.setup_camera(
+    camera_config={
+        "camera_mode": "auto",
+        "camera_view_type": "perspective",
+        "camera_auto_scale": 1.2,  # Zoom out to see entire 10x10 grid
+    },
+    entity_positions=agent_positions,
+)
 
 # Run simulation
 print("Starting simulation...")

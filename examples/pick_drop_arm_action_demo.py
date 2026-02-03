@@ -142,7 +142,15 @@ sim_core.register_callback(repeat_callback, frequency=10)
 print("Action sequence configured and started!")
 
 # Camera setup
-p.resetDebugVisualizerCamera(2.0, 45, -30, [0, 0, 0.2])
+sim_core.setup_camera(
+    camera_config={
+        "camera_mode": "manual",
+        "camera_distance": 2.0,
+        "camera_yaw": 45,
+        "camera_pitch": -30,
+        "camera_target": [0, 0, 0.2],
+    }
+)
 
 # Run simulation
 print("\nStarting simulation...")

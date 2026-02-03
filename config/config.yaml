@@ -37,7 +37,12 @@ monitor: true
 ignore_static_collision: true
 
 # Enable profiling output (True/False)
-enable_profiling: false
+enable_profiling: true
+
+# Profiling configuration
+# - profiling_interval: Number of steps to average before printing report (default: 100)
+#   Example: profiling_interval=100 → prints average every 100 steps
+profiling_interval: 100
 
 # ========================================
 # Collision Detection Settings

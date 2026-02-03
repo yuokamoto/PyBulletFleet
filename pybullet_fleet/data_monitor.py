@@ -73,8 +73,10 @@ class DataMonitor:
             "Actual Speed",
             "Time Step",
             "Physics",
-            "Robots",
-            "Collisions",
+            "Agents",
+            "Objects",
+            "Active Collisions",
+            "Total Collisions",
             "Steps",
         ]
 
@@ -118,8 +120,10 @@ class DataMonitor:
                     text=f"Time Step: {data.get('time_step', 0):.4f}s ({data.get('frequency', 0):.0f}Hz)"
                 )
                 self.labels["Physics"].config(text=f"Physics: {data.get('physics', 'Unknown')}")
-                self.labels["Robots"].config(text=f"Robots: {data.get('robots', {})}")
-                self.labels["Collisions"].config(text=f"Collisions: {data.get('collisions', 0)}")
+                self.labels["Agents"].config(text=f"Agents: {data.get('agents', 0)}")
+                self.labels["Objects"].config(text=f"Objects: {data.get('objects', 0)}")
+                self.labels["Active Collisions"].config(text=f"Active Collisions: {data.get('active_collisions', 0)}")
+                self.labels["Total Collisions"].config(text=f"Total Collisions: {data.get('collisions', 0)}")
                 self.labels["Steps"].config(text=f"Steps: {data.get('steps', 0)}")
 
                 self.status_label.config(text=f"Status: Connected (Updated: {time.strftime('%H:%M:%S')})")

@@ -27,11 +27,14 @@ def main():
     sim = MultiRobotSimulationCore(params)
 
     # Camera setup
-    p.resetDebugVisualizerCamera(
-        cameraDistance=10.0,
-        cameraYaw=45,
-        cameraPitch=-30,
-        cameraTargetPosition=[2, 0, 0],
+    sim.setup_camera(
+        camera_config={
+            "camera_mode": "manual",
+            "camera_distance": 10.0,
+            "camera_yaw": 45,
+            "camera_pitch": -30,
+            "camera_target": [2, 0, 0],
+        }
     )
 
     print("\n" + "=" * 70)
@@ -59,7 +62,7 @@ def main():
     agent = Agent.from_params(agent_params, sim_core=sim)
 
     # Enable path visualization for all actions
-    agent.path_visualize = False
+    agent.path_visualize = True
     agent.path_visualize_width = 3.0
 
     # Get mesh paths (absolute)

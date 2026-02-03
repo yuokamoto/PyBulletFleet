@@ -66,7 +66,15 @@ arm_agent = Agent.from_urdf(
 )
 
 # Setup camera
-p.resetDebugVisualizerCamera(10.0, 45, -25, [0.5, 0.5, 0.5])
+sim_core.setup_camera(
+    camera_config={
+        "camera_mode": "manual",
+        "camera_distance": 10.0,
+        "camera_yaw": 45,
+        "camera_pitch": -25,
+        "camera_target": [0.5, 0.5, 0.5],
+    }
+)
 
 
 # Callbacks
