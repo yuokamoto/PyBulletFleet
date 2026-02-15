@@ -21,11 +21,7 @@ from pybullet_fleet.core_simulation import MultiRobotSimulationCore, SimulationP
 from pybullet_fleet.sim_object import Pose, SimObject, ShapeParams
 
 # Initialize simulation
-params = SimulationParams(
-    gui=True, 
-    timestep=0.01, 
-    physics=True # for robot arm
-)
+params = SimulationParams(gui=True, timestep=0.01, physics=True)  # for robot arm
 sim_core = MultiRobotSimulationCore(params)
 
 # 1. SimObject with mesh (pallet visual)

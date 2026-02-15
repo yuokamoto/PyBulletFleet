@@ -39,9 +39,15 @@ ignore_static_collision: true
 # Enable profiling output (True/False)
 enable_profiling: true
 
+# Enable memory profiling output (True/False)
+# Tracks memory usage using Python's tracemalloc module
+# Useful for detecting memory leaks in long-running simulations
+enable_memory_profiling: false
+
 # Profiling configuration
 # - profiling_interval: Number of steps to average before printing report (default: 100)
 #   Example: profiling_interval=100 → prints average every 100 steps
+#   This interval applies to both time profiling and memory profiling
 profiling_interval: 100
 
 # ========================================

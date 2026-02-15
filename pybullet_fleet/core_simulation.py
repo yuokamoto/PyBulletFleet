@@ -9,6 +9,7 @@ monitoring, and log control for various robots, pallets, and meshes.
 import logging
 import os
 import time
+import tracemalloc  # Memory profiling (imported once at module level)
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 
 import numpy as np
@@ -92,6 +93,7 @@ class SimulationParams:
             ignore_static_collision=config.get("ignore_static_collision", True),
             enable_profiling=config.get("enable_profiling", False),
             profiling_interval=config.get("profiling_interval", 100),
+            enable_memory_profiling=config.get("enable_memory_profiling", False),
             enable_collision_color_change=config.get("enable_collision_color_change", False),
             spatial_hash_cell_size_mode=SpatialHashCellSizeMode(config.get("spatial_hash_cell_size_mode", "auto_initial")),
             spatial_hash_cell_size=config.get("spatial_hash_cell_size", None),
@@ -127,6 +129,7 @@ class SimulationParams:
         ignore_static_collision: bool = True,
         enable_profiling: bool = False,
         profiling_interval: int = 100,
+        enable_memory_profiling: bool = False,
         enable_collision_color_change: bool = False,
         spatial_hash_cell_size_mode: SpatialHashCellSizeMode = SpatialHashCellSizeMode.AUTO_INITIAL,
         spatial_hash_cell_size: Optional[float] = None,  # Used when mode=CONSTANT
@@ -154,6 +157,7 @@ class SimulationParams:
         self.ignore_static_collision = ignore_static_collision
         self.enable_profiling = enable_profiling
         self.profiling_interval = profiling_interval  # Steps between profiling reports
+        self.enable_memory_profiling = enable_memory_profiling  # Memory profiling switch
         self.enable_collision_color_change = enable_collision_color_change
         self.spatial_hash_cell_size_mode = spatial_hash_cell_size_mode
         self.spatial_hash_cell_size = spatial_hash_cell_size  # Fixed cell size (for mode=CONSTANT)
@@ -236,20 +240,34 @@ class MultiRobotSimulationCore:
             params.ignore_static_collision
         )  # If True, skip collision checks with static objects
         self._simulation_paused: bool = False  # Track if simulation is paused
-        
+
         # --- Profiling configuration ---
         self.enable_profiling: bool = params.enable_profiling  # Master profiling switch
         self._profiling_interval: int = params.profiling_interval  # Report average every N steps
-        
+        self.enable_memory_profiling: bool = params.enable_memory_profiling  # Memory profiling switch
+
         # --- Profiling statistics ---
         self._profiling_stats: Dict[str, List[float]] = {
-            'agent_update': [],
-            'callbacks': [],
-            'step_simulation': [],
-            'collision_check': [],
-            'monitor_update': [],
-            'total': []
+            "agent_update": [],
+            "callbacks": [],
+            "step_simulation": [],
+            "collision_check": [],
+            "monitor_update": [],
+            "total": [],
         }
+
+        # --- Memory profiling statistics (O(1) memory, aggregator-based) ---
+        self._memory_stats: Dict[str, Union[int, float]] = {
+            "count": 0,  # Number of samples
+            "current_sum": 0.0,  # Sum of current memory (for average)
+            "current_min": float("inf"),  # Minimum current memory
+            "current_max": 0.0,  # Maximum current memory
+            "current_first": 0.0,  # First sample (for growth calculation)
+            "current_last": 0.0,  # Last sample (for growth calculation)
+            "peak_sum": 0.0,  # Sum of peak memory (for average)
+            "peak_max": 0.0,  # Maximum peak memory
+        }
+        self._memory_tracemalloc_started: bool = False  # Track if WE started tracemalloc
 
         # --- Movement tracking and collision optimization ---
         self._moved_this_step: set = set()  # object_ids that moved this step
@@ -270,7 +288,9 @@ class MultiRobotSimulationCore:
             {}
         )  # object_id -> AABB
         self._cached_spatial_grid: Dict[Tuple[int, int, int], Set[int]] = {}  # Spatial hash grid: cell -> {object_ids}
-        self._cached_object_to_cell: Dict[int, List[Tuple[int, int, int]]] = {}  # object_id -> list of cells (supports multi-cell registration)
+        self._cached_object_to_cell: Dict[int, List[Tuple[int, int, int]]] = (
+            {}
+        )  # object_id -> list of cells (supports multi-cell registration)
         self._aabb_cache_valid: bool = False  # Flag indicating if AABB cache is valid
         self._last_ignore_static: Optional[bool] = None  # Track last ignore_static value to detect mode changes
 
@@ -1532,13 +1552,10 @@ class MultiRobotSimulationCore:
                             or aabb_i[1][1] < aabb_j[0][1]
                             or aabb_i[0][1] > aabb_j[1][1]
                         )
-                        
+
                         # Check Z-axis overlap only if at least one object uses 3D mode
                         if mode_i == CollisionMode.NORMAL_3D or mode_j == CollisionMode.NORMAL_3D:
-                            aabb_overlap_z = not (
-                                aabb_i[1][2] < aabb_j[0][2]
-                                or aabb_i[0][2] > aabb_j[1][2]
-                            )
+                            aabb_overlap_z = not (aabb_i[1][2] < aabb_j[0][2] or aabb_i[0][2] > aabb_j[1][2])
                             # 3D mode: require both XY and Z overlap
                             if not (aabb_overlap_xy and aabb_overlap_z):
                                 continue  # No overlap, skip this pair
@@ -1665,8 +1682,10 @@ class MultiRobotSimulationCore:
                     # Best for: kinematics motion, safety margin detection
                     # Works with: Physics ON/OFF, stable with resetBasePositionAndOrientation
                     closest_points = p.getClosestPoints(
-                        obj_i.body_id, obj_j.body_id, distance=self.params.collision_margin,  # Safety clearance
-                        physicsClientId=self.client
+                        obj_i.body_id,
+                        obj_j.body_id,
+                        distance=self.params.collision_margin,  # Safety clearance
+                        physicsClientId=self.client,
                     )
                     has_collision = len(closest_points) > 0
 
@@ -1683,8 +1702,7 @@ class MultiRobotSimulationCore:
                     else:
                         # Both are kinematic - use getClosestPoints with safety margin
                         closest_points = p.getClosestPoints(
-                            obj_i.body_id, obj_j.body_id, distance=self.params.collision_margin,
-                            physicsClientId=self.client
+                            obj_i.body_id, obj_j.body_id, distance=self.params.collision_margin, physicsClientId=self.client
                         )
                         has_collision = len(closest_points) > 0
 
@@ -1778,8 +1796,9 @@ class MultiRobotSimulationCore:
         if not hasattr(self, "_speed_history"):
             self._speed_history = []  # [(real_time, sim_time)]
         self._speed_history.append((now, sim_time))
-        # Keep only history within 10 seconds
-        self._speed_history = [(rt, st) for rt, st in self._speed_history if now - rt <= 10.0]
+        # Keep only history within 10 seconds (efficient in-place removal)
+        while self._speed_history and now - self._speed_history[0][0] > 10.0:
+            self._speed_history.pop(0)
         # Calculate speed for the last 10 seconds
         if len(self._speed_history) >= 2:
             rt0, st0 = self._speed_history[0]
@@ -1790,11 +1809,11 @@ class MultiRobotSimulationCore:
         else:
             actual_speed = 0
         elapsed_time = now - self.start_time if self.start_time else 0
-        
+
         # Use len(self.agents) for O(1) agent count instead of O(N) iteration
         num_agents = len(self.agents)
         num_objects = len(self.sim_objects) - num_agents
-        
+
         monitor_data = {
             "sim_time": sim_time,
             "real_time": elapsed_time,
@@ -1872,6 +1891,13 @@ class MultiRobotSimulationCore:
         # Enable rendering before starting simulation
         self.enable_rendering()
 
+        # Start memory profiling if enabled (using is_tracing() for robustness)
+        if self.enable_memory_profiling and not tracemalloc.is_tracing():
+            # Start with 10 frames for traceback (useful for debugging memory issues)
+            tracemalloc.start(10)
+            self._memory_tracemalloc_started = True
+            logger.info("Memory profiling started using tracemalloc (10 frames)")
+
         logger.info(f"Simulation initialized: {len(self.sim_objects)} objects, timestep={self.params.timestep}s")
 
     def run_simulation(self, duration: Optional[float] = None) -> None:
@@ -1893,6 +1919,7 @@ class MultiRobotSimulationCore:
             duration = self.params.duration
 
         # Initialize simulation state (counters, visualizer, rendering)
+        # Note: initialize_simulation() already starts tracemalloc if needed
         self.initialize_simulation()
 
         try:
@@ -1921,19 +1948,19 @@ class MultiRobotSimulationCore:
                     # Speed>0: Synchronize with real time using absolute time calculation
                     loop_start = time.time()
                     current_time = time.time()
-                    
+
                     # Detect pause state change: reset start_time on resume
                     if last_pause_state and not self._simulation_paused:
                         # Just resumed from pause: reset start_time to avoid jump
                         start_time = current_time - current_sim_time / self.params.speed
                         logger.info("Resumed from pause: start_time reset for smooth continuation")
                     last_pause_state = self._simulation_paused
-                    
+
                     # Calculate target sim_time using absolute time (stable control)
                     elapsed_time = current_time - start_time
                     target_sim_time = elapsed_time * self.params.speed
                     time_diff = target_sim_time - current_sim_time
-                    
+
                     actual_sleep = 0.0
 
                     if time_diff > 0:
@@ -2153,49 +2180,141 @@ class MultiRobotSimulationCore:
         # Profiling output (only when profiling is enabled and not returning data)
         if self.enable_profiling:
             # Collect statistics for averaging
-            self._profiling_stats['agent_update'].append(1000*(t1-t0))  # type: ignore[possibly-unbound]
-            self._profiling_stats['callbacks'].append(1000*(t_cb1-t_cb0))  # type: ignore[possibly-unbound]
-            self._profiling_stats['step_simulation'].append(1000*(t_sim1-t_sim0))  # type: ignore[possibly-unbound]
-            self._profiling_stats['collision_check'].append(1000*(t_col1-t_col0))  # type: ignore[possibly-unbound]
-            self._profiling_stats['monitor_update'].append(1000*(t_mon1-t_mon0))  # type: ignore[possibly-unbound]
-            self._profiling_stats['total'].append(1000*(t_end-t_step))  # type: ignore[possibly-unbound]
-            
+            self._profiling_stats["agent_update"].append(1000 * (t1 - t0))  # type: ignore[possibly-unbound]
+            self._profiling_stats["callbacks"].append(1000 * (t_cb1 - t_cb0))  # type: ignore[possibly-unbound]
+            self._profiling_stats["step_simulation"].append(1000 * (t_sim1 - t_sim0))  # type: ignore[possibly-unbound]
+            self._profiling_stats["collision_check"].append(1000 * (t_col1 - t_col0))  # type: ignore[possibly-unbound]
+            self._profiling_stats["monitor_update"].append(1000 * (t_mon1 - t_mon0))  # type: ignore[possibly-unbound]
+            self._profiling_stats["total"].append(1000 * (t_end - t_step))  # type: ignore[possibly-unbound]
+
             # Print average statistics every N steps
-            if self.step_count % self._profiling_interval == 0 and len(self._profiling_stats['total']) > 0:
+            if self.step_count % self._profiling_interval == 0 and len(self._profiling_stats["total"]) > 0:
                 self._print_profiling_summary()
+
+        # Memory profiling output (O(1) aggregator-based statistics)
+        if self.enable_memory_profiling and tracemalloc.is_tracing():
+            # Get memory usage (no import needed - already at top)
+            current, peak = tracemalloc.get_traced_memory()
+            current_mb = current / 1024 / 1024  # Convert to MB
+            peak_mb = peak / 1024 / 1024  # Convert to MB
+
+            # Update aggregators (O(1) memory)
+            count = self._memory_stats["count"] + 1
+            self._memory_stats["count"] = count
+            self._memory_stats["current_sum"] += current_mb
+            self._memory_stats["current_min"] = min(self._memory_stats["current_min"], current_mb)
+            self._memory_stats["current_max"] = max(self._memory_stats["current_max"], current_mb)
+            self._memory_stats["peak_sum"] += peak_mb
+            self._memory_stats["peak_max"] = max(self._memory_stats["peak_max"], peak_mb)
+
+            # Track first and last samples for growth calculation
+            if count == 1:
+                self._memory_stats["current_first"] = current_mb
+            self._memory_stats["current_last"] = current_mb
+
+            # Print average statistics every N steps
+            if self.step_count % self._profiling_interval == 0 and count > 0:
+                self._print_memory_profiling_summary()
 
     def _print_profiling_summary(self) -> None:
         """Print profiling statistics summary (average over last N steps)."""
         import statistics
-        
-        if not self._profiling_stats['total']:
+
+        if not self._profiling_stats["total"]:
             return
-        
+
         # Calculate statistics for each component
-        components = ['agent_update', 'callbacks', 'step_simulation', 'collision_check', 'monitor_update', 'total']
+        components = ["agent_update", "callbacks", "step_simulation", "collision_check", "monitor_update", "total"]
         stats_info = []
-        
-        total_avg = statistics.mean(self._profiling_stats['total'])
-        num_samples = len(self._profiling_stats['total'])
-        
+
+        total_avg = statistics.mean(self._profiling_stats["total"])
+        num_samples = len(self._profiling_stats["total"])
+
         for comp in components:
             data = self._profiling_stats[comp]
             if not data:
                 continue
-            
+
             avg = statistics.mean(data)
-            
+
             # Calculate percentage of total
             percentage = (avg / total_avg * 100) if total_avg > 0 else 0
-            
+
             stats_info.append(f"{comp}={avg:.2f}ms ({percentage:.1f}%)")
-        
-        logger.info(
-            f"[PROFILING] Last {num_samples} steps average: " +
-            ", ".join(stats_info)
-        )
-        
+
+        logger.info(f"[PROFILING] Last {num_samples} steps average: " + ", ".join(stats_info))
+
         # Clear statistics for next interval
         for comp in components:
             self._profiling_stats[comp].clear()
 
+    def _print_memory_profiling_summary(self) -> None:
+        """
+        Print memory profiling statistics summary (aggregator-based, O(1) memory).
+
+        Note: Reports Python heap memory tracked by tracemalloc, not RSS (process memory).
+        For RSS, use psutil.Process().memory_info().rss separately.
+        """
+        count = self._memory_stats["count"]
+        if count == 0:
+            return
+
+        # Calculate statistics from aggregators
+        current_avg = self._memory_stats["current_sum"] / count
+        current_min = self._memory_stats["current_min"]
+        current_max = self._memory_stats["current_max"]
+        peak_avg = self._memory_stats["peak_sum"] / count
+        peak_max = self._memory_stats["peak_max"]
+
+        # Calculate memory growth (difference between first and last sample)
+        memory_growth = self._memory_stats["current_last"] - self._memory_stats["current_first"]
+        growth_str = f", growth={memory_growth:+.2f}MB"
+
+        logger.info(
+            f"[MEMORY] Last {count} steps: "
+            f"current={current_avg:.2f}MB (min={current_min:.2f}, max={current_max:.2f}), "
+            f"peak={peak_avg:.2f}MB (max={peak_max:.2f}){growth_str}"
+        )
+
+        # Reset aggregators for next interval (O(1) memory)
+        self._memory_stats["count"] = 0
+        self._memory_stats["current_sum"] = 0.0
+        self._memory_stats["current_min"] = float("inf")
+        self._memory_stats["current_max"] = 0.0
+        self._memory_stats["current_first"] = 0.0
+        self._memory_stats["current_last"] = 0.0
+        self._memory_stats["peak_sum"] = 0.0
+        self._memory_stats["peak_max"] = 0.0
+
+        # Reset peak memory for interval-based peak tracking (requires Python 3.9+)
+        # This makes "peak" meaningful for each interval rather than cumulative
+        if tracemalloc.is_tracing() and hasattr(tracemalloc, "reset_peak"):
+            tracemalloc.reset_peak()
+        # Note: Without reset_peak (Python <3.9), peak becomes cumulative over entire run
+
+    def get_memory_usage(self) -> Optional[Dict[str, float]]:
+        """
+        Get current memory usage (requires enable_memory_profiling=True).
+
+        Returns:
+            Dictionary with current and peak memory usage in MB, or None if not enabled.
+            Keys: 'current_mb', 'peak_mb'
+
+        Note:
+            - Returns **Python heap memory** tracked by tracemalloc, NOT RSS (process memory).
+            - tracemalloc tracks Python object allocations, not C extensions or OS-level memory.
+            - For total process memory (RSS), use: psutil.Process().memory_info().rss
+            - Peak is cumulative since last reset_peak() call (interval-based in profiling).
+
+        Example:
+            >>> sim = MultiRobotSimulationCore.from_dict(config)
+            >>> # ... run simulation with enable_memory_profiling=True ...
+            >>> mem = sim.get_memory_usage()
+            >>> if mem:
+            >>>     print(f"Python heap: {mem['current_mb']:.2f} MB, Peak: {mem['peak_mb']:.2f} MB")
+        """
+        if not self.enable_memory_profiling or not tracemalloc.is_tracing():
+            return None
+
+        current, peak = tracemalloc.get_traced_memory()
+        return {"current_mb": current / 1024 / 1024, "peak_mb": peak / 1024 / 1024}

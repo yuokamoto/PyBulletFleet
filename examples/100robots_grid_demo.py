@@ -224,11 +224,11 @@ def batch_agent_movement_callback(sim_core, dt):
             forward_y = forward_vel * np.sin(yaw) * dt
             new_x = pos[0] + forward_x
             new_y = pos[1] + forward_y
-            
+
             # Calculate new orientation
             new_yaw = yaw + yaw_vel * dt
             corrected_orn = p.getQuaternionFromEuler([0, 0, new_yaw])
-            
+
             # Set new pose (position-based control)
             new_pose = Pose.from_pybullet([new_x, new_y, 0.3], corrected_orn)
             agent.set_pose(new_pose)

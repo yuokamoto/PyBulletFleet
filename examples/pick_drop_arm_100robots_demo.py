@@ -20,8 +20,18 @@ from pybullet_fleet.core_simulation import MultiRobotSimulationCore, SimulationP
 from pybullet_fleet.sim_object import Pose, SimObject, ShapeParams
 from pybullet_fleet.action import JointAction, PickAction, DropAction, WaitAction
 
-# Simulation setup
-params = SimulationParams(gui=True, timestep=0.01, speed=0, physics=True, ignore_static_collision=True, log_level="debug")
+# Simulation setup with memory profiling enabled
+params = SimulationParams(
+    gui=True,
+    timestep=0.01,
+    speed=0,
+    physics=True,
+    ignore_static_collision=True,
+    log_level="info",
+    enable_profiling=True,  # Time profiling
+    enable_memory_profiling=True,  # Memory profiling
+    profiling_interval=500,  # Report every 500 steps
+)
 sim_core = MultiRobotSimulationCore(params)
 
 # Create AgentManager

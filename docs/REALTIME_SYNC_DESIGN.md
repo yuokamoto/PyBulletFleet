@@ -65,7 +65,7 @@ When ahead of target:
 ```python
 if time_diff < 0:
     sleep_time = abs(time_diff) - last_step_process_time
-    
+
     if sleep_time > 0:
         time.sleep(sleep_time)  # Exact sleep
     elif sleep_time > -min_sleep:

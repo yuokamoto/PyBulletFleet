@@ -55,7 +55,7 @@ def create_cube_patrol_path(
     cx, cy, cz = cube_center
 
     # Bottom level Z coordinate
-    z_bottom = cz - half_size + 0.3 # offset
+    z_bottom = cz - half_size + 0.3  # offset
     # Top level Z coordinate
     z_top = cz + half_size
 
@@ -87,7 +87,7 @@ def main():
 
     # Create simulation with config file
     config_path = os.path.join(os.path.dirname(__file__), "..", "config", "100robots_config.yaml")
-    params = SimulationParams.from_config(config_path)    
+    params = SimulationParams.from_config(config_path)
     sim = MultiRobotSimulationCore(params)
 
     # Get absolute path to URDF
@@ -226,10 +226,10 @@ def main():
     # setup_camera() automatically uses params.camera_config if camera_config is None
     # and calculates entity_positions from all objects if entity_positions is None
     sim.setup_camera()
-    
+
     if params.camera_config:
         print(f"✓ Camera configured from config file: {params.camera_config.get('camera_mode', 'none')} mode")
-        if 'camera_auto_scale' in params.camera_config:
+        if "camera_auto_scale" in params.camera_config:
             print(f"  Camera auto scale: {params.camera_config['camera_auto_scale']}")
     else:
         print("✓ Camera setup completed (no camera_config in config file)")
