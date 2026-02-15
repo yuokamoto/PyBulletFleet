@@ -37,9 +37,9 @@ setup(
     description="General-purpose PyBullet simulation library for multi-robot fleets",
     long_description=read_readme(),
     long_description_content_type="text/markdown",
-    author="Rapyuta Robotics",
+    author="Yu Okamoto",
     author_email="",
-    url="https://github.com/rapyuta-robotics/PyBulletFleet",
+    url="https://github.com/yuokamoto/PyBulletFleet",
     # Package discovery - now at top level
     packages=find_packages(include=["pybullet_fleet", "pybullet_fleet.*"]),
     # Dependencies

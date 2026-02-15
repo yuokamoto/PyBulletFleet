@@ -165,10 +165,10 @@ sim_core.set_profiling_log_frequency(10)  # Log every 10 steps
 
 ## Configuration Examples
 
-### Example 1: ASRS Warehouse (Ground Robots)
+### Example 1: Warehouse (Ground Robots)
 
 ```yaml
-# config/asrs_config.yaml
+# config/config.yaml
 simulation:
   timestep: 0.1                 # Kinematics-optimized
   speed: 0                      # Maximum speed

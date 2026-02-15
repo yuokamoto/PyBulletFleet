@@ -331,14 +331,6 @@ class SimObjectManager:
                 obj.update()  # Skip static shelves, bins, etc.
 ```
 
-**Warehouse Scenario Analysis**:
-```
-Typical ASRS warehouse:
-- Shelves/racks:     9,000 objects (90%) → STATIC
-- Robots/pallets:    1,000 objects (10%) → DYNAMIC
-- Expected speedup:  10x (update only 10% of objects)
-- Current: 270ms → Target: 27ms
-```
 
 ### Spatial Partitioning
 

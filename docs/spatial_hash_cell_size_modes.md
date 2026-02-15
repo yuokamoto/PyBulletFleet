@@ -352,7 +352,7 @@ No, cell_size only affects broad-phase performance. Narrow-phase collision detec
 
 ## Example: Production Configuration
 
-Recommended setup for ASRS warehouse simulation (1000 robots + structures):
+Recommended setup for 1000 robots + structures:
 
 ```yaml
 # config.yaml
