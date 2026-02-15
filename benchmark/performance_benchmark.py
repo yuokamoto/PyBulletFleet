@@ -63,9 +63,9 @@ def get_system_info() -> Dict[str, Any]:
                 elif "CPU max MHz:" in line:
                     try:
                         info["cpu_max_mhz"] = float(line.split(":", 1)[1].strip())
-                    except:
+                    except (ValueError, IndexError):
                         pass
-        except:
+        except (FileNotFoundError, IOError):
             pass
 
     return info

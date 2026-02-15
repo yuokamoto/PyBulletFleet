@@ -545,7 +545,7 @@ fleet.step()
 
 ## Multi-Cell Registration for Large Objects
 
-**Date**: 2026-01-21  
+**Date**: 2026-01-21
 **Feature**: Automatic multi-cell spatial grid registration
 
 ### Problem Statement
@@ -563,7 +563,7 @@ Large wall AABB: 5.0m × 5.0m (center at Cell B)
 Small robot: 0.5m × 0.5m (in Cell A)
 
 [Cell A] [Cell B (wall center)] [Cell C]
-  Robot                            
+  Robot
 
 → Robot only checks Cell A neighbors
 → Wall is in Cell B → NOT checked
@@ -653,12 +653,12 @@ _cached_object_to_cell: Dict[int, List[Tuple[int, int, int]]]
 # _get_potential_collision_pairs_spatial_hash()
 for obj_id_i in moved_objects:
     cells_i = self._cached_object_to_cell.get(obj_id_i, [])
-    
+
     # Check neighbors in ALL cells this object occupies
     for cell_i in cells_i:
         for offset in neighbor_offsets:
             neighbor_cell = (cell_i[0] + offset[0], ...)
-            
+
             # Find neighbors and check AABB overlap
             for obj_id_j in self._cached_spatial_grid.get(neighbor_cell, set()):
                 # ... collision check

@@ -16,13 +16,13 @@ collision_mode_comparison.py
     ===================================================================
     Collision Mode Comparison for 1000 Agents
     ===================================================================
-    
+
     Mode: No Collision (Disabled)
     ------------------------------
     Total simulation step: 2.345ms
     Collision check: 0.000ms (disabled)
     Other processing: 2.345ms
-    
+
     Mode: 2D Collision (9 neighbors)
     ---------------------------------
     Total simulation step: 5.678ms
@@ -33,9 +33,9 @@ collision_mode_comparison.py
       Contact Points:  0.432ms (  8.5%)
       Total collision: 2.501ms
     Other processing: 3.177ms
-    
+
     Speedup vs 3D: 1.45x
-    
+
     Mode: 3D Collision (27 neighbors)
     ----------------------------------
     Total simulation step: 8.234ms
@@ -46,14 +46,14 @@ collision_mode_comparison.py
       Contact Points:  0.432ms (  8.5%)
       Total collision: 5.112ms
     Other processing: 3.122ms
-    
+
     ===================================================================
     Summary
     ===================================================================
     No Collision:  2.345ms (baseline, 0% collision overhead)
     2D Collision:  5.678ms (+142% vs no collision, 67% reduction vs 3D)
     3D Collision:  8.234ms (+251% vs no collision, baseline for collision)
-    
+
     Recommendation:
       - For 2D navigation: Use 2D mode for 1.45x speedup
       - For 3D navigation: Use 3D mode (required for accuracy)
@@ -75,13 +75,13 @@ from pybullet_fleet.agent import AgentSpawnParams, MotionMode
 
 def benchmark_collision_mode(mode_name: str, collision_freq: float, collision_2d: bool, num_agents: int, num_iterations: int):
     """特定の衝突モードでベンチマーク"""
-    
+
     # Clean disconnect
     if p.isConnected():
         p.disconnect()
-    
+
     p.connect(p.DIRECT)
-    
+
     # Setup
     config_path = os.path.join(os.path.dirname(__file__), "profiling_config.yaml")
     params = SimulationParams.from_config(config_path)
@@ -140,9 +140,9 @@ def benchmark_collision_mode(mode_name: str, collision_freq: float, collision_2d
         profiling_data = sim_core.step_once(return_profiling=True)
         step_time = (time.perf_counter() - t0) * 1000
         step_times.append(step_time)
-        
+
         # Extract collision timings if available
-        if profiling_data and 'collision_check' in profiling_data:
+        if profiling_data and "collision_check" in profiling_data:
             # Note: Built-in profiling returns breakdown in check_collisions
             # We need to call check_collisions separately with return_profiling=True
             pass
@@ -186,18 +186,18 @@ def print_results(results_list, num_agents):
         print(f"\nMode: {results['mode_name']}")
         print("-" * 70)
         print(f"Total simulation step: {results['step_time_mean']:.3f}ms (±{results['step_time_stdev']:.3f}ms)")
-        
+
         if results["collision_breakdown"]:
             print("\nCollision check breakdown:")
             total_collision = results["collision_breakdown"].get("total", {}).get("mean", 0)
-            
+
             for component in ["get_aabbs", "spatial_hashing", "aabb_filtering", "contact_points", "total"]:
                 if component in results["collision_breakdown"]:
                     mean = results["collision_breakdown"][component]["mean"]
                     percentage = (mean / total_collision * 100) if total_collision > 0 else 0
                     print(f"  {component.replace('_', ' ').title():.<20} {mean:>7.3f}ms ({percentage:>5.1f}%)")
-            
-            other_time = results['step_time_mean'] - total_collision
+
+            other_time = results["step_time_mean"] - total_collision
             print(f"\nOther processing: {other_time:.3f}ms")
         else:
             print("Collision check: disabled")
@@ -206,20 +206,20 @@ def print_results(results_list, num_agents):
     print("\n" + "=" * 70)
     print("Summary")
     print("=" * 70)
-    
-    no_collision_time = results_list[0]['step_time_mean']
-    collision_2d_time = results_list[1]['step_time_mean']
-    collision_3d_time = results_list[2]['step_time_mean']
-    
+
+    no_collision_time = results_list[0]["step_time_mean"]
+    collision_2d_time = results_list[1]["step_time_mean"]
+    collision_3d_time = results_list[2]["step_time_mean"]
+
     print(f"No Collision:  {no_collision_time:.3f}ms (baseline, 0% collision overhead)")
     print(f"2D Collision:  {collision_2d_time:.3f}ms (+{(collision_2d_time/no_collision_time - 1)*100:.1f}% vs no collision)")
     print(f"3D Collision:  {collision_3d_time:.3f}ms (+{(collision_3d_time/no_collision_time - 1)*100:.1f}% vs no collision)")
-    
+
     if collision_3d_time > collision_2d_time:
         speedup = collision_3d_time / collision_2d_time
         reduction = (1 - collision_2d_time / collision_3d_time) * 100
         print(f"\n2D mode speedup: {speedup:.2f}x ({reduction:.1f}% reduction vs 3D)")
-    
+
     print("\nRecommendation:")
     print("  - For 2D navigation: Use 2D mode for faster collision checks")
     print("  - For 3D navigation: Use 3D mode (required for accuracy)")
@@ -240,32 +240,38 @@ if __name__ == "__main__":
 
     # Run benchmarks for each mode
     results = []
-    
+
     print("[1/3] Benchmarking No Collision mode...")
-    results.append(benchmark_collision_mode(
-        "No Collision (Disabled)",
-        collision_freq=0,
-        collision_2d=False,
-        num_agents=args.agents,
-        num_iterations=args.iterations
-    ))
-    
+    results.append(
+        benchmark_collision_mode(
+            "No Collision (Disabled)",
+            collision_freq=0,
+            collision_2d=False,
+            num_agents=args.agents,
+            num_iterations=args.iterations,
+        )
+    )
+
     print("[2/3] Benchmarking 2D Collision mode...")
-    results.append(benchmark_collision_mode(
-        "2D Collision (9 neighbors)",
-        collision_freq=None,  # Check every step
-        collision_2d=True,
-        num_agents=args.agents,
-        num_iterations=args.iterations
-    ))
-    
+    results.append(
+        benchmark_collision_mode(
+            "2D Collision (9 neighbors)",
+            collision_freq=None,  # Check every step
+            collision_2d=True,
+            num_agents=args.agents,
+            num_iterations=args.iterations,
+        )
+    )
+
     print("[3/3] Benchmarking 3D Collision mode...")
-    results.append(benchmark_collision_mode(
-        "3D Collision (27 neighbors)",
-        collision_freq=None,  # Check every step
-        collision_2d=False,
-        num_agents=args.agents,
-        num_iterations=args.iterations
-    ))
+    results.append(
+        benchmark_collision_mode(
+            "3D Collision (27 neighbors)",
+            collision_freq=None,  # Check every step
+            collision_2d=False,
+            num_agents=args.agents,
+            num_iterations=args.iterations,
+        )
+    )
 
     print_results(results, args.agents)

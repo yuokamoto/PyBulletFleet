@@ -688,7 +688,8 @@ class MultiRobotSimulationCore:
             logger.debug(f"Added object {object_id} to {len(cells)} spatial grid cell(s) (multi-cell: {use_multi_cell})")
         else:
             logger.debug(
-                f"Updated object {object_id} spatial grid: {len(old_cells)} -> {len(cells)} cell(s) (multi-cell: {use_multi_cell})"
+                f"Updated object {object_id} spatial grid: {len(old_cells)} -> {len(cells)} cell(s) "
+                f"(multi-cell: {use_multi_cell})"
             )
 
     def _register_object_movement_type(self, obj: SimObject) -> None:
@@ -1593,7 +1594,8 @@ class MultiRobotSimulationCore:
         Returns:
             Tuple of (pairs, timings):
             - pairs: List of currently active collision pairs (obj_id_i, obj_id_j)
-            - timings: dict with get_aabbs, spatial_hashing, aabb_filtering, contact_points, total (in ms) if return_profiling=True, else None
+            - timings: dict with get_aabbs, spatial_hashing, aabb_filtering, contact_points, total (in ms)
+              if return_profiling=True, else None
 
         Example:
             # Without profiling
@@ -1715,7 +1717,8 @@ class MultiRobotSimulationCore:
                         new_collisions.add(pair)
                         self._active_collision_pairs.add(pair)
                         logger.info(
-                            f"NEW COLLISION: object {obj_id_i} (body {obj_i.body_id}) <-> object {obj_id_j} (body {obj_j.body_id})"
+                            f"NEW COLLISION: object {obj_id_i} (body {obj_i.body_id}) "
+                            f"<-> object {obj_id_j} (body {obj_j.body_id})"
                         )
                 else:
                     # No collision
@@ -1724,7 +1727,8 @@ class MultiRobotSimulationCore:
                         resolved_collisions.add(pair)
                         self._active_collision_pairs.discard(pair)
                         logger.info(
-                            f"COLLISION RESOLVED: object {obj_id_i} (body {obj_i.body_id}) <-> object {obj_id_j} (body {obj_j.body_id})"
+                            f"COLLISION RESOLVED: object {obj_id_i} (body {obj_i.body_id}) "
+                            f"<-> object {obj_id_j} (body {obj_j.body_id})"
                         )
 
             if return_profiling:
@@ -1829,7 +1833,8 @@ class MultiRobotSimulationCore:
             "steps": self.step_count,
         }
         logging.debug(
-            "[MONITOR] sim_time=%.2f, real_time=%.2f, speed=%.2f, agents=%d, objects=%d, active_collisions=%d, total_collisions=%d, steps=%d",
+            "[MONITOR] sim_time=%.2f, real_time=%.2f, speed=%.2f, agents=%d, objects=%d, "
+            "active_collisions=%d, total_collisions=%d, steps=%d",
             sim_time,
             elapsed_time,
             actual_speed,
@@ -2131,11 +2136,11 @@ class MultiRobotSimulationCore:
         if measure_timing:
             t_col0 = time.perf_counter()
 
-        collision_timings: Dict[str, float] = {}
         freq = self.collision_check_frequency
         # freq = None: check every step
         # freq = 0: disabled (never check)
         # freq > 0: check at specified frequency (Hz)
+        collision_timings: Optional[Dict[str, float]] = None
         if freq is None:
             # Check every step
             _, collision_timings = self.check_collisions(return_profiling=self.enable_profiling)

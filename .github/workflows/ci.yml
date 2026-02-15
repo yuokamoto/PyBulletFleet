@@ -18,13 +18,13 @@ jobs:
       with:
         python-version: '3.11'
 
-    - name: Set up Node.js (for pyright)
-      uses: actions/setup-node@v4
+    - name: Cache pre-commit environments
+      uses: actions/cache@v3
       with:
-        node-version: '18'
-
-    - name: Install pyright
-      run: npm install -g pyright
+        path: ~/.cache/pre-commit
+        key: pre-commit-${{ hashFiles('.pre-commit-config.yaml') }}
+        restore-keys: |
+          pre-commit-
 
     - name: Install dependencies
       run: |

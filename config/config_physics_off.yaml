@@ -1,13 +1,13 @@
 # ========================================
 # Physics OFF Mode (Kinematics-focused)
 # ========================================
-# 
+#
 # Recommended for:
 #   - Warehouse robot path planning
 #   - Multi-robot coordination
 #   - High-speed simulation (Nx speed)
 #   - What-if scenario analysis
-# 
+#
 # Key features:
 #   - No stepSimulation() overhead
 #   - Deterministic results

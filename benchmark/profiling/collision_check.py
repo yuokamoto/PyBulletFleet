@@ -28,7 +28,7 @@ from pybullet_fleet.agent import AgentSpawnParams.check_collisions()）は大規
        - Spatial Hashing: 空間グリッドの構築
        - AABB Filtering: 近接ペアの候補選定（最大のボトルネック、通常75%）
        - Contact Points: 実際の衝突判定
-    
+
     2. cProfile分析（--test=cprofile）
        - 関数レベルの詳細分析
        - ステップ内部の関数呼び出しを記録
@@ -37,10 +37,10 @@ from pybullet_fleet.agent import AgentSpawnParams.check_collisions()）は大規
 使い方:
     # Built-in profiling（デフォルト、推奨）
     python collision_check.py --agents=1000 --iterations=100
-    
+
     # cProfile で詳細分析
     python collision_check.py --agents=1000 --test=cprofile
-    
+
     # 両方実行
     python collision_check.py --agents=1000 --test=all
 
@@ -51,12 +51,12 @@ from pybullet_fleet.agent import AgentSpawnParams.check_collisions()）は大規
         Aabb Filtering:    3.845ms ( 75.2%)  ← 最大のボトルネック
         Contact Points:    0.432ms (  8.5%)
         Total:             5.112ms (100.0%)
-        
+
         Additional Information:
           Candidate pairs: 3456
           Actual collisions: 12
           Collision ratio: 0.3%  ← 99.7%は無駄な計算
-    
+
     cProfile (AABB Filtering の詳細):
         ncalls  tottime  cumtime  関数
         384500    1.850    1.850  AABB overlap check
@@ -86,7 +86,6 @@ Built-in Profiling の特徴:
 """
 import os
 import sys
-import time
 import cProfile
 import pstats
 import io
@@ -102,13 +101,13 @@ from pybullet_fleet.agent import AgentSpawnParams, MotionMode
 
 def profile_collision_check_builtin(num_agents: int, num_iterations: int = 100):
     """Built-in profiling を使用した collision check 分析"""
-    
+
     # Ensure clean disconnect and use DIRECT mode
     if p.isConnected():
         p.disconnect()
-    
+
     p.connect(p.DIRECT)  # Force DIRECT mode (no GUI, no X11)
-    
+
     # Setup - Load from profiling config
     config_path = os.path.join(os.path.dirname(__file__), "profiling_config.yaml")
     params = SimulationParams.from_config(config_path)
@@ -163,10 +162,10 @@ def profile_collision_check_builtin(num_agents: int, num_iterations: int = 100):
     for iteration in range(num_iterations):
         # Synchronize robot_bodies like in step_once()
         sim_core.robot_bodies = [obj.body_id for obj in sim_core.sim_objects]
-        
+
         # Get collision results + profiling data
         collision_pairs, iter_timings = sim_core.check_collisions(return_profiling=True)
-        
+
         # Collect timings
         for key in timings.keys():
             if key in iter_timings:
@@ -175,6 +174,7 @@ def profile_collision_check_builtin(num_agents: int, num_iterations: int = 100):
     # Statistics
     def stats(data):
         import statistics
+
         return {
             "mean": statistics.mean(data),
             "median": statistics.median(data),
@@ -206,13 +206,13 @@ def profile_collision_check_builtin(num_agents: int, num_iterations: int = 100):
 
 def profile_collision_check_with_cprofile(num_agents: int):
     """cProfile で collision check の詳細分析"""
-    
+
     # Ensure clean disconnect and use DIRECT mode
     if p.isConnected():
         p.disconnect()
-    
+
     p.connect(p.DIRECT)  # Force DIRECT mode (no GUI, no X11)
-    
+
     # Setup - Load from profiling config
     config_path = os.path.join(os.path.dirname(__file__), "profiling_config.yaml")
     params = SimulationParams.from_config(config_path)
@@ -251,7 +251,7 @@ def profile_collision_check_with_cprofile(num_agents: int):
     )
     print(f"Spawned {len(agents)} agents")
 
-    print(f"\ncProfile analysis of collision check...")
+    print("\ncProfile analysis of collision check...")
     print("=" * 70)
 
     # Warm-up

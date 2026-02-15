@@ -1,12 +1,12 @@
 # ========================================
 # Hybrid Mode (Advanced Mixed Operation)
 # ========================================
-# 
+#
 # Recommended for:
 #   - Mixed physics/kinematic scenarios
 #   - Some objects need physics, others just collision check
 #   - Advanced use cases with different detection needs
-# 
+#
 # Key features:
 #   - Physics objects: getContactPoints() (actual contact)
 #   - Kinematic objects: getClosestPoints() (safety margin)

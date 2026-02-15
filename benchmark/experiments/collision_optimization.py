@@ -25,8 +25,6 @@ Usage:
 
 import argparse
 import sys
-import time
-from typing import Dict, List, Tuple
 
 # TODO: Implement collision detection benchmarks
 # - Brute force vs spatial hashing
@@ -38,9 +36,7 @@ from typing import Dict, List, Tuple
 
 def main():
     """Main entry point for collision optimization experiments."""
-    parser = argparse.ArgumentParser(
-        description="Benchmark collision detection optimization approaches"
-    )
+    parser = argparse.ArgumentParser(description="Benchmark collision detection optimization approaches")
     parser.add_argument(
         "--agents",
         type=int,

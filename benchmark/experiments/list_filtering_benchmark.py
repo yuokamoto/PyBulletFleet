@@ -81,7 +81,7 @@ v2 = benchmark("Optimized V2 (for loop)", optimized_v2, robot_bodies, structure_
 v3 = benchmark("Optimized V3 (assume set)", optimized_v3, robot_bodies, structure_body_ids)
 
 print("=" * 50)
-print(f"Speedup factors (vs baseline):")
+print("Speedup factors (vs baseline):")
 print(f"  V1: {baseline/v1:.2f}x")
 print(f"  V2: {baseline/v2:.2f}x")
 print(f"  V3: {baseline/v3:.2f}x")

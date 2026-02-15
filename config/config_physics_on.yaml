@@ -1,13 +1,13 @@
 # ========================================
 # Physics ON Mode (Verification-focused)
 # ========================================
-# 
+#
 # Recommended for:
 #   - Verify collision-free paths under physics
 #   - Debug actual collision incidents
 #   - Analyze contact forces
 #   - Validate simulation accuracy
-# 
+#
 # Key features:
 #   - stepSimulation() called every step
 #   - Realistic physics behavior (mass, friction, push-back)

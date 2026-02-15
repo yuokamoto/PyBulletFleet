@@ -9,6 +9,7 @@ import pybullet_data
 
 from pybullet_fleet.agent import Agent
 from pybullet_fleet.geometry import Path, Pose
+from pybullet_fleet.sim_object import ShapeParams
 
 
 def main():
@@ -23,12 +24,18 @@ def main():
     # Create robot using from_mesh directly (like test_robot_movement.py)
     print("Creating robot...")
     robot = Agent.from_mesh(
-        mesh_path="mesh/cube.obj",
+        visual_shape=ShapeParams(
+            shape_type="mesh",
+            mesh_path="mesh/cube.obj",
+            mesh_scale=[0.5, 0.5, 0.5],
+            rgba_color=[1.0, 0.0, 0.0, 1.0],  # Red
+        ),
+        collision_shape=ShapeParams(
+            shape_type="box",
+            half_extents=[0.25, 0.25, 0.25],
+        ),
         pose=Pose.from_xyz(0.0, 0.0, 0.5),
-        mesh_scale=[0.5, 0.5, 0.5],
-        collision_half_extents=[0.25, 0.25, 0.25],
-        rgba_color=[1.0, 0.0, 0.0, 1.0],  # Red
-        base_mass=1.0,
+        mass=1.0,
         max_linear_vel=1.0,
         max_linear_accel=2.0,
         motion_mode="omnidirectional",

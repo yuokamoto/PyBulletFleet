@@ -14,13 +14,12 @@ Usage:
 import sys
 import time
 from pathlib import Path
-from typing import List, Tuple, Set
+from typing import List, Tuple
 
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import pybullet as p
-import pybullet_data
 import numpy as np
 
 from pybullet_fleet.core_simulation import MultiRobotSimulationCore, SimulationParams
@@ -244,7 +243,7 @@ def run_benchmark(num_objects: int, physics_ratio: float, num_pairs: int = 50, i
         else:
             mixed_pairs += 1
 
-    print(f"\nPair composition:")
+    print("\nPair composition:")
     print(f"  Physics-Physics:     {physics_pairs:3d} pairs ({physics_pairs/num_pairs*100:.1f}%)")
     print(f"  Kinematic-Kinematic: {kinematic_pairs:3d} pairs ({kinematic_pairs/num_pairs*100:.1f}%)")
     print(f"  Mixed:               {mixed_pairs:3d} pairs ({mixed_pairs/num_pairs*100:.1f}%)")
@@ -257,7 +256,7 @@ def run_benchmark(num_objects: int, physics_ratio: float, num_pairs: int = 50, i
     time_hybrid = benchmark_hybrid_approach(sim, pairs, iterations)
 
     # Results
-    print(f"\nResults (average time per iteration):")
+    print("\nResults (average time per iteration):")
     print(f"  1. getContactPoints only:  {time_contact:.3f} ms")
     print(f"  2. getClosestPoints only:  {time_closest:.3f} ms  ({time_closest/time_contact:5.2f}x)")
     print(f"  3. Hybrid approach:        {time_hybrid:.3f} ms  ({time_hybrid/time_contact:5.2f}x)")

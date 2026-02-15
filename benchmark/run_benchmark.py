@@ -29,7 +29,7 @@ import json
 import subprocess
 import argparse
 import statistics
-from typing import Dict, List, Optional
+from typing import List, Optional
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
@@ -154,13 +154,13 @@ def print_results(results: dict):
     print("\n" + "=" * 70)
     print("Results")
     print("=" * 70)
-    print(f"\nConfiguration:")
+    print("\nConfiguration:")
     print(f"  Agents: {results['num_agents']}")
     print(f"  Duration: {results['duration_s']}s")
     print(f"  Scenario: {results.get('scenario', 'default')}")
     print(f"  Repetitions: {results['num_reps']}")
 
-    print(f"\nPerformance:")
+    print("\nPerformance:")
     print(
         f"  Real-Time Factor: {results['real_time_factor']['median']:.2f}x " f"(±{results['real_time_factor']['stdev']:.2f})"
     )
@@ -181,7 +181,7 @@ def print_results(results: dict):
     else:
         rtf_status = "❌ POOR"
 
-    print(f"\nAssessment:")
+    print("\nAssessment:")
     print(f"  RTF: {rtf_status} ({rtf:.2f}x)")
     print("=" * 70)
 

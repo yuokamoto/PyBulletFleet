@@ -119,7 +119,7 @@ Safety clearance for `getClosestPoints()`:
 - `0.05-0.10`: Conservative (5-10cm, high-speed)
 - `0.0`: Contact detection only (touching)
 
-**Note**: Only affects `CLOSEST_POINTS` and `HYBRID` modes.  
+**Note**: Only affects `CLOSEST_POINTS` and `HYBRID` modes.
 `CONTACT_POINTS` always detects actual contact (margin=0).
 
 ## Auto-Selection Logic

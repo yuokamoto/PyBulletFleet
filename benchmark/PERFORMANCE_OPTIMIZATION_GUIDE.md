@@ -68,16 +68,16 @@ simulation:
   timestep: 0.1                 # Optimized for kinematics
   physics: false                # Disable unless needed
   gui: false                    # Headless
-  
+
   # Collision detection (2D optimized)
   collision_check_2d: true      # 2D mode (9 neighbors vs 27)
   collision_check_frequency: 10.0  # 10 Hz (balanced)
   ignore_static_collision: true # Skip structure-structure collisions
-  
+
   # Monitoring (headless)
   monitor: true
   enable_monitor_gui: false     # No GUI overhead
-  
+
   # Performance
   enable_profiling: false       # Disable for production
   enable_collision_color_change: false  # Disable visual feedback
@@ -174,16 +174,16 @@ simulation:
   speed: 0                      # Maximum speed
   physics: false                # Kinematics only
   gui: false                    # Headless
-  
+
   # 2D collision (ground robots)
   collision_check_2d: true
   collision_check_frequency: 10.0
   ignore_static_collision: true
-  
+
   # Monitoring
   monitor: true
   enable_monitor_gui: false
-  
+
   # Visualization (disabled for performance)
   enable_collision_shapes: false
   enable_structure_transparency: false
@@ -205,16 +205,16 @@ simulation:
   speed: 1.0                    # Real-time
   physics: true                 # Enable physics
   gui: true                     # Visualization
-  
+
   # 3D collision (drones)
   collision_check_2d: false
   collision_check_frequency: 30.0  # Higher frequency for safety
   ignore_static_collision: false
-  
+
   # Monitoring
   monitor: true
   enable_monitor_gui: true
-  
+
   # Development
   enable_profiling: true
 ```
@@ -232,16 +232,16 @@ simulation:
   speed: 1.0                    # Real-time
   physics: false
   gui: true                     # Enable GUI
-  
+
   # Full collision (for debugging)
   collision_check_2d: false
   collision_check_frequency: null  # Every step
-  
+
   # Visual debugging
   enable_collision_shapes: true
   enable_structure_transparency: true
   enable_collision_color_change: true
-  
+
   # Monitoring
   monitor: true
   enable_monitor_gui: true

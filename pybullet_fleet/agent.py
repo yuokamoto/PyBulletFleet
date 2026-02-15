@@ -8,7 +8,6 @@ Supports both Mesh and URDF loading.
 import logging
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple, Union
-import time
 
 import numpy as np
 import pybullet as p
@@ -51,6 +50,11 @@ class AgentSpawnParams(SimObjectSpawnParams):
         motion_mode: MotionMode.OMNIDIRECTIONAL (move in any direction) or MotionMode.DIFFERENTIAL (rotate then move forward)
         use_fixed_base: If True, robot base is fixed and doesn't move (default: False)
         user_data: Optional dictionary for custom metadata (default: empty dict)
+
+    Inherited from SimObjectSpawnParams:
+        name: Optional string name for human-readable identification.
+              Duplicates allowed - use for debugging/filtering, not unique lookup.
+              For unique identification, use object_id after spawning.
 
     Note:
         initial_pose is optional and mainly used by Agent.from_params().
@@ -174,6 +178,10 @@ class Agent(SimObject):
     - Fixed robot support (non-moving objects)
     - URDF support with joint control
     - Attach/detach objects (inherited from SimObject)
+
+    Object Identification (inherited from SimObject):
+    - object_id: Unique integer ID (assigned by sim_core, use for lookups)
+    - name: Optional string name (duplicates allowed, use for debugging/filtering)
 
     This class is designed to be eventually controlled by ROS2 nodes,
     so the API follows ROS message conventions.
@@ -344,6 +352,16 @@ class Agent(SimObject):
         """
         return self._goal_pose
 
+    @property
+    def current_waypoint_index(self) -> int:
+        """
+        Read-only property: Get current waypoint index in the path.
+
+        Returns:
+            Current waypoint index (0-based), or 0 if no path is set
+        """
+        return self._current_waypoint_index
+
     @classmethod
     def from_params(cls, spawn_params: AgentSpawnParams, sim_core=None) -> "Agent":
         """
@@ -427,6 +445,10 @@ class Agent(SimObject):
         # Set user_data if provided
         if spawn_params.user_data:
             agent.user_data.update(spawn_params.user_data)
+
+        # Set name if provided
+        if spawn_params.name is not None:
+            agent.name = spawn_params.name
 
         return agent
 
@@ -517,7 +539,7 @@ class Agent(SimObject):
             use_fixed_base=use_fixed_base,
             sim_core=sim_core,
         )
-        
+
         # Set collision mode (must be done after __init__ which calls add_object)
         agent.set_collision_mode(collision_mode)
 
@@ -597,7 +619,7 @@ class Agent(SimObject):
             use_fixed_base=use_fixed_base,
             sim_core=sim_core,
         )
-        
+
         # Set collision mode (must be done after __init__ which calls add_object)
         agent.set_collision_mode(collision_mode)
 

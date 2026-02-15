@@ -165,7 +165,7 @@ def run_benchmark(config_path: str, num_objects: int = 100, num_steps: int = 500
     # Cleanup
     p.disconnect()
 
-    print(f"\nResults:")
+    print("\nResults:")
     print(f"  Average step time: {avg_step:.3f}ms")
     print(f"  Average collision time: {avg_collision:.3f}ms")
     print(f"  Average active collisions: {avg_collisions:.1f}")
@@ -259,7 +259,7 @@ def main():
         avg_off = np.mean([r["avg_collision"] for r in physics_off])
         avg_on = np.mean([r["avg_collision"] for r in physics_on])
 
-        print(f"\n📊 Physics OFF vs ON:")
+        print("\n📊 Physics OFF vs ON:")
         print(f"   Physics OFF: {avg_off:.3f}ms (CLOSEST_POINTS)")
         print(f"   Physics ON:  {avg_on:.3f}ms (CONTACT_POINTS/HYBRID)")
         print(f"   Difference:  {avg_on/avg_off:.2f}x")

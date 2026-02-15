@@ -4,8 +4,6 @@ Update performance_benchmark.py to support config file loading.
 This script adds config file support while preserving the existing structure.
 """
 
-import sys
-
 # Read the original file
 with open("performance_benchmark.py", "r") as f:
     content = f.read()
@@ -69,7 +67,10 @@ if "def load_config(" not in content:
 
 # Update run_simulation_benchmark signature
 old_sig = "def run_simulation_benchmark(num_agents: int, duration: float, gui: bool = False) -> dict:"
-new_sig = "def run_simulation_benchmark(config: Dict[str, Any], num_agents: Optional[int] = None, duration: Optional[float] = None, gui: Optional[bool] = None) -> dict:"
+new_sig = (
+    "def run_simulation_benchmark(config: Dict[str, Any], num_agents: Optional[int] = None, "
+    "duration: Optional[float] = None, gui: Optional[bool] = None) -> dict:"
+)
 
 if old_sig in content and new_sig not in content:
     content = content.replace(old_sig, new_sig)

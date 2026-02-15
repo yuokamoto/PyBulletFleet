@@ -5,15 +5,12 @@ Test if p.getAABB() is the bottleneck.
 import os
 import sys
 import time
+import math
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import pybullet as p
 import pybullet_data
-from pybullet_fleet.agent_manager import AgentManager, GridSpawnParams
-from pybullet_fleet.agent import AgentSpawnParams, MotionMode
-from pybullet_fleet.core_simulation import MultiRobotSimulationCore, SimulationParams
-import math
 
 # Setup
 p.connect(p.DIRECT)

@@ -1,6 +1,6 @@
 # PyBullet Collision Detection Design
 
-**Date**: 2026-01-22  
+**Date**: 2026-01-22
 **Version**: 3.0 (Restructured for clarity: Overview → Architecture → Details)
 
 ---
@@ -26,7 +26,7 @@
 
 PyBulletFleet's collision detection system is designed for **scalability, determinism, and flexibility**:
 
-**The Challenge**: 
+**The Challenge**:
 - Naive all-pairs collision detection: **O(N²)** complexity
 - 1000 robots → 1,000,000 pairs to check every frame → **infeasible**
 
@@ -84,7 +84,7 @@ class CollisionMode(Enum):
 | **STATIC** | Once (at spawn) | Yes | 27 (3×3×3) | Walls, shelves, structures |
 | **DISABLED** | Never | No | 0 | Visualization, markers |
 
-**Key Insight**: 
+**Key Insight**:
 - **NORMAL_3D/2D**: Moving objects, AABB updated when it moves
 - **STATIC**: Fixed structures, AABB never updated (optimization)
 - **DISABLED**: No collision at all (neither spatial grid nor PyBullet)
@@ -148,7 +148,7 @@ World Space (top view):
 │  ·  │  ·  │  R1 │  ·  │  ·  │  ·  │  Cell size: 2.0m × 2.0m
 ├─────┼─────┼─────┼─────┼─────┼─────┤
 │  ·  │  ·  │  ·  │  ·  │  ·  │  ·  │  R1: Robot at (4, 10)
-├─────┼─────┼─────┼─────┼─────┼─────┤  R2: Robot at (2, 4) 
+├─────┼─────┼─────┼─────┼─────┼─────┤  R2: Robot at (2, 4)
 │  ·  │  R2 │  W  │  ·  │  ·  │  ·  │  W: Wall at (4, 4)
 ├─────┼─────┼─────┼─────┼─────┼─────┤  R3: Robot at (10, 2)
 │  ·  │  ·  │  ·  │  ·  │  R3 │  ·  │  Only check neighbors!
@@ -391,7 +391,7 @@ sim_core.run_simulation(...)  # Uses pre-calculated cell_size
 
 **Data Structure**:
 ```python
-_cached_aabbs_dict: Dict[int, Tuple[Tuple[float, float, float], 
+_cached_aabbs_dict: Dict[int, Tuple[Tuple[float, float, float],
                                      Tuple[float, float, float]]]
 # Key: object_id (body_id)
 # Value: ((min_x, min_y, min_z), (max_x, max_y, max_z))
@@ -402,13 +402,13 @@ _cached_aabbs_dict: Dict[int, Tuple[Tuple[float, float, float],
 def _update_object_aabb(self, object_id: int):
     """Called when object moves"""
     obj = self._sim_objects_dict[object_id]
-    
+
     # Query PyBullet (expensive!)
     self._cached_aabbs_dict[object_id] = p.getAABB(
-        obj.body_id, 
+        obj.body_id,
         physicsClientId=self.client
     )
-    
+
     # Update grid registration
     self._update_object_spatial_grid(object_id)
 ```
@@ -460,7 +460,7 @@ def _should_use_multi_cell_registration(self, object_id: int) -> bool:
     extent_x = aabb[1][0] - aabb[0][0]
     extent_y = aabb[1][1] - aabb[0][1]
     max_extent = max(extent_x, extent_y)
-    
+
     threshold_size = self._cached_cell_size * self.params.multi_cell_threshold
     return max_extent > threshold_size  # Default: 1.5x cell_size
 ```
@@ -496,7 +496,7 @@ def check_collisions(self):
     # Track objects that moved since last check
     moved_objects = self._moved_this_step.copy()
     self._moved_this_step.clear()
-    
+
     # Only iterate through moved objects
     for obj_id in moved_objects:
         # Find neighbors in grid
@@ -541,10 +541,10 @@ closest_points = p.getClosestPoints(
 - `len(closest_points) > 0`: Collision detected
 
 **Advantages**:
-✅ Works with `resetBasePositionAndOrientation()` (kinematic)  
-✅ Stable for kinematic-kinematic pairs  
-✅ Safety margin support (detect "near miss")  
-✅ No `stepSimulation()` required  
+✅ Works with `resetBasePositionAndOrientation()` (kinematic)
+✅ Stable for kinematic-kinematic pairs
+✅ Safety margin support (detect "near miss")
+✅ No `stepSimulation()` required
 
 **Use cases**:
 - Kinematics-focused planning
@@ -570,14 +570,14 @@ contact_points = p.getContactPoints(
 - Empty list if no contact
 
 **Advantages**:
-✅ Fast (contact cache already exists)  
-✅ Physics-accurate (actual contact forces)  
-✅ Contact normals and depths available  
+✅ Fast (contact cache already exists)
+✅ Physics-accurate (actual contact forces)
+✅ Contact normals and depths available
 
 **Limitations**:
-❌ **Requires `stepSimulation()`**: Cannot skip physics update  
-❌ Limited for kinematics: Designed for physics simulation with dynamic objects  
-❌ No safety margin support: Only reports actual penetration  
+❌ **Requires `stepSimulation()`**: Cannot skip physics update
+❌ Limited for kinematics: Designed for physics simulation with dynamic objects
+❌ No safety margin support: Only reports actual penetration
 
 **Why not ideal for kinematics**:
 - Kinematics mode uses `resetBasePositionAndOrientation()` to set positions directly
@@ -674,7 +674,7 @@ drone = SimObject(
 **Characteristics**:
 - **Neighbor Check**: 9 cells (3×3×1, XY plane only)
 - **AABB Updates**: Every movement
-- **Grid Registration**: Updated on movement  
+- **Grid Registration**: Updated on movement
 - **Z-Axis**: Ignored for neighbor search (but AABB Z must still overlap!)
 
 **Use Cases**:
@@ -722,7 +722,7 @@ wall = SimObject(
 Many static walls (e.g., 1000):
   NORMAL_3D: All walls updated every frame → High overhead
   STATIC: 0 AABB updates/frame → No overhead ✓
-  
+
   → Moving robots can still collide with walls!
   → Walls never trigger updates themselves
 ```
@@ -1090,11 +1090,11 @@ python performance_benchmark.py
 
 PyBulletFleet's collision detection system provides:
 
-✅ **Scalability**: O(N) via spatial hashing (not O(N²))  
-✅ **Flexibility**: 4 collision modes per object  
-✅ **Performance**: Incremental updates, mode-based optimization  
-✅ **Determinism**: Same input → same output  
-✅ **Simplicity**: Automatic configuration, minimal setup  
+✅ **Scalability**: O(N) via spatial hashing (not O(N²))
+✅ **Flexibility**: 4 collision modes per object
+✅ **Performance**: Incremental updates, mode-based optimization
+✅ **Determinism**: Same input → same output
+✅ **Simplicity**: Automatic configuration, minimal setup
 
 **Recommended Workflow**:
 1. Start with default (physics=False, CLOSEST_POINTS)

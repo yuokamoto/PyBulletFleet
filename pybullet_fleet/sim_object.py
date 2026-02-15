@@ -84,13 +84,17 @@ class SimObjectSpawnParams:
         initial_pose: Initial Pose (position and orientation) in world coordinates
         mass: Object mass in kg (0.0 for static objects, >0 for dynamic)
         pickable: Whether this object can be picked by robots (default: True)
+        name: Optional string name for human-readable identification (default: None).
+              Duplicates allowed - multiple objects can share the same name.
+              Use for debugging, logging, filtering (e.g., "LeftRobot", "Pallet_A").
+              For unique identification, use object_id instead.
 
     Note:
         initial_pose is optional and mainly used by SimObject.from_params().
         Managers calculate positions automatically and may ignore this field.
 
     Example:
-        # Box visual + sphere collision
+        # Box visual + sphere collision with name
         params = SimObjectSpawnParams(
             visual_shape=ShapeParams(
                 shape_type="box",
@@ -102,8 +106,16 @@ class SimObjectSpawnParams:
                 radius=0.3
             ),
             initial_pose=Pose.from_xyz(0, 0, 1),
-            mass=1.0
+            mass=1.0,
+            name="Pallet_A"  # Human-readable name (duplicates allowed)
         )
+        obj = SimObject.from_params(params, sim_core)
+
+        # Later: Use object_id for unique lookup
+        retrieved_obj = sim_core.get_object_by_id(obj.object_id)
+
+        # Or filter by name (may return multiple objects)
+        pallets = [o for o in sim_core.objects if o.name == "Pallet_A"]
     """
 
     visual_shape: Optional[ShapeParams] = None
@@ -111,6 +123,7 @@ class SimObjectSpawnParams:
     initial_pose: Optional[Pose] = None
     mass: float = 0.0
     pickable: bool = True
+    name: Optional[str] = None  # Human-readable name (duplicates allowed, use object_id for unique lookup)
     visual_mesh_path: Optional[str] = None
     visual_frame_pose: Optional[Pose] = None
     collision_frame_pose: Optional[Pose] = None
@@ -122,12 +135,27 @@ class SimObject:
     Base class for simulation objects (robots, pallets, obstacles).
     Supports attachment/detachment and kinematic teleportation.
 
+    Object Identification:
+        - object_id: Unique integer ID assigned by sim_core (used for lookups and internal tracking).
+                    This is the primary identifier for programmatic access.
+        - name: Optional string name for human-readable identification (used for debugging, logging, filtering).
+               Multiple objects can share the same name (duplicates allowed).
+               Not guaranteed to be unique - use object_id for unique identification.
+
     Args:
         body_id: PyBullet body ID
         sim_core: Reference to simulation core (optional)
         mesh_path: Optional path to visual mesh file (obj, dae, stl, etc.)
                    If provided, visual shape will be updated with this mesh.
         pickable: Whether this object can be picked by robots (default: True)
+
+    Attributes:
+        object_id: Unique integer ID (assigned by sim_core, use for lookups)
+        name: Optional string name (duplicates allowed, use for debugging/filtering)
+        body_id: PyBullet body ID
+        mass: Object mass in kg
+        pickable: Whether this object can be picked by robots
+        collision_mode: Collision detection mode (NORMAL_3D, NORMAL_2D, STATIC, DISABLED)
     """
 
     # Class-level shared shapes cache (for optimization)
@@ -150,7 +178,15 @@ class SimObject:
         self.pickable = pickable
         self.collision_mode = collision_mode  # Collision detection mode
 
+        # Optional name for human-readable identification (debugging, logging, filtering)
+        # Note: Unlike object_id, name is NOT unique - multiple objects can share the same name.
+        # For programmatic lookup/search, use object_id instead.
+        # Examples: "LeftRobot_1", "Pallet_A", "Obstacle_Wall"
+        self.name: Optional[str] = None
+
         # Assign unique ID from sim_core if available
+        # Note: object_id is UNIQUE and should be used for programmatic object identification.
+        # Use sim_core.get_object_by_id(object_id) for lookups.
         if sim_core is not None and hasattr(sim_core, "_next_object_id"):
             self.object_id = sim_core._next_object_id
             sim_core._next_object_id += 1
@@ -244,10 +280,16 @@ class SimObject:
                 return cls._shared_shapes[shape_key]
 
         # Create visual shape
-        visual_id = cls._create_visual_shape(visual_shape, physics_client_id) if visual_shape and visual_shape.shape_type else -1
+        visual_id = (
+            cls._create_visual_shape(visual_shape, physics_client_id) if visual_shape and visual_shape.shape_type else -1
+        )
 
         # Create collision shape
-        collision_id = cls._create_collision_shape(collision_shape, physics_client_id) if collision_shape and collision_shape.shape_type else -1
+        collision_id = (
+            cls._create_collision_shape(collision_shape, physics_client_id)
+            if collision_shape and collision_shape.shape_type
+            else -1
+        )
 
         # Cache only if at least one is a mesh shape
         if visual_needs_cache or collision_needs_cache:
@@ -516,6 +558,10 @@ class SimObject:
             sim_core=sim_core,
             collision_mode=spawn_params.collision_mode,
         )
+
+        # Set name if provided
+        if spawn_params.name is not None:
+            obj.name = spawn_params.name
 
         return obj
 
@@ -873,19 +919,16 @@ class MeshObject(SimObject):
     ):
         # Get physics client ID from sim_core
         physics_client_id = sim_core.client if sim_core is not None else 0
-        
+
         vis_id = p.createVisualShape(
-            shapeType=p.GEOM_MESH, 
-            fileName=mesh_path, 
-            meshScale=mesh_scale, 
+            shapeType=p.GEOM_MESH,
+            fileName=mesh_path,
+            meshScale=mesh_scale,
             rgbaColor=rgbaColor,
-            physicsClientId=physics_client_id
+            physicsClientId=physics_client_id,
         )
         col_id = p.createCollisionShape(
-            shapeType=p.GEOM_MESH, 
-            fileName=mesh_path, 
-            meshScale=mesh_scale,
-            physicsClientId=physics_client_id
+            shapeType=p.GEOM_MESH, fileName=mesh_path, meshScale=mesh_scale, physicsClientId=physics_client_id
         )
         body_id = p.createMultiBody(
             baseMass=base_mass,

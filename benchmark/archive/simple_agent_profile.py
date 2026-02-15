@@ -8,12 +8,12 @@ Agent 操作のシンプルなプロファイリングツール
 
 移行理由:
     このファイルの機能は agent_update.py に統合されました。
-    
+
     旧版の問題:
     - ❌ agent_update.py と機能が重複（Stationary vs Moving）
     - ❌ test_with_without_goal() が test_stationary_vs_moving() と重複
     - ❌ 2つのファイルでメンテナンスコストが増加
-    
+
     新版の利点:
     - ✅ 全ての Agent 分析が1箇所に集約
     - ✅ Motion Mode 比較も追加
@@ -22,13 +22,13 @@ Agent 操作のシンプルなプロファイリングツール
 移行ガイド:
     # 旧版（このファイル）
     python benchmark/archive/simple_agent_profile.py --agents=1000
-    
+
     # 新版（推奨）- 全テスト実行
     python benchmark/profiling/agent_update.py --agents=1000 --test=all
-    
+
     # Stationary vs Moving のみ
     python benchmark/profiling/agent_update.py --agents=1000 --test=stationary
-    
+
     # Motion Mode 比較のみ
     python benchmark/profiling/agent_update.py --agents=1000 --test=motion_modes
 
@@ -51,7 +51,7 @@ Agent 操作のシンプルなプロファイリングツール
 使い方:
     # 基本実行（全テスト）
     python simple_agent_profile.py
-    
+
     # 特定のテストのみ
     python simple_agent_profile.py --test=stationary
     python simple_agent_profile.py --test=spawn
@@ -60,27 +60,27 @@ Agent 操作のシンプルなプロファイリングツール
 出力例:
     Test 1: Stationary vs Moving Agents (1000 agents)
     ======================================================================
-    
+
     Stationary agents:
       Total time: 15.20 ms
       Per agent: 15.20 μs
-    
+
     Moving agents:
       Total time: 120.50 ms
       Per agent: 120.50 μs
-    
+
     Overhead ratio (moving/stationary): 7.93x
     Potential savings if 50% stationary: 67.85 ms
-    
+
     Test 2: Spawn Performance
     ======================================================================
-    
+
     Total spawn time: 2.345 s
     Per agent: 2.345 ms
-    
+
     Test 3: Get/Set Pose Performance
     ======================================================================
-    
+
     get_pose(): 12.3 μs per call
     set_pose(): 45.6 μs per call
 

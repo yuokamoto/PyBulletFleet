@@ -10,12 +10,12 @@ collision_check_v1.py (ARCHIVED - 参考用)
     この旧版は core_simulation.py の実装を手動でコピーして測定していました。
     新版（collision_check.py）は Built-in Profiling 機能（return_profiling=True）を使用し、
     以下の問題を解決しています：
-    
+
     旧版の問題:
     - ❌ 実装の二重管理（約200行のコピー）
     - ❌ core_simulation.py 変更時に乖離のリスク
     - ❌ 簡略化により正確性が低下（固定 cell_size=1.0、3D のみ）
-    
+
     新版の利点:
     - ✅ 実装のコピー不要（二重管理なし）
     - ✅ 常に最新の実装を測定
@@ -25,7 +25,7 @@ collision_check_v1.py (ARCHIVED - 参考用)
 移行ガイド:
     # 旧版（このファイル）
     python benchmark/archive/collision_check_v1.py --agents=1000 --test=manual
-    
+
     # 新版（推奨）
     python benchmark/profiling/collision_check.py --agents=1000 --test=builtin
 
@@ -46,7 +46,7 @@ collision_check_v1.py (ARCHIVED - 参考用)
        - Spatial Hashing: 空間グリッドの構築
        - AABB Filtering: 近接ペアの候補選定（最大のボトルネック）
        - Contact Points: 実際の衝突判定
-    
+
     2. cProfile分析（--test=cprofile）
        - 関数レベルの詳細分析
        - ステップ内部の関数呼び出しを記録
@@ -55,10 +55,10 @@ collision_check_v1.py (ARCHIVED - 参考用)
 使い方（旧版）:
     # Manual 測定（デフォルト）
     python collision_check_v1.py --agents=1000 --iterations=100
-    
+
     # cProfile で詳細分析
     python collision_check_v1.py --agents=1000 --test=cprofile
-    
+
     # 両方実行
     python collision_check_v1.py --agents=1000 --test=all
 
@@ -69,12 +69,12 @@ collision_check_v1.py (ARCHIVED - 参考用)
         Aabb Filtering:    3.845ms ( 75.2%)  ← 最大のボトルネック
         Contact Points:    0.432ms (  8.5%)
         Total:             5.112ms (100.0%)
-    
+
     Additional Information:
         Candidate pairs: 3456
         Actual collisions: 12
         Collision ratio: 0.3%  ← 99.7%は無駄な計算
-    
+
     cProfile (AABB Filtering の詳細):
         ncalls  tottime  cumtime  関数
         384500    1.850    1.850  AABB overlap check
@@ -295,7 +295,7 @@ def profile_collision_check(num_agents: int, num_iterations: int = 100):
 
 def profile_collision_check_with_cprofile(num_agents: int):
     """cProfile で collision check の詳細分析"""
-    
+
     # Setup
     params = SimulationParams(
         gui=False,
@@ -340,7 +340,7 @@ def profile_collision_check_with_cprofile(num_agents: int):
     )
     print(f"Spawned {len(agents)} agents")
 
-    print(f"\ncProfile analysis of collision check...")
+    print("\ncProfile analysis of collision check...")
     print("=" * 70)
 
     # Warm-up

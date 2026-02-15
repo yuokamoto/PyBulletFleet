@@ -4,17 +4,20 @@ Test optimization ideas for collision check.
 """
 import time
 
+
 # Simulate the current implementation
 def current_implementation(robot_bodies, structure_body_ids):
     """Current: List comprehension every time."""
     robot_indices = [i for i, bid in enumerate(robot_bodies) if bid not in structure_body_ids]
     return robot_indices
 
+
 def optimized_v1(robot_bodies, structure_body_ids):
     """Optimization 1: Pre-filter using set difference."""
     non_structure_ids = set(robot_bodies) - structure_body_ids
     robot_indices = [i for i, bid in enumerate(robot_bodies) if bid in non_structure_ids]
     return robot_indices
+
 
 def optimized_v2(robot_bodies, structure_body_ids):
     """Optimization 2: Single pass with direct check."""
@@ -24,10 +27,12 @@ def optimized_v2(robot_bodies, structure_body_ids):
             robot_indices.append(i)
     return robot_indices
 
+
 def optimized_v3(robot_bodies, structure_body_ids_set):
     """Optimization 3: Assume structure_body_ids is already a set."""
     robot_indices = [i for i, bid in enumerate(robot_bodies) if bid not in structure_body_ids_set]
     return robot_indices
+
 
 # Test data
 num_robots = 1000
@@ -48,6 +53,7 @@ r4 = optimized_v3(robot_bodies, structure_body_ids)
 assert r1 == r2 == r3 == r4, "Results don't match!"
 print(f"✓ All methods produce same result ({len(r1)} non-structure robots)\n")
 
+
 # Benchmark
 def benchmark(name, func, *args):
     t0 = time.perf_counter()
@@ -58,17 +64,18 @@ def benchmark(name, func, *args):
     print(f"{name:30} {avg_ms:>8.4f}ms")
     return avg_ms
 
-print("="*50)
+
+print("=" * 50)
 print("Benchmark Results:")
-print("="*50)
+print("=" * 50)
 
 baseline = benchmark("Current (list comp)", current_implementation, robot_bodies, structure_body_ids)
 v1 = benchmark("Optimized V1 (set diff)", optimized_v1, robot_bodies, structure_body_ids)
 v2 = benchmark("Optimized V2 (for loop)", optimized_v2, robot_bodies, structure_body_ids)
 v3 = benchmark("Optimized V3 (assume set)", optimized_v3, robot_bodies, structure_body_ids)
 
-print("="*50)
-print(f"Speedup factors (vs baseline):")
+print("=" * 50)
+print("Speedup factors (vs baseline):")
 print(f"  V1: {baseline/v1:.2f}x")
 print(f"  V2: {baseline/v2:.2f}x")
 print(f"  V3: {baseline/v3:.2f}x")

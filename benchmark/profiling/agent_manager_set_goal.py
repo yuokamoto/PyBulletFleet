@@ -17,10 +17,10 @@ AgentManager.set_goal_pose() のプロファイリングツール
 使い方:
     # 基本実行（1000エージェント）
     python agent_manager_set_goal.py --agents=1000
-    
+
     # 少数エージェントでテスト
     python agent_manager_set_goal.py --agents=100
-    
+
     # 大規模テスト
     python agent_manager_set_goal.py --agents=5000
 
@@ -36,7 +36,7 @@ AgentManager.set_goal_pose() のプロファイリングツール
     - tottime: 関数自身の処理時間
     - cumtime: 関数 + 内部呼び出しの合計時間
     - cumtime - tottime = 子関数の処理時間
-    
+
     例: agent_manager.set_goal_pose()
       - cumtime: 0.109秒（全体）
       - tottime: 0.001秒（自身のオーバーヘッド、0.9%）
@@ -81,7 +81,7 @@ def profile_set_goal_pose(num_agents=1000):
     # Load from profiling config
     config_path = os.path.join(os.path.dirname(__file__), "profiling_config.yaml")
     params = SimulationParams.from_config(config_path)
-    
+
     sim_core = MultiRobotSimulationCore(params)
 
     # Spawn agents

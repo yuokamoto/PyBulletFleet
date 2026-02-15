@@ -163,10 +163,10 @@ Get Aabbs:
 
 Spatial Hashing:
   Mean:      0.312ms (  6.1%)
-  
+
 Aabb Filtering:
   Mean:      3.845ms ( 75.2%)  ← 最大のボトルネック
-  
+
 Contact Points:
   Mean:      0.432ms (  8.5%)
 
@@ -192,10 +192,10 @@ ncalls  tottime  cumtime  関数
 
 1. **ボトルネック特定** → `--test=builtin`
    - 4ステップのどこが遅いか一目瞭然
-   
+
 2. **ステップ内の詳細分析** → `--test=cprofile`
    - AABB Filtering の中で何が遅いか特定
-   
+
 3. **最適化効果の検証** → `--test=builtin`
    - オーバーヘッドなしで正確に before/after 比較
 
@@ -254,20 +254,20 @@ python benchmark/profiling/agent_update.py --agents=1000 --test=motion_modes
 
 **Manual Timing:**
 ```
-Component                 Mean (μs)    Median (μs)  Max (μs)     
+Component                 Mean (μs)    Median (μs)  Max (μs)
 ----------------------------------------------------------------------
-total                     120.50       118.30       250.10       
-update_differential       80.20        78.50        180.00       
-update_actions            35.10        34.00        90.00        
+total                     120.50       118.30       250.10
+update_differential       80.20        78.50        180.00
+update_actions            35.10        34.00        90.00
 ```
 
 **PyBullet API:**
 ```
-Function                                  Calls      Total (ms)   Avg (μs)    
+Function                                  Calls      Total (ms)   Avg (μs)
 ---------------------------------------------------------------------------
-resetBasePositionAndOrientation           1000       45.20        45.20       
-getBasePositionAndOrientation             2000       30.50        15.25       
-getBaseVelocity                           1000       12.30        12.30       
+resetBasePositionAndOrientation           1000       45.20        45.20
+getBasePositionAndOrientation             2000       30.50        15.25
+getBaseVelocity                           1000       12.30        12.30
 ```
 
 **Stationary vs Moving:**
@@ -305,13 +305,13 @@ Performance difference: OMNIDIRECTIONAL is 26% faster
 
 1. **ボトルネック特定** → `--test=cprofile`
    - 全関数を一覧して遅い部分を発見
-   
+
 2. **最適化効果の検証** → `--test=manual`
    - 最適化前後の正確な時間比較
-   
+
 3. **PyBullet API の最適化** → `--test=pybullet`
    - どの API が頻繁に呼ばれているか確認
-   
+
 4. **静止エージェントの性能影響を測定** → `--test=stationary`
    - ゴールなし（静止中）とゴールあり（移動中）の update() コスト比較
    - 移動・関節変化の更新処理の有無による性能差を確認
@@ -465,13 +465,13 @@ Agent.update_differential = patched_method
 # core_simulation.py
 def check_collisions(self, return_profiling: bool = False):
     timings = {}
-    
+
     if return_profiling:
         t0 = time.perf_counter()
     # ... 処理 ...
     if return_profiling:
         timings['step1'] = (time.perf_counter() - t0) * 1000
-    
+
     return result, timings
 ```
 

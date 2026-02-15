@@ -108,9 +108,9 @@ def create_demo_objects(sim_core: MultiRobotSimulationCore):
         ),
         mass=0.0,
         collision_mode=CollisionMode.NORMAL_3D,
+        name="Left_3D_Robot",
     )
     robot = Agent.from_params(spawn_params, sim_core=sim_core)
-    robot.name = "Left_3D_Robot"
     objects.append(robot)
     print(f"      Created at position {spawn_params.initial_pose.position}")
 
@@ -131,9 +131,9 @@ def create_demo_objects(sim_core: MultiRobotSimulationCore):
         ),
         mass=0.0,
         collision_mode=CollisionMode.NORMAL_2D,
+        name="Left_2D_Robot",
     )
     robot = Agent.from_params(spawn_params, sim_core=sim_core)
-    robot.name = "Left_2D_Robot"
     objects.append(robot)
     print(f"      Created at position {spawn_params.initial_pose.position}")
 
@@ -154,9 +154,9 @@ def create_demo_objects(sim_core: MultiRobotSimulationCore):
         ),
         mass=0.0,
         collision_mode=CollisionMode.NORMAL_3D,
+        name="Left_3D_Robot_2",
     )
     robot = Agent.from_params(spawn_params, sim_core=sim_core)
-    robot.name = "Left_3D_Robot_2"
     objects.append(robot)
     print(f"      Created at position {spawn_params.initial_pose.position}")
 
@@ -182,9 +182,9 @@ def create_demo_objects(sim_core: MultiRobotSimulationCore):
         ),
         mass=0.0,
         collision_mode=CollisionMode.NORMAL_3D,
+        name="Right_3D_Robot",
     )
     robot = Agent.from_params(spawn_params, sim_core=sim_core)
-    robot.name = "Right_3D_Robot"
     objects.append(robot)
     print(f"      Created at position {spawn_params.initial_pose.position}")
 
@@ -205,9 +205,9 @@ def create_demo_objects(sim_core: MultiRobotSimulationCore):
         ),
         mass=0.0,
         collision_mode=CollisionMode.NORMAL_2D,
+        name="Right_2D_Robot",
     )
     robot = Agent.from_params(spawn_params, sim_core=sim_core)
-    robot.name = "Right_2D_Robot"
     objects.append(robot)
     print(f"      Created at position {spawn_params.initial_pose.position}")
 
@@ -228,9 +228,9 @@ def create_demo_objects(sim_core: MultiRobotSimulationCore):
         ),
         mass=0.0,
         collision_mode=CollisionMode.DISABLED,
+        name="Right_DISABLED_Robot",
     )
     robot = Agent.from_params(spawn_params, sim_core=sim_core)
-    robot.name = "Right_DISABLED_Robot"
     objects.append(robot)
     print(f"      Created at position {spawn_params.initial_pose.position}")
 
@@ -401,9 +401,8 @@ def main():
     print("Simulation Configuration")
     print("=" * 70)
     print(f"Cell size: {sim_core._cached_cell_size}m")
-    print(
-        f"Multi-cell threshold: {params.multi_cell_threshold}x = {sim_core._cached_cell_size * params.multi_cell_threshold}m"
-    )
+    cell_size = sim_core._cached_cell_size if sim_core._cached_cell_size is not None else 0.0
+    print(f"Multi-cell threshold: {params.multi_cell_threshold}x = {cell_size * params.multi_cell_threshold}m")
     print(f"Collision margin: {params.collision_margin}m")
     print(f"Total cells in grid: {len(sim_core._cached_spatial_grid)}")
     print(f"Total objects: {len(objects)}")

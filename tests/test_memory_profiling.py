@@ -28,7 +28,6 @@ class TestMemoryProfiling:
         sim = MultiRobotSimulationCore.from_dict(config)
         assert sim.enable_memory_profiling is False
         assert sim._memory_tracemalloc_started is False
-        
 
     def test_memory_profiling_can_be_enabled(self):
         """Memory profiling can be enabled via configuration."""
@@ -43,7 +42,6 @@ class TestMemoryProfiling:
         }
         sim = MultiRobotSimulationCore.from_dict(config)
         assert sim.enable_memory_profiling is True
-        
 
     def test_memory_profiling_get_usage_returns_none_when_disabled(self):
         """get_memory_usage() should return None when profiling is disabled."""
@@ -58,7 +56,6 @@ class TestMemoryProfiling:
         }
         sim = MultiRobotSimulationCore.from_dict(config)
         assert sim.get_memory_usage() is None
-        
 
     def test_memory_profiling_collects_data(self):
         """Memory profiling should collect data during simulation."""
@@ -86,8 +83,6 @@ class TestMemoryProfiling:
         assert "peak_mb" in mem_usage
         assert mem_usage["current_mb"] > 0
         assert mem_usage["peak_mb"] >= mem_usage["current_mb"]
-
-        
 
     def test_memory_profiling_with_time_profiling(self):
         """Memory profiling should work alongside time profiling."""
@@ -117,8 +112,6 @@ class TestMemoryProfiling:
         mem_usage = sim.get_memory_usage()
         assert mem_usage is not None
         assert mem_usage["current_mb"] > 0
-
-        
 
     def test_memory_profiling_detects_memory_growth(self):
         """Memory profiling should detect memory usage changes."""
@@ -151,8 +144,6 @@ class TestMemoryProfiling:
 
         # Memory should have increased
         assert mem_after["current_mb"] > mem_before["current_mb"]
-
-        
 
 
 if __name__ == "__main__":

@@ -18,7 +18,10 @@ data = {
     "total": [],
 }
 
-pattern = r"Agent\.update=([\d.]+)ms.*Callbacks=([\d.]+)ms.*stepSimulation=([\d.]+)ms.*Collisions=([\d.]+)ms.*Monitor=([\d.]+)ms.*Total=([\d.]+)ms"
+pattern = (
+    r"Agent\.update=([\d.]+)ms.*Callbacks=([\d.]+)ms.*stepSimulation=([\d.]+)ms.*"
+    r"Collisions=([\d.]+)ms.*Monitor=([\d.]+)ms.*Total=([\d.]+)ms"
+)
 
 for line in lines:
     match = re.search(pattern, line)

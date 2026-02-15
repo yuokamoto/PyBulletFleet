@@ -58,7 +58,7 @@ def test_single_cell_registration():
         physicsClientId=sim_core.client,
     )
 
-    small_obj = SimObject(object_id=small_id, collision_mode=CollisionMode.NORMAL_3D)
+    small_obj = SimObject(body_id=small_id, collision_mode=CollisionMode.NORMAL_3D)
     sim_core._sim_objects_dict[small_id] = small_obj
 
     # Update AABB and spatial grid
@@ -70,8 +70,6 @@ def test_single_cell_registration():
 
     assert len(cells) == 1, f"Expected single cell, got {len(cells)}"
     logger.info("✓ Small object uses single cell registration")
-
-    sim_core.disconnect()
 
 
 def test_multi_cell_registration():
@@ -107,7 +105,7 @@ def test_multi_cell_registration():
         physicsClientId=sim_core.client,
     )
 
-    large_obj = SimObject(object_id=large_id, collision_mode=CollisionMode.STATIC)
+    large_obj = SimObject(body_id=large_id, collision_mode=CollisionMode.STATIC)
     sim_core._sim_objects_dict[large_id] = large_obj
     sim_core._static_objects.add(large_id)
 
@@ -122,8 +120,6 @@ def test_multi_cell_registration():
     # 5m x 5m object with 2m cells should span 3x3 = 9 cells
     assert len(cells) > 1, f"Expected multiple cells, got {len(cells)}"
     logger.info(f"✓ Large object uses multi-cell registration ({len(cells)} cells)")
-
-    sim_core.disconnect()
 
 
 def test_large_object_collision_detection():
@@ -160,7 +156,7 @@ def test_large_object_collision_detection():
         physicsClientId=sim_core.client,
     )
 
-    wall_obj = SimObject(object_id=wall_id, collision_mode=CollisionMode.STATIC)
+    wall_obj = SimObject(body_id=wall_id, collision_mode=CollisionMode.STATIC)
     sim_core._sim_objects_dict[wall_id] = wall_obj
     sim_core._static_objects.add(wall_id)
     sim_core._cached_collision_modes[wall_id] = CollisionMode.STATIC
@@ -179,7 +175,7 @@ def test_large_object_collision_detection():
         physicsClientId=sim_core.client,
     )
 
-    robot_obj = SimObject(object_id=robot_id, collision_mode=CollisionMode.NORMAL_3D)
+    robot_obj = SimObject(body_id=robot_id, collision_mode=CollisionMode.NORMAL_3D)
     sim_core._sim_objects_dict[robot_id] = robot_obj
     sim_core._cached_collision_modes[robot_id] = CollisionMode.NORMAL_3D
 
@@ -190,19 +186,24 @@ def test_large_object_collision_detection():
     # Mark robot as moved
     sim_core._moved_this_step.add(robot_id)
 
-    # Get potential collision pairs
-    pairs = sim_core._get_potential_collision_pairs_spatial_hash(ignore_static=False)
-
+    # Log cell registration (for debugging)
     logger.info(f"Wall cells: {sim_core._cached_object_to_cell.get(wall_id, [])}")
     logger.info(f"Robot cells: {sim_core._cached_object_to_cell.get(robot_id, [])}")
-    logger.info(f"Potential collision pairs: {pairs}")
 
-    # Should detect potential collision
-    expected_pair = (min(wall_id, robot_id), max(wall_id, robot_id))
-    assert expected_pair in pairs, f"Expected collision pair {expected_pair} not found in {pairs}"
-    logger.info(f"✓ Collision detected between large wall and small robot")
+    # Test collision detection using public API
+    collision_pairs, _ = sim_core.check_collisions(ignore_static=False)
 
-    sim_core.disconnect()
+    # Check if collision between wall and robot was detected
+    expected_pair_1 = (wall_id, robot_id)
+    expected_pair_2 = (robot_id, wall_id)
+    collision_detected = expected_pair_1 in collision_pairs or expected_pair_2 in collision_pairs
+
+    assert collision_detected, (
+        f"Expected collision between wall ({wall_id}) and robot ({robot_id}), "
+        f"but none detected. Collision pairs: {collision_pairs}"
+    )
+
+    logger.info(f"✓ Collision detected between wall and robot. Total pairs: {len(collision_pairs)}")
 
 
 def test_threshold_configuration():
@@ -240,7 +241,7 @@ def test_threshold_configuration():
         physicsClientId=sim_core.client,
     )
 
-    medium_obj = SimObject(object_id=medium_id, collision_mode=CollisionMode.NORMAL_3D)
+    medium_obj = SimObject(body_id=medium_id, collision_mode=CollisionMode.NORMAL_3D)
     sim_core._sim_objects_dict[medium_id] = medium_obj
 
     # Update AABB and spatial grid
@@ -252,8 +253,6 @@ def test_threshold_configuration():
 
     assert len(cells) > 1, f"Expected multi-cell with threshold 1.2x, got {len(cells)} cell(s)"
     logger.info(f"✓ Configurable threshold works correctly ({len(cells)} cells)")
-
-    sim_core.disconnect()
 
 
 if __name__ == "__main__":

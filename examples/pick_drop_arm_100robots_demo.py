@@ -14,7 +14,7 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 import pybullet as p
-from pybullet_fleet.agent import Agent, AgentSpawnParams
+from pybullet_fleet.agent import AgentSpawnParams
 from pybullet_fleet.agent_manager import AgentManager, GridSpawnParams
 from pybullet_fleet.core_simulation import MultiRobotSimulationCore, SimulationParams
 from pybullet_fleet.sim_object import Pose, SimObject, ShapeParams

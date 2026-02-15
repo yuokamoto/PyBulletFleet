@@ -6,7 +6,7 @@ simulation_profiler.py
 概要:
     step_once() の各コンポーネントをプロファイリングして、
     どの部分が遅いかを特定します。
-    
+
     performance_benchmark.py との違い:
       - performance_benchmark.py: 総合パフォーマンス測定（JSON出力）
       - simulation_profiler.py: コンポーネント別の詳細分析（統計出力）
@@ -26,36 +26,36 @@ simulation_profiler.py
 使い方:
     # 基本実行（Built-in Profiling、1000エージェント、100ステップ）
     python simulation_profiler.py --agents=1000 --steps=100
-    
+
     # cProfile分析
     python simulation_profiler.py --agents=1000 --steps=100 --test=cprofile
-    
+
     # Motion Mode比較
     python simulation_profiler.py --agents=1000 --steps=100 --test=motion_modes
-    
+
     # 全ての分析
     python simulation_profiler.py --agents=1000 --steps=100 --test=all
 
 出力例:
     Simulation Step Breakdown for 1000 Agents (100 steps)
     ======================================================================
-    
+
     Agent Update:
       Mean:      12.45ms ( 35.2%)
       Median:    12.38ms
       StdDev:     0.87ms
       Range:  [ 11.23, 15.67]ms
-    
+
     Collision Check:
       Mean:       5.12ms ( 14.5%)  ← collision_check.py で詳細分析可能
       Median:     5.08ms
       Range:  [  4.89,  6.23]ms
-    
+
     Pybullet Step:
       Mean:      15.34ms ( 43.4%)  ← 物理演算のコスト
       Median:    15.21ms
       Range:  [ 14.78, 17.12]ms
-    
+
     Total Step Time:
       Mean:      35.37ms (100.0%)
       Real-Time Factor: 28.3x
@@ -73,7 +73,6 @@ simulation_profiler.py
 """
 import os
 import sys
-import time
 import cProfile
 import pstats
 import io
@@ -87,17 +86,19 @@ from pybullet_fleet.agent import Agent, AgentSpawnParams, MotionMode
 from pybullet_fleet.geometry import Pose
 
 
-def create_test_agents(num_agents: int, sim_core: MultiRobotSimulationCore, motion_mode: MotionMode = MotionMode.OMNIDIRECTIONAL):
+def create_test_agents(
+    num_agents: int, sim_core: MultiRobotSimulationCore, motion_mode: MotionMode = MotionMode.OMNIDIRECTIONAL
+):
     """テスト用のAgentを直接生成（AgentManager不使用）"""
     robot_urdf = os.path.join(os.path.dirname(__file__), "../../robots/simple_cube.urdf")
-    
+
     agents = []
     grid_size = int(math.ceil(math.sqrt(num_agents)))
-    
+
     for i in range(num_agents):
         x = (i % grid_size) * 1.0
         y = (i // grid_size) * 1.0
-        
+
         spawn_params = AgentSpawnParams(
             urdf_path=robot_urdf,
             initial_pose=Pose.from_xyz(x, y, 0.1),
@@ -107,21 +108,21 @@ def create_test_agents(num_agents: int, sim_core: MultiRobotSimulationCore, moti
             mass=0.0,  # Kinematic
         )
         agent = Agent.from_params(spawn_params, sim_core=sim_core)
-        
+
         # Set goal to make agents "moving"
         goal_x = x + 5.0
         goal_y = y + 5.0
         agent.set_goal_pose(Pose.from_xyz(goal_x, goal_y, 0.1))
-        
+
         agents.append(agent)
-    
+
     return agents
 
 
 def profile_builtin_profiling(num_agents: int, num_steps: int = 100, motion_mode: MotionMode = MotionMode.OMNIDIRECTIONAL):
     """Built-in Profiling: step_once() の return_profiling を使って各コンポーネントを測定"""
     mode_name = "DIFFERENTIAL" if motion_mode == MotionMode.DIFFERENTIAL else "OMNIDIRECTIONAL"
-    
+
     print(f"\n{'='*70}")
     print(f"Built-in Profiling ({mode_name}): {num_agents} agents, {num_steps} steps")
     print(f"{'='*70}\n")
@@ -129,7 +130,7 @@ def profile_builtin_profiling(num_agents: int, num_steps: int = 100, motion_mode
     # Ensure clean disconnect and use DIRECT mode
     if p.isConnected():
         p.disconnect()
-    
+
     p.connect(p.DIRECT)  # Force DIRECT mode (no GUI, no X11)
 
     # Setup - Load from profiling config
@@ -158,7 +159,7 @@ def profile_builtin_profiling(num_agents: int, num_steps: int = 100, motion_mode
     for step in range(num_steps):
         # Get profiling data directly from step_once()
         timing_data = sim_core.step_once(return_profiling=True)
-        
+
         if timing_data:
             for key, value in timing_data.items():
                 if key in timings:
@@ -191,14 +192,14 @@ def profile_builtin_profiling(num_agents: int, num_steps: int = 100, motion_mode
 
     # Cleanup
     p.disconnect()
-    
+
     return timings
 
 
 def profile_with_cprofile(num_agents: int, num_steps: int = 100, motion_mode: MotionMode = MotionMode.OMNIDIRECTIONAL):
     """cProfile: 全関数のボトルネック探し"""
     mode_name = "DIFFERENTIAL" if motion_mode == MotionMode.DIFFERENTIAL else "OMNIDIRECTIONAL"
-    
+
     print(f"\n{'='*70}")
     print(f"cProfile ({mode_name}): {num_agents} agents, {num_steps} steps")
     print(f"{'='*70}\n")
@@ -206,7 +207,7 @@ def profile_with_cprofile(num_agents: int, num_steps: int = 100, motion_mode: Mo
     # Ensure clean disconnect and use DIRECT mode
     if p.isConnected():
         p.disconnect()
-    
+
     p.connect(p.DIRECT)  # Force DIRECT mode (no GUI, no X11)
 
     # Setup - Load from profiling config
@@ -251,7 +252,7 @@ def profile_with_cprofile(num_agents: int, num_steps: int = 100, motion_mode: Mo
 
     # Cleanup
     p.disconnect()
-    
+
     return stats
 
 
@@ -260,53 +261,54 @@ def analyze_motion_modes(num_agents: int, num_steps: int = 100):
     print(f"\n{'='*70}")
     print(f"Motion Mode Comparison: {num_agents} agents, {num_steps} steps")
     print(f"{'='*70}")
-    
+
     results = {}
-    
+
     for mode in [MotionMode.DIFFERENTIAL, MotionMode.OMNIDIRECTIONAL]:
         mode_name = "DIFFERENTIAL" if mode == MotionMode.DIFFERENTIAL else "OMNIDIRECTIONAL"
-        
+
         # Run built-in profiling
         timings = profile_builtin_profiling(num_agents, num_steps, mode)
-        
+
         # Extract key metrics
         import statistics
+
         total_mean = statistics.mean(timings["total"])
         agent_update_mean = statistics.mean(timings["agent_update"])
         collision_mean = statistics.mean(timings["collision_check"])
-        
+
         results[mode_name] = {
             "total_ms": total_mean,
             "agent_update_ms": agent_update_mean,
             "collision_ms": collision_mean,
         }
-    
+
     # Compare
     diff = results["DIFFERENTIAL"]
     omni = results["OMNIDIRECTIONAL"]
-    
+
     print(f"\n{'='*70}")
     print("Performance Comparison:")
     print(f"{'='*70}")
-    
+
     ratio_total = diff["total_ms"] / omni["total_ms"]
     ratio_agent = diff["agent_update_ms"] / omni["agent_update_ms"]
-    
-    print(f"\nTotal Step Time:")
+
+    print("\nTotal Step Time:")
     print(f"  DIFFERENTIAL:     {diff['total_ms']:.3f} ms")
     print(f"  OMNIDIRECTIONAL:  {omni['total_ms']:.3f} ms")
     print(f"  Ratio: {ratio_total:.2f}x")
-    
-    print(f"\nAgent Update Time:")
+
+    print("\nAgent Update Time:")
     print(f"  DIFFERENTIAL:     {diff['agent_update_ms']:.3f} ms")
     print(f"  OMNIDIRECTIONAL:  {omni['agent_update_ms']:.3f} ms")
     print(f"  Ratio: {ratio_agent:.2f}x")
-    
+
     if ratio_total > 1.0:
         print(f"\n  → OMNIDIRECTIONAL is {ratio_total:.2f}x faster overall")
     else:
         print(f"\n  → DIFFERENTIAL is {1/ratio_total:.2f}x faster overall")
-    
+
     return results
 
 
@@ -318,20 +320,14 @@ def main():
     parser.add_argument("--agents", type=int, default=1000, help="Number of agents")
     parser.add_argument("--steps", type=int, default=100, help="Number of steps to profile")
     parser.add_argument(
-        "--test",
-        choices=["all", "builtin", "cprofile", "motion_modes"],
-        default="builtin",
-        help="Which test to run"
+        "--test", choices=["all", "builtin", "cprofile", "motion_modes"], default="builtin", help="Which test to run"
     )
     parser.add_argument(
-        "--mode",
-        choices=["differential", "omnidirectional"],
-        default="omnidirectional",
-        help="Motion mode for single tests"
+        "--mode", choices=["differential", "omnidirectional"], default="omnidirectional", help="Motion mode for single tests"
     )
-    
+
     args = parser.parse_args()
-    
+
     motion_mode = MotionMode.DIFFERENTIAL if args.mode == "differential" else MotionMode.OMNIDIRECTIONAL
 
     print("\n" + "=" * 70)
@@ -349,7 +345,7 @@ def main():
         print("\n" + "=" * 70)
         print("cProfile Comparison: DIFFERENTIAL vs OMNIDIRECTIONAL")
         print("=" * 70)
-        
+
         profile_with_cprofile(args.agents, args.steps, MotionMode.DIFFERENTIAL)
         profile_with_cprofile(args.agents, args.steps, MotionMode.OMNIDIRECTIONAL)
 
