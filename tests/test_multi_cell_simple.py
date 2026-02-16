@@ -46,7 +46,7 @@ def test_multi_cell_with_agents():
     small_robots = []
     for i in range(3):
         spawn_params = AgentSpawnParams(
-            urdf_path="robots/platform_robot.urdf",
+            urdf_path="robots/mobile_robot.urdf",
             initial_pose=Pose(position=[i * 1.0, 0, 0], orientation=[0, 0, 0, 1]),
             collision_mode=CollisionMode.NORMAL_3D,
         )
@@ -135,7 +135,7 @@ def test_threshold_effect():
 
         # Create agent
         spawn_params = AgentSpawnParams(
-            urdf_path="robots/platform_robot.urdf",
+            urdf_path="robots/mobile_robot.urdf",
             initial_pose=Pose(position=[0, 0, 0], orientation=[0, 0, 0, 1]),
             collision_mode=CollisionMode.NORMAL_3D,
         )
