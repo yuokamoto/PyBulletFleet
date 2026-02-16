@@ -10,9 +10,7 @@ cd PyBulletFleet
 pip install -e .
 
 # 2. Run demo
-python examples/100robots_demo.py
-
-
+python examples/100robots_grid_demo.py
 ```
 
 ## Overview
@@ -20,10 +18,12 @@ python examples/100robots_demo.py
 This package provides reusable simulation components for multi-robot PyBullet environments.
 ## Features
 
-- **MultiRobotSimulationCore**: Main simulation engine with configurable rendering, and monitoring
-- **Robot**: Goal-based navigation for mobile and static robots
-- **RobotManager**: Multi-robot coordination and grid-based spawning
+- **MultiRobotSimulationCore**: Main simulation engine with configurable rendering and monitoring
+- **Agent**: Goal-based navigation for mobile and static agents with action system support
+- **AgentManager**: Multi-agent coordination and grid-based spawning
 - **DataMonitor**: Real-time performance monitoring
+- **Action System**: High-level actions (MoveTo, Pick, Drop, Wait) with state machine
+- **Collision Detection**: Spatial hash-based efficient collision checking
 
 ## Directory Structure
 
@@ -32,20 +32,39 @@ PyBulletFleet/
 ├── pybullet_fleet/
 │   ├── __init__.py
 │   ├── core_simulation.py             # Main simulation engine
-│   ├── robot.py                       # Robot implementation (mobile & static)
-│   ├── robot_manager.py               # Multi-robot management
+│   ├── agent.py                       # Agent implementation with action system
+│   ├── agent_manager.py               # Multi-agent management
+│   ├── action.py                      # Action system (MoveTo, Pick, Drop, Wait)
+│   ├── sim_object.py                  # Base simulation object
+│   ├── geometry.py                    # Pose, Path geometry classes
 │   ├── collision_visualizer.py        # Collision visualization
 │   ├── data_monitor.py                # Performance monitoring
-│   └── tools.py                       # Grid utilities
+│   └── tools.py                       # Utility functions
 ├── examples/
-│   └── 100robots_demo.py              # 100 robots demo
+│   ├── 100robots_grid_demo.py         # Grid-based multi-agent demo
+│   ├── 100robots_cube_patrol_demo.py  # Patrol behavior demo
+│   ├── path_following_demo.py         # Path following with different motion modes
+│   ├── action_system_demo.py          # Action system demonstration
+│   ├── pick_drop_arm_demo.py          # Single arm pick & drop
+│   ├── pick_drop_arm_100robots_demo.py # 100 arms pick & drop
+│   ├── pick_drop_arm_action_demo.py   # Arm with action system
+│   ├── pick_drop_mobile_100robots_demo.py # 100 mobile robots pick & drop
+│   ├── mobile_manipulator_demo.py     # Mobile manipulator demo
+│   ├── collision_features_demo.py     # Collision detection features
+│   ├── memory_profiling_demo.py       # Memory profiling utilities
+│   └── robot_demo.py                  # Basic robot demo
 ├── config/
-│   └── config.yaml                     # Default configuration
+│   ├── config.yaml                    # Default configuration
+│   └── 100robots_config.yaml          # 100 robots configuration
 ├── robots/
 │   ├── mobile_robot.urdf
 │   └── arm_robot.urdf
-├── setup.py                            # Standard Python package setup
-└── DESIGN.md                           # Architecture documentation
+├── mesh/
+│   ├── cube.obj                       # Cube mesh for objects
+│   └── 11pallet.obj                   # Pallet mesh
+├── setup.py                           # Standard Python package setup
+├── DESIGN.md                          # Architecture documentation
+└── README.md                          # This file
 ```
 
 ## Installation
@@ -98,190 +117,232 @@ Main simulation engine for PyBullet-based simulations.
 - Log level management
 
 
-### 2. Robot
+### 2. Agent
 
-Robot.
+Agent with goal-based navigation and action system.
 
 **Key Features:**
 - Automatic navigation to goal pose
 - Velocity and acceleration limits
-- Pose control
-- Kinematic teleportation
+- Action system (MoveTo, Pick, Drop, Wait)
+- Pose control and kinematic teleportation
+- Object attachment/detachment
 
-### 3. RobotManager
+### 3. AgentManager
 
-Manager for creating and coordinating multiple robots.
+Manager for creating and coordinating multiple agents.
 
 **Key Features:**
 - Grid-based batch spawning
-- Probabilistic robot type selection
-- Automatic robot placement
-- Multi-robot management
-- Bulk goal setting
+- Mixed agent type spawning with probabilities
+- Automatic agent placement
+- Multi-agent management
+- Goal update callback system
 
 **Spawning Methods:**
-- `spawn_robots_grid()`: Spawn single robot type in grid
-- `spawn_robots_grid_probabilistic()`: Spawn mixed robot types with probabilities
+- `spawn_agents_grid()`: Spawn single agent type in grid
+- `spawn_agents_grid_mixed()`: Spawn mixed agent types with probabilities
+- `spawn_agent_grid_counts()`: Spawn specific counts for each type
 
 
 ## Examples
 
-### Recommended Demos (New API)
+### Core Demos
 
 #### 100robots_grid_demo.py
-**概要:**
-シンプルな単一タイプのグリッド生成デモ。`RobotManager.spawn_robots_grid()` を使用。
+**Overview:**
+Basic grid-based multi-agent demo using `AgentManager.spawn_agents_grid()`.
 
-**特徴:**
-- YAML設定ファイルベース
-- 自動グリッド配置
-- ゴールベースナビゲーション
-- 共有シェイプ最適化
+**Features:**
+- YAML config file based
+- Automatic grid placement
+- Goal-based navigation
+- Shared shape optimization
 
-**用途:** 初心者向け、単一タイプのロボット群
+**Use Case:** Getting started with multi-agent simulations
 
 ```bash
 python examples/100robots_grid_demo.py
 ```
 
+#### 100robots_cube_patrol_demo.py
+**Overview:**
+100 agents patrolling between cubes with collision avoidance.
+
+**Features:**
+- Patrol behavior implementation
+- Collision detection and avoidance
+- Dynamic goal switching
+- Spatial hash optimization
+
+**Use Case:** Multi-agent coordination, patrol behaviors
+
+```bash
+python examples/100robots_cube_patrol_demo.py
+```
+
 #### path_following_demo.py
-**概要:**
-2つのモーションモード（全方向移動と差動駆動）を比較するデモ。
+**Overview:**
+Demo comparing two motion modes (omnidirectional and differential drive).
 
-**特徴:**
-- 全方向移動（Omnidirectional）: 回転せずに任意の方向に移動可能
-- 差動駆動（Differential Drive）: 目標方向に回転してから前進
-- 事前定義されたパス追従（円形と正方形）
-- 速度・加速度制限による現実的な動き
-- Pathデータクラスによるウェイポイント管理
+**Features:**
+- Omnidirectional: Can move in any direction without rotation
+- Differential Drive: Rotates toward target direction then moves forward
+- Predefined path following (circular and square patterns)
+- Realistic motion with velocity/acceleration limits
+- Waypoint management using Path dataclass
 
-**用途:** モーションプランニング、異なる駆動方式の比較
+**Use Case:** Motion planning, comparing different drive types
 
 ```bash
 python examples/path_following_demo.py
 ```
 
-#### 100robots_probabilistic_demo.py
-**概要:**
-確率ベースの混合ロボット生成デモ。辞書設定で複数タイプを確率指定。
+### Action System Demos
 
-**特徴:**
-- 辞書ベースのロボットタイプ設定
-- 確率による重み付け選択（例: 50% mobile, 20% arm, 30% スキップ）
-- 確率 < 100% 時のグリッド位置自動スキップ
-- robot.user_data でのタイプ追跡
-- 複数の設定例（100%カバー、スパース倉庫、可変密度）
+#### action_system_demo.py
+**Overview:**
+Demonstration of the high-level action system.
 
-**用途:** 高度な用途、混合ロボットタイプ、スパース配置
+**Features:**
+- MoveTo action (goal-based navigation)
+- Pick action (object attachment)
+- Drop action (object detachment)
+- Wait action (timed delays)
+- State machine-based action execution
 
-```bash
-python examples/100robots_probabilistic_demo.py
-```
-
-**使用例:**
-```python
-# 確率でロボットタイプを定義
-robot_type_params = {
-    'mobile_robot': (mobile_spawn_params, 0.50),  # 50% の確率
-    'arm_robot': (arm_spawn_params, 0.20)          # 20% の確率
-    # 残り 30% は自動スキップ（ロボットを配置しない）
-}
-
-robots = robot_manager.spawn_robots_grid_probabilistic(
-    num_positions=100,
-    grid_params=grid_params,
-    robot_type_params=robot_type_params
-)
-# 結果: ~50 mobile + ~20 arm + ~30 空き位置
-```
-
-#### robot_urdf_demo.py
-**概要:**
-Robot クラスの基本チュートリアル。Mesh と URDF の両方をサポート。
-
-**特徴:**
-- Robot.from_mesh() の例
-- Robot.from_urdf() の例
-- SimObject 継承（attach/detach）
-- URDF ロボットの関節制御
-
-**用途:** Robot クラスの基本学習
+**Use Case:** Learning the action system API
 
 ```bash
-python examples/robot_urdf_demo.py
+python examples/action_system_demo.py
 ```
 
-#### shape_params_demo.py
-**概要:**
-新しい ShapeParams API を使用したデモ。URDF single-linkと同等の柔軟な形状制御。
+#### pick_drop_arm_demo.py
+**Overview:**
+Single arm robot performing pick and drop operations.
 
-**特徴:**
-- プリミティブ形状のサポート（box, sphere, cylinder, mesh）
-- ビジュアルとコリジョンの独立制御
-- 形状ごとの色、スケール、フレームオフセット
-- URDFと同等の柔軟性
+**Features:**
+- URDF-based arm robot
+- Pick and drop sequence
+- Object attachment to specific links
+- Pose-based manipulation
 
-**用途:** 高度な形状制御、プリミティブ形状の使用
-
-**使用例:**
-```python
-from pybullet_fleet.sim_object import SimObject, ShapeParams
-from pybullet_fleet.geometry import Pose
-
-# Box visual + Sphere collision
-obj = SimObject.from_mesh(
-    visual_shape=ShapeParams(
-        shape_type="box",
-        half_extents=[0.5, 0.3, 0.2],
-        rgba_color=[1.0, 0.0, 0.0, 1.0]
-    ),
-    collision_shape=ShapeParams(
-        shape_type="sphere",
-        radius=0.3
-    ),
-    pose=Pose.from_xyz(0, 0, 1),
-    mass=1.0
-)
-
-# Mesh with rotated frame
-agent = Agent.from_mesh(
-    visual_shape=ShapeParams(
-        shape_type="mesh",
-        mesh_path="robot.obj",
-        mesh_scale=[1.0, 1.0, 1.0],
-        rgba_color=[0.2, 0.2, 0.2, 1.0],
-        frame_pose=Pose.from_euler(0, 0, 0, roll=np.pi/2, yaw=np.pi/2)
-    ),
-    collision_shape=ShapeParams(
-        shape_type="box",
-        half_extents=[0.2, 0.1, 0.2]
-    ),
-    pose=Pose.from_xyz(0, 0, 0.5),
-    max_linear_vel=2.0
-)
-```
+**Use Case:** Single manipulator control
 
 ```bash
-python examples/shape_params_demo.py
+python examples/pick_drop_arm_demo.py
 ```
 
-### Legacy Demo
+#### pick_drop_arm_action_demo.py
+**Overview:**
+Arm robot using action system for pick and drop.
 
-#### 100robots_demo.py
-**概要:**
-旧 API（URDFObject ベース）のデモ。後方互換性のための参照用。
+**Features:**
+- Action-based pick and drop
+- High-level task specification
+- Automatic action sequencing
 
-**注意:**
-このデモはレガシー API を使用しています。新規プロジェクトでは上記のデモを使用してください。
+**Use Case:** Action system with manipulators
 
 ```bash
-python examples/100robots_demo.py
+python examples/pick_drop_arm_action_demo.py
 ```
 
+#### pick_drop_arm_100robots_demo.py
+**Overview:**
+100 arm robots performing synchronized pick and drop operations.
 
-## Todo
-- ~~Merge MeshObject and URDFObject~~ ✅ Done (Robot class)
-- ~~Update examples to use Robot and RobotManager~~ ✅ Done
+**Features:**
+- Multi-manipulator coordination
+- Grid-based arm placement
+- Simultaneous pick and drop
+- Performance optimization
+
+**Use Case:** Large-scale manipulation tasks
+
+```bash
+python examples/pick_drop_arm_100robots_demo.py
+```
+
+#### pick_drop_mobile_100robots_demo.py
+**Overview:**
+100 mobile robots picking and dropping objects.
+
+**Features:**
+- Mobile base manipulation
+- Navigation with object carrying
+- Multi-agent pick and drop coordination
+
+**Use Case:** Mobile manipulation fleets
+
+```bash
+python examples/pick_drop_mobile_100robots_demo.py
+```
+
+#### mobile_manipulator_demo.py
+**Overview:**
+Mobile manipulator demonstration.
+
+**Features:**
+- Combined mobile base and arm control
+- Navigation while manipulating
+- Coordinated motion
+
+**Use Case:** Mobile manipulation systems
+
+```bash
+python examples/mobile_manipulator_demo.py
+```
+
+### Utility Demos
+
+#### collision_features_demo.py
+**Overview:**
+Demonstration of collision detection features.
+
+**Features:**
+- Spatial hash visualization
+- Collision pair detection
+- Performance metrics
+- Debug visualization
+
+**Use Case:** Understanding collision system
+
+```bash
+python examples/collision_features_demo.py
+```
+
+#### memory_profiling_demo.py
+**Overview:**
+Memory profiling utilities demonstration.
+
+**Features:**
+- Memory usage tracking
+- Performance profiling
+- Resource monitoring
+
+**Use Case:** Performance optimization
+
+```bash
+python examples/memory_profiling_demo.py
+```
+
+#### robot_demo.py
+**Overview:**
+Basic robot creation and control demo.
+
+**Features:**
+- Agent.from_mesh() examples
+- Agent.from_urdf() examples
+- Basic navigation
+- Pose control
+
+**Use Case:** Learning Agent class basics
+
+```bash
+python examples/robot_demo.py
+```
+
 
 ## Dependencies
 
@@ -318,7 +379,6 @@ pre-commit run --all-files
 **Format code:**
 ```bash
 black pybullet_fleet examples
-isort pybullet_fleet examples
 ```
 
 **Lint code:**
@@ -328,7 +388,7 @@ flake8 pybullet_fleet
 
 **Type check:**
 ```bash
-mypy pybullet_fleet
+pyright pybullet_fleet
 ```
 
 ### CI/CD

@@ -6,7 +6,7 @@ The spatial hash collision detection system uses a configurable cell size that d
 
 ## Configuration Modes
 
-### Mode 1: `constant` (最適化済み、手動設定)
+### Mode 1: `constant` (Optimized, Manual Setting)
 
 Fixed cell size provided by user. Fastest option with no runtime overhead.
 
@@ -51,7 +51,7 @@ spatial_hash_cell_size: 2.5  # meters
 
 ---
 
-### Mode 2: `auto_adaptive` (自動適応、動的更新)
+### Mode 2: `auto_adaptive` (Auto-Adaptive, Dynamic Update)
 
 Automatically recalculates cell_size when objects are added or removed.
 
@@ -96,7 +96,7 @@ spatial_hash_cell_size_mode: "auto_adaptive"
 
 ---
 
-### Mode 3: `auto_initial` (初回自動計算、手動トリガー) **[DEFAULT]**
+### Mode 3: `auto_initial` (Initial Auto-Calculation, Manual Trigger) **[DEFAULT]**
 
 Calculates cell_size once at first collision check. Can be manually recalculated.
 

@@ -1801,10 +1801,10 @@ class Agent(SimObject):
         for obj in self.attached_objects:
             # Only update if attached to a link (not base) and no constraint (mass=0)
             if obj._attached_link_index >= 0 and getattr(obj, "_constraint_id", None) is None:
-                # 親リンクのワールド座標を取得
+                # Get parent link's world coordinates
                 link_state = p.getLinkState(self.body_id, obj._attached_link_index)
                 parent_pos, parent_orn = link_state[0], link_state[1]
-                # 相対オフセットを適用
+                # Apply relative offset
                 new_pos, new_orn = p.multiplyTransforms(
                     parent_pos, parent_orn, obj._attach_offset.position, obj._attach_offset.orientation
                 )

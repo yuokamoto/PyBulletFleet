@@ -2,24 +2,24 @@
 
 ## Architecture Overview
 
-This package provides a modular, reusable PyBullet simulation framework designed for multi-robot scenarios. The architecture is organized into several key components, each with specific responsibilities.
+This package provides a modular, reusable PyBullet simulation framework designed for multi-agent scenarios. The architecture is organized into several key components, each with specific responsibilities.
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                    User Application                          │
-└───────────────────────┬─────────────────────────────────────┘
-                        │
-        ┌───────────────┴───────────────┐
-        │  MultiRobotSimulationCore     │  ← Main simulation engine
-        │  (core_simulation.py)         │
-        └───────────────┬───────────────┘
-                        │
-        ┌───────────────┼───────────────┬───────────────┐
-        │               │               │               │
-   ┌────▼────┐    ┌────▼────┐    ┌────▼────┐    ┌────▼────┐
-   │ Mobile  │    │ Robot   │    │ Tools   │    │Visualizer│
-   │ Robot   │    │ Manager │    │ (grid)  │    │ Monitor │
-   └─────────┘    └─────────┘    └─────────┘    └─────────┘
+└───────────────────┬─────────────────────────────────────────┘
+                    │
+    ┌───────────────┴───────────────┐
+    │  MultiRobotSimulationCore     │  ← Main simulation engine
+    │  (core_simulation.py)         │
+    └───────────────┬───────────────┘
+                    │
+    ┌───────────────┼───────────────┬───────────────┬──────────────┐
+    │               │               │               │              │
+┌───▼───┐    ┌─────▼──────┐  ┌────▼────┐    ┌────▼────┐   ┌────▼────┐
+│ Agent │    │ Agent      │  │ Action  │    │ Tools   │   │Visualizer│
+│       │    │ Manager    │  │ System  │    │ (utils) │   │ Monitor │
+└───────┘    └────────────┘  └─────────┘    └─────────┘   └─────────┘
 ```
 
 ## Core Components
@@ -40,17 +40,35 @@ The central orchestrator for PyBullet simulations.
 - Visualization control (visual shapes, collision shapes, transparency)
 - Performance monitoring integration
 - Structure body tracking
-- Callback management for user-defined robot updates
+- Callback management for user-defined updates
 - Keyboard event handling (SPACE, v, c, t keys)
+- Collision detection system integration
 
 **Key Methods:**
 - `from_dict(config)` / `from_yaml(path)`: Factory methods for initialization
-- `run_simulation(robot_update_callback, final_callback)`: Main simulation loop
+- `run_simulation(update_callback, final_callback)`: Main simulation loop
+- `step_once()`: Single simulation step
 - `setup_camera()`: Camera positioning
 - `configure_visualizer()`: Visual settings configuration
 - `register_static_body(body_id)`: Track static structure elements
+- `register_callback(callback, frequency)`: Register custom update callbacks
 - `_handle_keyboard_events()`: Process keyboard inputs
 
+##### SimObject
+Base class for all simulation objects.
+
+**Responsibilities:**
+- Common interface for objects in simulation
+- Position and orientation management via Pose
+- Metadata storage
+- Object attachment system
+- Shared shape caching for performance
+
+**Key Features:**
+- Support for mesh and primitive shapes
+- Collision and visual shape separation
+- Pickable/non-pickable objects
+- Parent-child attachment with constraints
 
 ##### SimulationParams
 Configuration dataclass for simulation parameters.
@@ -60,38 +78,7 @@ Configuration dataclass for simulation parameters.
 - `physics`, `monitor`: Feature toggles
 - `camera_*`: Camera configuration
 - `enable_*`: Visualization settings
-
-##### SimObject
-Abstract base class for all simulation objects.
-
-**Responsibilities:**
-- Common interface for objects in simulation
-- Position and orientation management via Pose
-- Metadata storage
-
-**Subclasses:**
-- `MeshObject`: For static mesh-based objects
-- `URDFObject`: For URDF-based objects
-
-todo: merge with Robot class.
-
-##### Pose
-Position and orientation representation for any object in the simulation.
-Compatible with ROS2 geometry_msgs/Pose and PyBullet's (position, orientation) tuples.
-
-**Attributes:**
-- `position`: np.ndarray [x, y, z]
-- `orientation`: np.ndarray (quaternion) [x, y, z, w]
-
-**Properties:**
-- `x`, `y`, `z`: Convenient accessors for position components
-
-**Methods:**
-- `from_xyz()`: Create from position only
-- `from_euler()`: Create from position and Euler angles
-- `from_pybullet()`: Create from PyBullet getBasePositionAndOrientation()
-- `as_euler()`: Get Euler angles (roll, pitch, yaw)
-- `as_position_orientation()`: Get (position, orientation) tuple
+- `spatial_hash_*`: Collision detection settings
 
 ##### LogLevelManager
 Utility for managing PyBullet log verbosity.
@@ -101,38 +88,46 @@ Utility for managing PyBullet log verbosity.
 
 ---
 
-### 2. robot.py
+### 2. agent.py
 
-**Purpose**: Goal-based navigation for mobile robots
+**Purpose**: Agent with goal-based navigation and action system
 
 #### Key Classes:
 
-##### Robot
+##### Agent (extends SimObject)
 
 **Responsibilities:**
 - Goal-based navigation (move towards target pose)
+- Action execution (MoveTo, Pick, Drop, Wait)
 - Velocity and acceleration limiting
-- Kinematic teleportation (for physics-disabled mode)
 - Path following
-- Goal reached detection
+- Object manipulation
+- Collision handling
 
 **Key Methods:**
 - `set_goal(pose)`: Set target destination
-- `update(dt)`: Update robot state per timestep
+- `update(dt)`: Update agent state per timestep
+- `execute_action(action)`: Execute high-level action
 - `is_goal_reached()`: Check if at destination
-- `get_pose()`: Get current position and orientation
-- `kinematic_teleport_base()`: Direct position/velocity control
+- `pick(obj)`: Attach object to agent
+- `drop()`: Detach currently held object
+
+**Motion Modes:**
+- Omnidirectional: Move in any direction without rotation
+- Differential: Rotate towards goal then move forward
 
 **Control Algorithm:**
-- Simple proportional controller for position
+- Proportional controller for position
 - Linear interpolation for smooth motion
 - Velocity clamping based on max_linear_vel and max_linear_accel
 
-##### RobotSpawnParams
-Configuration dataclass for robot initialization.
+##### AgentSpawnParams
+Configuration dataclass for agent initialization.
 
 **Attributes:**
 - `max_linear_vel`, `max_linear_accel`: Motion limits
+- `max_angular_vel`, `max_angular_accel`: Rotation limits
+- `motion_mode`: "omnidirectional" or "differential"
 - `orientation_euler`: Initial orientation
 - `base_mass`: Mass (0.0 for kinematic control)
 - `use_collision`: Enable collision detection
@@ -143,9 +138,9 @@ Configuration dataclass for robot initialization.
 
 ---
 
-### 3. robot_manager.py
+### 3. agent_manager.py
 
-**Purpose**: Multi-robot coordination and spawning
+**Purpose**: Multi-agent coordination and spawning
 
 #### Key Classes:
 
@@ -160,6 +155,8 @@ High-level manager for multiple Agent instances.
 
 **Key Methods:**
 - `spawn_agents_grid(num_agents, grid_params, spawn_params)`: Create agents in grid pattern
+- `spawn_agents_grid_mixed(num_agents, grid_params, spawn_params_list)`: Mixed type spawning
+- `spawn_agent_grid_counts(grid_params, spawn_params_count_list)`: Exact count spawning
 - `register_goal_update_callback(callback)`: Register custom goal logic
 - `update_goals(dt)`: Execute goal update callback (called automatically by MultiRobotSimulationCore)
 - `get_agents()`: Access agent collection
@@ -183,31 +180,117 @@ Configuration for grid-based agent placement.
 
 ---
 
-### 4. tools.py
+### 4. action.py
 
-**Purpose**: Utility functions for coordinate conversion and legacy spawning
+**Purpose**: High-level action system for agents
 
-#### Key Functions:
+#### Key Classes:
 
-##### Coordinate Conversion
-- `grid_to_world(grid, spacing, offset)`: Convert grid indices to world coordinates
-- `world_to_grid(pos, spacing, offset)`: Convert world coordinates to grid indices
-- `grid_to_world_2d()`, `world_to_grid_2d()`: 2D versions
+##### Action (Base Class)
+Abstract base class for all actions.
 
-**Use Cases:**
-- Path planning in grid space
-- Collision detection on grid
-- Visualization of grid-based structures
+**Methods:**
+- `start(agent)`: Initialize action
+- `update(agent, dt)`: Update action state
+- `is_complete()`: Check if action finished
+- `stop(agent)`: Clean up action
 
-##### Legacy Spawning Functions
-- `grid_execution()`: Execute function over grid
-- `grid_spawn()`: Generic grid spawning
-- `grid_spawn_urdf()`, `grid_spawn_mesh()`: Type-specific spawning
+##### MoveTo
+Navigate agent to target pose.
 
+**Parameters:**
+- `target_pose`: Destination pose
+- `tolerance`: Distance threshold for completion
+
+##### Pick
+Pick up an object and attach it to agent.
+
+**Parameters:**
+- `obj`: SimObject to pick
+- `link_index`: Agent link to attach to (default: -1 for base)
+- `offset`: Attachment offset pose
+
+##### Drop
+Drop currently held object.
+
+**Parameters:**
+- `offset`: Drop position offset from agent
+
+##### Wait
+Wait for specified duration.
+
+**Parameters:**
+- `duration`: Wait time in seconds
 
 ---
 
-### 6. data_monitor.py
+### 5. geometry.py
+
+**Purpose**: Geometric data structures
+
+#### Key Classes:
+
+##### Pose
+Position and orientation representation.
+
+**Attributes:**
+- `position`: np.ndarray [x, y, z]
+- `orientation`: np.ndarray (quaternion) [x, y, z, w]
+
+**Methods:**
+- `from_xyz()`, `from_euler()`, `from_pybullet()`: Factory methods
+- `as_euler()`, `as_position_orientation()`: Conversion methods
+- `distance_to()`: Distance calculation
+
+##### Path
+Waypoint sequence for path following.
+
+**Attributes:**
+- `waypoints`: List[Pose]
+
+**Methods:**
+- `from_points()`: Create from position list
+- `add_waypoint()`: Add pose to path
+- `get_waypoint(index)`: Retrieve specific waypoint
+
+---
+
+### 6. tools.py
+
+**Purpose**: Utility functions
+
+#### Key Functions:
+
+##### Pose Calculation
+- `calculate_offset_pose()`: Calculate pose at offset distance from target
+- `calculate_approach_pose()`: Deprecated alias for calculate_offset_pose
+
+**Use Cases:**
+- Pick/drop pose calculation
+- Approach pose generation
+- Offset manipulation
+
+---
+
+### 7. collision_visualizer.py
+
+**Purpose**: Collision detection and visualization
+
+#### Key Features:
+
+- Spatial hash-based collision detection
+- Configurable cell size modes (constant, auto_adaptive, auto_initial)
+- Collision pair visualization
+- Performance-optimized for large scenes
+
+**Collision Detection:**
+- O(N) average case with spatial hashing
+- Configurable distance threshold
+- Optional visualization of collision pairs
+
+---
+
+### 8. data_monitor.py
 
 **Purpose**: Real-time performance monitoring
 
@@ -243,14 +326,25 @@ GUI window displaying simulation metrics.
 ## Performance Considerations
 
 ### Bottlenecks:
-1. **GUI Rendering**: 2-3x slower than headless
-2. **Collision Detection**: O(n²) for n robots
-3. **Mesh Complexity**: High-poly meshes slow down
-4. **Monitor Updates**: tkinter overhead
+1. **GUI Rendering**: 2-3x slower than headless mode
+2. **Collision Detection**: O(N) with spatial hashing, O(N²) without
+3. **Mesh Complexity**: High-poly meshes slow down rendering
+4. **Monitor Updates**: tkinter GUI overhead
+5. **Shape Creation**: Repeated shape creation for many objects
 
 ### Optimizations:
 1. **Disable GUI**: `gui: false` for batch simulations
-2. **Increase Timestep**: Trade accuracy for speed
-3. **Simple Shapes**: Use boxes/cylinders instead of meshes
-4. **Batch Operations**: Update all robots in single pass
-5. **Disable Monitor**: `monitor: false` in production
+2. **Spatial Hashing**: Enabled by default for collision detection
+3. **Shared Shapes**: Automatic shape caching reduces OpenGL overhead
+4. **Increase Timestep**: Trade accuracy for speed (default: 1/240s)
+5. **Simple Shapes**: Use boxes/cylinders instead of complex meshes
+6. **Batch Operations**: Update all agents in single pass
+7. **Disable Monitor**: `monitor: false` in production
+8. **Cell Size Tuning**: Use `constant` mode with optimal cell_size for best performance
+
+### Scaling Results:
+- **100 agents**: ~240 FPS (real-time capable)
+- **1000 agents**: ~24 FPS (10x slowdown)
+- **10000 agents**: Requires optimization and headless mode
+
+See `docs/PERFORMANCE_ANALYSIS.md` and `docs/OPTIMIZATION_RESULTS.md` for detailed benchmarks.

@@ -131,7 +131,7 @@ def _update_object_spatial_grid(self, object_id: int, remove_only: bool = False)
 ### Day 1-2 Overnight: Collision Check Timing Analysis
 
 #### Critical Question
-**User**: "collision checkの実装についてですが、現在は、step_onceで実装しています。これを例えば、sim_objectのupdateごとに実行したりしたらどうなりますでしょうか？"
+**User**: "About the collision check implementation, currently it's implemented in step_once. What would happen if we execute it per sim_object update instead?"
 
 This triggered deep performance analysis.
 
@@ -189,7 +189,7 @@ Created benchmark to measure actual performance:
 ### Day 2: January 19, 2026 - Project Cleanup
 
 #### Morning: Folder Structure Review
-**User**: "開発の過程で多くファイルができましたが、example フォルダは必要ですか？"
+**User**: "Many files were created during development, but is the example folder necessary?"
 
 **Discovery**:
 - `example/` folder: 4 test scripts (development artifacts)
@@ -231,7 +231,7 @@ rm -rf example/
 ### Day 2 Evening: VSCode Performance Crisis
 
 #### Issue Discovery
-**User**: "vscodeが重くなっているのですが、個々のやり取りが長くなったせいですか？"
+**User**: "VSCode is getting heavy. Is it because each conversation has become longer?"
 
 **Memory Analysis**:
 ```bash
@@ -253,7 +253,7 @@ VSCode Memory: 2,602 MB (2.6GB)  # Normal
 3. **Best practice**: New chat session for major topics
 
 #### File Resurrection Mystery
-**User**: "再起動した際に復活しました。削除したはずのファイルが..."
+**User**: "Files that I thought I deleted came back after restart..."
 
 **Root Cause**:
 - Copilot created files during conversation
@@ -273,7 +273,7 @@ git clean -f -d  # Remove 38 untracked files
 ### Day 3: January 20-21, 2026 - Collision Method Benchmarking
 
 #### Critical Question
-**User**: "getContactPointsはphysics objectにつかい、kinematicsはgetclosestpointの方が良くないですか？"
+**User**: "Shouldn't we use getContactPoints for physics objects and getClosestPoint for kinematics?"
 
 Excellent optimization insight!
 
