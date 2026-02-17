@@ -679,10 +679,10 @@ class PickAction(Action):
     def _calculate_approach_pose(self, agent) -> Pose:
         """Calculate approach pose based on target object position."""
         obj_pose = self._target_object.get_pose()
-        return tools.calculate_approach_pose(
+        return tools.calculate_offset_pose(
             target_position=obj_pose.position,
             current_position=agent.get_pose().position,
-            approach_offset=self.approach_offset,
+            offset=self.approach_offset,
             keep_height=True,
         )
 
@@ -962,10 +962,10 @@ class DropAction(Action):
 
     def _calculate_approach_pose(self, agent) -> Pose:
         """Calculate approach pose based on drop position."""
-        return tools.calculate_approach_pose(
+        return tools.calculate_offset_pose(
             target_position=self.drop_position,
             current_position=agent.get_pose().position,
-            approach_offset=self.approach_offset,
+            offset=self.approach_offset,
             keep_height=True,
         )
 

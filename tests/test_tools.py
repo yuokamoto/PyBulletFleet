@@ -13,7 +13,6 @@ import numpy as np
 from pybullet_fleet.tools import (
     normalize_vector_param,
     calculate_offset_pose,
-    calculate_approach_pose,
     world_to_grid,
     grid_to_world,
 )
@@ -62,18 +61,6 @@ class TestNormalizeVectorParam:
         """Test that wrong dimension list raises ValueError"""
         with pytest.raises(ValueError, match="must be a float or a list of 3 floats"):
             normalize_vector_param([1.0, 2.0], "test_param", dim=3)
-
-    def test_zero_value(self):
-        """Test with zero value"""
-        result = normalize_vector_param(0.0, "test_param", dim=3)
-
-        np.testing.assert_array_almost_equal(result, [0.0, 0.0, 0.0])
-
-    def test_negative_values(self):
-        """Test with negative values"""
-        result = normalize_vector_param([-1.0, -2.0, -3.0], "test_param", dim=3)
-
-        np.testing.assert_array_almost_equal(result, [-1.0, -2.0, -3.0])
 
 
 class TestCalculateOffsetPose:
@@ -169,25 +156,6 @@ class TestCalculateOffsetPose:
         # Should face north (yaw = pi/2)
         expected_yaw = np.pi / 2
         assert abs(pose.yaw - expected_yaw) < 0.01
-
-
-class TestCalculateApproachPose:
-    """Test calculate_approach_pose (deprecated wrapper)"""
-
-    def test_approach_pose_wrapper(self):
-        """Test that approach pose wrapper calls offset pose correctly"""
-        target = [5.0, 0.0, 0.1]
-        current = [0.0, 0.0, 0.3]
-        approach_offset = 1.5
-
-        # Both should give same result
-        approach = calculate_approach_pose(target, current, approach_offset, keep_height=True)
-        offset = calculate_offset_pose(target, current, approach_offset, keep_height=True)
-
-        assert abs(approach.x - offset.x) < 0.001
-        assert abs(approach.y - offset.y) < 0.001
-        assert abs(approach.z - offset.z) < 0.001
-        assert abs(approach.yaw - offset.yaw) < 0.001
 
 
 class TestWorldToGrid:

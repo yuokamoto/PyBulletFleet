@@ -170,35 +170,6 @@ def calculate_offset_pose(
     return Pose.from_euler(x=offset_pos[0], y=offset_pos[1], z=offset_pos[2], roll=0.0, pitch=0.0, yaw=yaw)
 
 
-def calculate_approach_pose(
-    target_position: List[float], current_position: List[float], approach_offset: float, keep_height: bool = True
-) -> "Pose":
-    """
-    Calculate approach pose for pick/drop operations.
-
-    .. deprecated::
-        This function is deprecated and kept for backward compatibility.
-        Use :func:`calculate_offset_pose` instead.
-
-    Args:
-        target_position: Target position [x, y, z]
-        current_position: Current agent position [x, y, z]
-        approach_offset: Distance from target for approach pose
-        keep_height: Whether to keep current height (default: True)
-
-    Returns:
-        Pose object representing the approach pose
-
-    Example:
-        >>> # Old way (deprecated but still works)
-        >>> approach = calculate_approach_pose([5, 0, 0.1], [0, 0, 0.3], approach_offset=1.0)
-        >>>
-        >>> # New way (recommended)
-        >>> approach = calculate_offset_pose([5, 0, 0.1], [0, 0, 0.3], offset=1.0)
-    """
-    return calculate_offset_pose(target_position, current_position, approach_offset, keep_height)
-
-
 def world_to_grid(pos: List[float], spacing: List[float], offset: Optional[List[float]] = None) -> List[int]:
     """
     Convert world coordinates to grid indices (always 3D), with offset.
