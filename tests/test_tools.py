@@ -10,6 +10,7 @@ This module tests:
 
 import pytest
 import numpy as np
+import logging
 from pybullet_fleet.tools import (
     normalize_vector_param,
     calculate_offset_pose,
@@ -121,18 +122,26 @@ class TestCalculateOffsetPose:
         # Should use target height
         assert abs(pose.z - 0.1) < 0.01
 
-    def test_offset_same_position(self):
-        """Test offset when current and target are same"""
+    def test_offset_same_position(self, caplog):
+        """Test offset when current and target are same (edge case)"""
         target = [5.0, 5.0, 0.1]
         current = [5.0, 5.0, 0.3]
         offset = 1.0
 
-        pose = calculate_offset_pose(target, current, offset, keep_height=True)
+        # Should emit warning because direction is undefined
+        with caplog.at_level(logging.WARNING):
+            pose = calculate_offset_pose(target, current, offset, keep_height=True)
 
-        # Should handle gracefully (no NaN)
-        assert not np.isnan(pose.x)
-        assert not np.isnan(pose.y)
-        assert not np.isnan(pose.z)
+        # Check that warning was logged
+        assert "current and target positions are same" in caplog.text
+        assert "Direction is undefined" in caplog.text
+
+        # When current and target XY are same, direction is undefined
+        # Function should default to yaw=0 and stay at target position (offset is ignored)
+        assert abs(pose.x - 5.0) < 0.01
+        assert abs(pose.y - 5.0) < 0.01
+        assert abs(pose.z - 0.3) < 0.01  # Keep current height
+        assert abs(pose.yaw - 0.0) < 0.01  # Default yaw
 
     def test_offset_negative(self):
         """Test negative offset (beyond target)"""

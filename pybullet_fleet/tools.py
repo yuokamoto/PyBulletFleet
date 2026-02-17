@@ -157,6 +157,14 @@ def calculate_offset_pose(
         direction = direction / direction_norm
         yaw = np.arctan2(direction[1], direction[0])
     else:
+        # Current and target positions are the same (in XY plane)
+        # Direction is undefined, cannot apply offset properly
+        logger.warning(
+            f"calculate_offset_pose: current and target positions are same in XY plane "
+            f"(distance={direction_norm:.6f}). Direction is undefined. "
+            f"Defaulting to yaw=0 and ignoring offset={offset}."
+        )
+        direction = np.array([0.0, 0.0, 0.0])
         yaw = 0.0
 
     # Calculate offset position (away from target by offset distance)
