@@ -19,6 +19,46 @@ from pybullet_fleet.tools import (
 )
 
 
+# Helper functions for testing
+def assert_distance_from_target(pose, target, expected_distance, tolerance=0.01):
+    """
+    Assert that pose is at expected_distance from target in XY plane.
+
+    Args:
+        pose: Pose object with x, y attributes
+        target: Target position [x, y, z] or [x, y]
+        expected_distance: Expected distance from target (can be negative for absolute check)
+        tolerance: Acceptable error margin (default: 0.01)
+    """
+    distance = np.sqrt((pose.x - target[0]) ** 2 + (pose.y - target[1]) ** 2)
+    assert (
+        abs(distance - abs(expected_distance)) < tolerance
+    ), f"Distance from target: {distance:.4f}, expected: {abs(expected_distance):.4f}"
+
+
+def assert_pose_on_line(pose, current, target, offset, tolerance=0.01):
+    """
+    Assert that pose is on the line between current and target at offset distance.
+
+    Verifies that:
+    1. Pose position matches expected position calculated from offset
+    2. Pose is geometrically correct relative to current-target line
+
+    Args:
+        pose: Pose object with x, y, yaw attributes
+        current: Current position [x, y, z] or [x, y]
+        target: Target position [x, y, z] or [x, y]
+        offset: Distance from target (positive = before target, negative = beyond)
+        tolerance: Acceptable error margin (default: 0.01)
+    """
+    # Calculate expected position using yaw
+    expected_x = target[0] - offset * np.cos(pose.yaw)
+    expected_y = target[1] - offset * np.sin(pose.yaw)
+
+    assert abs(pose.x - expected_x) < tolerance, f"Pose X: {pose.x:.4f}, expected: {expected_x:.4f}"
+    assert abs(pose.y - expected_y) < tolerance, f"Pose Y: {pose.y:.4f}, expected: {expected_y:.4f}"
+
+
 class TestNormalizeVectorParam:
     """Test normalize_vector_param utility"""
 
@@ -83,14 +123,9 @@ class TestCalculateOffsetPose:
         # Should face the target (yaw = 0)
         assert abs(pose.yaw - 0.0) < 0.01
 
-        # Check distance from target (should be exactly offset distance)
-        distance_to_target = np.sqrt((pose.x - target[0]) ** 2 + (pose.y - target[1]) ** 2)
-        assert abs(distance_to_target - offset) < 0.01
-
-        # Check distance from current (should be less than original distance)
-        distance_to_current = np.sqrt((pose.x - current[0]) ** 2 + (pose.y - current[1]) ** 2)
-        original_distance = np.sqrt((target[0] - current[0]) ** 2 + (target[1] - current[1]) ** 2)
-        assert distance_to_current < original_distance
+        # Use helper functions for common assertions
+        assert_distance_from_target(pose, target, offset)
+        assert_pose_on_line(pose, current, target, offset)
 
     def test_offset_pose_diagonal(self):
         """Test offset pose on diagonal path"""
@@ -107,18 +142,9 @@ class TestCalculateOffsetPose:
         expected_yaw = np.pi / 4
         assert abs(pose.yaw - expected_yaw) < 0.01
 
-        # Check distance from target (should be exactly offset distance)
-        distance_to_target = np.sqrt((pose.x - target[0]) ** 2 + (pose.y - target[1]) ** 2)
-        assert abs(distance_to_target - offset) < 0.01
-
-        # Check that pose is on the line between current and target
-        # Expected position: target - offset * direction
-        # direction = (3,3) / sqrt(18) = (3,3) / 4.243 = (0.707, 0.707)
-        # Expected pose: (3, 3) - 1.0 * (0.707, 0.707) = (2.293, 2.293)
-        expected_x = target[0] - offset * np.cos(expected_yaw)
-        expected_y = target[1] - offset * np.sin(expected_yaw)
-        assert abs(pose.x - expected_x) < 0.01
-        assert abs(pose.y - expected_y) < 0.01
+        # Use helper functions for common assertions
+        assert_distance_from_target(pose, target, offset)
+        assert_pose_on_line(pose, current, target, offset)
 
     def test_offset_zero_at_target(self):
         """Test zero offset places pose at target"""
@@ -133,13 +159,13 @@ class TestCalculateOffsetPose:
         assert abs(pose.y - 2.0) < 0.01
         assert abs(pose.z - 0.3) < 0.01  # Keep current height
 
-        # Check distance from target is zero (at target)
-        distance_to_target = np.sqrt((pose.x - target[0]) ** 2 + (pose.y - target[1]) ** 2)
-        assert abs(distance_to_target - 0.0) < 0.01
-
         # Should face toward target
         expected_yaw = np.arctan2(target[1] - current[1], target[0] - current[0])
         assert abs(pose.yaw - expected_yaw) < 0.01
+
+        # Use helper functions for common assertions
+        assert_distance_from_target(pose, target, offset)
+        assert_pose_on_line(pose, current, target, offset)
 
     def test_offset_keep_height_false(self):
         """Test offset with keep_height=False"""
@@ -185,15 +211,15 @@ class TestCalculateOffsetPose:
         assert abs(pose.x - 6.0) < 0.01
         assert abs(pose.y - 0.0) < 0.01
 
-        # Check distance from target (absolute value of negative offset)
-        distance_to_target = np.sqrt((pose.x - target[0]) ** 2 + (pose.y - target[1]) ** 2)
-        assert abs(distance_to_target - abs(offset)) < 0.01
-
         # Should still face the target
         assert abs(pose.yaw - 0.0) < 0.01
 
         # Pose should be beyond target from current
         assert pose.x > target[0]  # Beyond target in positive x direction
+
+        # Use helper functions for common assertions
+        assert_distance_from_target(pose, target, offset)  # Uses abs(offset)
+        assert_pose_on_line(pose, current, target, offset)
 
     def test_offset_pose_orientation(self):
         """Test that pose orientation faces target"""
@@ -207,16 +233,16 @@ class TestCalculateOffsetPose:
         expected_yaw = np.pi / 2
         assert abs(pose.yaw - expected_yaw) < 0.01
 
-        # Check distance from target
-        distance_to_target = np.sqrt((pose.x - target[0]) ** 2 + (pose.y - target[1]) ** 2)
-        assert abs(distance_to_target - offset) < 0.01
-
         # Should be 1.0m away from target (at y=4.0)
         assert abs(pose.x - 0.0) < 0.01
         assert abs(pose.y - 4.0) < 0.01
 
         # Verify pose is between current and target
         assert 0.0 < pose.y < 5.0
+
+        # Use helper functions for common assertions
+        assert_distance_from_target(pose, target, offset)
+        assert_pose_on_line(pose, current, target, offset)
 
 
 class TestWorldToGrid:
