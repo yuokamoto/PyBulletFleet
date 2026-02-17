@@ -494,3 +494,67 @@ class TestSimObjectMultiple:
         assert box_obj.body_id >= 0
         assert sphere_obj.body_id >= 0
         assert mesh_obj.body_id >= 0
+
+
+class TestSimObjectVisualOnly:
+    """Test SimObject with visual-only or collision-only shapes"""
+
+    def test_visual_only_object(self, pybullet_env):
+        """Test creating object with visual shape but no collision"""
+        obj = SimObject.from_params(
+            SimObjectSpawnParams(
+                visual_shape=ShapeParams(shape_type="box", half_extents=[0.5, 0.5, 0.5]),
+                collision_shape=None,  # No collision
+                initial_pose=Pose.from_xyz(0, 0, 1),
+                mass=1.0,
+            )
+        )
+
+        assert obj.body_id >= 0
+        assert obj.mass == 1.0
+
+    def test_collision_only_object(self, pybullet_env):
+        """Test creating object with collision shape but no visual"""
+        obj = SimObject.from_params(
+            SimObjectSpawnParams(
+                visual_shape=None,  # No visual
+                collision_shape=ShapeParams(shape_type="box", half_extents=[0.5, 0.5, 0.5]),
+                initial_pose=Pose.from_xyz(0, 0, 1),
+                mass=1.0,
+            )
+        )
+
+        assert obj.body_id >= 0
+        assert obj.mass == 1.0
+
+
+class TestSimObjectKinematic:
+    """Test kinematic (mass=0) object behavior"""
+
+    def test_kinematic_flag(self, pybullet_env):
+        """Test is_kinematic flag is set correctly"""
+        # Kinematic object (mass=0)
+        kinematic_obj = SimObject.from_params(
+            SimObjectSpawnParams(
+                visual_shape=ShapeParams(shape_type="box", half_extents=[0.5, 0.5, 0.5]),
+                collision_shape=ShapeParams(shape_type="box", half_extents=[0.5, 0.5, 0.5]),
+                initial_pose=Pose.from_xyz(0, 0, 1),
+                mass=0.0,
+            )
+        )
+
+        assert kinematic_obj.is_kinematic is True
+        assert kinematic_obj.mass == 0.0
+
+        # Dynamic object (mass>0)
+        dynamic_obj = SimObject.from_params(
+            SimObjectSpawnParams(
+                visual_shape=ShapeParams(shape_type="box", half_extents=[0.5, 0.5, 0.5]),
+                collision_shape=ShapeParams(shape_type="box", half_extents=[0.5, 0.5, 0.5]),
+                initial_pose=Pose.from_xyz(2, 0, 1),
+                mass=1.5,
+            )
+        )
+
+        assert dynamic_obj.is_kinematic is False
+        assert dynamic_obj.mass == 1.5

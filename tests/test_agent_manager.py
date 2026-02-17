@@ -339,5 +339,31 @@ class TestAgentManagerEmpty:
         assert manager.get_moving_count() == 0
 
 
+class TestAgentManagerAddObject:
+    """Test AgentManager add_object method"""
+
+    def test_add_object_directly(self, pybullet_env):
+        """Test adding an agent directly without spawning methods"""
+        from pybullet_fleet.agent import Agent
+
+        manager = AgentManager()
+
+        # Create an agent manually
+        mesh_path = os.path.join(os.path.dirname(__file__), "../mesh/cube.obj")
+        spawn_params = AgentSpawnParams(
+            visual_shape=ShapeParams(shape_type="mesh", mesh_path=mesh_path, mesh_scale=[0.2, 0.2, 0.2]),
+            collision_shape=ShapeParams(shape_type="box", half_extents=[0.1, 0.1, 0.1]),
+            mass=1.0,
+        )
+        agent = Agent.from_params(spawn_params)
+
+        # Add it to the manager
+        manager.add_object(agent)
+
+        assert manager.get_object_count() == 1
+        assert len(manager.objects) == 1
+        assert manager.body_ids[agent.body_id] == agent
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

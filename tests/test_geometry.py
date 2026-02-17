@@ -490,3 +490,29 @@ class TestPoseYawMethods:
         assert abs(pose.roll - roll) < 0.01
         assert abs(pose.pitch - pitch) < 0.01
         assert abs(pose.yaw - yaw) < 0.01
+
+
+class TestPoseFromPyBullet:
+    """Test Pose.from_pybullet() constructor"""
+
+    def test_from_pybullet_basic(self):
+        """Test creating pose from PyBullet format"""
+        position = (1.0, 2.0, 3.0)
+        orientation = (0.0, 0.0, 0.0, 1.0)  # Identity quaternion
+
+        pose = Pose.from_pybullet(position, orientation)
+
+        assert pose.position[0] == 1.0
+        assert pose.position[1] == 2.0
+        assert pose.position[2] == 3.0
+        assert len(pose.orientation) == 4
+
+    def test_from_pybullet_with_rotation(self):
+        """Test creating pose from PyBullet format with rotation"""
+        position = (0.0, 0.0, 0.0)
+        # 90 degree rotation around z-axis
+        orientation = (0.0, 0.0, 0.7071068, 0.7071068)
+
+        pose = Pose.from_pybullet(position, orientation)
+
+        assert abs(pose.yaw - 1.5708) < 0.01  # ~90 degrees in radians
