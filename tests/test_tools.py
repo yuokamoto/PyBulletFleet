@@ -83,6 +83,15 @@ class TestCalculateOffsetPose:
         # Should face the target (yaw = 0)
         assert abs(pose.yaw - 0.0) < 0.01
 
+        # Check distance from target (should be exactly offset distance)
+        distance_to_target = np.sqrt((pose.x - target[0]) ** 2 + (pose.y - target[1]) ** 2)
+        assert abs(distance_to_target - offset) < 0.01
+
+        # Check distance from current (should be less than original distance)
+        distance_to_current = np.sqrt((pose.x - current[0]) ** 2 + (pose.y - current[1]) ** 2)
+        original_distance = np.sqrt((target[0] - current[0]) ** 2 + (target[1] - current[1]) ** 2)
+        assert distance_to_current < original_distance
+
     def test_offset_pose_diagonal(self):
         """Test offset pose on diagonal path"""
         target = [3.0, 3.0, 0.0]
@@ -98,6 +107,19 @@ class TestCalculateOffsetPose:
         expected_yaw = np.pi / 4
         assert abs(pose.yaw - expected_yaw) < 0.01
 
+        # Check distance from target (should be exactly offset distance)
+        distance_to_target = np.sqrt((pose.x - target[0]) ** 2 + (pose.y - target[1]) ** 2)
+        assert abs(distance_to_target - offset) < 0.01
+
+        # Check that pose is on the line between current and target
+        # Expected position: target - offset * direction
+        # direction = (3,3) / sqrt(18) = (3,3) / 4.243 = (0.707, 0.707)
+        # Expected pose: (3, 3) - 1.0 * (0.707, 0.707) = (2.293, 2.293)
+        expected_x = target[0] - offset * np.cos(expected_yaw)
+        expected_y = target[1] - offset * np.sin(expected_yaw)
+        assert abs(pose.x - expected_x) < 0.01
+        assert abs(pose.y - expected_y) < 0.01
+
     def test_offset_zero_at_target(self):
         """Test zero offset places pose at target"""
         target = [5.0, 2.0, 0.1]
@@ -110,6 +132,14 @@ class TestCalculateOffsetPose:
         assert abs(pose.x - 5.0) < 0.01
         assert abs(pose.y - 2.0) < 0.01
         assert abs(pose.z - 0.3) < 0.01  # Keep current height
+
+        # Check distance from target is zero (at target)
+        distance_to_target = np.sqrt((pose.x - target[0]) ** 2 + (pose.y - target[1]) ** 2)
+        assert abs(distance_to_target - 0.0) < 0.01
+
+        # Should face toward target
+        expected_yaw = np.arctan2(target[1] - current[1], target[0] - current[0])
+        assert abs(pose.yaw - expected_yaw) < 0.01
 
     def test_offset_keep_height_false(self):
         """Test offset with keep_height=False"""
@@ -153,6 +183,17 @@ class TestCalculateOffsetPose:
 
         # Should be 1.0m beyond target (at x=6.0)
         assert abs(pose.x - 6.0) < 0.01
+        assert abs(pose.y - 0.0) < 0.01
+
+        # Check distance from target (absolute value of negative offset)
+        distance_to_target = np.sqrt((pose.x - target[0]) ** 2 + (pose.y - target[1]) ** 2)
+        assert abs(distance_to_target - abs(offset)) < 0.01
+
+        # Should still face the target
+        assert abs(pose.yaw - 0.0) < 0.01
+
+        # Pose should be beyond target from current
+        assert pose.x > target[0]  # Beyond target in positive x direction
 
     def test_offset_pose_orientation(self):
         """Test that pose orientation faces target"""
@@ -165,6 +206,17 @@ class TestCalculateOffsetPose:
         # Should face north (yaw = pi/2)
         expected_yaw = np.pi / 2
         assert abs(pose.yaw - expected_yaw) < 0.01
+
+        # Check distance from target
+        distance_to_target = np.sqrt((pose.x - target[0]) ** 2 + (pose.y - target[1]) ** 2)
+        assert abs(distance_to_target - offset) < 0.01
+
+        # Should be 1.0m away from target (at y=4.0)
+        assert abs(pose.x - 0.0) < 0.01
+        assert abs(pose.y - 4.0) < 0.01
+
+        # Verify pose is between current and target
+        assert 0.0 < pose.y < 5.0
 
 
 class TestWorldToGrid:
