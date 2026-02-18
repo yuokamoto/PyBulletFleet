@@ -436,9 +436,9 @@ class TestEdgeCases:
 
         pose = calculate_offset_pose(target, current, offset, keep_height=True)
 
-        # Should be 100m away from target
-        distance = np.sqrt((pose.x - target[0]) ** 2 + (pose.y - target[1]) ** 2)
-        assert abs(distance - 100.0) < 0.1
+        # Use helper functions for validation with appropriate tolerance for large offset
+        assert_distance_from_target(pose, target, offset, tolerance=0.1)
+        assert_pose_on_line(pose, current, target, offset, tolerance=0.1)
 
     def test_grid_conversion_fractional_spacing(self):
         """Test grid conversion with fractional spacing"""
