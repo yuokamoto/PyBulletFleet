@@ -268,9 +268,9 @@ class TestWorldToGrid:
         assert grid == [2, 3, 4]
 
     def test_world_to_grid_non_uniform_spacing(self):
-        """Test world to grid with non-uniform spacing"""
-        pos = [2.0, 4.0, 6.0]
-        spacing = [2.0, 2.0, 2.0]
+        """Test world to grid with non-uniform spacing (different spacing per axis)"""
+        pos = [2.0, 6.0, 15.0]
+        spacing = [2.0, 3.0, 5.0]  # Different spacing for x, y, z
 
         grid = world_to_grid(pos, spacing)
 
@@ -338,13 +338,13 @@ class TestGridToWorld:
         assert pos == [2.5, 3.5, 4.5]
 
     def test_grid_to_world_non_uniform_spacing(self):
-        """Test grid to world with non-uniform spacing"""
+        """Test grid to world with non-uniform spacing (different spacing per axis)"""
         grid = [1, 2, 3]
-        spacing = [2.0, 2.0, 2.0]
+        spacing = [2.0, 3.0, 5.0]  # Different spacing for x, y, z
 
         pos = grid_to_world(grid, spacing)
 
-        assert pos == [2.0, 4.0, 6.0]
+        assert pos == [2.0, 6.0, 15.0]
 
     def test_grid_to_world_negative_indices(self):
         """Test grid to world with negative indices"""
