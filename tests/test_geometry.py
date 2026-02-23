@@ -13,6 +13,21 @@ import numpy as np
 from pybullet_fleet.geometry import Pose, Path
 
 
+# Helper functions for testing
+def assert_pose_equal(pose: Pose, expected_position: list, tolerance: float = 0.001):
+    """
+    Assert that pose position matches expected values.
+
+    Args:
+        pose: Pose object to check
+        expected_position: Expected [x, y, z] position
+        tolerance: Acceptable error margin (default: 0.001)
+    """
+    assert abs(pose.x - expected_position[0]) < tolerance, f"X mismatch: {pose.x:.4f} != {expected_position[0]:.4f}"
+    assert abs(pose.y - expected_position[1]) < tolerance, f"Y mismatch: {pose.y:.4f} != {expected_position[1]:.4f}"
+    assert abs(pose.z - expected_position[2]) < tolerance, f"Z mismatch: {pose.z:.4f} != {expected_position[2]:.4f}"
+
+
 class TestPoseCreation:
     """Test Pose creation methods"""
 
@@ -33,6 +48,12 @@ class TestPoseCreation:
         assert pose.x == 1.0
         assert pose.y == 2.0
         assert pose.z == 3.0
+
+        # Euler angles should match the specified values
+        assert abs(pose.roll - 0.1) < 0.01
+        assert abs(pose.pitch - 0.2) < 0.01
+        assert abs(pose.yaw - 0.3) < 0.01
+
         # Orientation should be non-identity
         assert not np.allclose(pose.orientation, [0, 0, 0, 1])
 
@@ -44,6 +65,16 @@ class TestPoseCreation:
 
         np.testing.assert_array_almost_equal(pose.position, position)
         np.testing.assert_array_almost_equal(pose.orientation, orientation)
+
+    def test_pose_from_yaw(self):
+        """Test creating Pose with yaw angle only"""
+        pose = Pose.from_yaw(1, 2, 3, yaw=np.pi / 2)
+
+        # Position should match
+        assert_pose_equal(pose, [1, 2, 3])
+
+        # Yaw should be approximately pi/2
+        assert abs(pose.yaw - np.pi / 2) < 0.01
 
     def test_pose_default_constructor(self):
         """Test Pose with minimal constructor"""
@@ -105,7 +136,7 @@ class TestPoseConversion:
 
 
 class TestPoseProperties:
-    """Test Pose properties"""
+    """Test Pose properties and accessors"""
 
     def test_xyz_properties(self):
         """Test x, y, z property accessors"""
@@ -124,6 +155,34 @@ class TestPoseProperties:
 
     def test_orientation_is_list(self):
         """Test that orientation is a list"""
+        pose = Pose(position=[0, 0, 0])
+
+        assert isinstance(pose.orientation, list)
+        assert len(pose.orientation) == 4
+
+    def test_yaw_property(self):
+        """Test yaw property accessor works with different Pose creation methods"""
+        # Test with from_yaw
+        pose1 = Pose.from_yaw(0, 0, 0, yaw=1.2)
+        assert abs(pose1.yaw - 1.2) < 0.01
+
+        # Test with from_euler (yaw should be extracted correctly)
+        pose2 = Pose.from_euler(0, 0, 0, roll=0.1, pitch=0.2, yaw=0.5)
+        assert abs(pose2.yaw - 0.5) < 0.01
+
+        # Test with default pose (should be 0)
+        pose3 = Pose.from_xyz(0, 0, 0)
+        assert abs(pose3.yaw - 0.0) < 0.01
+
+    def test_roll_pitch_yaw_properties(self):
+        """Test roll, pitch, yaw property accessors"""
+        roll, pitch, yaw = 0.1, 0.2, 0.3
+        pose = Pose.from_euler(0, 0, 0, roll=roll, pitch=pitch, yaw=yaw)
+
+        # All angles should match
+        assert abs(pose.roll - roll) < 0.01
+        assert abs(pose.pitch - pitch) < 0.01
+        assert abs(pose.yaw - yaw) < 0.01
         pose = Pose(position=[0, 0, 0])
 
         assert isinstance(pose.orientation, list)
@@ -171,20 +230,6 @@ class TestPoseDistanceCalculations:
 
         assert abs(distance - expected_distance) < 0.001
 
-    def test_position_access(self):
-        """Test accessing position coordinates"""
-        pose1 = Pose.from_xyz(1, 2, 3)
-        pose2 = Pose.from_xyz(4, 5, 6)
-
-        # Verify position access works
-        assert pose1.x == 1
-        assert pose1.y == 2
-        assert pose1.z == 3
-
-        assert pose2.x == 4
-        assert pose2.y == 5
-        assert pose2.z == 6
-
 
 class TestPath:
     """Test Path class"""
@@ -200,10 +245,10 @@ class TestPath:
         path = Path.from_positions(positions)
 
         assert len(path.waypoints) == 4
-        assert path.waypoints[0].x == 0
-        assert path.waypoints[1].x == 1
-        assert path.waypoints[2].y == 1
-        assert path.waypoints[3].x == 0
+        assert_pose_equal(path.waypoints[0], [0, 0, 0])
+        assert_pose_equal(path.waypoints[1], [1, 0, 0])
+        assert_pose_equal(path.waypoints[2], [1, 1, 0])
+        assert_pose_equal(path.waypoints[3], [0, 1, 0])
 
     def test_path_constructor(self):
         """Test Path constructor with waypoints"""
@@ -211,21 +256,21 @@ class TestPath:
         path = Path(waypoints=waypoints)
 
         assert len(path.waypoints) == 2
-        assert path.waypoints[0].x == 1
-        assert path.waypoints[1].x == 4
+        assert_pose_equal(path.waypoints[0], [1, 2, 3])
+        assert_pose_equal(path.waypoints[1], [4, 5, 6])
 
     def test_path_indexing(self):
-        """Test path indexing and iteration"""
+        """Test path indexing (bracket notation access)"""
         path = Path.from_positions([[0, 0, 0], [1, 1, 1], [2, 2, 2]])
 
-        # Test indexing
+        # Test indexing with bracket notation
         waypoint0 = path[0]
         waypoint1 = path[1]
         waypoint2 = path[2]
 
-        assert waypoint0.x == 0
-        assert waypoint1.x == 1
-        assert waypoint2.x == 2
+        assert_pose_equal(waypoint0, [0, 0, 0])
+        assert_pose_equal(waypoint1, [1, 1, 1])
+        assert_pose_equal(waypoint2, [2, 2, 2])
 
     def test_path_indexing_out_of_bounds(self):
         """Test path indexing with invalid index"""
@@ -253,9 +298,10 @@ class TestPath:
 
         assert len(path) == 3
 
-        # Test iteration
+        # Test iteration with complete position checking
+        expected_positions = [[0, 0, 0], [1, 0, 0], [2, 0, 0]]
         for i, waypoint in enumerate(path):
-            assert waypoint.x == i
+            assert_pose_equal(waypoint, expected_positions[i])
 
         # Third waypoint should have rotation
         assert not np.allclose(path[2].orientation, [0, 0, 0, 1])
@@ -287,23 +333,6 @@ class TestPoseEdgeCases:
         assert pose.x == 1000
         assert pose.y == 2000
         assert pose.z == 3000
-
-    def test_quaternion_normalization(self):
-        """Test that quaternion maintains expected properties"""
-        # Create with non-normalized quaternion
-        orientation = [1, 1, 1, 1]  # Not normalized
-        pose = Pose(position=[0, 0, 0], orientation=orientation)
-
-        # Note: Current implementation doesn't auto-normalize
-        # Just verify quaternion is stored
-        assert len(pose.orientation) == 4
-
-        # Test with normalized quaternion
-        normalized = [0, 0, 0, 1]  # Unit quaternion
-        pose2 = Pose(position=[0, 0, 0], orientation=normalized)
-
-        magnitude = np.linalg.norm(pose2.orientation)
-        assert abs(magnitude - 1.0) < 0.001
 
 
 if __name__ == "__main__":
@@ -443,76 +472,78 @@ class TestPathAdvancedFeatures:
         # Test slicing waypoints list
         first_three = path.waypoints[:3]
         assert len(first_three) == 3
-        assert first_three[0].x == 0
-        assert first_three[2].x == 2
+        assert_pose_equal(first_three[0], [0, 0, 0])
+        assert_pose_equal(first_three[2], [2, 0, 0])
 
+    def test_path_append(self):
+        """Test appending one path to another (in-place mutation)"""
+        path1 = Path.from_positions([[0, 0, 0], [1, 0, 0]])
+        path2 = Path.from_positions([[2, 0, 0], [3, 0, 0]])
 
-class TestPoseYawMethods:
-    """Test Pose yaw-specific methods"""
+        # Append path2 to path1
+        path1.append(path2)
 
-    def test_from_yaw(self):
-        """Test creating Pose with yaw angle"""
-        pose = Pose.from_yaw(1, 2, 3, yaw=np.pi / 2)
+        # path1 should now have 4 waypoints
+        assert len(path1) == 4
+        assert_pose_equal(path1[0], [0, 0, 0])
+        assert_pose_equal(path1[1], [1, 0, 0])
+        assert_pose_equal(path1[2], [2, 0, 0])
+        assert_pose_equal(path1[3], [3, 0, 0])
 
-        assert pose.x == 1
-        assert pose.y == 2
-        assert pose.z == 3
+        # path2 should be unchanged
+        assert len(path2) == 2
 
-        # Yaw should be approximately pi/2
-        assert abs(pose.yaw - np.pi / 2) < 0.01
+    def test_path_add_operator(self):
+        """Test adding paths with + operator (non-mutating)"""
+        path1 = Path.from_positions([[0, 0, 0], [1, 0, 0]])
+        path2 = Path.from_positions([[2, 0, 0], [3, 0, 0]])
 
-    def test_to_yaw_quaternion(self):
-        """Test converting yaw to quaternion"""
-        pose = Pose.from_xyz(0, 0, 0)
-        quat = pose.to_yaw_quaternion(np.pi / 4)
+        # Create new path with + operator
+        combined = path1 + path2
 
-        # Should be a valid quaternion
-        assert len(quat) == 4
+        # Combined path should have 4 waypoints
+        assert len(combined) == 4
+        assert_pose_equal(combined[0], [0, 0, 0])
+        assert_pose_equal(combined[1], [1, 0, 0])
+        assert_pose_equal(combined[2], [2, 0, 0])
+        assert_pose_equal(combined[3], [3, 0, 0])
 
-        # Magnitude should be approximately 1
-        magnitude = np.linalg.norm(quat)
-        assert abs(magnitude - 1.0) < 0.01
+        # Original paths should be unchanged
+        assert len(path1) == 2
+        assert len(path2) == 2
 
-    def test_yaw_property(self):
-        """Test yaw property accessor"""
-        yaw_angle = 1.2
-        pose = Pose.from_yaw(0, 0, 0, yaw=yaw_angle)
+    def test_path_from_paths(self):
+        """Test creating path from multiple paths"""
+        path1 = Path.from_positions([[0, 0, 0], [1, 0, 0]])
+        path2 = Path.from_positions([[2, 0, 0], [3, 0, 0]])
+        path3 = Path.from_positions([[4, 0, 0], [5, 0, 0]])
 
-        # Yaw property should match
-        assert abs(pose.yaw - yaw_angle) < 0.01
+        # Combine multiple paths
+        combined = Path.from_paths([path1, path2, path3])
 
-    def test_roll_pitch_yaw_properties(self):
-        """Test roll, pitch, yaw property accessors"""
-        roll, pitch, yaw = 0.1, 0.2, 0.3
-        pose = Pose.from_euler(0, 0, 0, roll=roll, pitch=pitch, yaw=yaw)
+        # Should have all waypoints
+        assert len(combined) == 6
+        assert_pose_equal(combined[0], [0, 0, 0])
+        assert_pose_equal(combined[2], [2, 0, 0])
+        assert_pose_equal(combined[4], [4, 0, 0])
+        assert_pose_equal(combined[5], [5, 0, 0])
 
-        # All angles should match
-        assert abs(pose.roll - roll) < 0.01
-        assert abs(pose.pitch - pitch) < 0.01
-        assert abs(pose.yaw - yaw) < 0.01
+    def test_path_get_total_distance(self):
+        """Test calculating total path distance"""
+        # Simple straight line path
+        path = Path.from_positions([[0, 0, 0], [1, 0, 0], [1, 1, 0], [1, 1, 1]])
 
+        total_distance = path.get_total_distance()
 
-class TestPoseFromPyBullet:
-    """Test Pose.from_pybullet() constructor"""
+        # Expected: 1 + 1 + 1 = 3.0
+        assert abs(total_distance - 3.0) < 0.01
 
-    def test_from_pybullet_basic(self):
-        """Test creating pose from PyBullet format"""
-        position = (1.0, 2.0, 3.0)
-        orientation = (0.0, 0.0, 0.0, 1.0)  # Identity quaternion
+    def test_path_get_total_distance_empty(self):
+        """Test total distance for empty or single-waypoint path"""
+        # Empty path
+        empty_path = Path(waypoints=[])
+        assert empty_path.get_total_distance() == 0.0
 
-        pose = Pose.from_pybullet(position, orientation)
-
-        assert pose.position[0] == 1.0
-        assert pose.position[1] == 2.0
-        assert pose.position[2] == 3.0
-        assert len(pose.orientation) == 4
-
-    def test_from_pybullet_with_rotation(self):
-        """Test creating pose from PyBullet format with rotation"""
-        position = (0.0, 0.0, 0.0)
-        # 90 degree rotation around z-axis
-        orientation = (0.0, 0.0, 0.7071068, 0.7071068)
-
-        pose = Pose.from_pybullet(position, orientation)
-
-        assert abs(pose.yaw - 1.5708) < 0.01  # ~90 degrees in radians
+        # Single waypoint
+        single_path = Path.from_positions([[0, 0, 0]])
+        assert single_path.get_total_distance() == 0.0

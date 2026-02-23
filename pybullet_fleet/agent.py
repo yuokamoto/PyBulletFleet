@@ -6,7 +6,7 @@ Supports both Mesh and URDF loading.
 """
 
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 import numpy as np
@@ -49,7 +49,6 @@ class AgentSpawnParams(SimObjectSpawnParams):
         max_angular_accel: Maximum angular acceleration in rad/s² (for differential drive, default: 10.0)
         motion_mode: MotionMode.OMNIDIRECTIONAL (move in any direction) or MotionMode.DIFFERENTIAL (rotate then move forward)
         use_fixed_base: If True, robot base is fixed and doesn't move (default: False)
-        user_data: Optional dictionary for custom metadata (default: empty dict)
 
     Inherited from SimObjectSpawnParams:
         name: Optional string name for human-readable identification.
@@ -57,8 +56,7 @@ class AgentSpawnParams(SimObjectSpawnParams):
               For unique identification, use object_id after spawning.
 
     Note:
-        initial_pose is optional and mainly used by Agent.from_params().
-        AgentManager.spawn_agents_grid() calculates positions automatically and ignores this field.
+        AgentManager.spawn_agents_grid() calculates positions automatically and may override initial_pose.
     """
 
     urdf_path: Optional[str] = None
@@ -68,7 +66,6 @@ class AgentSpawnParams(SimObjectSpawnParams):
     max_angular_accel: Union[float, List[float]] = 10.0
     motion_mode: Union[MotionMode, str] = MotionMode.OMNIDIRECTIONAL
     use_fixed_base: bool = False
-    user_data: Dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self):
         """Validate agent spawn parameters."""
@@ -93,7 +90,7 @@ class AgentSpawnParams(SimObjectSpawnParams):
 
         Args:
             config: Dictionary with robot parameters including:
-                    - mesh_path or urdf_path (required)
+                    - visual_shape/collision_shape or urdf_path
                     - initial_pose: Pose object (optional)
                     - max_linear_vel, max_linear_accel, use_fixed_base, etc. (optional)
 
@@ -132,32 +129,24 @@ class AgentSpawnParams(SimObjectSpawnParams):
         if isinstance(motion_mode_value, str):
             motion_mode_value = MotionMode(motion_mode_value)
 
-        # Create visual_shape from legacy parameters if provided
-        visual_shape = config.get("visual_shape")
-        if visual_shape is None and config.get("mesh_path"):
-            visual_shape = ShapeParams(
-                shape_type="mesh",
-                mesh_path=config["mesh_path"],
-                mesh_scale=config.get("mesh_scale", [1.0, 1.0, 1.0]),
-                rgba_color=config.get("rgba_color", [0.2, 0.2, 0.2, 1.0]),
-            )
-
-        # Create collision_shape from legacy parameters if provided
-        collision_shape = config.get("collision_shape")
-        if collision_shape is None and config.get("mesh_path"):
-            collision_shape = ShapeParams(shape_type="box", half_extents=config.get("collision_half_extents", [0.2, 0.1, 0.2]))
+        # Get base fields from parent
+        base = SimObjectSpawnParams.from_dict(config)
 
         return cls(
-            visual_shape=visual_shape,
-            collision_shape=collision_shape,
+            visual_shape=base.visual_shape,
+            collision_shape=base.collision_shape,
+            initial_pose=base.initial_pose,
+            mass=base.mass,
+            pickable=base.pickable,
+            name=base.name,
+            collision_mode=base.collision_mode,
+            user_data=base.user_data,
             urdf_path=config.get("urdf_path"),
-            initial_pose=config.get("initial_pose"),
             max_linear_vel=config.get("max_linear_vel", 2.0),
             max_linear_accel=config.get("max_linear_accel", 5.0),
             max_angular_vel=config.get("max_angular_vel", 3.0),
             max_angular_accel=config.get("max_angular_accel", 10.0),
             motion_mode=motion_mode_value,
-            mass=config.get("mass", 0.0),
             use_fixed_base=config.get("use_fixed_base", False),
         )
 
@@ -187,13 +176,9 @@ class Agent(SimObject):
     so the API follows ROS message conventions.
     """
 
-    # Class-level shared shapes (for optimization)
-    _shared_shapes: Dict[str, Tuple[int, int]] = {}
-
     def __init__(
         self,
         body_id: int,
-        mesh_path: Optional[str] = None,
         urdf_path: Optional[str] = None,
         max_linear_vel: Union[float, List[float]] = 2.0,
         max_linear_accel: Union[float, List[float]] = 5.0,
@@ -202,13 +187,14 @@ class Agent(SimObject):
         motion_mode: Union[MotionMode, str] = MotionMode.OMNIDIRECTIONAL,
         use_fixed_base: bool = False,
         sim_core=None,
+        name: Optional[str] = None,
+        user_data: Optional[Dict[str, Any]] = None,
     ):
         """
         Initialize Agent.
 
         Args:
             body_id: PyBullet body ID
-            mesh_path: Path to robot mesh file (if mesh-based)
             urdf_path: Path to robot URDF file (if URDF-based)
             max_linear_vel: Maximum velocity (m/s) - float or [vx, vy, vz] for per-axis limits
             max_linear_accel: Maximum acceleration (m/s²) - float or [ax, ay, az] for per-axis limits
@@ -224,9 +210,8 @@ class Agent(SimObject):
             For URDF robots, use Agent.from_urdf() factory method.
         """
         # Initialize SimObject base class
-        super().__init__(body_id, sim_core=sim_core)
+        super().__init__(body_id, sim_core=sim_core, name=name, user_data=user_data)
 
-        self.mesh_path = mesh_path
         self.urdf_path = urdf_path
 
         # Normalize max_linear_vel and max_linear_accel to numpy arrays [vx, vy, vz]
@@ -274,9 +259,6 @@ class Agent(SimObject):
 
         # Differential drive state - Private
         self._differential_phase: DifferentialPhase = DifferentialPhase.ROTATE
-
-        # User-extensible data storage
-        self.user_data: Dict[str, Any] = {}
 
         # Action queue system for high-level task execution
         self._action_queue: List[Action] = []
@@ -424,6 +406,8 @@ class Agent(SimObject):
                 use_fixed_base=spawn_params.use_fixed_base,
                 collision_mode=spawn_params.collision_mode,
                 sim_core=sim_core,
+                name=spawn_params.name,
+                user_data=spawn_params.user_data,
             )
         else:
             # Mesh robot
@@ -440,15 +424,9 @@ class Agent(SimObject):
                 use_fixed_base=spawn_params.use_fixed_base,
                 collision_mode=spawn_params.collision_mode,
                 sim_core=sim_core,
+                name=spawn_params.name,
+                user_data=spawn_params.user_data,
             )
-
-        # Set user_data if provided
-        if spawn_params.user_data:
-            agent.user_data.update(spawn_params.user_data)
-
-        # Set name if provided
-        if spawn_params.name is not None:
-            agent.name = spawn_params.name
 
         return agent
 
@@ -467,6 +445,8 @@ class Agent(SimObject):
         use_fixed_base: bool = False,
         collision_mode: CollisionMode = CollisionMode.NORMAL_3D,
         sim_core=None,
+        name: Optional[str] = None,
+        user_data: Optional[Dict[str, Any]] = None,
     ) -> "Agent":
         """
         Create a mesh-based Agent with flexible shape control.
@@ -524,13 +504,9 @@ class Agent(SimObject):
             mass=mass,
         )
 
-        # Store mesh_path for backward compatibility
-        stored_mesh_path = visual_shape.mesh_path if (visual_shape and visual_shape.shape_type == "mesh") else None
-
         # Create agent instance with Agent-specific parameters
         agent = cls(
             body_id=body_id,
-            mesh_path=stored_mesh_path,
             max_linear_vel=max_linear_vel,
             max_linear_accel=max_linear_accel,
             max_angular_vel=max_angular_vel,
@@ -538,6 +514,8 @@ class Agent(SimObject):
             motion_mode=motion_mode,
             use_fixed_base=use_fixed_base,
             sim_core=sim_core,
+            name=name,
+            user_data=user_data,
         )
 
         # Set collision mode (must be done after __init__ which calls add_object)
@@ -559,6 +537,8 @@ class Agent(SimObject):
         use_fixed_base: bool = False,
         collision_mode: CollisionMode = CollisionMode.NORMAL_3D,
         sim_core=None,
+        name: Optional[str] = None,
+        user_data: Optional[Dict[str, Any]] = None,
     ) -> "Agent":
         """
         Create a URDF-based Agent (with joints).
@@ -618,6 +598,8 @@ class Agent(SimObject):
             motion_mode=motion_mode,
             use_fixed_base=use_fixed_base,
             sim_core=sim_core,
+            name=name,
+            user_data=user_data,
         )
 
         # Set collision mode (must be done after __init__ which calls add_object)
@@ -800,7 +782,7 @@ class Agent(SimObject):
             current_pose: Current robot pose
         """
         # Teleport to exact goal position before updating waypoint
-        p.resetBasePositionAndOrientation(self.body_id, self._goal_pose.position, current_pose.orientation)
+        self.set_pose_raw(self._goal_pose.position, current_pose.orientation, preserve_velocity=False)
 
         lazy_logger.debug(lambda: f"Agent {self.body_id} reached waypoint at position {self._goal_pose.position[:2]}")
         lazy_logger.debug(
@@ -883,12 +865,20 @@ class Agent(SimObject):
 
         # Reuse existing TPI instances (created by set_motion_mode)
         if self._tpi_pos is None:
-            raise RuntimeError("_tpi_pos is not initialized. Call set_motion_mode() before setting path.")
+            logger.warning(
+                f"Agent {self.body_id}: _tpi_pos is not initialized. " f"Auto-calling set_motion_mode({self._motion_mode})."
+            )
+            self.set_motion_mode(self._motion_mode or MotionMode.OMNIDIRECTIONAL)
+            if self._tpi_pos is None:
+                logger.error(f"Agent {self.body_id}: _tpi_pos is still None after set_motion_mode. Skipping trajectory init.")
+                return
+
+        tpi_pos = self._tpi_pos  # Local reference for type narrowing
 
         # 3D: X, Y, Z with per-axis limits
         for axis in range(3):
             try:
-                self._tpi_pos[axis].init(
+                tpi_pos[axis].init(
                     p0=current_pos[axis],
                     pe=goal_pos[axis],
                     acc_max=self.max_linear_accel[axis],  # Per-axis acceleration
@@ -898,27 +888,41 @@ class Agent(SimObject):
                     ve=0.0,  # Stop at goal
                     dec_max=self.max_linear_accel[axis],  # Per-axis deceleration
                 )
-                self._tpi_pos[axis].calc_trajectory()  # Calculate trajectory
+                tpi_pos[axis].calc_trajectory()  # Calculate trajectory
             except ValueError as e:
                 # TPI error: same position with different velocity (dp=0, dv!=0)
                 # This can happen when setting a new goal at the current position
-                # Warning only - robot will stay at current position
+                # Safety fallback: retry with v0=0 to move to goal in ~distance/max_vel time
                 logger.warning(
                     f"Agent {self.body_id}: Failed to initialize trajectory for axis {axis}: {e}. "
-                    f"Robot will stay at current position."
+                    f"Retrying with v0=0 (safety fallback)."
                 )
-                # Initialize with zero movement (stay at current position)
-                self._tpi_pos[axis].init(
-                    p0=current_pos[axis],
-                    pe=current_pos[axis],  # Same position
-                    acc_max=self.max_linear_accel[axis],
-                    vmax=self.max_linear_vel[axis],
-                    t0=t0,
-                    v0=0.0,  # Zero velocity
-                    ve=0.0,
-                    dec_max=self.max_linear_accel[axis],
-                )
-                self._tpi_pos[axis].calc_trajectory()
+                try:
+                    tpi_pos[axis].init(
+                        p0=current_pos[axis],
+                        pe=goal_pos[axis],  # Still aim for the goal
+                        acc_max=self.max_linear_accel[axis],
+                        vmax=self.max_linear_vel[axis],
+                        t0=t0,
+                        v0=0.0,  # Reset velocity to avoid dp=0,dv!=0 error
+                        ve=0.0,
+                        dec_max=self.max_linear_accel[axis],
+                    )
+                    tpi_pos[axis].calc_trajectory()
+                except ValueError:
+                    # Both attempts failed (e.g. already at goal position)
+                    # Initialize with zero movement (stay at current position)
+                    tpi_pos[axis].init(
+                        p0=current_pos[axis],
+                        pe=current_pos[axis],
+                        acc_max=self.max_linear_accel[axis],
+                        vmax=self.max_linear_vel[axis],
+                        t0=t0,
+                        v0=0.0,
+                        ve=0.0,
+                        dec_max=self.max_linear_accel[axis],
+                    )
+                    tpi_pos[axis].calc_trajectory()
 
     def _update_omnidirectional(self, dt: float):
         """
@@ -957,16 +961,12 @@ class Agent(SimObject):
             self._handle_goal_reached(current_pose)
             return
 
-        # Update position (full 3D)
-        new_pos = np.array([p_xyz[0], p_xyz[1], p_xyz[2]])
-
         # Update velocity (3D)
-        self._current_velocity = np.array([v_xyz[0], v_xyz[1], v_xyz[2]])
+        self._current_velocity = np.array(v_xyz)
 
         # Set new position (omnidirectional: keep original orientation, don't rotate)
-        # Use set_pose() to ensure attached objects are updated
-        new_pose = Pose(position=new_pos.tolist(), orientation=current_pose.orientation)
-        self.set_pose(new_pose)
+        # Use set_pose_raw() to avoid Pose allocation in hot path
+        self.set_pose_raw(p_xyz, current_pose.orientation)
 
     def _init_differential_rotation_trajectory(self, goal: Pose):
         """
@@ -1134,13 +1134,13 @@ class Agent(SimObject):
                     f"Agent {self.body_id}: Failed to initialize rotation trajectory: {e}. " f"Skipping rotation phase."
                 )
                 # Teleport to target orientation
-                p.resetBasePositionAndOrientation(self.body_id, current_pos.tolist(), self._rotation_target_quat.tolist())
+                self.set_pose_raw(current_pos.tolist(), self._rotation_target_quat.tolist(), preserve_velocity=False)
                 # Skip to FORWARD phase
                 self._differential_phase = DifferentialPhase.FORWARD
                 self._init_differential_forward_distance_trajectory(self._forward_total_distance_3d)
         else:
             # No rotation needed, teleport to target orientation and skip to FORWARD phase
-            p.resetBasePositionAndOrientation(self.body_id, current_pos.tolist(), self._rotation_target_quat.tolist())
+            self.set_pose_raw(current_pos.tolist(), self._rotation_target_quat.tolist(), preserve_velocity=False)
 
             # Calculate 3D distance for forward phase
             distance_3d = self._forward_total_distance_3d
@@ -1179,22 +1179,39 @@ class Agent(SimObject):
             self._tpi_forward.calc_trajectory()  # Calculate trajectory
         except ValueError as e:
             # TPI error: distance is zero or invalid
+            # Safety fallback: retry with v0=0 to move to goal
             logger.warning(
-                f"Agent {self.body_id}: Failed to initialize forward trajectory: {e}. " f"Goal may already be reached."
+                f"Agent {self.body_id}: Failed to initialize forward trajectory: {e}. "
+                f"Retrying with v0=0 (safety fallback)."
             )
-            # Initialize with zero movement (already at goal)
-            self._tpi_forward = TwoPointInterpolation()
-            self._tpi_forward.init(
-                p0=0.0,
-                pe=0.0,  # Zero distance
-                acc_max=avg_accel,
-                vmax=avg_vel,
-                t0=t0,
-                v0=0.0,
-                ve=0.0,
-                dec_max=avg_accel,
-            )
-            self._tpi_forward.calc_trajectory()
+            try:
+                self._tpi_forward = TwoPointInterpolation()
+                self._tpi_forward.init(
+                    p0=0.0,
+                    pe=distance,  # Still aim for the goal
+                    acc_max=avg_accel,
+                    vmax=avg_vel,
+                    t0=t0,
+                    v0=0.0,  # Reset velocity to avoid dp=0,dv!=0 error
+                    ve=0.0,
+                    dec_max=avg_accel,
+                )
+                self._tpi_forward.calc_trajectory()
+            except ValueError:
+                # Both attempts failed (e.g. already at goal position)
+                # Initialize with zero movement (stay at current position)
+                self._tpi_forward = TwoPointInterpolation()
+                self._tpi_forward.init(
+                    p0=0.0,
+                    pe=0.0,  # Zero distance
+                    acc_max=avg_accel,
+                    vmax=avg_vel,
+                    t0=t0,
+                    v0=0.0,
+                    ve=0.0,
+                    dec_max=avg_accel,
+                )
+                self._tpi_forward.calc_trajectory()
 
     def _update_differential(self, dt: float):
         """
@@ -1240,8 +1257,7 @@ class Agent(SimObject):
             if current_time >= self._tpi_rotation_angle.get_end_time():
                 # Rotation complete, switch to forward phase
                 # Set exact final rotation (target quaternion)
-                final_pose = Pose(position=current_pos.tolist(), orientation=self._rotation_target_quat.tolist())
-                self.set_pose(final_pose)
+                self.set_pose_raw(current_pos.tolist(), self._rotation_target_quat.tolist())
 
                 # Initialize forward trajectory
                 self._differential_phase = DifferentialPhase.FORWARD
@@ -1256,12 +1272,10 @@ class Agent(SimObject):
 
                 r_interpolated = self._rotation_slerp(angle_ratio)
                 new_orientation = r_interpolated.as_quat().tolist()
-                new_pose = Pose(position=current_pos.tolist(), orientation=new_orientation)
-                self.set_pose(new_pose)
+                self.set_pose_raw(current_pos.tolist(), new_orientation)
             else:
                 # Fallback: use target orientation directly
-                fallback_pose = Pose(position=current_pos.tolist(), orientation=self._rotation_target_quat.tolist())
-                self.set_pose(fallback_pose)
+                self.set_pose_raw(current_pos.tolist(), self._rotation_target_quat.tolist())
 
             # Update angular velocity from TPI
             self._current_angular_velocity = angular_vel
@@ -1300,57 +1314,9 @@ class Agent(SimObject):
             direction_3d_unit = direction_3d / total_distance if total_distance > 1e-6 else np.array([0.0, 0.0, 0.0])
             self._current_velocity = direction_3d_unit * forward_vel
 
-            # Update position/orientation - use set_pose() to update attached objects
-            new_pose = Pose(position=new_pos.tolist(), orientation=new_orientation)
-            self.set_pose(new_pose)
+            # Update position/orientation - use set_pose_raw() to avoid Pose allocation in hot path
+            self.set_pose_raw(new_pos.tolist(), new_orientation)
             self._current_angular_velocity = 0.0
-
-    def _direction_and_up_to_quaternion(self, x_axis: np.ndarray, z_axis: np.ndarray) -> List[float]:
-        """
-        Create quaternion from desired X-axis (forward) and Z-axis (up) directions.
-
-        The Y-axis is computed as Z × X to form a right-handed coordinate system.
-        If X and Z are not perpendicular, Z-axis takes priority and X is adjusted.
-
-        Args:
-            x_axis: Desired forward direction (will be normalized)
-            z_axis: Desired up direction (will be normalized, takes priority)
-
-        Returns:
-            Quaternion [x, y, z, w] representing the orientation
-        """
-        # Normalize inputs
-        z_norm = z_axis / np.linalg.norm(z_axis)
-        x_initial = x_axis / np.linalg.norm(x_axis)
-
-        # Y-axis = Z × X (right-hand rule)
-        y_axis = np.cross(z_norm, x_initial)
-        y_norm_magnitude = np.linalg.norm(y_axis)
-
-        # Check if X and Z are parallel (or nearly so)
-        if y_norm_magnitude < 1e-6:
-            # X and Z are parallel, cannot form a valid coordinate system
-            # Fall back to a default Y-axis
-            # Choose Y perpendicular to Z
-            if abs(z_norm[2]) < 0.9:
-                # Z is not vertical, use world up × Z
-                y_axis = np.cross(np.array([0, 0, 1]), z_norm)
-            else:
-                # Z is nearly vertical, use world X × Z
-                y_axis = np.cross(np.array([1, 0, 0]), z_norm)
-            y_axis = y_axis / np.linalg.norm(y_axis)
-        else:
-            y_axis = y_axis / y_norm_magnitude
-
-        # Recompute X-axis to ensure orthogonality: X = Y × Z
-        x_final = np.cross(y_axis, z_norm)
-
-        # Build rotation matrix with [X, Y, Z] as columns
-        rotation_matrix = np.column_stack([x_final, y_axis, z_norm])
-
-        # Convert to quaternion
-        r = R.from_matrix(rotation_matrix)
-        return r.as_quat().tolist()  # [x, y, z, w]
 
     # ============================================================================
     # Action Queue System
@@ -1593,7 +1559,7 @@ class Agent(SimObject):
         if not self.is_urdf_robot():
             logger.warning("get_all_joints_state_by_name() only works for URDF robots")
             return {}
-        joint_names = [self.joint_info[i]["jointName"] for i in range(self.get_num_joints())]
+        joint_names = [self.joint_info[i][1].decode("utf-8") for i in range(self.get_num_joints())]
         result = {}
         for name in joint_names:
             result[name] = self.get_joint_state_by_name(name)
@@ -1808,7 +1774,7 @@ class Agent(SimObject):
                 new_pos, new_orn = p.multiplyTransforms(
                     parent_pos, parent_orn, obj._attach_offset.position, obj._attach_offset.orientation
                 )
-                obj.set_pose(Pose.from_pybullet(new_pos, new_orn))
+                obj.set_pose_raw(new_pos, new_orn)
 
     def __repr__(self):
         pose = self.get_pose()

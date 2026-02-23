@@ -1,182 +1,267 @@
-#!/usr/bin/env python3
 """
-Test logging_utils.py performance and functionality.
+Tests for logging_utils module (lazy evaluation loggers).
+
+This module tests:
+- LazyLogger creation and initialization
+- Lazy evaluation of log messages
+- Log level filtering
+- Migration helpers (get_lazy_logger, wrap_existing_logger, migrate_logger)
+- Performance benefit of lazy evaluation
 """
+
 import logging
 import time
-import sys
-import os
+
 import numpy as np
+import pytest
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-
-from pybullet_fleet.logging_utils import get_lazy_logger, migrate_logger
-
-
-def benchmark_standard_logger(num_iterations=10000):
-    """Benchmark standard logger with array formatting."""
-    logger = logging.getLogger("standard_benchmark")
-    logger.setLevel(logging.INFO)  # DEBUG messages will be skipped
-
-    test_array = np.random.rand(100)
-
-    start = time.perf_counter()
-    for i in range(num_iterations):
-        # This will evaluate f-string even though DEBUG is disabled
-        logger.debug(f"Iteration {i}: array={test_array[:10]}, mean={test_array.mean()}")
-    elapsed = time.perf_counter() - start
-
-    return elapsed
+from pybullet_fleet.logging_utils import (
+    LazyLogger,
+    get_lazy_logger,
+    migrate_logger,
+    wrap_existing_logger,
+)
 
 
-def benchmark_standard_with_check(num_iterations=10000):
-    """Benchmark standard logger with manual isEnabledFor check."""
-    logger = logging.getLogger("standard_check_benchmark")
-    logger.setLevel(logging.INFO)  # DEBUG messages will be skipped
+class TestLazyLoggerCreation:
+    """Test LazyLogger initialization"""
 
-    test_array = np.random.rand(100)
+    def test_create_with_name(self):
+        """Test creating LazyLogger with name"""
+        logger = LazyLogger(name="test_creation")
 
-    start = time.perf_counter()
-    for i in range(num_iterations):
-        if logger.isEnabledFor(logging.DEBUG):
-            logger.debug(f"Iteration {i}: array={test_array[:10]}, mean={test_array.mean()}")
-    elapsed = time.perf_counter() - start
+        assert logger.logger is not None
+        assert logger.logger.name == "test_creation"
 
-    return elapsed
+    def test_create_with_existing_logger(self):
+        """Test creating LazyLogger by wrapping existing logger"""
+        std_logger = logging.getLogger("test_wrap")
+        logger = LazyLogger(logger=std_logger)
 
+        assert logger.logger is std_logger
 
-def benchmark_lazy_logger(num_iterations=10000):
-    """Benchmark lazy logger with lambda."""
-    logger = get_lazy_logger("lazy_benchmark")
-    logger.logger.setLevel(logging.INFO)  # DEBUG messages will be skipped
+    def test_create_without_args_raises_error(self):
+        """Test that creating LazyLogger without name or logger raises ValueError"""
+        with pytest.raises(ValueError, match="Either 'name' or 'logger' must be provided"):
+            LazyLogger()
 
-    test_array = np.random.rand(100)
+    def test_get_lazy_logger_helper(self):
+        """Test get_lazy_logger convenience function"""
+        logger = get_lazy_logger("test_helper")
 
-    start = time.perf_counter()
-    for i in range(num_iterations):
-        # Lambda is not called when DEBUG is disabled
-        logger.debug(lambda: f"Iteration {i}: array={test_array[:10]}, mean={test_array.mean()}")
-    elapsed = time.perf_counter() - start
+        assert isinstance(logger, LazyLogger)
+        assert logger.logger.name == "test_helper"
 
-    return elapsed
+    def test_wrap_existing_logger_helper(self):
+        """Test wrap_existing_logger convenience function"""
+        std_logger = logging.getLogger("test_wrap_helper")
+        lazy = wrap_existing_logger(std_logger)
 
-
-def test_functionality():
-    """Test that lazy logger works correctly."""
-    print("\n" + "=" * 70)
-    print("Testing LazyLogger Functionality")
-    print("=" * 70)
-
-    # Setup handler to capture output
-    import io
-
-    log_capture = io.StringIO()
-    handler = logging.StreamHandler(log_capture)
-    handler.setLevel(logging.DEBUG)
-    formatter = logging.Formatter("%(levelname)s - %(message)s")
-    handler.setFormatter(formatter)
-
-    # Test 1: Basic functionality
-    logger = get_lazy_logger("test_basic")
-    logger.logger.addHandler(handler)
-    logger.logger.setLevel(logging.DEBUG)
-
-    test_array = np.array([1, 2, 3, 4, 5])
-
-    logger.debug(lambda: f"Array: {test_array}")
-    logger.info(lambda: f"Mean: {test_array.mean()}")
-    logger.warning("Simple warning")
-
-    output = log_capture.getvalue()
-    print("\nCaptured log output:")
-    print(output)
-
-    assert "Array:" in output
-    assert "Mean:" in output
-    assert "Simple warning" in output
-    print("✅ Basic functionality test passed")
-
-    # Test 2: Level filtering
-    log_capture.truncate(0)
-    log_capture.seek(0)
-    logger.logger.setLevel(logging.INFO)
-
-    call_count = 0
-
-    def expensive_func():
-        nonlocal call_count
-        call_count += 1
-        return f"Called {call_count} times"
-
-    logger.debug(expensive_func)  # Should NOT call expensive_func
-    logger.info(expensive_func)  # Should call expensive_func
-
-    assert call_count == 1, f"Expected 1 call, got {call_count}"
-    print("✅ Level filtering test passed")
-
-    # Test 3: Migration helper
-    print("\n" + "-" * 70)
-    print("Testing migration helper")
-    print("-" * 70)
-
-    std_logger, lazy_logger = migrate_logger("test_migration")
-    std_logger.setLevel(logging.DEBUG)
-    std_logger.addHandler(handler)
-
-    log_capture.truncate(0)
-    log_capture.seek(0)
-
-    std_logger.info("Standard message")
-    lazy_logger.debug(lambda: f"Lazy message: {test_array}")
-
-    output = log_capture.getvalue()
-    print(output)
-
-    assert "Standard message" in output
-    assert "Lazy message" in output
-    print("✅ Migration test passed")
+        assert isinstance(lazy, LazyLogger)
+        assert lazy.logger is std_logger
 
 
-def test_performance():
-    """Test performance improvement."""
-    print("\n" + "=" * 70)
-    print("Performance Benchmark (10,000 iterations)")
-    print("=" * 70)
+class TestLazyLoggerOutput:
+    """Test that LazyLogger produces correct log output"""
 
-    print("\nSetup: Logger level=INFO, logging DEBUG messages (will be filtered)")
-    print("Each DEBUG message formats NumPy array and calculates mean")
+    def test_debug_message(self, caplog):
+        """Test debug level lazy message"""
+        logger = get_lazy_logger("test_debug")
 
-    print("\n1. Standard logger (no check)...")
-    t_standard = benchmark_standard_logger()
-    print(f"   Time: {t_standard*1000:.2f}ms")
+        with caplog.at_level(logging.DEBUG, logger="test_debug"):
+            logger.debug(lambda: "debug message")
 
-    print("\n2. Standard logger (with isEnabledFor check)...")
-    t_check = benchmark_standard_with_check()
-    print(f"   Time: {t_check*1000:.2f}ms")
-    print(f"   Speedup vs standard: {t_standard/t_check:.1f}x")
+        assert "debug message" in caplog.text
 
-    print("\n3. Lazy logger (with lambda)...")
-    t_lazy = benchmark_lazy_logger()
-    print(f"   Time: {t_lazy*1000:.2f}ms")
-    print(f"   Speedup vs standard: {t_standard/t_lazy:.1f}x")
-    print(f"   Overhead vs check: {t_lazy/t_check:.2f}x")
+    def test_info_message(self, caplog):
+        """Test info level lazy message"""
+        logger = get_lazy_logger("test_info")
 
-    print("\n" + "=" * 70)
-    print("Summary:")
-    print("=" * 70)
-    print(f"Standard logger:           {t_standard*1000:.2f}ms (baseline)")
-    print(f"Standard with check:       {t_check*1000:.2f}ms ({(1-t_check/t_standard)*100:.1f}% faster)")
-    print(f"Lazy logger:               {t_lazy*1000:.2f}ms ({(1-t_lazy/t_standard)*100:.1f}% faster)")
-    print(f"\nConclusion: Lazy logger is ~{t_standard/t_lazy:.0f}x faster for disabled log levels")
+        with caplog.at_level(logging.INFO, logger="test_info"):
+            logger.info(lambda: "info message")
+
+        assert "info message" in caplog.text
+
+    def test_warning_message(self, caplog):
+        """Test warning level lazy message"""
+        logger = get_lazy_logger("test_warning")
+
+        with caplog.at_level(logging.WARNING, logger="test_warning"):
+            logger.warning(lambda: "warning message")
+
+        assert "warning message" in caplog.text
+
+    def test_error_message(self, caplog):
+        """Test error level lazy message"""
+        logger = get_lazy_logger("test_error")
+
+        with caplog.at_level(logging.ERROR, logger="test_error"):
+            logger.error(lambda: "error message")
+
+        assert "error message" in caplog.text
+
+    def test_critical_message(self, caplog):
+        """Test critical level lazy message"""
+        logger = get_lazy_logger("test_critical")
+
+        with caplog.at_level(logging.CRITICAL, logger="test_critical"):
+            logger.critical(lambda: "critical message")
+
+        assert "critical message" in caplog.text
+
+    def test_plain_string_message(self, caplog):
+        """Test that plain strings (not lambdas) also work"""
+        logger = get_lazy_logger("test_plain")
+
+        with caplog.at_level(logging.WARNING, logger="test_plain"):
+            logger.warning("plain string warning")
+
+        assert "plain string warning" in caplog.text
+
+    def test_message_with_numpy_array(self, caplog):
+        """Test lazy message containing numpy array formatting"""
+        logger = get_lazy_logger("test_numpy")
+        arr = np.array([1, 2, 3, 4, 5])
+
+        with caplog.at_level(logging.DEBUG, logger="test_numpy"):
+            logger.debug(lambda: f"Array: {arr}, mean: {arr.mean()}")
+
+        assert "Array:" in caplog.text
+        assert "mean:" in caplog.text
 
 
-if __name__ == "__main__":
-    # Suppress actual log output during benchmarks
-    logging.basicConfig(level=logging.CRITICAL)
+class TestLazyEvaluation:
+    """Test that expensive formatting is skipped when level is disabled"""
 
-    test_functionality()
-    test_performance()
+    def test_lambda_not_called_when_level_disabled(self):
+        """Test that lambda is NOT evaluated when log level is higher"""
+        logger = get_lazy_logger("test_skip")
+        logger.logger.setLevel(logging.INFO)
 
-    print("\n" + "=" * 70)
-    print("All tests passed! ✅")
-    print("=" * 70)
+        call_count = 0
+
+        def expensive_func():
+            nonlocal call_count
+            call_count += 1
+            return f"Called {call_count} times"
+
+        logger.debug(expensive_func)  # DEBUG < INFO, should NOT call
+
+        assert call_count == 0, f"Expected 0 calls when level=INFO, got {call_count}"
+
+    def test_lambda_called_when_level_enabled(self):
+        """Test that lambda IS evaluated when log level allows it"""
+        logger = get_lazy_logger("test_call")
+        logger.logger.setLevel(logging.DEBUG)
+        logger.logger.addHandler(logging.NullHandler())
+
+        call_count = 0
+
+        def expensive_func():
+            nonlocal call_count
+            call_count += 1
+            return f"Called {call_count} times"
+
+        logger.debug(expensive_func)
+
+        assert call_count == 1, f"Expected 1 call when level=DEBUG, got {call_count}"
+
+    def test_mixed_level_filtering(self):
+        """Test that only enabled levels trigger evaluation"""
+        logger = get_lazy_logger("test_mixed")
+        logger.logger.setLevel(logging.INFO)
+        logger.logger.addHandler(logging.NullHandler())
+
+        call_count = 0
+
+        def counting_func():
+            nonlocal call_count
+            call_count += 1
+            return f"Call #{call_count}"
+
+        logger.debug(counting_func)  # Should NOT call (DEBUG < INFO)
+        logger.info(counting_func)  # Should call
+        logger.warning(counting_func)  # Should call
+        logger.debug(counting_func)  # Should NOT call
+
+        assert call_count == 2, f"Expected 2 calls, got {call_count}"
+
+    def test_is_enabled_for(self):
+        """Test isEnabledFor method"""
+        logger = get_lazy_logger("test_enabled")
+        logger.logger.setLevel(logging.WARNING)
+
+        assert logger.isEnabledFor(logging.WARNING) is True
+        assert logger.isEnabledFor(logging.ERROR) is True
+        assert logger.isEnabledFor(logging.DEBUG) is False
+        assert logger.isEnabledFor(logging.INFO) is False
+
+
+class TestMigrateLogger:
+    """Test migrate_logger helper function"""
+
+    def test_migrate_with_name(self):
+        """Test migrate_logger creates both standard and lazy loggers"""
+        std_logger, lazy_logger = migrate_logger(logger_name="test_migrate")
+
+        assert isinstance(std_logger, logging.Logger)
+        assert isinstance(lazy_logger, LazyLogger)
+        assert std_logger.name == "test_migrate"
+
+    def test_migrate_with_existing_logger(self):
+        """Test migrate_logger wraps an existing logger"""
+        existing = logging.getLogger("test_existing")
+        std_logger, lazy_logger = migrate_logger(logger_instance=existing)
+
+        assert std_logger is existing
+        assert lazy_logger.logger is existing
+
+    def test_migrate_without_args_raises_error(self):
+        """Test that migrate_logger without args raises ValueError"""
+        with pytest.raises(ValueError):
+            migrate_logger()
+
+    def test_migrate_both_loggers_output(self, caplog):
+        """Test that both loggers from migrate produce output"""
+        std_logger, lazy_logger = migrate_logger(logger_name="test_both")
+
+        with caplog.at_level(logging.DEBUG, logger="test_both"):
+            std_logger.info("standard message")
+            lazy_logger.debug(lambda: "lazy message")
+
+        assert "standard message" in caplog.text
+        assert "lazy message" in caplog.text
+
+
+class TestPerformance:
+    """Test that lazy evaluation provides measurable performance benefit"""
+
+    def test_lazy_faster_than_standard(self):
+        """Test lazy logger is faster than standard logger for disabled levels"""
+        num_iterations = 10000
+        test_array = np.random.rand(100)
+
+        # Standard logger: f-string always evaluated
+        std_logger = logging.getLogger("perf_standard")
+        std_logger.setLevel(logging.INFO)
+
+        start = time.perf_counter()
+        for i in range(num_iterations):
+            std_logger.debug(f"Iteration {i}: array={test_array[:10]}, mean={test_array.mean()}")
+        t_standard = time.perf_counter() - start
+
+        # Lazy logger: lambda NOT evaluated when disabled
+        lazy_logger = get_lazy_logger("perf_lazy")
+        lazy_logger.logger.setLevel(logging.INFO)
+
+        start = time.perf_counter()
+        for i in range(num_iterations):
+            lazy_logger.debug(lambda: f"Iteration {i}: array={test_array[:10]}, mean={test_array.mean()}")
+        t_lazy = time.perf_counter() - start
+
+        # Lazy should be faster (at least 2x speedup)
+        speedup = t_standard / t_lazy
+        assert speedup >= 2.0, (
+            f"Expected at least 2x speedup, got {speedup:.1f}x "
+            f"(standard={t_standard*1000:.2f}ms, lazy={t_lazy*1000:.2f}ms)"
+        )

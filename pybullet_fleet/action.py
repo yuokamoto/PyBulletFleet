@@ -571,7 +571,7 @@ class PickAction(Action):
             )
 
             # Teleport object to attachment position
-            self._target_object.set_pose(Pose.from_pybullet(attach_world_pos, attach_world_orn))
+            self._target_object.set_pose_raw(attach_world_pos, attach_world_orn)
 
             # Attach object using relative_pose
             success = agent.attach_object(
@@ -885,8 +885,7 @@ class DropAction(Action):
                 drop_orientation = self.drop_orientation
 
             # Teleport object to drop position
-            drop_pose = Pose(position=final_position, orientation=drop_orientation)
-            self._target_object.set_pose(drop_pose)
+            self._target_object.set_pose_raw(final_position, drop_orientation)
 
             # If not placing gently, give object a small downward velocity
             if not self.place_gently:

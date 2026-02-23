@@ -116,19 +116,6 @@ class Pose:
         quaternion = p.getQuaternionFromEuler([0.0, 0.0, yaw])
         return cls(position=[x, y, z], orientation=list(quaternion))
 
-    def to_yaw_quaternion(self, yaw: float) -> List[float]:
-        """
-        Create quaternion from yaw angle (rotation around z-axis).
-
-        Args:
-            yaw: Yaw angle in radians
-
-        Returns:
-            [x, y, z, w] quaternion
-        """
-        # Use PyBullet to convert yaw to quaternion (roll=0, pitch=0, yaw=yaw)
-        return list(p.getQuaternionFromEuler([0.0, 0.0, yaw]))
-
 
 @dataclass
 class Path:

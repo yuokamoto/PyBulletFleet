@@ -4,10 +4,9 @@ Base class for simulation objects with attachment support.
 """
 
 from dataclasses import dataclass, field
-from typing import Callable, List, Optional, Dict, Tuple
+from typing import Any, Callable, List, Optional, Dict, Tuple
 import logging
 
-import numpy as np
 import pybullet as p
 
 from .geometry import Pose
@@ -81,17 +80,17 @@ class SimObjectSpawnParams:
     Attributes:
         visual_shape: Visual shape parameters (ShapeParams or None)
         collision_shape: Collision shape parameters (ShapeParams or None)
-        initial_pose: Initial Pose (position and orientation) in world coordinates
+        initial_pose: Initial Pose (position and orientation) in world coordinates (default: origin)
         mass: Object mass in kg (0.0 for static objects, >0 for dynamic)
         pickable: Whether this object can be picked by robots (default: True)
         name: Optional string name for human-readable identification (default: None).
               Duplicates allowed - multiple objects can share the same name.
               Use for debugging, logging, filtering (e.g., "LeftRobot", "Pallet_A").
               For unique identification, use object_id instead.
+        user_data: Optional dictionary for custom metadata (default: empty dict)
 
     Note:
-        initial_pose is optional and mainly used by SimObject.from_params().
-        Managers calculate positions automatically and may ignore this field.
+        Managers calculate positions automatically and may override initial_pose.
 
     Example:
         # Box visual + sphere collision with name
@@ -120,14 +119,51 @@ class SimObjectSpawnParams:
 
     visual_shape: Optional[ShapeParams] = None
     collision_shape: Optional[ShapeParams] = None
-    initial_pose: Optional[Pose] = None
+    initial_pose: Pose = field(default_factory=lambda: Pose.from_xyz(0.0, 0.0, 0.0))
     mass: float = 0.0
     pickable: bool = True
     name: Optional[str] = None  # Human-readable name (duplicates allowed, use object_id for unique lookup)
-    visual_mesh_path: Optional[str] = None
     visual_frame_pose: Optional[Pose] = None
     collision_frame_pose: Optional[Pose] = None
     collision_mode: CollisionMode = CollisionMode.NORMAL_3D  # Collision detection mode
+    user_data: Dict[str, Any] = field(default_factory=dict)  # Custom metadata storage
+
+    @classmethod
+    def from_dict(cls, config: Dict[str, Any]) -> "SimObjectSpawnParams":
+        """
+        Create SimObjectSpawnParams from configuration dictionary.
+
+        Args:
+            config: Dictionary with object parameters.
+
+        Returns:
+            SimObjectSpawnParams instance
+
+        Example:
+            config = {
+                'visual_shape': ShapeParams(shape_type='box', half_extents=[0.5, 0.3, 0.2]),
+                'collision_shape': ShapeParams(shape_type='sphere', radius=0.3),
+                'initial_pose': Pose.from_xyz(1.0, 2.0, 0.0),
+                'mass': 1.0,
+                'name': 'Pallet_A',
+            }
+            params = SimObjectSpawnParams.from_dict(config)
+        """
+        # Convert collision_mode string to enum if needed
+        collision_mode_value = config.get("collision_mode", CollisionMode.NORMAL_3D)
+        if isinstance(collision_mode_value, str):
+            collision_mode_value = CollisionMode(collision_mode_value)
+
+        return cls(
+            visual_shape=config.get("visual_shape"),
+            collision_shape=config.get("collision_shape"),
+            initial_pose=config.get("initial_pose", Pose.from_xyz(0.0, 0.0, 0.0)),
+            mass=config.get("mass", 0.0),
+            pickable=config.get("pickable", True),
+            name=config.get("name"),
+            collision_mode=collision_mode_value,
+            user_data=config.get("user_data", {}),
+        )
 
 
 class SimObject:
@@ -145,8 +181,6 @@ class SimObject:
     Args:
         body_id: PyBullet body ID
         sim_core: Reference to simulation core (optional)
-        mesh_path: Optional path to visual mesh file (obj, dae, stl, etc.)
-                   If provided, visual shape will be updated with this mesh.
         pickable: Whether this object can be picked by robots (default: True)
 
     Attributes:
@@ -156,6 +190,7 @@ class SimObject:
         mass: Object mass in kg
         pickable: Whether this object can be picked by robots
         collision_mode: Collision detection mode (NORMAL_3D, NORMAL_2D, STATIC, DISABLED)
+        user_data: Dictionary for custom metadata (default: empty dict)
     """
 
     # Class-level shared shapes cache (for optimization)
@@ -165,24 +200,27 @@ class SimObject:
         self,
         body_id: int,
         sim_core=None,
-        mesh_path: Optional[str] = None,
         pickable: bool = True,
         mass: float = None,
         collision_mode: CollisionMode = CollisionMode.NORMAL_3D,
+        name: Optional[str] = None,
+        user_data: Optional[Dict[str, Any]] = None,
     ):
         self.body_id = body_id
         self.sim_core = sim_core
         self.attached_objects: List["SimObject"] = []
         self.callbacks: List[dict] = []
-        self.mesh_path = mesh_path
         self.pickable = pickable
         self.collision_mode = collision_mode  # Collision detection mode
+
+        # User-extensible data storage (custom metadata)
+        self.user_data: Dict[str, Any] = dict(user_data) if user_data else {}
 
         # Optional name for human-readable identification (debugging, logging, filtering)
         # Note: Unlike object_id, name is NOT unique - multiple objects can share the same name.
         # For programmatic lookup/search, use object_id instead.
         # Examples: "LeftRobot_1", "Pallet_A", "Obstacle_Wall"
-        self.name: Optional[str] = None
+        self.name: Optional[str] = name
 
         # Assign unique ID from sim_core if available
         # Note: object_id is UNIQUE and should be used for programmatic object identification.
@@ -454,6 +492,8 @@ class SimObject:
         pickable: bool = True,
         sim_core=None,
         collision_mode: CollisionMode = CollisionMode.NORMAL_3D,
+        name: Optional[str] = None,
+        user_data: Optional[Dict[str, Any]] = None,
     ) -> "SimObject":
         """
         Create a SimObject with optional visual and collision shapes.
@@ -461,10 +501,11 @@ class SimObject:
         Args:
             visual_shape: ShapeParams for visual geometry
             collision_shape: ShapeParams for collision geometry
-            pose: Initial Pose (position and orientation)
+            pose: Initial Pose (position and orientation, default: origin)
             mass: Object mass (0.0 for static)
             pickable: Whether object can be picked by robots
             sim_core: Reference to simulation core
+            name: Optional human-readable name (duplicates allowed)
 
         Returns:
             SimObject instance
@@ -508,16 +549,14 @@ class SimObject:
             physics_client_id=physics_client_id,
         )
 
-        # Store mesh_path if available for backward compatibility
-        stored_mesh_path = visual_shape.mesh_path if (visual_shape and visual_shape.shape_type == "mesh") else None
-
         return cls(
             body_id=body_id,
             sim_core=sim_core,
-            mesh_path=stored_mesh_path,
             pickable=pickable,
             mass=mass,
             collision_mode=collision_mode,
+            name=name,
+            user_data=user_data,
         )
 
     @classmethod
@@ -557,11 +596,9 @@ class SimObject:
             pickable=spawn_params.pickable,
             sim_core=sim_core,
             collision_mode=spawn_params.collision_mode,
+            name=spawn_params.name,
+            user_data=spawn_params.user_data,
         )
-
-        # Set name if provided
-        if spawn_params.name is not None:
-            obj.name = spawn_params.name
 
         return obj
 
@@ -620,15 +657,21 @@ class SimObject:
         """
         Return current position and orientation as Pose object.
 
-        Performance optimization: Caches the pose within the same simulation timestep
-        to avoid redundant PyBullet API calls. Cache is automatically invalidated when
-        sim_time advances or when set_pose() is called.
+        Performance optimization:
+        - Kinematic objects (mass=0): Always returns cached pose since position
+          only changes via set_pose(), which updates the cache.
+        - Dynamic objects: Caches within the same simulation timestep to avoid
+          redundant PyBullet API calls. Cache is invalidated when sim_time advances.
         """
-        # Check if we have a valid cached pose for the current simulation time
+        # Kinematic objects never move on their own - cache is always valid
+        # (position only changes via set_pose(), which updates the cache)
+        if self.is_kinematic:
+            return self._cached_pose
+
+        # Dynamic objects: check if cache is valid for current sim time
         current_sim_time = self.sim_core.sim_time if self.sim_core is not None else -1.0
 
         if self._cached_pose is not None and current_sim_time >= 0 and self._cached_pose_sim_time == current_sim_time:
-            # Return cached pose (avoids PyBullet API call)
             return self._cached_pose
 
         # Cache miss: Query PyBullet and update cache
@@ -652,6 +695,51 @@ class SimObject:
         Returns:
             True if the object moved (position or orientation changed), False otherwise
         """
+        position, orientation = pose.as_position_orientation()
+        moved = self._set_pose_internal(position, orientation, preserve_velocity)
+        return moved
+
+    def set_pose_raw(
+        self,
+        position,
+        orientation,
+        preserve_velocity: bool = True,
+    ) -> bool:
+        """
+        Set position and orientation from raw lists/tuples (no Pose allocation).
+
+        This is the fast path for internal use where position and orientation
+        are already available as lists/tuples, avoiding Pose object creation overhead.
+
+        Args:
+            position: [x, y, z] position (list, tuple, or any sequence)
+            orientation: [x, y, z, w] quaternion (list, tuple, or any sequence)
+            preserve_velocity: If True, preserve current velocity after setting pose.
+
+        Returns:
+            True if the object moved, False otherwise
+        """
+        return self._set_pose_internal(position, orientation, preserve_velocity)
+
+    def _set_pose_internal(
+        self,
+        position,
+        orientation,
+        preserve_velocity: bool = True,
+    ) -> bool:
+        """
+        Internal implementation for setting position and orientation.
+
+        Shared by set_pose() and set_pose_raw() to avoid code duplication.
+
+        Args:
+            position: [x, y, z] position
+            orientation: [x, y, z, w] quaternion
+            preserve_velocity: If True, preserve current velocity after setting pose.
+
+        Returns:
+            True if the object moved, False otherwise
+        """
         # Static objects should never move - warn and return early
         if self.collision_mode == CollisionMode.STATIC:
             logger.warning(
@@ -661,18 +749,32 @@ class SimObject:
             )
             return False
 
-        position, orientation = pose.as_position_orientation()
-
         # Detect movement using cached pose (no PyBullet API call needed)
-        last_pos, last_orn = self._cached_pose.as_position_orientation()
-        pos_diff = np.linalg.norm(np.array(position) - np.array(last_pos))
+        # Use manual distance calculation instead of np.linalg.norm for ~10x speedup
+        last_pos = self._cached_pose.position
+        last_orn = self._cached_pose.orientation
+        dx = position[0] - last_pos[0]
+        dy = position[1] - last_pos[1]
+        dz = position[2] - last_pos[2]
+        pos_diff_sq = dx * dx + dy * dy + dz * dz
 
-        # Quaternion angular distance: min(|q1 - q2|, |q1 + q2|) to handle q = -q equivalence
-        orn_arr = np.array(orientation)
-        last_orn_arr = np.array(last_orn)
-        orn_diff = min(np.linalg.norm(orn_arr - last_orn_arr), np.linalg.norm(orn_arr + last_orn_arr))
+        # Quaternion angular distance: min(|q1 - q2|², |q1 + q2|²) to handle q = -q equivalence
+        dq0 = orientation[0] - last_orn[0]
+        dq1 = orientation[1] - last_orn[1]
+        dq2 = orientation[2] - last_orn[2]
+        dq3 = orientation[3] - last_orn[3]
+        orn_diff_sq = dq0 * dq0 + dq1 * dq1 + dq2 * dq2 + dq3 * dq3
+        # Check q = -q equivalence only if diff is significant
+        if orn_diff_sq > 1e-12:
+            sq0 = orientation[0] + last_orn[0]
+            sq1 = orientation[1] + last_orn[1]
+            sq2 = orientation[2] + last_orn[2]
+            sq3 = orientation[3] + last_orn[3]
+            orn_sum_sq = sq0 * sq0 + sq1 * sq1 + sq2 * sq2 + sq3 * sq3
+            if orn_sum_sq < orn_diff_sq:
+                orn_diff_sq = orn_sum_sq
 
-        moved = pos_diff > 1e-6 or orn_diff > 1e-6
+        moved = pos_diff_sq > 1e-12 or orn_diff_sq > 1e-12
 
         # Optimization: Skip velocity operations for kinematic objects
         # Use cached is_kinematic flag to avoid PyBullet API calls
@@ -720,13 +822,17 @@ class SimObject:
             lambda: f"set_pose: body_id={self.body_id} attached_objects(before)={[o.body_id for o in self.attached_objects]}"
         )
         for obj in self.attached_objects:
+            # Skip objects attached to a specific link (not base link).
+            # These are handled by Agent.update_attached_objects_kinematics()
+            # which uses the actual link position from PyBullet.
+            if obj._attached_link_index >= 0:
+                continue
             # Follow using relative position and orientation from attachment
             # _attach_offset is always initialized with default (0,0,0) if not set
             new_pos, new_orn = p.multiplyTransforms(
                 position, orientation, obj._attach_offset.position, obj._attach_offset.orientation
             )
-            new_pose = Pose.from_pybullet(new_pos, new_orn)
-            obj.set_pose(new_pose, preserve_velocity=preserve_velocity)
+            obj.set_pose_raw(new_pos, new_orn, preserve_velocity=preserve_velocity)
             lazy_logger.debug(
                 lambda obj=obj: f"attached_object set pose　body_id={self.body_id}: obj_body_id={obj.body_id} "
                 f"position={obj._attach_offset.position} orientation={obj._attach_offset.orientation}"
@@ -760,7 +866,7 @@ class SimObject:
 
             # Attach with position and orientation
             agent.attach_object(pallet, relative_pose=Pose.from_euler(0.6, 0, -0.2,
-                                                                       roll=np.pi/2, pitch=0, yaw=0))
+                                                                       roll=1.5708, pitch=0, yaw=0))
 
             # Attach to specific link with default zero offset
             agent.attach_object(box, parent_link_index=2)
@@ -814,8 +920,7 @@ class SimObject:
         )
 
         # Create constraint if object has mass (physics-based attachment)
-        mass = p.getDynamicsInfo(obj.body_id, -1)[0]
-        if mass > 0:
+        if obj.mass > 0:
             obj._constraint_id = p.createConstraint(
                 parentBodyUniqueId=self.body_id,
                 parentLinkIndex=parent_link_index,
@@ -900,194 +1005,3 @@ class SimObject:
             if current_time - cbinfo["last_executed"] >= cbinfo["frequency"]:
                 cbinfo["func"](self)
                 cbinfo["last_executed"] = current_time
-
-
-# =============================================================================
-# Legacy classes (deprecated - use Agent class instead)
-# =============================================================================
-
-
-class MeshObject(SimObject):
-    """
-    Deprecated: Use Agent.from_mesh() instead.
-    Legacy class for mesh-based objects.
-    """
-
-    @classmethod
-    def from_mesh(
-        cls, mesh_path, position, orientation, base_mass=0.0, mesh_scale=[1, 1, 1], rgbaColor=[1, 1, 1, 1], sim_core=None
-    ):
-        # Get physics client ID from sim_core
-        physics_client_id = sim_core.client if sim_core is not None else 0
-
-        vis_id = p.createVisualShape(
-            shapeType=p.GEOM_MESH,
-            fileName=mesh_path,
-            meshScale=mesh_scale,
-            rgbaColor=rgbaColor,
-            physicsClientId=physics_client_id,
-        )
-        col_id = p.createCollisionShape(
-            shapeType=p.GEOM_MESH, fileName=mesh_path, meshScale=mesh_scale, physicsClientId=physics_client_id
-        )
-        body_id = p.createMultiBody(
-            baseMass=base_mass,
-            baseCollisionShapeIndex=col_id,
-            baseVisualShapeIndex=vis_id,
-            basePosition=position,
-            baseOrientation=orientation,
-            physicsClientId=physics_client_id,
-        )
-        return cls(body_id=body_id, mesh_path=mesh_path, visual_id=vis_id, collision_id=col_id, sim_core=sim_core)
-
-    def __init__(self, body_id, mesh_path, visual_id=None, collision_id=None, sim_core=None):
-        super().__init__(body_id, sim_core=sim_core)
-        self.mesh_path = mesh_path
-        self.visual_id = visual_id
-        self.collision_id = collision_id
-
-    def set_color(self, rgbaColor, linkIndex=-1):
-        p.changeVisualShape(self.body_id, linkIndex, rgbaColor=rgbaColor)
-
-
-class URDFObject(SimObject):
-    """
-    Deprecated: Use Agent.from_urdf() instead.
-    Legacy class for URDF-based objects with navigation capabilities.
-    """
-
-    @classmethod
-    def from_urdf(cls, urdf_path, position, orientation, useFixedBase=False, set_mass_zero=False, meta_data={}, sim_core=None):
-        body_id = p.loadURDF(urdf_path, position, orientation, useFixedBase=useFixedBase)
-        return cls(body_id, urdf_path, set_mass_zero=set_mass_zero, meta_data=meta_data, sim_core=sim_core)
-
-    def __init__(
-        self,
-        body_id,
-        urdf_path,
-        set_mass_zero=False,
-        meta_data={},
-        max_linear_accel=1.0,
-        max_speed=1.0,
-        goal_threshold=0.01,
-        sim_core=None,
-    ):
-        super().__init__(body_id, sim_core=sim_core)
-        self.urdf_path = urdf_path
-        self.joint_info = [p.getJointInfo(body_id, j) for j in range(p.getNumJoints(body_id))]
-        if set_mass_zero:
-            self.set_all_masses_to_zero()
-        self.meta_data = meta_data
-        self.max_linear_accel = max_linear_accel
-        self.max_speed = max_speed
-        self.goal_threshold = goal_threshold
-        self.target_actions = []
-        self._current_nav_index = 0
-        self._nav_velocity = np.array([0.0, 0.0, 0.0])
-        self._nav_last_update = None
-        self._motion_completed = True
-
-    def set_navigation_params(self, max_linear_accel, max_speed, goal_threshold=None):
-        self.max_linear_accel = max_linear_accel
-        self.max_speed = max_speed
-        if goal_threshold is not None:
-            self.goal_threshold = goal_threshold
-
-    def set_action(self, pose_callback_list):
-        """
-        pose_callback_list: List[Tuple[Pose, Optional[Callable], Optional[float]]]
-        Example: [(Pose, callback, wait_time), (Pose, None, 0.0), ...]
-        callback is executed on arrival, wait_time is seconds to wait after reaching Pose
-        """
-        self.target_actions = pose_callback_list
-        self._current_nav_index = 0
-        self._nav_last_update = None
-        self._wait_until = None
-        self._motion_completed = False
-
-    def update_action(self, dt=0.01):
-        """
-        Move sequentially to each Pose in target_actions, considering max acceleration and max speed.
-        dt: simulation timestep
-        sim_time: simulation time (seconds). Required for wait functionality.
-        Used in pallet_carrier_demo.py. Can be replaced with Robot class.
-        """
-        # Wait feature: if _wait_until is set, stop until sim_time reaches that time
-        sim_time = self.sim_core.sim_time if self.sim_core is not None else None
-        if self._wait_until is not None:
-            if sim_time is not None and sim_time < self._wait_until:
-                self._nav_velocity = np.array([0.0, 0.0, 0.0])
-                return
-            else:
-                self._wait_until = None
-
-        if not self.target_actions or self._current_nav_index >= len(self.target_actions):
-            self._motion_completed = True
-            return  # Path finished
-
-        # Get current position
-        pose = self.get_pose()
-        pos, orn = pose.as_tuple()
-        current_pos = np.array(pos)
-        # nav_path extension: (Pose, callback, wait_time)
-        target_tuple = self.target_actions[self._current_nav_index]
-        if isinstance(target_tuple, Pose):
-            target_pose = target_tuple
-            callback = None
-            wait_time = 0.0
-        elif len(target_tuple) == 2:
-            target_pose, callback = target_tuple
-            wait_time = 0.0
-        else:
-            target_pose, callback, wait_time = target_tuple
-        target_pos, target_orn = target_pose.as_position_orientation()
-        target_pos = np.array(target_pos)
-        # Calculate velocity and acceleration
-        direction = target_pos - current_pos
-        distance = np.linalg.norm(direction)
-        if distance < self.goal_threshold:
-            # Goal reached: teleport if within threshold
-            self.set_pose(target_pose)
-            self._current_nav_index += 1
-            self._nav_velocity = np.array([0.0, 0.0, 0.0])
-            # Execute callback on arrival
-            if callback:
-                callback()
-            # If wait_time is specified, wait based on sim_time
-            if wait_time and sim_time is not None:
-                self._wait_until = sim_time + wait_time
-            return
-        direction = direction / (distance + 1e-6)
-        # Target speed: do not exceed the distance to the goal
-        desired_speed = min(self.max_speed, distance / dt, distance)
-        desired_velocity = direction * desired_speed
-        # Acceleration limit
-        accel = (desired_velocity - self._nav_velocity) / dt
-        accel_norm = np.linalg.norm(accel)
-        if accel_norm > self.max_linear_accel:
-            accel = accel / (accel_norm + 1e-6) * self.max_linear_accel
-        self._nav_velocity += accel * dt
-        speed = np.linalg.norm(self._nav_velocity)
-        if speed > self.max_speed:
-            self._nav_velocity = self._nav_velocity / (speed + 1e-6) * self.max_speed
-        # Update position
-        new_pos = current_pos + self._nav_velocity * dt
-        # Orientation matches target Pose
-        _, target_orn = target_pose.as_position_orientation()
-        new_pose = Pose.from_pybullet(new_pos.tolist(), target_orn)
-        self.set_pose(new_pose)
-
-    def set_all_masses_to_zero(self):
-        p.changeDynamics(self.body_id, -1, mass=0)
-        for j in range(p.getNumJoints(self.body_id)):
-            p.changeDynamics(self.body_id, j, mass=0)
-
-    def kinematic_teleport_joint(self, joint_index, target_pos):
-        p.resetJointState(self.body_id, joint_index, target_pos)
-
-    def set_joint_target(self, joint_index, target_pos):
-        mass = p.getDynamicsInfo(self.body_id, joint_index)[0]
-        if mass == 0:
-            self.kinematic_teleport_joint(joint_index, target_pos)
-        else:
-            p.setJointMotorControl2(self.body_id, joint_index, p.POSITION_CONTROL, targetPosition=target_pos)

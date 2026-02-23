@@ -27,7 +27,7 @@ from pybullet_fleet.core_simulation import (
 )
 
 # Base classes
-from pybullet_fleet.sim_object import MeshObject, SimObject, URDFObject
+from pybullet_fleet.sim_object import SimObject
 
 # Utilities
 from pybullet_fleet.tools import grid_to_world, world_to_grid, normalize_vector_param
@@ -46,8 +46,6 @@ __all__ = [
     "SimulationParams",
     "SpatialHashCellSizeMode",
     "SimObject",
-    "MeshObject",
-    "URDFObject",
     "LogLevelManager",
     # Agent management
     "Agent",

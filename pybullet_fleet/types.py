@@ -112,7 +112,6 @@ class CollisionMode(Enum):
         STATIC: Static object mode (never moves, but has collision)
                 - Registered in collision system during spawn
                 - Never updates AABB/spatial grid (performance optimization)
-                - Can be made transparent with 't' key
                 - Examples: walls, shelves, structures
 
         DISABLED: Collision detection completely disabled (ghost object)

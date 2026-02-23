@@ -55,20 +55,25 @@ The central orchestrator for PyBullet simulations.
 - `_handle_keyboard_events()`: Process keyboard inputs
 
 ##### SimObject
-Base class for all simulation objects.
+Base class for all simulation objects (single rigid body, no joints or links).
+
+SimObject represents a **single-body** object in PyBullet — it has only a base link
+and does **not** support joints, links, or URDF loading. For objects that require
+multi-link bodies with joint control (e.g., URDF robots), use Agent instead.
 
 **Responsibilities:**
 - Common interface for objects in simulation
 - Position and orientation management via Pose
 - Metadata storage
-- Object attachment system
+- Object attachment system (base-link attachment only)
 - Shared shape caching for performance
 
 **Key Features:**
-- Support for mesh and primitive shapes
+- Support for mesh and primitive shapes (created via `createMultiBody`)
 - Collision and visual shape separation
 - Pickable/non-pickable objects
 - Parent-child attachment with constraints
+- No joint/link support — single rigid body only
 
 ##### SimulationParams
 Configuration dataclass for simulation parameters.
@@ -96,13 +101,19 @@ Utility for managing PyBullet log verbosity.
 
 ##### Agent (extends SimObject)
 
+Agent extends SimObject to support **URDF loading with multi-link bodies and joint control**.
+While SimObject is limited to single rigid bodies, Agent can load URDF models that contain
+multiple links connected by joints, and provides joint state management and link-level
+object attachment via `update_attached_objects_kinematics()`.
+
 **Responsibilities:**
 - Goal-based navigation (move towards target pose)
 - Action execution (MoveTo, Pick, Drop, Wait)
 - Velocity and acceleration limiting
 - Path following
-- Object manipulation
+- Object manipulation (supports link-level attachment for URDF robots)
 - Collision handling
+- URDF model loading with joint/link support
 
 **Key Methods:**
 - `set_goal(pose)`: Set target destination
