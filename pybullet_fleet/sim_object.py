@@ -4,7 +4,7 @@ Base class for simulation objects with attachment support.
 """
 
 from dataclasses import dataclass, field
-from typing import Any, Callable, List, Optional, Dict, Tuple
+from typing import Any, Callable, List, Optional, Dict, Tuple, Union
 import logging
 
 import pybullet as p
@@ -12,6 +12,7 @@ import pybullet as p
 from .geometry import Pose
 from .logging_utils import get_lazy_logger
 from .types import CollisionMode
+from .tools import resolve_link_index
 
 # Standard logger for info/warning/error
 logger = logging.getLogger(__name__)
@@ -843,7 +844,7 @@ class SimObject:
     def attach_object(
         self,
         obj: "SimObject",
-        parent_link_index: int = -1,
+        parent_link_index: Union[int, str] = -1,
         relative_pose: Optional[Pose] = None,
         joint_type: int = p.JOINT_FIXED,
     ) -> bool:
@@ -852,7 +853,8 @@ class SimObject:
 
         Args:
             obj: Object to attach
-            parent_link_index: Link index to attach to (-1 for base link)
+            parent_link_index: Link index (int) or link name (str) to attach to.
+                              -1 or ``"base_link"`` for the base link.
             relative_pose: Position and orientation offset in parent link's frame as Pose object
                           (default: None, which uses Pose(position=[0, 0, 0], orientation=[0, 0, 0, 1]))
             joint_type: PyBullet joint type (default: JOINT_FIXED)
@@ -868,9 +870,15 @@ class SimObject:
             agent.attach_object(pallet, relative_pose=Pose.from_euler(0.6, 0, -0.2,
                                                                        roll=1.5708, pitch=0, yaw=0))
 
-            # Attach to specific link with default zero offset
+            # Attach to specific link by index
             agent.attach_object(box, parent_link_index=2)
+
+            # Attach to specific link by name
+            agent.attach_object(box, parent_link_index="end_effector")
         """
+        # Resolve link name to index
+        parent_link_index = resolve_link_index(self.body_id, parent_link_index)
+
         # Default to zero offset if not specified
         if relative_pose is None:
             relative_pose = Pose(position=[0.0, 0.0, 0.0], orientation=[0.0, 0.0, 0.0, 1.0])

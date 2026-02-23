@@ -14,18 +14,24 @@ from pybullet_fleet.geometry import Pose, Path
 
 
 # Helper functions for testing
-def assert_pose_equal(pose: Pose, expected_position: list, tolerance: float = 0.001):
+IDENTITY_QUAT = [0, 0, 0, 1]  # Identity quaternion (no rotation)
+
+
+def assert_pose_equal(pose: Pose, expected_position: list, expected_orientation: list = None, decimal: int = 3):
     """
-    Assert that pose position matches expected values.
+    Assert that pose position (and optionally orientation) matches expected values.
 
     Args:
         pose: Pose object to check
         expected_position: Expected [x, y, z] position
-        tolerance: Acceptable error margin (default: 0.001)
+        expected_orientation: Expected [x, y, z, w] quaternion (optional, skip if None)
+        decimal: Number of decimal places for comparison (default: 3, i.e. 0.0005 tolerance)
     """
-    assert abs(pose.x - expected_position[0]) < tolerance, f"X mismatch: {pose.x:.4f} != {expected_position[0]:.4f}"
-    assert abs(pose.y - expected_position[1]) < tolerance, f"Y mismatch: {pose.y:.4f} != {expected_position[1]:.4f}"
-    assert abs(pose.z - expected_position[2]) < tolerance, f"Z mismatch: {pose.z:.4f} != {expected_position[2]:.4f}"
+    np.testing.assert_array_almost_equal(pose.position, expected_position, decimal=decimal, err_msg="Position mismatch")
+    if expected_orientation is not None:
+        np.testing.assert_array_almost_equal(
+            pose.orientation, expected_orientation, decimal=decimal, err_msg="Orientation mismatch"
+        )
 
 
 class TestPoseCreation:
@@ -35,27 +41,19 @@ class TestPoseCreation:
         """Test creating Pose from position only"""
         pose = Pose.from_xyz(1.0, 2.0, 3.0)
 
-        assert pose.x == 1.0
-        assert pose.y == 2.0
-        assert pose.z == 3.0
-        # Default orientation should be identity quaternion
-        np.testing.assert_array_almost_equal(pose.orientation, [0, 0, 0, 1])
+        assert_pose_equal(pose, [1.0, 2.0, 3.0], IDENTITY_QUAT)
 
     def test_pose_from_euler(self):
         """Test creating Pose from position and Euler angles"""
         pose = Pose.from_euler(1.0, 2.0, 3.0, roll=0.1, pitch=0.2, yaw=0.3)
 
-        assert pose.x == 1.0
-        assert pose.y == 2.0
-        assert pose.z == 3.0
+        # Position and orientation (quaternion for roll=0.1, pitch=0.2, yaw=0.3)
+        assert_pose_equal(pose, [1.0, 2.0, 3.0], [0.034271, 0.106021, 0.143572, 0.983347])
 
-        # Euler angles should match the specified values
+        # Euler angles should round-trip correctly
         assert abs(pose.roll - 0.1) < 0.01
         assert abs(pose.pitch - 0.2) < 0.01
         assert abs(pose.yaw - 0.3) < 0.01
-
-        # Orientation should be non-identity
-        assert not np.allclose(pose.orientation, [0, 0, 0, 1])
 
     def test_pose_from_pybullet(self):
         """Test creating Pose from PyBullet format"""
@@ -63,8 +61,7 @@ class TestPoseCreation:
         orientation = [0.0, 0.0, 0.707, 0.707]  # 90 degrees around Z
         pose = Pose.from_pybullet(position, orientation)
 
-        np.testing.assert_array_almost_equal(pose.position, position)
-        np.testing.assert_array_almost_equal(pose.orientation, orientation)
+        assert_pose_equal(pose, position, orientation)
 
     def test_pose_from_yaw(self):
         """Test creating Pose with yaw angle only"""
@@ -81,8 +78,7 @@ class TestPoseCreation:
         # Pose requires position, but orientation has default
         pose = Pose(position=[0, 0, 0])
 
-        np.testing.assert_array_almost_equal(pose.position, [0, 0, 0])
-        np.testing.assert_array_almost_equal(pose.orientation, [0, 0, 0, 1])
+        assert_pose_equal(pose, [0, 0, 0], IDENTITY_QUAT)
 
     def test_pose_with_position_and_orientation(self):
         """Test Pose with explicit position and orientation"""
@@ -90,8 +86,7 @@ class TestPoseCreation:
         orientation = [0.0, 0.0, 0.707, 0.707]
         pose = Pose(position=position, orientation=orientation)
 
-        np.testing.assert_array_almost_equal(pose.position, position)
-        np.testing.assert_array_almost_equal(pose.orientation, orientation)
+        assert_pose_equal(pose, position, orientation)
 
 
 class TestPoseConversion:
@@ -142,9 +137,7 @@ class TestPoseProperties:
         """Test x, y, z property accessors"""
         pose = Pose.from_xyz(1.5, 2.5, 3.5)
 
-        assert pose.x == 1.5
-        assert pose.y == 2.5
-        assert pose.z == 3.5
+        assert_pose_equal(pose, [1.5, 2.5, 3.5])
 
     def test_position_is_list(self):
         """Test that position is a list"""
@@ -314,25 +307,19 @@ class TestPoseEdgeCases:
         """Test pose at origin"""
         pose = Pose.from_xyz(0, 0, 0)
 
-        assert pose.x == 0
-        assert pose.y == 0
-        assert pose.z == 0
+        assert_pose_equal(pose, [0, 0, 0], IDENTITY_QUAT)
 
     def test_pose_negative_coordinates(self):
         """Test pose with negative coordinates"""
         pose = Pose.from_xyz(-1, -2, -3)
 
-        assert pose.x == -1
-        assert pose.y == -2
-        assert pose.z == -3
+        assert_pose_equal(pose, [-1, -2, -3], IDENTITY_QUAT)
 
     def test_pose_large_coordinates(self):
         """Test pose with large coordinates"""
         pose = Pose.from_xyz(1000, 2000, 3000)
 
-        assert pose.x == 1000
-        assert pose.y == 2000
-        assert pose.z == 3000
+        assert_pose_equal(pose, [1000, 2000, 3000], IDENTITY_QUAT)
 
 
 if __name__ == "__main__":

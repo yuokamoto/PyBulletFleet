@@ -241,6 +241,7 @@ class Agent(SimObject):
         self._current_waypoint_index = 0
         self._final_target_orientation: Optional[np.ndarray] = None  # Final orientation to align to
         self._align_final_orientation: bool = False  # Whether to align to final orientation
+        self._is_final_orientation_aligning: bool = False  # True while performing final orientation rotation
         self._movement_direction: MovementDirection = MovementDirection.FORWARD  # Movement direction (differential mode only)
 
         # Two-point interpolation trajectory planners (initialized by set_motion_mode) - Private
@@ -820,6 +821,7 @@ class Agent(SimObject):
                     # Path complete - stop all motion in PyBullet
                     self._path = []  # Clear path (was None)
                     self._goal_pose = None
+                    self._is_final_orientation_aligning = False
                     # Reset velocity in PyBullet to stop any residual motion
                     p.resetBaseVelocity(self.body_id, linearVelocity=[0, 0, 0], angularVelocity=[0, 0, 0])
                     logger.info(f"Path complete (body_id={self.body_id})")
@@ -846,6 +848,7 @@ class Agent(SimObject):
         # Mark that we're done with the path (just doing final rotation)
         self._path = []
         self._align_final_orientation = False  # Don't repeat this
+        self._is_final_orientation_aligning = True  # Signal update() to use differential rotation
 
     def _init_omnidirectional_trajectory(self, goal: Pose):
         """
@@ -1459,7 +1462,11 @@ class Agent(SimObject):
                 return False  # No movement if not moving
 
             # Dispatch to appropriate motion controller
-            if self._motion_mode == MotionMode.OMNIDIRECTIONAL:
+            if self._is_final_orientation_aligning:
+                # Final orientation alignment: always use differential rotation
+                # (even for omnidirectional robots, we rotate in place)
+                self._update_differential(dt)
+            elif self._motion_mode == MotionMode.OMNIDIRECTIONAL:
                 self._update_omnidirectional(dt)
             elif self._motion_mode == MotionMode.DIFFERENTIAL:
                 self._update_differential(dt)
@@ -1493,6 +1500,7 @@ class Agent(SimObject):
         self._differential_phase = DifferentialPhase.ROTATE
         self._final_target_orientation = None
         self._align_final_orientation = False
+        self._is_final_orientation_aligning = False
         self._movement_direction = MovementDirection.FORWARD
         self._clear_path_visualization()  # Clear visualization when stopping
 
