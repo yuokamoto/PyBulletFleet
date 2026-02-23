@@ -245,7 +245,7 @@ class Agent(SimObject):
 
         # Two-point interpolation trajectory planners (initialized by set_motion_mode) - Private
         # Position trajectories [X, Y, Z] - shared by both omnidirectional and differential modes
-        self._tpi_pos: Optional[List[TwoPointInterpolation]] = None
+        self._tpi_pos: List[TwoPointInterpolation] = []
         # Rotation using scipy Slerp combined with TPI for angle progression - used by differential mode
         self._rotation_slerp: Optional[Slerp] = None
         self._tpi_rotation_angle: Optional[TwoPointInterpolation] = None  # TPI for rotation angle (0 to total_angle)
@@ -864,21 +864,19 @@ class Agent(SimObject):
         t0 = self.sim_core.sim_time if self.sim_core is not None else 0.0
 
         # Reuse existing TPI instances (created by set_motion_mode)
-        if self._tpi_pos is None:
+        if not self._tpi_pos:
             logger.warning(
                 f"Agent {self.body_id}: _tpi_pos is not initialized. " f"Auto-calling set_motion_mode({self._motion_mode})."
             )
             self.set_motion_mode(self._motion_mode or MotionMode.OMNIDIRECTIONAL)
-            if self._tpi_pos is None:
-                logger.error(f"Agent {self.body_id}: _tpi_pos is still None after set_motion_mode. Skipping trajectory init.")
+            if not self._tpi_pos:
+                logger.error(f"Agent {self.body_id}: _tpi_pos is still empty after set_motion_mode. Skipping trajectory init.")
                 return
-
-        tpi_pos = self._tpi_pos  # Local reference for type narrowing
 
         # 3D: X, Y, Z with per-axis limits
         for axis in range(3):
             try:
-                tpi_pos[axis].init(
+                self._tpi_pos[axis].init(
                     p0=current_pos[axis],
                     pe=goal_pos[axis],
                     acc_max=self.max_linear_accel[axis],  # Per-axis acceleration
@@ -888,7 +886,7 @@ class Agent(SimObject):
                     ve=0.0,  # Stop at goal
                     dec_max=self.max_linear_accel[axis],  # Per-axis deceleration
                 )
-                tpi_pos[axis].calc_trajectory()  # Calculate trajectory
+                self._tpi_pos[axis].calc_trajectory()  # Calculate trajectory
             except ValueError as e:
                 # TPI error: same position with different velocity (dp=0, dv!=0)
                 # This can happen when setting a new goal at the current position
@@ -898,7 +896,7 @@ class Agent(SimObject):
                     f"Retrying with v0=0 (safety fallback)."
                 )
                 try:
-                    tpi_pos[axis].init(
+                    self._tpi_pos[axis].init(
                         p0=current_pos[axis],
                         pe=goal_pos[axis],  # Still aim for the goal
                         acc_max=self.max_linear_accel[axis],
@@ -908,11 +906,11 @@ class Agent(SimObject):
                         ve=0.0,
                         dec_max=self.max_linear_accel[axis],
                     )
-                    tpi_pos[axis].calc_trajectory()
+                    self._tpi_pos[axis].calc_trajectory()
                 except ValueError:
                     # Both attempts failed (e.g. already at goal position)
                     # Initialize with zero movement (stay at current position)
-                    tpi_pos[axis].init(
+                    self._tpi_pos[axis].init(
                         p0=current_pos[axis],
                         pe=current_pos[axis],
                         acc_max=self.max_linear_accel[axis],
@@ -922,7 +920,7 @@ class Agent(SimObject):
                         ve=0.0,
                         dec_max=self.max_linear_accel[axis],
                     )
-                    tpi_pos[axis].calc_trajectory()
+                    self._tpi_pos[axis].calc_trajectory()
 
     def _update_omnidirectional(self, dt: float):
         """
@@ -941,7 +939,7 @@ class Agent(SimObject):
         current_time = self.sim_core.sim_time if self.sim_core is not None else 0.0
 
         # Get interpolated position and velocity from trajectories
-        if self._tpi_pos is None:
+        if not self._tpi_pos:
             # This should not happen if set_motion_mode and set_path were called correctly
             return
 
