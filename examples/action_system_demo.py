@@ -118,8 +118,7 @@ def main():
     # DropAction automatically calculates approach pose from drop position
     # Keep pallet's horizontal orientation when dropped
     task2 = DropAction(
-        drop_position=[5, 5, 0.1],
-        drop_orientation=list(pallet_orientation_quat),  # Keep horizontal orientation
+        drop_pose=Pose(position=[5, 5, 0.1], orientation=list(pallet_orientation_quat)),
         place_gently=True,
         use_approach=True,  # Use approach phase
         approach_offset=1.5,  # Approach from 1.5m away

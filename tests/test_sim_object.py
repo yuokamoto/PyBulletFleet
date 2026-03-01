@@ -983,3 +983,53 @@ class TestSimObjectKinematic:
             )
         )
         assert_object_properties(dynamic_obj, mass=1.5, is_kinematic=False, position=(2, 0, 1))
+
+
+class TestSharedShapesCache:
+    """Test SimObject._shared_shapes caching behaviour.
+
+    Mesh shapes are expensive to create, so ``create_shared_shapes`` caches
+    them by their ShapeParams key.  Primitive shapes (box, sphere, …) are
+    cheap and should NOT be cached.
+    """
+
+    def test_mesh_shapes_are_cached(self, pybullet_env):
+        """Two calls with identical mesh params should return the same shape IDs."""
+        mesh_params = ShapeParams(
+            shape_type="mesh",
+            mesh_path=MESH_PATH,
+            mesh_scale=[0.2, 0.2, 0.2],
+            rgba_color=[1, 0, 0, 1],
+        )
+        col_params = ShapeParams(shape_type="box", half_extents=[0.1, 0.1, 0.1])
+
+        vid1, cid1 = SimObject.create_shared_shapes(visual_shape=mesh_params, collision_shape=col_params)
+        vid2, cid2 = SimObject.create_shared_shapes(visual_shape=mesh_params, collision_shape=col_params)
+
+        # Same IDs → cache was hit
+        assert vid1 == vid2
+        assert cid1 == cid2
+        # Exactly one entry should have been added to the cache
+        assert len(SimObject._shared_shapes) == 1
+
+    def test_different_mesh_params_create_new_shapes(self, pybullet_env):
+        """Different mesh params should produce different shape IDs."""
+        base = dict(shape_type="mesh", mesh_path=MESH_PATH, mesh_scale=[0.2, 0.2, 0.2])
+        red = ShapeParams(**base, rgba_color=[1, 0, 0, 1])
+        green = ShapeParams(**base, rgba_color=[0, 1, 0, 1])
+
+        vid_r, _ = SimObject.create_shared_shapes(visual_shape=red)
+        vid_g, _ = SimObject.create_shared_shapes(visual_shape=green)
+
+        assert vid_r != vid_g
+        assert len(SimObject._shared_shapes) == 2
+
+    def test_primitive_shapes_are_not_cached(self, pybullet_env):
+        """Box / sphere / cylinder shapes should not be cached."""
+        box = ShapeParams(shape_type="box", half_extents=[0.5, 0.5, 0.5])
+
+        SimObject.create_shared_shapes(visual_shape=box, collision_shape=box)
+        SimObject.create_shared_shapes(visual_shape=box, collision_shape=box)
+
+        # Cache should remain empty — primitives are never stored
+        assert len(SimObject._shared_shapes) == 0

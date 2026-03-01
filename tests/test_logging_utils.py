@@ -1,11 +1,18 @@
 """
 Tests for logging_utils module (lazy evaluation loggers).
 
+Design intent & usage policy:
+- LazyLogger/NamedLazyLogger only perform lazy evaluation if you pass a lambda.
+- For lightweight constants or simple strings, pass them directly (no lambda needed).
+- For expensive computations or side effects, always wrap in a lambda.
+- These tests explicitly check that both lambda and string messages are supported, and that lazy evaluation works as intended.
+- In real usage, you only need to use lambda for expensive or side-effecting computations.
+
 This module tests:
 - LazyLogger creation and initialization
 - Lazy evaluation of log messages
 - Log level filtering
-- Migration helpers (get_lazy_logger, wrap_existing_logger, migrate_logger)
+- Helpers (get_lazy_logger, wrap_existing_logger)
 - Performance benefit of lazy evaluation
 """
 
@@ -17,8 +24,9 @@ import pytest
 
 from pybullet_fleet.logging_utils import (
     LazyLogger,
+    NamedLazyLogger,
     get_lazy_logger,
-    migrate_logger,
+    get_named_lazy_logger,
     wrap_existing_logger,
 )
 
@@ -180,11 +188,16 @@ class TestLazyEvaluation:
             return f"Call #{call_count}"
 
         logger.debug(counting_func)  # Should NOT call (DEBUG < INFO)
-        logger.info(counting_func)  # Should call
-        logger.warning(counting_func)  # Should call
-        logger.debug(counting_func)  # Should NOT call
+        assert call_count == 0, f"After debug (disabled): expected 0, got {call_count}"
 
-        assert call_count == 2, f"Expected 2 calls, got {call_count}"
+        logger.info(counting_func)  # Should call
+        assert call_count == 1, f"After info: expected 1, got {call_count}"
+
+        logger.warning(counting_func)  # Should call
+        assert call_count == 2, f"After warning: expected 2, got {call_count}"
+
+        logger.debug(counting_func)  # Should NOT call
+        assert call_count == 2, f"After debug (disabled): expected 2, got {call_count}"
 
     def test_is_enabled_for(self):
         """Test isEnabledFor method"""
@@ -197,40 +210,112 @@ class TestLazyEvaluation:
         assert logger.isEnabledFor(logging.INFO) is False
 
 
-class TestMigrateLogger:
-    """Test migrate_logger helper function"""
+class TestNamedLazyLogger:
+    """Test NamedLazyLogger with instance-level prefix"""
 
-    def test_migrate_with_name(self):
-        """Test migrate_logger creates both standard and lazy loggers"""
-        std_logger, lazy_logger = migrate_logger(logger_name="test_migrate")
+    def test_create_with_prefix(self):
+        """NamedLazyLogger stores initial prefix."""
+        log = NamedLazyLogger(name="test_named", prefix="[obj:1] ")
+        assert log.prefix == "[obj:1] "
 
-        assert isinstance(std_logger, logging.Logger)
-        assert isinstance(lazy_logger, LazyLogger)
-        assert std_logger.name == "test_migrate"
+    def test_create_without_prefix(self):
+        """Default prefix is empty string."""
+        log = NamedLazyLogger(name="test_named_empty")
+        assert log.prefix == ""
 
-    def test_migrate_with_existing_logger(self):
-        """Test migrate_logger wraps an existing logger"""
-        existing = logging.getLogger("test_existing")
-        std_logger, lazy_logger = migrate_logger(logger_instance=existing)
+    def test_set_prefix(self):
+        """set_prefix updates the prefix dynamically."""
+        log = NamedLazyLogger(name="test_set_prefix")
+        assert log.prefix == ""
 
-        assert std_logger is existing
-        assert lazy_logger.logger is existing
+        log.set_prefix("[Agent:5:robot_A] ")
+        assert log.prefix == "[Agent:5:robot_A] "
 
-    def test_migrate_without_args_raises_error(self):
-        """Test that migrate_logger without args raises ValueError"""
-        with pytest.raises(ValueError):
-            migrate_logger()
+    def test_prefix_in_output(self, caplog):
+        """Prefix is prepended to every log message."""
+        log = NamedLazyLogger(name="test_prefix_out", prefix="[Agent:3] ")
 
-    def test_migrate_both_loggers_output(self, caplog):
-        """Test that both loggers from migrate produce output"""
-        std_logger, lazy_logger = migrate_logger(logger_name="test_both")
+        with caplog.at_level(logging.DEBUG, logger="test_prefix_out"):
+            log.info("Path complete")
 
-        with caplog.at_level(logging.DEBUG, logger="test_both"):
-            std_logger.info("standard message")
-            lazy_logger.debug(lambda: "lazy message")
+        assert "[Agent:3] Path complete" in caplog.text
 
-        assert "standard message" in caplog.text
-        assert "lazy message" in caplog.text
+    def test_prefix_with_lazy_lambda(self, caplog):
+        """Prefix works with lambda messages."""
+        log = NamedLazyLogger(name="test_prefix_lazy", prefix="[obj:7] ")
+
+        with caplog.at_level(logging.DEBUG, logger="test_prefix_lazy"):
+            log.debug(lambda: "pos=[1.0, 2.0]")
+
+        assert "[obj:7] pos=[1.0, 2.0]" in caplog.text
+
+    def test_prefix_lazy_skipped_when_disabled(self):
+        """Lambda is NOT evaluated when level is disabled, even with prefix."""
+        log = NamedLazyLogger(name="test_prefix_skip", prefix="[X] ")
+        log.logger.setLevel(logging.INFO)
+
+        call_count = 0
+
+        def expensive():
+            nonlocal call_count
+            call_count += 1
+            return "expensive result"
+
+        log.debug(expensive)  # DEBUG < INFO → skipped
+        assert call_count == 0
+
+    def test_prefix_updated_after_creation(self, caplog):
+        """Prefix change is reflected in subsequent log messages."""
+        log = NamedLazyLogger(name="test_prefix_update", prefix="[init] ")
+
+        with caplog.at_level(logging.DEBUG, logger="test_prefix_update"):
+            log.info("before")
+            log.set_prefix("[Agent:99:picker] ")
+            log.info("after")
+
+        assert "[init] before" in caplog.text
+        assert "[Agent:99:picker] after" in caplog.text
+
+    def test_empty_prefix_no_extra_characters(self, caplog):
+        """Empty prefix does not add spurious characters."""
+        log = NamedLazyLogger(name="test_no_prefix")
+
+        with caplog.at_level(logging.DEBUG, logger="test_no_prefix"):
+            log.info("clean message")
+
+        assert "clean message" in caplog.text
+        # No leading bracket or space
+        record = [r for r in caplog.records if r.name == "test_no_prefix"][0]
+        assert record.message == "clean message"
+
+    def test_get_named_lazy_logger_helper(self):
+        """get_named_lazy_logger convenience function returns NamedLazyLogger."""
+        log = get_named_lazy_logger("test_helper_named", prefix="[A:1] ")
+
+        assert isinstance(log, NamedLazyLogger)
+        assert log.prefix == "[A:1] "
+        assert log.logger.name == "test_helper_named"
+
+    def test_all_levels_include_prefix(self, caplog):
+        """All log levels (debug/info/warning/error/critical) include prefix."""
+        log = NamedLazyLogger(name="test_all_levels", prefix="[P] ")
+
+        with caplog.at_level(logging.DEBUG, logger="test_all_levels"):
+            log.debug("d")
+            log.info("i")
+            log.warning("w")
+            log.error("e")
+            log.critical("c")
+
+        records = [r for r in caplog.records if r.name == "test_all_levels"]
+        assert len(records) == 5
+        for rec in records:
+            assert rec.message.startswith("[P] "), f"Missing prefix in: {rec.message}"
+
+    def test_isinstance_of_lazy_logger(self):
+        """NamedLazyLogger is a subclass of LazyLogger."""
+        log = NamedLazyLogger(name="test_isinstance")
+        assert isinstance(log, LazyLogger)
 
 
 class TestPerformance:

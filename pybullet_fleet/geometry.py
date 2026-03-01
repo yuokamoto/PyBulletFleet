@@ -55,6 +55,11 @@ class Pose:
         """Yaw angle in radians (rotation around z-axis)."""
         return p.getEulerFromQuaternion(self.orientation)[2]
 
+    def __str__(self) -> str:
+        """Concise string: ``Pose(x=1.00, y=2.00, z=0.00, yaw=90.0°)``."""
+        yaw_deg = np.degrees(self.yaw)
+        return f"Pose(x={self.x:.2f}, y={self.y:.2f}, z={self.z:.2f}, yaw={yaw_deg:.1f}°)"
+
     @classmethod
     def from_xyz(cls, x: float, y: float, z: float):
         """Create Pose from x, y, z coordinates."""
@@ -142,6 +147,21 @@ class Path:
     """
 
     waypoints: List[Pose]
+
+    def __str__(self) -> str:
+        """Multi-line string showing each waypoint.
+
+        Example::
+
+            Path(3 waypoints):
+              [0] Pose(x=0.00, y=0.00, z=0.00, yaw=0.0°)
+              [1] Pose(x=1.00, y=0.00, z=0.00, yaw=0.0°)
+              [2] Pose(x=1.00, y=1.00, z=0.00, yaw=90.0°)
+        """
+        lines = [f"Path({len(self.waypoints)} waypoints):"]
+        for i, wp in enumerate(self.waypoints):
+            lines.append(f"  [{i}] {wp}")
+        return "\n".join(lines)
 
     def __len__(self) -> int:
         """Return number of waypoints."""

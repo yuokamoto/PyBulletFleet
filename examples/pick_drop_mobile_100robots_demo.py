@@ -180,8 +180,7 @@ def create_action_sequence_A_to_B(robot, pallet):
         ),
         # 3. Drop pallet at Area B
         DropAction(
-            drop_position=drop_position,
-            drop_orientation=list(pallet_orientation_quat),
+            drop_pose=Pose(position=drop_position, orientation=list(pallet_orientation_quat)),
             place_gently=True,
             use_approach=False,
             drop_offset=0.6,
@@ -233,8 +232,7 @@ def create_action_sequence_B_to_A(robot, pallet):
         ),
         # 3. Drop pallet at Area A
         DropAction(
-            drop_position=drop_position,
-            drop_orientation=list(pallet_orientation_quat),
+            drop_pose=Pose(position=drop_position, orientation=list(pallet_orientation_quat)),
             place_gently=True,
             use_approach=False,
             drop_offset=0.6,

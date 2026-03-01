@@ -66,25 +66,7 @@ if logger.isEnabledFor(logging.DEBUG):
     logger.debug(f"Orientation: {quaternion}")
 ```
 
-### Method 3: Migration Helper (Best for Gradual Migration)
-
-```python
-from pybullet_fleet.logging_utils import migrate_logger
-
-# Get both standard and lazy loggers
-logger, lazy_logger = migrate_logger(__name__)
-
-# Existing code continues to work
-logger.info("Simple message")
-logger.warning(f"Count: {count}")
-
-# New expensive logging uses lazy logger
-lazy_logger.debug(lambda: f"Expensive: {numpy_array}")
-```
-
-## Real-World Example: agent.py
-
-**Before optimization:**
+### Method 2: isEnabledFor Check (Good for Existing Code)
 ```python
 def _init_differential_rotation_trajectory(self, goal):
     # These 4 lines caused 316ms overhead for 1000 calls!
@@ -123,16 +105,6 @@ Wrap an existing logger with lazy evaluation.
 std_logger = logging.getLogger(__name__)
 lazy_logger = wrap_existing_logger(std_logger)
 lazy_logger.debug(lambda: f"Data: {array}")
-```
-
-### `migrate_logger(logger_name: str) -> Tuple[logging.Logger, LazyLogger]`
-
-Get both standard and lazy loggers for gradual migration.
-
-```python
-logger, lazy_logger = migrate_logger(__name__)
-logger.info("Standard")
-lazy_logger.debug(lambda: f"Lazy: {array}")
 ```
 
 ### `LazyLogger` Methods

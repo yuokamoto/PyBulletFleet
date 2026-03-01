@@ -435,6 +435,7 @@ class TestCollisionDetectionMethod:
         params = SimulationParams(
             gui=False,
             physics=False,
+            monitor=False,
             # collision_detection_method not specified → should auto-select
         )
         sim_core = MultiRobotSimulationCore(params)
@@ -448,6 +449,7 @@ class TestCollisionDetectionMethod:
         params = SimulationParams(
             gui=False,
             physics=True,
+            monitor=False,
             # collision_detection_method not specified → should auto-select
         )
         sim_core = MultiRobotSimulationCore(params)

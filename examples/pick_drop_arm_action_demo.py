@@ -83,7 +83,7 @@ def create_action_sequence():
         JointAction(target_joint_positions=place_joints, tolerance=0.05),
         # 5. Drop box on left side
         DropAction(
-            drop_position=box_place_pose.position,
+            drop_pose=box_place_pose,
             use_approach=False,  # No approach needed for arm
         ),
         # 6. Return to initial position
@@ -107,7 +107,7 @@ def create_action_sequence():
         JointAction(target_joint_positions=pick_joints, tolerance=0.05),
         # 4. Drop box on right side
         DropAction(
-            drop_position=box_pick_pose.position,
+            drop_pose=box_pick_pose,
             use_approach=False,
         ),
         # 5. Return to initial position

@@ -1,0 +1,39 @@
+test
+
+tools.
+    not: grid_execution, joint_index, link_index
+
+types
+
+geometry
+    not: visualize, plain calc
+
+logging
+config_utils: notest
+data_monitor: notest
+sim_object
+memory_profiling(core_simulation?)
+agent
+    spawn
+    movement
+agent_manager
+action  creation only
+----
+
+movement
+    robot_movement
+    path
+collision
+    aabbl
+    multicell
+    collision
+data_monitor
+core_simulation
+
+integration
+sim_object
+ set_pose/get_poseのkinematics/static/physicsの挙動の違い
+ detach/attachの挙動の違い
+agent
+　movement
+  action

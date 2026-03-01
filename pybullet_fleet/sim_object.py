@@ -10,7 +10,7 @@ import logging
 import pybullet as p
 
 from .geometry import Pose
-from .logging_utils import get_lazy_logger
+from .logging_utils import get_lazy_logger, get_named_lazy_logger
 from .types import CollisionMode
 from .tools import resolve_link_index
 
@@ -232,6 +232,11 @@ class SimObject:
         else:
             self.object_id = -1  # No ID if not registered to sim_core
 
+        # Instance-level logger with prefix for identification in multi-object scenarios.
+        # Subclasses (Agent) can update the prefix via self._log.set_prefix(...).
+        self._log = get_named_lazy_logger(__name__)
+        self._update_log_prefix()
+
         # Attachment state (initialized with default zero offset)
         self._attach_offset: Pose = Pose(position=[0.0, 0.0, 0.0], orientation=[0.0, 0.0, 0.0, 1.0])
         self._constraint_id: Optional[int] = None
@@ -258,12 +263,41 @@ class SimObject:
             # setCollisionFilterGroupMask: (bodyId, linkId, collisionFilterGroup, collisionFilterMask)
             # Setting mask=0 disables collision with all objects
             p.setCollisionFilterGroupMask(self.body_id, -1, 0, 0)
-            logger.debug(f"Disabled PyBullet collision for object {self.object_id} (body {self.body_id})")
+            self._log.debug(f"Disabled PyBullet collision (body {self.body_id})")
 
         # Auto-register to sim_core if provided
         if sim_core is not None:
             # Centralized registration via add_object() for consistency
             sim_core.add_object(self)
+
+    def set_name(self, name: Optional[str]) -> None:
+        """
+        Set the object name and update the log prefix accordingly.
+
+        Use this instead of directly setting ``self.name`` to ensure
+        the log prefix stays in sync.
+
+        Args:
+            name: New human-readable name (None to clear)
+        """
+        if self.name != name:
+            self.name = name
+            self._update_log_prefix()
+
+    def _update_log_prefix(self):
+        """
+        Update the instance logger prefix based on current identification.
+
+        Called automatically during __init__. Subclasses (Agent) should call
+        this again if they add extra identification info (e.g. "Agent" class name).
+
+        Format: ``[ClassName:object_id:name]`` or ``[ClassName:object_id]`` if no name.
+        """
+        cls_name = self.__class__.__name__
+        if self.name:
+            self._log.set_prefix(f"[{cls_name}:{self.object_id}:{self.name}] ")
+        else:
+            self._log.set_prefix(f"[{cls_name}:{self.object_id}] ")
 
     @classmethod
     def create_shared_shapes(
@@ -652,7 +686,7 @@ class SimObject:
         if self.sim_core is not None:
             self.sim_core._update_object_collision_mode(self.object_id, old_mode, mode)
 
-        logger.info(f"Object {self.object_id}: collision_mode changed from {old_mode.value} -> {mode.value}")
+        self._log.info(f"collision_mode changed from {old_mode.value} -> {mode.value}")
 
     def get_pose(self) -> Pose:
         """
@@ -743,8 +777,8 @@ class SimObject:
         """
         # Static objects should never move - warn and return early
         if self.collision_mode == CollisionMode.STATIC:
-            logger.warning(
-                f"Attempting to move static object {self.object_id} (body {self.body_id}). "
+            self._log.warning(
+                "Attempting to move static object. "
                 "Static objects (CollisionMode.STATIC) should not be moved. "
                 "If this object needs to move, change collision_mode to NORMAL_3D/NORMAL_2D."
             )
@@ -819,9 +853,7 @@ class SimObject:
         self._cached_pose_sim_time = self.sim_core.sim_time if self.sim_core is not None else -1.0
 
         # Recursively apply the same coordinates and velocity to attached_objects
-        lazy_logger.debug(
-            lambda: f"set_pose: body_id={self.body_id} attached_objects(before)={[o.body_id for o in self.attached_objects]}"
-        )
+        self._log.debug(lambda: f"set_pose: attached_objects(before)={[o.body_id for o in self.attached_objects]}")
         for obj in self.attached_objects:
             # Skip objects attached to a specific link (not base link).
             # These are handled by Agent.update_attached_objects_kinematics()
@@ -834,8 +866,8 @@ class SimObject:
                 position, orientation, obj._attach_offset.position, obj._attach_offset.orientation
             )
             obj.set_pose_raw(new_pos, new_orn, preserve_velocity=preserve_velocity)
-            lazy_logger.debug(
-                lambda obj=obj: f"attached_object set pose　body_id={self.body_id}: obj_body_id={obj.body_id} "
+            self._log.debug(
+                lambda obj=obj: f"attached_object set pose: obj_body_id={obj.body_id} "
                 f"position={obj._attach_offset.position} orientation={obj._attach_offset.orientation}"
             )
 
@@ -886,25 +918,25 @@ class SimObject:
         # Check if object is pickable
 
         if not obj.pickable:
-            logger.info(f"[SimObject] Cannot attach: object {obj.body_id} is not pickable")
+            self._log.info(f"Cannot attach: object {obj.body_id} is not pickable")
             return False
 
         # Prevent attaching an object that is already attached to another SimObject
 
         if obj.is_attached():
-            logger.info(
-                f"[SimObject] Cannot attach: object {obj.body_id} is already attached to "
+            self._log.info(
+                f"Cannot attach: object {obj.body_id} is already attached to "
                 f"another SimObject (body_id={obj._attached_to.body_id if obj._attached_to else None})"
             )
             return False
 
         if obj in self.attached_objects:
-            logger.info(f"[SimObject] Object {obj.body_id} already attached")
+            self._log.info(f"Object {obj.body_id} already attached")
             return False
 
         # Add to attached list
         self.attached_objects.append(obj)
-        lazy_logger.debug(
+        self._log.debug(
             lambda: (
                 f"attach_object: obj={obj.body_id} relative_pose={relative_pose.position} "
                 f"orientation={relative_pose.orientation}"
@@ -922,7 +954,7 @@ class SimObject:
         obj._attach_offset = relative_pose
         obj._attached_to = self
         obj._attached_link_index = parent_link_index
-        lazy_logger.debug(
+        self._log.debug(
             lambda: f"attach_object: obj={obj.body_id} _attach_offset.position={obj._attach_offset.position} "
             f"_attach_offset.orientation={obj._attach_offset.orientation}"
         )
@@ -942,7 +974,7 @@ class SimObject:
                 childFrameOrientation=[0, 0, 0, 1],
             )
 
-        logger.info(f"[SimObject] Attached object {obj.body_id} to link {parent_link_index}")
+        self._log.info(f"Attached object {obj.body_id} to link {parent_link_index}")
         return True
 
     def detach_object(self, obj: "SimObject") -> bool:
@@ -960,15 +992,15 @@ class SimObject:
         """
 
         if obj not in self.attached_objects:
-            logger.info(f"[SimObject] Object {obj.body_id} is not attached")
+            self._log.info(f"Object {obj.body_id} is not attached")
             return False
 
         # Remove from attached list
         self.attached_objects.remove(obj)
 
         # Debug: show attached_objects after removal
-        lazy_logger.debug(
-            lambda: f"detach_object: body_id={self.body_id} detached={obj.body_id} "
+        self._log.debug(
+            lambda: f"detach_object: detached={obj.body_id} "
             f"attached_objects(after)={[o.body_id for o in self.attached_objects]}"
         )
 
@@ -982,7 +1014,7 @@ class SimObject:
         obj._attached_to = None
         obj._attached_link_index = -1
 
-        logger.info(f"[SimObject] Detached object {obj.body_id}")
+        self._log.info(f"Detached object {obj.body_id}")
         return True
 
     def get_attached_objects(self) -> List["SimObject"]:

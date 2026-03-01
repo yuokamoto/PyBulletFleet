@@ -196,8 +196,7 @@ actions = [
     WaitAction(duration=0.5, action_type="prepare_drop"),
     # 6. Drop pallet (with arm extension integrated)
     DropAction(
-        drop_position=[1.5, 2.0, 0.1],
-        drop_orientation=list(pallet_orientation_quat),
+        drop_pose=Pose(position=[1.5, 2.0, 0.1], orientation=list(pallet_orientation_quat)),
         place_gently=True,
         use_approach=False,
         drop_offset=0.0,

@@ -150,7 +150,7 @@ def create_action_sequence(arm_agent, box_sim):
         JointAction(target_joint_positions=place_joints, tolerance=0.05),
         # 5. Drop box on left side
         DropAction(
-            drop_position=place_position,
+            drop_pose=Pose(position=place_position),
             use_approach=False,
         ),
         # 6. Return to initial position
@@ -174,7 +174,7 @@ def create_action_sequence(arm_agent, box_sim):
         JointAction(target_joint_positions=pick_joints, tolerance=0.05),
         # 4. Drop box on right side
         DropAction(
-            drop_position=pick_position,
+            drop_pose=Pose(position=pick_position),
             use_approach=False,
         ),
         # 5. Return to initial position

@@ -155,22 +155,32 @@ Configuration dataclass for agent initialization.
 
 #### Key Classes:
 
-##### AgentManager
-High-level manager for multiple Agent instances.
-
-**Responsibilities:**
-- Batch agent spawning (grid-based layout)
-- Centralized agent collection management
-- Goal management and update callbacks
-- Grid position calculation
+##### SimObjectManager
+Base manager for all simulation objects.  Parametrised by an `object_class`
+(default `SimObject`) so that spawning methods automatically create the right type.
 
 **Key Methods:**
-- `spawn_agents_grid(num_agents, grid_params, spawn_params)`: Create agents in grid pattern
-- `spawn_agents_grid_mixed(num_agents, grid_params, spawn_params_list)`: Mixed type spawning
-- `spawn_agent_grid_counts(grid_params, spawn_params_count_list)`: Exact count spawning
-- `register_goal_update_callback(callback)`: Register custom goal logic
-- `update_goals(dt)`: Execute goal update callback (called automatically by MultiRobotSimulationCore)
-- `get_agents()`: Access agent collection
+- `spawn_objects_grid(num_objects, grid_params, spawn_params)`: Create objects in grid pattern
+- `spawn_grid_mixed(num_objects, grid_params, spawn_params_list)`: Mixed type spawning
+- `spawn_grid_counts(grid_params, spawn_params_count_list)`: Exact count spawning
+- `spawn_objects_batch(params_list)`: Batch spawn with explicit poses
+
+##### AgentManager
+Extends SimObjectManager with `object_class=Agent`.
+
+**Additional Responsibilities:**
+- Goal management and update callbacks
+- Query moving/stopped agents
+
+**Convenience Aliases:**
+- `spawn_agents_grid(...)` → `spawn_objects_grid(...)`
+- `spawn_agents_grid_mixed(...)` → `spawn_grid_mixed(...)`
+- `spawn_agent_grid_counts(...)` → `spawn_grid_counts(...)`
+
+**Agent-Specific Methods:**
+- `register_callback(callback)`: Register custom goal logic
+- `set_goal_pose(agent_index, goal)`: Set goal for a specific agent
+- `get_moving_count()`: Count moving agents
 
 **Note:**
 - Agent.update() is automatically called by MultiRobotSimulationCore.step_once()

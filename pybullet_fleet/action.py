@@ -22,11 +22,12 @@ import pybullet as p
 from .geometry import Pose, Path
 from .types import ActionStatus, MovementDirection
 from . import tools
+from .logging_utils import get_named_lazy_logger
 
 if TYPE_CHECKING:
     from .sim_object import SimObject
 
-# Create logger for this module
+# Create logger for this module (for module-level use only)
 logger = logging.getLogger(__name__)
 
 # Note: ActionStatus and MovementDirection have been moved to types.py
@@ -77,6 +78,8 @@ class Action(ABC):
         self.start_time: Optional[float] = None
         self.end_time: Optional[float] = None
         self.error_message: Optional[str] = None
+        # Instance-level named logger with action class prefix
+        self._log = get_named_lazy_logger(__name__, prefix=f"[{self.__class__.__name__}]")
 
     @abstractmethod
     def execute(self, agent, dt: float) -> bool:
@@ -122,26 +125,25 @@ class Action(ABC):
         """Check if action has completed (successfully or with failure)."""
         return self.status in [ActionStatus.COMPLETED, ActionStatus.FAILED, ActionStatus.CANCELLED]
 
-    def _log_debug(self, message: str, agent_id: int = -1):
-        """Log debug message with action class name and agent ID prefix."""
-        if agent_id >= 0:
-            logger.debug(f"[Agent#{agent_id}][{self.__class__.__name__}] {message}")
-        else:
-            logger.debug(f"[{self.__class__.__name__}] {message}")
+    def _update_log_prefix(self, agent=None):
+        """Update log prefix using agent's identification.
 
-    def _log_info(self, message: str, agent_id: int = -1):
-        """Log info message with action class name and agent ID prefix."""
-        if agent_id >= 0:
-            logger.info(f"[Agent#{agent_id}][{self.__class__.__name__}] {message}")
-        else:
-            logger.info(f"[{self.__class__.__name__}] {message}")
+        Reuses the agent's log prefix (which includes object_id and name)
+        and appends the action class name.
 
-    def _log_error(self, message: str, agent_id: int = -1):
-        """Log error message with action class name and agent ID prefix."""
-        if agent_id >= 0:
-            logger.error(f"[Agent#{agent_id}][{self.__class__.__name__}] {message}")
-        else:
-            logger.error(f"[{self.__class__.__name__}] {message}")
+        Typically called once at action start (in :meth:`_log_start`)
+        since agent does not change during execution.
+
+        Format: ``[Agent:id:name:ActionClass] `` or ``[ActionClass] `` if no agent.
+        """
+        action_name = self.__class__.__name__
+        if agent is not None and hasattr(agent, "_log"):
+            # Reuse agent's prefix: "[Agent:3:robot_A] " -> "Agent:3:robot_A"
+            agent_prefix = agent._log.prefix.strip().strip("[]")
+            if agent_prefix:
+                self._log.set_prefix(f"[{agent_prefix}:{action_name}] ")
+                return
+        self._log.set_prefix(f"[{action_name}] ")
 
     def _log_start(self, agent=None):
         """
@@ -151,7 +153,7 @@ class Action(ABC):
         Args:
             agent: Agent instance (optional, for agent ID logging)
         """
-        agent_id = agent.object_id if agent is not None and hasattr(agent, "object_id") else -1
+        self._update_log_prefix(agent)
 
         # Get all dataclass fields if available
         if hasattr(self, "__dataclass_fields__"):
@@ -161,20 +163,12 @@ class Action(ABC):
                 # Skip private fields (starting with _) and init=False fields
                 if not field_name.startswith("_") and field_info.init:
                     value = getattr(self, field_name)
-                    # Format special types for readability
-                    if isinstance(value, Path):
-                        params[field_name] = f"Path({len(value.waypoints)} waypoints)"
-                    elif isinstance(value, Pose):
-                        params[field_name] = f"Pose({value.position[:2]}...)"
-                    elif isinstance(value, (list, tuple)) and len(value) > 3:
-                        params[field_name] = f"[{len(value)} items]"
-                    else:
-                        params[field_name] = value
+                    params[field_name] = value
 
             params_str = ", ".join(f"{k}={v}" for k, v in params.items())
-            self._log_info(f"START - {params_str}", agent_id=agent_id)
+            self._log.info(f"START - {params_str}")
         else:
-            self._log_info("START", agent_id=agent_id)
+            self._log.info("START")
 
     def _log_failure(self, reason: str, agent=None):
         """
@@ -184,10 +178,9 @@ class Action(ABC):
             reason: Failure reason
             agent: Agent instance (optional, for agent ID logging)
         """
-        agent_id = agent.object_id if agent is not None and hasattr(agent, "object_id") else -1
         self.error_message = reason
-        self._log_info(f"FAILED - {reason}", agent_id=agent_id)
-        self._log_error(f"Action failed: {reason}", agent_id=agent_id)
+        self._log.info(f"FAILED - {reason}")
+        self._log.error(f"Action failed: {reason}")
 
     def _log_phase_transition(self, phase, agent=None):
         """
@@ -197,8 +190,19 @@ class Action(ABC):
             phase: New phase (Enum)
             agent: Agent instance (optional, for agent ID logging)
         """
-        agent_id = agent.object_id if agent is not None and hasattr(agent, "object_id") else -1
-        self._log_info(f"Phase transition -> {phase.value.upper()}", agent_id=agent_id)
+        self._log.info(f"Phase transition -> {phase.value.upper()}")
+
+    def _log_end(self):
+        """Log action completion with duration.
+
+        Called when the action finishes successfully.
+        Logs at INFO level with the action's total duration.
+        """
+        duration = self.get_duration()
+        if duration is not None:
+            self._log.info(f"END - duration={duration:.2f}s")
+        else:
+            self._log.info("END")
 
 
 @dataclass
@@ -262,7 +266,7 @@ class MoveAction(Action):
             self.status = ActionStatus.COMPLETED
             self.end_time = agent.sim_core.sim_time if agent.sim_core else 0.0
 
-            self._log_debug(f"COMPLETED - duration={self.get_duration():.2f}s", agent_id=agent.object_id)
+            self._log_end()
             return True
 
         return False
@@ -308,7 +312,7 @@ class JointAction(Action):
         if agent.are_joints_at_targets(self.target_joint_positions, tolerance=self.tolerance):
             self.status = ActionStatus.COMPLETED
             self.end_time = agent.sim_core.sim_time if agent.sim_core else 0.0
-            self._log_debug(f"COMPLETED - reached joints, duration={self.get_duration():.2f}s")
+            self._log_end()
             return True
         return False
 
@@ -361,7 +365,7 @@ class WaitAction(Action):
         if self._elapsed_time >= self.duration:
             self.status = ActionStatus.COMPLETED
             self.end_time = agent.sim_core.sim_time if agent.sim_core else 0.0
-            self._log_debug(f"COMPLETED - type={self.action_type}, elapsed={self._elapsed_time:.2f}s")
+            self._log_end()
             return True
 
         return False
@@ -473,7 +477,7 @@ class PickAction(Action):
             self._log_start(agent)
 
             if isinstance(self.attach_link, str):
-                self._log_debug(f"Resolved link '{self.attach_link}' to index {self._attach_link_index}")
+                self._log.debug(f"Resolved link '{self.attach_link}' to index {self._attach_link_index}")
 
         # Phase 1: Initialize - find target object and calculate poses
         if self._phase == PickPhase.INIT:
@@ -493,7 +497,7 @@ class PickAction(Action):
 
             obj_pos = self._target_object.get_pose().position
             pick_pos = self._pick_pose.position
-            self._log_info(f"Object at {obj_pos[:2]}, pick pose at {pick_pos[:2]}", agent_id=agent.object_id)
+            self._log.info(f"Object at {obj_pos[:2]}, pick pose at {pick_pos[:2]}")
 
             if self.use_approach:
                 # Calculate or use approach pose
@@ -501,30 +505,26 @@ class PickAction(Action):
                     self.approach_pose = self._calculate_approach_pose(agent)
 
                 approach_pos = self.approach_pose.position
-                self._log_info(
-                    f"Approach pose at {approach_pos[:2]} (offset={self.approach_offset:.3f}m)", agent_id=agent.object_id
-                )
+                self._log.info(f"Approach pose at {approach_pos[:2]} (offset={self.approach_offset:.3f}m)")
 
                 # Create move action for approach (move forward)
                 approach_path = Path([self.approach_pose])
                 self._approach_action = MoveAction(path=approach_path, auto_approach=True, final_orientation_align=True)
                 self._phase = PickPhase.APPROACHING
                 self._log_phase_transition(PickPhase.APPROACHING, agent)
-                self._log_info(f"Target object {self._target_object.body_id} found, approaching...", agent_id=agent.object_id)
+                self._log.info(f"Target object {self._target_object.body_id} found, approaching...")
             else:
                 # Skip approach, go directly to moving to pick pose
                 self._phase = PickPhase.MOVING_TO_PICK
                 self._log_phase_transition(PickPhase.MOVING_TO_PICK, agent)
-                self._log_info(
-                    f"Target object {self._target_object.body_id} found, moving to pick position...", agent_id=agent.object_id
-                )
+                self._log.info(f"Target object {self._target_object.body_id} found, moving to pick position...")
 
         # Phase 2: Approach target (move forward to approach_pose)
         if self._phase == PickPhase.APPROACHING:
             if self._approach_action.execute(agent, dt):
                 self._phase = PickPhase.MOVING_TO_PICK
                 self._log_phase_transition(PickPhase.MOVING_TO_PICK, agent)
-                self._log_info("Reached approach pose, moving to pick position...", agent_id=agent.object_id)
+                self._log.info("Reached approach pose, moving to pick position...")
 
         # Phase 3: Move forward to pick pose
         if self._phase == PickPhase.MOVING_TO_PICK:
@@ -538,12 +538,12 @@ class PickAction(Action):
                 current_pos = agent.get_pose().position
                 pick_pos = self._pick_pose.position
                 distance = np.linalg.norm(np.array(pick_pos[:2]) - np.array(current_pos[:2]))
-                self._log_info(f"Moving forward {distance:.3f}m to pick pose...", agent_id=agent.object_id)
+                self._log.info(f"Moving forward {distance:.3f}m to pick pose...")
 
             if self._forward_action.execute(agent, dt):
                 self._phase = PickPhase.PICKING
                 self._log_phase_transition(PickPhase.PICKING, agent)
-                self._log_info("Reached pick position, picking...", agent_id=agent.object_id)
+                self._log.info("Reached pick position, picking...")
 
         # Phase 4: Pick object (with optional joint control)
         if self._phase == PickPhase.PICKING:
@@ -584,9 +584,8 @@ class PickAction(Action):
                     current_pos = agent.get_pose().position
                     approach_pos = self.approach_pose.position
                     retreat_distance = np.linalg.norm(np.array(approach_pos[:2]) - np.array(current_pos[:2]))
-                    self._log_info(
-                        f"Successfully picked object {self._target_object.body_id}, retreating {retreat_distance:.3f}m...",
-                        agent_id=agent.object_id,
+                    self._log.info(
+                        f"Successfully picked object {self._target_object.body_id}, retreating {retreat_distance:.3f}m..."
                     )
 
                     retreat_path = Path([self.approach_pose])
@@ -602,10 +601,7 @@ class PickAction(Action):
                     # No approach, complete immediately
                     self.status = ActionStatus.COMPLETED
                     self.end_time = agent.sim_core.sim_time if agent.sim_core else 0.0
-                    self._log_debug(
-                        f"COMPLETED - object_id={self._target_object.body_id}, duration={self.get_duration():.2f}s"
-                    )
-                    self._log_info(f"Successfully picked object {self._target_object.body_id}", agent_id=agent.object_id)
+                    self._log_end()
                     return True
             else:
                 self.status = ActionStatus.FAILED
@@ -618,8 +614,7 @@ class PickAction(Action):
             if self._retreat_action.execute(agent, dt):
                 self.status = ActionStatus.COMPLETED
                 self.end_time = agent.sim_core.sim_time if agent.sim_core else 0.0
-                self._log_debug(f"COMPLETED - object_id={self._target_object.body_id}, duration={self.get_duration():.2f}s")
-                self._log_info("Returned to approach pose", agent_id=agent.object_id)
+                self._log_end()
                 return True
 
         return False
@@ -698,8 +693,6 @@ class PickAction(Action):
         self._pick_pose = None
         self._joint_action = None
 
-    pass
-
 
 @dataclass
 class DropAction(Action):
@@ -712,38 +705,39 @@ class DropAction(Action):
     3. Teleport object to drop position
 
     Args:
-        drop_position: Where to drop the object [x, y, z] (required)
-        drop_orientation: Orientation as quaternion [x, y, z, w] (optional)
+        drop_pose: Where to drop the object (position and orientation).
+                  Orientation defaults to no rotation ``[0, 0, 0, 1]``.
         approach_pose: Explicit approach pose (optional, auto-calculated if None)
         approach_offset: Auto-calculate approach offset distance (default: 0.2m)
         place_gently: Place at exact position vs drop from height (default: True)
-        drop_height: Height above drop_position to release if not gentle (default: 0.1m)
+        drop_height: Height above drop_pose to release if not gentle (default: 0.1m)
         target_object_id: Specific object to drop (None = drop first attached)
-        path_visualize: Whether to visualize approach/drop paths (default: None = use agent's setting)
-        path_color: RGB color for path visualization (default: None = yellow for drop)
-        path_width: Line width for path visualization (default: None = use agent's setting)
 
     Example:
         # Drop at specific location
         action = DropAction(
-            drop_position=[10, 5, 0.1],
+            drop_pose=Pose(position=[10, 5, 0.1]),
             place_gently=True
         )
         agent.add_action(action)
+
+        # Drop with specific orientation
+        action = DropAction(
+            drop_pose=Pose(position=[10, 5, 0.1], orientation=[0, 0, 0.7, 0.7]),
+        )
 
     Note:
         Path visualization is controlled by agent.path_visualize setting.
     """
 
     # Drop location (required)
-    drop_position: List[float]
-    drop_orientation: Optional[List[float]] = None
+    drop_pose: Pose
 
     # Approach configuration
     use_approach: bool = True  # Whether to use approach phase
     approach_pose: Optional[Pose] = None  # Explicit approach pose (if None, auto-calculated)
     approach_offset: float = 1.0  # Distance from target for approach pose (used if approach_pose is None)
-    drop_offset: float = 0.0  # Distance from drop_position where drop is executed (0 = at drop_position)
+    drop_offset: float = 0.0  # Distance from drop_pose where drop is executed (0 = at drop_pose)
 
     # Drop behavior
     place_gently: bool = True
@@ -770,8 +764,6 @@ class DropAction(Action):
     def __post_init__(self):
         super().__init__()
 
-    pass
-
     def execute(self, agent, dt: float) -> bool:
         """Execute drop action."""
         if self.status == ActionStatus.NOT_STARTED:
@@ -797,9 +789,9 @@ class DropAction(Action):
             # Calculate drop pose (where drop is executed)
             self._drop_pose = self._calculate_drop_pose(agent)
 
-            target_pos = self.drop_position
+            target_pos = self.drop_pose.position
             drop_pos = self._drop_pose.position
-            self._log_info(f"Target at {target_pos[:2]}, drop pose at {drop_pos[:2]}", agent_id=agent.object_id)
+            self._log.info(f"Target at {target_pos[:2]}, drop pose at {drop_pos[:2]}")
 
             if self.use_approach:
                 # Calculate or use approach pose
@@ -807,28 +799,26 @@ class DropAction(Action):
                     self.approach_pose = self._calculate_approach_pose(agent)
 
                 approach_pos = self.approach_pose.position
-                self._log_info(
-                    f"Approach pose at {approach_pos[:2]} (offset={self.approach_offset:.3f}m)", agent_id=agent.object_id
-                )
+                self._log.info(f"Approach pose at {approach_pos[:2]} (offset={self.approach_offset:.3f}m)")
 
                 # Create move action for approach (move forward)
                 approach_path = Path([self.approach_pose])
                 self._approach_action = MoveAction(path=approach_path, auto_approach=True, final_orientation_align=True)
                 self._phase = DropPhase.APPROACHING
                 self._log_phase_transition(DropPhase.APPROACHING, agent)
-                self._log_info("Approaching drop position...", agent_id=agent.object_id)
+                self._log.info("Approaching drop position...")
             else:
                 # Skip approach, go directly to moving to drop pose
                 self._phase = DropPhase.MOVING_TO_DROP
                 self._log_phase_transition(DropPhase.MOVING_TO_DROP, agent)
-                self._log_info("Moving to drop position...", agent_id=agent.object_id)
+                self._log.info("Moving to drop position...")
 
         # Phase 2: Approach drop position (move forward to approach_pose)
         if self._phase == DropPhase.APPROACHING:
             if self._approach_action.execute(agent, dt):
                 self._phase = DropPhase.MOVING_TO_DROP
                 self._log_phase_transition(DropPhase.MOVING_TO_DROP, agent)
-                self._log_info("Reached approach pose, moving to drop position...", agent_id=agent.object_id)
+                self._log.info("Reached approach pose, moving to drop position...")
 
         # Phase 3: Move forward to drop pose
         if self._phase == DropPhase.MOVING_TO_DROP:
@@ -841,12 +831,12 @@ class DropAction(Action):
                 current_pos = agent.get_pose().position
                 drop_pos = self._drop_pose.position
                 distance = np.linalg.norm(np.array(drop_pos[:2]) - np.array(current_pos[:2]))
-                self._log_info(f"Moving forward {distance:.3f}m to drop pose...", agent_id=agent.object_id)
+                self._log.info(f"Moving forward {distance:.3f}m to drop pose...")
 
             if self._forward_action.execute(agent, dt):
                 self._phase = DropPhase.DROPPING
                 self._log_phase_transition(DropPhase.DROPPING, agent)
-                self._log_info("Reached drop position, dropping...", agent_id=agent.object_id)
+                self._log.info("Reached drop position, dropping...")
 
         # Phase 4: Drop object (with optional joint control)
         if self._phase == DropPhase.DROPPING:
@@ -868,24 +858,19 @@ class DropAction(Action):
                 self.status = ActionStatus.FAILED
                 self._log_failure("Failed to detach object", agent)
                 self.end_time = agent.sim_core.sim_time if agent.sim_core else 0.0
-                self._log_info(f"Failed: {self.error_message}", agent_id=agent.object_id)
+                self._log.info(f"Failed: {self.error_message}")
                 return True
 
-            # Calculate final drop pose
+            # Calculate final drop position
+            drop_pos = self.drop_pose.position
             if self.place_gently:
-                final_position = self.drop_position
+                final_position = drop_pos
             else:
                 # Drop from height
-                final_position = [self.drop_position[0], self.drop_position[1], self.drop_position[2] + self.drop_height]
-
-            # Determine orientation
-            if self.drop_orientation is None:
-                drop_orientation = [0, 0, 0, 1]  # Default: no rotation
-            else:
-                drop_orientation = self.drop_orientation
+                final_position = [drop_pos[0], drop_pos[1], drop_pos[2] + self.drop_height]
 
             # Teleport object to drop position
-            self._target_object.set_pose_raw(final_position, drop_orientation)
+            self._target_object.set_pose_raw(final_position, self.drop_pose.orientation)
 
             # If not placing gently, give object a small downward velocity
             if not self.place_gently:
@@ -896,9 +881,8 @@ class DropAction(Action):
                 current_pos = agent.get_pose().position
                 approach_pos = self.approach_pose.position
                 retreat_distance = np.linalg.norm(np.array(approach_pos[:2]) - np.array(current_pos[:2]))
-                self._log_info(
-                    f"Successfully dropped object {self._target_object.body_id}, retreating {retreat_distance:.3f}m...",
-                    agent_id=agent.object_id,
+                self._log.info(
+                    f"Successfully dropped object {self._target_object.body_id}, retreating {retreat_distance:.3f}m..."
                 )
 
                 # Use visualization settings from action or agent defaults
@@ -916,8 +900,7 @@ class DropAction(Action):
                 # No approach, complete immediately
                 self.status = ActionStatus.COMPLETED
                 self.end_time = agent.sim_core.sim_time if agent.sim_core else 0.0
-                self._log_debug(f"COMPLETED - object_id={self._target_object.body_id}, duration={self.get_duration():.2f}s")
-                self._log_info(f"Successfully dropped object {self._target_object.body_id}", agent_id=agent.object_id)
+                self._log_end()
                 return True
 
         # Phase 5: Retreat to approach pose (move backward)
@@ -925,8 +908,7 @@ class DropAction(Action):
             if self._retreat_action.execute(agent, dt):
                 self.status = ActionStatus.COMPLETED
                 self.end_time = agent.sim_core.sim_time if agent.sim_core else 0.0
-                self._log_debug(f"COMPLETED - object_id={self._target_object.body_id}, duration={self.get_duration():.2f}s")
-                self._log_info("Returned to approach pose", agent_id=agent.object_id)
+                self._log_end()
                 return True
 
         return False
@@ -951,18 +933,18 @@ class DropAction(Action):
             return True
 
     def _calculate_drop_pose(self, agent) -> Pose:
-        """Calculate pose where drop is executed (drop_offset away from drop_position)."""
+        """Calculate pose where drop is executed (drop_offset away from drop_pose)."""
         return tools.calculate_offset_pose(
-            target_position=self.drop_position,
+            target_position=self.drop_pose.position,
             current_position=agent.get_pose().position,
             offset=self.drop_offset,
             keep_height=True,
         )
 
     def _calculate_approach_pose(self, agent) -> Pose:
-        """Calculate approach pose based on drop position."""
+        """Calculate approach pose based on drop pose."""
         return tools.calculate_offset_pose(
-            target_position=self.drop_position,
+            target_position=self.drop_pose.position,
             current_position=agent.get_pose().position,
             offset=self.approach_offset,
             keep_height=True,

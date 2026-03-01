@@ -139,10 +139,16 @@ Manager for creating and coordinating multiple agents.
 - Multi-agent management
 - Goal update callback system
 
-**Spawning Methods:**
-- `spawn_agents_grid()`: Spawn single agent type in grid
-- `spawn_agents_grid_mixed()`: Spawn mixed agent types with probabilities
-- `spawn_agent_grid_counts()`: Spawn specific counts for each type
+**Spawning Methods (SimObjectManager base — works on both managers):**
+- `spawn_objects_grid()`: Spawn single type in grid
+- `spawn_grid_mixed()`: Spawn mixed types with probabilities
+- `spawn_grid_counts()`: Spawn specific counts for each type
+- `spawn_objects_batch()`: Batch spawn with explicit poses
+
+**AgentManager convenience aliases:**
+- `spawn_agents_grid()` → `spawn_objects_grid()`
+- `spawn_agents_grid_mixed()` → `spawn_grid_mixed()`
+- `spawn_agent_grid_counts()` → `spawn_grid_counts()`
 
 
 ## Examples

@@ -2,11 +2,20 @@
 """
 Logging utilities with lazy evaluation for expensive operations.
 
-This module provides logging wrappers that prevent expensive string formatting
-when the log level is not enabled, similar to the pattern used in action.py.
+Design intent & usage policy:
+- The standard Python logger always evaluates f-strings and expensive computations, even if the log level is disabled.
+- LazyLogger/NamedLazyLogger allow you to pass a lambda, so the message is only evaluated if the log level is enabled.
+- This prevents unnecessary computation and side effects, improving performance.
+
+Usage policy:
+- For lightweight constants or simple strings, pass them directly (no lambda needed).
+- For expensive computations or side effects, always wrap in a lambda.
+- Both are supported for flexibility and easier migration from standard logging.
+
+See test_logging_utils.py for more usage and test examples.
 """
 import logging
-from typing import Callable, Union, Tuple
+from typing import Callable, Union
 
 
 class LazyLogger:
@@ -94,6 +103,98 @@ class LazyLogger:
         return self._logger.isEnabledFor(level)
 
 
+class NamedLazyLogger(LazyLogger):
+    """
+    LazyLogger with a dynamic prefix for instance-level identification.
+
+    Designed for SimObject/Agent/Action instances where each log line
+    should include identifiers like object_id and name, without
+    manually embedding them in every log call.
+
+    The prefix can be updated at any time via :meth:`set_prefix` (e.g.
+    after ``object_id`` is assigned by sim_core).
+
+    Usage::
+
+        # In SimObject.__init__
+        self._log = NamedLazyLogger(__name__)
+        self._log.set_prefix(f"[obj:{self.object_id}] ")
+
+        # In Agent.__init__ (after super().__init__)
+        self._log.set_prefix(f"[Agent:{self.object_id}:{self.name}] ")
+
+        # Log calls — prefix is prepended automatically
+        self._log.info("Path complete")
+        # => [Agent:3:robot_A] Path complete
+
+        self._log.debug(lambda: f"pos={self.get_pose().position[:2]}")
+        # => [Agent:3:robot_A] pos=[1.0, 2.0]   (only evaluated if DEBUG enabled)
+
+    Note:
+        The prefix is stored as a plain string and prepended inside
+        ``_log_lazy`` only when the level is enabled, so the cost is
+        negligible when the message is filtered out.
+    """
+
+    def __init__(self, name: str = None, logger: logging.Logger = None, prefix: str = ""):
+        """
+        Initialize NamedLazyLogger.
+
+        Args:
+            name: Logger name (passed to logging.getLogger)
+            logger: Existing logger instance (alternative to name)
+            prefix: Initial prefix string (default: "")
+        """
+        super().__init__(name=name, logger=logger)
+        self._prefix = prefix
+
+    def set_prefix(self, prefix: str):
+        """
+        Update the prefix prepended to every log message.
+
+        Call this whenever the identifying information changes
+        (e.g. after object_id is assigned).
+
+        Args:
+            prefix: New prefix string (include trailing space if desired)
+        """
+        self._prefix = prefix
+
+    @property
+    def prefix(self) -> str:
+        """Get current prefix string."""
+        return self._prefix
+
+    def _log_lazy(self, level: int, msg_func: Callable[[], str], *args, **kwargs):
+        """Override to prepend prefix to every message."""
+        if self._logger.isEnabledFor(level):
+            message = msg_func() if callable(msg_func) else msg_func
+            self._logger.log(level, f"{self._prefix}{message}", *args, **kwargs)
+
+
+def get_named_lazy_logger(name: str, prefix: str = "") -> NamedLazyLogger:
+    """
+    Get a NamedLazyLogger instance.
+
+    This is the recommended way to create instance-level loggers for
+    SimObject / Agent / Action classes.
+
+    Args:
+        name: Logger name (typically __name__)
+        prefix: Initial prefix (default: "")
+
+    Returns:
+        NamedLazyLogger instance
+
+    Example::
+
+        # In __init__
+        self._log = get_named_lazy_logger(__name__, f"[Agent:{self.object_id}] ")
+        self._log.debug(lambda: f"pos={pos}")
+    """
+    return NamedLazyLogger(name=name, prefix=prefix)
+
+
 def get_lazy_logger(name: str) -> LazyLogger:
     """
     Get a LazyLogger instance for the given name.
@@ -129,39 +230,3 @@ def wrap_existing_logger(logger: logging.Logger) -> LazyLogger:
         lazy_logger.debug(lambda: f"Array: {arr}")
     """
     return LazyLogger(logger=logger)
-
-
-# Convenience function for quick migration
-def migrate_logger(logger_name: str = None, logger_instance: logging.Logger = None) -> Tuple[logging.Logger, LazyLogger]:
-    """
-    Create both standard and lazy logger for gradual migration.
-
-    This allows existing code to continue using the standard logger
-    while new code can use the lazy logger.
-
-    Args:
-        logger_name: Logger name (for new logger)
-        logger_instance: Existing logger instance
-
-    Returns:
-        Tuple of (standard_logger, lazy_logger)
-
-    Example:
-        logger, lazy_logger = migrate_logger(__name__)
-
-        # Existing code (unchanged)
-        logger.info("Simple message")
-
-        # New code (lazy evaluation)
-        lazy_logger.debug(lambda: f"Expensive: {arr}")
-    """
-    if logger_instance is not None:
-        standard = logger_instance
-        lazy = wrap_existing_logger(logger_instance)
-    elif logger_name is not None:
-        standard = logging.getLogger(logger_name)
-        lazy = get_lazy_logger(logger_name)
-    else:
-        raise ValueError("Either logger_name or logger_instance must be provided")
-
-    return standard, lazy
