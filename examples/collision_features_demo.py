@@ -367,9 +367,9 @@ def main():
         multi_cell_threshold=MULTI_CELL_THRESHOLD,
         # Visualization settings
         enable_collision_color_change=True,  # Enable collision visualization
-        enable_collision_shapes=False,  # Normal mesh display initially (press 'c' to toggle wireframe)
+        enable_collision_shapes=False,  # Normal mesh display initially (press 'w' to toggle wireframe)
         # Performance settings
-        enable_profiling=True,
+        enable_time_profiling=True,
         # Simulation settings
         duration=args.duration,
         timestep=0.01,
@@ -382,7 +382,6 @@ def main():
 
     # Enable collision visualization controls
     sim_core.configure_visualizer(
-        enable_collision_shapes=False,  # Normal mesh display initially
         enable_structure_transparency=False,
         enable_shadows=True,
     )

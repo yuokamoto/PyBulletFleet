@@ -15,6 +15,7 @@ This module tests:
 """
 
 import os
+from typing import Optional
 
 import numpy as np
 import pybullet as p
@@ -317,6 +318,90 @@ class TestAgentCreationFromMesh:
         )
 
         assert agent1.body_id != agent2.body_id
+
+    def test_from_mesh_collision_mode_passed_through_init(self, pybullet_env):
+        """Agent.from_mesh should pass collision_mode through __init__ to SimObject.__init__.
+
+        Previously, Agent.__init__ did NOT forward collision_mode to super().__init__(),
+        so add_object always received NORMAL_3D, then from_mesh called set_collision_mode
+        to fix it – a wasteful 2-step transition.  After the fix, add_object should
+        receive the correct collision_mode directly and _update_object_collision_mode
+        should NOT be called during from_mesh.
+        """
+
+        class TrackingSimCore:
+            """Mock that records collision_mode at add_object time and
+            tracks _update_object_collision_mode calls."""
+
+            def __init__(self):
+                self._next_object_id = 0
+                self.sim_time = 0.0
+                self._kinematic_objects = set()
+                self.collision_mode_at_add: Optional[CollisionMode] = None
+                self.update_collision_mode_calls = []
+
+            def add_object(self, obj):
+                self.collision_mode_at_add = obj.collision_mode
+
+            def _update_object_collision_mode(self, object_id, old_mode, new_mode):
+                self.update_collision_mode_calls.append((object_id, old_mode, new_mode))
+
+            def _mark_object_moved(self, object_id):
+                pass
+
+        tracker = TrackingSimCore()
+        agent = Agent.from_mesh(
+            visual_shape=ShapeParams(shape_type="mesh", mesh_path=MESH_PATH, mesh_scale=[0.2, 0.2, 0.2]),
+            collision_shape=ShapeParams(shape_type="box", half_extents=[0.1, 0.1, 0.1]),
+            collision_mode=CollisionMode.STATIC,
+            sim_core=tracker,
+        )
+
+        # add_object should have been called with collision_mode already set to STATIC
+        assert (
+            tracker.collision_mode_at_add == CollisionMode.STATIC
+        ), f"add_object received collision_mode={tracker.collision_mode_at_add}, expected STATIC"
+        # set_collision_mode should NOT have been called (no transition needed)
+        assert (
+            len(tracker.update_collision_mode_calls) == 0
+        ), f"_update_object_collision_mode was called {len(tracker.update_collision_mode_calls)} times, expected 0"
+        # Final collision_mode should be STATIC
+        assert agent.collision_mode == CollisionMode.STATIC
+
+    def test_from_urdf_collision_mode_passed_through_init(self, pybullet_env):
+        """Same as mesh test but for URDF path."""
+
+        class TrackingSimCore:
+            def __init__(self):
+                self._next_object_id = 0
+                self.sim_time = 0.0
+                self._kinematic_objects = set()
+                self.collision_mode_at_add: Optional[CollisionMode] = None
+                self.update_collision_mode_calls = []
+
+            def add_object(self, obj):
+                self.collision_mode_at_add = obj.collision_mode
+
+            def _update_object_collision_mode(self, object_id, old_mode, new_mode):
+                self.update_collision_mode_calls.append((object_id, old_mode, new_mode))
+
+            def _mark_object_moved(self, object_id):
+                pass
+
+        tracker = TrackingSimCore()
+        agent = Agent.from_urdf(
+            urdf_path="robots/mobile_robot.urdf",
+            collision_mode=CollisionMode.STATIC,
+            sim_core=tracker,
+        )
+
+        assert (
+            tracker.collision_mode_at_add == CollisionMode.STATIC
+        ), f"add_object received collision_mode={tracker.collision_mode_at_add}, expected STATIC"
+        assert (
+            len(tracker.update_collision_mode_calls) == 0
+        ), f"_update_object_collision_mode was called {len(tracker.update_collision_mode_calls)} times, expected 0"
+        assert agent.collision_mode == CollisionMode.STATIC
 
 
 class TestAgentCreationFromURDF:

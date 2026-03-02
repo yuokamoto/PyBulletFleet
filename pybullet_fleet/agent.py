@@ -186,6 +186,7 @@ class Agent(SimObject):
         max_angular_accel: Union[float, List[float]] = 10.0,
         motion_mode: Union[MotionMode, str] = MotionMode.OMNIDIRECTIONAL,
         use_fixed_base: bool = False,
+        collision_mode: CollisionMode = CollisionMode.NORMAL_3D,
         sim_core=None,
         name: Optional[str] = None,
         user_data: Optional[Dict[str, Any]] = None,
@@ -202,6 +203,7 @@ class Agent(SimObject):
             max_angular_accel: Maximum angular acceleration (rad/s²) - float or [yaw, pitch, roll] for per-axis limits
             motion_mode: MotionMode.OMNIDIRECTIONAL or MotionMode.DIFFERENTIAL drive
             use_fixed_base: If True, robot base is fixed and doesn't move
+            collision_mode: Collision detection mode (default: NORMAL_3D)
             sim_core: Reference to simulation core (optional)
 
         Note:
@@ -209,8 +211,9 @@ class Agent(SimObject):
             For mesh robots, use Agent.from_mesh() factory method.
             For URDF robots, use Agent.from_urdf() factory method.
         """
-        # Initialize SimObject base class
-        super().__init__(body_id, sim_core=sim_core, name=name, user_data=user_data)
+        # Initialize SimObject base class (collision_mode is forwarded so
+        # add_object receives the correct mode directly – no post-hoc transition)
+        super().__init__(body_id, sim_core=sim_core, collision_mode=collision_mode, name=name, user_data=user_data)
 
         self.urdf_path = urdf_path
 
@@ -509,6 +512,8 @@ class Agent(SimObject):
         )
 
         # Create agent instance with Agent-specific parameters
+        # collision_mode is passed through __init__ -> super().__init__() -> add_object
+        # so the object is registered with the correct mode directly (no post-hoc transition)
         agent = cls(
             body_id=body_id,
             max_linear_vel=max_linear_vel,
@@ -517,13 +522,11 @@ class Agent(SimObject):
             max_angular_accel=max_angular_accel,
             motion_mode=motion_mode,
             use_fixed_base=use_fixed_base,
+            collision_mode=collision_mode,
             sim_core=sim_core,
             name=name,
             user_data=user_data,
         )
-
-        # Set collision mode (must be done after __init__ which calls add_object)
-        agent.set_collision_mode(collision_mode)
 
         return agent
 
@@ -592,6 +595,7 @@ class Agent(SimObject):
                 p.changeDynamics(body_id, joint_idx, mass=0.0)
 
         # Create agent instance (SimObject.__init__ handles auto-registration)
+        # collision_mode is passed through __init__ -> super().__init__() -> add_object
         agent = cls(
             body_id=body_id,
             urdf_path=urdf_path,
@@ -601,13 +605,11 @@ class Agent(SimObject):
             max_angular_accel=max_angular_accel,
             motion_mode=motion_mode,
             use_fixed_base=use_fixed_base,
+            collision_mode=collision_mode,
             sim_core=sim_core,
             name=name,
             user_data=user_data,
         )
-
-        # Set collision mode (must be done after __init__ which calls add_object)
-        agent.set_collision_mode(collision_mode)
 
         return agent
 

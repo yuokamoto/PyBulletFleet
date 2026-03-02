@@ -36,12 +36,13 @@ enable_monitor_gui: true
 log_level: info
 
 # Camera
-camera_mode: manual
-camera_view_type: perspective
-camera_distance: 20.0
-camera_yaw: 45
-camera_pitch: -30
-camera_target: [5, 5, 0]
+camera:
+  camera_mode: manual
+  camera_view_type: perspective
+  camera_distance: 20.0
+  camera_yaw: 45
+  camera_pitch: -30
+  camera_target: [5, 5, 0]
 
 # Visualizer
 enable_visual_shapes: true

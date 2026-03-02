@@ -93,7 +93,7 @@ class TestMemoryProfiling:
             "gui": False,
             "physics": False,
             "monitor": False,
-            "enable_profiling": True,  # Time profiling
+            "enable_time_profiling": True,  # Time profiling
             "enable_memory_profiling": True,  # Memory profiling
             "profiling_interval": 10,
         }
@@ -105,7 +105,7 @@ class TestMemoryProfiling:
             sim.step_once()
 
         # Both profiling features should work
-        assert sim.enable_profiling is True
+        assert sim._enable_time_profiling is True
         assert sim.enable_memory_profiling is True
 
         # Memory usage should be available

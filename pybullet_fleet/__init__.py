@@ -21,7 +21,6 @@ from pybullet_fleet.agent_manager import AgentManager, GridSpawnParams
 
 # Core simulation classes
 from pybullet_fleet.core_simulation import (
-    LogLevelManager,
     MultiRobotSimulationCore,
     SimulationParams,
 )
@@ -46,7 +45,6 @@ __all__ = [
     "SimulationParams",
     "SpatialHashCellSizeMode",
     "SimObject",
-    "LogLevelManager",
     # Agent management
     "Agent",
     "AgentSpawnParams",

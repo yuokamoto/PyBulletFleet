@@ -159,18 +159,18 @@ log_level: debug
 # ========================================
 # Camera Settings
 # ========================================
+camera:
+  # Camera mode: 'manual' (use fixed values), 'auto', or 'none' (no camera setup)
+  camera_mode: manual
 
-# Camera mode: 'manual' (use fixed values) or 'none' (no camera setup)
-camera_mode: manual
+  # Camera view type: 'top_down' or 'perspective'
+  camera_view_type: perspective
 
-# Camera view type: 'top_down' or 'perspective'
-camera_view_type: perspective
-
-# Manual camera settings
-camera_distance: 20.0      # Distance from target (meters)
-camera_yaw: 45             # Horizontal angle (degrees)
-camera_pitch: -30          # Vertical angle (degrees)
-camera_target: [5, 5, 0]   # Target position [x, y, z]
+  # Manual camera settings
+  camera_distance: 20.0      # Distance from target (meters)
+  camera_yaw: 45             # Horizontal angle (degrees)
+  camera_pitch: -30          # Vertical angle (degrees)
+  camera_target: [5, 5, 0]   # Target position [x, y, z]
 
 # ========================================
 # Visualizer Settings

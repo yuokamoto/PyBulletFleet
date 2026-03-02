@@ -7,9 +7,13 @@ monitoring, and log control for various robots, pallets, and meshes.
 """
 
 import logging
+import math
 import os
+import statistics
 import time
 import tracemalloc  # Memory profiling (imported once at module level)
+from collections import deque
+from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 
 import numpy as np
@@ -22,6 +26,7 @@ import yaml
 
 from pybullet_fleet.collision_visualizer import CollisionVisualizer
 from pybullet_fleet.data_monitor import DataMonitor
+from pybullet_fleet.logging_utils import get_lazy_logger
 from pybullet_fleet.sim_object import SimObject
 from pybullet_fleet.agent import Agent
 from pybullet_fleet.types import SpatialHashCellSizeMode, CollisionDetectionMethod, CollisionMode
@@ -33,28 +38,57 @@ if "PYBULLET_LOG_LEVEL" in os.environ:
 
 logging.basicConfig(level=logging.getLevelName(GLOBAL_LOG_LEVEL), format="%(asctime)s %(levelname)s %(message)s")
 
-# Create module logger
-logger = logging.getLogger(__name__)
+# Create module logger (LazyLogger: avoids expensive f-string evaluation when log level is disabled)
+logger = get_lazy_logger(__name__)
 
 
-# Log level management class
-
-
-class LogLevelManager:
-    @staticmethod
-    def set_global_log_level(level_str: str) -> None:
-        global GLOBAL_LOG_LEVEL
-        level_name = str(level_str).upper()
-        GLOBAL_LOG_LEVEL = level_name
-        logging.getLogger().setLevel(logging.getLevelName(level_name))
-
-    @staticmethod
-    def set_log_level_from_params(params: "SimulationParams") -> None:
-        level_str = getattr(params, "log_level", GLOBAL_LOG_LEVEL)
-        LogLevelManager.set_global_log_level(level_str)
-
-
+@dataclass
 class SimulationParams:
+    """Simulation configuration parameters.
+
+    All fields have sensible defaults for headless kinematics-based simulation.
+    Use ``from_config`` / ``from_dict`` to load from YAML files.
+    """
+
+    speed: float = 1.0  # speed=0 means maximum speed (no sleep)
+    timestep: float = 1.0 / 240.0
+    duration: float = 0
+    gui: bool = True
+    physics: bool = False
+    monitor: bool = True
+    enable_monitor_gui: bool = True
+    collision_check_frequency: Optional[float] = None
+    log_level: str = "warn"
+    max_steps_per_frame: int = 10  # Maximum simulation steps per rendering frame
+    gui_min_fps: int = 30  # Minimum FPS for GUI responsiveness (default: 30 FPS = 33ms)
+    # Visualizer settings
+    enable_collision_shapes: bool = False
+    enable_structure_transparency: bool = False
+    enable_shadows: bool = True
+    enable_gui_panel: bool = False
+    ignore_static_collision: bool = True
+    enable_time_profiling: bool = False
+    profiling_interval: int = 100  # Steps between profiling reports
+    enable_memory_profiling: bool = False  # Memory profiling switch
+    enable_collision_color_change: bool = False
+    spatial_hash_cell_size_mode: SpatialHashCellSizeMode = SpatialHashCellSizeMode.AUTO_INITIAL
+    spatial_hash_cell_size: Optional[float] = None  # Fixed cell size (for mode=CONSTANT)
+    collision_detection_method: Optional[CollisionDetectionMethod] = None  # Auto-select based on physics
+    collision_margin: float = 0.02  # Safety clearance for getClosestPoints (meters, default: 2cm)
+    multi_cell_threshold: float = 1.5  # Threshold multiplier for multi-cell registration (>= 1.0)
+    camera_config: Optional[Dict[str, Any]] = None  # Camera configuration from config file
+
+    def __post_init__(self) -> None:
+        # Auto-select collision detection method based on physics mode if not explicitly set
+        if self.collision_detection_method is None:
+            # Physics ON: use CONTACT_POINTS (actual contact manifold)
+            # Physics OFF: use CLOSEST_POINTS (distance-based, kinematics-safe)
+            self.collision_detection_method = (
+                CollisionDetectionMethod.CONTACT_POINTS if self.physics else CollisionDetectionMethod.CLOSEST_POINTS
+            )
+        # Ensure camera_config is always a dict (avoid mutable default)
+        if self.camera_config is None:
+            self.camera_config = {}
 
     @classmethod
     def from_config(cls, config_path: str = "config.yaml") -> "SimulationParams":
@@ -91,7 +125,7 @@ class SimulationParams:
             enable_shadows=config.get("enable_shadows", True),
             enable_gui_panel=config.get("enable_gui_panel", False),  # Default: hide GUI panel
             ignore_static_collision=config.get("ignore_static_collision", True),
-            enable_profiling=config.get("enable_profiling", False),
+            enable_time_profiling=config.get("enable_time_profiling", False),
             profiling_interval=config.get("profiling_interval", 100),
             enable_memory_profiling=config.get("enable_memory_profiling", False),
             enable_collision_color_change=config.get("enable_collision_color_change", False),
@@ -108,72 +142,6 @@ class SimulationParams:
             camera_config=config.get("camera", {}),  # Camera configuration
         )
 
-    def __init__(
-        self,
-        num_robots: int = 10,
-        speed: float = 1.0,
-        timestep: float = 1.0 / 240.0,
-        duration: float = 0,
-        gui: bool = True,
-        physics: bool = False,
-        monitor: bool = True,
-        enable_monitor_gui: bool = True,
-        collision_check_frequency: Optional[float] = None,
-        log_level: str = "warn",
-        max_steps_per_frame: int = 10,
-        gui_min_fps: int = 30,
-        enable_collision_shapes: bool = False,
-        enable_structure_transparency: bool = False,
-        enable_shadows: bool = True,
-        enable_gui_panel: bool = False,
-        ignore_static_collision: bool = True,
-        enable_profiling: bool = False,
-        profiling_interval: int = 100,
-        enable_memory_profiling: bool = False,
-        enable_collision_color_change: bool = False,
-        spatial_hash_cell_size_mode: SpatialHashCellSizeMode = SpatialHashCellSizeMode.AUTO_INITIAL,
-        spatial_hash_cell_size: Optional[float] = None,  # Used when mode=CONSTANT
-        collision_detection_method: Optional[CollisionDetectionMethod] = None,  # Auto-select based on physics
-        collision_margin: float = 0.02,  # Safety clearance for getClosestPoints (meters, default: 2cm)
-        multi_cell_threshold: float = 1.5,  # Threshold multiplier for multi-cell registration (>= 1.0)
-        camera_config: Optional[Dict[str, Any]] = None,  # Camera configuration from config file
-    ) -> None:
-        self.speed = speed  # speed=0 means maximum speed (no sleep)
-        self.timestep = timestep
-        self.duration = duration
-        self.gui = gui
-        self.physics = physics
-        self.monitor = monitor
-        self.enable_monitor_gui = enable_monitor_gui
-        self.collision_check_frequency = collision_check_frequency
-        self.log_level = log_level
-        self.max_steps_per_frame = max_steps_per_frame  # Maximum simulation steps per rendering frame
-        self.gui_min_fps = gui_min_fps  # Minimum FPS for GUI responsiveness (default: 30 FPS = 33ms)
-        # Visualizer settings
-        self.enable_collision_shapes = enable_collision_shapes
-        self.enable_structure_transparency = enable_structure_transparency
-        self.enable_shadows = enable_shadows
-        self.enable_gui_panel = enable_gui_panel
-        self.ignore_static_collision = ignore_static_collision
-        self.enable_profiling = enable_profiling
-        self.profiling_interval = profiling_interval  # Steps between profiling reports
-        self.enable_memory_profiling = enable_memory_profiling  # Memory profiling switch
-        self.enable_collision_color_change = enable_collision_color_change
-        self.spatial_hash_cell_size_mode = spatial_hash_cell_size_mode
-        self.spatial_hash_cell_size = spatial_hash_cell_size  # Fixed cell size (for mode=CONSTANT)
-        self.multi_cell_threshold = multi_cell_threshold  # Threshold for multi-cell registration
-
-        # Auto-select collision detection method based on physics mode if not explicitly set
-        if collision_detection_method is None:
-            # Physics ON: use CONTACT_POINTS (actual contact manifold)
-            # Physics OFF: use CLOSEST_POINTS (distance-based, kinematics-safe)
-            collision_detection_method = (
-                CollisionDetectionMethod.CONTACT_POINTS if physics else CollisionDetectionMethod.CLOSEST_POINTS
-            )
-        self.collision_detection_method = collision_detection_method
-        self.collision_margin = collision_margin  # Safety clearance for collision detection
-        self.camera_config = camera_config if camera_config is not None else {}  # Camera configuration
-
 
 class MultiRobotSimulationCore:
     # Precomputed neighbor offsets for spatial hashing (class constants)
@@ -184,6 +152,8 @@ class MultiRobotSimulationCore:
     _NEIGHBOR_OFFSETS_2D = tuple(
         (dx, dy, 0) for dx in (-1, 0, 1) for dy in (-1, 0, 1)
     )  # 9 neighbors for 2D collision detection (Z=0 only)
+
+    _EMPTY_SET: frozenset = frozenset()  # Reusable empty set for dict.get() default (avoids per-call allocation)
 
     @classmethod
     def from_yaml(cls, yaml_path: str = "config.yaml") -> "MultiRobotSimulationCore":
@@ -204,47 +174,52 @@ class MultiRobotSimulationCore:
         params = SimulationParams.from_dict(config)
         return cls(params)
 
-    def __init__(self, params: SimulationParams, collision_color: List[float] = [0, 0, 1, 1]) -> None:
-        # Initialize log level
-        LogLevelManager.set_log_level_from_params(params)
-        self.client: Optional[int] = None
-        self.sim_objects: List[SimObject] = []  # List of all simulation objects (Agent, SimObject, etc.)
+    def __init__(self, params: SimulationParams, collision_color: Optional[List[float]] = None) -> None:
+        # Initialize log level from params
+        level_str = getattr(params, "log_level", GLOBAL_LOG_LEVEL)
+        level_name = str(level_str).upper()
+        logging.getLogger().setLevel(logging.getLevelName(level_name))
+
+        # --- Public (read-only via @property, internal via self._X) ---
+        self._client: Optional[int] = None
+        self._sim_objects: List[SimObject] = []  # List of all simulation objects (Agent, SimObject, etc.)
         self._sim_objects_dict: Dict[int, SimObject] = {}  # Dict for O(1) lookup: object_id -> SimObject
-        self.agents: List[Agent] = []  # List of Agent instances only for O(M) iteration in step_once()
-        self._last_collided: set = set()
+        self._agents: List[Agent] = []  # List of Agent instances only for O(M) iteration in step_once()
         self._robot_original_colors: Dict[int, List[float]] = {}  # body_id: rgbaColor
-        self.collision_count: int = 0
-        self.step_count: int = 0
-        self.sim_time: float = 0.0  # Simulation time
-        self.start_time: Optional[float] = None
-        self._next_object_id: int = 0  # Counter for unique object IDs
+        self._collision_count: int = 0
+        self._step_count: int = 0
+        self.sim_time: float = 0.0  # Simulation time (kept public for hot-path access)
+        self._enable_time_profiling: bool = params.enable_time_profiling
+
+        # --- Fully private (no external access) ---
+        self._start_time: Optional[float] = None
+        self._next_object_id: int = 0  # Counter for unique object IDs (read/incremented by SimObject.__init__)
         self._last_logged_collision_count: int = 0  # Track last logged collision count
-        self.monitor_enabled: bool = params.monitor
-        self.last_monitor_update: float = 0
-        self.callbacks: List[Dict[str, Any]] = []  # List of callback functions
-        self.data_monitor: Optional[DataMonitor] = None
-        self.collision_check_frequency: Optional[float] = params.collision_check_frequency  # If None, check every step
-        self.last_collision_check: float = 0.0
-        self.log_level: str = params.log_level
-        self.params: SimulationParams = params
-        self.collision_color: List[float] = collision_color
+        self._monitor_enabled: bool = params.monitor
+        self._last_monitor_update: float = 0
+        self._callbacks: List[Dict[str, Any]] = []  # List of callback functions
+        self._data_monitor: Optional[DataMonitor] = None
+        self._collision_check_frequency: Optional[float] = params.collision_check_frequency  # If None, check every step
+        self._last_collision_check: float = 0.0
+        self._log_level: str = params.log_level
+        self._params: SimulationParams = params
+        self._collision_color: List[float] = collision_color if collision_color is not None else [0, 0, 1, 1]
         self._rendering_enabled: bool = False  # Track rendering state
-        self.collision_visualizer: CollisionVisualizer = CollisionVisualizer()  # Collision shape visualizer
-        self._collision_shapes_enabled: bool = False  # Default: collision shapes OFF
+        self._collision_visualizer: CollisionVisualizer = CollisionVisualizer()  # Collision shape visualizer
+
         self._keyboard_events_registered: bool = False  # Track if keyboard events are registered
         self._original_visual_colors: Dict[Tuple[int, int], List[float]] = (
             {}
         )  # Store original colors: (body_id, link_index) -> rgba
         self._structure_transparent: bool = False  # Track if structure is transparent
-        self.ignore_static_collision: bool = (
+        self._ignore_static_collision: bool = (
             params.ignore_static_collision
         )  # If True, skip collision checks with static objects
         self._simulation_paused: bool = False  # Track if simulation is paused
 
         # --- Profiling configuration ---
-        self.enable_profiling: bool = params.enable_profiling  # Master profiling switch
         self._profiling_interval: int = params.profiling_interval  # Report average every N steps
-        self.enable_memory_profiling: bool = params.enable_memory_profiling  # Memory profiling switch
+        self._enable_memory_profiling: bool = params.enable_memory_profiling  # Memory profiling switch
 
         # --- Profiling statistics ---
         self._profiling_stats: Dict[str, List[float]] = {
@@ -269,19 +244,20 @@ class MultiRobotSimulationCore:
         }
         self._memory_tracemalloc_started: bool = False  # Track if WE started tracemalloc
 
+        # --- Monitor speed history (deque for O(1) popleft) ---
+        self._speed_history: deque = deque()  # [(real_time, sim_time)]
+
         # --- Movement tracking and collision optimization ---
         self._moved_this_step: set = set()  # object_ids that moved this step
         self._physics_objects: set = set()  # object_ids with physics enabled (can move via collisions)
         self._kinematic_objects: set = set()  # object_ids that move only via set_pose/update
-        self._static_objects: set = set()  # object_ids that never move (static structures)
+        self._static_collision_objects: set = set()  # object_ids with CollisionMode.STATIC
         self._disabled_collision_objects: set = set()  # object_ids with collision completely disabled
 
         # --- Collision detection cache ---
         self._cached_collision_modes: Dict[int, CollisionMode] = {}  # object_id -> CollisionMode
         self._cached_cell_size: Optional[float] = None  # Cached cell size for spatial hashing
-        self._cached_non_static_dict: Dict[int, Tuple[SimObject, CollisionMode]] = (
-            {}
-        )  # object_id -> (SimObject, collision_mode) for O(1) add/remove (excludes STATIC and DISABLED)
+        self._dynamic_collision_objects: set = set()  # object_ids with NORMAL_3D or NORMAL_2D (excludes STATIC and DISABLED)
 
         # Incremental AABB and spatial grid cache
         self._cached_aabbs_dict: Dict[int, Tuple[Tuple[float, float, float], Tuple[float, float, float]]] = (
@@ -303,11 +279,48 @@ class MultiRobotSimulationCore:
     def setup_monitor(self) -> None:
         # If monitor: true and console_monitor: false, start DataMonitor
 
-        if self.params.monitor:
-            self.data_monitor = DataMonitor("PyBullet Simulation Monitor", enable_gui=self.params.enable_monitor_gui)
-            self.data_monitor.start()
+        if self._params.monitor:
+            self._data_monitor = DataMonitor("PyBullet Simulation Monitor", enable_gui=self._params.enable_monitor_gui)
+            self._data_monitor.start()
         else:
-            self.data_monitor = None
+            self._data_monitor = None
+
+    # --- Read-only public properties ---
+
+    @property
+    def client(self) -> Optional[int]:
+        """PyBullet physics client ID."""
+        return self._client
+
+    @property
+    def sim_objects(self) -> List[SimObject]:
+        """List of all simulation objects (Agent, SimObject, etc.)."""
+        return self._sim_objects
+
+    @property
+    def agents(self) -> List[Agent]:
+        """List of Agent instances."""
+        return self._agents
+
+    @property
+    def params(self) -> SimulationParams:
+        """Simulation parameters."""
+        return self._params
+
+    @property
+    def step_count(self) -> int:
+        """Current simulation step count."""
+        return self._step_count
+
+    @property
+    def collision_count(self) -> int:
+        """Total number of collisions detected."""
+        return self._collision_count
+
+    @property
+    def enable_memory_profiling(self) -> bool:
+        """Whether memory profiling is enabled."""
+        return self._enable_memory_profiling
 
     def register_callback(self, callback: Callable, frequency: Optional[float] = None) -> None:
         """
@@ -328,7 +341,7 @@ class MultiRobotSimulationCore:
 
             sim_core.register_callback(my_callback, frequency=10.0)  # 10 Hz
         """
-        self.callbacks.append({"func": callback, "frequency": frequency, "last_exec": 0.0})
+        self._callbacks.append({"func": callback, "frequency": frequency, "last_exec": 0.0})
 
     def set_collision_check_frequency(self, frequency: Optional[float] = None) -> None:
         """
@@ -348,7 +361,7 @@ class MultiRobotSimulationCore:
 
         Note: Higher frequency increases computational cost but improves collision detection accuracy.
         """
-        self.collision_check_frequency = frequency
+        self._collision_check_frequency = frequency
 
         # Log the setting for clarity
         if frequency is None:
@@ -358,56 +371,49 @@ class MultiRobotSimulationCore:
         else:
             logger.info(f"Collision check frequency set to: {frequency} Hz ({1.0/frequency:.3f}s interval)")
 
-    def set_profiling_log_frequency(self, frequency: int = 10) -> None:
-        """
-        Set the frequency for profiling log output (in steps).
-
-        Args:
-            frequency: Log profiling info every N steps (default: 10)
-                      - 1: Every step (high overhead, detailed)
-                      - 10: Every 10 steps (low overhead, recommended)
-                      - 100: Every 100 steps (minimal overhead)
-
-        Note: Profiling must be enabled (enable_profiling=True) for logs to appear.
-        """
-        self._profiling_log_frequency = max(1, frequency)
-        logger.info(f"Profiling log frequency set to every {self._profiling_log_frequency} steps")
-
     def setup_pybullet(self) -> None:
         """Initialize PyBullet with GUI panels hidden."""
-        self.client = p.connect(p.GUI if self.params.gui else p.DIRECT)
+        self._client = p.connect(p.GUI if self._params.gui else p.DIRECT)
 
         # Hide all debug UI panels immediately after connection
-        if self.params.gui:
+        if self._params.gui:
             p.configureDebugVisualizer(p.COV_ENABLE_GUI, 0)
 
         p.setAdditionalSearchPath(pybullet_data.getDataPath())
-        p.setGravity(0, 0, -9.81 if self.params.physics else 0)
-        p.setTimeStep(self.params.timestep)
+        p.setGravity(0, 0, -9.81 if self._params.physics else 0)
+        p.setTimeStep(self._params.timestep)
         p.setRealTimeSimulation(0)
-        # High-speed parameter settings
-        p.setPhysicsEngineParameter(enableFileCaching=True)
-        p.setPhysicsEngineParameter(deterministicOverlappingPairs=True)
-        p.setPhysicsEngineParameter(allowedCcdPenetration=0.01)
-        if not self.params.physics:
-            p.setPhysicsEngineParameter(numSubSteps=1)
-            p.setPhysicsEngineParameter(numSolverIterations=1)
-            p.setPhysicsEngineParameter(enableConeFriction=False)
-        self.plane_id = p.loadURDF("plane.urdf")
+
+        # Physics engine parameter tuning
+        p.setPhysicsEngineParameter(enableFileCaching=True)  # Cache URDF files for faster repeated loading
+        if self._params.physics:
+            # Physics ON: deterministic broadphase + CCD for reproducibility and tunneling prevention
+            p.setPhysicsEngineParameter(
+                deterministicOverlappingPairs=True,
+                allowedCcdPenetration=0.01,
+            )
+        else:
+            # Physics OFF (kinematics only): minimize solver overhead
+            p.setPhysicsEngineParameter(
+                numSubSteps=1,
+                numSolverIterations=1,
+                enableConeFriction=False,
+            )
+        p.loadURDF("plane.urdf")
         # Disable rendering during setup for better performance
-        if self.params.gui:
+        if self._params.gui:
             self.disable_rendering()
 
     def disable_rendering(self) -> None:
         """Disable rendering during object spawning for better performance."""
-        if self.params.gui:
+        if self._params.gui:
             p.configureDebugVisualizer(p.COV_ENABLE_RENDERING, 0)
             self._rendering_enabled = False
             logger.info("Rendering disabled for setup/spawning phase")
 
     def enable_rendering(self) -> None:
         """Enable rendering before starting simulation."""
-        if self.params.gui and not self._rendering_enabled:
+        if self._params.gui and not self._rendering_enabled:
             p.configureDebugVisualizer(p.COV_ENABLE_RENDERING, 1)
             self._rendering_enabled = True
             logger.info("Rendering enabled for simulation")
@@ -491,7 +497,7 @@ class MultiRobotSimulationCore:
             return
 
         try:
-            self._cached_aabbs_dict[object_id] = p.getAABB(obj.body_id, physicsClientId=self.client)
+            self._cached_aabbs_dict[object_id] = p.getAABB(obj.body_id, physicsClientId=self._client)
             logger.debug(f"Updated AABB for object {object_id}")
 
             # Also update spatial grid if requested and cell_size is initialized
@@ -553,9 +559,40 @@ class MultiRobotSimulationCore:
         max_extent = max(extent_x, extent_y)
 
         # Use multi-cell if object is larger than threshold * cell_size
-        threshold_size = self._cached_cell_size * self.params.multi_cell_threshold
+        threshold_size = self._cached_cell_size * self._params.multi_cell_threshold
 
         return max_extent > threshold_size
+
+    def _discard_from_cells(self, object_id: int, cells: List[Tuple[int, int, int]]) -> None:
+        """Remove an object from the given spatial grid cells.
+
+        For each cell, discards *object_id* from the cell's set.
+        If the set becomes empty the cell key is deleted from the grid.
+
+        Args:
+            object_id: The object to remove
+            cells: List of (x, y, z) cell keys to remove *object_id* from
+        """
+        for cell in cells:
+            if cell in self._cached_spatial_grid:
+                self._cached_spatial_grid[cell].discard(object_id)
+                if not self._cached_spatial_grid[cell]:
+                    del self._cached_spatial_grid[cell]
+
+    def _coord_to_cell(self, coord: float) -> int:
+        """Convert a world coordinate to a spatial grid cell index.
+
+        Uses floor division so that negative coordinates map toward -inf
+        (e.g. -0.1 / 2.0 → cell -1).
+
+        Args:
+            coord: World-space coordinate value (x, y, or z)
+
+        Returns:
+            Integer cell index along the given axis
+        """
+        assert self._cached_cell_size is not None
+        return int(math.floor(coord / self._cached_cell_size))
 
     def _get_overlapping_cells(self, object_id: int) -> List[Tuple[int, int, int]]:
         """
@@ -586,27 +623,12 @@ class MultiRobotSimulationCore:
         aabb_min, aabb_max = aabb[0], aabb[1]
 
         # Calculate cell range for each dimension
-        import math
-
-        cells = []
-        for d in range(3):  # x, y, z
-            min_cell = int(math.floor(aabb_min[d] / self._cached_cell_size))
-            max_cell = int(math.floor(aabb_max[d] / self._cached_cell_size))
-
-            if d == 0:
-                x_range = range(min_cell, max_cell + 1)
-            elif d == 1:
-                y_range = range(min_cell, max_cell + 1)
-            else:  # d == 2
-                z_range = range(min_cell, max_cell + 1)
+        x_range = range(self._coord_to_cell(aabb_min[0]), self._coord_to_cell(aabb_max[0]) + 1)
+        y_range = range(self._coord_to_cell(aabb_min[1]), self._coord_to_cell(aabb_max[1]) + 1)
+        z_range = range(self._coord_to_cell(aabb_min[2]), self._coord_to_cell(aabb_max[2]) + 1)
 
         # Generate all cell combinations
-        for x in x_range:
-            for y in y_range:
-                for z in z_range:
-                    cells.append((x, y, z))
-
-        return cells
+        return [(x, y, z) for x in x_range for y in y_range for z in z_range]
 
     def _update_object_spatial_grid(self, object_id: int, remove_only: bool = False) -> None:
         """
@@ -615,6 +637,7 @@ class MultiRobotSimulationCore:
         This unified method handles:
         - Initial addition: old_cells=None → add to new cell(s)
         - Movement update: old_cells exists → remove from old, add to new
+          (skipped when new cells == old cells for performance)
         - Removal: remove_only=True → remove from current cell(s) only
         - Multi-cell registration: Large objects registered to all overlapping cells
 
@@ -633,27 +656,20 @@ class MultiRobotSimulationCore:
             # Remove from grid
             sim._update_object_spatial_grid(obj_id, remove_only=True)  # Only removes
         """
-        # Remove from old cells (if exists)
         old_cells = self._cached_object_to_cell.get(object_id)
-        if old_cells is not None:
-            for old_cell in old_cells:
-                if old_cell in self._cached_spatial_grid:
-                    self._cached_spatial_grid[old_cell].discard(object_id)
-                    # Clean up empty cells
-                    if not self._cached_spatial_grid[old_cell]:
-                        del self._cached_spatial_grid[old_cell]
-            del self._cached_object_to_cell[object_id]
 
-        # If remove_only, skip addition and return
+        # If remove_only, remove from old cells and return
         if remove_only:
             if old_cells is not None:
+                self._discard_from_cells(object_id, old_cells)
+                del self._cached_object_to_cell[object_id]
                 logger.debug(f"Removed object {object_id} from {len(old_cells)} spatial grid cell(s)")
             return
 
         # For add/update: ensure AABB exists
         if object_id not in self._cached_aabbs_dict:
-            obj = self._sim_objects_dict.get(object_id)
-            if obj is None:
+            # Safeguard against stale object references
+            if object_id not in self._sim_objects_dict:
                 logger.warning(f"Cannot update spatial grid for object {object_id}: object not found")
                 return
             # Update AABB without triggering spatial grid update (avoid circular call)
@@ -665,25 +681,31 @@ class MultiRobotSimulationCore:
         if self._cached_cell_size is None:
             return
 
-        # Determine if multi-cell registration is needed
+        # Compute new cells
         use_multi_cell = self._should_use_multi_cell_registration(object_id)
 
         if use_multi_cell:
-            # Large object: register to all overlapping cells
             cells = self._get_overlapping_cells(object_id)
         else:
-            # Normal object: register to single cell (center)
             aabb = self._cached_aabbs_dict[object_id]
             center = [0.5 * (aabb[0][d] + aabb[1][d]) for d in range(3)]
-            cell = tuple(int(center[d] // self._cached_cell_size) for d in range(3))
+            cell = tuple(self._coord_to_cell(center[d]) for d in range(3))
             cells = [cell]
 
-        # Register to all cells
+        # Same-cell optimization: skip grid operations if cells haven't changed
+        if old_cells is not None and cells == old_cells:
+            return
+
+        # Remove from old cells (if exists)
+        if old_cells is not None:
+            self._discard_from_cells(object_id, old_cells)
+
+        # Register to new cells
         self._cached_object_to_cell[object_id] = cells
         for cell in cells:
             self._cached_spatial_grid.setdefault(cell, set()).add(object_id)
 
-        # Log appropriate message based on whether this is add or update
+        # Log
         if old_cells is None:
             logger.debug(f"Added object {object_id} to {len(cells)} spatial grid cell(s) (multi-cell: {use_multi_cell})")
         else:
@@ -694,7 +716,11 @@ class MultiRobotSimulationCore:
 
     def _register_object_movement_type(self, obj: SimObject) -> None:
         """
-        Register an object's movement type for optimization.
+        Register (or re-register) an object's movement type for optimization.
+
+        This method is **idempotent**: it first clears any existing movement-type
+        entries for the object, then classifies it afresh.  Safe to call both on
+        initial add and on subsequent mode changes.
 
         Movement types:
         - STATIC: Never moves (registered via obj.is_static)
@@ -709,10 +735,15 @@ class MultiRobotSimulationCore:
         """
         object_id = obj.object_id
 
+        # Idempotent: clear previous classification (no-op on first call)
+        self._physics_objects.discard(object_id)
+        self._kinematic_objects.discard(object_id)
+
         # Register based on movement type (not collision mode)
+        # Note: _static_collision_objects is managed by collision-domain methods,
+        # not here. This only handles _physics_objects / _kinematic_objects.
         if obj.is_static:
-            # STATIC: Never moves
-            self._static_objects.add(object_id)
+            # STATIC: Never moves (no movement tracking needed)
             logger.debug(f"Object {object_id} registered as static (movement type)")
         else:
             # Dynamic objects: Determine if physics-enabled or kinematic
@@ -737,63 +768,52 @@ class MultiRobotSimulationCore:
             old_mode: Previous CollisionMode
             new_mode: New CollisionMode
         """
+        # Early return if mode hasn't changed
+        if old_mode == new_mode:
+            return
+
         obj = self._sim_objects_dict.get(object_id)
         if obj is None:
             logger.warning(f"Cannot update collision mode for object {object_id}: not found")
             return
 
-        # Remove from old movement type sets
-        self._static_objects.discard(object_id)
-        self._physics_objects.discard(object_id)
-        self._kinematic_objects.discard(object_id)
-
-        # Re-register with new mode
+        # Re-register movement type (physics / kinematic classification)
         self._register_object_movement_type(obj)
 
         # Update collision mode cache
         self._cached_collision_modes[object_id] = new_mode
 
         # Handle collision system updates based on mode transition
+        # _static_collision_objects and _dynamic_collision_objects are managed here (collision domain)
         # Structure: First check old_mode, then check new_mode within each case
 
         if old_mode == CollisionMode.DISABLED:
-            # DISABLED -> *: Need to add object to collision system
-            if new_mode == CollisionMode.DISABLED:
-                # No change
-                pass
-            elif new_mode == CollisionMode.STATIC:
-                # DISABLED -> STATIC: Add to collision system (STATIC not in non_static_dict)
-                self._add_object_to_collision_system(object_id)
-            else:
-                # DISABLED -> NORMAL_3D/2D: Add to collision system and non_static_dict
-                self._cached_non_static_dict[object_id] = (obj, new_mode)
-                self._add_object_to_collision_system(object_id)
+            # DISABLED -> *: Classification + AABB/grid handled inside
+            self._add_object_to_collision_system(object_id)
 
         elif old_mode == CollisionMode.STATIC:
             # STATIC -> *: STATIC already has AABB/grid
+            self._static_collision_objects.discard(object_id)
             if new_mode == CollisionMode.DISABLED:
                 # STATIC -> DISABLED: Remove from collision system
                 self._remove_object_from_collision_system(object_id)
-            elif new_mode == CollisionMode.STATIC:
-                # No change
-                pass
             else:
-                # STATIC -> NORMAL_3D/2D: Add to non_static_dict, mark as moved
-                self._cached_non_static_dict[object_id] = (obj, new_mode)
+                # STATIC -> NORMAL_3D/2D: Add to dynamic set, mark as moved
+                self._dynamic_collision_objects.add(object_id)
                 self._moved_this_step.add(object_id)
 
         else:
-            # NORMAL_3D/2D -> *: Currently in non_static_dict
+            # NORMAL_3D/2D -> *: Currently in dynamic set
             if new_mode == CollisionMode.DISABLED:
-                # NORMAL -> DISABLED: Remove from collision system and non_static_dict
-                self._cached_non_static_dict.pop(object_id, None)
+                # NORMAL -> DISABLED: Remove from collision system and dynamic set
+                self._dynamic_collision_objects.discard(object_id)
                 self._remove_object_from_collision_system(object_id)
             elif new_mode == CollisionMode.STATIC:
-                # NORMAL -> STATIC: Remove from non_static_dict, keep AABB/grid
-                self._cached_non_static_dict.pop(object_id, None)
+                # NORMAL -> STATIC: Remove from dynamic set, add to static set, keep AABB/grid
+                self._dynamic_collision_objects.discard(object_id)
+                self._static_collision_objects.add(object_id)
             else:
-                # NORMAL_3D <-> NORMAL_2D: Just update mode in non_static_dict
-                self._cached_non_static_dict[object_id] = (obj, new_mode)
+                # NORMAL_3D <-> NORMAL_2D: mode cached in _cached_collision_modes, mark as moved
                 self._moved_this_step.add(object_id)
 
         logger.info(f"Updated collision mode for object {object_id}: {old_mode.value} -> {new_mode.value}")
@@ -802,21 +822,38 @@ class MultiRobotSimulationCore:
         """
         Add object to collision detection system.
 
-        Updates AABB cache, spatial grid, and marks as moved.
-        Called when object is added or when collision mode changes from DISABLED to NORMAL/STATIC.
+        Classifies the object by its current ``collision_mode`` into the
+        appropriate collision set / dict, then initialises AABB cache,
+        spatial grid entry, and marks the object as moved.
 
-        Note: This method should NEVER be called for DISABLED collision mode objects.
-              When transitioning from DISABLED to enabled mode, removes from _disabled_collision_objects.
+        Called when an object is first added (``add_object``) or when its
+        collision mode transitions from DISABLED to an enabled mode.
+
+        Note: Must NOT be called for DISABLED collision mode objects.
+              The caller is responsible for handling DISABLED separately.
 
         Args:
             object_id: Object ID to add
         """
+        obj = self._sim_objects_dict.get(object_id)
+        if obj is None:
+            logger.warning(f"Cannot add object {object_id} to collision system: not found")
+            return
+
         # Remove from disabled set (transitioning from DISABLED to enabled mode)
         self._disabled_collision_objects.discard(object_id)
 
+        # Classify into collision-domain set based on current mode
+        mode = obj.collision_mode
+        if mode == CollisionMode.STATIC:
+            self._static_collision_objects.add(object_id)
+        else:
+            # NORMAL_3D or NORMAL_2D
+            self._dynamic_collision_objects.add(object_id)
+
         self._update_object_aabb(object_id, update_grid=True)
         self._moved_this_step.add(object_id)
-        logger.debug(f"Added object {object_id} to collision system")
+        logger.debug(f"Added object {object_id} to collision system (mode={mode.value})")
 
     def _remove_object_from_collision_system(self, object_id: int) -> None:
         """
@@ -844,9 +881,12 @@ class MultiRobotSimulationCore:
         self._remove_object_aabb(object_id)
         self._moved_this_step.discard(object_id)
 
+        # Remove all active collision pairs referencing this object
+        self._active_collision_pairs = {(i, j) for i, j in self._active_collision_pairs if i != object_id and j != object_id}
+
     def set_collision_spatial_hash_cell_size_mode(
         self, mode: Optional[SpatialHashCellSizeMode] = None, cell_size: Optional[float] = None
-    ) -> Optional[float]:
+    ) -> float:
         """
         Set collision detection spatial hash cell size mode and recalculate/rebuild grid.
 
@@ -858,7 +898,7 @@ class MultiRobotSimulationCore:
             cell_size: Override spatial_hash_cell_size when mode=CONSTANT (optional)
 
         Returns:
-            The calculated cell_size, or None if no AABBs are available
+            The calculated cell_size (always > 0, falls back to 1.0 if no AABBs available)
 
         Example:
             # Recalculate with current mode
@@ -877,16 +917,16 @@ class MultiRobotSimulationCore:
         """
         # Update params if mode or cell_size is provided
         if mode is not None:
-            old_mode = self.params.spatial_hash_cell_size_mode
-            self.params.spatial_hash_cell_size_mode = mode
+            old_mode = self._params.spatial_hash_cell_size_mode
+            self._params.spatial_hash_cell_size_mode = mode
             logger.debug(f"Updated mode: {old_mode} -> {mode}")
 
         if cell_size is not None:
-            old_size = self.params.spatial_hash_cell_size
-            self.params.spatial_hash_cell_size = cell_size
+            old_size = self._params.spatial_hash_cell_size
+            self._params.spatial_hash_cell_size = cell_size
 
             # Warn if cell_size is provided but mode is not CONSTANT
-            current_mode = self.params.spatial_hash_cell_size_mode
+            current_mode = self._params.spatial_hash_cell_size_mode
             if current_mode != SpatialHashCellSizeMode.CONSTANT:
                 logger.warning(
                     f"cell_size parameter ({cell_size}) will be ignored in {current_mode.value} mode. "
@@ -895,20 +935,20 @@ class MultiRobotSimulationCore:
             else:
                 logger.debug(f"Updated cell_size: {old_size} -> {cell_size}")
 
-        mode = self.params.spatial_hash_cell_size_mode
+        mode = self._params.spatial_hash_cell_size_mode
         old_cell_size = self._cached_cell_size
 
         # Calculate cell_size based on mode
         if mode == SpatialHashCellSizeMode.CONSTANT:
             # CONSTANT mode: use user-provided value
-            if self.params.spatial_hash_cell_size is None:
+            if self._params.spatial_hash_cell_size is None:
                 logger.error(
                     "spatial_hash_cell_size_mode=CONSTANT requires spatial_hash_cell_size to be set. "
                     "Falling back to default 1.0m"
                 )
                 cell_size = 1.0
             else:
-                cell_size = self.params.spatial_hash_cell_size
+                cell_size = self._params.spatial_hash_cell_size
             self._cached_cell_size = cell_size
             logger.info(f"Collision spatial hash: Using constant cell size: {cell_size:.3f}m")
 
@@ -954,16 +994,16 @@ class MultiRobotSimulationCore:
             obj = SimObject(body_id=body_id, sim_core=sim_core)  # Calls add_object() internally
         """
         # Add to sim_objects list and dict
-        if obj in self.sim_objects:
+        if obj in self._sim_objects:
             logger.warning(f"Object {obj.object_id} already added to simulation")
             return
 
-        self.sim_objects.append(obj)
+        self._sim_objects.append(obj)
         self._sim_objects_dict[obj.object_id] = obj
 
         # Add to agents list if this is an Agent instance (for O(M) iteration)
         if isinstance(obj, Agent):
-            self.agents.append(obj)
+            self._agents.append(obj)
 
         # Store collision mode in cache
         self._cached_collision_modes[obj.object_id] = obj.collision_mode
@@ -974,21 +1014,13 @@ class MultiRobotSimulationCore:
         # Add to collision system based on collision mode
         if obj.collision_mode == CollisionMode.DISABLED:
             # DISABLED: No collision detection at all
-            # Add to disabled set, no AABB, no spatial grid, no tracking
             self._disabled_collision_objects.add(obj.object_id)
-
-        elif obj.collision_mode == CollisionMode.STATIC:
-            # STATIC: Add AABB/grid once, never update
-            # Static objects are excluded from _cached_non_static_dict
-            self._add_object_to_collision_system(obj.object_id)
-
         else:
-            # NORMAL_3D or NORMAL_2D: Add to non-static dict and collision system
-            self._cached_non_static_dict[obj.object_id] = (obj, obj.collision_mode)
+            # STATIC / NORMAL_3D / NORMAL_2D: classification + AABB/grid
             self._add_object_to_collision_system(obj.object_id)
 
         # Trigger cell_size recalculation in auto_adaptive mode
-        if self.params.spatial_hash_cell_size_mode == SpatialHashCellSizeMode.AUTO_ADAPTIVE:
+        if self._params.spatial_hash_cell_size_mode == SpatialHashCellSizeMode.AUTO_ADAPTIVE:
             self.set_collision_spatial_hash_cell_size_mode()
 
         # Save original color once when object is added (for collision visualization)
@@ -1021,7 +1053,7 @@ class MultiRobotSimulationCore:
 
         # Remove from sim_objects list and dict
         try:
-            self.sim_objects.remove(obj)
+            self._sim_objects.remove(obj)
         except ValueError:
             logger.warning(f"Object {obj_id} not found in sim_objects")
             return
@@ -1031,7 +1063,7 @@ class MultiRobotSimulationCore:
         # Remove from agents list if this is an Agent instance
         if isinstance(obj, Agent):
             try:
-                self.agents.remove(obj)
+                self._agents.remove(obj)
             except ValueError:
                 pass  # Already removed or not in list
 
@@ -1039,7 +1071,7 @@ class MultiRobotSimulationCore:
         self._moved_this_step.discard(obj_id)
         self._physics_objects.discard(obj_id)
         self._kinematic_objects.discard(obj_id)
-        self._static_objects.discard(obj_id)
+        self._static_collision_objects.discard(obj_id)
         self._disabled_collision_objects.discard(obj_id)
 
         # Remove from collision mode cache
@@ -1048,11 +1080,11 @@ class MultiRobotSimulationCore:
         # Remove from collision system (AABB, spatial grid)
         self._remove_object_from_collision_system(obj_id)
 
-        # Remove from non-static dict (O(1) dict removal)
-        self._cached_non_static_dict.pop(obj_id, None)
+        # Remove from dynamic collision set
+        self._dynamic_collision_objects.discard(obj_id)
 
-        # Remove from active collision pairs
-        self._active_collision_pairs = {(i, j) for i, j in self._active_collision_pairs if i != obj_id and j != obj_id}
+        # Remove original color cache (prevents stale color on body_id reuse)
+        self._robot_original_colors.pop(obj.body_id, None)
 
         # Remove PyBullet body
         if obj.body_id is not None:
@@ -1062,14 +1094,13 @@ class MultiRobotSimulationCore:
                 logger.warning(f"Failed to remove PyBullet body {obj.body_id}")
 
         # Trigger cell_size recalculation in auto_adaptive mode
-        if self.params.spatial_hash_cell_size_mode == SpatialHashCellSizeMode.AUTO_ADAPTIVE:
+        if self._params.spatial_hash_cell_size_mode == SpatialHashCellSizeMode.AUTO_ADAPTIVE:
             self.set_collision_spatial_hash_cell_size_mode()
 
         logger.info(f"Removed object {obj_id} (body {obj.body_id}) from simulation")
 
     def configure_visualizer(
         self,
-        enable_collision_shapes: Optional[bool] = None,
         enable_structure_transparency: Optional[bool] = None,
         enable_shadows: Optional[bool] = None,
     ) -> None:
@@ -1077,39 +1108,40 @@ class MultiRobotSimulationCore:
         Configure PyBullet visualizer settings with keyboard control.
 
         Args:
-            enable_collision_shapes: Initial state for collision shapes (None=use config)
             enable_structure_transparency: Initial state for structure transparency (None=use config)
             enable_shadows: Enable shadows (None=use config)
 
-        Keyboard shortcuts (active during simulation):
-        - Press 'c' to toggle collision shapes ON/OFF
+        Custom keyboard shortcuts (active during simulation):
+        - Press SPACE to pause/play simulation
         - Press 't' to toggle structure transparency ON/OFF
+
+        PyBullet built-in keyboard shortcuts (always available):
+        - Press 'w' to toggle wireframe / collision shape display
+        - Press 'g' to toggle grid display
+        - Press 'j' to toggle joint axes display
         """
-        if not self.params.gui:
+        if not self._params.gui:
             return
 
         # Use config values if parameters are None
-        if enable_collision_shapes is None:
-            enable_collision_shapes = self.params.enable_collision_shapes
         if enable_structure_transparency is None:
-            enable_structure_transparency = self.params.enable_structure_transparency
+            enable_structure_transparency = self._params.enable_structure_transparency
         if enable_shadows is None:
-            enable_shadows = self.params.enable_shadows
+            enable_shadows = self._params.enable_shadows
 
         # Save original colors of all visual shapes ONCE
         if not self._original_visual_colors:
             self._save_original_visual_colors()
 
         # Store initial states
-        self._collision_shapes_enabled = enable_collision_shapes
         self._structure_transparent = enable_structure_transparency
 
         # Configure shadows
         p.configureDebugVisualizer(p.COV_ENABLE_SHADOWS, 1 if enable_shadows else 0)
 
-        # Apply initial visibility states
-        # self._set_visual_shapes_visibility(self._visual_shapes_enabled)
-        self._set_collision_shapes_visibility(self._collision_shapes_enabled)
+        # Apply initial collision shape visibility from config
+        if self._params.enable_collision_shapes:
+            p.configureDebugVisualizer(p.COV_ENABLE_WIREFRAME, 1)
 
         # Apply initial structure transparency
         self._set_structure_transparency(self._structure_transparent)
@@ -1118,21 +1150,24 @@ class MultiRobotSimulationCore:
         self._keyboard_events_registered = True
 
         logger.info(
-            "Visualizer configured: collision=%s, transparency=%s, shadows=%s",
-            enable_collision_shapes,
+            "Visualizer configured: transparency=%s, shadows=%s",
             enable_structure_transparency,
             enable_shadows,
         )
-        logger.info("Keyboard controls registered: SPACE=pause, v=visual, c=collision, t=transparency")
+        logger.info("Keyboard controls registered: SPACE=pause, t=transparency")
         print("\n[KEYBOARD CONTROLS]")
-        print("  Press SPACE to pause/play simulation")
-        print(f"  Press 'c' to toggle collision shapes (current: {'ON' if self._collision_shapes_enabled else 'OFF'})")
-        print("  Press 't' to toggle structure transparency " f"(current: {'ON' if self._structure_transparent else 'OFF'})")
-        if len(self._static_objects) > 100:
+        print("  Custom:")
+        print("    Press SPACE to pause/play simulation")
+        print("    Press 't' to toggle structure transparency " f"(current: {'ON' if self._structure_transparent else 'OFF'})")
+        if len(self._static_collision_objects) > 100:
             print(
-                "             ⚠️  Warning: %d static objects detected - " "toggling may be slow (not recommended)",
-                len(self._static_objects),
+                f"             ⚠️  Warning: {len(self._static_collision_objects)} static objects detected - "
+                "toggling may be slow (not recommended)"
             )
+        print("  PyBullet built-in:")
+        print("    Press 'w' to toggle wireframe / collision shapes")
+        print("    Press 'g' to toggle grid")
+        print("    Press 'j' to toggle joint axes")
 
     def _save_original_visual_colors(self) -> None:
         """
@@ -1152,10 +1187,10 @@ class MultiRobotSimulationCore:
 
     def _handle_keyboard_events(self) -> None:
         """
-        Handle keyboard events for toggling visual/collision shapes and pausing simulation.
+        Handle keyboard events for pausing simulation and toggling transparency.
         Called during simulation step.
         """
-        if not self.params.gui:
+        if not self._params.gui:
             return
 
         try:
@@ -1170,126 +1205,64 @@ class MultiRobotSimulationCore:
             self._simulation_paused = not self._simulation_paused
             print(f"\n[PAUSE] Simulation: {'PAUSED' if self._simulation_paused else 'PLAYING'}")
 
-        # # 'v' key (ASCII 118) - toggle visual shapes
-        # if ord("v") in keys and keys[ord("v")] & p.KEY_WAS_TRIGGERED:
-        #     self._visual_shapes_enabled = not self._visual_shapes_enabled
-        #     self._set_visual_shapes_visibility(self._visual_shapes_enabled)
-        #     print(f"\n[TOGGLE] Visual shapes: {'ON' if self._visual_shapes_enabled else 'OFF'}")
-
-        # 'c' key (ASCII 99) - toggle collision shapes
-        if ord("c") in keys and keys[ord("c")] & p.KEY_WAS_TRIGGERED:
-            self._collision_shapes_enabled = not self._collision_shapes_enabled
-            self._set_collision_shapes_visibility(self._collision_shapes_enabled)
-            print(f"\n[TOGGLE] Collision shapes: {'ON' if self._collision_shapes_enabled else 'OFF'}")
-
         # 't' key (ASCII 116) - toggle structure transparency
         if ord("t") in keys and keys[ord("t")] & p.KEY_WAS_TRIGGERED:
-            num_structures = len(self._static_objects)
+            num_structures = len(self._static_collision_objects)
             if num_structures > 100:
                 print(f"\n[TOGGLE] ⚠️  Warning: Toggling transparency for {num_structures} static objects...")
                 print("         This may take several seconds (not recommended for large scenes)")
                 print("         Consider setting 'enable_structure_transparency' in config.yaml instead")
 
             self._structure_transparent = not self._structure_transparent
-            # self._set_transparency(self._structure_transparent)
             self._set_structure_transparency(self._structure_transparent)
             print(f"\n[TOGGLE] Structure transparency: {'ON' if self._structure_transparent else 'OFF'}")
-
-    # def _set_visual_shapes_visibility(self, visible: bool) -> None:
-    #     """
-    #     Set visibility of visual shapes independently from collision shapes.
-    #     Uses pre-saved colors for fast restoration.
-    #     Respects structure transparency setting when restoring visibility.
-
-    #     Args:
-    #         visible: True to show visual shapes, False to hide them
-    #     """
-    #     if not self.params.gui:
-    #         return
-
-    #     # Use saved color data for FAST toggling
-    #     for key, rgba in self._original_visual_colors.items():
-    #         body_id, link_index = key
-    #         try:
-    #             if visible:
-    #                 # Check if this body is a structure and transparency is enabled
-    #                 if body_id in self._structure_body_ids and self._structure_transparent:
-    #                     # Restore with transparency
-    #                     p.changeVisualShape(body_id, link_index, rgbaColor=[rgba[0], rgba[1], rgba[2], 0.3])
-    #                 else:
-    #                     # Restore original color with full opacity
-    #                     p.changeVisualShape(body_id, link_index, rgbaColor=[rgba[0], rgba[1], rgba[2], 1.0])
-    #             else:
-    #                 # Make transparent (alpha = 0)
-    #                 p.changeVisualShape(body_id, link_index, rgbaColor=[rgba[0], rgba[1], rgba[2], 0.0])
-    #         except Exception:
-    #             pass
-    #             pass
-
-    #     logger.info(f"Visual shapes {'enabled' if visible else 'disabled'}")
-
-    def _set_collision_shapes_visibility(self, visible: bool) -> None:
-        """
-        Set visibility of collision shapes using PyBullet's configureDebugVisualizer.
-
-        Args:
-            visible: True to show collision shapes, False to hide them
-        """
-        if not self.params.gui:
-            return
-
-        # Use PyBullet's configureDebugVisualizer for robust collision shape toggling
-        try:
-            p.configureDebugVisualizer(3, 1 if visible else 0)
-            logger.info(f"Collision shapes {'enabled' if visible else 'disabled'} (PyBullet visualizer)")
-        except Exception as e:
-            logger.warning(f"Failed to toggle collision shapes with PyBullet visualizer: {e}")
-
-    # def _set_transparency(self, transparent: bool) -> None:
-    #     try:
-    #         p.configureDebugVisualizer(4, 1 if transparent else 0)
-    #         logger.info(f"Transparency {'enabled' if transparent else 'disabled'} (PyBullet visualizer)")
-    #     except Exception as e:
-    #         logger.warning(f"Failed to toggle transparency with PyBullet visualizer: {e}")
 
     def _set_structure_transparency(self, transparent: bool) -> None:
         """
         Set transparency of static bodies (structures).
         Uses pre-saved colors with modified alpha channel.
-        FAST implementation using pre-saved color dictionary.
+        Disables rendering during batch update for ~175x speedup in GUI mode.
 
         Args:
             transparent: True to make static objects semi-transparent, False for opaque
         """
-        if not self.params.gui:
+        if not self._params.gui:
             return
 
         alpha = 0.3 if transparent else 1.0
 
-        print(f"[TRANSPARENCY] Applying alpha={alpha} to {len(self._static_objects)} static objects...")
+        logger.info(f"[TRANSPARENCY] Applying alpha={alpha} to {len(self._static_collision_objects)} static objects...")
 
         # Apply alpha only to static bodies using pre-saved colors (FAST)
         # Convert object_ids to body_ids for visual shape manipulation
         static_body_ids = {
-            self._sim_objects_dict[obj_id].body_id for obj_id in self._static_objects if obj_id in self._sim_objects_dict
+            self._sim_objects_dict[obj_id].body_id
+            for obj_id in self._static_collision_objects
+            if obj_id in self._sim_objects_dict
         }
 
         processed = 0
-        for key, rgba in self._original_visual_colors.items():
-            body_id, link_index = key
+        # Disable rendering during batch update to avoid per-call OpenGL re-render
+        p.configureDebugVisualizer(p.COV_ENABLE_RENDERING, 0)
+        try:
+            for key, rgba in self._original_visual_colors.items():
+                body_id, link_index = key
 
-            # Only process static bodies (O(1) lookup with set)
-            if body_id not in static_body_ids:
-                continue
+                # Only process static bodies (O(1) lookup with set)
+                if body_id not in static_body_ids:
+                    continue
 
-            try:
-                # Apply new alpha to the original color
-                p.changeVisualShape(body_id, link_index, rgbaColor=[rgba[0], rgba[1], rgba[2], alpha])
-                processed += 1
-            except Exception:
-                pass
+                try:
+                    # Apply new alpha to the original color
+                    p.changeVisualShape(body_id, link_index, rgbaColor=[rgba[0], rgba[1], rgba[2], alpha])
+                    processed += 1
+                except Exception:
+                    pass
+        finally:
+            # Always re-enable rendering, even if an error occurred
+            p.configureDebugVisualizer(p.COV_ENABLE_RENDERING, 1)
 
-        print(f"[TRANSPARENCY] Complete: {processed} visual shapes updated")
+        logger.info(f"[TRANSPARENCY] Complete: {processed} visual shapes updated")
         logger.info(f"Static objects transparency {'enabled (alpha=0.3)' if transparent else 'disabled (alpha=1.0)'}")
 
     def setup_camera(
@@ -1302,14 +1275,19 @@ class MultiRobotSimulationCore:
             camera_config: Dictionary with camera settings (from yaml config)
             entity_positions: List of [x, y, z] positions for auto camera calculation
         """
-        if not self.params.gui:
+        if not self._params.gui:
             return  # No camera setup needed without GUI
 
-        # Use self.params.camera_config if camera_config is not provided
+        # Use self._params.camera_config if camera_config is not provided
         if camera_config is None:
-            camera_config = self.params.camera_config
+            camera_config = self._params.camera_config
 
         camera_mode = camera_config.get("camera_mode", "none")
+
+        valid_modes = ("none", "manual", "auto")
+        if camera_mode not in valid_modes:
+            logger.warning(f"Unknown camera_mode '{camera_mode}'. Valid modes: {valid_modes}")
+            return
 
         if camera_mode == "none":
             return  # Skip camera setup
@@ -1331,12 +1309,12 @@ class MultiRobotSimulationCore:
             # Calculate camera from entity positions
             # If entity_positions is None, calculate from all simulation objects
             if entity_positions is None or len(entity_positions) == 0:
-                if len(self.sim_objects) == 0:
+                if len(self._sim_objects) == 0:
                     logger.warning("Auto camera mode requested but no objects in simulation")
                     return
                 # Calculate positions from all simulation objects
                 entity_positions = []
-                for obj in self.sim_objects:
+                for obj in self._sim_objects:
                     pose = obj.get_pose()
                     entity_positions.append(pose.position)
                 logger.info(f"Auto camera: calculated from {len(entity_positions)} objects")
@@ -1349,6 +1327,7 @@ class MultiRobotSimulationCore:
             view_type = camera_config.get("camera_view_type", "top_down")
             auto_scale = camera_config.get("camera_auto_scale", 0.8)
 
+            _MIN_CAMERA_DISTANCE = 1.0  # Prevent distance=0 when all objects are co-located
             if view_type == "top_down":
                 # Top-down orthographic view
                 distance = max(extent[0], extent[1]) * auto_scale
@@ -1360,6 +1339,7 @@ class MultiRobotSimulationCore:
                 yaw = 45
                 pitch = -30
 
+            distance = max(distance, _MIN_CAMERA_DISTANCE)
             target = [center[0], center[1], center[2]]
 
             p.resetDebugVisualizerCamera(
@@ -1367,16 +1347,13 @@ class MultiRobotSimulationCore:
             )
 
             logger.info(f"Camera set to auto mode ({view_type}): distance={distance:.2f}m, target={target}")
-            print(f"\n--- Camera View ({view_type}) ---")
-            print(f"  Structure extent: [{extent[0]:.2f} x {extent[1]:.2f} x {extent[2]:.2f}] meters")
-            print(f"  Center: [{center[0]:.2f}, {center[1]:.2f}, {center[2]:.2f}]")
-            print(f"  Camera distance: {distance:.2f}m")
-            print(f"  Camera target: [{target[0]:.2f}, {target[1]:.2f}, {target[2]:.2f}]")
-            print(f"  Yaw: {yaw}°, Pitch: {pitch}°")
+            logger.info(f"  Structure extent: [{extent[0]:.2f} x {extent[1]:.2f} x {extent[2]:.2f}] meters")
+            logger.info(f"  Center: [{center[0]:.2f}, {center[1]:.2f}, {center[2]:.2f}]")
+            logger.info(f"  Yaw: {yaw}°, Pitch: {pitch}°")
 
     def get_aabbs(self) -> List[Tuple[Tuple[float, float, float], Tuple[float, float, float]]]:
         """Get AABBs for all simulation objects."""
-        return [p.getAABB(obj.body_id) for obj in self.sim_objects]
+        return [p.getAABB(obj.body_id) for obj in self._sim_objects]
 
     def filter_aabb_pairs(
         self, ignore_static: Optional[bool] = None, moved_objects: Optional[Set[int]] = None, return_profiling: bool = False
@@ -1408,15 +1385,15 @@ class MultiRobotSimulationCore:
         timings: Dict[str, float] = {}
 
         if ignore_static is None:
-            ignore_static = self.ignore_static_collision
+            ignore_static = self._ignore_static_collision
 
         # 1. Handle mode changes
         # Check if ignore_static mode has changed (skip if this is the first call)
         if self._last_ignore_static is not None and self._last_ignore_static != ignore_static:
-            # Mode changed: reset collision state and mark all objects for re-check
-            # Note: No need to clear AABB/spatial grid caches - they are position-based, not filter-based
-            # Mark all objects as moved to trigger full collision recalculation
-            self._moved_this_step = set(self._sim_objects_dict.keys())
+            # Mode changed: force full recalculation regardless of moved_objects argument
+            # Override moved_objects directly so the current call scans all objects
+            # (setting self._moved_this_step alone would only affect the *next* call)
+            moved_objects = set(self._sim_objects_dict.keys())
             # Clear existing collision pairs (will be recalculated with new filter rules)
             self._active_collision_pairs.clear()
             logger.debug(f"ignore_static mode changed to {ignore_static}, resetting collision state and marking all as moved")
@@ -1436,8 +1413,8 @@ class MultiRobotSimulationCore:
         # Only rebuild if cache was explicitly invalidated (mode change)
         if not self._aabb_cache_valid:
             # Full rebuild needed only if cache is completely invalid (e.g., mode change)
-            logger.debug(f"Full AABB rebuild for {len(self.sim_objects)} objects")
-            for obj in self.sim_objects:
+            logger.debug(f"Full AABB rebuild for {len(self._sim_objects)} objects")
+            for obj in self._sim_objects:
                 self._cached_aabbs_dict[obj.object_id] = p.getAABB(obj.body_id)
             # Mark cache as valid after update
             self._aabb_cache_valid = True
@@ -1472,19 +1449,19 @@ class MultiRobotSimulationCore:
             moved_objects = self._moved_this_step
 
         pairs = set()
-        processed_pairs = set()  # Track (obj_id_i, obj_id_j) to avoid duplicates
+        tested_pairs = set()  # Track already-tested (i, j) pairs to avoid duplicate AABB checks
 
         # OPTIMIZATION: Only iterate through moved objects instead of all objects
         # This dramatically reduces computation when few objects move (e.g., 10 moved out of 1000 total)
         for obj_id_i in moved_objects:
-            obj_i = self._sim_objects_dict.get(obj_id_i)
-            if obj_i is None:
+            # Safeguard against stale moved_objects entries
+            if obj_id_i not in self._sim_objects_dict:
                 continue
 
             # Skip static objects in ignore_static mode
             # Note: In most cases, moved_this_step won't contain static objects,
             # but they may be added during spawn or mode changes
-            if ignore_static and obj_id_i in self._static_objects:
+            if ignore_static and obj_id_i in self._static_collision_objects:
                 continue
 
             # Skip disabled collision objects
@@ -1509,13 +1486,13 @@ class MultiRobotSimulationCore:
                 for offset in offsets:
                     neighbor_cell = (cell_i[0] + offset[0], cell_i[1] + offset[1], cell_i[2] + offset[2])
 
-                    for obj_id_j in self._cached_spatial_grid.get(neighbor_cell, set()):
+                    for obj_id_j in self._cached_spatial_grid.get(neighbor_cell, self._EMPTY_SET):
                         # Skip self-pairs
                         if obj_id_j == obj_id_i:
                             continue
 
                         # Skip if j is static in ignore_static mode
-                        if ignore_static and obj_id_j in self._static_objects:
+                        if ignore_static and obj_id_j in self._static_collision_objects:
                             continue
 
                         # Skip disabled collision objects
@@ -1523,15 +1500,15 @@ class MultiRobotSimulationCore:
                             continue
 
                         # Create sorted pair to avoid duplicates (i < j)
-                        pair_key = (min(obj_id_i, obj_id_j), max(obj_id_i, obj_id_j))
+                        pair_key = (obj_id_i, obj_id_j) if obj_id_i < obj_id_j else (obj_id_j, obj_id_i)
 
-                        # Skip already processed pairs
-                        if pair_key in processed_pairs:
+                        # Skip already tested pairs
+                        if pair_key in tested_pairs:
                             continue
-                        processed_pairs.add(pair_key)
+                        tested_pairs.add(pair_key)
 
-                        obj_j = self._sim_objects_dict.get(obj_id_j)
-                        if obj_j is None:
+                        # Safeguard against stale spatial grid entries
+                        if obj_id_j not in self._sim_objects_dict:
                             continue
 
                         mode_j = self._cached_collision_modes.get(obj_id_j, CollisionMode.NORMAL_3D)
@@ -1617,13 +1594,11 @@ class MultiRobotSimulationCore:
         self._moved_this_step.clear()
 
         if collision_color is None:
-            collision_color = self.collision_color
-        collision_pairs = []
-        collided = set()
+            collision_color = self._collision_color
 
         # Determine ignore_static flag
         if ignore_static is None:
-            ignore_static = self.ignore_static_collision
+            ignore_static = self._ignore_static_collision
 
         try:
             # Get candidate pairs (moved-based optimization)
@@ -1652,7 +1627,7 @@ class MultiRobotSimulationCore:
             # Skip static-static pairs (they never change after initial check)
             for obj_id_i, obj_id_j in list(self._active_collision_pairs):
                 # Skip if both objects are static (no need to re-check)
-                if obj_id_i in self._static_objects and obj_id_j in self._static_objects:
+                if obj_id_i in self._static_collision_objects and obj_id_j in self._static_collision_objects:
                     continue
 
                 # Re-check if at least one object moved
@@ -1663,35 +1638,39 @@ class MultiRobotSimulationCore:
             new_collisions = set()
             resolved_collisions = set()
 
+            detection_method = self._params.collision_detection_method
+
             for obj_id_i, obj_id_j in pairs_to_check:
                 obj_i = self._sim_objects_dict.get(obj_id_i)
                 obj_j = self._sim_objects_dict.get(obj_id_j)
                 if obj_i is None or obj_j is None:
+                    # Object was removed — clean up stale pair
+                    self._active_collision_pairs.discard((obj_id_i, obj_id_j))
                     continue
 
                 # Select collision detection method based on configuration
                 has_collision = False
 
-                if self.params.collision_detection_method == CollisionDetectionMethod.CONTACT_POINTS:
+                if detection_method == CollisionDetectionMethod.CONTACT_POINTS:
                     # Method 1: getContactPoints (physics mode, actual contact manifold)
                     # Best for: physics simulation, requires stepSimulation()
                     # Note: May be unstable for kinematic-kinematic pairs
-                    contact_points = p.getContactPoints(obj_i.body_id, obj_j.body_id, physicsClientId=self.client)
+                    contact_points = p.getContactPoints(obj_i.body_id, obj_j.body_id, physicsClientId=self._client)
                     has_collision = len(contact_points) > 0
 
-                elif self.params.collision_detection_method == CollisionDetectionMethod.CLOSEST_POINTS:
+                elif detection_method == CollisionDetectionMethod.CLOSEST_POINTS:
                     # Method 2: getClosestPoints (kinematics mode, distance-based)
                     # Best for: kinematics motion, safety margin detection
                     # Works with: Physics ON/OFF, stable with resetBasePositionAndOrientation
                     closest_points = p.getClosestPoints(
                         obj_i.body_id,
                         obj_j.body_id,
-                        distance=self.params.collision_margin,  # Safety clearance
-                        physicsClientId=self.client,
+                        distance=self._params.collision_margin,  # Safety clearance
+                        physicsClientId=self._client,
                     )
                     has_collision = len(closest_points) > 0
 
-                elif self.params.collision_detection_method == CollisionDetectionMethod.HYBRID:
+                elif detection_method == CollisionDetectionMethod.HYBRID:
                     # Method 3: Hybrid (physics uses getContactPoints, kinematic uses getClosestPoints)
                     # Best for: Mixed physics/kinematics with different detection needs
                     is_physics_i = obj_id_i in self._physics_objects
@@ -1699,12 +1678,12 @@ class MultiRobotSimulationCore:
 
                     if is_physics_i or is_physics_j:
                         # At least one is physics object - use getContactPoints
-                        contact_points = p.getContactPoints(obj_i.body_id, obj_j.body_id, physicsClientId=self.client)
+                        contact_points = p.getContactPoints(obj_i.body_id, obj_j.body_id, physicsClientId=self._client)
                         has_collision = len(contact_points) > 0
                     else:
                         # Both are kinematic - use getClosestPoints with safety margin
                         closest_points = p.getClosestPoints(
-                            obj_i.body_id, obj_j.body_id, distance=self.params.collision_margin, physicsClientId=self.client
+                            obj_i.body_id, obj_j.body_id, distance=self._params.collision_margin, physicsClientId=self._client
                         )
                         has_collision = len(closest_points) > 0
 
@@ -1735,10 +1714,10 @@ class MultiRobotSimulationCore:
                 timings["contact_points"] = (time.perf_counter() - t_contact0) * 1000  # ms
 
             # Update collision count (track total new collisions)
-            self.collision_count += len(new_collisions)
+            self._collision_count += len(new_collisions)
 
             # Color update (collision: blue, normal: original) only if enabled
-            if self.params.enable_collision_color_change:
+            if self._params.enable_collision_color_change:
                 # Get all currently colliding objects
                 currently_colliding = set()
                 for obj_id_i, obj_id_j in self._active_collision_pairs:
@@ -1793,16 +1772,19 @@ class MultiRobotSimulationCore:
         """
         return list(self._active_collision_pairs)
 
-    def update_monitor(self, suppress_console: bool = False) -> None:
+    def update_monitor(self) -> None:
+        """Update simulation monitor with current statistics.
+
+        Calculates actual simulation speed from a 10-second sliding window,
+        logs monitor data via logger, and writes to DataMonitor if enabled.
+        """
         now = time.time()
-        sim_time = self.step_count * self.params.timestep
+        sim_time = self._step_count * self._params.timestep
         # --- Speed history buffer ---
-        if not hasattr(self, "_speed_history"):
-            self._speed_history = []  # [(real_time, sim_time)]
         self._speed_history.append((now, sim_time))
-        # Keep only history within 10 seconds (efficient in-place removal)
+        # Keep only history within 10 seconds (O(1) popleft with deque)
         while self._speed_history and now - self._speed_history[0][0] > 10.0:
-            self._speed_history.pop(0)
+            self._speed_history.popleft()
         # Calculate speed for the last 10 seconds
         if len(self._speed_history) >= 2:
             rt0, st0 = self._speed_history[0]
@@ -1812,27 +1794,27 @@ class MultiRobotSimulationCore:
             actual_speed = sim_elapsed / elapsed if elapsed > 0 else 0
         else:
             actual_speed = 0
-        elapsed_time = now - self.start_time if self.start_time else 0
+        elapsed_time = now - self._start_time if self._start_time else 0
 
-        # Use len(self.agents) for O(1) agent count instead of O(N) iteration
-        num_agents = len(self.agents)
-        num_objects = len(self.sim_objects) - num_agents
+        # Use len(self._agents) for O(1) agent count instead of O(N) iteration
+        num_agents = len(self._agents)
+        num_objects = len(self._sim_objects) - num_agents
 
         monitor_data = {
             "sim_time": sim_time,
             "real_time": elapsed_time,
-            "target_speed": self.params.speed,
+            "target_speed": self._params.speed,
             "actual_speed": actual_speed,
-            "time_step": self.params.timestep,
-            "frequency": 1 / self.params.timestep,
-            "physics": "enabled" if self.params.physics else "disabled",
+            "time_step": self._params.timestep,
+            "frequency": 1 / self._params.timestep,
+            "physics": "enabled" if self._params.physics else "disabled",
             "agents": num_agents,
             "objects": num_objects,
             "active_collisions": len(self._active_collision_pairs),
-            "collisions": self.collision_count,
-            "steps": self.step_count,
+            "collisions": self._collision_count,
+            "steps": self._step_count,
         }
-        logging.debug(
+        logger.debug(
             "[MONITOR] sim_time=%.2f, real_time=%.2f, speed=%.2f, agents=%d, objects=%d, "
             "active_collisions=%d, total_collisions=%d, steps=%d",
             sim_time,
@@ -1841,16 +1823,16 @@ class MultiRobotSimulationCore:
             num_agents,
             num_objects,
             len(self._active_collision_pairs),
-            self.collision_count,
-            self.step_count,
+            self._collision_count,
+            self._step_count,
         )
         # Log only when collision count increases (new collision detected)
-        if self.collision_count > self._last_logged_collision_count:
-            logging.info(f"NEW COLLISION: total={self.collision_count} at sim_time={sim_time:.2f}")
-            self._last_logged_collision_count = self.collision_count
+        if self._collision_count > self._last_logged_collision_count:
+            logger.info(f"NEW COLLISION: total={self._collision_count} at sim_time={sim_time:.2f}")
+            self._last_logged_collision_count = self._collision_count
         # Also output to DataMonitor window
-        if self.data_monitor:
-            self.data_monitor.write_data(monitor_data)
+        if self._data_monitor:
+            self._data_monitor.write_data(monitor_data)
 
     def initialize_simulation(self) -> None:
         """
@@ -1875,19 +1857,48 @@ class MultiRobotSimulationCore:
                 sim.step_once()
         """
         # Reset simulation state
-        self.start_time = time.time()
-        self.step_count = 0
-        self.collision_count = 0
+        self._start_time = time.time()
+        self._step_count = 0
+        self._collision_count = 0
         self.sim_time = 0.0
-        self.last_collision_check = 0.0
-        self.last_monitor_update = 0.0
+        self._last_collision_check = 0.0
+        self._last_monitor_update = 0.0
         self._last_logged_collision_count = 0
+
+        # Reset pause state (#1: prevents stuck-paused on re-run)
+        self._simulation_paused = False
 
         # Clear movement tracking from any previous simulation
         self._moved_this_step.clear()
 
         # Clear active collision pairs (fresh start)
         self._active_collision_pairs.clear()
+
+        # Reset filter_aabb_pairs mode-change detection (#6: fresh start)
+        self._last_ignore_static = None
+
+        # Clear speed history (#2: prevents stale data in update_monitor)
+        self._speed_history.clear()
+
+        # Reset callback last_exec (#3: prevents stale dt on restart)
+        for cbinfo in self._callbacks:
+            cbinfo["last_exec"] = 0.0
+
+        # Clear profiling statistics (#4: prevents mixing data across runs)
+        for key in self._profiling_stats:
+            self._profiling_stats[key].clear()
+
+        # Reset memory statistics (#5: prevents stale growth/average data)
+        self._memory_stats = {
+            "count": 0,
+            "current_sum": 0.0,
+            "current_min": float("inf"),
+            "current_max": 0.0,
+            "current_first": 0.0,
+            "current_last": 0.0,
+            "peak_sum": 0.0,
+            "peak_max": 0.0,
+        }
 
         # Configure visualizer after all objects are spawned
         # This ensures transparency and other visual settings are applied correctly
@@ -1897,13 +1908,13 @@ class MultiRobotSimulationCore:
         self.enable_rendering()
 
         # Start memory profiling if enabled (using is_tracing() for robustness)
-        if self.enable_memory_profiling and not tracemalloc.is_tracing():
+        if self._enable_memory_profiling and not tracemalloc.is_tracing():
             # Start with 10 frames for traceback (useful for debugging memory issues)
             tracemalloc.start(10)
             self._memory_tracemalloc_started = True
             logger.info("Memory profiling started using tracemalloc (10 frames)")
 
-        logger.info(f"Simulation initialized: {len(self.sim_objects)} objects, timestep={self.params.timestep}s")
+        logger.info(f"Simulation initialized: {len(self._sim_objects)} objects, timestep={self._params.timestep}s")
 
     def run_simulation(self, duration: Optional[float] = None) -> None:
         """
@@ -1911,7 +1922,7 @@ class MultiRobotSimulationCore:
 
         Args:
             duration: Simulation duration in seconds (simulation time, not real time).
-                     If None, uses self.params.duration. If duration <= 0, runs indefinitely.
+                     If None, uses self._params.duration. If duration <= 0, runs indefinitely.
 
         Example:
             # Run for 10 seconds (simulation time)
@@ -1921,7 +1932,7 @@ class MultiRobotSimulationCore:
             sim.run_simulation(duration=0)
         """
         if duration is None:
-            duration = self.params.duration
+            duration = self._params.duration
 
         # Initialize simulation state (counters, visualizer, rendering)
         # Note: initialize_simulation() already starts tracemalloc if needed
@@ -1933,7 +1944,7 @@ class MultiRobotSimulationCore:
             last_pause_state = False  # Track pause state to detect resume
 
             while True:
-                current_sim_time = self.step_count * self.params.timestep
+                current_sim_time = self._step_count * self._params.timestep
 
                 # Check duration based on simulation time (not real time)
                 if duration > 0 and current_sim_time >= duration:
@@ -1943,11 +1954,11 @@ class MultiRobotSimulationCore:
                 try:
                     p.getConnectionInfo()
                 except p.error:
-                    logging.info("PyBullet connection lost (GUI window closed)")
+                    logger.info("PyBullet connection lost (GUI window closed)")
                     break
 
                 # Speed=0: Run as fast as possible (no synchronization, no sleep)
-                if self.params.speed <= 0:
+                if self._params.speed <= 0:
                     self.step_once()
                 else:
                     # Speed>0: Synchronize with real time using absolute time calculation
@@ -1957,21 +1968,21 @@ class MultiRobotSimulationCore:
                     # Detect pause state change: reset start_time on resume
                     if last_pause_state and not self._simulation_paused:
                         # Just resumed from pause: reset start_time to avoid jump
-                        start_time = current_time - current_sim_time / self.params.speed
+                        start_time = current_time - current_sim_time / self._params.speed
                         logger.info("Resumed from pause: start_time reset for smooth continuation")
                     last_pause_state = self._simulation_paused
 
                     # Calculate target sim_time using absolute time (stable control)
                     elapsed_time = current_time - start_time
-                    target_sim_time = elapsed_time * self.params.speed
+                    target_sim_time = elapsed_time * self._params.speed
                     time_diff = target_sim_time - current_sim_time
 
                     actual_sleep = 0.0
 
                     if time_diff > 0:
                         # Behind target: execute multiple steps to catch up
-                        steps_needed = int(time_diff / self.params.timestep)
-                        steps_needed = max(1, min(steps_needed, self.params.max_steps_per_frame))
+                        steps_needed = int(time_diff / self._params.timestep)
+                        steps_needed = max(1, min(steps_needed, self._params.max_steps_per_frame))
                         for _ in range(steps_needed):
                             self.step_once()
                     else:
@@ -1980,11 +1991,11 @@ class MultiRobotSimulationCore:
                         sleep_time = abs(time_diff) - last_step_process_time
 
                         # Determine minimum sleep for GUI responsiveness
-                        if self.params.gui:
-                            min_sleep = 1.0 / self.params.gui_min_fps
+                        if self._params.gui:
+                            min_sleep = 1.0 / self._params.gui_min_fps
                         else:
                             # For non-GUI, use timestep as minimum
-                            min_sleep = self.params.timestep
+                            min_sleep = self._params.timestep
 
                         # Sleep strategy based on how much we're ahead/behind
                         if sleep_time > 0:
@@ -1999,14 +2010,14 @@ class MultiRobotSimulationCore:
                     last_step_process_time = time.time() - loop_start - actual_sleep
 
         except KeyboardInterrupt:
-            logging.warning("Simulation interrupted by user")
+            logger.warning("Simulation interrupted by user")
         except RuntimeError as e:
             if "PyBullet disconnected" in str(e):
-                logging.info("PyBullet connection lost (GUI window closed)")
+                logger.info("PyBullet connection lost (GUI window closed)")
             else:
                 raise
         except p.error:
-            logging.info("PyBullet connection lost (GUI window closed)")
+            logger.info("PyBullet connection lost (GUI window closed)")
         self.update_monitor()
 
         # Disconnect from PyBullet if still connected
@@ -2022,7 +2033,7 @@ class MultiRobotSimulationCore:
         Execute one simulation step.
 
         Performs agent updates, callbacks, physics step, collision detection, and monitoring.
-        If enable_profiling is True, detailed timing information is logged.
+        If enable_time_profiling is True, detailed timing information is logged.
 
         Args:
             return_profiling: If True, return timing breakdown dictionary instead of logging.
@@ -2044,7 +2055,7 @@ class MultiRobotSimulationCore:
         The profiling measurements themselves do not significantly impact simulation performance.
         """
         # Profiling: step start time (measure even if return_profiling=True)
-        measure_timing = self.enable_profiling or return_profiling
+        measure_timing = self._enable_time_profiling or return_profiling
         if measure_timing:
             t_step = time.perf_counter()
 
@@ -2069,27 +2080,16 @@ class MultiRobotSimulationCore:
         # across multiple steps when collision_check_frequency < step_frequency
         self._moved_this_step.update(self._physics_objects)
 
-        # Update AABBs and spatial grid for physics objects immediately after physics step (batch operation)
-        # Kinematic objects update their AABBs and spatial grid in set_pose() for immediate consistency
-        for obj_id in self._physics_objects:
-            # O(1) dict lookup instead of O(N) linear search
-            obj = self._sim_objects_dict.get(obj_id)
-            if obj is not None:
-                self._update_object_aabb(obj_id)
-                # Update spatial grid if cell_size is initialized
-                if self._cached_cell_size is not None:
-                    self._update_object_spatial_grid(obj_id)
-
-        self.sim_time = self.step_count * self.params.timestep
+        self.sim_time = self._step_count * self._params.timestep
 
         # Update all simulation objects that have update() method
         # Agent instances are automatically updated every step for movement control
-        # OPTIMIZATION: Use self.agents list for O(M) iteration instead of O(N) with isinstance() check
+        # OPTIMIZATION: Use self._agents list for O(M) iteration instead of O(N) with isinstance() check
         if measure_timing:
             t0 = time.perf_counter()
 
-        for agent in self.agents:
-            moved = agent.update(self.params.timestep)
+        for agent in self._agents:
+            moved = agent.update(self._params.timestep)
             # Track kinematic agent movement
             if moved and agent.object_id in self._kinematic_objects:
                 self._moved_this_step.add(agent.object_id)
@@ -2101,13 +2101,13 @@ class MultiRobotSimulationCore:
         if measure_timing:
             t_cb0 = time.perf_counter()
 
-        for cbinfo in self.callbacks:
+        for cbinfo in self._callbacks:
             freq = cbinfo.get("frequency", None)
             last_exec = cbinfo.get("last_exec", 0.0)
             interval = 1.0 / freq if freq else 0.0
             # Judge based on self.sim_time
             if freq is None or self.sim_time - last_exec >= interval:
-                dt = self.sim_time - last_exec if last_exec > 0 else self.params.timestep
+                dt = self.sim_time - last_exec if last_exec > 0 else self._params.timestep
                 cbinfo["func"](self, dt)
                 cbinfo["last_exec"] = self.sim_time
 
@@ -2124,10 +2124,22 @@ class MultiRobotSimulationCore:
         # stepSimulation() control based on physics mode
         # Physics ON: Call stepSimulation() every step (rigid body integration, contact resolution)
         # Physics OFF: Skip stepSimulation() for pure kinematics (position updates via reset API)
-        if self.params.physics:
+        if self._params.physics:
             p.stepSimulation()
         # Note: Even in Physics OFF mode, collision detection still works via getClosestPoints()
         # which queries geometry directly without requiring stepSimulation()
+
+        # Update AABBs and spatial grid for physics objects AFTER stepSimulation()
+        # This ensures collision detection uses current-frame positions, not stale ones.
+        # Kinematic objects update their AABBs and spatial grid in set_pose() for immediate consistency.
+        for obj_id in self._physics_objects:
+            # Safeguard against stale _physics_objects entries
+            if obj_id not in self._sim_objects_dict:
+                continue
+            self._update_object_aabb(obj_id)
+            # Update spatial grid if cell_size is initialized
+            if self._cached_cell_size is not None:
+                self._update_object_spatial_grid(obj_id)
 
         if measure_timing:
             t_sim1 = time.perf_counter()
@@ -2136,36 +2148,35 @@ class MultiRobotSimulationCore:
         if measure_timing:
             t_col0 = time.perf_counter()
 
-        freq = self.collision_check_frequency
+        freq = self._collision_check_frequency
         # freq = None: check every step
         # freq = 0: disabled (never check)
         # freq > 0: check at specified frequency (Hz)
-        collision_timings: Optional[Dict[str, float]] = None
         if freq is None:
             # Check every step
-            _, collision_timings = self.check_collisions(return_profiling=self.enable_profiling)
-            self.last_collision_check = self.sim_time
+            self.check_collisions(return_profiling=False)
+            self._last_collision_check = self.sim_time
         elif freq > 0:
             # Check at specified frequency
             interval = 1.0 / freq
-            if self.sim_time - self.last_collision_check >= interval:
-                _, collision_timings = self.check_collisions(return_profiling=self.enable_profiling)
-                self.last_collision_check = self.sim_time
+            if self.sim_time - self._last_collision_check >= interval:
+                self.check_collisions(return_profiling=False)
+                self._last_collision_check = self.sim_time
         # else: freq = 0, skip collision checks entirely
 
         if measure_timing:
             t_col1 = time.perf_counter()
 
-        self.step_count += 1
+        self._step_count += 1
         # Monitor: every step if GUI enabled, otherwise every second
         if measure_timing:
             t_mon0 = time.perf_counter()
 
-        if self.monitor_enabled:
-            interval = self.params.timestep if self.params.gui else 1.0
-            if self.sim_time - self.last_monitor_update > interval:
+        if self._monitor_enabled:
+            interval = self._params.timestep if self._params.gui else 1.0
+            if self.sim_time - self._last_monitor_update > interval:
                 self.update_monitor()
-                self.last_monitor_update = self.sim_time
+                self._last_monitor_update = self.sim_time
 
         if measure_timing:
             t_mon1 = time.perf_counter()
@@ -2182,8 +2193,8 @@ class MultiRobotSimulationCore:
                 "total": 1000 * (t_end - t_step),  # type: ignore[possibly-unbound]
             }
 
-        # Profiling output (only when profiling is enabled and not returning data)
-        if self.enable_profiling:
+        # Profiling output (only when time profiling is enabled and not returning data)
+        if self._enable_time_profiling:
             # Collect statistics for averaging
             self._profiling_stats["agent_update"].append(1000 * (t1 - t0))  # type: ignore[possibly-unbound]
             self._profiling_stats["callbacks"].append(1000 * (t_cb1 - t_cb0))  # type: ignore[possibly-unbound]
@@ -2193,11 +2204,11 @@ class MultiRobotSimulationCore:
             self._profiling_stats["total"].append(1000 * (t_end - t_step))  # type: ignore[possibly-unbound]
 
             # Print average statistics every N steps
-            if self.step_count % self._profiling_interval == 0 and len(self._profiling_stats["total"]) > 0:
+            if self._step_count % self._profiling_interval == 0 and len(self._profiling_stats["total"]) > 0:
                 self._print_profiling_summary()
 
         # Memory profiling output (O(1) aggregator-based statistics)
-        if self.enable_memory_profiling and tracemalloc.is_tracing():
+        if self._enable_memory_profiling and tracemalloc.is_tracing():
             # Get memory usage (no import needed - already at top)
             current, peak = tracemalloc.get_traced_memory()
             current_mb = current / 1024 / 1024  # Convert to MB
@@ -2218,13 +2229,11 @@ class MultiRobotSimulationCore:
             self._memory_stats["current_last"] = current_mb
 
             # Print average statistics every N steps
-            if self.step_count % self._profiling_interval == 0 and count > 0:
+            if self._step_count % self._profiling_interval == 0 and count > 0:
                 self._print_memory_profiling_summary()
 
     def _print_profiling_summary(self) -> None:
         """Print profiling statistics summary (average over last N steps)."""
-        import statistics
-
         if not self._profiling_stats["total"]:
             return
 
@@ -2318,7 +2327,7 @@ class MultiRobotSimulationCore:
             >>> if mem:
             >>>     print(f"Python heap: {mem['current_mb']:.2f} MB, Peak: {mem['peak_mb']:.2f} MB")
         """
-        if not self.enable_memory_profiling or not tracemalloc.is_tracing():
+        if not self._enable_memory_profiling or not tracemalloc.is_tracing():
             return None
 
         current, peak = tracemalloc.get_traced_memory()
