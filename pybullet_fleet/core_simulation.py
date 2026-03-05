@@ -14,7 +14,7 @@ import time
 import tracemalloc  # Memory profiling (imported once at module level)
 from collections import deque
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union, cast
 
 import numpy as np
 
@@ -591,8 +591,7 @@ class MultiRobotSimulationCore:
         Returns:
             Integer cell index along the given axis
         """
-        assert self._cached_cell_size is not None
-        return int(math.floor(coord / self._cached_cell_size))
+        return int(math.floor(coord / cast(float, self._cached_cell_size)))
 
     def _get_overlapping_cells(self, object_id: int) -> List[Tuple[int, int, int]]:
         """
@@ -1202,8 +1201,11 @@ class MultiRobotSimulationCore:
 
         # Space key (ASCII 32) - toggle pause/play
         if ord(" ") in keys and keys[ord(" ")] & p.KEY_WAS_TRIGGERED:
-            self._simulation_paused = not self._simulation_paused
-            print(f"\n[PAUSE] Simulation: {'PAUSED' if self._simulation_paused else 'PLAYING'}")
+            if self.is_paused:
+                self.resume()
+            else:
+                self.pause()
+            print(f"\n[PAUSE] Simulation: {'PAUSED' if self.is_paused else 'PLAYING'}")
 
         # 't' key (ASCII 116) - toggle structure transparency
         if ord("t") in keys and keys[ord("t")] & p.KEY_WAS_TRIGGERED:
@@ -1522,25 +1524,20 @@ class MultiRobotSimulationCore:
                         if aabb_j is None:
                             continue
 
-                        # Check if AABBs overlap (continue if NO overlap)
-                        # For 2D modes, check XY only; for 3D modes, check XYZ
-                        aabb_overlap_xy = not (
+                        # Check if AABBs overlap in all 3 axes (continue if NO overlap)
+                        # Note: NORMAL_2D's optimisation is in neighbour *search* (9 vs 27 cells),
+                        # NOT in skipping the Z-axis AABB check.  Full XYZ overlap is always required
+                        # so that objects at different heights within the same Z-cell are correctly
+                        # rejected when their AABBs don't actually overlap.
+                        if (
                             aabb_i[1][0] < aabb_j[0][0]
                             or aabb_i[0][0] > aabb_j[1][0]
                             or aabb_i[1][1] < aabb_j[0][1]
                             or aabb_i[0][1] > aabb_j[1][1]
-                        )
-
-                        # Check Z-axis overlap only if at least one object uses 3D mode
-                        if mode_i == CollisionMode.NORMAL_3D or mode_j == CollisionMode.NORMAL_3D:
-                            aabb_overlap_z = not (aabb_i[1][2] < aabb_j[0][2] or aabb_i[0][2] > aabb_j[1][2])
-                            # 3D mode: require both XY and Z overlap
-                            if not (aabb_overlap_xy and aabb_overlap_z):
-                                continue  # No overlap, skip this pair
-                        else:
-                            # Both use 2D mode: only check XY overlap
-                            if not aabb_overlap_xy:
-                                continue  # No overlap, skip this pair
+                            or aabb_i[1][2] < aabb_j[0][2]
+                            or aabb_i[0][2] > aabb_j[1][2]
+                        ):
+                            continue  # No overlap, skip this pair
 
                         # AABBs overlap - add to candidate pairs
                         pairs.add(pair_key)
@@ -1866,7 +1863,7 @@ class MultiRobotSimulationCore:
         self._last_logged_collision_count = 0
 
         # Reset pause state (#1: prevents stuck-paused on re-run)
-        self._simulation_paused = False
+        self.resume()
 
         # Clear movement tracking from any previous simulation
         self._moved_this_step.clear()
@@ -1952,7 +1949,7 @@ class MultiRobotSimulationCore:
 
                 # Check if PyBullet connection is still active (e.g., GUI window not closed)
                 try:
-                    p.getConnectionInfo()
+                    p.getConnectionInfo(physicsClientId=self.client)
                 except p.error:
                     logger.info("PyBullet connection lost (GUI window closed)")
                     break
@@ -1966,11 +1963,11 @@ class MultiRobotSimulationCore:
                     current_time = time.time()
 
                     # Detect pause state change: reset start_time on resume
-                    if last_pause_state and not self._simulation_paused:
+                    if last_pause_state and not self.is_paused:
                         # Just resumed from pause: reset start_time to avoid jump
                         start_time = current_time - current_sim_time / self._params.speed
                         logger.info("Resumed from pause: start_time reset for smooth continuation")
-                    last_pause_state = self._simulation_paused
+                    last_pause_state = self.is_paused
 
                     # Calculate target sim_time using absolute time (stable control)
                     elapsed_time = current_time - start_time
@@ -2022,11 +2019,28 @@ class MultiRobotSimulationCore:
 
         # Disconnect from PyBullet if still connected
         try:
-            p.getConnectionInfo()
-            p.disconnect()
+            p.getConnectionInfo(physicsClientId=self.client)
+            p.disconnect(self.client)
         except p.error:
             # Already disconnected
             pass
+
+    # ------------------------------------------------------------------
+    # Pause / Resume
+    # ------------------------------------------------------------------
+
+    def pause(self) -> None:
+        """Pause the simulation. step_once will be skipped while paused."""
+        self._simulation_paused = True
+
+    def resume(self) -> None:
+        """Resume the simulation after a pause."""
+        self._simulation_paused = False
+
+    @property
+    def is_paused(self) -> bool:
+        """Return True if the simulation is currently paused."""
+        return self._simulation_paused
 
     def step_once(self, return_profiling: bool = False) -> Optional[Dict[str, float]]:
         """
@@ -2061,7 +2075,7 @@ class MultiRobotSimulationCore:
 
         # Check if PyBullet is still connected
         try:
-            p.getConnectionInfo()
+            p.getConnectionInfo(physicsClientId=self.client)
         except p.error:
             # PyBullet disconnected, skip this step
             return
@@ -2071,7 +2085,7 @@ class MultiRobotSimulationCore:
             self._handle_keyboard_events()
 
         # Skip physics simulation and callbacks if paused
-        if self._simulation_paused:
+        if self.is_paused:
             return
 
         # Physics objects are always considered as potentially moved (conservative approach)
@@ -2115,7 +2129,7 @@ class MultiRobotSimulationCore:
             t_cb1 = time.perf_counter()
 
         # Check if PyBullet is still connected before stepping
-        if not p.isConnected():
+        if not p.isConnected(physicsClientId=self.client):
             raise RuntimeError("PyBullet disconnected (GUI window closed)")
 
         if measure_timing:

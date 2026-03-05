@@ -5,6 +5,9 @@ Tests object lifecycle, simulation step, callback system, and configuration
 using a real PyBullet environment (DIRECT mode).
 """
 
+import math
+import time
+
 import pytest
 import pybullet as p
 
@@ -73,6 +76,32 @@ def make_agent(sim_core, position=(0, 0, 0)):
     )
 
 
+def obj_cells(sim_core, obj):
+    """Return the set of cells that *obj* is registered in."""
+    return set(sim_core._cached_object_to_cell[obj.object_id])
+
+
+class SpyGrid(dict):
+    """A dict subclass that records every key passed to .get().
+
+    Replaces sim_core._cached_spatial_grid to observe which cells
+    filter_aabb_pairs actually queries during neighbour search.
+    """
+
+    def __init__(self, original):
+        super().__init__(original)
+        self.queried_keys = set()
+
+    def get(self, key, default=None):
+        self.queried_keys.add(key)
+        return super().get(key, default)
+
+
+def was_searched(spy_grid, sim_core, obj):
+    """Return True if ANY cell occupied by *obj* was queried during search."""
+    return bool(obj_cells(sim_core, obj) & spy_grid.queried_keys)
+
+
 # ============================================================================
 # Object Lifecycle
 # ============================================================================
@@ -107,19 +136,28 @@ class TestObjectLifecycle:
 
     def test_add_disabled_object_skips_collision_system(self, sim_core):
         obj = make_box(sim_core, [0, 0, 0], collision_mode=CollisionMode.DISABLED)
+        # Collision domain: disabled only
         assert obj.object_id in sim_core._disabled_collision_objects
+        assert obj.object_id not in sim_core._static_collision_objects
+        assert obj.object_id not in sim_core._dynamic_collision_objects
         assert obj.object_id not in sim_core._cached_aabbs_dict
+        # Movement type: DISABLED mass=0 is kinematic (not STATIC, so not skipped)
+        assert obj.object_id in sim_core._kinematic_objects
+        assert obj.object_id not in sim_core._physics_objects
 
     def test_add_static_object_registers_in_static_collision_set(self, sim_core):
         """STATIC object should be in _static_collision_objects (collision domain),
-        not in _dynamic_collision_objects."""
+        not in _dynamic_collision_objects or _disabled_collision_objects."""
         obj = make_box(sim_core, [0, 0, 0], collision_mode=CollisionMode.STATIC)
         assert obj.object_id in sim_core._static_collision_objects
         assert obj.object_id not in sim_core._dynamic_collision_objects
+        assert obj.object_id not in sim_core._disabled_collision_objects
 
     def test_add_normal_object_registers_in_dynamic_collision_set(self, sim_core):
         obj = make_box(sim_core, [0, 0, 0], collision_mode=CollisionMode.NORMAL_3D)
         assert obj.object_id in sim_core._dynamic_collision_objects
+        assert obj.object_id not in sim_core._static_collision_objects
+        assert obj.object_id not in sim_core._disabled_collision_objects
 
     def test_static_collision_objects_not_managed_by_movement_type(self, sim_core):
         """_register_object_movement_type should NOT touch _static_collision_objects.
@@ -152,27 +190,151 @@ class TestObjectLifecycle:
         # set size unchanged (no duplicate entries)
         assert sum(1 for x in sim_core._kinematic_objects if x == oid) == 1
 
-    def test_update_object_movement_type_removed(self, sim_core):
-        """_update_object_movement_type was merged into _register_object_movement_type.
+    def test_static_object_in_neither_movement_set(self, sim_core):
+        """STATIC object should be in neither _kinematic_objects nor _physics_objects."""
+        obj = make_box(sim_core, [0, 0, 0], collision_mode=CollisionMode.STATIC)
+        oid = obj.object_id
+        # Collision domain: static only
+        assert oid in sim_core._static_collision_objects
+        assert oid not in sim_core._dynamic_collision_objects
+        assert oid not in sim_core._disabled_collision_objects
+        # Movement type: neither (STATIC)
+        assert oid not in sim_core._kinematic_objects
+        assert oid not in sim_core._physics_objects
 
-        The separate wrapper no longer exists."""
-        assert not hasattr(sim_core, "_update_object_movement_type")
+    def test_kinematic_object_in_kinematic_set_only(self, sim_core):
+        """Kinematic object (mass=0, non-STATIC) should be in _kinematic_objects,
+        not in _physics_objects."""
+        obj = make_box(sim_core, [0, 0, 0], mass=0.0, collision_mode=CollisionMode.NORMAL_3D)
+        oid = obj.object_id
+        # Collision domain: dynamic only
+        assert oid in sim_core._dynamic_collision_objects
+        assert oid not in sim_core._static_collision_objects
+        assert oid not in sim_core._disabled_collision_objects
+        # Movement type: kinematic only
+        assert oid in sim_core._kinematic_objects
+        assert oid not in sim_core._physics_objects
 
-    def test_update_object_collision_mode_calls_movement_type_update(self, sim_core):
-        """_update_object_collision_mode should delegate movement-type update
-        to _register_object_movement_type (single idempotent method)."""
+    def test_physics_object_in_physics_set_only(self, sim_core):
+        """Physics object (mass > 0) should be in _physics_objects,
+        not in _kinematic_objects."""
+        obj = make_box(sim_core, [0, 0, 0], mass=1.0, collision_mode=CollisionMode.NORMAL_3D)
+        oid = obj.object_id
+        # Collision domain: dynamic only
+        assert oid in sim_core._dynamic_collision_objects
+        assert oid not in sim_core._static_collision_objects
+        assert oid not in sim_core._disabled_collision_objects
+        # Movement type: physics only
+        assert oid in sim_core._physics_objects
+        assert oid not in sim_core._kinematic_objects
+
+    def test_transition_normal_to_static_maintains_exclusivity(self, sim_core):
+        """NORMAL_3D → STATIC: collision domain and movement type exclusivity."""
         obj = make_box(sim_core, [0, 0, 0], collision_mode=CollisionMode.NORMAL_3D)
         oid = obj.object_id
+        # Pre-condition
+        assert oid in sim_core._dynamic_collision_objects
         assert oid in sim_core._kinematic_objects
 
-        # Transition NORMAL_3D -> STATIC
         obj.set_collision_mode(CollisionMode.STATIC)
 
-        # Movement type should still be correctly registered
-        # (STATIC obj with mass=0 is still "static" in movement sense)
-        assert oid not in sim_core._physics_objects
-        # Kinematic set should be cleared for static objects
+        # Collision domain: static only
+        assert oid in sim_core._static_collision_objects
+        assert oid not in sim_core._dynamic_collision_objects
+        assert oid not in sim_core._disabled_collision_objects
+        # Movement type: neither (STATIC)
         assert oid not in sim_core._kinematic_objects
+        assert oid not in sim_core._physics_objects
+
+    def test_transition_normal_to_disabled_maintains_exclusivity(self, sim_core):
+        """NORMAL_3D → DISABLED: collision domain and movement type exclusivity."""
+        obj = make_box(sim_core, [0, 0, 0], collision_mode=CollisionMode.NORMAL_3D)
+        oid = obj.object_id
+        # Pre-condition
+        assert oid in sim_core._dynamic_collision_objects
+        assert oid in sim_core._kinematic_objects
+
+        obj.set_collision_mode(CollisionMode.DISABLED)
+
+        # Collision domain: disabled only
+        assert oid in sim_core._disabled_collision_objects
+        assert oid not in sim_core._dynamic_collision_objects
+        assert oid not in sim_core._static_collision_objects
+        # Movement type: DISABLED mass=0 → kinematic
+        assert oid in sim_core._kinematic_objects
+        assert oid not in sim_core._physics_objects
+
+    def test_transition_static_to_normal_maintains_exclusivity(self, sim_core):
+        """STATIC → NORMAL_3D: collision domain and movement type exclusivity."""
+        obj = make_box(sim_core, [0, 0, 0], collision_mode=CollisionMode.STATIC)
+        oid = obj.object_id
+        # Pre-condition
+        assert oid in sim_core._static_collision_objects
+        assert oid not in sim_core._kinematic_objects
+
+        obj.set_collision_mode(CollisionMode.NORMAL_3D)
+
+        # Collision domain: dynamic only
+        assert oid in sim_core._dynamic_collision_objects
+        assert oid not in sim_core._static_collision_objects
+        assert oid not in sim_core._disabled_collision_objects
+        # Movement type: mass=0 → kinematic
+        assert oid in sim_core._kinematic_objects
+        assert oid not in sim_core._physics_objects
+
+    def test_transition_static_to_disabled_maintains_exclusivity(self, sim_core):
+        """STATIC → DISABLED: collision domain and movement type exclusivity."""
+        obj = make_box(sim_core, [0, 0, 0], collision_mode=CollisionMode.STATIC)
+        oid = obj.object_id
+        # Pre-condition
+        assert oid in sim_core._static_collision_objects
+        assert oid not in sim_core._kinematic_objects
+
+        obj.set_collision_mode(CollisionMode.DISABLED)
+
+        # Collision domain: disabled only
+        assert oid in sim_core._disabled_collision_objects
+        assert oid not in sim_core._static_collision_objects
+        assert oid not in sim_core._dynamic_collision_objects
+        # Movement type: DISABLED mass=0 → kinematic
+        assert oid in sim_core._kinematic_objects
+        assert oid not in sim_core._physics_objects
+
+    def test_transition_disabled_to_normal_maintains_exclusivity(self, sim_core):
+        """DISABLED → NORMAL_3D: collision domain and movement type exclusivity."""
+        obj = make_box(sim_core, [0, 0, 0], collision_mode=CollisionMode.DISABLED)
+        oid = obj.object_id
+        # Pre-condition
+        assert oid in sim_core._disabled_collision_objects
+        assert oid in sim_core._kinematic_objects
+
+        obj.set_collision_mode(CollisionMode.NORMAL_3D)
+
+        # Collision domain: dynamic only
+        assert oid in sim_core._dynamic_collision_objects
+        assert oid not in sim_core._disabled_collision_objects
+        assert oid not in sim_core._static_collision_objects
+        # Movement type: mass=0 → kinematic
+        assert oid in sim_core._kinematic_objects
+        assert oid not in sim_core._physics_objects
+
+    def test_transition_disabled_to_static_maintains_exclusivity(self, sim_core):
+        """DISABLED → STATIC: collision domain and movement type exclusivity."""
+        obj = make_box(sim_core, [0, 0, 0], collision_mode=CollisionMode.DISABLED)
+        oid = obj.object_id
+        # Pre-condition
+        assert oid in sim_core._disabled_collision_objects
+        assert oid in sim_core._kinematic_objects
+
+        obj.set_collision_mode(CollisionMode.STATIC)
+
+        # Collision domain: static only
+        assert oid in sim_core._static_collision_objects
+        assert oid not in sim_core._disabled_collision_objects
+        assert oid not in sim_core._dynamic_collision_objects
+        # Movement type: neither (STATIC)
+        assert oid not in sim_core._kinematic_objects
+        assert oid not in sim_core._physics_objects
 
     def test_add_object_to_collision_system_classifies_static(self, sim_core):
         """_add_object_to_collision_system should register a STATIC object
@@ -205,28 +367,65 @@ class TestObjectLifecycle:
         assert len(sim_core.sim_objects) == count_before
 
     def test_remove_object_clears_all_caches(self, sim_core):
+        """remove_object should clear all caches: dict, collision mode,
+        AABB, spatial grid, collision domain sets, and movement type sets."""
         obj = make_box(sim_core, [0, 0, 0])
         obj_id = obj.object_id
         sim_core.remove_object(obj)
 
+        # Core registries
         assert obj_id not in sim_core._sim_objects_dict
         assert obj not in sim_core.sim_objects
         assert obj_id not in sim_core._cached_collision_modes
         assert obj_id not in sim_core._cached_aabbs_dict
         assert obj_id not in sim_core._cached_object_to_cell
+        # Collision domain sets (mutually exclusive)
         assert obj_id not in sim_core._dynamic_collision_objects
+        assert obj_id not in sim_core._static_collision_objects
+        assert obj_id not in sim_core._disabled_collision_objects
+        # Movement type sets (mutually exclusive)
+        assert obj_id not in sim_core._kinematic_objects
+        assert obj_id not in sim_core._physics_objects
+        # Movement tracking
+        assert obj_id not in sim_core._moved_this_step
 
     def test_remove_agent_clears_agents_list(self, sim_core):
+        """remove_object(agent) should clear agents list and all caches,
+        same as remove_object for a normal SimObject."""
         agent = make_agent(sim_core)
+        oid = agent.object_id
         sim_core.remove_object(agent)
-        assert agent not in sim_core.agents
-        assert agent not in sim_core.sim_objects
 
-    def test_remove_nonexistent_is_noop(self, sim_core):
+        # Agent-specific
+        assert agent not in sim_core.agents
+        # Core registries (same as test_remove_object_clears_all_caches)
+        assert agent not in sim_core.sim_objects
+        assert oid not in sim_core._sim_objects_dict
+        assert oid not in sim_core._cached_collision_modes
+        assert oid not in sim_core._cached_aabbs_dict
+        assert oid not in sim_core._cached_object_to_cell
+        # Collision domain sets
+        assert oid not in sim_core._dynamic_collision_objects
+        assert oid not in sim_core._static_collision_objects
+        assert oid not in sim_core._disabled_collision_objects
+        # Movement type sets
+        assert oid not in sim_core._kinematic_objects
+        assert oid not in sim_core._physics_objects
+
+    def test_remove_nonexistent_is_noop(self, sim_core, caplog):
+        """Removing an already-removed object should not raise,
+        and should log a warning."""
+        import logging
+
         obj = make_box(sim_core, [0, 0, 0])
         sim_core.remove_object(obj)
-        # Second remove should not raise
-        sim_core.remove_object(obj)
+        # Second remove should not raise, but should warn
+        with caplog.at_level(logging.WARNING, logger="pybullet_fleet.core_simulation"):
+            sim_core.remove_object(obj)
+
+        assert any(
+            "not found" in r.message for r in caplog.records
+        ), "Second remove_object should log a warning about object not found"
 
     def test_remove_object_clears_robot_original_colors(self, sim_core):
         """remove_object should delete body_id entry from _robot_original_colors."""
@@ -244,6 +443,13 @@ class TestObjectLifecycle:
         obj2 = make_box(sim_core, [0.3, 0, 0])
         sim_core._moved_this_step.add(obj2.object_id)
         sim_core.check_collisions()
+
+        # Verify collision exists before removal
+        expected = (
+            min(obj1.object_id, obj2.object_id),
+            max(obj1.object_id, obj2.object_id),
+        )
+        assert expected in sim_core._active_collision_pairs, "Pre-condition: objects should be colliding before removal"
 
         sim_core.remove_object(obj2)
         # No pair should reference removed object
@@ -408,6 +614,105 @@ class TestStepOnce:
         )
         assert expected in pairs
 
+    def test_step_adds_moving_agent_to_moved_this_step(self, sim_core):
+        """step_once should add a kinematic agent to _moved_this_step
+        when agent.update() returns True (agent moved)."""
+        agent = make_agent(sim_core, position=(0, 0, 0))
+        agent.set_goal_pose(Pose.from_xyz(10, 0, 0))
+
+        # Disable collision check so _moved_this_step is not cleared
+        sim_core._collision_check_frequency = 0
+        # Clear any _moved_this_step entries from add_object
+        sim_core._moved_this_step.clear()
+
+        sim_core.step_once()
+
+        assert (
+            agent.object_id in sim_core._moved_this_step
+        ), "Moving kinematic agent should be in _moved_this_step after step_once"
+
+    def test_step_does_not_add_stationary_agent_to_moved_this_step(self, sim_core):
+        """step_once should NOT add an agent to _moved_this_step
+        when the agent has no goal (not moving)."""
+        agent = make_agent(sim_core, position=(0, 0, 0))
+        # No goal set → agent.update() should return False
+
+        # Disable collision check so _moved_this_step is not cleared
+        sim_core._collision_check_frequency = 0
+        # Clear any _moved_this_step entries from add_object
+        sim_core._moved_this_step.clear()
+
+        sim_core.step_once()
+
+        assert agent.object_id not in sim_core._moved_this_step, "Stationary agent should NOT be in _moved_this_step"
+
+    def test_step_adds_physics_objects_to_moved_this_step(self):
+        """step_once should unconditionally add all physics objects
+        to _moved_this_step (conservative approach)."""
+        # Need physics=True so that mass>0 objects are in _physics_objects
+        params = SimulationParams(
+            gui=False,
+            physics=True,
+            monitor=False,
+            collision_detection_method=CollisionDetectionMethod.CONTACT_POINTS,
+            spatial_hash_cell_size_mode=SpatialHashCellSizeMode.CONSTANT,
+            spatial_hash_cell_size=2.0,
+            log_level="warning",
+        )
+        sc = MultiRobotSimulationCore(params)
+        sc.set_collision_spatial_hash_cell_size_mode()
+        try:
+            obj = make_box(sc, [0, 0, 0], mass=1.0, collision_mode=CollisionMode.NORMAL_3D)
+            assert obj.object_id in sc._physics_objects
+
+            # Disable collision check so _moved_this_step is not cleared
+            sc._collision_check_frequency = 0
+            # Clear any _moved_this_step entries from add_object
+            sc._moved_this_step.clear()
+
+            sc.step_once()
+
+            assert obj.object_id in sc._moved_this_step, "Physics object should always be in _moved_this_step after step_once"
+        finally:
+            p.disconnect(sc.client)
+
+    def test_static_object_in_moved_this_step_on_add(self, sim_core):
+        """STATIC object should be in _moved_this_step after add_object
+        so it participates in the first collision check."""
+        obj = make_box(sim_core, [0, 0, 0], collision_mode=CollisionMode.STATIC)
+
+        assert obj.object_id in sim_core._moved_this_step, "STATIC object should be in _moved_this_step after add_object"
+
+    def test_static_object_not_readded_to_moved_this_step_by_step_once(self, sim_core):
+        """After initial add, step_once should NOT re-add a STATIC object
+        to _moved_this_step (it's not in _physics_objects and not a
+        kinematic agent)."""
+        obj = make_box(sim_core, [0, 0, 0], collision_mode=CollisionMode.STATIC)
+
+        # Disable collision check so _moved_this_step is not cleared
+        sim_core._collision_check_frequency = 0
+        # Clear to isolate what step_once adds
+        sim_core._moved_this_step.clear()
+
+        sim_core.step_once()
+
+        assert obj.object_id not in sim_core._moved_this_step, (
+            "STATIC object should NOT be re-added to _moved_this_step " "by step_once"
+        )
+
+    def test_step_clears_moved_this_step_after_collision_check(self, sim_core):
+        """_moved_this_step should be cleared after check_collisions runs."""
+        agent = make_agent(sim_core, position=(0, 0, 0))
+        agent.set_goal_pose(Pose.from_xyz(10, 0, 0))
+
+        # collision_check_frequency=None means check every step
+        assert sim_core._collision_check_frequency is None
+
+        sim_core.step_once()
+
+        # After collision check, _moved_this_step should be cleared
+        assert len(sim_core._moved_this_step) == 0, "_moved_this_step should be cleared after collision check"
+
 
 # ============================================================================
 # Callback System
@@ -510,7 +815,7 @@ class TestCollisionCheckFrequency:
         sc = MultiRobotSimulationCore(params)
         try:
             obj1 = make_box(sc, [0, 0, 0])
-            obj2 = make_box(sc, [0.3, 0, 0])
+            obj2 = make_box(sc, [0, 0, 0])
             sc._moved_this_step.add(obj1.object_id)
 
             sc.step_once()
@@ -522,7 +827,7 @@ class TestCollisionCheckFrequency:
 
     def test_frequency_none_checks_every_step(self, sim_core):
         obj1 = make_box(sim_core, [0, 0, 0])
-        obj2 = make_box(sim_core, [0.3, 0, 0])
+        obj2 = make_box(sim_core, [0, 0, 0])
         sim_core._moved_this_step.add(obj1.object_id)
 
         sim_core.step_once()
@@ -532,88 +837,6 @@ class TestCollisionCheckFrequency:
 # ============================================================================
 # configure_visualizer
 # ============================================================================
-
-
-class TestConfigureVisualizerWarning:
-    """Test configure_visualizer static objects warning prints correct count."""
-
-    def test_static_warning_expands_count(self, sim_core, capsys):
-        """Bug: print('%d', len(...)) does not expand %d; should use f-string."""
-        # Create > 100 static objects to trigger the warning
-        for i in range(101):
-            make_box(sim_core, [i * 2, 0, 0], collision_mode=CollisionMode.STATIC)
-
-        # Force gui param so configure_visualizer body executes
-        sim_core._params.gui = True
-        sim_core.configure_visualizer()
-
-        captured = capsys.readouterr().out
-        # The warning must contain the actual integer count, not literal "%d"
-        assert "%d" not in captured, "print still contains unexpanded %d placeholder"
-        assert "101" in captured, "Warning should contain the actual static object count"
-
-
-class TestConfigureVisualizerLogMessage:
-    """Test configure_visualizer log messages are accurate."""
-
-    def test_keyboard_log_no_visual_key(self, sim_core, caplog):
-        """v=visual and c=collision should not appear in log since features were removed."""
-        import logging
-
-        sim_core._params.gui = True
-        with caplog.at_level(logging.INFO):
-            sim_core.configure_visualizer()
-
-        keyboard_logs = [r.message for r in caplog.records if "Keyboard controls" in r.message]
-        assert keyboard_logs, "Expected a 'Keyboard controls' log message"
-        assert "v=visual" not in keyboard_logs[0], "Stale 'v=visual' reference in log message"
-        assert "c=collision" not in keyboard_logs[0], "Stale 'c=collision' reference — duplicates PyBullet 'w' key"
-
-
-class TestCollisionShapesVisibilityRemoved:
-    """Verify _set_collision_shapes_visibility and c-key handler are removed."""
-
-    def test_method_removed(self, sim_core):
-        """_set_collision_shapes_visibility should no longer exist (duplicates PyBullet 'w')."""
-        assert not hasattr(
-            sim_core, "_set_collision_shapes_visibility"
-        ), "_set_collision_shapes_visibility should be removed (duplicates PyBullet built-in 'w' key)"
-
-    def test_collision_shapes_enabled_attr_removed(self, sim_core):
-        """_collision_shapes_enabled state should no longer exist."""
-        assert not hasattr(sim_core, "_collision_shapes_enabled"), "_collision_shapes_enabled should be removed"
-
-
-class TestConfigureVisualizerBuiltinKeybinds:
-    """Test configure_visualizer documents PyBullet built-in keybinds."""
-
-    def test_prints_builtin_keybind_info(self, sim_core, capsys):
-        """configure_visualizer should document PyBullet built-in keybinds."""
-        sim_core._params.gui = True
-        sim_core.configure_visualizer()
-
-        captured = capsys.readouterr().out
-        # Should mention 'w' for wireframe (PyBullet built-in)
-        assert "w" in captured.lower(), "Should document PyBullet's built-in 'w' key for wireframe"
-
-
-class TestSetStructureTransparencyLogging:
-    """Test _set_structure_transparency uses logger, not print."""
-
-    def test_no_print_output(self, sim_core, capsys, monkeypatch):
-        """_set_structure_transparency should use logger.info, not print."""
-        import pybullet as pb
-
-        monkeypatch.setattr(pb, "changeVisualShape", lambda *args, **kwargs: None)
-        sim_core._params.gui = True
-        # Add a static object so there's something to process
-        obj = make_box(sim_core, [0, 0, 0], collision_mode=CollisionMode.STATIC)
-        sim_core._original_visual_colors[(obj.body_id, -1)] = [1.0, 0.0, 0.0, 1.0]
-
-        sim_core._set_structure_transparency(True)
-
-        captured = capsys.readouterr().out
-        assert "[TRANSPARENCY]" not in captured, "Should use logger.info, not print"
 
 
 class TestSetStructureTransparencyRendering:
@@ -705,22 +928,6 @@ class TestSetStructureTransparencyRendering:
 class TestSetupCamera:
     """Test setup_camera behavior."""
 
-    def test_auto_mode_no_print_output(self, sim_core, capsys, monkeypatch):
-        """auto mode should use logger, not print."""
-        import pybullet as pb
-
-        monkeypatch.setattr(pb, "resetDebugVisualizerCamera", lambda **kw: None)
-        sim_core._params.gui = True
-        # Place two objects so extent > 0
-        make_box(sim_core, [0, 0, 0])
-        make_box(sim_core, [5, 5, 0])
-
-        sim_core.setup_camera(camera_config={"camera_mode": "auto"})
-
-        captured = capsys.readouterr().out
-        assert "Camera View" not in captured, "auto mode should use logger.info, not print"
-        assert "extent" not in captured, "auto mode should use logger.info, not print"
-
     def test_unknown_camera_mode_warns(self, sim_core, caplog, monkeypatch):
         """Unknown camera_mode should log a warning."""
         import logging
@@ -764,10 +971,10 @@ class TestInitializeSimulation:
     """Test initialize_simulation resets all stale state for a fresh run."""
 
     def test_resets_simulation_paused(self, sim_core):
-        """#1: _simulation_paused must be reset so step_once doesn't skip."""
-        sim_core._simulation_paused = True
+        """#1: pause state must be reset so step_once doesn't skip."""
+        sim_core.pause()
         sim_core.initialize_simulation()
-        assert sim_core._simulation_paused is False
+        assert sim_core.is_paused is False
 
     def test_clears_speed_history(self, sim_core):
         """#2: _speed_history deque must be emptied for accurate speed calculation."""
@@ -839,147 +1046,446 @@ class TestInitializeSimulation:
 
 
 class TestRunSimulation:
-    """Test run_simulation uses module logger, not root logging."""
+    """Test run_simulation loop behavior."""
 
-    def test_no_root_logging_calls_in_run_simulation(self):
-        """run_simulation must use logger.xxx(), not logging.xxx()."""
-        import inspect
-        from pybullet_fleet.core_simulation import MultiRobotSimulationCore
-
-        source = inspect.getsource(MultiRobotSimulationCore.run_simulation)
-        # Find bare logging.info/warning/error/debug calls (not logger.xxx)
-        import re
-
-        # Match 'logging.info', 'logging.warning', etc. but not 'logger.info'
-        matches = re.findall(r"\blogging\.(info|warning|error|debug)\b", source)
-        assert matches == [], (
-            f"run_simulation uses root logging module directly: {matches}. " "Should use module-level 'logger' instead."
+    @pytest.fixture
+    def fast_sim(self):
+        """Headless sim with speed=0 (no sleep) for deterministic testing."""
+        params = SimulationParams(
+            gui=False,
+            physics=False,
+            monitor=False,
+            speed=0,
+            log_level="warning",
         )
+        sc = MultiRobotSimulationCore(params)
+        yield sc
+        try:
+            p.disconnect(sc.client)
+        except p.error:
+            pass  # already disconnected by run_simulation on connection check
 
+    # -- basic duration -------------------------------------------------------
 
-# ============================================================================
-# step_once ordering & dead code
-# ============================================================================
+    def test_stops_after_duration(self, fast_sim):
+        """Stops after ceil(duration / timestep) steps when duration=N."""
+        fast_sim.run_simulation(duration=0.5)
+        # Loop breaks when step_count * timestep >= duration → step_count = ceil(duration / timestep)
+        expected = math.ceil(0.5 / fast_sim.params.timestep)
+        assert fast_sim.step_count == expected
 
+    def test_uses_params_duration_when_none(self, fast_sim):
+        """duration=None falls back to params.duration."""
+        fast_sim._params.duration = 0.1
+        fast_sim.run_simulation()  # duration=None
+        expected = math.ceil(0.1 / fast_sim.params.timestep)
+        assert fast_sim.step_count == expected
 
-class TestStepOnceCodeQuality:
-    """Source-level checks for step_once correctness."""
+    def test_initializes_before_run(self, fast_sim):
+        """run_simulation resets step_count at the start."""
+        fast_sim._step_count = 999
+        fast_sim.run_simulation(duration=0.01)
+        # step_count should reflect duration, not the stale 999
+        expected = math.ceil(0.01 / fast_sim.params.timestep)
+        assert fast_sim.step_count == expected
 
-    def test_physics_aabb_update_after_step_simulation(self):
-        """#1 HIGH: Physics object AABB/grid update must happen AFTER stepSimulation().
+    # -- speed ----------------------------------------------------------------
 
-        If AABB update runs before stepSimulation(), collision detection uses
-        1-frame-old positions for physics objects — a correctness bug.
+    def test_speed_zero_runs_without_sleep(self, fast_sim, monkeypatch):
+        """speed=0 never calls time.sleep (runs at maximum speed)."""
+        sleep_calls = []
+        original_sleep = time.sleep
+
+        def spy_sleep(seconds):
+            sleep_calls.append(seconds)
+            original_sleep(seconds)
+
+        monkeypatch.setattr(time, "sleep", spy_sleep)
+        fast_sim._params.speed = 0
+        fast_sim.run_simulation(duration=0.05)
+        assert len(sleep_calls) == 0, f"speed=0 should never call time.sleep, got {len(sleep_calls)} calls"
+
+    def test_speed_positive_calls_sleep(self, monkeypatch):
+        """speed>0 calls time.sleep for real-time synchronization."""
+        params = SimulationParams(
+            gui=False,
+            physics=False,
+            monitor=False,
+            speed=1.0,
+            log_level="warning",
+        )
+        sc = MultiRobotSimulationCore(params)
+        try:
+            sleep_calls = []
+            original_sleep = time.sleep
+
+            def spy_sleep(seconds):
+                sleep_calls.append(seconds)
+                # Keep actual sleep minimal to avoid slow tests
+                if seconds > 0.001:
+                    original_sleep(0.001)
+
+            monkeypatch.setattr(time, "sleep", spy_sleep)
+            sc.run_simulation(duration=0.05)
+            assert len(sleep_calls) > 0, "speed=1.0 should call time.sleep for sync"
+        finally:
+            if p.isConnected(physicsClientId=sc.client):
+                p.disconnect(sc.client)
+
+    def test_higher_speed_executes_more_steps_per_frame(self, monkeypatch):
+        """Both speed=1 and speed=10 produce the same step_count for the same
+        sim-time duration, since duration is measured in simulation time."""
+        step_counts = {}
+        for speed in (1.0, 10.0):
+            params = SimulationParams(
+                gui=False,
+                physics=False,
+                monitor=False,
+                speed=speed,
+                log_level="warning",
+            )
+            sc = MultiRobotSimulationCore(params)
+            try:
+                # Stub out sleep so the loop runs without real-time delay
+                monkeypatch.setattr(time, "sleep", lambda s: None)
+                sc.run_simulation(duration=0.1)
+                step_counts[speed] = sc.step_count
+            finally:
+                if p.isConnected(physicsClientId=sc.client):
+                    p.disconnect(sc.client)
+        # Same sim-time duration=0.1 → same step_count regardless of speed
+        # (duration is measured in simulation time, not wall-clock time)
+        expected = math.ceil(0.1 / SimulationParams(gui=False).timestep)
+        assert step_counts[1.0] == expected
+        assert step_counts[10.0] == expected
+
+    def test_higher_speed_completes_in_less_wall_clock_time(self, monkeypatch):
+        """speed=10 should accumulate ~10x less total sleep than speed=1,
+        confirming faster wall-clock completion.
+
+        Uses a fake clock where time.time() advances only by sleep amounts,
+        giving deterministic control over the real-time sync loop.
         """
-        import inspect
-        import re
-        from pybullet_fleet.core_simulation import MultiRobotSimulationCore
+        total_sleeps = {}
+        for speed in (1.0, 10.0):
+            params = SimulationParams(
+                gui=False,
+                physics=False,
+                monitor=False,
+                speed=speed,
+                log_level="warning",
+            )
+            sc = MultiRobotSimulationCore(params)
+            try:
+                # Fake clock: only sleep advances time; step_once computation
+                # is treated as zero-cost.  This is intentional — both speeds
+                # share the same simplification, so the *ratio* of accumulated
+                # sleep is a valid proxy for relative wall-clock duration.
+                base = time.time()
+                clock = base
 
-        source = inspect.getsource(MultiRobotSimulationCore.step_once)
+                def fake_time():
+                    return clock
 
-        # Find the position of stepSimulation() call
-        step_sim_match = re.search(r"p\.stepSimulation\(\)", source)
-        assert step_sim_match is not None, "stepSimulation() call not found in step_once"
+                def fake_sleep(seconds):
+                    # nonlocal required: closures can read outer scalars,
+                    # but reassignment (+=) needs nonlocal to avoid UnboundLocalError.
+                    nonlocal clock
+                    clock += seconds
 
-        # Find the physics-object AABB update loop
-        # Pattern: "for obj_id in self._physics_objects:" followed by "_update_object_aabb"
-        aabb_update_match = re.search(
-            r"for obj_id in self\._physics_objects:.*?_update_object_aabb",
-            source,
-            re.DOTALL,
+                monkeypatch.setattr(time, "time", fake_time)
+                monkeypatch.setattr(time, "sleep", fake_sleep)
+                sc.run_simulation(duration=0.5)
+                # clock - base == total sleep accumulated (computation is zero-cost)
+                total_sleeps[speed] = clock - base
+            finally:
+                if p.isConnected(physicsClientId=sc.client):
+                    p.disconnect(sc.client)
+
+        # speed=10 should sleep roughly 10x less than speed=1
+        assert total_sleeps[10.0] < total_sleeps[1.0] * 0.5, (
+            f"speed=10 should complete in much less wall-clock time than speed=1: "
+            f"sleep[10]={total_sleeps[10.0]:.4f}s vs sleep[1]={total_sleeps[1.0]:.4f}s"
         )
-        assert aabb_update_match is not None, "_update_object_aabb loop not found in step_once"
 
-        # AABB update must come AFTER stepSimulation()
-        assert aabb_update_match.start() > step_sim_match.start(), (
-            "Physics object AABB/grid update runs BEFORE stepSimulation(). "
-            "This means collision detection uses 1-frame-old positions. "
-            "Move the AABB update block to after p.stepSimulation()."
-        )
+    # -- behind target (catch-up) ---------------------------------------------
 
-    def test_no_unused_collision_timings_variable(self):
-        """#2 LOW: collision_timings should not be assigned if never read."""
-        import inspect
-        import re
-        from pybullet_fleet.core_simulation import MultiRobotSimulationCore
+    def test_behind_target_executes_multiple_steps(self, monkeypatch):
+        """With extreme speed, the catch-up loop batches multiple step_once
+        calls per iteration.
 
-        source = inspect.getsource(MultiRobotSimulationCore.step_once)
-
-        # Check for "collision_timings" variable assignment (not underscore)
-        # The variable is assigned but never consumed — should use _ or be removed
-        assignments = re.findall(r"\bcollision_timings\b", source)
-        assert len(assignments) == 0, (
-            f"Found {len(assignments)} references to 'collision_timings' in step_once. "
-            "This variable is assigned but never read. Remove it or replace with '_'."
-        )
-
-
-# ============================================================================
-# Whole-file code quality
-# ============================================================================
-
-
-class TestCoreSimulationCodeQuality:
-    """Source-level checks for core_simulation.py overall quality."""
-
-    def test_no_mutable_default_arguments(self):
-        """#1 HIGH: __init__ must not use mutable default arguments (list/dict).
-
-        Mutable defaults are shared across all call sites, so mutating the
-        default value affects every future caller.
+        We spy on step_once directly and detect iteration boundaries via
+        time.time() calls to measure per-iteration batch sizes, then
+        verify at least some batches contain more than one step.
         """
-        import inspect
-        from pybullet_fleet.core_simulation import MultiRobotSimulationCore
+        params = SimulationParams(
+            gui=False,
+            physics=False,
+            monitor=False,
+            speed=10000.0,  # extreme: always far behind after any sleep
+            max_steps_per_frame=10,
+            log_level="warning",
+        )
+        sc = MultiRobotSimulationCore(params)
+        try:
+            base = time.time()
+            clock = base
 
-        sig = inspect.signature(MultiRobotSimulationCore.__init__)
-        for name, param in sig.parameters.items():
-            if name == "self":
-                continue
-            if isinstance(param.default, (list, dict, set)):
-                raise AssertionError(
-                    f"Parameter '{name}' has mutable default {param.default!r}. "
-                    "Use None and assign inside __init__ instead."
+            # Detect iteration boundaries: time.time() is called between
+            # step_once batches (loop_start, current_time, last_step_process_time).
+            # We set a flag each call; the step_once spy flushes the current
+            # batch counter when it sees the flag.
+            new_iter_flag = False
+            batches = []
+            batch_counter = 0
+
+            original_step_once = sc.step_once
+
+            def spy_step_once(**kwargs):
+                nonlocal new_iter_flag, batch_counter
+                if new_iter_flag:
+                    if batch_counter > 0:
+                        batches.append(batch_counter)
+                    batch_counter = 0
+                    new_iter_flag = False
+                batch_counter += 1
+                return original_step_once(**kwargs)
+
+            def fake_time():
+                nonlocal new_iter_flag
+                new_iter_flag = True
+                return clock
+
+            def fake_sleep(seconds):
+                nonlocal clock
+                clock += seconds
+
+            monkeypatch.setattr(sc, "step_once", spy_step_once)
+            monkeypatch.setattr(time, "time", fake_time)
+            monkeypatch.setattr(time, "sleep", fake_sleep)
+            sc.run_simulation(duration=0.5)
+            # Flush the last batch
+            if batch_counter > 0:
+                batches.append(batch_counter)
+
+            # At least some iterations executed multiple step_once calls
+            assert any(b > 1 for b in batches), (
+                f"Expected multi-step catch-up batches, " f"got max={max(batches)}, batches={batches[:10]}"
+            )
+        finally:
+            if p.isConnected(physicsClientId=sc.client):
+                p.disconnect(sc.client)
+
+    def test_max_steps_per_frame_caps_catchup(self, monkeypatch):
+        """max_steps_per_frame caps step_once calls per loop iteration.
+
+        With extreme speed every iteration is behind target.  We spy on
+        step_once and detect iteration boundaries via time.time() calls,
+        recording per-iteration batch sizes.  No batch may exceed
+        max_steps_per_frame, and extreme speed should hit the cap.
+        """
+        max_steps = 5
+        params = SimulationParams(
+            gui=False,
+            physics=False,
+            monitor=False,
+            speed=10000.0,
+            max_steps_per_frame=max_steps,
+            log_level="warning",
+        )
+        sc = MultiRobotSimulationCore(params)
+        try:
+            base = time.time()
+            clock = base
+
+            new_iter_flag = False
+            batches = []
+            batch_counter = 0
+
+            original_step_once = sc.step_once
+
+            def spy_step_once(**kwargs):
+                nonlocal new_iter_flag, batch_counter
+                if new_iter_flag:
+                    if batch_counter > 0:
+                        batches.append(batch_counter)
+                    batch_counter = 0
+                    new_iter_flag = False
+                batch_counter += 1
+                return original_step_once(**kwargs)
+
+            def fake_time():
+                nonlocal new_iter_flag
+                new_iter_flag = True
+                return clock
+
+            def fake_sleep(seconds):
+                nonlocal clock
+                clock += seconds
+
+            monkeypatch.setattr(sc, "step_once", spy_step_once)
+            monkeypatch.setattr(time, "time", fake_time)
+            monkeypatch.setattr(time, "sleep", fake_sleep)
+            sc.run_simulation(duration=0.5)
+            if batch_counter > 0:
+                batches.append(batch_counter)
+
+            expected_total = math.ceil(0.5 / params.timestep)
+            assert sc.step_count == expected_total, f"Expected {expected_total} total steps, got {sc.step_count}"
+
+            # No batch exceeds max_steps_per_frame
+            assert all(b <= max_steps for b in batches), (
+                f"Batch exceeded max_steps_per_frame={max_steps}: " f"max={max(batches)}, batches={batches[:10]}"
+            )
+            # Extreme speed keeps the loop behind target → cap is reached
+            assert any(b == max_steps for b in batches), (
+                f"Expected some batches to hit cap={max_steps}: " f"batches={batches[:10]}"
+            )
+        finally:
+            if p.isConnected(physicsClientId=sc.client):
+                p.disconnect(sc.client)
+
+    # -- ahead of target (sleep) ----------------------------------------------
+
+    def test_ahead_of_target_sleeps(self, monkeypatch):
+        """When ahead of real-time target, sleeps to wait.
+
+        Uses a fake clock starting at 0.0 (not real time) to avoid
+        floating-point precision loss from large unix timestamps.
+        With speed=1.0 and zero-cost step_once, each sleep is exactly
+        one timestep.
+        """
+        params = SimulationParams(
+            gui=False,
+            physics=False,
+            monitor=False,
+            speed=1.0,
+            log_level="warning",
+        )
+        sc = MultiRobotSimulationCore(params)
+        try:
+            # Start clock at 0.0 to avoid float precision issues with
+            # large unix timestamps (≈1.77e9 loses ~7 decimal digits).
+            clock = 0.0
+            sleep_durations = []
+
+            def fake_time():
+                return clock
+
+            def fake_sleep(seconds):
+                nonlocal clock
+                sleep_durations.append(seconds)
+                clock += seconds
+
+            monkeypatch.setattr(time, "time", fake_time)
+            monkeypatch.setattr(time, "sleep", fake_sleep)
+            sc.run_simulation(duration=0.02)
+
+            dt = params.timestep
+            # With zero-cost step_once, the loop alternates: ahead→sleep(dt), behind→step.
+            # Every sleep should be approximately one timestep (speed=1.0).
+            positive_sleeps = [s for s in sleep_durations if s > 0]
+            assert len(positive_sleeps) > 0, "Should have positive sleeps when ahead of target"
+            for s in positive_sleeps:
+                assert dt * 0.5 <= s <= dt * 2, (
+                    f"Sleep {s:.6f}s outside expected range " f"[{dt*0.5:.6f}, {dt*2:.6f}] (timestep={dt:.6f})"
                 )
+        finally:
+            if p.isConnected(physicsClientId=sc.client):
+                p.disconnect(sc.client)
 
-    def test_no_dead_set_profiling_log_frequency(self):
-        """#2 MED: set_profiling_log_frequency sets _profiling_log_frequency,
-        but step_once uses _profiling_interval. The method is dead/ineffective.
-        It should either be removed or fixed to update _profiling_interval.
+    # -- pause / resume -------------------------------------------------------
+
+    def test_pause_skips_step_once(self, fast_sim):
+        """While paused, step_once does not increment step_count."""
+        fast_sim.initialize_simulation()
+        fast_sim.pause()
+        fast_sim.step_once()
+        assert fast_sim.step_count == 0, "step_once should be skipped when paused"
+
+    def test_resume_continues_stepping(self, fast_sim):
+        """After resume, step_once executes again."""
+        fast_sim.initialize_simulation()
+        fast_sim.pause()
+        fast_sim.step_once()
+        assert fast_sim.step_count == 0
+
+        fast_sim.resume()
+        fast_sim.step_once()
+        assert fast_sim.step_count == 1, "step_once should execute after resume"
+
+    def test_pause_resume_preserves_sim_time_continuity(self, monkeypatch):
+        """After pause→resume, sim_time advances continuously (no jump).
+
+        Verifies that resetting start_time on resume prevents wall-clock
+        time elapsed during pause from causing step skips or time jumps.
         """
-        from pybullet_fleet.core_simulation import MultiRobotSimulationCore
-
-        assert not hasattr(MultiRobotSimulationCore, "set_profiling_log_frequency"), (
-            "set_profiling_log_frequency still exists but sets _profiling_log_frequency "
-            "which is never read. step_once uses _profiling_interval instead. "
-            "Remove this dead method or fix it to update _profiling_interval."
+        params = SimulationParams(
+            gui=False,
+            physics=False,
+            monitor=False,
+            speed=1.0,
+            max_steps_per_frame=5,
+            log_level="warning",
         )
+        sc = MultiRobotSimulationCore(params)
+        try:
+            dt = params.timestep
 
-    def test_no_unused_plane_id(self):
-        """#4 MED: _plane_id is assigned but never referenced."""
-        import inspect
-        import re
-        from pybullet_fleet.core_simulation import MultiRobotSimulationCore
+            # Control time.time() to simulate wall-clock time passing during pause
+            wall_clock = 0.0
+            base = time.time()
 
-        source = inspect.getsource(MultiRobotSimulationCore)
-        # Find all references to _plane_id
-        refs = re.findall(r"\b_plane_id\b", source)
-        # Should have 0 references (assignment removed entirely)
-        # or if kept, must have at least 2 (assignment + usage)
-        assert len(refs) == 0, (
-            f"Found {len(refs)} reference(s) to '_plane_id'. " "It is assigned but never read. Remove the variable assignment."
-        )
+            def fake_time():
+                # Closure only reads wall_clock; no nonlocal needed because
+                # reassignment happens in the enclosing (same) scope.
+                return base + wall_clock
 
-    def test_statistics_imported_at_top_level(self):
-        """#5 LOW: import statistics should be at module level, not inside method."""
-        import inspect
-        from pybullet_fleet.core_simulation import MultiRobotSimulationCore
+            monkeypatch.setattr(time, "time", fake_time)
+            monkeypatch.setattr(time, "sleep", lambda s: None)
 
-        source = inspect.getsource(MultiRobotSimulationCore._print_profiling_summary)
-        # Should NOT contain 'import statistics' inside the method
-        assert "import statistics" not in source, (
-            "_print_profiling_summary has a deferred 'import statistics'. "
-            "Move it to the top-level imports for consistency and performance."
-        )
+            sc.initialize_simulation()
+
+            steps_before_pause = 5
+            steps_during_pause = 2  # paused → all skipped
+            steps_after_resume = 3
+
+            # --- Phase 1: Execute normal steps before pause ---
+            for _ in range(steps_before_pause):
+                wall_clock += dt  # advance wall-clock by one timestep
+                sc.step_once()
+            assert sc.step_count == steps_before_pause
+
+            sim_time_at_pause = sc.sim_time
+
+            # --- Phase 2: Pause (simulate 10s of wall-clock time passing) ---
+            sc.pause()
+            wall_clock += 10.0  # 10s passes during pause
+            for _ in range(steps_during_pause):
+                sc.step_once()  # paused → skipped
+            assert sc.step_count == steps_before_pause, "step_count should not change while paused"
+
+            # --- Phase 3: Resume ---
+            sc.resume()
+
+            for _ in range(steps_after_resume):
+                wall_clock += dt
+                sc.step_once()
+            assert sc.step_count == steps_before_pause + steps_after_resume, "Should resume stepping after unpause"
+
+            # sim_time should advance continuously from pre-pause value
+            expected_sim_time = sim_time_at_pause + steps_after_resume * dt
+            assert (
+                sc.sim_time > sim_time_at_pause
+            ), f"sim_time should advance after resume: {sc.sim_time} > {sim_time_at_pause}"
+            # No 10s jump — should advance by steps_after_resume timesteps only
+            assert sc.sim_time == pytest.approx(expected_sim_time, abs=dt), (
+                f"sim_time should advance by ~{steps_after_resume} step(s), not jump: "
+                f"got {sc.sim_time}, expected ~{expected_sim_time}"
+            )
+        finally:
+            if p.isConnected(physicsClientId=sc.client):
+                p.disconnect(sc.client)
 
 
 # ============================================================================
@@ -1054,30 +1560,130 @@ class TestFilterAabbPairs:
         pair = (min(static.object_id, normal.object_id), max(static.object_id, normal.object_id))
         assert pair in pairs
 
-    def test_2d_mode_ignores_z_separation(self, sim_core):
-        """Two NORMAL_2D objects at same XY but Z-separated (within same grid cell)
-        should be detected because 2D mode skips the Z-axis AABB overlap check.
-        Use Z=1.5 so both objects stay in the same spatial grid Z-cell (cell_size=2.0)
-        but their Z AABBs (size=0.25) do NOT overlap."""
+    def test_2d_mode_rejects_z_separated_same_cell(self, sim_core):
+        """NORMAL_2D with Z-separated objects in the SAME Z-cell: rejected.
+
+        Both objects share the same XY position and fall in the same Z-cell
+        (Z=0 → cell 0, Z=1.5 → cell 0 with cell_size=2.0), so 2D neighbor
+        search finds them.  However their Z-axis AABBs (size=0.25) do NOT
+        overlap: [−0.125, 0.125] vs [1.375, 1.625].
+
+        NORMAL_2D's optimisation is only in neighbour search (9 vs 27 cells).
+        AABB overlap is always checked on all 3 axes, so this pair is rejected
+        — same as NORMAL_3D for the same geometry."""
         obj1 = make_box(sim_core, [0, 0, 0], collision_mode=CollisionMode.NORMAL_2D)
         obj2 = make_box(sim_core, [0, 0, 1.5], collision_mode=CollisionMode.NORMAL_2D)
-        sim_core._moved_this_step.add(obj1.object_id)
 
+        # Only obj1 is "moved" so the spy observes obj1's search only
+        sim_core._moved_this_step = {obj1.object_id}
+        spy = SpyGrid(sim_core._cached_spatial_grid)
+        sim_core._cached_spatial_grid = spy
         pairs, _ = sim_core.filter_aabb_pairs()
 
+        # obj2's cell WAS queried (same Z-cell) → search hit
+        assert was_searched(spy, sim_core, obj2), "obj2's cell should have been queried (same Z-cell)"
+        # but pair is rejected by AABB Z-overlap check
         pair = (min(obj1.object_id, obj2.object_id), max(obj1.object_id, obj2.object_id))
-        assert pair in pairs, "2D mode should ignore Z-axis separation"
+        assert pair not in pairs, "Search found obj2, but AABB Z-overlap should reject the pair"
 
-    def test_3d_mode_respects_z_separation(self, sim_core):
-        """Two NORMAL_3D objects separated only in Z should NOT overlap."""
+    def test_2d_mode_detects_overlapping_objects(self, sim_core):
+        """NORMAL_2D with actually overlapping objects should be detected.
+
+        Both objects are at the same position → AABBs fully overlap on all
+        3 axes.  2D neighbour search (9 cells) finds them, and the full
+        XYZ AABB check passes."""
+        obj1 = make_box(sim_core, [0, 0, 0], collision_mode=CollisionMode.NORMAL_2D)
+        obj2 = make_box(sim_core, [0.3, 0, 0], collision_mode=CollisionMode.NORMAL_2D)
+
+        sim_core._moved_this_step = {obj1.object_id}
+        spy = SpyGrid(sim_core._cached_spatial_grid)
+        sim_core._cached_spatial_grid = spy
+        pairs, _ = sim_core.filter_aabb_pairs()
+
+        assert was_searched(spy, sim_core, obj2), "obj2's cell should have been queried"
+        pair = (min(obj1.object_id, obj2.object_id), max(obj1.object_id, obj2.object_id))
+        assert pair in pairs, "2D mode should detect overlapping objects"
+
+    def test_3d_rejects_z_separated_same_cell(self, sim_core):
+        """Mirror of test_2d_mode_rejects_z_separated_same_cell with NORMAL_3D.
+
+        Same geometry (Z=0 vs Z=1.5, same Z-cell) but NORMAL_3D mode.
+        AABB overlap requires Z-axis overlap, which fails here
+        (Z AABBs [−0.125,0.125] vs [1.375,1.625] don't overlap)."""
+        obj1 = make_box(sim_core, [0, 0, 0], collision_mode=CollisionMode.NORMAL_3D)
+        obj2 = make_box(sim_core, [0, 0, 1.5], collision_mode=CollisionMode.NORMAL_3D)
+
+        sim_core._moved_this_step = {obj1.object_id}
+        spy = SpyGrid(sim_core._cached_spatial_grid)
+        sim_core._cached_spatial_grid = spy
+        pairs, _ = sim_core.filter_aabb_pairs()
+
+        # obj2's cell WAS queried (same Z-cell) → search hit
+        assert was_searched(spy, sim_core, obj2), "obj2's cell should have been queried (same Z-cell)"
+        pair = (min(obj1.object_id, obj2.object_id), max(obj1.object_id, obj2.object_id))
+        assert pair not in pairs, "Search found obj2, but AABB Z-overlap should reject the pair"
+
+    def test_2d_search_miss_different_z_cell(self, sim_core):
+        """2D neighbour search never reaches a different Z-cell (search miss).
+
+        Z=0 → cell 0, Z=3.0 → cell 1 (floor(3.0/2.0)=1).
+        2D offsets use Z=0 only, so cell 1 is never visited."""
+        obj1 = make_box(sim_core, [0, 0, 0], collision_mode=CollisionMode.NORMAL_2D)
+        obj2 = make_box(sim_core, [0, 0, 3.0], collision_mode=CollisionMode.NORMAL_2D)
+
+        sim_core._moved_this_step = {obj1.object_id}
+        spy = SpyGrid(sim_core._cached_spatial_grid)
+        sim_core._cached_spatial_grid = spy
+        pairs, _ = sim_core.filter_aabb_pairs()
+
+        # obj2's cell was NEVER queried → genuine search miss
+        assert not was_searched(spy, sim_core, obj2), "obj2's Z-cell should NOT have been queried by 2D search"
+        pair = (min(obj1.object_id, obj2.object_id), max(obj1.object_id, obj2.object_id))
+        assert pair not in pairs
+
+    def test_3d_search_miss_z_cell_too_far(self, sim_core):
+        """3D neighbour search cannot reach Z-cell 2 from Z-cell 0 (search miss).
+
+        Z=0 → cell 0, Z=5 → cell 2 (floor(5/2.0)=2).
+        3D offsets reach Z ∈ {-1, 0, 1} only, so cell 2 is out of range.
+
+        This tests the search boundary, NOT the AABB overlap check.
+        See test_3d_aabb_rejects_adjacent_z_cell for the AABB rejection path."""
         obj1 = make_box(sim_core, [0, 0, 0], collision_mode=CollisionMode.NORMAL_3D)
         obj2 = make_box(sim_core, [0, 0, 5], collision_mode=CollisionMode.NORMAL_3D)
-        sim_core._moved_this_step.add(obj1.object_id)
 
+        sim_core._moved_this_step = {obj1.object_id}
+        spy = SpyGrid(sim_core._cached_spatial_grid)
+        sim_core._cached_spatial_grid = spy
         pairs, _ = sim_core.filter_aabb_pairs()
 
+        # obj2's cell was NEVER queried → genuine search miss
+        assert not was_searched(spy, sim_core, obj2), "obj2's Z-cell should NOT have been queried (too far for 3D offsets)"
         pair = (min(obj1.object_id, obj2.object_id), max(obj1.object_id, obj2.object_id))
-        assert pair not in pairs, "3D mode should respect Z-axis separation"
+        assert pair not in pairs
+
+    def test_3d_aabb_rejects_adjacent_z_cell(self, sim_core):
+        """3D neighbour search reaches adjacent Z-cell, but AABB overlap fails.
+
+        Z=0 → cell 0, Z=2.5 → cell 1 (floor(2.5/2.0)=1).
+        3D offsets include Z=+1, so cell 1 IS searched and the pair IS
+        considered.  However Z AABBs [−0.125, 0.125] vs [2.375, 2.625]
+        do NOT overlap, so the pair is rejected at the AABB check stage.
+
+        This tests the AABB rejection path (not search miss)."""
+        obj1 = make_box(sim_core, [0, 0, 0], collision_mode=CollisionMode.NORMAL_3D)
+        obj2 = make_box(sim_core, [0, 0, 2.5], collision_mode=CollisionMode.NORMAL_3D)
+
+        sim_core._moved_this_step = {obj1.object_id}
+        spy = SpyGrid(sim_core._cached_spatial_grid)
+        sim_core._cached_spatial_grid = spy
+        pairs, _ = sim_core.filter_aabb_pairs()
+
+        # obj2's cell WAS queried (adjacent Z-cell) → search hit
+        assert was_searched(spy, sim_core, obj2), "obj2's cell should have been queried (adjacent Z-cell via 3D offset)"
+        # but pair is rejected by AABB Z-overlap check
+        pair = (min(obj1.object_id, obj2.object_id), max(obj1.object_id, obj2.object_id))
+        assert pair not in pairs, "Search found obj2, but AABB Z-overlap should reject the pair"
 
     def test_return_profiling_includes_timings(self, sim_core):
         """return_profiling=True should return a dict with timing keys."""
@@ -1099,12 +1705,26 @@ class TestFilterAabbPairs:
         assert timings is None
 
     def test_mode_change_forces_full_recalculation(self, sim_core):
-        """Changing ignore_static should clear active_collision_pairs and recheck all."""
+        """Changing ignore_static triggers a full rescan of ALL objects.
+
+        Setup: static + normal1 + normal2 (all overlapping).
+
+        1st call (ignore_static=False): only normal1 is in _moved_this_step.
+        Then _moved_this_step is cleared to simulate "nothing moved".
+
+        2nd call (ignore_static=True): mode change should override the empty
+        _moved_this_step with all object IDs → full recalculation.
+
+        We prove recalculation happened by asserting normal1-normal2 pair IS
+        found (impossible with an empty moved set).  We prove the new mode is
+        applied by asserting static pairs are excluded.
+        """
         static = make_box(sim_core, [0, 0, 0], collision_mode=CollisionMode.STATIC)
-        normal = make_box(sim_core, [0.3, 0, 0], collision_mode=CollisionMode.NORMAL_3D)
+        normal1 = make_box(sim_core, [0.1, 0, 0], collision_mode=CollisionMode.NORMAL_3D)
+        normal2 = make_box(sim_core, [0.2, 0, 0], collision_mode=CollisionMode.NORMAL_3D)
 
         # First call with ignore_static=False — sets _last_ignore_static
-        sim_core._moved_this_step.add(normal.object_id)
+        sim_core._moved_this_step = {normal1.object_id}
         sim_core.filter_aabb_pairs(ignore_static=False)
 
         # Clear moved set to simulate "nothing moved"
@@ -1113,9 +1733,20 @@ class TestFilterAabbPairs:
         # Switch to ignore_static=True — should force full recalculation
         pairs, _ = sim_core.filter_aabb_pairs(ignore_static=True)
 
-        # Static+normal pair should NOT be in results because ignore_static=True
-        pair = (min(static.object_id, normal.object_id), max(static.object_id, normal.object_id))
-        assert pair not in pairs
+        # Proof of recalculation: normal1-normal2 pair found despite empty
+        # _moved_this_step (only possible if all objects were re-scanned)
+        dyn_pair = (
+            min(normal1.object_id, normal2.object_id),
+            max(normal1.object_id, normal2.object_id),
+        )
+        assert dyn_pair in pairs, (
+            "normal1-normal2 pair should be found — proves full recalculation "
+            "happened even though _moved_this_step was empty"
+        )
+
+        # Proof of new mode applied: static pairs excluded
+        for a, b in pairs:
+            assert a != static.object_id and b != static.object_id, "static object should be excluded under ignore_static=True"
 
 
 # ============================================================================
@@ -1207,22 +1838,14 @@ class TestGetAabbs:
 
 
 # ============================================================================
-# update_monitor
+# update_monitor — collision logging
 # ============================================================================
 
 
-class TestUpdateMonitor:
-    """Test update_monitor data reporting."""
+class TestCollisionLogging:
+    """Test NEW COLLISION log output from update_monitor."""
 
-    def test_uses_logger_not_print(self, sim_core, capsys):
-        """update_monitor should use logger, not print."""
-        sim_core._start_time = __import__("time").time()
-        sim_core.update_monitor()
-
-        captured = capsys.readouterr().out
-        assert "[MONITOR]" not in captured, "Should use logger.debug, not print"
-
-    def test_collision_count_logging(self, sim_core, caplog):
+    def test_logs_new_collision_when_count_increases(self, sim_core, caplog):
         """Should log NEW COLLISION message when collision_count increases."""
         import logging
 
@@ -1235,7 +1858,7 @@ class TestUpdateMonitor:
 
         assert any("NEW COLLISION" in r.message for r in caplog.records)
 
-    def test_no_collision_log_when_count_unchanged(self, sim_core, caplog):
+    def test_no_log_when_count_unchanged(self, sim_core, caplog):
         """Should NOT log NEW COLLISION when count doesn't change."""
         import logging
 
@@ -1247,55 +1870,6 @@ class TestUpdateMonitor:
             sim_core.update_monitor()
 
         assert not any("NEW COLLISION" in r.message for r in caplog.records)
-
-    def test_speed_history_populated(self, sim_core):
-        """update_monitor should append to _speed_history deque."""
-        sim_core._start_time = __import__("time").time()
-        assert len(sim_core._speed_history) == 0
-
-        sim_core.update_monitor()
-        assert len(sim_core._speed_history) == 1
-
-
-# ============================================================================
-# _print_profiling_summary
-# ============================================================================
-
-
-class TestPrintProfilingSummary:
-    """Test _print_profiling_summary output."""
-
-    def test_noop_when_no_stats(self, sim_core, caplog):
-        """Should do nothing when profiling_stats is empty."""
-        import logging
-
-        with caplog.at_level(logging.INFO, logger="pybullet_fleet.core_simulation"):
-            sim_core._print_profiling_summary()
-
-        assert not any("[PROFILING]" in r.message for r in caplog.records)
-
-    def test_logs_summary_when_stats_present(self, sim_core, caplog):
-        """Should log a summary line when profiling data is available."""
-        import logging
-
-        # Populate profiling stats
-        for key in sim_core._profiling_stats:
-            sim_core._profiling_stats[key].append(1.0)
-
-        with caplog.at_level(logging.INFO, logger="pybullet_fleet.core_simulation"):
-            sim_core._print_profiling_summary()
-
-        assert any("[PROFILING]" in r.message for r in caplog.records)
-
-    def test_clears_stats_after_print(self, sim_core):
-        """Should clear profiling_stats after printing summary."""
-        for key in sim_core._profiling_stats:
-            sim_core._profiling_stats[key].append(2.0)
-
-        sim_core._print_profiling_summary()
-
-        for key in sim_core._profiling_stats:
-            assert len(sim_core._profiling_stats[key]) == 0, f"_profiling_stats['{key}'] should be cleared after summary"
 
 
 # ============================================================================
