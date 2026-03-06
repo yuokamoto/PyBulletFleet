@@ -335,7 +335,57 @@ These are **expected behaviors** to document, not bugs:
 
 ---
 
-## 8. Test Execution
+## 9. Collision Detection Pipeline — Test Coverage Map
+
+The collision detection system is a multi-stage pipeline.
+Each stage is tested in a different file/class, and the stages compose to
+provide end-to-end coverage.
+
+### Pipeline Stages
+
+```
+set_pose() / step_once()
+        │
+        ▼
+┌─────────────────────────┐
+│ 1. _moved_this_step     │  ← Which objects need re-evaluation?
+│    (movement tracking)  │
+└────────────┬────────────┘
+             ▼
+┌─────────────────────────┐
+│ 2. filter_aabb_pairs()  │  ← AABB broadphase: generate candidate pairs
+│    (broadphase filter)  │
+└────────────┬────────────┘
+             ▼
+┌─────────────────────────┐
+│ 3. check_collisions()   │  ← Narrowphase: PyBullet getClosestPoints /
+│    (narrowphase +       │    getContactPoints per candidate pair.
+│     pairs management)   │    Update _active_collision_pairs (add/remove).
+└────────────┬────────────┘
+             ▼
+   _active_collision_pairs   ← Final result: set of colliding (i, j) tuples
+```
+
+### Where Each Stage Is Tested
+
+| Stage | Test File | Test Class / Tests | What Is Verified |
+|-------|-----------|-------------------|------------------|
+| **1. Movement tracking** | `test_core_simulation.py` | `TestStepOnce` | Moving agent → added to `_moved_this_step`; stationary agent → not added; physics objects → always added; STATIC → added on creation only, not re-added by `step_once`; cleared after collision check |
+| **2. Broadphase (filter_aabb_pairs)** | `test_core_simulation.py` | `TestFilterAabbPairs` | Overlapping AABBs → pair returned; distant objects → no pair; no moved objects → empty; DISABLED excluded; `ignore_static` flag; multi-cell objects; profiling timings |
+| **3a. Narrowphase (detection)** | `test_collision_comprehensive.py` | `TestBasicCollisionDetection` | All 4×4 mode combinations × 2 distances = 32 parametrized cases; CLOSEST_POINTS near-miss (xfail: AABB limitation); CONTACT_POINTS with `step_once` |
+| **3b. Pairs accuracy** | `test_collision_comprehensive.py` | `TestCollisionPairsAccuracy` | Exact set equality of `_active_collision_pairs`: 3-object chain, all-separated (empty), no-movement (unchanged), move adds/removes pairs, progressive accumulation |
+| **3c. Movement → pairs** | `test_collision_comprehensive.py` | `TestMovementDetection` | `set_pose` into collision → detected; `set_pose` out of collision → resolved |
+| **3d. Runtime mode changes** | `test_collision_comprehensive.py` | `TestRuntimeModeChanges` | Disable at runtime → pair removed; enable → pair added; same-mode no-op; `_remove_object_from_collision_system` clears pairs |
+| **3e. Multi-cell** | `test_collision_comprehensive.py` | `TestMultiCellRegistration` | Single-cell vs multi-cell registration; `_get_overlapping_cells`; large wall ↔ small robot; threshold; `_coord_to_cell`; same-cell skip; `_discard_from_cells` |
+
+### Cross-cutting concerns
+
+| Concern | Where Tested |
+|---------|-------------|
+| `ignore_static_collision` flag | `TestFilterAabbPairs` (broadphase), `TestIgnoreStaticCollision` in `test_core_simulation.py` |
+| `collision_check_frequency` | `TestCollisionCheckFrequency` in `test_core_simulation.py` |
+| Object removal cleans pairs | `TestRemoveObject.test_remove_clears_active_collision_pairs` in `test_core_simulation.py` |
+| Collision logging | `TestCollisionLogging` in `test_core_simulation.py` |
 
 ### Run All Tests
 ```bash

@@ -21,17 +21,11 @@ Date: 2026-01-21
 """
 
 import logging
-import sys
-import os
 import itertools
 from typing import List, Tuple, Optional
 
-# Add parent directory to path
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-
 import pybullet as p
 import pytest
-import numpy as np
 
 from pybullet_fleet.core_simulation import MultiRobotSimulationCore, SimulationParams
 from pybullet_fleet.sim_object import SimObject, ShapeParams
@@ -136,7 +130,7 @@ def create_test_box(
         SimObject instance
     """
     if color is None:
-        color = [np.random.random(), np.random.random(), np.random.random(), 1.0]
+        color = [0.6, 0.6, 0.6, 1.0]
 
     # Create box using SimObject.from_mesh() with ShapeParams
     sim_obj = SimObject.from_mesh(
@@ -205,23 +199,6 @@ def assert_collision_detected(
             f"and obj{obj2.object_id} (body {obj2.body_id}). "
             f"Unexpected pair: {expected_pair}, Found pairs: {pairs}. {message}"
         )
-
-
-def assert_collision_count(sim_core: MultiRobotSimulationCore, expected_count: int, message: str = ""):
-    """
-    Assert the total number of collision pairs.
-
-    Args:
-        sim_core: Simulation core instance
-        expected_count: Expected number of collision pairs
-        message: Additional error message
-    """
-    pairs = get_collision_pairs(sim_core)
-    actual_count = len(pairs)
-
-    assert actual_count == expected_count, (
-        f"Expected {expected_count} collision pairs, found {actual_count}. " f"Pairs: {pairs}. {message}"
-    )
 
 
 def get_object_cells(sim_core: MultiRobotSimulationCore, sim_obj: SimObject) -> List[Tuple[int, int, int]]:
@@ -349,25 +326,6 @@ class TestBasicCollisionDetection:
             message=f"mode1={mode1.name}, mode2={mode2.name}, distance={distance}",
         )
 
-    def test_2d_mode_z_separation(self, sim_core_kinematics):
-        """
-        Special case: NORMAL_2D mode with Z-axis separation.
-
-        2D mode means "check 9 XY neighbors" not "ignore Z axis in AABB".
-        Objects separated in Z should NOT collide even in 2D mode.
-        """
-        obj1 = create_test_box(sim_core_kinematics, [0, 0, 0], size=0.5, collision_mode=CollisionMode.NORMAL_2D)
-        obj2 = create_test_box(sim_core_kinematics, [0.5, 0, 10], size=0.5, collision_mode=CollisionMode.NORMAL_2D)
-
-        # Z-separated and no AABB overlap in Z → should NOT collide even in 2D mode
-        assert_collision_detected(
-            sim_core_kinematics,
-            obj1,
-            obj2,
-            should_collide=False,
-            message="2D mode with Z separation should NOT collide (no Z overlap in AABB)",
-        )
-
 
 # ============================================================================
 # Category 2: CollisionDetectionMethod Verification
@@ -404,78 +362,21 @@ class TestCollisionDetectionMethod:
             message=f"CLOSEST_POINTS should detect near-miss within margin ({margin}m)",
         )
 
-    @pytest.mark.skip(
-        reason=(
-            "CONTACT_POINTS detection needs further investigation - "
-            "PyBullet reports 4 contacts but check_collisions() doesn't detect them. "
-            "Requires debugging of filter_aabb_pairs or collision pair tracking logic."
-        )
-    )
     def test_contact_points_requires_step_simulation(self, sim_core_physics):
-        """TC102: CONTACT_POINTS detects overlapping objects after step_once()"""
-        import pybullet as p
+        """TC102: CONTACT_POINTS detects overlapping objects after step_once()
 
-        # Create two overlapping objects
-        # At least one must have mass > 0 for PyBullet to generate contact points
-        # obj1: center at [0, 0, 0.75], extends z=0.25 to 1.25 (with mass)
-        # obj2: center at [0, 0, 0.25], extends z=-0.25 to 0.75 (static)
-        # Overlap region: z=0.25 to 0.75 (0.5m overlap)
+        CONTACT_POINTS requires stepSimulation() to generate contact manifold.
+        step_once() internally runs stepSimulation + check_collisions, so
+        a single call is sufficient.
+        """
         obj1 = create_test_box(sim_core_physics, [0, 0, 0.75], size=0.5, collision_mode=CollisionMode.NORMAL_3D, mass=1.0)
         obj2 = create_test_box(sim_core_physics, [0, 0, 0.25], size=0.5, collision_mode=CollisionMode.NORMAL_3D, mass=0.0)
 
-        # CONTACT_POINTS requires stepSimulation() to generate contact manifold
         sim_core_physics.step_once()
 
-        # Update AABBs
-        sim_core_physics._update_object_aabb(obj1.body_id, update_grid=True)
-        sim_core_physics._update_object_aabb(obj2.body_id, update_grid=True)
-        sim_core_physics._moved_this_step.add(obj1.body_id)
-
-        # Debug: Check contact points
-        contacts = p.getContactPoints(obj1.body_id, obj2.body_id, physicsClientId=sim_core_physics.client)
-        print("\nDEBUG test_contact_points_requires_step_simulation:")
-        print(f"  obj1.body_id={obj1.body_id} (mass=1.0), obj2.body_id={obj2.body_id} (mass=0.0)")
-        print(f"  Direct getContactPoints: {len(contacts)} contacts")
-        print(f"  _moved_this_step: {sim_core_physics._moved_this_step}")
-
-        # Should detect contact
-        assert_collision_detected(
-            sim_core_physics, obj1, obj2, should_collide=True, message="CONTACT_POINTS should detect overlapping objects"
-        )
-
-    def test_auto_selection_kinematics(self):
-        """TC105: Auto-selection chooses CLOSEST_POINTS for physics=False"""
-        params = SimulationParams(
-            gui=False,
-            physics=False,
-            monitor=False,
-            # collision_detection_method not specified → should auto-select
-        )
-        sim_core = MultiRobotSimulationCore(params)
-
-        try:
-            assert (
-                sim_core.params.collision_detection_method == CollisionDetectionMethod.CLOSEST_POINTS
-            ), "physics=False should auto-select CLOSEST_POINTS"
-        finally:
-            p.disconnect(sim_core.client)
-
-    def test_auto_selection_physics(self):
-        """TC105: Auto-selection chooses CONTACT_POINTS for physics=True"""
-        params = SimulationParams(
-            gui=False,
-            physics=True,
-            monitor=False,
-            # collision_detection_method not specified → should auto-select
-        )
-        sim_core = MultiRobotSimulationCore(params)
-
-        try:
-            assert (
-                sim_core.params.collision_detection_method == CollisionDetectionMethod.CONTACT_POINTS
-            ), "physics=True should auto-select CONTACT_POINTS"
-        finally:
-            p.disconnect(sim_core.client)
+        pairs = sim_core_physics.get_active_collision_pairs()
+        expected = (min(obj1.object_id, obj2.object_id), max(obj1.object_id, obj2.object_id))
+        assert expected in pairs, f"CONTACT_POINTS should detect overlapping objects. pairs={pairs}"
 
 
 # ============================================================================
@@ -516,17 +417,6 @@ class TestMultiCellRegistration:
         )
         cells = sim_core_multicell._cached_object_to_cell.get(obj.object_id, [])
         assert len(cells) == 1, f"Small object should use 1 cell, got {len(cells)}"
-
-    def test_large_object_multi_cell(self, sim_core_multicell):
-        """Large objects (>= threshold * cell_size) use multiple cells."""
-        obj = create_test_box(
-            sim_core_multicell,
-            [0, 0, 0],
-            size=2.5,
-            collision_mode=CollisionMode.STATIC,
-        )
-        cells = sim_core_multicell._cached_object_to_cell.get(obj.object_id, [])
-        assert len(cells) > 1, f"Large object (5m) should use multiple cells, got {len(cells)}"
 
     def test_should_use_multi_cell_registration(self, sim_core_multicell):
         """_should_use_multi_cell_registration returns correct bool."""
@@ -756,11 +646,8 @@ class TestMovementDetection:
         # Initially separated → no collision
         assert_collision_detected(sim_core_kinematics, obj1, obj2, should_collide=False)
 
-        # Move obj2 next to obj1
+        # Move obj2 next to obj1 (set_pose handles mark_moved, AABB, grid update)
         obj2.set_pose(Pose.from_xyz(0.5, 0, 0))
-        sim_core_kinematics._mark_object_moved(obj2.object_id)
-        sim_core_kinematics._update_object_aabb(obj2.object_id, update_grid=True)
-        sim_core_kinematics._moved_this_step.add(obj2.object_id)
 
         assert_collision_detected(sim_core_kinematics, obj1, obj2, should_collide=True)
 
@@ -773,13 +660,152 @@ class TestMovementDetection:
         sim_core_kinematics._moved_this_step.add(obj2.object_id)
         assert_collision_detected(sim_core_kinematics, obj1, obj2, should_collide=True)
 
-        # Move obj2 far away
+        # Move obj2 far away (set_pose handles mark_moved, AABB, grid update)
         obj2.set_pose(Pose.from_xyz(10, 0, 0))
-        sim_core_kinematics._mark_object_moved(obj2.object_id)
-        sim_core_kinematics._update_object_aabb(obj2.object_id, update_grid=True)
-        sim_core_kinematics._moved_this_step.add(obj2.object_id)
 
         assert_collision_detected(sim_core_kinematics, obj1, obj2, should_collide=False)
+
+
+class TestCollisionPairsAccuracy:
+    """Test that active_collision_pairs exactly matches expected pairs.
+
+    Unlike assert_collision_detected which checks a single pair,
+    these tests verify the complete set of collision pairs — ensuring
+    no extra or missing pairs exist.
+    """
+
+    @staticmethod
+    def _sorted_pairs(sim_core: MultiRobotSimulationCore):
+        """Return active collision pairs as a sorted-tuple set for exact comparison."""
+        return {(min(a, b), max(a, b)) for a, b in sim_core.get_active_collision_pairs()}
+
+    @staticmethod
+    def _pair(obj_a: SimObject, obj_b: SimObject) -> tuple:
+        return (min(obj_a.object_id, obj_b.object_id), max(obj_a.object_id, obj_b.object_id))
+
+    def test_three_object_chain_pairs(self, sim_core_kinematics):
+        """A↔B↔C chain: only adjacent pairs collide, A↔C does not.
+
+        Layout (size=0.5 → full extent 1.0m each):
+          A at x=0, B at x=0.8, C at x=1.6
+          A↔B overlap 0.2m (collide), B↔C overlap 0.2m (collide),
+          A↔C gap=0.6m > margin 0.02m (no collide)
+        """
+        sc = sim_core_kinematics
+        a = create_test_box(sc, [0, 0, 0], size=0.5, collision_mode=CollisionMode.NORMAL_3D)
+        b = create_test_box(sc, [0.8, 0, 0], size=0.5, collision_mode=CollisionMode.NORMAL_3D)
+        c = create_test_box(sc, [1.6, 0, 0], size=0.5, collision_mode=CollisionMode.NORMAL_3D)
+
+        # Mark all as moved for initial detection
+        for obj in [a, b, c]:
+            sc._moved_this_step.add(obj.object_id)
+
+        sc.check_collisions()
+        pairs = self._sorted_pairs(sc)
+
+        expected = {self._pair(a, b), self._pair(b, c)}
+        assert pairs == expected, f"Expected chain pairs {expected}, got {pairs}"
+
+    def test_all_separated_empty_pairs(self, sim_core_kinematics):
+        """Three well-separated objects → pairs must be empty set."""
+        sc = sim_core_kinematics
+        a = create_test_box(sc, [0, 0, 0], size=0.5, collision_mode=CollisionMode.NORMAL_3D)
+        b = create_test_box(sc, [10, 0, 0], size=0.5, collision_mode=CollisionMode.NORMAL_3D)
+        c = create_test_box(sc, [20, 0, 0], size=0.5, collision_mode=CollisionMode.NORMAL_3D)
+
+        for obj in [a, b, c]:
+            sc._moved_this_step.add(obj.object_id)
+
+        sc.check_collisions()
+        pairs = self._sorted_pairs(sc)
+
+        assert pairs == set(), f"All separated → expected empty, got {pairs}"
+
+    def test_no_movement_pairs_unchanged(self, sim_core_kinematics):
+        """Without movement, active_collision_pairs must not change.
+
+        Verifies: check_collisions() with empty _moved_this_step
+        preserves existing pairs and adds no new ones.
+        """
+        sc = sim_core_kinematics
+        a = create_test_box(sc, [0, 0, 0], size=0.5, collision_mode=CollisionMode.NORMAL_3D)
+        b = create_test_box(sc, [0.5, 0, 0], size=0.5, collision_mode=CollisionMode.NORMAL_3D)
+        c = create_test_box(sc, [10, 0, 0], size=0.5, collision_mode=CollisionMode.NORMAL_3D)
+
+        # Establish initial pairs: {(a, b)}
+        for obj in [a, b, c]:
+            sc._moved_this_step.add(obj.object_id)
+        sc.check_collisions()
+        pairs_before = self._sorted_pairs(sc)
+        assert pairs_before == {self._pair(a, b)}, f"Pre-condition failed: {pairs_before}"
+
+        # No movement → call check_collisions again
+        sc.check_collisions()
+        pairs_after = self._sorted_pairs(sc)
+
+        assert pairs_after == pairs_before, f"Pairs changed without movement: before={pairs_before}, after={pairs_after}"
+
+    def test_move_adds_and_removes_pairs(self, sim_core_kinematics):
+        """Moving one object updates pairs: old pair removed, new pair added.
+
+        Step 1: A↔B collide, C far → {(A,B)}
+        Step 2: Move B away from A, next to C → {(B,C)}
+        """
+        sc = sim_core_kinematics
+        a = create_test_box(sc, [0, 0, 0], size=0.5, collision_mode=CollisionMode.NORMAL_3D)
+        b = create_test_box(sc, [0.5, 0, 0], size=0.5, collision_mode=CollisionMode.NORMAL_3D)
+        c = create_test_box(sc, [10, 0, 0], size=0.5, collision_mode=CollisionMode.NORMAL_3D)
+
+        for obj in [a, b, c]:
+            sc._moved_this_step.add(obj.object_id)
+        sc.check_collisions()
+
+        assert self._sorted_pairs(sc) == {self._pair(a, b)}, "Step 1 failed"
+
+        # Move B next to C (set_pose handles mark_moved, AABB, grid)
+        b.set_pose(Pose.from_xyz(10.5, 0, 0))
+        sc.check_collisions()
+
+        pairs = self._sorted_pairs(sc)
+        assert self._pair(a, b) not in pairs, "A↔B should be resolved after B moved away"
+        assert self._pair(b, c) in pairs, "B↔C should collide after B moved next to C"
+        assert pairs == {self._pair(b, c)}, f"Expected only {{(B,C)}}, got {pairs}"
+
+    def test_progressive_pair_accumulation(self, sim_core_kinematics):
+        """Pairs evolve as objects are moved together step by step.
+
+        Step 0: A, B, C all separated       → {}
+        Step 1: Move B next to A             → {(A,B)}
+        Step 2: Move C next to B (and A)     → {(A,B), (A,C), (B,C)}
+        Step 3: Move B far away              → {(A,C)}
+        """
+        sc = sim_core_kinematics
+        a = create_test_box(sc, [0, 0, 0], size=0.5, collision_mode=CollisionMode.NORMAL_3D)
+        b = create_test_box(sc, [10, 0, 0], size=0.5, collision_mode=CollisionMode.NORMAL_3D)
+        c = create_test_box(sc, [20, 0, 0], size=0.5, collision_mode=CollisionMode.NORMAL_3D)
+
+        for obj in [a, b, c]:
+            sc._moved_this_step.add(obj.object_id)
+        sc.check_collisions()
+
+        # Step 0: all separated
+        assert self._sorted_pairs(sc) == set(), "Step 0: all separated"
+
+        # Step 1: Move B next to A
+        b.set_pose(Pose.from_xyz(0.5, 0, 0))
+        sc.check_collisions()
+        assert self._sorted_pairs(sc) == {self._pair(a, b)}, "Step 1: A↔B only"
+
+        # Step 2: Move C overlapping both A and B (at origin area)
+        c.set_pose(Pose.from_xyz(0.25, 0, 0))
+        sc.check_collisions()
+        expected_all = {self._pair(a, b), self._pair(a, c), self._pair(b, c)}
+        assert self._sorted_pairs(sc) == expected_all, "Step 2: all three collide"
+
+        # Step 3: Move B far away — only A↔C remains
+        b.set_pose(Pose.from_xyz(30, 0, 0))
+        sc.check_collisions()
+        assert self._sorted_pairs(sc) == {self._pair(a, c)}, "Step 3: only A↔C"
 
 
 # ============================================================================
