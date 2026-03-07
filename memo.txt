@@ -46,4 +46,4 @@ Scaling Results:
 See docs/PERFORMANCE_ANALYSIS.md and docs/OPTIMIZATION_RESULTS.md for detailed benchmarks.
 
 
-2.
+2. いちばんしりたいのは、おそらく、デモの作り方なので、それの説明が必要 agent row と grid

@@ -11,7 +11,7 @@ gui: false                   # Headless for benchmarking
 physics: true                # 🔴 Physics ON (required for hybrid)
 monitor: false
 ignore_static_collision: true
-enable_profiling: true       # 🔴 Enable profiling
+enable_time_profiling: true       # 🔴 Enable profiling
 
 # Collision Detection
 collision_detection_method: "hybrid"

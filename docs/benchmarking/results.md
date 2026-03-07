@@ -366,7 +366,7 @@ params = SimulationParams(
     target_rtf=0,                    # No sleep, maximum speed
     enable_monitor_gui=False,   # Headless data collection
     collision_check_2d=True,    # 2D optimization
-    enable_profiling=True       # For performance analysis
+    enable_time_profiling=True       # For performance analysis
 )
 ```
 

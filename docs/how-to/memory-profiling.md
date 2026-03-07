@@ -21,7 +21,7 @@ Add `enable_memory_profiling: true` to your YAML configuration file:
 
 ```yaml
 # config.yaml
-enable_profiling: true          # Time profiling (optional, independent)
+enable_time_profiling: true          # Time profiling (optional, independent)
 enable_memory_profiling: true   # Memory profiling
 profiling_interval: 100         # Report every 100 steps
 ```
@@ -199,7 +199,7 @@ for num_robots in [10, 50, 100, 200]:
 ```python
 # Enable both profiling features
 config = {
-    "enable_profiling": True,        # Time profiling
+    "enable_time_profiling": True,        # Time profiling
     "enable_memory_profiling": True, # Memory profiling
     "profiling_interval": 100,
 }
@@ -387,7 +387,7 @@ Memory profiling enabled but no `[MEMORY]` logs appear.
 | **Tool** | `tracemalloc` (built-in) | `time.perf_counter()` |
 | **Overhead** | ~5-10% memory | < 0.1% CPU |
 | **Use case** | Long-running stability | Optimization |
-| **Config** | `enable_memory_profiling` | `enable_profiling` |
+| **Config** | `enable_memory_profiling` | `enable_time_profiling` |
 
 **Recommendation:** Use both together for comprehensive performance analysis.
 

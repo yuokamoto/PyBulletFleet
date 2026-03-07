@@ -37,7 +37,7 @@ monitor: true
 ignore_static_collision: true
 
 # Enable profiling output (True/False)
-enable_profiling: true
+enable_time_profiling: true
 
 # Enable memory profiling output (True/False)
 # Tracks memory usage using Python's tracemalloc module

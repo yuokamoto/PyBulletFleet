@@ -28,7 +28,7 @@ params = SimulationParams(
     physics=True,
     ignore_static_collision=True,
     log_level="info",
-    enable_profiling=True,  # Time profiling
+    enable_time_profiling=True,  # Time profiling
     enable_memory_profiling=True,  # Memory profiling
     profiling_interval=500,  # Report every 500 steps
 )

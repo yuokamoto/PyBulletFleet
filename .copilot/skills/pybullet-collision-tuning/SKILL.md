@@ -127,7 +127,7 @@ Detecting collision when objects aren't touching?
 
 ```
 Collision too slow?
-├── Profile first: enable_profiling: true
+├── Profile first: enable_time_profiling: true
 │   └── What % of step time is collision_check?
 ├── Can objects be STATIC or DISABLED?
 │   └── Mark non-moving objects as STATIC

@@ -23,7 +23,7 @@ gui: true
 physics: true                # 🔴 Physics ON (dynamics mode)
 monitor: true
 ignore_static_collision: true
-enable_profiling: false
+enable_time_profiling: false
 
 # Collision Detection - Physics Mode
 collision_detection_method: "contact_points"  # 🔴 Physics contact manifold

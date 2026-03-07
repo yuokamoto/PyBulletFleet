@@ -21,7 +21,7 @@ monitor: true     # Disable monitor for performance
 log_level: info   # Show INFO level logs for profiling
 
 # Profiling configuration
-enable_profiling: true
+enable_time_profiling: true
 profiling_interval: 100  # Print average every 100 steps
 
 # Camera settings for 100 robots

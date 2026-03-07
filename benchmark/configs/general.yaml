@@ -21,7 +21,7 @@ simulation:
   #   - hybrid: Both methods (advanced use)
 
   # Performance Monitoring
-  enable_profiling: true  # Enable detailed profiling output
+  enable_time_profiling: true  # Enable detailed profiling output
   enable_monitor_gui: false  # Disable GUI monitor for headless benchmarking
   log_level: "WARN"  # Log level: DEBUG, INFO, WARN, ERROR (DEBUG shows profiling)
 
@@ -115,4 +115,4 @@ scenarios:
 #
 # - timestep: Larger timesteps = fewer steps per second = faster simulation
 # - physics: false (kinematic) is significantly faster than true (full physics)
-# - enable_profiling: true enables detailed timing breakdown in logs (requires log_level: DEBUG)
+# - enable_time_profiling: true enables detailed timing breakdown in logs (requires log_level: DEBUG)

@@ -22,7 +22,7 @@ gui: true
 physics: true                # 🔴 Physics ON (required for hybrid)
 monitor: true
 ignore_static_collision: true
-enable_profiling: false
+enable_time_profiling: false
 
 # Collision Detection - Hybrid Mode
 collision_detection_method: "hybrid"  # 🔴 Mixed approach

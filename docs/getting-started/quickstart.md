@@ -54,7 +54,7 @@ Key settings you will want to tweak:
 | `collision_detection_method` | string | `"closest_points"` | `"closest_points"`, `"contact_points"`, or `"hybrid"` |
 | `collision_safety_margin` | float | `0.02` | Safety buffer in metres for near-miss detection |
 | `monitor` | bool | `true` | Enable the real-time data monitor |
-| `enable_profiling` | bool | `true` | Print step-timing reports |
+| `enable_time_profiling` | bool | `true` | Print step-timing reports |
 
 Example — run headless at 10× real-time with physics enabled:
 

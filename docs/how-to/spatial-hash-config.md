@@ -372,7 +372,7 @@ spatial_hash_cell_size_mode: "constant"
 spatial_hash_cell_size: 2.0  # Tuned for 1m robots in 10m aisles
 
 # Profiling (development only)
-enable_profiling: false
+enable_time_profiling: false
 ```
 
 ```python

@@ -23,7 +23,7 @@ gui: true
 physics: false               # 🔴 Physics OFF (kinematics mode)
 monitor: true
 ignore_static_collision: true
-enable_profiling: false
+enable_time_profiling: false
 
 # Collision Detection - Kinematics Mode
 collision_detection_method: "closest_points"  # 🔴 Distance-based (kinematics-safe)

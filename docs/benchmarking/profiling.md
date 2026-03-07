@@ -846,13 +846,13 @@ python benchmark/profiling/agent_manager_set_goal.py --agents=1000
 
 ### Profiling logs are not displayed
 
-**Cause:** `enable_profiling=False` or log level is not set to `DEBUG`.
+**Cause:** `enable_time_profiling=False` or log level is not set to `DEBUG`.
 
 **Fix:**
 
 ```python
 params = SimulationParams(
-    enable_profiling=True,
+    enable_time_profiling=True,
     log_level="debug"
 )
 ```
@@ -862,7 +862,7 @@ Or in config:
 ```yaml
 # config.yaml
 simulation:
-  enable_profiling: true
+  enable_time_profiling: true
   log_level: debug
 ```
 

@@ -437,7 +437,7 @@ scenarios:
 simulation:
   collision_check_frequency: 0     # No collision
   physics: false                   # No physics
-  enable_profiling: false          # No profiling overhead
+  enable_time_profiling: false          # No profiling overhead
 ```
 
 **For Balanced Performance** (Recommended):
@@ -516,7 +516,7 @@ See [`PERFORMANCE_REPORT.md`](PERFORMANCE_REPORT.md) for detailed performance an
 
 **Maximum Performance (Offline):**
 ```python
-params = SimulationParams(target_rtf=0, gui=False, collision_check_2d=True, enable_profiling=False)
+params = SimulationParams(target_rtf=0, gui=False, collision_check_2d=True, enable_time_profiling=False)
 ```
 
 **Real-Time Visualization:**

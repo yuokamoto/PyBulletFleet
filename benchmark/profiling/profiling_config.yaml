@@ -43,7 +43,7 @@ collision_check_frequency: null
 ignore_static_collision: true
 
 # Enable profiling output (False - profiling tools use return_profiling)
-enable_profiling: false
+enable_time_profiling: false
 
 # ========================================
 # Performance Optimization Settings

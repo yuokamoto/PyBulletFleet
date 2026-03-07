@@ -58,7 +58,7 @@ Known performance numbers from historical benchmarks (headless, physics=false):
 | `collision_check_frequency` | null (every step) | **Major** — 10 Hz vs every step |
 | `spatial_hash_cell_size_mode` | auto_initial | Minor — constant is fastest |
 | `collision_margin` | 0.02 | Negligible |
-| `enable_profiling` | false | Negligible (<0.1%) |
+| `enable_time_profiling` | false | Negligible (<0.1%) |
 | `enable_memory_profiling` | false | Minor — tracemalloc overhead |
 | `log_level` | warn | Minor — debug logging is expensive |
 
@@ -70,5 +70,5 @@ enable_monitor_gui: false
 target_rtf: 0
 physics: false
 log_level: warn
-enable_profiling: true
+enable_time_profiling: true
 ```

@@ -28,7 +28,7 @@ params = SimulationParams(
     enable_monitor_gui=False,   # Headless data collection
     collision_check_2d=True,    # 2D optimization (9 neighbors vs 27)
     collision_check_frequency=10.0,  # 10 Hz collision check
-    enable_profiling=False,     # Disable profiling overhead
+    enable_time_profiling=False,     # Disable profiling overhead
     physics=False,              # Disable physics (if not needed)
     timestep=0.1                # Larger timestep for kinematics
 )
@@ -50,7 +50,7 @@ params = SimulationParams(
     enable_monitor_gui=True,    # Enable visualization
     collision_check_2d=False,   # Full 3D collision (if needed)
     collision_check_frequency=10.0,  # Reduced frequency for performance
-    enable_profiling=True,      # Enable performance logging
+    enable_time_profiling=True,      # Enable performance logging
     timestep=0.01               # Finer timestep for smooth visualization
 )
 ```
@@ -79,7 +79,7 @@ simulation:
   enable_monitor_gui: false     # No GUI overhead
 
   # Performance
-  enable_profiling: false       # Disable for production
+  enable_time_profiling: false       # Disable for production
   enable_collision_color_change: false  # Disable visual feedback
 ```
 
@@ -147,13 +147,13 @@ params = SimulationParams(
 
 | Mode | Overhead | Use Case |
 |------|----------|----------|
-| `enable_profiling=False` | None | Production |
-| `enable_profiling=True` | ~5-10% | Development, optimization |
+| `enable_time_profiling=False` | None | Production |
+| `enable_time_profiling=True` | ~5-10% | Development, optimization |
 
 **Usage:**
 ```python
 params = SimulationParams(
-    enable_profiling=True
+    enable_time_profiling=True
 )
 
 # Set profiling log frequency
@@ -216,7 +216,7 @@ simulation:
   enable_monitor_gui: true
 
   # Development
-  enable_profiling: true
+  enable_time_profiling: true
 ```
 
 **Recommendation:** Limit to ~100 agents for real-time performance
@@ -245,7 +245,7 @@ simulation:
   # Monitoring
   monitor: true
   enable_monitor_gui: true
-  enable_profiling: true
+  enable_time_profiling: true
 ```
 
 ---
@@ -338,7 +338,7 @@ params = SimulationParams(
 **Optimization Tips:**
 - Use `collision_check_2d=True` if applicable
 - Reduce `collision_check_frequency` to 5-10 Hz
-- Disable `enable_profiling` for production
+- Disable `enable_time_profiling` for production
 - Consider reducing physics timestep if motion is jerky
 
 ---
@@ -415,7 +415,7 @@ params = SimulationParams(
 params = SimulationParams(
     target_rtf=1.0,
     gui=True,
-    enable_profiling=True,
+    enable_time_profiling=True,
     enable_collision_color_change=True,
     collision_check_frequency=null  # Every step
 )
@@ -473,7 +473,7 @@ python benchmark/profiling/simulation_profiler.py --agents 1000 --steps 100
 4. **Profiling overhead**
    ```yaml
    # Solution: Disable profiling for production
-   enable_profiling: false
+   enable_time_profiling: false
    ```
 
 ---

@@ -64,7 +64,7 @@ python -m cProfile -s cumulative your_script.py | head -40
 **Time profiling (built-in):**
 ```yaml
 # In config:
-enable_profiling: true
+enable_time_profiling: true
 profiling_interval: 100
 log_level: debug
 ```

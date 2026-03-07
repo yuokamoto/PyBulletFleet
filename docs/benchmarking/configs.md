@@ -60,7 +60,7 @@ collision_detection_method: "closest_points"
 collision_margin: 0.02    # 2cm safety distance
 target_rtf: 0             # Maximum speed
 timestep: 0.00416666      # 1/240s (240 Hz)
-enable_profiling: true
+enable_time_profiling: true
 ```
 
 **Expected Performance**:
@@ -96,7 +96,7 @@ collision_detection_method: "contact_points"
 collision_margin: 0.0     # Actual contact only
 target_rtf: 0
 timestep: 0.00416666
-enable_profiling: true
+enable_time_profiling: true
 ```
 
 **Expected Performance**:
@@ -127,7 +127,7 @@ collision_detection_method: "hybrid"
 collision_margin: 0.02
 target_rtf: 0
 timestep: 0.00416666
-enable_profiling: true
+enable_time_profiling: true
 ```
 
 **Expected Performance**:
@@ -199,7 +199,7 @@ Recommended settings for all benchmark configs:
 target_rtf: 0                    # Maximum speed (no sleep)
 gui: false                  # Headless mode
 monitor: false              # No GUI monitor
-enable_profiling: true      # Enable profiling
+enable_time_profiling: true      # Enable profiling
 log_level: error            # Suppress logs
 ```
 
