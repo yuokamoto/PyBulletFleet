@@ -420,8 +420,8 @@ Memory profiling enabled but no `[MEMORY]` logs appear.
 ## References
 
 - [Python tracemalloc Documentation](https://docs.python.org/3/library/tracemalloc.html)
-- [REALTIME_SYNC_DESIGN.md](./REALTIME_SYNC_DESIGN.md) - Real-time synchronization design
-- [COLLISION_DETECTION_DESIGN_v3.md](./COLLISION_DETECTION_DESIGN_v3.md) - Collision detection system
+- [Real-time Synchronization Design](../architecture/realtime-sync) - Real-time synchronization design
+- [Collision Detection Design](../architecture/collision-detection) - Collision detection system
 
 ---
 

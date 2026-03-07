@@ -1,6 +1,6 @@
 # PyBullet Fleet - Performance Benchmark Suite
 
-This directory contains performance benchmarking tools and results for PyBullet Fleet simulation engine.
+This directory contains the benchmark **scripts and configs**. For full documentation (results, profiling guide, optimization guide), see [docs/benchmarking/](../docs/benchmarking/index.md).
 
 ## Performance Optimization Workflow
 

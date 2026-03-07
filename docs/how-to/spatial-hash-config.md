@@ -388,6 +388,6 @@ print(f"Cell size: {sim._cached_cell_size}m")
 
 ## See Also
 
-- [PyBulletFleet README](../README.md)
-- [Collision Detection Optimization](../docs/collision_optimization.md)
-- [Benchmark Results](../benchmark/README.md)
+- PyBulletFleet README
+- Collision Detection Optimization
+- Benchmark Results

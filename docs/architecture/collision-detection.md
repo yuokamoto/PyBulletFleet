@@ -902,7 +902,7 @@ ignore_static_collision: false
 
 ### Multi-Cell Registration (Large Objects)
 
-**See dedicated section**: [Multi-Cell Registration for Large Objects](#multi-cell-registration-for-large-objects)
+**See dedicated section**: [Multi-Cell Registration](#multi-cell-registration)
 
 **Summary**:
 - Automatic size-based detection

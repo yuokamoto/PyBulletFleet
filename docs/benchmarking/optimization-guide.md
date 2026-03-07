@@ -593,7 +593,7 @@ Based on latest optimization (2026-01-04):
 
 **Scalability:** Near-linear up to 500 agents, slightly super-linear (O(n^1.2)) above
 
-**See [`PERFORMANCE_REPORT.md`](PERFORMANCE_REPORT.md) for detailed analysis.**
+**See `PERFORMANCE_REPORT.md` for detailed analysis.**
 
 ---
 
@@ -620,10 +620,10 @@ Based on latest optimization (2026-01-04):
 
 ## See Also
 
-- [`README.md`](README.md) - Benchmark suite overview
-- [`PERFORMANCE_REPORT.md`](PERFORMANCE_REPORT.md) - Detailed performance analysis
-- [`profiling/README.md`](profiling/README.md) - Profiling tools documentation
-- [`experiments/README.md`](experiments/README.md) - Optimization experiments
+- Benchmark Suite README - Benchmark suite overview
+- `PERFORMANCE_REPORT.md` - Detailed performance analysis
+- `profiling/` - Profiling tools documentation
+- `experiments/` - Optimization experiments
 
 ---
 

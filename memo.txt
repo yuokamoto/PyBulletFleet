@@ -18,22 +18,17 @@ agent
     movement
 agent_manager
 action  creation only
+core_simulation
+collision
 ----
 
-movement
-    robot_movement
-    path
-collision
-    aabbl
-    multicell
-    collision
-data_monitor
-core_simulation
+todo
 
-integration
-sim_object
- set_pose/get_poseのkinematics/static/physicsの挙動の違い
- detach/attachの挙動の違い
-agent
-　movement
-  action
+linear joint
+kinematic robot arm
+mobile manipulator
+physics mobile robot
+conveyor elevator
+ROS 2
+https://github.com/yuokamoto/Unified-Simulation-Orchestrator のシミュレータに一つして使う
+USO準拠のsnapshot/replay feature
