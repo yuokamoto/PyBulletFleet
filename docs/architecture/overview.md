@@ -4,6 +4,8 @@
 
 This package provides a modular, reusable PyBullet simulation framework designed for multi-agent scenarios. The architecture is organized into several key components, each with specific responsibilities.
 
+> **Note:** The methods, attributes, and parameters listed in this document are representative highlights — not exhaustive lists. Refer to the source code or API reference for the full interface of each class.
+
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                    User Application                          │
