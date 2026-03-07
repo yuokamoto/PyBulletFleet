@@ -73,6 +73,14 @@ multi-link bodies with joint control (e.g., URDF robots), use Agent instead.
 - Object attachment system (base-link attachment only)
 - Shared shape caching for performance
 
+**Key Methods:**
+- `from_params(spawn_params)` / `from_mesh(...)`: Factory methods for creation
+- `get_pose()` / `set_pose(pose)`: Position and orientation management
+- `set_collision_mode(mode)`: Change collision detection mode
+- `attach_object(obj)` / `detach_object(obj)`: Parent-child attachment with constraints
+- `get_attached_objects()` / `is_attached()`: Query attachment state
+- `register_callback(callback, frequency)`: Register custom update callbacks
+
 **Key Features:**
 - Support for mesh and primitive shapes (created via `createMultiBody`)
 - Collision and visual shape separation
