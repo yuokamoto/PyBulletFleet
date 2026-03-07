@@ -24,7 +24,7 @@ import pybullet_data
 
 import yaml
 
-from pybullet_fleet.collision_visualizer import CollisionVisualizer
+from pybullet_fleet.collision_visualizer import CollisionVisualizer  # deprecated, unused
 from pybullet_fleet.data_monitor import DataMonitor
 from pybullet_fleet.logging_utils import get_lazy_logger
 from pybullet_fleet.sim_object import SimObject

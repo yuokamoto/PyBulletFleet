@@ -13,7 +13,7 @@ API documentation is auto-generated from source code docstrings using Sphinx aut
 | `pybullet_fleet.sim_object` | Static and dynamic simulation objects |
 | `pybullet_fleet.config_utils` | YAML configuration loading |
 | `pybullet_fleet.geometry` | Geometric utilities (poses, transforms) |
-| `pybullet_fleet.collision_visualizer` | Collision visualization overlays |
+| `pybullet_fleet.collision_visualizer` | *(Deprecated)* Collision visualization overlays |
 | `pybullet_fleet.data_monitor` | Runtime data monitoring |
 | `pybullet_fleet.logging_utils` | Logging configuration (`LazyLogger`) |
 | `pybullet_fleet.tools` | Utility functions |

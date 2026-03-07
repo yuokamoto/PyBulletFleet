@@ -287,25 +287,7 @@ Waypoint sequence for path following.
 
 ---
 
-### 7. collision_visualizer.py
-
-**Purpose**: Collision detection and visualization
-
-#### Key Features:
-
-- Spatial hash-based collision detection
-- Configurable cell size modes (constant, auto_adaptive, auto_initial)
-- Collision pair visualization
-- Performance-optimized for large scenes
-
-**Collision Detection:**
-- O(N) average case with spatial hashing
-- Configurable distance threshold
-- Optional visualization of collision pairs
-
----
-
-### 8. data_monitor.py
+### 7. data_monitor.py
 
 **Purpose**: Real-time performance monitoring
 
