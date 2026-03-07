@@ -390,6 +390,7 @@ Memory profiling enabled but no `[MEMORY]` logs appear.
 | **Config** | `enable_memory_profiling` | `enable_time_profiling` |
 
 **Recommendation:** Use both together for comprehensive performance analysis.
+For time profiling details, see [Time Profiling User Guide](time-profiling).
 
 ---
 
