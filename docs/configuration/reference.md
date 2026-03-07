@@ -18,7 +18,7 @@ PyBulletFleet provides multiple configuration files for different simulation mod
 - **Physics**: OFF (no `stepSimulation()`)
 - **Collision method**: `CLOSEST_POINTS` (distance-based, kinematics-safe)
 - **Collision margin**: 2cm safety clearance
-- **Speed**: 100x real-time
+- **RTF**: 100x real-time
 - **Key features**:
   - Fast and deterministic
   - Stable with `resetBasePositionAndOrientation()`
@@ -28,7 +28,7 @@ PyBulletFleet provides multiple configuration files for different simulation mod
 - **Use case**: Physics verification, debugging, contact analysis
 - **Physics**: ON (`stepSimulation()` every step)
 - **Collision method**: `CONTACT_POINTS` (actual contact manifold)
-- **Speed**: 1x real-time
+- **RTF**: 1x real-time
 - **Key features**:
   - Realistic physics behavior (mass, friction, push-back)
   - Actual contact logging

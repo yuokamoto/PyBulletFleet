@@ -24,7 +24,7 @@ This guide provides comprehensive recommendations for optimizing PyBullet Fleet 
 from pybullet_fleet.core_simulation import SimulationParams
 
 params = SimulationParams(
-    speed=0,                    # No sleep, maximum speed
+    target_rtf=0,                    # No sleep, maximum speed
     enable_monitor_gui=False,   # Headless data collection
     collision_check_2d=True,    # 2D optimization (9 neighbors vs 27)
     collision_check_frequency=10.0,  # 10 Hz collision check
@@ -45,7 +45,7 @@ params = SimulationParams(
 
 ```python
 params = SimulationParams(
-    speed=1.0,                  # Real-time synchronization
+    target_rtf=1.0,                  # Real-time synchronization
     gui=True,                   # Enable GUI
     enable_monitor_gui=True,    # Enable visualization
     collision_check_2d=False,   # Full 3D collision (if needed)
@@ -64,7 +64,7 @@ params = SimulationParams(
 ```yaml
 # config/production_config.yaml
 simulation:
-  speed: 0                      # Maximum speed
+  target_rtf: 0                      # Maximum speed
   timestep: 0.1                 # Optimized for kinematics
   physics: false                # Disable unless needed
   gui: false                    # Headless
@@ -87,15 +87,15 @@ simulation:
 
 ## Key Parameters
 
-### Speed Control
+### RTF Control
 
 | Parameter | Value | Use Case |
 |-----------|-------|----------|
-| `speed=0` | Maximum speed (no sleep) | Offline batch processing |
-| `speed=1.0` | Real-time | Interactive development, visualization |
-| `speed=2.0` | 2x real-time | Faster testing with GUI |
+| `target_rtf=0` | Maximum speed (no sleep) | Offline batch processing |
+| `target_rtf=1.0` | Real-time | Interactive development, visualization |
+| `target_rtf=2.0` | 2x real-time | Faster testing with GUI |
 
-**Note:** `speed=0` runs as fast as possible, limited only by CPU performance.
+**Note:** `target_rtf=0` runs as fast as possible, limited only by CPU performance.
 
 ---
 
@@ -171,7 +171,7 @@ sim_core.set_profiling_log_frequency(10)  # Log every 10 steps
 # config/config.yaml
 simulation:
   timestep: 0.1                 # Kinematics-optimized
-  speed: 0                      # Maximum speed
+  target_rtf: 0                      # Maximum speed
   physics: false                # Kinematics only
   gui: false                    # Headless
 
@@ -202,7 +202,7 @@ simulation:
 # config/drone_config.yaml
 simulation:
   timestep: 0.01                # Finer control
-  speed: 1.0                    # Real-time
+  target_rtf: 1.0                    # Real-time
   physics: true                 # Enable physics
   gui: true                     # Visualization
 
@@ -229,7 +229,7 @@ simulation:
 # config/debug_config.yaml
 simulation:
   timestep: 0.01
-  speed: 1.0                    # Real-time
+  target_rtf: 1.0                    # Real-time
   physics: false
   gui: true                     # Enable GUI
 
@@ -326,7 +326,7 @@ Total                    4.64ms      100.0%
 **Configuration:**
 ```python
 params = SimulationParams(
-    speed=1.0,
+    target_rtf=1.0,
     gui=True,
     timestep=0.01,
     collision_check_frequency=10.0
@@ -353,7 +353,7 @@ params = SimulationParams(
 **Configuration:**
 ```python
 params = SimulationParams(
-    speed=0,                    # Maximum speed
+    target_rtf=0,                    # Maximum speed
     gui=False,                  # Headless
     enable_monitor_gui=False,   # No GUI overhead
     timestep=0.1,               # Larger timestep
@@ -366,7 +366,7 @@ params = SimulationParams(
 - 500 agents: **0.93x RTF** (near real-time)
 
 **Optimization Tips:**
-- Use `speed=0` for maximum performance
+- Use `target_rtf=0` for maximum performance
 - Disable all visualization features
 - Use `collision_check_2d=True` if ground robots
 - Consider batching multiple simulations in parallel
@@ -383,7 +383,7 @@ params = SimulationParams(
 **Configuration:**
 ```python
 params = SimulationParams(
-    speed=0,
+    target_rtf=0,
     gui=False,
     timestep=0.1,
     collision_check_frequency=1.0,  # Lower frequency
@@ -413,7 +413,7 @@ params = SimulationParams(
 **Configuration:**
 ```python
 params = SimulationParams(
-    speed=1.0,
+    target_rtf=1.0,
     gui=True,
     enable_profiling=True,
     enable_collision_color_change=True,
@@ -425,7 +425,7 @@ params = SimulationParams(
 - Use profiling tools to identify bottlenecks
 - Enable collision visualization for debugging
 - Use smaller agent counts (<100) for faster iteration
-- Switch to `speed=0` for stress testing
+- Switch to `target_rtf=0` for stress testing
 
 ---
 
@@ -603,17 +603,17 @@ Based on latest optimization (2026-01-04):
 
 | Use Case | Agents | Config | Expected RTF |
 |----------|--------|--------|--------------|
-| Real-time GUI | < 200 | `speed=1.0`, `gui=true`, `2d=true` | > 1.0x |
-| Offline batch | < 1000 | `speed=0`, `gui=false`, `2d=true` | 0.5-1.0x |
-| Large-scale test | < 2000 | `speed=0`, `gui=false`, `freq=1Hz` | 0.2-0.5x |
-| Development | < 100 | `speed=1.0`, `gui=true`, `profiling=true` | > 2.0x |
+| Real-time GUI | < 200 | `target_rtf=1.0`, `gui=true`, `2d=true` | > 1.0x |
+| Offline batch | < 1000 | `target_rtf=0`, `gui=false`, `2d=true` | 0.5-1.0x |
+| Large-scale test | < 2000 | `target_rtf=0`, `gui=false`, `freq=1Hz` | 0.2-0.5x |
+| Development | < 100 | `target_rtf=1.0`, `gui=true`, `profiling=true` | > 2.0x |
 
 ### Key Takeaways
 
 1. **Use 2D collision** for ground robots → ~67% speedup
 2. **Reduce collision frequency** to 10 Hz → minimal impact on safety
 3. **Disable GUI** for batch processing → significant speedup
-4. **Use `speed=0`** for offline simulation → maximum throughput
+4. **Use `target_rtf=0`** for offline simulation → maximum throughput
 5. **Limit agents** to < 200 for real-time, < 1000 for offline
 
 ---

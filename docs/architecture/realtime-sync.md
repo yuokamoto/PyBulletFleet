@@ -100,18 +100,18 @@ After reset:  target = (115 - 110) * 1.0 = 5s,  actual = 5s → smooth ✅
 
 ---
 
-## Speed Multiplier Support
+## RTF Multiplier Support
 
-### Variable Speed Control
+### Variable RTF Control
 
 ```python
-speed = 0.5   # Half speed (slow motion)
-speed = 1.0   # Real-time (1:1)
-speed = 2.0   # Double speed (fast forward)
-speed = 0     # Maximum speed (no sleep, as fast as possible)
+target_rtf = 0.5   # Half speed (slow motion)
+target_rtf = 1.0   # Real-time (1:1)
+target_rtf = 2.0   # Double speed (fast forward)
+target_rtf = 0     # Maximum speed (no sleep, as fast as possible)
 ```
 
-**Example with speed=2.0:**
+**Example with target_rtf=2.0:**
 ```python
 # After 1 second of real time
 elapsed_real = 1.0

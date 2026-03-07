@@ -189,7 +189,7 @@ from pybullet_fleet import (
 from pybullet_fleet.types import CollisionMode, MotionMode
 
 # 1. Config
-params = SimulationParams(gui=True, physics=False, speed=1.0)
+params = SimulationParams(gui=True, physics=False, target_rtf=1.0)
 sim = MultiRobotSimulationCore(params)
 
 # 2. Spawn

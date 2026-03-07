@@ -54,7 +54,7 @@ Known performance numbers from historical benchmarks (headless, physics=false):
 | `physics` | false | Moderate — stepSimulation() cost |
 | `monitor` | true | Minor — matplotlib overhead |
 | `timestep` | 0.1 | Indirect — fewer steps = faster wall time |
-| `speed` | 100 | 0 = max speed (no sleep) |
+| `target_rtf` | 100 | 0 = max speed (no sleep) |
 | `collision_check_frequency` | null (every step) | **Major** — 10 Hz vs every step |
 | `spatial_hash_cell_size_mode` | auto_initial | Minor — constant is fastest |
 | `collision_margin` | 0.02 | Negligible |
@@ -67,7 +67,7 @@ Known performance numbers from historical benchmarks (headless, physics=false):
 gui: false
 monitor: false
 enable_monitor_gui: false
-speed: 0
+target_rtf: 0
 physics: false
 log_level: warn
 enable_profiling: true

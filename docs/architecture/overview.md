@@ -79,7 +79,7 @@ multi-link bodies with joint control (e.g., URDF robots), use Agent instead.
 Configuration dataclass for simulation parameters.
 
 **Attributes:**
-- `gui`, `timestep`, `speed`, `duration`: Core simulation settings
+- `gui`, `timestep`, `target_rtf`, `duration`: Core simulation settings
 - `physics`, `monitor`: Feature toggles
 - `camera_*`: Camera configuration
 - `enable_*`: Visualization settings

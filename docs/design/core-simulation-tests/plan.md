@@ -582,13 +582,13 @@ class TestSimulationParams:
         import yaml
         cfg = {
             "gui": False, "physics": False, "monitor": False,
-            "timestep": 0.05, "speed": 2.0,
+            "timestep": 0.05, "target_rtf": 2.0,
         }
         yaml_file = tmp_path / "test_config.yaml"
         yaml_file.write_text(yaml.dump(cfg))
         params = SimulationParams.from_config(str(yaml_file))
         assert params.timestep == 0.05
-        assert params.speed == 2.0
+        assert params.target_rtf == 2.0
 
 
 # ============================================================================
@@ -912,7 +912,7 @@ def sim():
         physics=False,
         monitor=False,
         timestep=0.1,
-        speed=0,  # max speed (no sleep)
+        target_rtf=0,  # max speed (no sleep)
         collision_detection_method=CollisionDetectionMethod.CLOSEST_POINTS,
         spatial_hash_cell_size_mode=SpatialHashCellSizeMode.CONSTANT,
         spatial_hash_cell_size=2.0,

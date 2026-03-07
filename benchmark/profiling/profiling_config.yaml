@@ -12,9 +12,9 @@
 # Simulation Parameters
 # ========================================
 
-# Target simulation speed multiplier
+# Target RTF (Real-Time Factor)
 # 0 = maximum speed (no sleep, no real-time sync)
-speed: 0
+target_rtf: 0
 
 # Simulation timestep (seconds per step)
 # Default: 0.1 for kinematics (finer resolution not needed)

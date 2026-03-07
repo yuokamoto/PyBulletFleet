@@ -18,7 +18,7 @@
 ```yaml
 simulation:
   timestep: 0.1           # 10 Hz simulation
-  speed: 0.0              # Maximum speed (no sleep)
+  target_rtf: 0.0         # Maximum speed (no sleep)
   duration: 10.0          # 10 seconds
   physics: false          # Kinematics only (faster)
   collision_check_2d: false
@@ -58,7 +58,7 @@ python run_benchmark.py --config configs/general.yaml --runs 5
 physics: false
 collision_detection_method: "closest_points"
 collision_margin: 0.02    # 2cm safety distance
-speed: 0                  # Maximum speed
+target_rtf: 0             # Maximum speed
 timestep: 0.00416666      # 1/240s (240 Hz)
 enable_profiling: true
 ```
@@ -94,7 +94,7 @@ python experiments/collision_methods_config_based.py
 physics: true
 collision_detection_method: "contact_points"
 collision_margin: 0.0     # Actual contact only
-speed: 0
+target_rtf: 0
 timestep: 0.00416666
 enable_profiling: true
 ```
@@ -125,7 +125,7 @@ enable_profiling: true
 physics: true
 collision_detection_method: "hybrid"
 collision_margin: 0.02
-speed: 0
+target_rtf: 0
 timestep: 0.00416666
 enable_profiling: true
 ```
@@ -196,7 +196,7 @@ python performance_benchmark.py --config configs/my_custom.yaml
 すべてのベンチマーク用configに推奨される設定：
 
 ```yaml
-speed: 0                    # Maximum speed (no sleep)
+target_rtf: 0               # Maximum speed (no sleep)
 gui: false                  # Headless mode
 monitor: false              # No GUI monitor
 enable_profiling: true      # Enable profiling

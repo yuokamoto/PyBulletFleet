@@ -345,7 +345,7 @@ python benchmark/run_benchmark.py --agents 1000 --config custom_config.yaml
 ```yaml
 simulation:
   timestep: 0.1                        # Simulation timestep (seconds)
-  speed: 0.0                           # 0 = maximum speed (no sleep)
+  target_rtf: 0.0                      # 0 = maximum speed (no sleep)
   physics: false                       # Enable physics (usually false for benchmarks)
   collision_check_frequency: null      # Hz, null=every step, 0=disabled
   collision_check_2d: false            # 2D mode (9 neighbors vs 27)
@@ -516,12 +516,12 @@ See [`PERFORMANCE_REPORT.md`](PERFORMANCE_REPORT.md) for detailed performance an
 
 **Maximum Performance (Offline):**
 ```python
-params = SimulationParams(speed=0, gui=False, collision_check_2d=True, enable_profiling=False)
+params = SimulationParams(target_rtf=0, gui=False, collision_check_2d=True, enable_profiling=False)
 ```
 
 **Real-Time Visualization:**
 ```python
-params = SimulationParams(speed=1.0, gui=True, collision_check_frequency=10.0)
+params = SimulationParams(target_rtf=1.0, gui=True, collision_check_frequency=10.0)
 ```
 
 **See the optimization guide for:**

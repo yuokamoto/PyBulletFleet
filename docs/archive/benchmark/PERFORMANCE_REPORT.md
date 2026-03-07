@@ -32,7 +32,7 @@
 - **PyBullet:** Jan 29 2025 build
 - **Test Duration:** 10 seconds simulation time
 - **Repetitions:** 3 runs per configuration
-- **Mode:** Headless (GUI disabled), speed=0 (maximum speed)
+- **Mode:** Headless (GUI disabled), target_rtf=0 (maximum speed)
 
 ### Results Summary
 
@@ -164,7 +164,7 @@ simulation:
 **For maximum performance testing:**
 ```python
 params = SimulationParams(
-    speed=0,                    # No sleep, maximum speed
+    target_rtf=0,                    # No sleep, maximum speed
     enable_monitor_gui=False,   # Headless data collection
     collision_check_2d=True,    # 2D optimization
     enable_profiling=True       # For performance analysis
@@ -213,11 +213,11 @@ params = SimulationParams(
 
 **Real-time visualization (RTF > 1.0):**
 - Limit to **< 200 agents** for smooth 60 FPS rendering
-- Configuration: `speed=1.0`, `gui=True`, `collision_check_frequency=10.0`
+- Configuration: `target_rtf=1.0`, `gui=True`, `collision_check_frequency=10.0`
 
 **Offline batch simulation:**
 - Can handle **1000+ agents** at 0.45x RTF
-- Configuration: `speed=0`, `gui=False`, `collision_check_2d=True`
+- Configuration: `target_rtf=0`, `gui=False`, `collision_check_2d=True`
 
 **Large-scale testing (>2000 agents):**
 - Accept <0.3x RTF for comprehensive testing
