@@ -7,6 +7,7 @@
 
 ## Table of Contents
 
+0. [TL;DR](#tldr)
 1. [Overview & Design Philosophy](#overview--design-philosophy)
 2. [Collision Modes: Quick Overview](#collision-modes-quick-overview)
 3. [Architecture Overview](#architecture-overview)
@@ -17,6 +18,25 @@
 8. [Implementation & Configuration](#implementation--configuration)
 9. [Advanced Features](#advanced-features)
 10. [FAQ & Troubleshooting](#faq--troubleshooting)
+
+---
+
+## TL;DR
+
+PyBulletFleet's collision detection system provides:
+
+- ✅ **Scalability**: O(N) via spatial hashing (not O(N²))
+- ✅ **Flexibility**: 4 collision modes per object
+- ✅ **Performance**: Incremental updates, mode-based optimization
+- ✅ **Determinism**: Same input → same output
+- ✅ **Simplicity**: Automatic configuration, minimal setup
+
+**Recommended Workflow**:
+1. Start with default (physics=False, CLOSEST_POINTS)
+2. Set collision modes (NORMAL_3D/2D, STATIC, DISABLED)
+3. Run and profile
+4. Optimize cell_size if needed
+5. Use Physics mode only for verification
 
 ---
 
@@ -1055,25 +1075,6 @@ cd benchmark
 python performance_benchmark.py
 ```
 
-
----
-
-## Conclusion
-
-PyBulletFleet's collision detection system provides:
-
-- ✅ **Scalability**: O(N) via spatial hashing (not O(N²))
-- ✅ **Flexibility**: 4 collision modes per object
-- ✅ **Performance**: Incremental updates, mode-based optimization
-- ✅ **Determinism**: Same input → same output
-- ✅ **Simplicity**: Automatic configuration, minimal setup
-
-**Recommended Workflow**:
-1. Start with default (physics=False, CLOSEST_POINTS)
-2. Set collision modes (NORMAL_3D/2D, STATIC, DISABLED)
-3. Run and profile
-4. Optimize cell_size if needed
-5. Use Physics mode only for verification
 
 ---
 
