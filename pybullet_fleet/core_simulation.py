@@ -75,7 +75,9 @@ class SimulationParams:
     spatial_hash_cell_size: Optional[float] = None  # Fixed cell size (for mode=CONSTANT)
     collision_detection_method: Optional[CollisionDetectionMethod] = None  # Auto-select based on physics
     collision_margin: float = 0.02  # Safety clearance for getClosestPoints (meters, default: 2cm)
-    multi_cell_threshold: float = 1.5  # Threshold multiplier for multi-cell registration (>= 1.0)
+    multi_cell_threshold: float = (
+        1.5  # Dimensionless multiplier of cell_size; objects larger than cell_size × this value span multiple cells (>= 1.0)
+    )
     camera_config: Optional[Dict[str, Any]] = None  # Camera configuration from config file
 
     def __post_init__(self) -> None:

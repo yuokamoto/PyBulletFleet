@@ -122,6 +122,15 @@ Safety clearance for `getClosestPoints()`:
 **Note**: Only affects `CLOSEST_POINTS` and `HYBRID` modes.
 `CONTACT_POINTS` always detects actual contact (margin=0).
 
+### `multi_cell_threshold` (float, dimensionless multiplier)
+Controls when objects are registered in multiple spatial-hash cells.
+Objects larger than `cell_size × multi_cell_threshold` span multiple cells.
+- `1.0`: Every object that exceeds one cell is multi-registered
+- `1.5`: Default — objects >1.5× the cell size span multiple cells ✅
+- `2.0+`: Only very large objects are multi-registered
+
+**Unit**: Dimensionless (multiplier of `cell_size`). For example, with `cell_size=2.0` and `multi_cell_threshold=1.5`, the threshold becomes 3.0 m.
+
 ## Auto-Selection Logic
 
 If `collision_detection_method` is not specified in config:
