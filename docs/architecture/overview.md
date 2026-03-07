@@ -98,7 +98,7 @@ multi-link bodies with joint control (e.g., URDF robots), use Agent instead.
 ##### LogLevelManager
 Utility for managing PyBullet log verbosity.
 
-**Methods:**
+**Key Methods:**
 - `set_log_level(level)`: Control PyBullet logging output
 
 ---
@@ -200,7 +200,7 @@ Extends SimObjectManager with `object_class=Agent`.
 ##### Action (Base Class)
 Abstract base class for all actions.
 
-**Methods:**
+**Key Methods:**
 - `start(agent)`: Initialize action
 - `update(agent, dt)`: Update action state
 - `is_complete()`: Check if action finished
@@ -248,7 +248,7 @@ Position and orientation representation.
 - `position`: np.ndarray [x, y, z]
 - `orientation`: np.ndarray (quaternion) [x, y, z, w]
 
-**Methods:**
+**Key Methods:**
 - `from_xyz()`, `from_euler()`, `from_pybullet()`: Factory methods
 - `as_euler()`, `as_position_orientation()`: Conversion methods
 - `distance_to()`: Distance calculation
@@ -259,7 +259,7 @@ Waypoint sequence for path following.
 **Attributes:**
 - `waypoints`: List[Pose]
 
-**Methods:**
+**Key Methods:**
 - `from_points()`: Create from position list
 - `add_waypoint()`: Add pose to path
 - `get_waypoint(index)`: Retrieve specific waypoint
