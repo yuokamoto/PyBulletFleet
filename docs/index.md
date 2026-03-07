@@ -5,25 +5,38 @@ built on PyBullet and designed for **fast N× real-time** evaluation.
 
 ## What is PyBulletFleet?
 
-Most robot simulators focus on **physics fidelity** — accurate contact dynamics,
-sensor modelling, and real-time rendering. This is essential for single-robot
-control research, but fleet-level development has a different set of priorities:
+Different simulation goals call for different tools.
+Physics-focused simulators (Gazebo, Isaac Sim, MuJoCo, etc.) excel at accurate
+contact dynamics, sensor modelling, and single-robot control — but stepping a
+full physics engine for every robot becomes the bottleneck when you need to
+evaluate **fleet-level** systems at scale.
 
-- **Speed over fidelity** — Evaluating fleet algorithms (task allocation, traffic
-  control, path planning) requires simulating hundreds to thousands of robots
-  *much faster* than real time. Physics-accurate stepping is often the bottleneck.
+PyBulletFleet sits in a different part of the design space: it is a
+**kinematics-first, fleet-scale** simulation engine whose primary goal is to
+enable fast development and testing of the software that *orchestrates* robot
+fleets rather than the software that *controls* individual robots.
+
+### Design priorities
+
+- **Speed over fidelity** — Fleet algorithms (task allocation, traffic control,
+  path planning) must be tested with hundreds to thousands of robots running
+  *much faster* than real time. Kinematics-based stepping — teleporting each
+  robot to its next pose without calling `stepSimulation()` — removes the
+  physics bottleneck and enables N× real-time execution.
 - **System integration over low-level control** — The primary consumers are
-  high-level systems such as WMS, task orchestrators, and fleet managers that
-  issue goals and monitor progress, not joint-level controllers.
-- **Scale over detail** — Testing at 1 000+ robot scale matters more than
-  modelling individual link dynamics.
-
-PyBulletFleet is built for this use case. It treats **kinematics as the default
-motion mode** — robots are teleported to their next pose each step, bypassing
-`stepSimulation()` entirely — so the loop runs at N× real-time even with
-thousands of agents. When physics *is* needed (e.g., grasping, conveyor
-dynamics), it can be switched on per-scenario without changing the rest of the
-stack.
+  high-level systems: WMS (Warehouse Management Systems), task orchestrators,
+  fleet managers, and monitoring dashboards. These systems issue goals, observe
+  progress via state snapshots, and react to events — they do not need
+  joint-level torque feedback.
+- **Scale over detail** — Validating behaviour at 1 000+ robot scale matters
+  more than modelling individual link dynamics or sensor noise.
+- **Interoperability** — The simulation exposes a snapshot-based state
+  interface (full and delta snapshots) and a callback-driven step loop, making
+  it straightforward to plug into larger orchestration frameworks, replay
+  pipelines, or external control systems over gRPC / ROS 2.
+- **Physics as an option** — When physical interaction *is* needed (grasping,
+  conveyor dynamics, contact verification), full PyBullet physics can be
+  switched on per-scenario without changing the rest of the stack.
 
 ```{toctree}
 :maxdepth: 2
@@ -40,11 +53,12 @@ api/index
 
 ## Key Features
 
-- **N× speed simulation** — Kinematic (teleport-based) control as the primary motion mode
-- **Scalability** — Designed for 100–10,000 robot-scale environments
-- **Physics as an option** — Full PyBullet physics can be turned on when needed
-- **High-level abstractions** — Action system, agent managers, YAML-driven configuration
-- **System integration** — Callback-based loop and snapshot API for connecting to external orchestrators
+- **N× real-time simulation** — Kinematics-based (teleport) stepping as the default motion mode
+- **Scalability** — Designed for 100–10,000 robot-scale environments with spatial-hash collision
+- **Snapshot-based state** — Full and delta snapshot serialization for logging, replay, and external synchronization
+- **Physics as an option** — Full PyBullet physics can be enabled per-scenario when needed
+- **High-level abstractions** — Action system (MoveTo, Pick, Drop, Wait), agent managers, YAML-driven configuration
+- **External integration** — Callback-driven step loop and gRPC/ROS 2-ready interfaces for connecting to orchestrators, WMS, and fleet managers
 
 ## Indices and tables
 
