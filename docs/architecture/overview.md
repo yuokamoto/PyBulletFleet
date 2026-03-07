@@ -217,15 +217,19 @@ Navigate agent to target pose.
 Pick up an object and attach it to agent.
 
 **Key Parameters:**
-- `obj`: SimObject to pick
-- `link_index`: Agent link to attach to (default: -1 for base)
-- `offset`: Attachment offset pose
+- `target_object_id`: Specific object body ID to pick (optional)
+- `target_position`: Pick from position — auto-select nearest pickable object (optional)
+- `search_radius`: Search radius when using `target_position` (default: 0.5m)
+- `attach_link`: Link index or name to attach to (default: -1 for base)
+- `attach_relative_pose`: Offset in link's frame as Pose
 
 ##### Drop
-Drop currently held object.
+Drop an attached object at a specified location.
 
 **Key Parameters:**
-- `offset`: Drop position offset from agent
+- `drop_pose`: Where to drop the object (position and orientation)
+- `target_object_id`: Specific object to drop (None = first attached)
+- `place_gently`: Place at exact position vs drop from height (default: True)
 
 ##### Wait
 Wait for specified duration.
