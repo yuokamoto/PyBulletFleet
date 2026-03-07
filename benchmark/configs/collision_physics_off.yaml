@@ -4,7 +4,7 @@
 # Kinematics mode with distance-based collision detection
 # ========================================
 
-speed: 0                     # Maximum speed (no sleep)
+target_rtf: 0                # Maximum speed (no sleep)
 timestep: 0.00416666         # 1/240s
 duration: 10.0               # 10 seconds
 gui: false                   # Headless for benchmarking

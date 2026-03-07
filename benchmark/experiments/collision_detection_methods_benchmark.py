@@ -45,7 +45,7 @@ def create_test_objects(
         gui=False,
         physics=True,
         timestep=0.01,
-        speed=0,  # Fast as possible
+        target_rtf=0,  # Fast as possible
         duration=0,
         ignore_static_collision=True,
     )

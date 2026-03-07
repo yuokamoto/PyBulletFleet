@@ -24,7 +24,7 @@ from pybullet_fleet.action import JointAction, PickAction, DropAction, WaitActio
 params = SimulationParams(
     gui=True,
     timestep=0.01,
-    speed=0,
+    target_rtf=0,
     physics=True,
     ignore_static_collision=True,
     log_level="info",

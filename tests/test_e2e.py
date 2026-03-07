@@ -49,7 +49,7 @@ def sim():
         physics=False,
         monitor=False,
         timestep=0.1,
-        speed=0,  # max speed (no sleep)
+        target_rtf=0,  # max speed (no sleep)
         collision_detection_method=CollisionDetectionMethod.CLOSEST_POINTS,
         spatial_hash_cell_size_mode=SpatialHashCellSizeMode.CONSTANT,
         spatial_hash_cell_size=2.0,
@@ -365,7 +365,7 @@ class TestArmPickDropE2E:
             physics=True,
             monitor=False,
             timestep=1.0 / 240.0,
-            speed=0,
+            target_rtf=0,
             collision_detection_method=CollisionDetectionMethod.CONTACT_POINTS,
             spatial_hash_cell_size_mode=SpatialHashCellSizeMode.CONSTANT,
             spatial_hash_cell_size=2.0,

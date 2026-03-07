@@ -28,7 +28,7 @@ Layout:
 
 Usage:
     python examples/collision_features_demo.py
-    python examples/collision_features_demo.py --duration 30 --speed 1.5
+    python examples/collision_features_demo.py --duration 30 --target-rtf 1.5
 
     Press 'c' to toggle collision shape visualization (wireframe)
     Press 't' to toggle structure transparency
@@ -326,7 +326,7 @@ def create_movement_pattern(t: float, robot_id: int, side: str = "left") -> Pose
 def main():
     parser = argparse.ArgumentParser(description="Collision Features Demo")
     parser.add_argument("--duration", type=float, default=30.0, help="Simulation duration (seconds)")
-    parser.add_argument("--speed", type=float, default=1.0, help="Simulation speed multiplier")
+    parser.add_argument("--target-rtf", type=float, default=1.0, help="Target RTF (Real-Time Factor)")
     args = parser.parse_args()
 
     print("=" * 70)
@@ -373,7 +373,7 @@ def main():
         # Simulation settings
         duration=args.duration,
         timestep=0.01,
-        speed=args.speed,
+        target_rtf=args.target_rtf,
         log_level="info",
     )
 

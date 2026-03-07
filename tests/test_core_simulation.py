@@ -510,13 +510,13 @@ class TestSimulationParams:
             "physics": False,
             "monitor": False,
             "timestep": 0.05,
-            "speed": 2.0,
+            "target_rtf": 2.0,
         }
         yaml_file = tmp_path / "test_config.yaml"
         yaml_file.write_text(yaml.dump(cfg))
         params = SimulationParams.from_config(str(yaml_file))
         assert params.timestep == 0.05
-        assert params.speed == 2.0
+        assert params.target_rtf == 2.0
 
 
 # ============================================================================
@@ -1050,12 +1050,12 @@ class TestRunSimulation:
 
     @pytest.fixture
     def fast_sim(self):
-        """Headless sim with speed=0 (no sleep) for deterministic testing."""
+        """Headless sim with target_rtf=0 (no sleep) for deterministic testing."""
         params = SimulationParams(
             gui=False,
             physics=False,
             monitor=False,
-            speed=0,
+            target_rtf=0,
             log_level="warning",
         )
         sc = MultiRobotSimulationCore(params)
@@ -1089,10 +1089,10 @@ class TestRunSimulation:
         expected = math.ceil(0.01 / fast_sim.params.timestep)
         assert fast_sim.step_count == expected
 
-    # -- speed ----------------------------------------------------------------
+    # -- target_rtf ----------------------------------------------------------------
 
     def test_speed_zero_runs_without_sleep(self, fast_sim, monkeypatch):
-        """speed=0 never calls time.sleep (runs at maximum speed)."""
+        """target_rtf=0 never calls time.sleep (runs at maximum speed)."""
         sleep_calls = []
         original_sleep = time.sleep
 
@@ -1101,17 +1101,17 @@ class TestRunSimulation:
             original_sleep(seconds)
 
         monkeypatch.setattr(time, "sleep", spy_sleep)
-        fast_sim._params.speed = 0
+        fast_sim._params.target_rtf = 0
         fast_sim.run_simulation(duration=0.05)
-        assert len(sleep_calls) == 0, f"speed=0 should never call time.sleep, got {len(sleep_calls)} calls"
+        assert len(sleep_calls) == 0, f"target_rtf=0 should never call time.sleep, got {len(sleep_calls)} calls"
 
     def test_speed_positive_calls_sleep(self, monkeypatch):
-        """speed>0 calls time.sleep for real-time synchronization."""
+        """target_rtf>0 calls time.sleep for real-time synchronization."""
         params = SimulationParams(
             gui=False,
             physics=False,
             monitor=False,
-            speed=1.0,
+            target_rtf=1.0,
             log_level="warning",
         )
         sc = MultiRobotSimulationCore(params)
@@ -1127,21 +1127,21 @@ class TestRunSimulation:
 
             monkeypatch.setattr(time, "sleep", spy_sleep)
             sc.run_simulation(duration=0.05)
-            assert len(sleep_calls) > 0, "speed=1.0 should call time.sleep for sync"
+            assert len(sleep_calls) > 0, "target_rtf=1.0 should call time.sleep for sync"
         finally:
             if p.isConnected(physicsClientId=sc.client):
                 p.disconnect(sc.client)
 
     def test_higher_speed_executes_more_steps_per_frame(self, monkeypatch):
-        """Both speed=1 and speed=10 produce the same step_count for the same
+        """Both target_rtf=1 and target_rtf=10 produce the same step_count for the same
         sim-time duration, since duration is measured in simulation time."""
         step_counts = {}
-        for speed in (1.0, 10.0):
+        for rtf in (1.0, 10.0):
             params = SimulationParams(
                 gui=False,
                 physics=False,
                 monitor=False,
-                speed=speed,
+                target_rtf=rtf,
                 log_level="warning",
             )
             sc = MultiRobotSimulationCore(params)
@@ -1149,30 +1149,30 @@ class TestRunSimulation:
                 # Stub out sleep so the loop runs without real-time delay
                 monkeypatch.setattr(time, "sleep", lambda s: None)
                 sc.run_simulation(duration=0.1)
-                step_counts[speed] = sc.step_count
+                step_counts[rtf] = sc.step_count
             finally:
                 if p.isConnected(physicsClientId=sc.client):
                     p.disconnect(sc.client)
-        # Same sim-time duration=0.1 → same step_count regardless of speed
+        # Same sim-time duration=0.1 → same step_count regardless of target_rtf
         # (duration is measured in simulation time, not wall-clock time)
         expected = math.ceil(0.1 / SimulationParams(gui=False).timestep)
         assert step_counts[1.0] == expected
         assert step_counts[10.0] == expected
 
     def test_higher_speed_completes_in_less_wall_clock_time(self, monkeypatch):
-        """speed=10 should accumulate ~10x less total sleep than speed=1,
+        """target_rtf=10 should accumulate ~10x less total sleep than target_rtf=1,
         confirming faster wall-clock completion.
 
         Uses a fake clock where time.time() advances only by sleep amounts,
         giving deterministic control over the real-time sync loop.
         """
         total_sleeps = {}
-        for speed in (1.0, 10.0):
+        for rtf in (1.0, 10.0):
             params = SimulationParams(
                 gui=False,
                 physics=False,
                 monitor=False,
-                speed=speed,
+                target_rtf=rtf,
                 log_level="warning",
             )
             sc = MultiRobotSimulationCore(params)
@@ -1197,21 +1197,21 @@ class TestRunSimulation:
                 monkeypatch.setattr(time, "sleep", fake_sleep)
                 sc.run_simulation(duration=0.5)
                 # clock - base == total sleep accumulated (computation is zero-cost)
-                total_sleeps[speed] = clock - base
+                total_sleeps[rtf] = clock - base
             finally:
                 if p.isConnected(physicsClientId=sc.client):
                     p.disconnect(sc.client)
 
-        # speed=10 should sleep roughly 10x less than speed=1
+        # target_rtf=10 should sleep roughly 10x less than target_rtf=1
         assert total_sleeps[10.0] < total_sleeps[1.0] * 0.5, (
-            f"speed=10 should complete in much less wall-clock time than speed=1: "
+            f"target_rtf=10 should complete in much less wall-clock time than target_rtf=1: "
             f"sleep[10]={total_sleeps[10.0]:.4f}s vs sleep[1]={total_sleeps[1.0]:.4f}s"
         )
 
     # -- behind target (catch-up) ---------------------------------------------
 
     def test_behind_target_executes_multiple_steps(self, monkeypatch):
-        """With extreme speed, the catch-up loop batches multiple step_once
+        """With extreme target_rtf, the catch-up loop batches multiple step_once
         calls per iteration.
 
         We spy on step_once directly and detect iteration boundaries via
@@ -1222,7 +1222,7 @@ class TestRunSimulation:
             gui=False,
             physics=False,
             monitor=False,
-            speed=10000.0,  # extreme: always far behind after any sleep
+            target_rtf=10000.0,  # extreme: always far behind after any sleep
             max_steps_per_frame=10,
             log_level="warning",
         )
@@ -1279,17 +1279,17 @@ class TestRunSimulation:
     def test_max_steps_per_frame_caps_catchup(self, monkeypatch):
         """max_steps_per_frame caps step_once calls per loop iteration.
 
-        With extreme speed every iteration is behind target.  We spy on
+        With extreme target_rtf every iteration is behind target.  We spy on
         step_once and detect iteration boundaries via time.time() calls,
         recording per-iteration batch sizes.  No batch may exceed
-        max_steps_per_frame, and extreme speed should hit the cap.
+        max_steps_per_frame, and extreme target_rtf should hit the cap.
         """
         max_steps = 5
         params = SimulationParams(
             gui=False,
             physics=False,
             monitor=False,
-            speed=10000.0,
+            target_rtf=10000.0,
             max_steps_per_frame=max_steps,
             log_level="warning",
         )
@@ -1337,7 +1337,7 @@ class TestRunSimulation:
             assert all(b <= max_steps for b in batches), (
                 f"Batch exceeded max_steps_per_frame={max_steps}: " f"max={max(batches)}, batches={batches[:10]}"
             )
-            # Extreme speed keeps the loop behind target → cap is reached
+            # Extreme target_rtf keeps the loop behind target → cap is reached
             assert any(b == max_steps for b in batches), (
                 f"Expected some batches to hit cap={max_steps}: " f"batches={batches[:10]}"
             )
@@ -1352,14 +1352,14 @@ class TestRunSimulation:
 
         Uses a fake clock starting at 0.0 (not real time) to avoid
         floating-point precision loss from large unix timestamps.
-        With speed=1.0 and zero-cost step_once, each sleep is exactly
+        With target_rtf=1.0 and zero-cost step_once, each sleep is exactly
         one timestep.
         """
         params = SimulationParams(
             gui=False,
             physics=False,
             monitor=False,
-            speed=1.0,
+            target_rtf=1.0,
             log_level="warning",
         )
         sc = MultiRobotSimulationCore(params)
@@ -1383,7 +1383,7 @@ class TestRunSimulation:
 
             dt = params.timestep
             # With zero-cost step_once, the loop alternates: ahead→sleep(dt), behind→step.
-            # Every sleep should be approximately one timestep (speed=1.0).
+            # Every sleep should be approximately one timestep (target_rtf=1.0).
             positive_sleeps = [s for s in sleep_durations if s > 0]
             assert len(positive_sleeps) > 0, "Should have positive sleeps when ahead of target"
             for s in positive_sleeps:
@@ -1424,7 +1424,7 @@ class TestRunSimulation:
             gui=False,
             physics=False,
             monitor=False,
-            speed=1.0,
+            target_rtf=1.0,
             max_steps_per_frame=5,
             log_level="warning",
         )

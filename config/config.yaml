@@ -11,8 +11,8 @@
 # Simulation Parameters
 # ========================================
 
-# Target simulation speed multiplier (e.g. 1=real time, 10=10x faster)
-speed: 100
+# Target RTF (Real-Time Factor): 1=real time, 10=10x faster, 0=max speed
+target_rtf: 100
 
 # Simulation timestep (seconds per step)
 # Default: 0.1 for kinematics simulation (finer resolution not needed)

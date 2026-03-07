@@ -19,7 +19,7 @@ class TestMemoryProfiling:
         """Memory profiling should be disabled by default."""
         config = {
             "timestep": 0.1,
-            "speed": 1.0,
+            "target_rtf": 1.0,
             "duration": 0,
             "gui": False,
             "physics": False,
@@ -33,7 +33,7 @@ class TestMemoryProfiling:
         """Memory profiling can be enabled via configuration."""
         config = {
             "timestep": 0.1,
-            "speed": 1.0,
+            "target_rtf": 1.0,
             "duration": 0,
             "gui": False,
             "physics": False,
@@ -47,7 +47,7 @@ class TestMemoryProfiling:
         """get_memory_usage() should return None when profiling is disabled."""
         config = {
             "timestep": 0.1,
-            "speed": 1.0,
+            "target_rtf": 1.0,
             "duration": 0,
             "gui": False,
             "physics": False,
@@ -61,7 +61,7 @@ class TestMemoryProfiling:
         """Memory profiling should collect data during simulation."""
         config = {
             "timestep": 0.1,
-            "speed": 0,  # Run as fast as possible
+            "target_rtf": 0,  # Run as fast as possible
             "duration": 0,
             "gui": False,
             "physics": False,
@@ -88,7 +88,7 @@ class TestMemoryProfiling:
         """Memory profiling should work alongside time profiling."""
         config = {
             "timestep": 0.1,
-            "speed": 0,  # Run as fast as possible
+            "target_rtf": 0,  # Run as fast as possible
             "duration": 0,
             "gui": False,
             "physics": False,
@@ -117,7 +117,7 @@ class TestMemoryProfiling:
         """Memory profiling should detect memory usage changes."""
         config = {
             "timestep": 0.1,
-            "speed": 0,  # Run as fast as possible
+            "target_rtf": 0,  # Run as fast as possible
             "duration": 0,
             "gui": False,
             "physics": False,

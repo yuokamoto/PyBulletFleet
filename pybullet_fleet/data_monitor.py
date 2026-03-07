@@ -69,8 +69,8 @@ class DataMonitor:
         fields = [
             "Simulation Time",
             "Real Time",
-            "Target Speed",
-            "Actual Speed",
+            "Target RTF",
+            "Actual RTF",
             "Time Step",
             "Physics",
             "Agents",
@@ -114,8 +114,8 @@ class DataMonitor:
                 # Update labels
                 self.labels["Simulation Time"].config(text=f"Simulation Time: {data.get('sim_time', 0):.1f}s")
                 self.labels["Real Time"].config(text=f"Real Time: {data.get('real_time', 0):.1f}s")
-                self.labels["Target Speed"].config(text=f"Target Speed: {data.get('target_speed', 0):.1f}x")
-                self.labels["Actual Speed"].config(text=f"Actual Speed: {data.get('actual_speed', 0):.1f}x")
+                self.labels["Target RTF"].config(text=f"Target RTF: {data.get('target_rtf', 0):.1f}x")
+                self.labels["Actual RTF"].config(text=f"Actual RTF: {data.get('actual_rtf', 0):.1f}x")
                 self.labels["Time Step"].config(
                     text=f"Time Step: {data.get('time_step', 0):.4f}s ({data.get('frequency', 0):.0f}Hz)"
                 )

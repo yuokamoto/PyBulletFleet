@@ -50,7 +50,7 @@ class SimulationParams:
     Use ``from_config`` / ``from_dict`` to load from YAML files.
     """
 
-    speed: float = 1.0  # speed=0 means maximum speed (no sleep)
+    target_rtf: float = 1.0  # target_rtf=0 means maximum speed (no sleep)
     timestep: float = 1.0 / 240.0
     duration: float = 0
     gui: bool = True
@@ -108,7 +108,7 @@ class SimulationParams:
             SimulationParams instance
         """
         return cls(
-            speed=config.get("speed", 1.0),
+            target_rtf=config.get("target_rtf", config.get("speed", 1.0)),
             timestep=config.get("timestep", 1.0 / 10.0),
             duration=config.get("duration", 0),
             gui=config.get("gui", True),
@@ -1782,15 +1782,15 @@ class MultiRobotSimulationCore:
         # Keep only history within 10 seconds (O(1) popleft with deque)
         while self._speed_history and now - self._speed_history[0][0] > 10.0:
             self._speed_history.popleft()
-        # Calculate speed for the last 10 seconds
+        # Calculate actual RTF for the last 10 seconds
         if len(self._speed_history) >= 2:
             rt0, st0 = self._speed_history[0]
             rt1, st1 = self._speed_history[-1]
             elapsed = rt1 - rt0
             sim_elapsed = st1 - st0
-            actual_speed = sim_elapsed / elapsed if elapsed > 0 else 0
+            actual_rtf = sim_elapsed / elapsed if elapsed > 0 else 0
         else:
-            actual_speed = 0
+            actual_rtf = 0
         elapsed_time = now - self._start_time if self._start_time else 0
 
         # Use len(self._agents) for O(1) agent count instead of O(N) iteration
@@ -1800,8 +1800,8 @@ class MultiRobotSimulationCore:
         monitor_data = {
             "sim_time": sim_time,
             "real_time": elapsed_time,
-            "target_speed": self._params.speed,
-            "actual_speed": actual_speed,
+            "target_rtf": self._params.target_rtf,
+            "actual_rtf": actual_rtf,
             "time_step": self._params.timestep,
             "frequency": 1 / self._params.timestep,
             "physics": "enabled" if self._params.physics else "disabled",
@@ -1812,11 +1812,11 @@ class MultiRobotSimulationCore:
             "steps": self._step_count,
         }
         logger.debug(
-            "[MONITOR] sim_time=%.2f, real_time=%.2f, speed=%.2f, agents=%d, objects=%d, "
+            "[MONITOR] sim_time=%.2f, real_time=%.2f, rtf=%.2f, agents=%d, objects=%d, "
             "active_collisions=%d, total_collisions=%d, steps=%d",
             sim_time,
             elapsed_time,
-            actual_speed,
+            actual_rtf,
             num_agents,
             num_objects,
             len(self._active_collision_pairs),
@@ -1954,8 +1954,8 @@ class MultiRobotSimulationCore:
                     logger.info("PyBullet connection lost (GUI window closed)")
                     break
 
-                # Speed=0: Run as fast as possible (no synchronization, no sleep)
-                if self._params.speed <= 0:
+                # target_rtf=0: Run as fast as possible (no synchronization, no sleep)
+                if self._params.target_rtf <= 0:
                     self.step_once()
                 else:
                     # Speed>0: Synchronize with real time using absolute time calculation
@@ -1965,13 +1965,13 @@ class MultiRobotSimulationCore:
                     # Detect pause state change: reset start_time on resume
                     if last_pause_state and not self.is_paused:
                         # Just resumed from pause: reset start_time to avoid jump
-                        start_time = current_time - current_sim_time / self._params.speed
+                        start_time = current_time - current_sim_time / self._params.target_rtf
                         logger.info("Resumed from pause: start_time reset for smooth continuation")
                     last_pause_state = self.is_paused
 
                     # Calculate target sim_time using absolute time (stable control)
                     elapsed_time = current_time - start_time
-                    target_sim_time = elapsed_time * self._params.speed
+                    target_sim_time = elapsed_time * self._params.target_rtf
                     time_diff = target_sim_time - current_sim_time
 
                     actual_sleep = 0.0

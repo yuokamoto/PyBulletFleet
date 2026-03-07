@@ -16,7 +16,7 @@
 # ========================================
 
 # Simulation Parameters
-speed: 100                    # High-speed simulation (100x real-time)
+target_rtf: 100               # High-speed simulation (100x real-time)
 timestep: 0.1                # Coarse timestep OK for kinematics
 duration: 0                  # Unlimited
 gui: true

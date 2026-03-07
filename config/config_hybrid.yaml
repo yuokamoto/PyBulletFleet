@@ -15,7 +15,7 @@
 # ========================================
 
 # Simulation Parameters
-speed: 1.0                   # Real-time recommended for mixed mode
+target_rtf: 1.0               # Real-time recommended for mixed mode
 timestep: 0.00416666         # 1/240s (physics timestep)
 duration: 0                  # Unlimited
 gui: true

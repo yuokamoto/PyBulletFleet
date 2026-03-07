@@ -48,7 +48,7 @@ Key settings you will want to tweak:
 | Setting | Type | Default | Description |
 |---------|------|---------|-------------|
 | `gui` | bool | `true` | Open the PyBullet GUI window |
-| `speed` | int | `100` | Simulation speed multiplier (1 = real time) |
+| `target_rtf` | float | `100` | Target Real-Time Factor (1.0 = real time, 0 = max speed) |
 | `timestep` | float | `0.1` | Seconds per simulation step |
 | `physics` | bool | `false` | Enable PyBullet physics engine (off for pure kinematic mode) |
 | `collision_detection_method` | string | `"closest_points"` | `"closest_points"`, `"contact_points"`, or `"hybrid"` |
@@ -56,11 +56,11 @@ Key settings you will want to tweak:
 | `monitor` | bool | `true` | Enable the real-time data monitor |
 | `enable_profiling` | bool | `true` | Print step-timing reports |
 
-Example — run headless at 10× speed with physics enabled:
+Example — run headless at 10× real-time with physics enabled:
 
 ```yaml
 gui: false
-speed: 10
+target_rtf: 10
 physics: true
 collision_detection_method: "contact_points"
 ```
@@ -91,7 +91,7 @@ All example scripts live in the `examples/` directory.
 | Script | Description |
 |--------|-------------|
 | `100robots_grid_demo.py` | Grid-based multi-agent demo — best starting point |
-| `100robots_cube_patrol_demo.py` | 100 agents patrolling between cubes with collision avoidance |
+| `100robots_cube_patrol_demo.py` | 100 agents patrolling between cubes |
 | `path_following_demo.py` | Compares omnidirectional and differential-drive motion modes |
 | `action_system_demo.py` | High-level action system (MoveTo, Pick, Drop, Wait) |
 | `pick_drop_arm_demo.py` | Single arm robot performing pick-and-drop operations |

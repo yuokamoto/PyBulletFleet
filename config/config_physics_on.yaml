@@ -12,11 +12,11 @@
 #   - stepSimulation() called every step
 #   - Realistic physics behavior (mass, friction, push-back)
 #   - Actual contact logging
-#   - Limited speed multiplier (1-10x)
+#   - Limited target_rtf (1-10x)
 # ========================================
 
 # Simulation Parameters
-speed: 1.0                   # Real-time (physics requires fixed timestep)
+target_rtf: 1.0               # Real-time (physics requires fixed timestep)
 timestep: 0.00416666         # 1/240s (standard physics timestep)
 duration: 0                  # Unlimited
 gui: true

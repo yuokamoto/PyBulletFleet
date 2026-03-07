@@ -4,7 +4,7 @@
 # Simulation Parameters
 simulation:
   timestep: 0.1  # Simulation timestep in seconds (default: 0.1 = 10 Hz)
-  speed: 0.0  # Simulation speed multiplier (0.0 = maximum speed, no sleep)
+  target_rtf: 0.0  # Target RTF (0.0 = maximum speed, no sleep)
   duration: 10.0  # Default simulation duration in seconds
   physics: false  # Enable physics engine (false = kinematic only, faster)
 

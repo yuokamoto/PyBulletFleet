@@ -163,7 +163,7 @@ def run_benchmark(
         gui=gui,
         timestep=sim_config.get("timestep", 0.1),
         duration=duration,
-        speed=sim_config.get("speed", 0.0),
+        target_rtf=sim_config.get("target_rtf", sim_config.get("speed", 0.0)),
         physics=sim_config.get("physics", False),
         monitor=sim_config.get("monitor", True),
         enable_monitor_gui=sim_config.get("enable_monitor_gui", False),

@@ -356,7 +356,7 @@ Recommended setup for 1000 robots + structures:
 
 ```yaml
 # config.yaml
-speed: 1.0
+target_rtf: 1.0
 timestep: 0.1
 gui: false
 physics: false
