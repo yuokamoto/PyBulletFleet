@@ -28,7 +28,7 @@ fleets rather than the software that *controls* individual robots.
   fleet managers, and monitoring dashboards. These systems issue goals, observe
   progress via state snapshots, and react to events — they do not need
   joint-level torque feedback.
-- **Scale over detail** — Validating behaviour at 1 000+ robot scale matters
+- **Scale over detail** — Validating behaviour at 100+ robot scale matters
   more than modelling individual link dynamics or sensor noise.
 - **Interoperability** — The simulation exposes a snapshot-based state
   interface (full and delta snapshots) and a callback-driven step loop, making
@@ -54,7 +54,7 @@ api/index
 ## Key Features
 
 - **N× real-time simulation** — Kinematics-based (teleport) stepping as the default motion mode
-- **Scalability** — Designed for 100–10,000 robot-scale environments with spatial-hash collision
+- **Scalability** — Tested with 100+ robots; spatial-hash collision keeps per-step cost low as fleet size grows
 - **Snapshot-based state** — Full and delta snapshot serialization for logging, replay, and external synchronization
 - **Physics as an option** — Full PyBullet physics can be enabled per-scenario when needed
 - **High-level abstractions** — Action system (MoveTo, Pick, Drop, Wait), agent managers, YAML-driven configuration
