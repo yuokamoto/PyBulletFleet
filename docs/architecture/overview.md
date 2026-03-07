@@ -241,81 +241,19 @@ Wait for specified duration.
 
 ### 5. geometry.py
 
-**Purpose**: Geometric data structures
-
-#### Key Classes:
-
-##### Pose
-Position and orientation representation.
-
-**Attributes:**
-- `position`: np.ndarray [x, y, z]
-- `orientation`: np.ndarray (quaternion) [x, y, z, w]
-
-**Key Methods:**
-- `from_xyz()`, `from_euler()`, `from_pybullet()`: Factory methods
-- `as_euler()`, `as_position_orientation()`: Conversion methods
-- `distance_to()`: Distance calculation
-
-##### Path
-Waypoint sequence for path following.
-
-**Attributes:**
-- `waypoints`: List[Pose]
-
-**Key Methods:**
-- `from_points()`: Create from position list
-- `add_waypoint()`: Add pose to path
-- `get_waypoint(index)`: Retrieve specific waypoint
+**Purpose**: Geometric data structures (`Pose`, `Path`) used throughout the codebase for position/orientation representation and waypoint sequences.
 
 ---
 
 ### 6. tools.py
 
-**Purpose**: Utility functions
-
-#### Key Functions:
-
-##### Pose Calculation
-- `calculate_offset_pose()`: Calculate pose at offset distance from target
-- `calculate_approach_pose()`: Deprecated alias for calculate_offset_pose
-
-**Use Cases:**
-- Pick/drop pose calculation
-- Approach pose generation
-- Offset manipulation
+**Purpose**: Utility functions for pose calculation (approach/offset poses for pick/drop actions).
 
 ---
 
 ### 7. data_monitor.py
 
-**Purpose**: Real-time performance monitoring
-
-#### Key Class:
-
-##### DataMonitor
-GUI window displaying simulation metrics.
-
-**Responsibilities:**
-- FPS calculation
-- Step time measurement
-- Display in separate tkinter window
-- Non-blocking updates
-
-**Key Methods:**
-- `start()`: Launch monitor window
-- `update(step_time, fps)`: Update displayed metrics
-- `stop()`: Close window
-
-**Implementation:**
-- Runs in main thread (tkinter requirement)
-- Updates via method calls from simulation loop
-- Uses after() for non-blocking behavior
-
-**Use Cases:**
-- Performance optimization
-- Debugging slow simulations
-- Benchmarking
+**Purpose**: Optional real-time GUI monitor (`DataMonitor`) displaying FPS and step-time metrics in a tkinter window. Enabled via `monitor: true` in config.
 
 ---
 
@@ -339,9 +277,5 @@ GUI window displaying simulation metrics.
 7. **Disable Monitor**: `monitor: false` in production
 8. **Cell Size Tuning**: Use `constant` mode with optimal cell_size for best performance
 
-### Scaling Results:
-- **100 agents**: ~240 FPS (real-time capable)
-- **1000 agents**: ~24 FPS (10x slowdown)
-- **10000 agents**: Requires optimization and headless mode
 
 See `docs/PERFORMANCE_ANALYSIS.md` and `docs/OPTIMIZATION_RESULTS.md` for detailed benchmarks.
