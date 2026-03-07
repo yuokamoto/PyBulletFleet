@@ -54,21 +54,10 @@ The central orchestrator for PyBullet simulations.
 - `register_callback(callback, frequency)`: Register custom update callbacks
 - `_handle_keyboard_events()`: Process keyboard inputs
 
-##### SimulationParams
-Configuration dataclass that holds **all parameters for `MultiRobotSimulationCore`**.
-Passed to the constructor to configure the simulation engine.
-
-**Attributes:**
-- `gui`, `timestep`, `target_rtf`, `duration`: Core simulation settings
-- `physics`, `monitor`: Feature toggles
-- `camera_*`: Camera configuration
-- `enable_*`: Visualization settings
-- `spatial_hash_*`: Collision detection settings
-
-**Creation:**
-- Direct: `SimulationParams(gui=False, target_rtf=0, ...)`
-- From dict: `SimulationParams.from_dict(config)`
-- From YAML: `SimulationParams.from_config("config/config.yaml")`
+**Associated Params:**
+- **`SimulationParams`** — Configuration dataclass holding all parameters for `MultiRobotSimulationCore`. Passed to the constructor to configure the simulation engine.
+  - Attributes: `gui`, `timestep`, `target_rtf`, `duration` (core settings), `physics`, `monitor` (feature toggles), `camera_*` (camera config), `enable_*` (visualization), `spatial_hash_*` (collision detection)
+  - Creation: `SimulationParams(gui=False, target_rtf=0, ...)`, `SimulationParams.from_dict(config)`, `SimulationParams.from_config("config/config.yaml")`
 
 ##### SimObject
 Base class for all simulation objects (single rigid body, no joints or links).
