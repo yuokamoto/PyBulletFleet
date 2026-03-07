@@ -541,10 +541,11 @@ closest_points = p.getClosestPoints(
 - `len(closest_points) > 0`: Collision detected
 
 **Advantages**:
-✅ Works with `resetBasePositionAndOrientation()` (kinematic)
-✅ Stable for kinematic-kinematic pairs
-✅ Safety margin support (detect "near miss")
-✅ No `stepSimulation()` required
+
+- ✅ Works with `resetBasePositionAndOrientation()` (kinematic)
+- ✅ Stable for kinematic-kinematic pairs
+- ✅ Safety margin support (detect "near miss")
+- ✅ No `stepSimulation()` required
 
 **Use cases**:
 - Kinematics-focused planning
@@ -570,14 +571,16 @@ contact_points = p.getContactPoints(
 - Empty list if no contact
 
 **Advantages**:
-✅ Fast (contact cache already exists)
-✅ Physics-accurate (actual contact forces)
-✅ Contact normals and depths available
+
+- ✅ Fast (contact cache already exists)
+- ✅ Physics-accurate (actual contact forces)
+- ✅ Contact normals and depths available
 
 **Limitations**:
-❌ **Requires `stepSimulation()`**: Cannot skip physics update
-❌ Limited for kinematics: Designed for physics simulation with dynamic objects
-❌ No safety margin support: Only reports actual penetration
+
+- ❌ **Requires `stepSimulation()`**: Cannot skip physics update
+- ❌ Limited for kinematics: Designed for physics simulation with dynamic objects
+- ❌ No safety margin support: Only reports actual penetration
 
 **Why not ideal for kinematics**:
 - Kinematics mode uses `resetBasePositionAndOrientation()` to set positions directly
@@ -927,7 +930,6 @@ ignore_static_collision: false
 - Only these objects trigger collision checks
 - Static objects never added to `_moved_this_step`
 
-### Cell Size Optimization
 
 ### Cell Size Optimization
 
@@ -1009,36 +1011,6 @@ params = SimulationParams(
 
 ## FAQ & Troubleshooting
 
-### Q: Why not always use `getClosestPoints()`?
-
-**A**: In Physics ON mode with many actual contacts, `getContactPoints()` is:
-- Faster (contact cache already exists)
-- More accurate (actual contact manifold with normals, depths)
-
-But for kinematics, `getClosestPoints()` is **required** for stability.
-
-### Q: STATIC vs DISABLED - What's the difference?
-
-**A**:
-- **STATIC**: Collision enabled, AABB never updated (for fixed structures)
-  - Still detectable by moving objects ✓
-  - Optimization: No updates
-- **DISABLED**: No collision at all (for visualization)
-  - Completely ignored by collision system
-  - Zero overhead
-
-### Q: Can 2D and 3D objects collide?
-
-**A**: Yes! Collision modes are per-object:
-```python
-robot_2d = SimObject(..., collision_mode=CollisionMode.NORMAL_2D)
-drone_3d = SimObject(..., collision_mode=CollisionMode.NORMAL_3D)
-
-# Collision check:
-# drone_3d checks 27 neighbors → finds robot_2d ✓
-# robot_2d checks 9 neighbors → finds drone_3d (if in XY neighbors) ✓
-```
-
 ### Q: How do I debug collision detection?
 
 **A**: Several options:
@@ -1090,11 +1062,11 @@ python performance_benchmark.py
 
 PyBulletFleet's collision detection system provides:
 
-✅ **Scalability**: O(N) via spatial hashing (not O(N²))
-✅ **Flexibility**: 4 collision modes per object
-✅ **Performance**: Incremental updates, mode-based optimization
-✅ **Determinism**: Same input → same output
-✅ **Simplicity**: Automatic configuration, minimal setup
+- ✅ **Scalability**: O(N) via spatial hashing (not O(N²))
+- ✅ **Flexibility**: 4 collision modes per object
+- ✅ **Performance**: Incremental updates, mode-based optimization
+- ✅ **Determinism**: Same input → same output
+- ✅ **Simplicity**: Automatic configuration, minimal setup
 
 **Recommended Workflow**:
 1. Start with default (physics=False, CLOSEST_POINTS)
