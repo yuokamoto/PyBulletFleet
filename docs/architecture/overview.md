@@ -209,14 +209,14 @@ Abstract base class for all actions.
 ##### MoveTo
 Navigate agent to target pose.
 
-**Parameters:**
+**Key Parameters:**
 - `target_pose`: Destination pose
 - `tolerance`: Distance threshold for completion
 
 ##### Pick
 Pick up an object and attach it to agent.
 
-**Parameters:**
+**Key Parameters:**
 - `obj`: SimObject to pick
 - `link_index`: Agent link to attach to (default: -1 for base)
 - `offset`: Attachment offset pose
@@ -224,13 +224,13 @@ Pick up an object and attach it to agent.
 ##### Drop
 Drop currently held object.
 
-**Parameters:**
+**Key Parameters:**
 - `offset`: Drop position offset from agent
 
 ##### Wait
 Wait for specified duration.
 
-**Parameters:**
+**Key Parameters:**
 - `duration`: Wait time in seconds
 
 ---
