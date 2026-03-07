@@ -91,6 +91,11 @@ multi-link bodies with joint control (e.g., URDF robots), use Agent instead.
 - Parent-child attachment with constraints
 - No joint/link support — single rigid body only
 
+**Associated Params:**
+
+- `SimObjectSpawnParams` — Parameters for spawning a SimObject (visual/collision shapes, initial pose, mass, pickable, collision mode, name, user_data). Pass to `SimObject.from_params()`.
+- `ShapeParams` — Visual or collision shape definition (shape type, mesh path, half extents, radius, colour, frame offset). Referenced by `SimObjectSpawnParams.visual_shape` and `.collision_shape`.
+
 ##### LogLevelManager
 Utility for managing PyBullet log verbosity.
 
@@ -138,20 +143,9 @@ object attachment via `update_attached_objects_kinematics()`.
 - Linear interpolation for smooth motion
 - Velocity clamping based on max_linear_vel and max_linear_accel
 
-##### AgentSpawnParams
-Configuration dataclass for agent initialization.
+**Associated Params:**
 
-**Attributes:**
-- `max_linear_vel`, `max_linear_accel`: Motion limits
-- `max_angular_vel`, `max_angular_accel`: Rotation limits
-- `motion_mode`: "omnidirectional" or "differential"
-- `orientation_euler`: Initial orientation
-- `base_mass`: Mass (0.0 for kinematic control)
-- `use_collision`: Enable collision detection
-
-**Design Notes:**
-- Separate spawn params from runtime params for clarity
-- Immutable after creation (dataclass)
+- `AgentSpawnParams` — Configuration for agent initialization: motion limits (`max_linear_vel`, `max_linear_accel`, `max_angular_vel`, `max_angular_accel`), motion mode (`"omnidirectional"` / `"differential"`), orientation, mass, collision toggle. Immutable after creation.
 
 ---
 
@@ -192,18 +186,9 @@ Extends SimObjectManager with `object_class=Agent`.
 - Agent.update() is automatically called by MultiRobotSimulationCore.step_once()
 - AgentManager focuses on goal management, not movement updates
 
-##### GridSpawnParams
-Configuration for grid-based agent placement.
+**Associated Params:**
 
-**Attributes:**
-- `x_min`, `x_max`, `y_min`, `z_max, `y_min`, `z_max`: Grid boundaries
-- `spacing`: [x, y, z] spacing between agents
-- `offset`: [x, y, z] global offset
-
-**Grid Calculation:**
-- Automatically distributes agents evenly within bounds
-- Uses ceiling(sqrt(n)) for grid dimensions
-- Handles non-perfect squares
+- `GridSpawnParams` — Grid layout configuration: boundaries (`x_min`/`x_max`, `y_min`/`y_max`, `z_min`/`z_max`), spacing, offset. Automatically distributes agents evenly using `ceil(sqrt(n))`.
 
 ---
 
