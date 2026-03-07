@@ -51,6 +51,18 @@ testing/index
 api/index
 ```
 
+### How to read this documentation
+
+| Section | What you'll find | When to read |
+|---------|-----------------|--------------|
+| **Getting Started** | Installation and first simulation | First visit |
+| **Architecture** | Design decisions, class relationships, collision system internals | Understanding *why* things work the way they do |
+| **How-to Guides** | Task-oriented guides: enable time/memory profiling, configure spatial hashing, set up logging | You want to *do* something specific |
+| **Configuration** | YAML parameter reference, collision detection method selection | Looking up a specific setting |
+| **Benchmarking** | External profiling scripts, optimization workflows, benchmark results | Deep performance analysis with `benchmark/profiling/` tools |
+| **Testing** | Test strategy, running tests, coverage | Contributing or debugging |
+| **API Reference** | Auto-generated module docs | Looking up a specific class or method |
+
 ## Key Features
 
 - **N× real-time simulation** — Kinematics-based (teleport) stepping as the default motion mode
