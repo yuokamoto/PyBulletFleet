@@ -9,16 +9,16 @@
 **Without lazy evaluation:**
 ```python
 # ❌ BAD: Array is converted to string even if DEBUG is disabled
-logger.debug(f"Array data: {numpy_array}")  # 687ms for 10k calls
+logger.debug(f"Array data: {numpy_array}")  # Slow: formats string every call
 ```
 
 **With lazy evaluation:**
 ```python
 # ✅ GOOD: Array conversion only happens if DEBUG is enabled
-lazy_logger.debug(lambda: f"Array data: {numpy_array}")  # 5ms for 10k calls
+lazy_logger.debug(lambda: f"Array data: {numpy_array}")  # Fast: skips formatting
 ```
 
-**Performance: ~145x faster** when log level is disabled!
+**Performance: orders of magnitude faster** when log level is disabled.
 
 ## When to Use Lazy Logging
 
@@ -69,14 +69,14 @@ if logger.isEnabledFor(logging.DEBUG):
 ### Method 2: isEnabledFor Check (Good for Existing Code)
 ```python
 def _init_differential_rotation_trajectory(self, goal):
-    # These 4 lines caused 316ms overhead for 1000 calls!
+    # These lines caused significant overhead in hot paths!
     logger.debug(f"Agent {self.body_id} checking orientation alignment:")
     logger.debug(f"  Movement direction: {x_axis_target}")  # NumPy array
     logger.debug(f"  Goal's X-axis: {x_axis_goal}")         # NumPy array
     logger.debug(f"  Alignment: {alignment:.3f}")
 ```
 
-**After optimization (76% faster):**
+**After optimization (significantly faster):**
 ```python
 def _init_differential_rotation_trajectory(self, goal):
     if logger.isEnabledFor(logging.DEBUG):
@@ -131,11 +131,11 @@ python PyBulletFleet/tests/test_logging_utils.py
 Expected output:
 ```
 Performance Benchmark (10,000 iterations)
-Standard logger:           686.90ms (baseline)
-Standard with check:       1.08ms (99.8% faster)
-Lazy logger:               4.75ms (99.3% faster)
+Standard logger:           slow (baseline)
+Standard with check:       fast (>99% faster)
+Lazy logger:               fast (>99% faster)
 
-Conclusion: Lazy logger is ~145x faster for disabled log levels
+Conclusion: Lazy logger is orders of magnitude faster for disabled log levels
 ```
 
 ## Best Practices
