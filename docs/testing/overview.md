@@ -1,127 +1,44 @@
 # Tests
 
-This directory contains scripts for verifying and testing PyBulletFleet functionality.
+All tests run headless (`p.DIRECT`) and require no GUI.
 
-## Test Files
+## Running Tests
 
-### Automated Tests
-
-#### `test_agent_movement.py` ✅ Recommended
-**Purpose**: Automated unit tests for agent movement functionality
-
-**Features**:
-- Fast execution without GUI (`p.DIRECT` mode)
-- Two test cases:
-  1. Basic movement test: Single-goal movement of an Omnidirectional robot
-  2. Path following test: 4-waypoint square path of a Differential drive robot
-- Clear pass/fail determination (using XY-plane distance)
-- Suitable for CI/CD and regression testing during development
-
-**How to run**:
 ```bash
-python tests/test_agent_movement.py
+# Run all tests
+pytest tests/
+
+# Run a specific file
+pytest tests/test_core_simulation.py
+
+# Verbose output
+pytest tests/ -v
+
+# Stop on first failure
+pytest tests/ -x
 ```
 
-**Expected output**:
-```
-Basic Movement Test: ✓ PASS
-Path Following Test: ✓ PASS
-```
+## Test Coverage
 
----
+| File | Tests | What it covers |
+|------|------:|----------------|
+| `test_core_simulation.py` | 110 | SimulationParams, init/teardown, step loop, callbacks, timing |
+| `test_agent_core.py` | 76 | Agent spawn, movement, drive modes, state management |
+| `test_collision_comprehensive.py` | 58 | All collision methods, spatial hashing, margin, multi-cell |
+| `test_sim_object.py` | 58 | SimObject spawn, shapes, properties |
+| `test_agent_manager.py` | 49 | AgentManager / SimObjectManager lifecycle |
+| `test_action.py` | 42 | Action classes (Move, Pick, Drop, Wait) unit tests |
+| `test_geometry.py` | 40 | Pose, Path, distance calculations |
+| `test_tools.py` | 33 | Utility functions |
+| `test_action_integration.py` | 31 | Action execution with real Agent + PyBullet |
+| `test_logging_utils.py` | 28 | Lazy-evaluation loggers |
+| `test_e2e.py` | 10 | End-to-end simulation workflows |
+| `test_memory_profiling.py` | 6 | Memory profiling hooks |
 
-### Manual Tests / Demos
+## Shared Fixtures
 
-#### `test_robot_movement.py`
-**Purpose**: Simple single-robot movement demo (GUI)
+`conftest.py` provides pytest fixtures shared across all tests (e.g., PyBullet connection setup/teardown).
 
-**Features**:
-- Visual verification with GUI display
-- A single Omnidirectional robot moves from (0,0,0.5) to (2,0,0.5)
-- Simple and easy to understand
-- Convenient for debugging and verifying behavior
+## Visual Demos
 
-**How to run**:
-```bash
-python tests/test_robot_movement.py
-```
-
-#### `test_path_following.py`
-**Purpose**: Path following GUI demo (direct PyBullet connection version)
-
-**Features**:
-- Directly uses `p.connect(p.GUI)` without `MultiRobotSimulationCore`
-- A single robot follows a square path
-- Can be replaced by `examples/path_following_demo.py`
-- Kept for debugging and comparison purposes
-
-**How to run**:
-```bash
-python tests/test_path_following.py
-```
-
-#### `test_path_simple.py`
-**Purpose**: Simple path following test (experimental)
-
-**Features**:
-- Minimal code implementing path following
-- Simplified version for debugging
-- Similar to `test_path_following.py`, but simpler
-
-**How to run**:
-```bash
-python tests/test_path_simple.py
-```
-
-#### `test_path_with_simcore.py`
-**Purpose**: Path following test using `MultiRobotSimulationCore`
-
-**Features**:
-- Usage example of `MultiRobotSimulationCore` and `sim.run_simulation()`
-- Update logic using callbacks
-- Experimental file that served as the base for `examples/path_following_demo.py`
-- Rich debug output
-
-**How to run**:
-```bash
-python tests/test_path_with_simcore.py
-```
-
----
-
-## Notes When Running Tests
-
-### Package Imports
-Test files are intended to be run from the top-level directory.
-If running from the `tests/` directory, path adjustments may be necessary.
-
-### Dependencies
-- PyBullet
-- NumPy
-- pybullet_data
-
-### Troubleshooting
-
-**If the robot is not displayed**:
-- When using `MultiRobotSimulationCore`, you need to call `sim.run_simulation()` or `sim.enable_rendering()`
-- When connecting directly to PyBullet, it is displayed automatically
-
-**If the z-coordinate is off**:
-- Robots with `mass > 0` will fall due to gravity
-- Since goal determination uses XY-plane distance, this is not a functional issue
-
----
-
-## Recommended Usage
-
-1. **Verification during development**: Run `test_agent_movement.py`
-2. **Visual debugging**: Use `test_robot_movement.py` or `test_path_following.py`
-3. **Full-featured demos**: Use `examples/path_following_demo.py`
-
----
-
-## Reference
-
-- Main demos are in the `examples/` directory
-- `examples/path_following_demo.py`: Comparison demo of Omnidirectional vs Differential drive
-- `examples/100robots_grid_demo.py`: Grid demo with 100 robots
+For GUI-based verification, see `examples/` — test files are automated only.

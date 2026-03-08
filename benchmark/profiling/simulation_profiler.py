@@ -1,42 +1,42 @@
 #!/usr/bin/env python3
 """
 simulation_profiler.py
-シミュレーションステップの詳細プロファイリングツール
+Detailed profiling tool for simulation steps
 
-概要:
-    step_once() の各コンポーネントをプロファイリングして、
-    どの部分が遅いかを特定します。
+Overview:
+    Profiles each component of step_once() to
+    identify which parts are slow.
 
-    performance_benchmark.py との違い:
-      - performance_benchmark.py: 総合パフォーマンス測定（JSON出力）
-      - simulation_profiler.py: コンポーネント別の詳細分析（統計出力）
+    Differences from performance_benchmark.py:
+      - performance_benchmark.py: Overall performance measurement (JSON output)
+      - simulation_profiler.py: Detailed per-component analysis (statistical output)
 
-測定コンポーネント:
-    1. Agent Update: 全エージェントの状態更新（軌道追従、運動学計算）
-    2. Collision Check: 衝突検出（空間ハッシング、AABB フィルタリング）
-    3. PyBullet Step: PyBullet の物理演算ステップ
-    4. Monitor Update: データモニター更新（オプション）
-    5. Other: その他のオーバーヘッド
+Measured Components:
+    1. Agent Update: State update for all agents (trajectory tracking, kinematics)
+    2. Collision Check: Collision detection (spatial hashing, AABB filtering)
+    3. PyBullet Step: PyBullet physics simulation step
+    4. Monitor Update: Data monitor update (optional)
+    5. Other: Miscellaneous overhead
 
-分析手法:
-    1. Built-in Profiling: step_once() の return_profiling でコンポーネント測定（デフォルト）
-    2. cProfile: 全関数のボトルネック探し
+Analysis Methods:
+    1. Built-in Profiling: Component measurement via step_once() return_profiling (default)
+    2. cProfile: Bottleneck analysis across all functions
     3. Motion Mode Comparison: DIFFERENTIAL vs OMNIDIRECTIONAL
 
-使い方:
-    # 基本実行（Built-in Profiling、1000エージェント、100ステップ）
+Usage:
+    # Basic usage (Built-in Profiling, 1000 agents, 100 steps)
     python simulation_profiler.py --agents=1000 --steps=100
 
-    # cProfile分析
+    # cProfile analysis
     python simulation_profiler.py --agents=1000 --steps=100 --test=cprofile
 
-    # Motion Mode比較
+    # Motion Mode comparison
     python simulation_profiler.py --agents=1000 --steps=100 --test=motion_modes
 
-    # 全ての分析
+    # All analyses
     python simulation_profiler.py --agents=1000 --steps=100 --test=all
 
-出力例:
+Example Output:
     Simulation Step Breakdown for 1000 Agents (100 steps)
     ======================================================================
 
@@ -47,12 +47,12 @@ simulation_profiler.py
       Range:  [ 11.23, 15.67]ms
 
     Collision Check:
-      Mean:       5.12ms ( 14.5%)  ← collision_check.py で詳細分析可能
+      Mean:       5.12ms ( 14.5%)  <- detailed analysis available in collision_check.py
       Median:     5.08ms
       Range:  [  4.89,  6.23]ms
 
     Pybullet Step:
-      Mean:      15.34ms ( 43.4%)  ← 物理演算のコスト
+      Mean:      15.34ms ( 43.4%)  <- physics computation cost
       Median:    15.21ms
       Range:  [ 14.78, 17.12]ms
 
@@ -60,16 +60,16 @@ simulation_profiler.py
       Mean:      35.37ms (100.0%)
       Real-Time Factor: 28.3x
 
-使い分け:
-    - シミュレーション全体のボトルネック特定 → このツール
-    - 総合パフォーマンス測定（JSON出力） → performance_benchmark.py
-    - Agent.update() の詳細分析 → agent_update.py
-    - 衝突検出の詳細分析 → collision_check.py
+When to Use:
+    - Identifying overall simulation bottlenecks -> this tool
+    - Overall performance measurement (JSON output) -> performance_benchmark.py
+    - Detailed analysis of Agent.update() -> agent_update.py
+    - Detailed analysis of collision detection -> collision_check.py
 
-関連ファイル:
-    - performance_benchmark.py: 総合ベンチマーク（メモリ、CPU、JSON出力）
-    - agent_update.py: Agent.update() の詳細プロファイリング
-    - collision_check.py: 衝突検出の詳細プロファイリング
+Related Files:
+    - performance_benchmark.py: Comprehensive benchmark (memory, CPU, JSON output)
+    - agent_update.py: Detailed profiling of Agent.update()
+    - collision_check.py: Detailed profiling of collision detection
 """
 import os
 import sys
@@ -77,6 +77,7 @@ import cProfile
 import pstats
 import io
 import math
+import statistics
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
@@ -89,7 +90,7 @@ from pybullet_fleet.geometry import Pose
 def create_test_agents(
     num_agents: int, sim_core: MultiRobotSimulationCore, motion_mode: MotionMode = MotionMode.OMNIDIRECTIONAL
 ):
-    """テスト用のAgentを直接生成（AgentManager不使用）"""
+    """Generate test Agents directly (without using AgentManager)"""
     robot_urdf = os.path.join(os.path.dirname(__file__), "../../robots/simple_cube.urdf")
 
     agents = []
@@ -120,18 +121,17 @@ def create_test_agents(
 
 
 def profile_builtin_profiling(num_agents: int, num_steps: int = 100, motion_mode: MotionMode = MotionMode.OMNIDIRECTIONAL):
-    """Built-in Profiling: step_once() の return_profiling を使って各コンポーネントを測定"""
+    """Built-in Profiling: Measure each component using step_once() return_profiling"""
     mode_name = "DIFFERENTIAL" if motion_mode == MotionMode.DIFFERENTIAL else "OMNIDIRECTIONAL"
 
     print(f"\n{'='*70}")
     print(f"Built-in Profiling ({mode_name}): {num_agents} agents, {num_steps} steps")
     print(f"{'='*70}\n")
 
-    # Ensure clean disconnect and use DIRECT mode
+    # Clean up any leftover connection before creating a fresh sim_core.
+    # MultiRobotSimulationCore.setup_pybullet() handles p.connect(p.DIRECT).
     if p.isConnected():
         p.disconnect()
-
-    p.connect(p.DIRECT)  # Force DIRECT mode (no GUI, no X11)
 
     # Setup - Load from profiling config
     config_path = os.path.join(os.path.dirname(__file__), "profiling_config.yaml")
@@ -167,8 +167,6 @@ def profile_builtin_profiling(num_agents: int, num_steps: int = 100, motion_mode
 
     # Calculate statistics
     def stats(data):
-        import statistics
-
         return {
             "mean": statistics.mean(data),
             "median": statistics.median(data),
@@ -197,18 +195,16 @@ def profile_builtin_profiling(num_agents: int, num_steps: int = 100, motion_mode
 
 
 def profile_with_cprofile(num_agents: int, num_steps: int = 100, motion_mode: MotionMode = MotionMode.OMNIDIRECTIONAL):
-    """cProfile: 全関数のボトルネック探し"""
+    """cProfile: Bottleneck analysis across all functions"""
     mode_name = "DIFFERENTIAL" if motion_mode == MotionMode.DIFFERENTIAL else "OMNIDIRECTIONAL"
 
     print(f"\n{'='*70}")
     print(f"cProfile ({mode_name}): {num_agents} agents, {num_steps} steps")
     print(f"{'='*70}\n")
 
-    # Ensure clean disconnect and use DIRECT mode
+    # Clean up any leftover connection before creating a fresh sim_core.
     if p.isConnected():
         p.disconnect()
-
-    p.connect(p.DIRECT)  # Force DIRECT mode (no GUI, no X11)
 
     # Setup - Load from profiling config
     config_path = os.path.join(os.path.dirname(__file__), "profiling_config.yaml")
@@ -222,23 +218,18 @@ def profile_with_cprofile(num_agents: int, num_steps: int = 100, motion_mode: Mo
     agents = create_test_agents(num_agents, sim_core, motion_mode)
     print(f"Spawned {len(agents)} agents")
 
-    # Spawn agents
-    print(f"Spawning {num_agents} agents...")
-    agents = create_test_agents(num_agents, sim_core, motion_mode)
-    print(f"Spawned {len(agents)} agents")
-
     # Warm-up
     print("Warm-up...")
     for _ in range(10):
         sim_core.step_once()
 
-    # Profile - step_once() を直接呼ぶだけ
+    # Profile - simply call step_once() directly
     print(f"Profiling {num_steps} steps with cProfile...")
     profiler = cProfile.Profile()
     profiler.enable()
 
     for _ in range(num_steps):
-        sim_core.step_once()  # 再実装不要、step_once() を直接呼ぶ
+        sim_core.step_once()  # No re-implementation needed, call step_once() directly
 
     profiler.disable()
 
@@ -257,7 +248,7 @@ def profile_with_cprofile(num_agents: int, num_steps: int = 100, motion_mode: Mo
 
 
 def analyze_motion_modes(num_agents: int, num_steps: int = 100):
-    """Motion Mode比較: DIFFERENTIAL vs OMNIDIRECTIONAL"""
+    """Motion Mode comparison: DIFFERENTIAL vs OMNIDIRECTIONAL"""
     print(f"\n{'='*70}")
     print(f"Motion Mode Comparison: {num_agents} agents, {num_steps} steps")
     print(f"{'='*70}")
@@ -271,8 +262,6 @@ def analyze_motion_modes(num_agents: int, num_steps: int = 100):
         timings = profile_builtin_profiling(num_agents, num_steps, mode)
 
         # Extract key metrics
-        import statistics
-
         total_mean = statistics.mean(timings["total"])
         agent_update_mean = statistics.mean(timings["agent_update"])
         collision_mean = statistics.mean(timings["collision_check"])
@@ -313,7 +302,7 @@ def analyze_motion_modes(num_agents: int, num_steps: int = 100):
 
 
 def main():
-    """メイン実行"""
+    """Main execution"""
     import argparse
 
     parser = argparse.ArgumentParser(description="Profile step_once() breakdown")

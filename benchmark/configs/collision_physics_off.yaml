@@ -18,7 +18,6 @@ collision_detection_method: "closest_points"
 collision_margin: 0.02
 
 # Optimization
-collision_check_2d: false
 enable_monitor_gui: false
 log_level: error             # Suppress logs for clean benchmark output
 

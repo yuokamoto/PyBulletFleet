@@ -61,7 +61,11 @@ class MockSimCore:
         self._dt = dt
         self.sim_objects: list = []
         self._kinematic_objects: set = set()
-        self.client = 0  # default PyBullet physics client ID
+        self._client = 0  # default PyBullet physics client ID
+
+    @property
+    def client(self):
+        return self._client
 
     def add_object(self, obj):
         self.sim_objects.append(obj)
@@ -982,7 +986,11 @@ class PhysicsSimCore:
         self._dt = dt
         self.sim_objects: list = []
         self._kinematic_objects: set = set()
-        self.client = 0
+        self._client = 0
+
+    @property
+    def client(self):
+        return self._client
 
     def add_object(self, obj):
         self.sim_objects.append(obj)

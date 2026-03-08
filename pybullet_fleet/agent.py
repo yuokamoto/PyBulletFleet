@@ -230,8 +230,8 @@ class Agent(SimObject):
         # URDF-specific: joint information
         self.joint_info = []
         if urdf_path is not None:
-            num_joints = p.getNumJoints(body_id)
-            self.joint_info = [p.getJointInfo(body_id, j) for j in range(num_joints)]
+            num_joints = p.getNumJoints(body_id, physicsClientId=self._pid)
+            self.joint_info = [p.getJointInfo(body_id, j, physicsClientId=self._pid) for j in range(num_joints)]
 
         # Goal tracking (only used for non-static robots) - Private internal state
         self._goal_pose: Optional[Pose] = None
@@ -582,17 +582,18 @@ class Agent(SimObject):
         # Get position and orientation from Pose
         position, orientation = pose.as_position_orientation()
 
-        body_id = p.loadURDF(urdf_path, position, orientation, useFixedBase=use_fixed_base)
+        _client = sim_core._client if sim_core is not None else 0
+        body_id = p.loadURDF(urdf_path, position, orientation, useFixedBase=use_fixed_base, physicsClientId=_client)
 
         # Override mass if explicitly set to 0.0 (kinematic control)
         # mass=1.0 (default) means use URDF's mass values
         if mass == 0.0:
             # Kinematic control: set mass to 0 for all links
             # This prevents gravity and inertia from affecting the robot
-            p.changeDynamics(body_id, -1, mass=0.0)
-            num_joints = p.getNumJoints(body_id)
+            p.changeDynamics(body_id, -1, mass=0.0, physicsClientId=_client)
+            num_joints = p.getNumJoints(body_id, physicsClientId=_client)
             for joint_idx in range(num_joints):
-                p.changeDynamics(body_id, joint_idx, mass=0.0)
+                p.changeDynamics(body_id, joint_idx, mass=0.0, physicsClientId=_client)
 
         # Create agent instance (SimObject.__init__ handles auto-registration)
         # collision_mode is passed through __init__ -> super().__init__() -> add_object
@@ -668,7 +669,7 @@ class Agent(SimObject):
         """Clear all path visualization debug lines."""
         for debug_id in self._path_debug_ids:
             try:
-                p.removeUserDebugItem(debug_id)
+                p.removeUserDebugItem(debug_id, physicsClientId=self._pid)
             except Exception:  # noqa: B902
                 pass  # Ignore errors if item was already removed
         self._path_debug_ids.clear()
@@ -693,7 +694,12 @@ class Agent(SimObject):
             end_pos = path[i + 1].position
 
             debug_id = p.addUserDebugLine(
-                start_pos, end_pos, lineColorRGB=color, lineWidth=width, lifeTime=0  # Permanent until manually removed
+                start_pos,
+                end_pos,
+                lineColorRGB=color,
+                lineWidth=width,
+                lifeTime=0,  # Permanent until manually removed
+                physicsClientId=self._pid,
             )
             self._path_debug_ids.append(debug_id)
 
@@ -830,7 +836,9 @@ class Agent(SimObject):
                     self._goal_pose = None
                     self._is_final_orientation_aligning = False
                     # Reset velocity in PyBullet to stop any residual motion
-                    p.resetBaseVelocity(self.body_id, linearVelocity=[0, 0, 0], angularVelocity=[0, 0, 0])
+                    p.resetBaseVelocity(
+                        self.body_id, linearVelocity=[0, 0, 0], angularVelocity=[0, 0, 0], physicsClientId=self._pid
+                    )
                     self._log.info("Path complete")
 
     def _start_final_orientation_alignment(self):
@@ -1532,7 +1540,7 @@ class Agent(SimObject):
             self._log.warning("get_joint_state() only works for URDF robots")
             return (0.0, 0.0)
 
-        joint_state = p.getJointState(self.body_id, joint_index)
+        joint_state = p.getJointState(self.body_id, joint_index, physicsClientId=self._pid)
         return (joint_state[0], joint_state[1])  # position, velocity
 
     def get_joint_state_by_name(self, joint_name: str) -> tuple:
@@ -1610,6 +1618,7 @@ class Agent(SimObject):
             controlMode=p.POSITION_CONTROL,
             targetPosition=target_position,
             force=max_force,
+            physicsClientId=self._pid,
         )
 
     def set_joint_target_by_name(self, joint_name: str, target_position: float, max_force: float = 500.0):
@@ -1773,7 +1782,7 @@ class Agent(SimObject):
             # Only update if attached to a link (not base) and no constraint (mass=0)
             if obj._attached_link_index >= 0 and getattr(obj, "_constraint_id", None) is None:
                 # Get parent link's world coordinates
-                link_state = p.getLinkState(self.body_id, obj._attached_link_index)
+                link_state = p.getLinkState(self.body_id, obj._attached_link_index, physicsClientId=self._pid)
                 parent_pos, parent_orn = link_state[0], link_state[1]
                 # Apply relative offset
                 new_pos, new_orn = p.multiplyTransforms(

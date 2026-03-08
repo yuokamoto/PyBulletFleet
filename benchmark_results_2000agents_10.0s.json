@@ -1,0 +1,91 @@
+{
+  "num_agents": 2000,
+  "duration_s": 10.0,
+  "scenario": null,
+  "num_reps": 3,
+  "gui": false,
+  "spawn_time_s": {
+    "median": 0.4936248610028997,
+    "mean": 0.49422371267185855,
+    "stdev": 0.01144423575600503,
+    "min": 0.48309066001093015,
+    "max": 0.5059556170017458
+  },
+  "spawn_cpu_s": {
+    "median": 0.49,
+    "mean": 0.48999999999999994,
+    "stdev": 0.01000000000000012,
+    "min": 0.47999999999999976,
+    "max": 0.5
+  },
+  "spawn_cpu_percent": {
+    "median": 99.26566482175653,
+    "mean": 99.14959801708012,
+    "stdev": 0.28685489238750755,
+    "min": 98.82289734482278,
+    "max": 99.36023188466106
+  },
+  "simulation_wall_s": {
+    "median": 6.493679003993748,
+    "mean": 6.452368895009083,
+    "stdev": 0.17816171143003445,
+    "min": 6.257181031018263,
+    "max": 6.606246650015237
+  },
+  "simulation_cpu_s": {
+    "median": 6.48,
+    "mean": 6.446666666666666,
+    "stdev": 0.18230011885167066,
+    "min": 6.25,
+    "max": 6.609999999999999
+  },
+  "simulation_cpu_percent": {
+    "median": 99.88523536425326,
+    "mean": 99.91046648826531,
+    "stdev": 0.1355064699291374,
+    "min": 99.78934893478205,
+    "max": 100.05681516576064
+  },
+  "real_time_factor": {
+    "median": 1.539959088499723,
+    "mean": 1.5506138973112789,
+    "stdev": 0.04321897949642495,
+    "min": 1.5137188376060613,
+    "max": 1.598163765828052
+  },
+  "avg_step_time_ms": {
+    "median": 64.93679003993748,
+    "mean": 64.52368895009081,
+    "stdev": 1.7816171143003483,
+    "min": 62.57181031018262,
+    "max": 66.06246650015237
+  },
+  "expected_steps": 100,
+  "system_info": {
+    "platform": "Linux",
+    "platform_release": "5.15.0-139-generic",
+    "platform_version": "#149~20.04.1-Ubuntu SMP Wed Apr 16 08:29:56 UTC 2025",
+    "architecture": "x86_64",
+    "processor": "x86_64",
+    "python_version": "3.8.10",
+    "total_memory_gb": 31.06,
+    "cpu_count": 4,
+    "cpu_count_logical": 8,
+    "cpu_model": "11th Gen Intel(R) Core(TM) i7-1185G7 @ 3.00GHz",
+    "cpu_max_mhz": 4800.0
+  },
+  "mem_spawn_rss_mb": {
+    "median": 43.76171875,
+    "mean": 43.736979166666664,
+    "stdev": 0.04627436365603349,
+    "min": 43.68359375,
+    "max": 43.765625
+  },
+  "mem_total_rss_mb": {
+    "median": 29.66015625,
+    "mean": 29.639322916666668,
+    "stdev": 0.11470903379810952,
+    "min": 29.515625,
+    "max": 29.7421875
+  }
+}

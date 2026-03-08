@@ -30,7 +30,6 @@ collision_detection_method: "contact_points"  # 🔴 Physics contact manifold
 collision_margin: 0.02                        # Safety margin (for hybrid mode)
 
 # Performance Optimization
-collision_check_2d: false
 enable_monitor_gui: true
 
 # Logging
@@ -46,7 +45,6 @@ camera:
   camera_target: [5, 5, 0]
 
 # Visualizer
-enable_visual_shapes: true
 enable_collision_shapes: false
 enable_structure_transparency: false
 enable_shadows: true         # Shadows enabled for realism

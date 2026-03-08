@@ -70,6 +70,19 @@ api/index
 - **Physics as an option** — Full PyBullet physics can be enabled per-scenario when needed
 - **High-level abstractions** — Action system (MoveTo, Pick, Drop, Wait), agent managers, YAML-driven configuration
 
+## Performance at a Glance
+
+> Single test environment (Intel i7-1185G7, 32 GB RAM, Ubuntu 20.04). Results will vary by hardware.
+
+| Agents | Real-Time Factor | Step Time |
+|--------|-----------------|-----------|
+| 100    | 46× | 2.2 ms  |
+| 500    | 7×  | 14.1 ms |
+| 1000   | 3×  | 32.0 ms |
+| 2000   | 1.2×| 84.6 ms |
+
+Kinematics mode (physics OFF), headless. See {doc}`benchmarking/benchmark-suite` for full data, component breakdown, and methodology.
+
 ### Planned
 
 - **Snapshot-based state** — Full and delta snapshot serialization for logging, replay, and external synchronization

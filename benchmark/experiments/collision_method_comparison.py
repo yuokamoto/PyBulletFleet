@@ -1,56 +1,56 @@
 #!/usr/bin/env python3
 """
 collision_method_comparison.py
-衝突検出手法の比較実験
+Collision detection method comparison experiment
 
-概要:
-    複数の衝突検出手法を比較します：
-    1. Spatial Hashing (Current): 空間分割 + AABB filtering + getContactPoints
-    2. Brute Force AABB: 全ペア総当たり + AABB overlap + getContactPoints
-    3. PyBullet getClosestPoints: PyBullet標準のgetClosestPoints API
-    4. getContactPoints() [No Args]: 引数なしで全衝突を一括取得
-    5. getContactPoints(A,B) [Pairwise]: 全ペアで個別にgetContactPoints呼び出し
+Overview:
+    Compares multiple collision detection methods:
+    1. Spatial Hashing (Current): Spatial partitioning + AABB filtering + getContactPoints
+    2. Brute Force AABB: All-pairs brute force + AABB overlap + getContactPoints
+    3. PyBullet getClosestPoints: PyBullet's standard getClosestPoints API
+    4. getContactPoints() [No Args]: Batch retrieval of all contacts with no arguments
+    5. getContactPoints(A,B) [Pairwise]: Individual getContactPoints calls for all pairs
 
-各手法の特徴:
+Characteristics of Each Method:
     Spatial Hashing (Current):
-        - O(N) 空間計算量、近傍のみチェック
-        - AABB filtering で候補を絞る
-        - 最終的に getContactPoints で正確な衝突判定
-        - 大規模シミュレーション向け
+        - O(N) spatial complexity, checks only neighbors
+        - Narrows candidates with AABB filtering
+        - Final collision determination via getContactPoints
+        - Suited for large-scale simulations
 
     Brute Force AABB:
-        - O(N²) すべてのペアをチェック
-        - AABB overlap check を実施
-        - 小規模シミュレーション (<100 objects) では高速
-        - シンプルな実装
+        - O(N^2) checks all pairs
+        - Performs AABB overlap check
+        - Fast for small simulations (<100 objects)
+        - Simple implementation
 
     PyBullet getClosestPoints:
-        - PyBullet の C++ 実装による最近接点計算
-        - 距離閾値を指定可能
-        - 正確だが全ペアチェックが必要
+        - Closest point computation via PyBullet's C++ implementation
+        - Configurable distance threshold
+        - Accurate but requires all-pairs checking
 
     getContactPoints() [No Args]:
-        - 引数なしで呼び出し、すべての接触点を一括取得
-        - PyBullet内部で管理されている全衝突情報を取得
-        - API呼び出し回数が1回で済む（最も効率的な可能性）
+        - Called without arguments, retrieves all contact points in batch
+        - Obtains all collision information managed internally by PyBullet
+        - Only 1 API call needed (potentially most efficient)
         - O(1) API calls
 
     getContactPoints(A,B) [Pairwise]:
-        - 全ペアで個別にgetContactPoints呼び出し
-        - 最も信頼性が高い
-        - 全ペアチェックで O(N²) API calls
+        - Individual getContactPoints calls for all pairs
+        - Most reliable
+        - O(N^2) API calls for all-pairs checking
 
-使い方:
-    # すべての手法を比較
+Usage:
+    # Compare all methods
     python collision_method_comparison.py --agents=100,500,1000 --methods=all
 
-    # 特定の手法のみ（引数なし版との比較）
+    # Compare specific methods only (comparison with no-args version)
     python collision_method_comparison.py --agents=1000 --methods=spatial,contact,pairwise
 
-    # 詳細プロファイリング付き
+    # With detailed profiling
     python collision_method_comparison.py --agents=1000 --profile
 
-出力例:
+Example Output:
     ===================================================================
     Collision Method Comparison
     ===================================================================
@@ -107,7 +107,7 @@ collision_method_comparison.py
     - Medium simulations (100-500 agents): Spatial Hashing (balanced)
     - Large simulations (>500 agents): Spatial Hashing (best scalability)
 
-    Spatial Hashing scales as O(N), Brute Force as O(N²)
+    Spatial Hashing scales as O(N), Brute Force as O(N^2)
 
     For maximum accuracy, all methods detect the same collisions.
 """
@@ -127,11 +127,9 @@ from pybullet_fleet.agent import AgentSpawnParams, MotionMode
 
 
 def setup_simulation(num_agents: int):
-    """シミュレーション環境をセットアップ"""
+    """Set up the simulation environment"""
     if p.isConnected():
         p.disconnect()
-
-    p.connect(p.DIRECT)
 
     config_path = os.path.join(os.path.dirname(__file__), "..", "profiling", "profiling_config.yaml")
     params = SimulationParams.from_config(config_path)
@@ -234,10 +232,12 @@ def method_get_contact_points_all(sim_core) -> Tuple[List, float]:
     """Method 4: PyBullet getContactPoints (no args - batch all contacts)"""
     t0 = time.perf_counter()
 
-    # 引数なしでgetContactPoints()を呼び出すと、すべての接触点を一括取得
+    # Step simulation to populate the contact buffer before querying
+    p.stepSimulation()
+    # Call getContactPoints() without arguments to retrieve all contact points in batch
     all_contacts = p.getContactPoints()
 
-    # body_id のペアを抽出（重複を避けるためsetを使用）
+    # Extract body_id pairs (use set to avoid duplicates)
     collision_pairs_set = set()
     objects = sim_core.sim_objects
     body_id_to_index = {obj.body_id: i for i, obj in enumerate(objects)}
@@ -246,11 +246,11 @@ def method_get_contact_points_all(sim_core) -> Tuple[List, float]:
         body_a = contact[1]  # bodyUniqueIdA
         body_b = contact[2]  # bodyUniqueIdB
 
-        # シミュレーション内のオブジェクトのみを対象
+        # Only include objects within the simulation
         if body_a in body_id_to_index and body_b in body_id_to_index:
             idx_a = body_id_to_index[body_a]
             idx_b = body_id_to_index[body_b]
-            # 順序を正規化してペアを追加
+            # Normalize order and add pair
             pair = (min(idx_a, idx_b), max(idx_a, idx_b))
             collision_pairs_set.add(pair)
 
@@ -277,7 +277,7 @@ def method_get_contact_points_pairwise(sim_core) -> Tuple[List, float]:
 
 
 def benchmark_method(method_name: str, method_func, sim_core, num_iterations: int) -> Dict[str, Any]:
-    """特定の手法をベンチマーク"""
+    """Benchmark a specific method"""
     times = []
     collision_counts = []
 
@@ -303,7 +303,7 @@ def benchmark_method(method_name: str, method_func, sim_core, num_iterations: in
 
 
 def print_comparison_table(results_list: List[Dict], num_agents: int):
-    """比較結果をテーブル形式で出力"""
+    """Output comparison results in table format"""
     print(f"\n{'='*70}")
     print(f"Results for {num_agents} Agents")
     print(f"{'='*70}\n")

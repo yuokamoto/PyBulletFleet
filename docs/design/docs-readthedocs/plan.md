@@ -104,8 +104,8 @@ import sys
 sys.path.insert(0, os.path.abspath('..'))
 
 project = 'PyBulletFleet'
-copyright = '2026, Yuki Okamoto'
-author = 'Yuki Okamoto'
+copyright = '2026, Yu Okamoto'
+author = 'Yu Okamoto'
 release = '0.1.0'
 
 extensions = [

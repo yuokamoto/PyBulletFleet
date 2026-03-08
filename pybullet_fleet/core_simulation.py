@@ -379,20 +379,21 @@ class MultiRobotSimulationCore:
 
         # Hide all debug UI panels immediately after connection
         if self._params.gui:
-            p.configureDebugVisualizer(p.COV_ENABLE_GUI, 0)
+            p.configureDebugVisualizer(p.COV_ENABLE_GUI, 0, physicsClientId=self._client)
 
         p.setAdditionalSearchPath(pybullet_data.getDataPath())
-        p.setGravity(0, 0, -9.81 if self._params.physics else 0)
-        p.setTimeStep(self._params.timestep)
-        p.setRealTimeSimulation(0)
+        p.setGravity(0, 0, -9.81 if self._params.physics else 0, physicsClientId=self._client)
+        p.setTimeStep(self._params.timestep, physicsClientId=self._client)
+        p.setRealTimeSimulation(0, physicsClientId=self._client)
 
         # Physics engine parameter tuning
-        p.setPhysicsEngineParameter(enableFileCaching=True)  # Cache URDF files for faster repeated loading
+        p.setPhysicsEngineParameter(enableFileCaching=True, physicsClientId=self._client)
         if self._params.physics:
             # Physics ON: deterministic broadphase + CCD for reproducibility and tunneling prevention
             p.setPhysicsEngineParameter(
                 deterministicOverlappingPairs=True,
                 allowedCcdPenetration=0.01,
+                physicsClientId=self._client,
             )
         else:
             # Physics OFF (kinematics only): minimize solver overhead
@@ -400,8 +401,9 @@ class MultiRobotSimulationCore:
                 numSubSteps=1,
                 numSolverIterations=1,
                 enableConeFriction=False,
+                physicsClientId=self._client,
             )
-        p.loadURDF("plane.urdf")
+        p.loadURDF("plane.urdf", physicsClientId=self._client)
         # Disable rendering during setup for better performance
         if self._params.gui:
             self.disable_rendering()
@@ -409,14 +411,14 @@ class MultiRobotSimulationCore:
     def disable_rendering(self) -> None:
         """Disable rendering during object spawning for better performance."""
         if self._params.gui:
-            p.configureDebugVisualizer(p.COV_ENABLE_RENDERING, 0)
+            p.configureDebugVisualizer(p.COV_ENABLE_RENDERING, 0, physicsClientId=self._client)
             self._rendering_enabled = False
             logger.info("Rendering disabled for setup/spawning phase")
 
     def enable_rendering(self) -> None:
         """Enable rendering before starting simulation."""
         if self._params.gui and not self._rendering_enabled:
-            p.configureDebugVisualizer(p.COV_ENABLE_RENDERING, 1)
+            p.configureDebugVisualizer(p.COV_ENABLE_RENDERING, 1, physicsClientId=self._client)
             self._rendering_enabled = True
             logger.info("Rendering enabled for simulation")
 
@@ -505,8 +507,12 @@ class MultiRobotSimulationCore:
             # Also update spatial grid if requested and cell_size is initialized
             if update_grid and self._cached_cell_size is not None:
                 self._update_object_spatial_grid(object_id)
-        except p.error:
-            logger.warning(f"Failed to update AABB for object {object_id} (body {obj.body_id})")
+        except (p.error, Exception):
+            # In kinematics mode (physics=false), getAABB() may fail for newly
+            # spawned bodies because PyBullet has not yet computed collision info.
+            # This is harmless — the AABB will be populated on the first
+            # performCollisionDetection() / stepSimulation() call.
+            logger.debug(f"Deferred AABB init for object {object_id} (body {obj.body_id})")
 
     def _remove_object_aabb(self, object_id: int, update_grid: bool = True) -> None:
         """
@@ -1028,7 +1034,7 @@ class MultiRobotSimulationCore:
         if obj.body_id not in self._robot_original_colors:
             try:
                 # Try to get current visual color, fallback to default if not available
-                visual_data = p.getVisualShapeData(obj.body_id)
+                visual_data = p.getVisualShapeData(obj.body_id, physicsClientId=self._client)
                 if visual_data:
                     self._robot_original_colors[obj.body_id] = list(visual_data[0][7])  # RGBA color
                 else:
@@ -1090,7 +1096,7 @@ class MultiRobotSimulationCore:
         # Remove PyBullet body
         if obj.body_id is not None:
             try:
-                p.removeBody(obj.body_id)
+                p.removeBody(obj.body_id, physicsClientId=self._client)
             except p.error:
                 logger.warning(f"Failed to remove PyBullet body {obj.body_id}")
 
@@ -1138,11 +1144,11 @@ class MultiRobotSimulationCore:
         self._structure_transparent = enable_structure_transparency
 
         # Configure shadows
-        p.configureDebugVisualizer(p.COV_ENABLE_SHADOWS, 1 if enable_shadows else 0)
+        p.configureDebugVisualizer(p.COV_ENABLE_SHADOWS, 1 if enable_shadows else 0, physicsClientId=self._client)
 
         # Apply initial collision shape visibility from config
         if self._params.enable_collision_shapes:
-            p.configureDebugVisualizer(p.COV_ENABLE_WIREFRAME, 1)
+            p.configureDebugVisualizer(p.COV_ENABLE_WIREFRAME, 1, physicsClientId=self._client)
 
         # Apply initial structure transparency
         self._set_structure_transparency(self._structure_transparent)
@@ -1175,9 +1181,9 @@ class MultiRobotSimulationCore:
         Save original colors of all visual shapes for fast restoration.
         Called once during configure_visualizer().
         """
-        num_bodies = p.getNumBodies()
+        num_bodies = p.getNumBodies(physicsClientId=self._client)
         for body_id in range(num_bodies):
-            visual_data = p.getVisualShapeData(body_id)
+            visual_data = p.getVisualShapeData(body_id, physicsClientId=self._client)
             for shape in visual_data:
                 link_index = shape[1]
                 rgba = shape[7]  # Original RGBA color
@@ -1196,7 +1202,7 @@ class MultiRobotSimulationCore:
 
         try:
             # Get keyboard events
-            keys = p.getKeyboardEvents()
+            keys = p.getKeyboardEvents(physicsClientId=self._client)
         except p.error:
             # PyBullet disconnected (window closed), stop handling events
             return
@@ -1247,7 +1253,7 @@ class MultiRobotSimulationCore:
 
         processed = 0
         # Disable rendering during batch update to avoid per-call OpenGL re-render
-        p.configureDebugVisualizer(p.COV_ENABLE_RENDERING, 0)
+        p.configureDebugVisualizer(p.COV_ENABLE_RENDERING, 0, physicsClientId=self._client)
         try:
             for key, rgba in self._original_visual_colors.items():
                 body_id, link_index = key
@@ -1258,13 +1264,15 @@ class MultiRobotSimulationCore:
 
                 try:
                     # Apply new alpha to the original color
-                    p.changeVisualShape(body_id, link_index, rgbaColor=[rgba[0], rgba[1], rgba[2], alpha])
+                    p.changeVisualShape(
+                        body_id, link_index, rgbaColor=[rgba[0], rgba[1], rgba[2], alpha], physicsClientId=self._client
+                    )
                     processed += 1
                 except Exception:
                     pass
         finally:
             # Always re-enable rendering, even if an error occurred
-            p.configureDebugVisualizer(p.COV_ENABLE_RENDERING, 1)
+            p.configureDebugVisualizer(p.COV_ENABLE_RENDERING, 1, physicsClientId=self._client)
 
         logger.info(f"[TRANSPARENCY] Complete: {processed} visual shapes updated")
         logger.info(f"Static objects transparency {'enabled (alpha=0.3)' if transparent else 'disabled (alpha=1.0)'}")
@@ -1304,7 +1312,11 @@ class MultiRobotSimulationCore:
             target = camera_config.get("camera_target", [0, 0, 0])
 
             p.resetDebugVisualizerCamera(
-                cameraDistance=distance, cameraYaw=yaw, cameraPitch=pitch, cameraTargetPosition=target
+                cameraDistance=distance,
+                cameraYaw=yaw,
+                cameraPitch=pitch,
+                cameraTargetPosition=target,
+                physicsClientId=self._client,
             )
 
             logger.info(f"Camera set to manual mode: distance={distance:.2f}m, yaw={yaw}°, pitch={pitch}°, target={target}")
@@ -1347,7 +1359,11 @@ class MultiRobotSimulationCore:
             target = [center[0], center[1], center[2]]
 
             p.resetDebugVisualizerCamera(
-                cameraDistance=distance, cameraYaw=yaw, cameraPitch=pitch, cameraTargetPosition=target
+                cameraDistance=distance,
+                cameraYaw=yaw,
+                cameraPitch=pitch,
+                cameraTargetPosition=target,
+                physicsClientId=self._client,
             )
 
             logger.info(f"Camera set to auto mode ({view_type}): distance={distance:.2f}m, target={target}")
@@ -1357,7 +1373,7 @@ class MultiRobotSimulationCore:
 
     def get_aabbs(self) -> List[Tuple[Tuple[float, float, float], Tuple[float, float, float]]]:
         """Get AABBs for all simulation objects."""
-        return [p.getAABB(obj.body_id) for obj in self._sim_objects]
+        return [p.getAABB(obj.body_id, physicsClientId=self._client) for obj in self._sim_objects]
 
     def filter_aabb_pairs(
         self, ignore_static: Optional[bool] = None, moved_objects: Optional[Set[int]] = None, return_profiling: bool = False
@@ -1417,9 +1433,14 @@ class MultiRobotSimulationCore:
         # Only rebuild if cache was explicitly invalidated (mode change)
         if not self._aabb_cache_valid:
             # Full rebuild needed only if cache is completely invalid (e.g., mode change)
+            # In kinematics mode, call performCollisionDetection() first to ensure
+            # PyBullet's broadphase has initialised collision info for all bodies.
+            # Without this, getAABB() emits noisy C++ b3Warning messages.
+            if not self._params.physics:
+                p.performCollisionDetection(physicsClientId=self._client)
             logger.debug(f"Full AABB rebuild for {len(self._sim_objects)} objects")
             for obj in self._sim_objects:
-                self._cached_aabbs_dict[obj.object_id] = p.getAABB(obj.body_id)
+                self._cached_aabbs_dict[obj.object_id] = p.getAABB(obj.body_id, physicsClientId=self._client)
             # Mark cache as valid after update
             self._aabb_cache_valid = True
 
@@ -1728,7 +1749,7 @@ class MultiRobotSimulationCore:
                     for obj_id in (obj_id_i, obj_id_j):
                         obj = self._sim_objects_dict.get(obj_id)
                         if obj is not None:
-                            p.changeVisualShape(obj.body_id, -1, rgbaColor=collision_color)
+                            p.changeVisualShape(obj.body_id, -1, rgbaColor=collision_color, physicsClientId=self._client)
 
                 # Update colors for resolved collisions (restore original color)
                 # Only restore if object is not involved in any other collision
@@ -1738,7 +1759,7 @@ class MultiRobotSimulationCore:
                             obj = self._sim_objects_dict.get(obj_id)
                             if obj is not None:
                                 orig_color = self._robot_original_colors.get(obj.body_id, [0, 0, 0, 1])
-                                p.changeVisualShape(obj.body_id, -1, rgbaColor=orig_color)
+                                p.changeVisualShape(obj.body_id, -1, rgbaColor=orig_color, physicsClientId=self._client)
 
         except p.error:
             # PyBullet disconnected, skip collision checking
@@ -2044,7 +2065,7 @@ class MultiRobotSimulationCore:
         """Return True if the simulation is currently paused."""
         return self._simulation_paused
 
-    def step_once(self, return_profiling: bool = False) -> Optional[Dict[str, float]]:
+    def step_once(self, return_profiling: bool = False) -> Optional[Dict[str, Any]]:
         """
         Execute one simulation step.
 
@@ -2062,6 +2083,13 @@ class MultiRobotSimulationCore:
                     'callbacks': float,
                     'step_simulation': float,
                     'collision_check': float,
+                    'collision_breakdown': {       # per-phase detail (present when collision ran)
+                        'get_aabbs': float,
+                        'spatial_hashing': float,
+                        'aabb_filtering': float,
+                        'contact_points': float,
+                        'total': float,
+                    },
                     'monitor_update': float,
                     'total': float,
                 }
@@ -2141,7 +2169,7 @@ class MultiRobotSimulationCore:
         # Physics ON: Call stepSimulation() every step (rigid body integration, contact resolution)
         # Physics OFF: Skip stepSimulation() for pure kinematics (position updates via reset API)
         if self._params.physics:
-            p.stepSimulation()
+            p.stepSimulation(physicsClientId=self._client)
         # Note: Even in Physics OFF mode, collision detection still works via getClosestPoints()
         # which queries geometry directly without requiring stepSimulation()
 
@@ -2164,19 +2192,20 @@ class MultiRobotSimulationCore:
         if measure_timing:
             t_col0 = time.perf_counter()
 
+        collision_breakdown = None  # per-phase breakdown (only when return_profiling=True)
         freq = self._collision_check_frequency
         # freq = None: check every step
         # freq = 0: disabled (never check)
         # freq > 0: check at specified frequency (Hz)
         if freq is None:
             # Check every step
-            self.check_collisions(return_profiling=False)
+            _, collision_breakdown = self.check_collisions(return_profiling=return_profiling)
             self._last_collision_check = self.sim_time
         elif freq > 0:
             # Check at specified frequency
             interval = 1.0 / freq
             if self.sim_time - self._last_collision_check >= interval:
-                self.check_collisions(return_profiling=False)
+                _, collision_breakdown = self.check_collisions(return_profiling=return_profiling)
                 self._last_collision_check = self.sim_time
         # else: freq = 0, skip collision checks entirely
 
@@ -2200,7 +2229,7 @@ class MultiRobotSimulationCore:
 
         # Return profiling data if requested
         if return_profiling:
-            return {
+            result: Dict[str, Any] = {
                 "agent_update": 1000 * (t1 - t0),  # type: ignore[possibly-unbound]
                 "callbacks": 1000 * (t_cb1 - t_cb0),  # type: ignore[possibly-unbound]
                 "step_simulation": 1000 * (t_sim1 - t_sim0),  # type: ignore[possibly-unbound]
@@ -2208,6 +2237,9 @@ class MultiRobotSimulationCore:
                 "monitor_update": 1000 * (t_mon1 - t_mon0),  # type: ignore[possibly-unbound]
                 "total": 1000 * (t_end - t_step),  # type: ignore[possibly-unbound]
             }
+            if collision_breakdown is not None:
+                result["collision_breakdown"] = collision_breakdown
+            return result
 
         # Profiling output (only when time profiling is enabled and not returning data)
         if self._enable_time_profiling:

@@ -1,18 +1,18 @@
 #!/usr/bin/env python3
 """
 collision_mode_comparison.py
-衝突検出モード比較ツール
+Collision detection mode comparison tool
 
-概要:
-    3つの衝突検出モードのパフォーマンスを比較します：
-    1. No Collision (collision_check_frequency=0): 衝突検出を完全に無効化
-    2. 2D Collision (collision_check_2d=True): Z軸方向の近傍を無視（9近傍）
-    3. 3D Collision (collision_check_2d=False): 全方向の近傍をチェック（27近傍）
+Overview:
+    Compares the performance of 3 collision detection modes:
+    1. No Collision (CollisionMode.DISABLED): Completely disable collision detection
+    2. 2D Collision (CollisionMode.NORMAL_2D): Ignore Z-axis neighbors (9 neighbors)
+    3. 3D Collision (CollisionMode.NORMAL_3D): Check neighbors in all directions (27 neighbors)
 
-使い方:
+Usage:
     python collision_mode_comparison.py --agents=1000 --iterations=100
 
-出力例:
+Example Output:
     ===================================================================
     Collision Mode Comparison for 1000 Agents
     ===================================================================
@@ -71,23 +71,26 @@ import pybullet as p
 from pybullet_fleet.core_simulation import MultiRobotSimulationCore, SimulationParams
 from pybullet_fleet.agent_manager import AgentManager, GridSpawnParams
 from pybullet_fleet.agent import AgentSpawnParams, MotionMode
+from pybullet_fleet.geometry import Pose
+from pybullet_fleet.types import CollisionMode
 
 
-def benchmark_collision_mode(mode_name: str, collision_freq: float, collision_2d: bool, num_agents: int, num_iterations: int):
-    """特定の衝突モードでベンチマーク"""
+def benchmark_collision_mode(
+    mode_name: str, collision_freq: float, collision_mode: CollisionMode, num_agents: int, num_iterations: int
+):
+    """Benchmark a specific collision mode"""
 
     # Clean disconnect
     if p.isConnected():
         p.disconnect()
-
-    p.connect(p.DIRECT)
 
     # Setup
     config_path = os.path.join(os.path.dirname(__file__), "profiling_config.yaml")
     params = SimulationParams.from_config(config_path)
     params.monitor = False
     params.collision_check_frequency = collision_freq
-    params.collision_check_2d = collision_2d
+
+    wants_collision = collision_freq is None or collision_freq > 0
 
     sim_core = MultiRobotSimulationCore(params)
     agent_manager = AgentManager(sim_core=sim_core)
@@ -112,6 +115,7 @@ def benchmark_collision_mode(mode_name: str, collision_freq: float, collision_2d
         max_linear_vel=2.0,
         max_angular_vel=3.0,
         mass=0.0,
+        collision_mode=collision_mode,
     )
 
     agents = agent_manager.spawn_agents_grid(
@@ -119,6 +123,13 @@ def benchmark_collision_mode(mode_name: str, collision_freq: float, collision_2d
         grid_params=grid_params,
         spawn_params=agent_spawn_params,
     )
+
+    # Set goals so agents actually move (required for meaningful collision benchmarks)
+    # Without goals, agents are stationary → _moved_this_step is empty →
+    # collision check short-circuits and 2D/3D difference is not measured.
+    for agent in agents:
+        pos = agent.get_pose().position
+        agent.set_goal_pose(Pose.from_xyz(pos[0] + 5.0, pos[1] + 5.0, pos[2]))
 
     # Collect timing data
     step_times = []
@@ -141,19 +152,12 @@ def benchmark_collision_mode(mode_name: str, collision_freq: float, collision_2d
         step_time = (time.perf_counter() - t0) * 1000
         step_times.append(step_time)
 
-        # Extract collision timings if available
-        if profiling_data and "collision_check" in profiling_data:
-            # Note: Built-in profiling returns breakdown in check_collisions
-            # We need to call check_collisions separately with return_profiling=True
-            pass
-
-    # Get collision breakdown separately
-    if collision_freq > 0:
-        for _ in range(num_iterations):
-            _, timing = sim_core.check_collisions(return_profiling=True)
+        # Extract per-phase collision breakdown from step_once profiling data
+        if profiling_data and "collision_breakdown" in profiling_data:
+            breakdown = profiling_data["collision_breakdown"]
             for key in collision_timings:
-                if key in timing:
-                    collision_timings[key].append(timing[key])
+                if key in breakdown:
+                    collision_timings[key].append(breakdown[key])
 
     p.disconnect()
 
@@ -165,7 +169,7 @@ def benchmark_collision_mode(mode_name: str, collision_freq: float, collision_2d
         "collision_breakdown": {},
     }
 
-    if collision_freq > 0:
+    if wants_collision:
         for key, times in collision_timings.items():
             if times:
                 results["collision_breakdown"][key] = {
@@ -177,7 +181,7 @@ def benchmark_collision_mode(mode_name: str, collision_freq: float, collision_2d
 
 
 def print_results(results_list, num_agents):
-    """結果を整形して出力"""
+    """Format and output results"""
     print("\n" + "=" * 70)
     print(f"Collision Mode Comparison for {num_agents} Agents")
     print("=" * 70)
@@ -246,7 +250,7 @@ if __name__ == "__main__":
         benchmark_collision_mode(
             "No Collision (Disabled)",
             collision_freq=0,
-            collision_2d=False,
+            collision_mode=CollisionMode.DISABLED,
             num_agents=args.agents,
             num_iterations=args.iterations,
         )
@@ -257,7 +261,7 @@ if __name__ == "__main__":
         benchmark_collision_mode(
             "2D Collision (9 neighbors)",
             collision_freq=None,  # Check every step
-            collision_2d=True,
+            collision_mode=CollisionMode.NORMAL_2D,
             num_agents=args.agents,
             num_iterations=args.iterations,
         )
@@ -268,7 +272,7 @@ if __name__ == "__main__":
         benchmark_collision_mode(
             "3D Collision (27 neighbors)",
             collision_freq=None,  # Check every step
-            collision_2d=False,
+            collision_mode=CollisionMode.NORMAL_3D,
             num_agents=args.agents,
             num_iterations=args.iterations,
         )

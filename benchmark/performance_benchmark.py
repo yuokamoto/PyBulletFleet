@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-performance_benchmark_worker.py
+performance_benchmark.py
 Simple benchmark worker that executes one simulation and outputs JSON results.
 
 This is a clean worker process that:
@@ -226,12 +226,16 @@ def run_benchmark(
     # Set random goals for some agents (to simulate real usage)
     import random
 
-    num_moving_agents = min(num_agents // 10, 100)  # Move 10% of agents (max 100)
-    for i in range(num_moving_agents):
-        agent_idx = random.randint(0, len(agents) - 1)
+    num_moving_agents = max(num_agents // 2, min(num_agents, 10))  # Move at least half (or all if < 20)
+    moving_indices = random.sample(range(len(agents)), num_moving_agents)
+    for agent_idx in moving_indices:
         target_x = random.uniform(-10, grid_size + 10)
         target_y = random.uniform(-10, grid_size + 10)
         agents[agent_idx].set_goal_pose(Pose.from_xyz(target_x, target_y, 0.1))
+
+    # Warmup steps to stabilize timing
+    for _ in range(10):
+        sim_core.step_once()
 
     # Run simulation (timed)
     cpu_sim_start = cpu_time_s(proc)

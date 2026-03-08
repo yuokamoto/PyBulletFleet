@@ -1,88 +1,71 @@
 #!/usr/bin/env python3
 """
 collision_check.py
-衝突検出処理の詳細プロファイリングツール
+Detailed profiling tool for collision detection pipeline.
+Measures 4-step breakdown: Get AABBs, Spatial Hashing, AABB Filtering, Contact Points.
 
-概要:
- import os
-import sys
-import time
-import cProfile
-import pstats
-import io
-import math
+Analysis Methods:
+    1. Built-in Profiling - default
+       - Uses core_simulation.py's return_profiling=True option
+       - Get AABBs: Retrieve bounding boxes from PyBullet
+       - Spatial Hashing: Build spatial grid
+       - AABB Filtering: Candidate pair selection for nearby objects (biggest bottleneck, typically 75%)
+       - Contact Points: Actual collision determination
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
+    2. cProfile analysis (--test=cprofile)
+       - Function-level detailed analysis
+       - Records function calls within a step
+       - Best for discovering unexpected bottlenecks
 
-import pybullet as p
-from pybullet_fleet.core_simulation import MultiRobotSimulationCore, SimulationParams
-from pybullet_fleet.agent_manager import AgentManager, GridSpawnParams
-from pybullet_fleet.agent import AgentSpawnParams.check_collisions()）は大規模シミュレーションの主要なボトルネックです。
-    このツールは core_simulation.py に組み込まれた Built-in Profiling 機能を使用して、
-    衝突検出を4ステップに分解し、どの部分が遅いかを特定します。
-
-分析手法:
-    1. Built-in Profiling（組み込みプロファイリング）- デフォルト
-       - core_simulation.py の return_profiling=True オプションを使用
-       - Get AABBs: PyBullet からバウンディングボックス取得
-       - Spatial Hashing: 空間グリッドの構築
-       - AABB Filtering: 近接ペアの候補選定（最大のボトルネック、通常75%）
-       - Contact Points: 実際の衝突判定
-
-    2. cProfile分析（--test=cprofile）
-       - 関数レベルの詳細分析
-       - ステップ内部の関数呼び出しを記録
-       - 意外なボトルネックの発見に最適
-
-使い方:
-    # Built-in profiling（デフォルト、推奨）
+Usage:
+    # Built-in profiling (default, recommended)
     python collision_check.py --agents=1000 --iterations=100
 
-    # cProfile で詳細分析
+    # Detailed analysis with cProfile
     python collision_check.py --agents=1000 --test=cprofile
 
-    # 両方実行
+    # Run both
     python collision_check.py --agents=1000 --test=all
 
-出力例:
+Example Output:
     Built-in Profiling:
         Get Aabbs:         0.523ms ( 10.2%)
         Spatial Hashing:   0.312ms (  6.1%)
-        Aabb Filtering:    3.845ms ( 75.2%)  ← 最大のボトルネック
+        Aabb Filtering:    3.845ms ( 75.2%)  <- biggest bottleneck
         Contact Points:    0.432ms (  8.5%)
         Total:             5.112ms (100.0%)
 
         Additional Information:
           Candidate pairs: 3456
           Actual collisions: 12
-          Collision ratio: 0.3%  ← 99.7%は無駄な計算
+          Collision ratio: 0.3%  <- 99.7% are wasted computations
 
-    cProfile (AABB Filtering の詳細):
-        ncalls  tottime  cumtime  関数
+    cProfile (AABB Filtering details):
+        ncalls  tottime  cumtime  function
         384500    1.850    1.850  AABB overlap check
          27000    0.650    0.650  dict.get (grid lookup)
          27000    0.420    0.420  tuple addition (neighbor_cell)
 
-Built-in Profiling の特徴:
-    ✅ 実装のコピー不要（core_simulation.py から直接取得）
-    ✅ 常に最新の実装を測定
-    ✅ Dynamic cell size、2D/3D モード対応
-    ✅ オーバーヘッド最小（return_profiling フラグのみ）
+Features of Built-in Profiling:
+    * No need to copy implementation (obtained directly from core_simulation.py)
+    * Always measures the latest implementation
+    * Supports dynamic cell size, 2D/3D modes
+    * Minimal overhead (only the return_profiling flag)
 
-使い分け:
-    - ボトルネックのステップ特定 → Built-in profiling（デフォルト）
-    - ステップ内の詳細分析 → cProfile
-    - 最適化効果の検証 → Built-in profiling（オーバーヘッドなし）
+When to Use:
+    - Identifying bottleneck steps -> Built-in profiling (default)
+    - Detailed analysis within a step -> cProfile
+    - Verifying optimization effects -> Built-in profiling (no overhead)
 
-最適化のヒント:
-    - AABB Filtering が 75% → 2D モードで 67%削減可能
-    - Collision ratio が 0.3% → フィルタリング精度向上の余地あり
-    - Dynamic cell size により自動最適化
+Optimization Tips:
+    - AABB Filtering at 75% -> 67% reduction possible with 2D mode
+    - Collision ratio at 0.3% -> room for filtering accuracy improvement
+    - Automatic optimization via dynamic cell size
 
-関連ファイル:
-    - agent_update.py: Agent.update() の詳細プロファイリング
-    - step_breakdown.py: シミュレーション全体のステップ分解
-    - ../archive/collision_check_v1.py: 旧版（Manual implementation、参考用）
+Related Files:
+    - agent_update.py: Detailed profiling of Agent.update()
+    - step_breakdown.py: Simulation-wide step breakdown
+    - ../archive/collision_check_v1.py: Legacy version (manual implementation, for reference)
 """
 import os
 import sys
@@ -90,6 +73,7 @@ import cProfile
 import pstats
 import io
 import math
+import statistics
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
@@ -100,13 +84,11 @@ from pybullet_fleet.agent import AgentSpawnParams, MotionMode
 
 
 def profile_collision_check_builtin(num_agents: int, num_iterations: int = 100):
-    """Built-in profiling を使用した collision check 分析"""
+    """Collision check analysis using built-in profiling"""
 
-    # Ensure clean disconnect and use DIRECT mode
+    # Clean up any leftover connection before creating a fresh sim_core.
     if p.isConnected():
         p.disconnect()
-
-    p.connect(p.DIRECT)  # Force DIRECT mode (no GUI, no X11)
 
     # Setup - Load from profiling config
     config_path = os.path.join(os.path.dirname(__file__), "profiling_config.yaml")
@@ -173,8 +155,6 @@ def profile_collision_check_builtin(num_agents: int, num_iterations: int = 100):
 
     # Statistics
     def stats(data):
-        import statistics
-
         return {
             "mean": statistics.mean(data),
             "median": statistics.median(data),
@@ -205,13 +185,11 @@ def profile_collision_check_builtin(num_agents: int, num_iterations: int = 100):
 
 
 def profile_collision_check_with_cprofile(num_agents: int):
-    """cProfile で collision check の詳細分析"""
+    """Detailed analysis of collision check using cProfile"""
 
-    # Ensure clean disconnect and use DIRECT mode
+    # Clean up any leftover connection before creating a fresh sim_core.
     if p.isConnected():
         p.disconnect()
-
-    p.connect(p.DIRECT)  # Force DIRECT mode (no GUI, no X11)
 
     # Setup - Load from profiling config
     config_path = os.path.join(os.path.dirname(__file__), "profiling_config.yaml")

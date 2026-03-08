@@ -31,6 +31,8 @@ import argparse
 import statistics
 from typing import List, Optional
 
+import yaml
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 
@@ -235,12 +237,28 @@ def parse_args():
     return parser.parse_args()
 
 
+def get_output_dir(config_path: Optional[str]) -> str:
+    """Get output directory from config file, falling back to CWD."""
+    if config_path:
+        try:
+            with open(config_path) as f:
+                config = yaml.safe_load(f)
+            output_dir = config.get("benchmark", {}).get("output_dir", ".")
+            os.makedirs(output_dir, exist_ok=True)
+            return output_dir
+        except (FileNotFoundError, yaml.YAMLError):
+            pass
+    return "."
+
+
 def main():
     args = parse_args()
 
     print("=" * 70)
     print("PyBullet Fleet - Performance Benchmark Runner")
     print("=" * 70)
+
+    output_dir = get_output_dir(args.config)
 
     all_results = []
 
@@ -260,7 +278,7 @@ def main():
         print_sweep_summary(all_results)
 
         # Save sweep results
-        output_file = f"benchmark_sweep_{args.duration}s.json"
+        output_file = os.path.join(output_dir, f"benchmark_sweep_{args.duration}s.json")
         with open(output_file, "w") as f:
             json.dump(all_results, f, indent=2)
         print(f"\nSweep results saved to: {output_file}")
@@ -281,7 +299,7 @@ def main():
         print_sweep_summary(all_results)
 
         # Save comparison results
-        output_file = f"benchmark_compare_{args.agents}agents.json"
+        output_file = os.path.join(output_dir, f"benchmark_compare_{args.agents}agents.json")
         with open(output_file, "w") as f:
             json.dump(all_results, f, indent=2)
         print(f"\nComparison results saved to: {output_file}")
@@ -301,7 +319,7 @@ def main():
 
         # Save single result
         scenario_suffix = f"_{args.scenario}" if args.scenario else ""
-        output_file = f"benchmark_results_{args.agents}agents_{args.duration}s{scenario_suffix}.json"
+        output_file = os.path.join(output_dir, f"benchmark_results_{args.agents}agents_{args.duration}s{scenario_suffix}.json")
         with open(output_file, "w") as f:
             json.dump(result, f, indent=2)
         print(f"\nResults saved to: {output_file}")

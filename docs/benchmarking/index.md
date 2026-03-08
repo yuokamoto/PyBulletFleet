@@ -5,9 +5,5 @@ Performance benchmarking tools, results, and optimization guides for PyBulletFle
 ```{toctree}
 :maxdepth: 2
 
-results
-optimization-guide
-profiling
-configs
-experiments
+benchmark-suite
 ```

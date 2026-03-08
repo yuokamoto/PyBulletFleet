@@ -1,55 +1,55 @@
 #!/usr/bin/env python3
 """
 agent_manager_set_goal.py
-AgentManager.set_goal_pose() のプロファイリングツール
+Profiling tool for AgentManager.set_goal_pose()
 
-概要:
-    AgentManager.set_goal_pose() は複数エージェントにゴールを設定する操作です。
-    このツールは cProfile で関数レベルの詳細を分析し、ボトルネックを特定します。
+Overview:
+    AgentManager.set_goal_pose() is the operation that sets goals for multiple agents.
+    This tool uses cProfile for function-level detailed analysis to identify bottlenecks.
 
-測定内容:
-    - agent_manager.set_goal_pose() のオーバーヘッド
-    - agent.set_goal_pose() の実行時間
-    - agent.set_path() の内部処理
-    - _init_differential_rotation_trajectory() の時間（最大のボトルネック）
-    - _init_differential_forward_distance_trajectory() の時間
+Measured Items:
+    - agent_manager.set_goal_pose() overhead
+    - agent.set_goal_pose() execution time
+    - agent.set_path() internal processing
+    - _init_differential_rotation_trajectory() time (biggest bottleneck)
+    - _init_differential_forward_distance_trajectory() time
 
-使い方:
-    # 基本実行（1000エージェント）
+Usage:
+    # Basic usage (1000 agents)
     python agent_manager_set_goal.py --agents=1000
 
-    # 少数エージェントでテスト
+    # Test with fewer agents
     python agent_manager_set_goal.py --agents=100
 
-    # 大規模テスト
+    # Large-scale test
     python agent_manager_set_goal.py --agents=5000
 
-出力例:
-    ncalls  tottime  cumtime  関数
+Example Output:
+    ncalls  tottime  cumtime  function
       1000    0.001    0.109  agent_manager.set_goal_pose()
       1000    0.000    0.108  agent.set_goal_pose()
       1000    0.007    0.107  agent.set_path()
-      1000    0.022    0.092  _init_differential_rotation_trajectory()  ← ボトルネック（84%）
+      1000    0.022    0.092  _init_differential_rotation_trajectory()  <- bottleneck (84%)
       1000    0.003    0.032  _init_differential_forward_distance_trajectory()
 
-分析結果の読み方:
-    - tottime: 関数自身の処理時間
-    - cumtime: 関数 + 内部呼び出しの合計時間
-    - cumtime - tottime = 子関数の処理時間
+How to Read the Results:
+    - tottime: Processing time of the function itself
+    - cumtime: Total time including internal calls
+    - cumtime - tottime = processing time of child functions
 
-    例: agent_manager.set_goal_pose()
-      - cumtime: 0.109秒（全体）
-      - tottime: 0.001秒（自身のオーバーヘッド、0.9%）
-      - 残り 99.1% は子関数（agent.set_goal_pose）
+    Example: agent_manager.set_goal_pose()
+      - cumtime: 0.109s (total)
+      - tottime: 0.001s (own overhead, 0.9%)
+      - Remaining 99.1% is in child functions (agent.set_goal_pose)
 
-最適化のヒント:
-    - _init_differential_rotation_trajectory が 84% を占める
-    - Rotation行列計算（scipy）と軌道補間が重い
-    - キャッシングや事前計算で改善可能
+Optimization Tips:
+    - _init_differential_rotation_trajectory accounts for 84%
+    - Rotation matrix computation (scipy) and trajectory interpolation are expensive
+    - Can be improved with caching or pre-computation
 
-関連ファイル:
-    - agent_update.py: Agent.update() の詳細プロファイリング
-    - collision_check.py: 衝突検出の詳細プロファイリング
+Related Files:
+    - agent_update.py: Detailed profiling of Agent.update()
+    - collision_check.py: Detailed profiling of collision detection
 """
 import os
 import sys
@@ -58,7 +58,7 @@ import cProfile
 import pstats
 from io import StringIO
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 import pybullet as p
 from pybullet_fleet.core_simulation import MultiRobotSimulationCore, SimulationParams
@@ -73,10 +73,6 @@ def profile_set_goal_pose(num_agents=1000):
     # Setup
     if p.isConnected():
         p.disconnect()
-
-    p.connect(p.DIRECT)  # Force DIRECT mode (no GUI, no X11)
-    p.resetSimulation()
-    p.setGravity(0, 0, -9.81)
 
     # Load from profiling config
     config_path = os.path.join(os.path.dirname(__file__), "profiling_config.yaml")
@@ -160,7 +156,7 @@ if __name__ == "__main__":
     import argparse
 
     ap = argparse.ArgumentParser()
-    ap.add_argument("--n", type=int, default=1000, help="Number of agents")
+    ap.add_argument("--agents", type=int, default=1000, help="Number of agents")
     args = ap.parse_args()
 
-    profile_set_goal_pose(args.n)
+    profile_set_goal_pose(args.agents)

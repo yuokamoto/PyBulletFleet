@@ -22,37 +22,44 @@ This guide provides comprehensive recommendations for optimizing PyBullet Fleet 
 
 ```python
 from pybullet_fleet.core_simulation import SimulationParams
+from pybullet_fleet.types import CollisionMode
 
 params = SimulationParams(
     target_rtf=0,                    # No sleep, maximum speed
     enable_monitor_gui=False,   # Headless data collection
-    collision_check_2d=True,    # 2D optimization (9 neighbors vs 27)
     collision_check_frequency=10.0,  # 10 Hz collision check
     enable_time_profiling=False,     # Disable profiling overhead
     physics=False,              # Disable physics (if not needed)
     timestep=0.1                # Larger timestep for kinematics
 )
+
+# Collision mode is per-agent (set on AgentSpawnParams, not SimulationParams)
+# AgentSpawnParams(..., collision_mode=CollisionMode.NORMAL_2D)  # 9 neighbors (XY only)
 ```
 
 **Expected Performance:**
-- 1000 agents: ~0.45x RTF (slower than real-time, but acceptable for offline)
-- 500 agents: ~0.93x RTF (near real-time)
-- 100 agents: ~6.61x RTF (much faster than real-time)
+- 1000 agents: ~3.1× RTF
+- 500 agents: ~7.1× RTF
+- 100 agents: ~46× RTF
 
 ---
 
 ### For Real-Time Visualization (Interactive Development)
 
 ```python
+from pybullet_fleet.types import CollisionMode
+
 params = SimulationParams(
     target_rtf=1.0,                  # Real-time synchronization
     gui=True,                   # Enable GUI
     enable_monitor_gui=True,    # Enable visualization
-    collision_check_2d=False,   # Full 3D collision (if needed)
     collision_check_frequency=10.0,  # Reduced frequency for performance
     enable_time_profiling=True,      # Enable performance logging
     timestep=0.01               # Finer timestep for smooth visualization
 )
+
+# For 3D collision, set per-agent:
+# AgentSpawnParams(..., collision_mode=CollisionMode.NORMAL_3D)  # 27 neighbors (full 3D)
 ```
 
 **Recommendation:** Limit to **< 200 agents** for smooth 60 FPS rendering
@@ -69,10 +76,11 @@ simulation:
   physics: false                # Disable unless needed
   gui: false                    # Headless
 
-  # Collision detection (2D optimized)
-  collision_check_2d: true      # 2D mode (9 neighbors vs 27)
+  # Collision detection
   collision_check_frequency: 10.0  # 10 Hz (balanced)
   ignore_static_collision: true # Skip structure-structure collisions
+  # NOTE: collision_mode is per-agent (set on spawn params, not here)
+  # Use collision_mode: normal_2d on AgentSpawnParams for 2D (9 neighbors)
 
   # Monitoring (headless)
   monitor: true
@@ -127,17 +135,21 @@ simulation:
 
 #### Dimension Control
 
-| Mode | Neighbors | Speedup | Use Case |
-|------|-----------|---------|----------|
-| `collision_check_2d=true` | 9 (XY plane) | ~67% faster | Ground robots (AGVs), fixed Z |
-| `collision_check_2d=false` | 27 (3D cube) | Baseline | Drones, lifts, 3D movement |
+| Mode (per-agent) | Neighbors | Speedup | Use Case |
+|-------------------|-----------|---------|----------|
+| `collision_mode=CollisionMode.NORMAL_2D` | 9 (XY plane) | ~67% faster | Ground robots (AGVs), fixed Z |
+| `collision_mode=CollisionMode.NORMAL_3D` | 27 (3D cube) | Baseline | Drones, lifts, 3D movement |
+| `collision_mode=CollisionMode.DISABLED` | 0 | No overhead | Visualization-only objects |
 
 **Example:**
 ```python
-# 2D collision (recommended for ground robots)
-params = SimulationParams(
-    collision_check_2d=True,
-    collision_check_frequency=10.0
+from pybullet_fleet.types import CollisionMode
+from pybullet_fleet.agent import AgentSpawnParams
+
+# 2D collision is set per-agent on spawn params (not on SimulationParams)
+agent_params = AgentSpawnParams(
+    urdf_path="robots/mobile_robot.urdf",
+    collision_mode=CollisionMode.NORMAL_2D,  # 9 neighbors (XY only)
 )
 ```
 
@@ -175,10 +187,11 @@ simulation:
   physics: false                # Kinematics only
   gui: false                    # Headless
 
-  # 2D collision (ground robots)
-  collision_check_2d: true
+  # Collision detection
   collision_check_frequency: 10.0
   ignore_static_collision: true
+  # NOTE: collision_mode is per-agent (set on AgentSpawnParams)
+  # Example: AgentSpawnParams(..., collision_mode=CollisionMode.NORMAL_2D)
 
   # Monitoring
   monitor: true
@@ -191,8 +204,8 @@ simulation:
 ```
 
 **Expected Performance:**
-- 500 agents: ~0.93x RTF
-- 1000 agents: ~0.45x RTF
+- 500 agents: ~7.1× RTF
+- 1000 agents: ~3.1× RTF
 
 ---
 
@@ -206,10 +219,11 @@ simulation:
   physics: true                 # Enable physics
   gui: true                     # Visualization
 
-  # 3D collision (drones)
-  collision_check_2d: false
+  # Collision detection
   collision_check_frequency: 30.0  # Higher frequency for safety
   ignore_static_collision: false
+  # NOTE: collision_mode is per-agent (set on AgentSpawnParams)
+  # Example: AgentSpawnParams(..., collision_mode=CollisionMode.NORMAL_3D)
 
   # Monitoring
   monitor: true
@@ -234,8 +248,9 @@ simulation:
   gui: true                     # Enable GUI
 
   # Full collision (for debugging)
-  collision_check_2d: false
   collision_check_frequency: null  # Every step
+  # NOTE: collision_mode is per-agent (set on AgentSpawnParams)
+  # Use CollisionMode.NORMAL_3D for full 3D debugging
 
   # Visual debugging
   enable_collision_shapes: true
@@ -267,8 +282,8 @@ simulation:
 - ❌ **Poor:** RTF < 1.0 (slower than real-time)
 
 **Example:**
-- 100 agents: **6.61x RTF** → 10s simulation runs in ~1.5s
-- 1000 agents: **0.45x RTF** → 10s simulation takes ~22s
+- 100 agents: **46× RTF** → 10s simulation runs in ~0.22s
+- 1000 agents: **3.1× RTF** → 10s simulation takes ~3.2s
 
 ---
 
@@ -282,35 +297,37 @@ simulation:
 - **Offline processing:** No strict requirement
 
 **Typical Bottlenecks:**
-1. **Collision Check (70-80%)** - Spatial hashing optimization applied
-2. **Step Simulation (10-15%)** - PyBullet physics engine
-3. **Agent Update (5-10%)** - Navigation and control logic
+1. **Agent Update (80-90%)** - Navigation, kinematics, and path following
+2. **Collision Check (10-15%)** - Spatial hashing and AABB filtering
+3. **Step Simulation (0-40%)** - 0% with physics off; up to 40% with physics on
 
 **Example (1000 agents):**
 ```
 Component               Time (ms)    Percentage
 ────────────────────────────────────────────────
-Collision Check          3.61ms       77.8%
-Step Simulation          0.57ms       12.3%
-Agent Update             0.34ms        7.3%
+Agent Update            13.79ms       88.2%
+Collision Check          1.76ms       11.2%
+Monitor Update           0.08ms        0.5%
+Step Simulation          0.00ms        0.0%
 ────────────────────────────────────────────────
-Total                    4.64ms      100.0%
+Total                   15.63ms      100.0%
 ```
 
 ---
 
 ### Memory Usage
 
-**Expected:** ~10KB per agent (linear scaling)
+**Expected:** ~20KB per agent (linear scaling above ~500 agents)
 
 | Agents | Memory Delta |
-|--------|--------------|
-| 100    | -24.2 MB     |
-| 500    | -16.0 MB     |
-| 1000   | -5.6 MB      |
-| 2000   | +14.3 MB     |
+|--------|-------------|
+| 100    | -23.8 MB    |
+| 250    | -19.7 MB    |
+| 500    | -12.2 MB    |
+| 1000   | +3.0 MB     |
+| 2000   | +29.4 MB    |
 
-**Note:** Negative values indicate memory freed by Python garbage collection during test
+Memory grows linearly above ~500 agents at ~20 KB per agent.
 
 ---
 
@@ -336,7 +353,7 @@ params = SimulationParams(
 **Agent Limit:** **< 200 agents**
 
 **Optimization Tips:**
-- Use `collision_check_2d=True` if applicable
+- Use `CollisionMode.NORMAL_2D` on agent spawn params if applicable
 - Reduce `collision_check_frequency` to 5-10 Hz
 - Disable `enable_time_profiling` for production
 - Consider reducing physics timestep if motion is jerky
@@ -362,13 +379,13 @@ params = SimulationParams(
 ```
 
 **Performance:**
-- 1000 agents: **0.45x RTF** (acceptable)
-- 500 agents: **0.93x RTF** (near real-time)
+- 1000 agents: **3.1× RTF**
+- 500 agents: **7.1× RTF**
 
 **Optimization Tips:**
 - Use `target_rtf=0` for maximum performance
 - Disable all visualization features
-- Use `collision_check_2d=True` if ground robots
+- Use `CollisionMode.NORMAL_2D` on agent spawn params for ground robots
 - Consider batching multiple simulations in parallel
 
 ---
@@ -387,12 +404,14 @@ params = SimulationParams(
     gui=False,
     timestep=0.1,
     collision_check_frequency=1.0,  # Lower frequency
-    collision_check_2d=True
 )
+
+# Use 2D collision per-agent for ground robots:
+# AgentSpawnParams(..., collision_mode=CollisionMode.NORMAL_2D)
 ```
 
 **Performance:**
-- 2000 agents: **0.24x RTF** (slow but acceptable)
+- 2000 agents: **1.2× RTF** (at real-time limit)
 - 5000+ agents: Consider distributed simulation
 
 **Optimization Tips:**
@@ -451,9 +470,9 @@ python benchmark/profiling/simulation_profiler.py --agents 1000 --steps 100
 
 1. **Collision check > 80% of step time**
    ```yaml
-   # Solution: Enable 2D collision
-   collision_check_2d: true
+   # Solution: Reduce collision frequency and use 2D mode per-agent
    collision_check_frequency: 10.0
+   # Set collision_mode: normal_2d on AgentSpawnParams (per-agent, not here)
    ```
 
 2. **GUI overhead**
@@ -482,7 +501,7 @@ python benchmark/profiling/simulation_profiler.py --agents 1000 --steps 100
 
 **Symptoms:**
 - Super-linear memory growth
-- Memory usage >> 10KB per agent
+- Memory usage >> 20KB per agent
 - System slowdown over time
 
 **Diagnosis:**
@@ -492,7 +511,7 @@ python benchmark/performance_benchmark.py --agents 2000 --duration 60
 ```
 
 **Expected:**
-- ~10KB per agent (linear scaling)
+- ~20KB per agent (linear scaling above ~500 agents)
 - Slight negative growth due to Python GC
 
 **If super-linear:**
@@ -546,7 +565,7 @@ python benchmark/run_benchmark.py --agents 1000 --repetitions 10
    - ~6x speedup
    - Only for baseline testing
 
-2. **2D collision at 1 Hz** (`collision_check_2d=true`, `frequency=1.0`)
+2. **2D collision at 1 Hz** (`collision_mode=CollisionMode.NORMAL_2D` per-agent, `frequency=1.0`)
    - ~3x speedup
    - Good for sparse environments
 
@@ -581,19 +600,19 @@ python benchmark/run_benchmark.py --agents 1000 --repetitions 10
 
 ## Benchmark Results Reference
 
-Based on latest optimization (2026-01-04):
+Based on latest measurement (2026-03-08, kinematics mode, 50% agents moving):
 
-| Agents | RTF    | Step Time | Assessment    |
-|--------|--------|-----------|---------------|
-| 100    | 6.61x  | 1.51ms   | ✅ Excellent   |
-| 250    | 2.34x  | 4.27ms   | ⚠️ Good       |
-| 500    | 0.93x  | 10.80ms  | ❌ Acceptable |
-| 1000   | 0.45x  | 22.27ms  | ❌ Poor       |
-| 2000   | 0.24x  | 41.96ms  | ❌ Poor       |
+| Agents | RTF (×) | Step Time (ms) | Assessment |
+|--------|---------|----------------|------------|
+| 100 | 46.0 | 2.2 | Excellent |
+| 250 | 16.1 | 6.2 | Excellent |
+| 500 | 7.1 | 14.1 | Good |
+| 1000 | 3.1 | 32.0 | Good |
+| 2000 | 1.2 | 84.6 | Real-time limit |
 
-**Scalability:** Near-linear up to 500 agents, slightly super-linear (O(n^1.2)) above
+**Scalability:** O(n^1.3) — near-linear up to 500 agents, slightly super-linear above.
 
-**See `PERFORMANCE_REPORT.md` for detailed analysis.**
+See [Benchmark Results](results) for detailed data, methodology, and collision method comparison.
 
 ---
 
@@ -603,10 +622,10 @@ Based on latest optimization (2026-01-04):
 
 | Use Case | Agents | Config | Expected RTF |
 |----------|--------|--------|--------------|
-| Real-time GUI | < 200 | `target_rtf=1.0`, `gui=true`, `2d=true` | > 1.0x |
-| Offline batch | < 1000 | `target_rtf=0`, `gui=false`, `2d=true` | 0.5-1.0x |
-| Large-scale test | < 2000 | `target_rtf=0`, `gui=false`, `freq=1Hz` | 0.2-0.5x |
-| Development | < 100 | `target_rtf=1.0`, `gui=true`, `profiling=true` | > 2.0x |
+| Real-time GUI | < 200 | `target_rtf=1.0`, `gui=true`, `2d=true` | > 7× |
+| Offline batch | < 1000 | `target_rtf=0`, `gui=false`, `2d=true` | 3-7× |
+| Large-scale test | < 2000 | `target_rtf=0`, `gui=false`, `freq=1Hz` | 1-3× |
+| Development | < 100 | `target_rtf=1.0`, `gui=true`, `profiling=true` | > 46× |
 
 ### Key Takeaways
 
@@ -620,12 +639,11 @@ Based on latest optimization (2026-01-04):
 
 ## See Also
 
-- Benchmark Suite README - Benchmark suite overview
-- `PERFORMANCE_REPORT.md` - Detailed performance analysis
-- `profiling/` - Profiling tools documentation
-- `experiments/` - Optimization experiments
+- [Benchmark Results](results) - Detailed performance data and methodology
+- [Profiling Guide](profiling) - Profiling tools documentation
+- [Benchmark Experiments](experiments) - Optimization experiments
 
 ---
 
-**Last Updated:** 2026-01-12
+**Last Updated:** 2026-03-08
 **PyBullet Fleet Version:** Latest (post-optimization)

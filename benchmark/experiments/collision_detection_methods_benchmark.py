@@ -27,7 +27,7 @@ from pybullet_fleet.sim_object import SimObject
 
 
 def create_test_objects(
-    num_objects: int, physics_ratio: float = 0.5, spacing: float = 2.0
+    num_objects: int, physics_ratio: float = 0.5, spacing: float = 0.4
 ) -> Tuple[MultiRobotSimulationCore, List[SimObject]]:
     """
     Create test environment with mix of physics and kinematic objects.
@@ -89,7 +89,9 @@ def create_test_objects(
     return sim, objects
 
 
-def benchmark_get_contact_points(sim: MultiRobotSimulationCore, pairs: List[Tuple[int, int]], iterations: int = 100) -> float:
+def benchmark_get_contact_points(
+    sim: MultiRobotSimulationCore, pairs: List[Tuple[int, int]], iterations: int = 100
+) -> Tuple[float, float]:
     """
     Benchmark getContactPoints for all pairs.
 
@@ -99,9 +101,16 @@ def benchmark_get_contact_points(sim: MultiRobotSimulationCore, pairs: List[Tupl
         iterations: Number of iterations
 
     Returns:
-        Average time per iteration in milliseconds
+        Tuple of (mean, stdev) time per iteration in milliseconds
     """
     times = []
+
+    # Warmup iterations
+    for _ in range(5):
+        for obj_id_i, obj_id_j in pairs:
+            obj_i = sim._sim_objects_dict[obj_id_i]
+            obj_j = sim._sim_objects_dict[obj_id_j]
+            p.getContactPoints(obj_i.body_id, obj_j.body_id)
 
     for _ in range(iterations):
         t0 = time.perf_counter()
@@ -118,12 +127,12 @@ def benchmark_get_contact_points(sim: MultiRobotSimulationCore, pairs: List[Tupl
         elapsed = (time.perf_counter() - t0) * 1000  # ms
         times.append(elapsed)
 
-    return np.mean(times)
+    return np.mean(times), np.std(times)
 
 
 def benchmark_get_closest_points(
     sim: MultiRobotSimulationCore, pairs: List[Tuple[int, int]], distance: float = 0.0, iterations: int = 100
-) -> float:
+) -> Tuple[float, float]:
     """
     Benchmark getClosestPoints for all pairs.
 
@@ -134,9 +143,16 @@ def benchmark_get_closest_points(
         iterations: Number of iterations
 
     Returns:
-        Average time per iteration in milliseconds
+        Tuple of (mean, stdev) time per iteration in milliseconds
     """
     times = []
+
+    # Warmup iterations
+    for _ in range(5):
+        for obj_id_i, obj_id_j in pairs:
+            obj_i = sim._sim_objects_dict[obj_id_i]
+            obj_j = sim._sim_objects_dict[obj_id_j]
+            p.getClosestPoints(obj_i.body_id, obj_j.body_id, distance=distance)
 
     for _ in range(iterations):
         t0 = time.perf_counter()
@@ -153,10 +169,12 @@ def benchmark_get_closest_points(
         elapsed = (time.perf_counter() - t0) * 1000  # ms
         times.append(elapsed)
 
-    return np.mean(times)
+    return np.mean(times), np.std(times)
 
 
-def benchmark_hybrid_approach(sim: MultiRobotSimulationCore, pairs: List[Tuple[int, int]], iterations: int = 100) -> float:
+def benchmark_hybrid_approach(
+    sim: MultiRobotSimulationCore, pairs: List[Tuple[int, int]], iterations: int = 100
+) -> Tuple[float, float]:
     """
     Benchmark hybrid approach: getClosestPoints for kinematic + getContactPoints for physics.
 
@@ -166,9 +184,21 @@ def benchmark_hybrid_approach(sim: MultiRobotSimulationCore, pairs: List[Tuple[i
         iterations: Number of iterations
 
     Returns:
-        Average time per iteration in milliseconds
+        Tuple of (mean, stdev) time per iteration in milliseconds
     """
     times = []
+
+    # Warmup iterations
+    for _ in range(5):
+        for obj_id_i, obj_id_j in pairs:
+            obj_i = sim._sim_objects_dict[obj_id_i]
+            obj_j = sim._sim_objects_dict[obj_id_j]
+            is_physics_i = obj_id_i in sim._physics_objects
+            is_physics_j = obj_id_j in sim._physics_objects
+            if is_physics_i and is_physics_j:
+                p.getContactPoints(obj_i.body_id, obj_j.body_id)
+            else:
+                p.getClosestPoints(obj_i.body_id, obj_j.body_id, distance=0.0)
 
     for _ in range(iterations):
         t0 = time.perf_counter()
@@ -196,7 +226,7 @@ def benchmark_hybrid_approach(sim: MultiRobotSimulationCore, pairs: List[Tuple[i
         elapsed = (time.perf_counter() - t0) * 1000  # ms
         times.append(elapsed)
 
-    return np.mean(times)
+    return np.mean(times), np.std(times)
 
 
 def run_benchmark(num_objects: int, physics_ratio: float, num_pairs: int = 50, iterations: int = 100) -> dict:
@@ -249,17 +279,17 @@ def run_benchmark(num_objects: int, physics_ratio: float, num_pairs: int = 50, i
     print(f"  Mixed:               {mixed_pairs:3d} pairs ({mixed_pairs/num_pairs*100:.1f}%)")
 
     # Run benchmarks
-    print(f"\nRunning benchmarks ({iterations} iterations each)...")
+    print(f"\nRunning benchmarks ({iterations} iterations each, 5 warmup iterations)...")
 
-    time_contact = benchmark_get_contact_points(sim, pairs, iterations)
-    time_closest = benchmark_get_closest_points(sim, pairs, distance=0.0, iterations=iterations)
-    time_hybrid = benchmark_hybrid_approach(sim, pairs, iterations)
+    time_contact, std_contact = benchmark_get_contact_points(sim, pairs, iterations)
+    time_closest, std_closest = benchmark_get_closest_points(sim, pairs, distance=0.0, iterations=iterations)
+    time_hybrid, std_hybrid = benchmark_hybrid_approach(sim, pairs, iterations)
 
     # Results
-    print("\nResults (average time per iteration):")
-    print(f"  1. getContactPoints only:  {time_contact:.3f} ms")
-    print(f"  2. getClosestPoints only:  {time_closest:.3f} ms  ({time_closest/time_contact:5.2f}x)")
-    print(f"  3. Hybrid approach:        {time_hybrid:.3f} ms  ({time_hybrid/time_contact:5.2f}x)")
+    print("\nResults (average time ± stdev per iteration):")
+    print(f"  1. getContactPoints only:  {time_contact:.3f} ± {std_contact:.3f} ms")
+    print(f"  2. getClosestPoints only:  {time_closest:.3f} ± {std_closest:.3f} ms  ({time_closest/time_contact:5.2f}x)")
+    print(f"  3. Hybrid approach:        {time_hybrid:.3f} ± {std_hybrid:.3f} ms  ({time_hybrid/time_contact:5.2f}x)")
 
     if time_hybrid < time_contact:
         speedup = (time_contact - time_hybrid) / time_contact * 100
@@ -279,8 +309,11 @@ def run_benchmark(num_objects: int, physics_ratio: float, num_pairs: int = 50, i
         "kinematic_pairs": kinematic_pairs,
         "mixed_pairs": mixed_pairs,
         "time_contact": time_contact,
+        "std_contact": std_contact,
         "time_closest": time_closest,
+        "std_closest": std_closest,
         "time_hybrid": time_hybrid,
+        "std_hybrid": std_hybrid,
     }
 
 
@@ -314,21 +347,21 @@ def main():
     print(f"\n{'='*70}")
     print("SUMMARY")
     print(f"{'='*70}")
-    print(f"\n{'Config':<25} {'Contact':<12} {'Closest':<12} {'Hybrid':<12} {'Winner':<10}")
-    print(f"{'-'*70}")
+    print(f"\n{'Config':<25} {'Contact':<20} {'Closest':<20} {'Hybrid':<20} {'Winner':<10}")
+    print(f"{'-'*95}")
 
     for r in results:
         config = f"{r['num_objects']}obj, {r['physics_ratio']*100:.0f}%phys"
-        contact = f"{r['time_contact']:.2f}ms"
-        closest = f"{r['time_closest']:.2f}ms"
-        hybrid = f"{r['time_hybrid']:.2f}ms"
+        contact = f"{r['time_contact']:.2f}\u00b1{r['std_contact']:.2f}ms"
+        closest = f"{r['time_closest']:.2f}\u00b1{r['std_closest']:.2f}ms"
+        hybrid = f"{r['time_hybrid']:.2f}\u00b1{r['std_hybrid']:.2f}ms"
 
         # Determine winner
         times = [r["time_contact"], r["time_closest"], r["time_hybrid"]]
         methods = ["Contact", "Closest", "Hybrid"]
         winner = methods[times.index(min(times))]
 
-        print(f"{config:<25} {contact:<12} {closest:<12} {hybrid:<12} {winner:<10}")
+        print(f"{config:<25} {contact:<20} {closest:<20} {hybrid:<20} {winner:<10}")
 
     print(f"\n{'='*70}")
     print("RECOMMENDATIONS")

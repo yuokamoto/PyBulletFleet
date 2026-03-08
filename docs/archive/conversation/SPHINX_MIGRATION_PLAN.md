@@ -41,7 +41,7 @@ sphinx-quickstart
 # プロンプトへの回答:
 # > Separate source and build directories (y/n) [n]: y
 # > Project name: PyBulletFleet
-# > Author name(s): Yuki Okamoto
+# > Author name(s): Yu Okamoto
 # > Project release []: 0.1.0
 # > Project language [en]: en
 ```
@@ -57,8 +57,8 @@ sys.path.insert(0, os.path.abspath('../../'))  # pybullet_fleet へのパス
 
 # Project information
 project = 'PyBulletFleet'
-copyright = '2026, Yuki Okamoto'
-author = 'Yuki Okamoto'
+copyright = '2026, Yu Okamoto'
+author = 'Yu Okamoto'
 release = '0.1.0'
 
 # Extensions

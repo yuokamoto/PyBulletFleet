@@ -191,11 +191,12 @@ def main():
     print("  2. Physics ON + CONTACT_POINTS (physics)")
     print("  3. Physics ON + HYBRID (mixed)")
 
-    # Config files to test
+    # Config files to test (relative to benchmark/ directory)
+    benchmark_dir = Path(__file__).parent.parent
     configs = [
-        "configs/collision_physics_off.yaml",
-        "configs/collision_physics_on.yaml",
-        "configs/collision_hybrid.yaml",
+        str(benchmark_dir / "configs" / "collision_physics_off.yaml"),
+        str(benchmark_dir / "configs" / "collision_physics_on.yaml"),
+        str(benchmark_dir / "configs" / "collision_hybrid.yaml"),
     ]
 
     # Test parameters

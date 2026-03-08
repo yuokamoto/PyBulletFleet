@@ -209,6 +209,7 @@ class SimObject:
     ):
         self.body_id = body_id
         self.sim_core = sim_core
+
         self.attached_objects: List["SimObject"] = []
         self.callbacks: List[dict] = []
         self.pickable = pickable
@@ -248,13 +249,13 @@ class SimObject:
             self.mass = mass
         else:
             # Query from PyBullet (getDynamicsInfo returns mass at index 0)
-            self.mass = p.getDynamicsInfo(self.body_id, -1)[0]
+            self.mass = p.getDynamicsInfo(self.body_id, -1, physicsClientId=self._pid)[0]
 
         # Kinematic flag (mass=0 means kinematic/static object)
         self.is_kinematic = self.mass == 0.0
 
         # Pose caching for performance optimization (also used for movement detection)
-        initial_pos, initial_orn = p.getBasePositionAndOrientation(self.body_id)
+        initial_pos, initial_orn = p.getBasePositionAndOrientation(self.body_id, physicsClientId=self._pid)
         self._cached_pose: Pose = Pose.from_pybullet(initial_pos, initial_orn)
         self._cached_pose_sim_time: float = -1.0  # Simulation time when pose was cached
 
@@ -262,13 +263,18 @@ class SimObject:
         if self.collision_mode == CollisionMode.DISABLED:
             # setCollisionFilterGroupMask: (bodyId, linkId, collisionFilterGroup, collisionFilterMask)
             # Setting mask=0 disables collision with all objects
-            p.setCollisionFilterGroupMask(self.body_id, -1, 0, 0)
+            p.setCollisionFilterGroupMask(self.body_id, -1, 0, 0, physicsClientId=self._pid)
             self._log.debug(f"Disabled PyBullet collision (body {self.body_id})")
 
         # Auto-register to sim_core if provided
         if sim_core is not None:
             # Centralized registration via add_object() for consistency
             sim_core.add_object(self)
+
+    @property
+    def _pid(self) -> int:
+        """PyBullet physicsClientId (falls back to 0 if no sim_core)."""
+        return self.sim_core._client if self.sim_core is not None else 0
 
     def set_name(self, name: Optional[str]) -> None:
         """
@@ -677,10 +683,10 @@ class SimObject:
         # Update PyBullet collision filter if switching to/from DISABLED
         if mode == CollisionMode.DISABLED:
             # Disable PyBullet collision
-            p.setCollisionFilterGroupMask(self.body_id, -1, 0, 0)
+            p.setCollisionFilterGroupMask(self.body_id, -1, 0, 0, physicsClientId=self._pid)
         elif old_mode == CollisionMode.DISABLED:
             # Re-enable PyBullet collision (default group=1, mask=-1)
-            p.setCollisionFilterGroupMask(self.body_id, -1, 1, -1)
+            p.setCollisionFilterGroupMask(self.body_id, -1, 1, -1, physicsClientId=self._pid)
 
         # Notify sim_core to update collision system
         if self.sim_core is not None:
@@ -710,7 +716,7 @@ class SimObject:
             return self._cached_pose
 
         # Cache miss: Query PyBullet and update cache
-        position, orientation = p.getBasePositionAndOrientation(self.body_id)
+        position, orientation = p.getBasePositionAndOrientation(self.body_id, physicsClientId=self._pid)
         self._cached_pose = Pose.from_pybullet(position, orientation)
         self._cached_pose_sim_time = current_sim_time
 
@@ -815,13 +821,13 @@ class SimObject:
         # Use cached is_kinematic flag to avoid PyBullet API calls
         if preserve_velocity and not self.is_kinematic:
             # Get current velocities to preserve them (for dynamic objects only)
-            linear_vel, angular_vel = p.getBaseVelocity(self.body_id)
-            p.resetBasePositionAndOrientation(self.body_id, position, orientation)
-            p.resetBaseVelocity(self.body_id, linear_vel, angular_vel)
+            linear_vel, angular_vel = p.getBaseVelocity(self.body_id, physicsClientId=self._pid)
+            p.resetBasePositionAndOrientation(self.body_id, position, orientation, physicsClientId=self._pid)
+            p.resetBaseVelocity(self.body_id, linear_vel, angular_vel, physicsClientId=self._pid)
         else:
             # Fast path: Just set position without velocity operations
             # (kinematic objects or explicitly requested to skip velocity preservation)
-            p.resetBasePositionAndOrientation(self.body_id, position, orientation)
+            p.resetBasePositionAndOrientation(self.body_id, position, orientation, physicsClientId=self._pid)
 
         # Notify sim_core if movement detected
         if moved and self.sim_core is not None:
@@ -945,9 +951,9 @@ class SimObject:
 
         # Get parent link position and orientation
         if parent_link_index == -1:
-            parent_pos, parent_orn = p.getBasePositionAndOrientation(self.body_id)
+            parent_pos, parent_orn = p.getBasePositionAndOrientation(self.body_id, physicsClientId=self._pid)
         else:
-            link_state = p.getLinkState(self.body_id, parent_link_index)
+            link_state = p.getLinkState(self.body_id, parent_link_index, physicsClientId=self._pid)
             parent_pos, parent_orn = link_state[0], link_state[1]
 
         # Save attachment state with user-specified relative pose
@@ -972,6 +978,7 @@ class SimObject:
                 childFramePosition=[0, 0, 0],
                 parentFrameOrientation=relative_pose.orientation,
                 childFrameOrientation=[0, 0, 0, 1],
+                physicsClientId=self._pid,
             )
 
         self._log.info(f"Attached object {obj.body_id} to link {parent_link_index}")
@@ -1006,7 +1013,7 @@ class SimObject:
 
         # Remove constraint if it exists
         if obj._constraint_id is not None:
-            p.removeConstraint(obj._constraint_id)
+            p.removeConstraint(obj._constraint_id, physicsClientId=self._pid)
             obj._constraint_id = None
 
         # Reset attachment state to default values

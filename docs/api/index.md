@@ -2,7 +2,17 @@
 
 API documentation is auto-generated from source code docstrings using Sphinx autodoc.
 
-## Modules
+```{toctree}
+:hidden:
+
+generated/pybullet_fleet
+```
+
+## Full API Documentation
+
+See [Full Module Reference](generated/pybullet_fleet) for all classes, methods, and parameters extracted from docstrings.
+
+## Module Overview
 
 | Module | Description |
 |--------|-------------|
@@ -20,8 +30,8 @@ API documentation is auto-generated from source code docstrings using Sphinx aut
 | `pybullet_fleet.types` | Type definitions and enums |
 
 :::{tip}
-To generate full API docs locally, run:
+To regenerate API docs after code changes:
 ```bash
-cd docs && sphinx-apidoc -o api/generated ../pybullet_fleet && make html
+cd docs && sphinx-apidoc -o api/generated ../pybullet_fleet --force && make html
 ```
 :::

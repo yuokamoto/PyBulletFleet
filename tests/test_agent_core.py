@@ -43,6 +43,11 @@ class MockSimCore:
         self.sim_objects = []
         self._next_object_id = 0
         self._kinematic_objects = set()
+        self._client = 0
+
+    @property
+    def client(self):
+        return self._client
 
     def add_object(self, obj):
         self.sim_objects.append(obj)
@@ -337,8 +342,13 @@ class TestAgentCreationFromMesh:
                 self._next_object_id = 0
                 self.sim_time = 0.0
                 self._kinematic_objects = set()
+                self._client = 0
                 self.collision_mode_at_add: Optional[CollisionMode] = None
                 self.update_collision_mode_calls = []
+
+            @property
+            def client(self):
+                return self._client
 
             def add_object(self, obj):
                 self.collision_mode_at_add = obj.collision_mode
@@ -376,8 +386,13 @@ class TestAgentCreationFromMesh:
                 self._next_object_id = 0
                 self.sim_time = 0.0
                 self._kinematic_objects = set()
+                self._client = 0
                 self.collision_mode_at_add: Optional[CollisionMode] = None
                 self.update_collision_mode_calls = []
+
+            @property
+            def client(self):
+                return self._client
 
             def add_object(self, obj):
                 self.collision_mode_at_add = obj.collision_mode

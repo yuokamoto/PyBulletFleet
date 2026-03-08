@@ -3,8 +3,11 @@
 # ========================================
 #
 # Optimized settings for profiling tools.
-# This config inherits from ../../config/config.yaml defaults
-# and overrides settings for profiling-specific use cases.
+#
+# NOTE: Uses flat keys (not nested under 'simulation:') because
+# profiling scripts load this via SimulationParams.from_config()
+# which expects flat keys. This differs from general.yaml which
+# uses nested 'simulation:' structure for performance_benchmark.py.
 #
 # ========================================
 
@@ -49,9 +52,8 @@ enable_time_profiling: false
 # Performance Optimization Settings
 # ========================================
 
-# Enable 2D collision optimization (9 neighbors instead of 27)
-# false = Full 3D collision detection (default for profiling)
-collision_check_2d: false
+# 2D collision optimization is now per-object via CollisionMode enum
+# (CollisionMode.NORMAL_2D = 9 neighbors, CollisionMode.NORMAL_3D = 27 neighbors)
 
 # ========================================
 # Logging Settings
@@ -59,19 +61,21 @@ collision_check_2d: false
 
 # Logging level for profiling (reduce noise)
 # Options: debug, info, warning, error, critical
-log_level: warning
+# Note: 'warning' shows AABB init warnings during spawn (harmless in kinematics mode).
+# Use 'error' to suppress them.
+log_level: error
 
 # ========================================
 # Camera Settings (not used in profiling)
 # ========================================
 
-camera_mode: none
+camera:
+  camera_mode: none
 
 # ========================================
 # Visualizer Settings (not used in profiling)
 # ========================================
 
-enable_visual_shapes: false
 enable_collision_shapes: false
 enable_structure_transparency: false
 enable_shadows: false

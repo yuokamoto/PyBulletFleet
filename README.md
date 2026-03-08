@@ -33,6 +33,19 @@ pip install -e .
 python examples/100robots_grid_demo.py
 ```
 
+## Performance
+
+> Results from a single test environment (Intel i7-1185G7, 32 GB RAM, Ubuntu 20.04). Your numbers will vary depending on hardware.
+
+| Agents | Real-Time Factor | Step Time |
+|--------|-----------------|-----------|
+| 100    | 46× | 2.2 ms  |
+| 500    | 7×  | 14.1 ms |
+| 1000   | 3×  | 32.0 ms |
+| 2000   | 1.2×| 84.6 ms |
+
+Kinematics mode (physics OFF), headless. See [Benchmark Results](benchmark/README.md#benchmark-results) for full data, component breakdown, and methodology.
+
 ## Documentation
 
 📖 **Full documentation:** [Read the Docs](https://pybulletfleet.readthedocs.io)

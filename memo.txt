@@ -23,7 +23,7 @@ collision
 ----
 
 todo
-
+doc
 linear joint
 kinematic robot arm
 mobile manipulator
@@ -32,18 +32,18 @@ conveyor elevator
 ROS 2
 https://github.com/yuokamoto/Unified-Simulation-Orchestrator のシミュレータに一つして使う
 USO準拠のsnapshot/replay feature
+github actionのリファクタリング。time/memory 計測を実施して自動更新。大きく変動がある場合にはアラートをだすなど
 
 
 doc review
-1. overview あやしい
-Scaling Results:
-100 agents: ~240 FPS (real-time capable)
+1. benchmarking cleanup
+2. exampleの追加
 
-1000 agents: ~24 FPS (10x slowdown)
-
-10000 agents: Requires optimization and headless mode
-
-See docs/PERFORMANCE_ANALYSIS.md and docs/OPTIMIZATION_RESULTS.md for detailed benchmarks.
-
-
-2. いちばんしりたいのは、おそらく、デモの作り方なので、それの説明が必要 agent row と grid
+benchmark
+- profiling
+    agent_manager_set_goal
+    agent update
+    collision checking
+    collision mode comparison
+    simulation_profiler -> done
+- experiments

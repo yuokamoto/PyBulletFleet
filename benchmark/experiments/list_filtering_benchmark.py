@@ -40,28 +40,8 @@ def optimized_v3(robot_bodies, structure_body_ids_set):
     return robot_indices
 
 
-# Test data
-num_robots = 1000
-robot_bodies = list(range(num_robots))
-structure_body_ids = set(range(500, 600))  # 100 structure bodies
-
-iterations = 1000
-
-print(f"Testing with {num_robots} robots, {len(structure_body_ids)} structure bodies")
-print(f"Iterations: {iterations}\n")
-
-# Verify all produce same results
-r1 = current_implementation(robot_bodies, structure_body_ids)
-r2 = optimized_v1(robot_bodies, structure_body_ids)
-r3 = optimized_v2(robot_bodies, structure_body_ids)
-r4 = optimized_v3(robot_bodies, structure_body_ids)
-
-assert r1 == r2 == r3 == r4, "Results don't match!"
-print(f"✓ All methods produce same result ({len(r1)} non-structure robots)\n")
-
-
-# Benchmark
-def benchmark(name, func, *args):
+# Benchmark helper
+def benchmark(name, func, iterations, *args):
     t0 = time.perf_counter()
     for _ in range(iterations):
         func(*args)
@@ -71,17 +51,49 @@ def benchmark(name, func, *args):
     return avg_ms
 
 
-print("=" * 50)
-print("Benchmark Results:")
-print("=" * 50)
+if __name__ == "__main__":
+    # Test data
+    # NOTE: structure_body_ids is a list so that "current" uses O(n) list lookup
+    # and "optimized_v3" (set lookup) shows a real difference.
+    num_robots = 1000
+    robot_bodies = list(range(num_robots))
+    structure_body_ids = list(range(500, 600))  # 100 structure bodies (list, not set)
+    structure_body_ids_set = set(structure_body_ids)
 
-baseline = benchmark("Current (list comp)", current_implementation, robot_bodies, structure_body_ids)
-v1 = benchmark("Optimized V1 (set diff)", optimized_v1, robot_bodies, structure_body_ids)
-v2 = benchmark("Optimized V2 (for loop)", optimized_v2, robot_bodies, structure_body_ids)
-v3 = benchmark("Optimized V3 (assume set)", optimized_v3, robot_bodies, structure_body_ids)
+    iterations = 1000
+    warmup_iterations = 5
 
-print("=" * 50)
-print("Speedup factors (vs baseline):")
-print(f"  V1: {baseline/v1:.2f}x")
-print(f"  V2: {baseline/v2:.2f}x")
-print(f"  V3: {baseline/v3:.2f}x")
+    print(f"Testing with {num_robots} robots, {len(structure_body_ids)} structure bodies")
+    print(f"Iterations: {iterations} (+ {warmup_iterations} warmup)\n")
+
+    # Verify all produce same results
+    r1 = current_implementation(robot_bodies, structure_body_ids)
+    r2 = optimized_v1(robot_bodies, structure_body_ids_set)
+    r3 = optimized_v2(robot_bodies, structure_body_ids)
+    r4 = optimized_v3(robot_bodies, structure_body_ids_set)
+
+    assert r1 == r2 == r3 == r4, "Results don't match!"
+    print(f"✓ All methods produce same result ({len(r1)} non-structure robots)\n")
+
+    # Warmup
+    print(f"Warming up ({warmup_iterations} iterations)...")
+    for _ in range(warmup_iterations):
+        current_implementation(robot_bodies, structure_body_ids)
+        optimized_v1(robot_bodies, structure_body_ids_set)
+        optimized_v2(robot_bodies, structure_body_ids)
+        optimized_v3(robot_bodies, structure_body_ids_set)
+
+    print("=" * 50)
+    print("Benchmark Results:")
+    print("=" * 50)
+
+    baseline = benchmark("Current (list comp)", current_implementation, iterations, robot_bodies, structure_body_ids)
+    v1 = benchmark("Optimized V1 (set diff)", optimized_v1, iterations, robot_bodies, structure_body_ids_set)
+    v2 = benchmark("Optimized V2 (for loop)", optimized_v2, iterations, robot_bodies, structure_body_ids)
+    v3 = benchmark("Optimized V3 (assume set)", optimized_v3, iterations, robot_bodies, structure_body_ids_set)
+
+    print("=" * 50)
+    print("Speedup factors (vs baseline):")
+    print(f"  V1: {baseline/v1:.2f}x")
+    print(f"  V2: {baseline/v2:.2f}x")
+    print(f"  V3: {baseline/v3:.2f}x")

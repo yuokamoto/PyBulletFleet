@@ -37,7 +37,11 @@ class MockSimCore:
         self.sim_objects = []
         self._next_object_id = 0
         self._kinematic_objects = set()
-        self.client = 0
+        self._client = 0
+
+    @property
+    def client(self):
+        return self._client
 
     def add_object(self, obj):
         self.sim_objects.append(obj)

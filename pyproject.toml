@@ -10,7 +10,7 @@ readme = "README.md"
 requires-python = ">=3.8"
 license = {file = "LICENSE"}
 authors = [
-    {name = "Yuki Okamoto", email = "yuokamoto1988@gmail.com"}
+    {name = "Yu Okamoto", email = "yuokamoto1988@gmail.com"}
 ]
 classifiers = [
     "Development Status :: 3 - Alpha",

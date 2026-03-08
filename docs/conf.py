@@ -5,8 +5,8 @@ sys.path.insert(0, os.path.abspath(".."))
 
 # -- Project information -----------------------------------------------------
 project = "PyBulletFleet"
-copyright = "2026, Yuki Okamoto"
-author = "Yuki Okamoto"
+copyright = "2026, Yu Okamoto"
+author = "Yu Okamoto"
 release = "0.1.0"
 
 # -- General configuration ---------------------------------------------------
@@ -17,6 +17,7 @@ extensions = [
     "sphinx_autodoc_typehints",
     "sphinx_copybutton",
     "myst_parser",
+    "sphinxcontrib.mermaid",
 ]
 
 templates_path = ["_templates"]
@@ -29,6 +30,7 @@ myst_enable_extensions = [
     "tasklist",
 ]
 myst_heading_anchors = 3
+myst_fence_as_directive = {"mermaid"}
 
 source_suffix = {
     ".rst": "restructuredtext",

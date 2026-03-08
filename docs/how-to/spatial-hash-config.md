@@ -254,7 +254,9 @@ spatial_hash_cell_size_mode: "auto_initial"
 
 # Other collision settings
 collision_check_frequency: 0.1  # seconds
-collision_check_2d: false       # 3D collision (27 neighbors)
+# NOTE: collision_mode is per-agent (set on AgentSpawnParams, not here)
+# Example: collision_mode: normal_2d  → 9 neighbors (XY plane)
+# Example: collision_mode: normal_3d  → 27 neighbors (full 3D, default)
 ```
 
 Load configuration:
@@ -273,55 +275,6 @@ sim = MultiRobotSimulationCore.from_yaml("config.yaml")
 | `auto_adaptive` | O(N log N) | **O(N log N)** | O(N) | Dynamic environments |
 | `auto_initial` | O(N log N) | O(1) | O(N) | **Most use cases** |
 
-**Benchmark (1000 objects):**
-- `constant`: 0ms overhead
-- `auto_adaptive`: ~2-5ms per add/remove
-- `auto_initial`: ~2ms one-time at startup
-
----
-
-## Migration Guide
-
-### From Previous Version (No Mode Configuration)
-
-Previous behavior is equivalent to `auto_initial` (default mode). No changes required:
-
-```python
-# Old code (still works)
-sim = MultiRobotSimulationCore(params)
-
-# Equivalent to:
-params = SimulationParams(spatial_hash_cell_size_mode="auto_initial")
-sim = MultiRobotSimulationCore(params)
-```
-
-### Optimizing Existing Code
-
-**For static scenes (structures + robots):**
-```python
-# Before: auto_initial (default)
-params = SimulationParams()
-
-# After: constant mode (benchmark to find optimal value)
-params = SimulationParams(
-    spatial_hash_cell_size_mode="constant",
-    spatial_hash_cell_size=2.5,  # benchmark-derived value
-)
-# Performance gain: ~2ms one-time savings at startup
-```
-
-**For dynamic spawning:**
-```python
-# Before: auto_initial (suboptimal for frequent add/remove)
-params = SimulationParams()
-
-# After: auto_adaptive (handles dynamic changes)
-params = SimulationParams(
-    spatial_hash_cell_size_mode="auto_adaptive",
-)
-# Trade-off: +2ms per add/remove, but always optimal cell_size
-```
-
 ---
 
 ## FAQ
@@ -330,12 +283,6 @@ params = SimulationParams(
 - Start with `auto_initial` (default)
 - Switch to `constant` if you can benchmark optimal cell_size
 - Use `auto_adaptive` only if object count changes frequently
-
-**Q: How do I find the optimal constant cell_size?**
-1. Run with `auto_initial` mode
-2. Check `sim._cached_cell_size` after initialization
-3. Use that value for `constant` mode
-4. Benchmark to verify performance
 
 **Q: Can I change mode at runtime?**
 No, mode is set at initialization via `SimulationParams`.
@@ -348,41 +295,6 @@ No, mode is set at initialization via `SimulationParams`.
 **Q: Does this affect collision accuracy?**
 No, cell_size only affects broad-phase performance. Narrow-phase collision detection (PyBullet's `getClosestPoints`) is always accurate.
 
----
-
-## Example: Production Configuration
-
-Recommended setup for 1000 robots + structures:
-
-```yaml
-# config.yaml
-target_rtf: 1.0
-timestep: 0.1
-gui: false
-physics: false
-monitor: true
-
-# Collision optimization
-collision_check_frequency: 0.1
-collision_check_2d: false
-ignore_static_collision: true
-
-# Spatial hash configuration
-spatial_hash_cell_size_mode: "constant"
-spatial_hash_cell_size: 2.0  # Tuned for 1m robots in 10m aisles
-
-# Profiling (development only)
-enable_time_profiling: false
-```
-
-```python
-# main.py
-sim = MultiRobotSimulationCore.from_yaml("config.yaml")
-
-# Verify configuration
-print(f"Cell size mode: {sim.params.spatial_hash_cell_size_mode}")
-print(f"Cell size: {sim._cached_cell_size}m")
-```
 
 ---
 

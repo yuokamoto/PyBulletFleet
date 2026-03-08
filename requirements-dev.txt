@@ -19,6 +19,9 @@ pre-commit>=3.0.0
 pytest>=7.0.0
 pytest-cov>=4.0.0
 
+# Benchmarking
+psutil>=5.9.0
+
 # Runtime dependencies (in case requirements.txt is not installed)
 pybullet>=3.0.0
 numpy>=1.20.0

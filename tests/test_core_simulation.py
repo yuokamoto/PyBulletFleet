@@ -588,7 +588,17 @@ class TestStepOnce:
         assert "total" in result
         assert "agent_update" in result
         assert "collision_check" in result
-        assert all(v >= 0 for v in result.values())
+        # Top-level float values should be non-negative
+        for key, val in result.items():
+            if isinstance(val, (int, float)):
+                assert val >= 0, f"{key} should be >= 0"
+        # collision_breakdown should be present and contain per-phase timings
+        assert "collision_breakdown" in result
+        breakdown = result["collision_breakdown"]
+        assert isinstance(breakdown, dict)
+        for phase in ("get_aabbs", "spatial_hashing", "aabb_filtering", "contact_points", "total"):
+            assert phase in breakdown
+            assert breakdown[phase] >= 0
 
     def test_multiple_steps_accumulate(self, sim_core):
         n = 50

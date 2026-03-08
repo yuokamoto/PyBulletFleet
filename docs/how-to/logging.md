@@ -52,19 +52,6 @@ lazy_logger.debug(lambda: "Simple message")
 lazy_logger.debug("Simple message also works")  # Backward compatible
 ```
 
-### Method 2: isEnabledFor Check (Good for Existing Code)
-
-```python
-import logging
-
-logger = logging.getLogger(__name__)
-
-# Protect expensive logging with isEnabledFor
-if logger.isEnabledFor(logging.DEBUG):
-    logger.debug(f"Array data: {numpy_array}")
-    logger.debug(f"Position: {position[:2]}")
-    logger.debug(f"Orientation: {quaternion}")
-```
 
 ### Method 2: isEnabledFor Check (Good for Existing Code)
 ```python
