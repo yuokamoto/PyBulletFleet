@@ -480,6 +480,31 @@ The profiling tools in `benchmark/profiling/` provide detailed CPU time analysis
 | `collision_check.py` | Detailed collision detection analysis | Get AABBs, Spatial Hashing, AABB Filtering, Contact Points |
 | `agent_update.py` | Detailed `Agent.update()` analysis | 5 methods (cProfile, Manual, PyBullet API, Stationary, Motion Modes) |
 | `agent_manager_set_goal.py` | Goal setting profiling | `set_goal_pose()` overhead and trajectory calculation |
+| `collision_mode_comparison.py` | Collision mode comparison | NORMAL_3D vs NORMAL_2D vs DISABLED step time |
+
+### Measurement Methods by Script
+
+Each profiling script uses one or more measurement techniques. The table below shows which `--test` options are available and what technique they use.
+
+| Script | `--test` Option | Technique | Description |
+|--------|----------------|-----------|-------------|
+| `simulation_profiler.py` | `builtin` (default) | `time.perf_counter` | Per-component timing via `step_once(return_profiling=True)` |
+| | `cprofile` | `cProfile` | Function-level call graph analysis |
+| | `motion_modes` | `time.perf_counter` | OMNIDIRECTIONAL vs DIFFERENTIAL comparison |
+| `collision_check.py` | `builtin` (default) | `time.perf_counter` | 4-stage pipeline breakdown via `check_collisions(return_profiling=True)` |
+| | `cprofile` | `cProfile` | Function-level analysis of collision path |
+| `agent_update.py` | `cprofile` (default) | `cProfile` | Function-level call graph of `agent.update()` |
+| | `manual` | `time.perf_counter` | Manual timing of update sub-steps |
+| | `pybullet` | `time.perf_counter` | PyBullet API call timing (resetBasePositionAndOrientation, etc.) |
+| | `stationary` | `time.perf_counter` | Stationary vs moving agent cost comparison |
+| | `motion_modes` | `time.perf_counter` | Per-motion-mode update cost |
+| `agent_manager_set_goal.py` | _(no option)_ | Both | `time.perf_counter` for wall time + `cProfile` for call graph (always runs both) |
+| `collision_mode_comparison.py` | _(no option)_ | `time.perf_counter` | Per-step wall time comparison across collision modes |
+
+**Technique summary:**
+- **`time.perf_counter`** — Measures wall-clock time of specific code sections. Low overhead, best for targeted measurements.
+- **`cProfile`** — Python's built-in profiler, captures all function calls with call counts and cumulative time. Higher overhead but reveals unexpected bottlenecks.
+- **`step_once(return_profiling=True)`** — Built-in profiling in `MultiRobotSimulationCore` that returns per-component timing dict (agent_update, collision_check, etc.).
 
 ### When to Use Each Tool
 
