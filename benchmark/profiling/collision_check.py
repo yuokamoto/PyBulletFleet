@@ -81,6 +81,7 @@ import pybullet as p
 from pybullet_fleet.core_simulation import MultiRobotSimulationCore, SimulationParams
 from pybullet_fleet.agent_manager import AgentManager, GridSpawnParams
 from pybullet_fleet.agent import AgentSpawnParams, MotionMode
+from pybullet_fleet.geometry import Pose
 
 
 def profile_collision_check_builtin(num_agents: int, num_iterations: int = 100):
@@ -94,6 +95,8 @@ def profile_collision_check_builtin(num_agents: int, num_iterations: int = 100):
     config_path = os.path.join(os.path.dirname(__file__), "profiling_config.yaml")
     params = SimulationParams.from_config(config_path)
     params.monitor = False  # Disable monitor for collision profiling
+    # Disable collision inside step_once; we call check_collisions separately
+    params.collision_check_frequency = 0
 
     sim_core = MultiRobotSimulationCore(params)
     agent_manager = AgentManager(sim_core=sim_core)
@@ -128,6 +131,11 @@ def profile_collision_check_builtin(num_agents: int, num_iterations: int = 100):
     )
     print(f"Spawned {len(agents)} agents")
 
+    # Set goals so agents actually move (required for _moved_this_step to be populated)
+    for agent in agents:
+        pos = agent.get_pose().position
+        agent.set_goal_pose(Pose.from_xyz(pos[0] + 5.0, pos[1] + 5.0, pos[2]))
+
     # Collect profiling data
     timings = {
         "get_aabbs": [],
@@ -142,10 +150,11 @@ def profile_collision_check_builtin(num_agents: int, num_iterations: int = 100):
 
     # Run iterations
     for iteration in range(num_iterations):
-        # Synchronize robot_bodies like in step_once()
-        sim_core.robot_bodies = [obj.body_id for obj in sim_core.sim_objects]
+        # Step agents so they move (populates _moved_this_step)
+        # collision_check_frequency=0 ensures no collision check inside step_once
+        sim_core.step_once()
 
-        # Get collision results + profiling data
+        # Measure collision check separately
         collision_pairs, iter_timings = sim_core.check_collisions(return_profiling=True)
 
         # Collect timings
@@ -195,6 +204,8 @@ def profile_collision_check_with_cprofile(num_agents: int):
     config_path = os.path.join(os.path.dirname(__file__), "profiling_config.yaml")
     params = SimulationParams.from_config(config_path)
     params.monitor = False  # Disable monitor for collision profiling
+    # Disable collision inside step_once; we call check_collisions under cProfile
+    params.collision_check_frequency = 0
 
     sim_core = MultiRobotSimulationCore(params)
     agent_manager = AgentManager(sim_core=sim_core)
@@ -229,21 +240,27 @@ def profile_collision_check_with_cprofile(num_agents: int):
     )
     print(f"Spawned {len(agents)} agents")
 
-    print("\ncProfile analysis of collision check...")
+    # Set goals so agents actually move
+    for agent in agents:
+        pos = agent.get_pose().position
+        agent.set_goal_pose(Pose.from_xyz(pos[0] + 5.0, pos[1] + 5.0, pos[2]))
+
+    num_cprofile_iterations = 50
+    print(f"\ncProfile analysis of collision check ({num_cprofile_iterations} iterations)...")
     print("=" * 70)
 
-    # Warm-up
-    sim_core.robot_bodies = [obj.body_id for obj in sim_core.sim_objects]
-    sim_core.check_collisions()
+    # Warm-up: step a few times to get agents moving
+    for _ in range(3):
+        sim_core.step_once()
+        sim_core.check_collisions()
 
-    # Profile
+    # Profile: step_once updates agents, then profile check_collisions separately
     profiler = cProfile.Profile()
     profiler.enable()
 
-    # Run collision check multiple times
-    for _ in range(10):
-        sim_core.robot_bodies = [obj.body_id for obj in sim_core.sim_objects]
-        sim_core.check_collisions()
+    for _ in range(num_cprofile_iterations):
+        sim_core.step_once()  # Move agents (populates _moved_this_step)
+        sim_core.check_collisions()  # <-- This is what we want to profile
 
     profiler.disable()
 
