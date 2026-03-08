@@ -7,6 +7,7 @@ Practical guides for common tasks.
 
 time-profiling
 memory-profiling
+custom-profiling
 logging
 spatial-hash-config
 ```

@@ -40,10 +40,5 @@ doc review
 2. exampleの追加
 
 benchmark
-- profiling
-    agent_manager_set_goal
-    agent update
-    collision checking
-    collision mode comparison
-    simulation_profiler -> done
 - experiments
+- doc

@@ -2052,6 +2052,39 @@ class MultiRobotSimulationCore:
     # Pause / Resume
     # ------------------------------------------------------------------
 
+    # ------------------------------------------------------------------
+    # Custom Profiling Fields
+    # ------------------------------------------------------------------
+
+    def record_profiling(self, name: str, value_ms: float) -> None:
+        """Record a custom profiling measurement (in milliseconds).
+
+        Call this from within Agent.update() or callback code to accumulate
+        timing data. Multiple calls per step are summed (e.g., 100 agents each
+        recording their custom_logic time). Auto-registers the field on first use.
+
+        The recorded field appears in both _print_profiling_summary() output and
+        step_once(return_profiling=True) results alongside built-in fields.
+
+        Args:
+            name: Field name (e.g., 'custom_logic', 'planner').
+                  Auto-registered on first call — no separate setup needed.
+            value_ms: Time measurement in milliseconds
+
+        Example:
+            # Inside your custom Agent.update():
+            t0 = time.perf_counter()
+            self._do_custom_logic(dt)
+            self.sim_core.record_profiling('custom_logic', (time.perf_counter() - t0) * 1000)
+        """
+        data = self._profiling_stats.get(name)
+        if data is None:
+            # Auto-register: create with initial 0.0 slot for current step
+            self._profiling_stats[name] = [value_ms]
+            return
+        if data:
+            data[-1] += value_ms
+
     def pause(self) -> None:
         """Pause the simulation. step_once will be skipped while paused."""
         self._simulation_paused = True
@@ -2090,6 +2123,7 @@ class MultiRobotSimulationCore:
                         'contact_points': float,
                         'total': float,
                     },
+                    '<custom_field>': float,       # present when custom fields registered
                     'monitor_update': float,
                     'total': float,
                 }
@@ -2118,6 +2152,12 @@ class MultiRobotSimulationCore:
         if self.is_paused:
             return
 
+        # Initialize profiling accumulators for this step (append 0.0 slot for ALL fields)
+        # Placed after pause/disconnect checks so paused steps don't accumulate stale entries
+        if measure_timing:
+            for data in self._profiling_stats.values():
+                data.append(0.0)
+
         # Physics objects are always considered as potentially moved (conservative approach)
         # This avoids expensive pose comparison every step
         # Note: _moved_this_step is cleared in check_collisions() to accumulate movements
@@ -2140,6 +2180,7 @@ class MultiRobotSimulationCore:
 
         if measure_timing:
             t1 = time.perf_counter()
+            self._profiling_stats["agent_update"][-1] = (t1 - t0) * 1000
 
         # Global callbacks (frequency control)
         if measure_timing:
@@ -2157,6 +2198,7 @@ class MultiRobotSimulationCore:
 
         if measure_timing:
             t_cb1 = time.perf_counter()
+            self._profiling_stats["callbacks"][-1] = (t_cb1 - t_cb0) * 1000
 
         # Check if PyBullet is still connected before stepping
         if not p.isConnected(physicsClientId=self.client):
@@ -2187,6 +2229,7 @@ class MultiRobotSimulationCore:
 
         if measure_timing:
             t_sim1 = time.perf_counter()
+            self._profiling_stats["step_simulation"][-1] = (t_sim1 - t_sim0) * 1000
 
         # Collision check frequency control
         if measure_timing:
@@ -2211,6 +2254,7 @@ class MultiRobotSimulationCore:
 
         if measure_timing:
             t_col1 = time.perf_counter()
+            self._profiling_stats["collision_check"][-1] = (t_col1 - t_col0) * 1000
 
         self._step_count += 1
         # Monitor: every step if GUI enabled, otherwise every second
@@ -2226,30 +2270,19 @@ class MultiRobotSimulationCore:
         if measure_timing:
             t_mon1 = time.perf_counter()
             t_end = time.perf_counter()
+            self._profiling_stats["monitor_update"][-1] = (t_mon1 - t_mon0) * 1000
+            self._profiling_stats["total"][-1] = (t_end - t_step) * 1000
 
-        # Return profiling data if requested
+        # Return profiling data if requested (pop values from _profiling_stats)
         if return_profiling:
-            result: Dict[str, Any] = {
-                "agent_update": 1000 * (t1 - t0),  # type: ignore[possibly-unbound]
-                "callbacks": 1000 * (t_cb1 - t_cb0),  # type: ignore[possibly-unbound]
-                "step_simulation": 1000 * (t_sim1 - t_sim0),  # type: ignore[possibly-unbound]
-                "collision_check": 1000 * (t_col1 - t_col0),  # type: ignore[possibly-unbound]
-                "monitor_update": 1000 * (t_mon1 - t_mon0),  # type: ignore[possibly-unbound]
-                "total": 1000 * (t_end - t_step),  # type: ignore[possibly-unbound]
-            }
+            result: Dict[str, Any] = {name: data.pop() for name, data in self._profiling_stats.items() if data}
             if collision_breakdown is not None:
                 result["collision_breakdown"] = collision_breakdown
             return result
 
         # Profiling output (only when time profiling is enabled and not returning data)
         if self._enable_time_profiling:
-            # Collect statistics for averaging
-            self._profiling_stats["agent_update"].append(1000 * (t1 - t0))  # type: ignore[possibly-unbound]
-            self._profiling_stats["callbacks"].append(1000 * (t_cb1 - t_cb0))  # type: ignore[possibly-unbound]
-            self._profiling_stats["step_simulation"].append(1000 * (t_sim1 - t_sim0))  # type: ignore[possibly-unbound]
-            self._profiling_stats["collision_check"].append(1000 * (t_col1 - t_col0))  # type: ignore[possibly-unbound]
-            self._profiling_stats["monitor_update"].append(1000 * (t_mon1 - t_mon0))  # type: ignore[possibly-unbound]
-            self._profiling_stats["total"].append(1000 * (t_end - t_step))  # type: ignore[possibly-unbound]
+            # All values already written to _profiling_stats via [-1] assignment/accumulation
 
             # Print average statistics every N steps
             if self._step_count % self._profiling_interval == 0 and len(self._profiling_stats["total"]) > 0:
@@ -2281,34 +2314,33 @@ class MultiRobotSimulationCore:
                 self._print_memory_profiling_summary()
 
     def _print_profiling_summary(self) -> None:
-        """Print profiling statistics summary (average over last N steps)."""
+        """Print profiling statistics summary (average over last N steps).
+
+        Prints all fields in _profiling_stats (built-in + custom) in a single line.
+        Custom fields recorded via record_profiling() appear alongside
+        built-in components automatically.
+        """
         if not self._profiling_stats["total"]:
             return
-
-        # Calculate statistics for each component
-        components = ["agent_update", "callbacks", "step_simulation", "collision_check", "monitor_update", "total"]
-        stats_info = []
 
         total_avg = statistics.mean(self._profiling_stats["total"])
         num_samples = len(self._profiling_stats["total"])
 
-        for comp in components:
-            data = self._profiling_stats[comp]
+        # Print all fields from _profiling_stats dict (preserves insertion order)
+        # Built-in fields come first (defined in __init__), custom fields follow
+        stats_info = []
+        for name, data in self._profiling_stats.items():
             if not data:
                 continue
-
             avg = statistics.mean(data)
-
-            # Calculate percentage of total
             percentage = (avg / total_avg * 100) if total_avg > 0 else 0
-
-            stats_info.append(f"{comp}={avg:.2f}ms ({percentage:.1f}%)")
+            stats_info.append(f"{name}={avg:.2f}ms ({percentage:.1f}%)")
 
         logger.info(f"[PROFILING] Last {num_samples} steps average: " + ", ".join(stats_info))
 
-        # Clear statistics for next interval
-        for comp in components:
-            self._profiling_stats[comp].clear()
+        # Clear all statistics for next interval
+        for data in self._profiling_stats.values():
+            data.clear()
 
     def _print_memory_profiling_summary(self) -> None:
         """

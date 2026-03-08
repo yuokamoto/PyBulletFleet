@@ -1941,3 +1941,119 @@ class TestRenderingControl:
 
         sim_core.enable_rendering()
         assert sim_core._rendering_enabled is False
+
+
+# ---------------------------------------------------------------------------
+# Custom Profiling Fields
+# ---------------------------------------------------------------------------
+
+
+class TestCustomProfilingFields:
+    """Tests for record_profiling API."""
+
+    def test_record_profiling_auto_registers(self, sim_core):
+        """First record_profiling call auto-registers the field in _profiling_stats."""
+        sim_core.record_profiling("custom_logic", 1.0)
+
+        assert "custom_logic" in sim_core._profiling_stats
+        assert sim_core._profiling_stats["custom_logic"] == [1.0]
+
+    def test_record_profiling_duplicate_no_extra_keys(self, sim_core):
+        """Multiple record_profiling calls don't create duplicate keys."""
+        sim_core.record_profiling("my_field", 1.0)
+        sim_core.record_profiling("my_field", 2.0)
+
+        assert list(sim_core._profiling_stats.keys()).count("my_field") == 1
+
+    def test_record_profiling_accumulates_within_step(self, sim_core):
+        """Multiple record_profiling calls within one step accumulate."""
+        sim_core._enable_time_profiling = True
+
+        # First call auto-registers with initial value
+        sim_core.record_profiling("work", 1.5)
+        # Second call accumulates into same slot
+        sim_core.record_profiling("work", 2.0)
+
+        assert sim_core._profiling_stats["work"][-1] == pytest.approx(3.5)
+
+    def test_record_profiling_resets_each_step(self, sim_core):
+        """Accumulators reset at the start of each step_once()."""
+        sim_core._enable_time_profiling = True
+
+        # Use a callback to record profiling DURING step_once
+        def record_cb(sc, dt):
+            sc.record_profiling("work", 5.0)
+
+        sim_core.register_callback(record_cb)
+
+        # First step: records 5.0
+        sim_core.step_once()
+
+        # Second step: new 0.0 slot is created, then callback records 5.0
+        # The previous step's value (5.0) should be in _profiling_stats history,
+        # not contaminating the new step
+        sim_core.step_once()
+
+        # Each step should independently have 5.0 (not accumulated 10.0)
+        assert sim_core._profiling_stats["work"][-1] == pytest.approx(5.0)
+
+    def test_custom_fields_in_return_profiling(self, sim_core):
+        """Custom fields appear in step_once(return_profiling=True) as top-level keys."""
+
+        # Use a callback to record profiling DURING step_once (simulates Agent.update())
+        def record_cb(sc, dt):
+            sc.record_profiling("my_compute", 0.42)
+
+        sim_core.register_callback(record_cb)
+
+        result = sim_core.step_once(return_profiling=True)
+
+        assert result is not None
+        assert "my_compute" in result
+        assert result["my_compute"] == pytest.approx(0.42)
+
+    def test_custom_fields_flushed_to_profiling_stats(self, sim_core):
+        """Custom fields are appended to _profiling_stats during enable_time_profiling."""
+        sim_core._enable_time_profiling = True
+
+        # Use a callback to record profiling DURING step_once
+        def record_cb(sc, dt):
+            sc.record_profiling("sensor_read", 1.23)
+
+        sim_core.register_callback(record_cb)
+        sim_core.step_once()
+
+        # The accumulated value should have been flushed to _profiling_stats
+        assert len(sim_core._profiling_stats["sensor_read"]) == 1
+        assert sim_core._profiling_stats["sensor_read"][0] == pytest.approx(1.23)
+
+    def test_custom_fields_in_print_summary(self, sim_core, caplog):
+        """Custom fields appear in _print_profiling_summary output."""
+        import logging
+
+        sim_core._enable_time_profiling = True
+
+        # Manually populate stats to trigger summary
+        sim_core._profiling_stats["planner"] = [0.5]
+        sim_core._profiling_stats["total"].append(2.0)
+        sim_core._profiling_stats["agent_update"].append(1.0)
+        sim_core._profiling_stats["callbacks"].append(0.1)
+        sim_core._profiling_stats["step_simulation"].append(0.1)
+        sim_core._profiling_stats["collision_check"].append(0.2)
+        sim_core._profiling_stats["monitor_update"].append(0.1)
+
+        with caplog.at_level(logging.INFO):
+            sim_core._print_profiling_summary()
+
+        # Custom field "planner" should appear in the log output
+        assert any("planner" in record.message for record in caplog.records)
+
+    def test_initialize_simulation_clears_custom_stats(self, sim_core):
+        """initialize_simulation() should clear custom profiling stats."""
+        sim_core.record_profiling("work", 1.0)  # auto-registers
+
+        sim_core.initialize_simulation()
+
+        assert sim_core._profiling_stats["work"] == []
+        # Field registration persists across initialize_simulation
+        assert "work" in sim_core._profiling_stats
