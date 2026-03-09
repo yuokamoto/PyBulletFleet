@@ -182,7 +182,6 @@ benchmark/
 │   ├── README.md
 │   ├── simulation_profiler.py         # step_once() component breakdown
 │   ├── collision_check.py             # Collision pipeline 4-stage analysis
-│   ├── collision_mode_comparison.py   # NORMAL_3D vs NORMAL_2D vs DISABLED
 │   ├── agent_update.py                # Agent.update() detailed analysis
 │   ├── agent_manager_set_goal.py      # set_goal_pose() profiling
 │   └── profiling_config.yaml          # Shared profiling configuration
@@ -192,6 +191,7 @@ benchmark/
 │   ├── collision_detection_methods_benchmark.py
 │   ├── collision_methods_config_based.py
 │   ├── collision_method_comparison.py
+│   ├── collision_mode_comparison.py   # NORMAL_3D vs NORMAL_2D vs DISABLED
 │   ├── performance_analysis.py
 │   ├── list_filtering_benchmark.py
 │   └── getaabb_performance.py

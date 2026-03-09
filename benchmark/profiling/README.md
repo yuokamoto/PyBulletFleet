@@ -14,7 +14,6 @@ All scripts live in `benchmark/profiling/`. For overall benchmark results and qu
 | `collision_check.py` | Detailed collision detection analysis | Get AABBs, Spatial Hashing, AABB Filtering, Contact Points |
 | `agent_update.py` | Detailed `Agent.update()` analysis | 5 methods (cProfile, Manual, PyBullet API, Stationary, Motion Modes) |
 | `agent_manager_set_goal.py` | Goal setting profiling | `set_goal_pose()` overhead and trajectory calculation |
-| `collision_mode_comparison.py` | Collision mode comparison | NORMAL_3D vs NORMAL_2D vs DISABLED step time |
 
 ## Measurement Methods by Script
 
@@ -33,7 +32,6 @@ Each profiling script uses one or more measurement techniques. The table below s
 | | `stationary` | `time.perf_counter` | Stationary vs moving agent cost comparison |
 | | `motion_modes` | `time.perf_counter` | Per-motion-mode update cost |
 | `agent_manager_set_goal.py` | _(no option)_ | Both | `time.perf_counter` for wall time + `cProfile` for call graph (always runs both) |
-| `collision_mode_comparison.py` | _(no option)_ | `time.perf_counter` | Per-step wall time comparison across collision modes |
 
 **Technique summary:**
 - **`time.perf_counter`** — Measures wall-clock time of specific code sections. Low overhead, best for targeted measurements.

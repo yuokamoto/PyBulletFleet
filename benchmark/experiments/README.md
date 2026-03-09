@@ -59,6 +59,21 @@ Outputs a table comparing time and detected collisions for each method at config
 
 See the Collision Detection Architecture page in the project documentation for design rationale.
 
+### `collision_mode_comparison.py`
+
+**Purpose:** Compare step-level performance across collision detection modes (NORMAL_3D vs NORMAL_2D vs DISABLED).
+
+```bash
+python benchmark/experiments/collision_mode_comparison.py --agents=1000 --iterations=100
+```
+
+**What it tests:**
+- No Collision (`CollisionMode.DISABLED`) — baseline with collision detection off
+- 2D Collision (`CollisionMode.NORMAL_2D`) — ignores Z-axis neighbors (9 neighbors)
+- 3D Collision (`CollisionMode.NORMAL_3D`) — checks all directions (27 neighbors)
+
+Outputs a comparison table with step time per mode and the relative cost of each collision mode.
+
 ---
 
 ## General Performance Experiments
