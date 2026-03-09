@@ -14,7 +14,7 @@ Usage:
 import sys
 import time
 from pathlib import Path
-from typing import List, Tuple
+from typing import Callable, List, Tuple
 
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -51,6 +51,7 @@ def create_test_objects(
     )
     sim = MultiRobotSimulationCore(params)
     sim.setup_pybullet()
+    pid = sim._client
 
     objects = []
     num_physics = int(num_objects * physics_ratio)
@@ -67,9 +68,12 @@ def create_test_objects(
         is_physics = i < num_physics
         mass = 1.0 if is_physics else 0.0
 
-        collision_shape = p.createCollisionShape(p.GEOM_BOX, halfExtents=[0.25, 0.25, 0.25])
+        collision_shape = p.createCollisionShape(p.GEOM_BOX, halfExtents=[0.25, 0.25, 0.25], physicsClientId=pid)
         visual_shape = p.createVisualShape(
-            p.GEOM_BOX, halfExtents=[0.25, 0.25, 0.25], rgbaColor=[1, 0, 0, 1] if is_physics else [0, 1, 0, 1]
+            p.GEOM_BOX,
+            halfExtents=[0.25, 0.25, 0.25],
+            rgbaColor=[1, 0, 0, 1] if is_physics else [0, 1, 0, 1],
+            physicsClientId=pid,
         )
 
         body_id = p.createMultiBody(
@@ -77,6 +81,7 @@ def create_test_objects(
             baseCollisionShapeIndex=collision_shape,
             baseVisualShapeIndex=visual_shape,
             basePosition=pos,
+            physicsClientId=pid,
         )
 
         obj = SimObject(body_id=body_id, sim_core=sim)
@@ -84,149 +89,91 @@ def create_test_objects(
         objects.append(obj)
 
     # Step simulation once to initialize
-    p.stepSimulation()
+    p.stepSimulation(physicsClientId=pid)
 
     return sim, objects
 
 
-def benchmark_get_contact_points(
-    sim: MultiRobotSimulationCore, pairs: List[Tuple[int, int]], iterations: int = 100
+# ---------------------------------------------------------------------------
+# Collision check strategies
+# ---------------------------------------------------------------------------
+# Each strategy is a callable (obj_id_i, obj_id_j, body_id_i, body_id_j) -> bool.
+# They are constructed via factory functions that capture `pid` and `sim`.
+
+
+def _make_contact_points_check(pid: int):
+    """getContactPoints for every pair."""
+
+    def check(_oi: int, _oj: int, bi: int, bj: int) -> bool:
+        return bool(p.getContactPoints(bi, bj, physicsClientId=pid))
+
+    return check
+
+
+def _make_closest_points_check(pid: int, distance: float = 0.0):
+    """getClosestPoints for every pair."""
+
+    def check(_oi: int, _oj: int, bi: int, bj: int) -> bool:
+        return bool(p.getClosestPoints(bi, bj, distance=distance, physicsClientId=pid))
+
+    return check
+
+
+def _make_hybrid_check(sim: MultiRobotSimulationCore, pid: int):
+    """getContactPoints for physics-physics pairs, getClosestPoints for the rest."""
+    physics_objects = sim._physics_objects
+
+    def check(oi: int, oj: int, bi: int, bj: int) -> bool:
+        if oi in physics_objects and oj in physics_objects:
+            return bool(p.getContactPoints(bi, bj, physicsClientId=pid))
+        return bool(p.getClosestPoints(bi, bj, distance=0.0, physicsClientId=pid))
+
+    return check
+
+
+# ---------------------------------------------------------------------------
+# Generic benchmark runner
+# ---------------------------------------------------------------------------
+
+
+def _benchmark_method(
+    sim: MultiRobotSimulationCore,
+    pairs: List[Tuple[int, int]],
+    check_fn: Callable[[int, int, int, int], bool],
+    iterations: int = 100,
+    warmup: int = 5,
 ) -> Tuple[float, float]:
     """
-    Benchmark getContactPoints for all pairs.
+    Benchmark a collision check strategy over random pairs.
 
     Args:
-        sim: Simulation core
+        sim: Simulation core (used to resolve object IDs → body IDs)
         pairs: List of (obj_id_i, obj_id_j) pairs to check
-        iterations: Number of iterations
+        check_fn: Callable(obj_id_i, obj_id_j, body_id_i, body_id_j) -> bool
+        iterations: Timed iterations
+        warmup: Untimed warmup iterations
 
     Returns:
-        Tuple of (mean, stdev) time per iteration in milliseconds
+        Tuple of (mean_ms, stdev_ms) per iteration
     """
+    objs = sim._sim_objects_dict
+    # Pre-resolve to (obj_id_i, obj_id_j, body_id_i, body_id_j) tuples
+    resolved = [(oi, oj, objs[oi].body_id, objs[oj].body_id) for oi, oj in pairs]
+
+    # Warmup
+    for _ in range(warmup):
+        for oi, oj, bi, bj in resolved:
+            check_fn(oi, oj, bi, bj)
+
+    # Timed runs
     times = []
-
-    # Warmup iterations
-    for _ in range(5):
-        for obj_id_i, obj_id_j in pairs:
-            obj_i = sim._sim_objects_dict[obj_id_i]
-            obj_j = sim._sim_objects_dict[obj_id_j]
-            p.getContactPoints(obj_i.body_id, obj_j.body_id)
-
     for _ in range(iterations):
         t0 = time.perf_counter()
+        for oi, oj, bi, bj in resolved:
+            check_fn(oi, oj, bi, bj)
+        times.append((time.perf_counter() - t0) * 1000)
 
-        collision_count = 0
-        for obj_id_i, obj_id_j in pairs:
-            obj_i = sim._sim_objects_dict[obj_id_i]
-            obj_j = sim._sim_objects_dict[obj_id_j]
-
-            contact_points = p.getContactPoints(obj_i.body_id, obj_j.body_id)
-            if contact_points:
-                collision_count += 1
-
-        elapsed = (time.perf_counter() - t0) * 1000  # ms
-        times.append(elapsed)
-
-    return np.mean(times), np.std(times)
-
-
-def benchmark_get_closest_points(
-    sim: MultiRobotSimulationCore, pairs: List[Tuple[int, int]], distance: float = 0.0, iterations: int = 100
-) -> Tuple[float, float]:
-    """
-    Benchmark getClosestPoints for all pairs.
-
-    Args:
-        sim: Simulation core
-        pairs: List of (obj_id_i, obj_id_j) pairs to check
-        distance: Maximum distance to check (0.0 = contact only)
-        iterations: Number of iterations
-
-    Returns:
-        Tuple of (mean, stdev) time per iteration in milliseconds
-    """
-    times = []
-
-    # Warmup iterations
-    for _ in range(5):
-        for obj_id_i, obj_id_j in pairs:
-            obj_i = sim._sim_objects_dict[obj_id_i]
-            obj_j = sim._sim_objects_dict[obj_id_j]
-            p.getClosestPoints(obj_i.body_id, obj_j.body_id, distance=distance)
-
-    for _ in range(iterations):
-        t0 = time.perf_counter()
-
-        collision_count = 0
-        for obj_id_i, obj_id_j in pairs:
-            obj_i = sim._sim_objects_dict[obj_id_i]
-            obj_j = sim._sim_objects_dict[obj_id_j]
-
-            closest_points = p.getClosestPoints(obj_i.body_id, obj_j.body_id, distance=distance)
-            if closest_points:
-                collision_count += 1
-
-        elapsed = (time.perf_counter() - t0) * 1000  # ms
-        times.append(elapsed)
-
-    return np.mean(times), np.std(times)
-
-
-def benchmark_hybrid_approach(
-    sim: MultiRobotSimulationCore, pairs: List[Tuple[int, int]], iterations: int = 100
-) -> Tuple[float, float]:
-    """
-    Benchmark hybrid approach: getClosestPoints for kinematic + getContactPoints for physics.
-
-    Args:
-        sim: Simulation core
-        pairs: List of (obj_id_i, obj_id_j) pairs to check
-        iterations: Number of iterations
-
-    Returns:
-        Tuple of (mean, stdev) time per iteration in milliseconds
-    """
-    times = []
-
-    # Warmup iterations
-    for _ in range(5):
-        for obj_id_i, obj_id_j in pairs:
-            obj_i = sim._sim_objects_dict[obj_id_i]
-            obj_j = sim._sim_objects_dict[obj_id_j]
-            is_physics_i = obj_id_i in sim._physics_objects
-            is_physics_j = obj_id_j in sim._physics_objects
-            if is_physics_i and is_physics_j:
-                p.getContactPoints(obj_i.body_id, obj_j.body_id)
-            else:
-                p.getClosestPoints(obj_i.body_id, obj_j.body_id, distance=0.0)
-
-    for _ in range(iterations):
-        t0 = time.perf_counter()
-
-        collision_count = 0
-        for obj_id_i, obj_id_j in pairs:
-            obj_i = sim._sim_objects_dict[obj_id_i]
-            obj_j = sim._sim_objects_dict[obj_id_j]
-
-            # Check if both objects are physics objects
-            is_physics_i = obj_id_i in sim._physics_objects
-            is_physics_j = obj_id_j in sim._physics_objects
-
-            if is_physics_i and is_physics_j:
-                # Both physics: use getContactPoints
-                contact_points = p.getContactPoints(obj_i.body_id, obj_j.body_id)
-                if contact_points:
-                    collision_count += 1
-            else:
-                # At least one kinematic: use getClosestPoints
-                closest_points = p.getClosestPoints(obj_i.body_id, obj_j.body_id, distance=0.0)
-                if closest_points:
-                    collision_count += 1
-
-        elapsed = (time.perf_counter() - t0) * 1000  # ms
-        times.append(elapsed)
-
-    return np.mean(times), np.std(times)
+    return float(np.mean(times)), float(np.std(times))
 
 
 def run_benchmark(num_objects: int, physics_ratio: float, num_pairs: int = 50, iterations: int = 100) -> dict:
@@ -281,9 +228,10 @@ def run_benchmark(num_objects: int, physics_ratio: float, num_pairs: int = 50, i
     # Run benchmarks
     print(f"\nRunning benchmarks ({iterations} iterations each, 5 warmup iterations)...")
 
-    time_contact, std_contact = benchmark_get_contact_points(sim, pairs, iterations)
-    time_closest, std_closest = benchmark_get_closest_points(sim, pairs, distance=0.0, iterations=iterations)
-    time_hybrid, std_hybrid = benchmark_hybrid_approach(sim, pairs, iterations)
+    pid = sim._client
+    time_contact, std_contact = _benchmark_method(sim, pairs, _make_contact_points_check(pid), iterations)
+    time_closest, std_closest = _benchmark_method(sim, pairs, _make_closest_points_check(pid, distance=0.0), iterations)
+    time_hybrid, std_hybrid = _benchmark_method(sim, pairs, _make_hybrid_check(sim, pid), iterations)
 
     # Results
     print("\nResults (average time ± stdev per iteration):")
@@ -299,7 +247,10 @@ def run_benchmark(num_objects: int, physics_ratio: float, num_pairs: int = 50, i
         print(f"\n❌ Hybrid approach is {slowdown:.1f}% slower than current implementation")
 
     # Cleanup
-    p.disconnect()
+    try:
+        p.disconnect(sim._client)
+    except p.error:
+        pass
 
     return {
         "num_objects": num_objects,

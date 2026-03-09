@@ -52,11 +52,20 @@ def create_test_scene(sim: MultiRobotSimulationCore, num_objects: int = 100, phy
         mass = 1.0 if is_physics else 0.0
 
         # Create object
-        collision_shape = p.createCollisionShape(p.GEOM_BOX, halfExtents=[object_size, object_size, object_size])
-        visual_shape = p.createVisualShape(p.GEOM_BOX, halfExtents=[object_size, object_size, object_size])
+        client = sim._client
+        collision_shape = p.createCollisionShape(
+            p.GEOM_BOX, halfExtents=[object_size, object_size, object_size], physicsClientId=client
+        )
+        visual_shape = p.createVisualShape(
+            p.GEOM_BOX, halfExtents=[object_size, object_size, object_size], physicsClientId=client
+        )
 
         body_id = p.createMultiBody(
-            baseMass=mass, baseCollisionShapeIndex=collision_shape, baseVisualShapeIndex=visual_shape, basePosition=[x, y, z]
+            baseMass=mass,
+            baseCollisionShapeIndex=collision_shape,
+            baseVisualShapeIndex=visual_shape,
+            basePosition=[x, y, z],
+            physicsClientId=client,
         )
 
         # Add to simulation
@@ -65,21 +74,25 @@ def create_test_scene(sim: MultiRobotSimulationCore, num_objects: int = 100, phy
 
         # Apply random velocity to physics objects
         if is_physics:
-            p.resetBaseVelocity(body_id, linearVelocity=[np.random.uniform(-2.0, 2.0), np.random.uniform(-2.0, 2.0), 0])
+            p.resetBaseVelocity(
+                body_id,
+                linearVelocity=[np.random.uniform(-2.0, 2.0), np.random.uniform(-2.0, 2.0), 0],
+                physicsClientId=client,
+            )
 
     return objects
 
 
 def move_kinematic_objects(objects, timestep: float, velocities: dict):
-    """Move kinematic objects manually."""
+    """Move kinematic objects manually via set_pose_raw (populates _moved_this_step)."""
     for obj, is_physics in objects:
         if not is_physics:
             if obj.body_id not in velocities:
                 velocities[obj.body_id] = np.array([np.random.uniform(-2.0, 2.0), np.random.uniform(-2.0, 2.0), 0])
 
-            pos, orn = p.getBasePositionAndOrientation(obj.body_id)
-            new_pos = np.array(pos) + velocities[obj.body_id] * timestep
-            p.resetBasePositionAndOrientation(obj.body_id, new_pos.tolist(), orn)
+            pose = obj.get_pose()
+            new_pos = (np.array(pose.position) + velocities[obj.body_id] * timestep).tolist()
+            obj.set_pose_raw(new_pos, pose.orientation, preserve_velocity=False)
 
 
 def run_benchmark(config_path: str, num_objects: int = 100, num_steps: int = 500):
@@ -121,7 +134,12 @@ def run_benchmark(config_path: str, num_objects: int = 100, num_steps: int = 500
     for step in range(100):
         move_kinematic_objects(objects, sim.params.timestep, kinematic_velocities)
         if params.physics:
-            p.stepSimulation()
+            p.stepSimulation(physicsClientId=sim._client)
+            # Mark physics objects as moved (stepSimulation changes their positions
+            # but doesn't go through set_pose, so _moved_this_step isn't populated)
+            for obj, is_phys in objects:
+                if is_phys:
+                    sim._moved_this_step.add(obj.object_id)
 
     # Count collisions after warmup
     active_pairs, _ = sim.check_collisions(return_profiling=False)
@@ -141,7 +159,11 @@ def run_benchmark(config_path: str, num_objects: int = 100, num_steps: int = 500
 
         # Step physics (if enabled)
         if params.physics:
-            p.stepSimulation()
+            p.stepSimulation(physicsClientId=sim._client)
+            # Mark physics objects as moved (stepSimulation bypasses set_pose)
+            for obj, is_phys in objects:
+                if is_phys:
+                    sim._moved_this_step.add(obj.object_id)
 
         # Measure collision detection time
         t_col_start = time.perf_counter()
@@ -163,7 +185,10 @@ def run_benchmark(config_path: str, num_objects: int = 100, num_steps: int = 500
     avg_collisions = np.mean(total_collisions)
 
     # Cleanup
-    p.disconnect()
+    try:
+        p.disconnect(sim._client)
+    except p.error:
+        pass
 
     print("\nResults:")
     print(f"  Average step time: {avg_step:.3f}ms")

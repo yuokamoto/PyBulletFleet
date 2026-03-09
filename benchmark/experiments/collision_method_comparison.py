@@ -44,11 +44,11 @@ Usage:
     # Compare all methods
     python collision_method_comparison.py --agents=100,500,1000 --methods=all
 
-    # Compare specific methods only (comparison with no-args version)
+    # Compare specific methods only
     python collision_method_comparison.py --agents=1000 --methods=spatial,contact,pairwise
 
-    # With detailed profiling
-    python collision_method_comparison.py --agents=1000 --profile
+    # Compare two methods
+    python collision_method_comparison.py --agents=100 --methods=spatial,contact
 
 Example Output:
     ===================================================================
@@ -126,8 +126,28 @@ from pybullet_fleet.agent_manager import AgentManager, GridSpawnParams
 from pybullet_fleet.agent import AgentSpawnParams, MotionMode
 
 
-def setup_simulation(num_agents: int):
-    """Set up the simulation environment"""
+def _mark_all_objects_moved(sim_core) -> None:
+    """Mark all objects as moved so that check_collisions() performs a full check.
+
+    check_collisions() uses an incremental optimization that only re-checks
+    pairs involving objects that moved since the last call.  In a benchmark
+    loop where step_once() is NOT called between iterations, the moved set is
+    empty after the first call, making Spatial Hashing appear orders of
+    magnitude faster than it really is.  Calling this before each iteration
+    ensures a fair, full-check comparison.
+    """
+    for obj in sim_core.sim_objects:
+        sim_core._moved_this_step.add(obj.object_id)
+
+
+def setup_simulation(num_agents: int, spacing: float = 1.0):
+    """Set up the simulation environment
+
+    Args:
+        num_agents: Number of agents to spawn
+        spacing: Grid spacing in meters. Default 1.0m gives no collisions
+            with simple_cube (0.1m). Use <=0.09 for dense/overlapping placement.
+    """
     if p.isConnected():
         p.disconnect()
 
@@ -147,7 +167,7 @@ def setup_simulation(num_agents: int):
         y_max=grid_size - 1,
         z_min=0,
         z_max=0,
-        spacing=[1.0, 1.0, 0.0],
+        spacing=[spacing, spacing, 0.0],
         offset=[0.0, 0.0, 0.1],
     )
 
@@ -171,6 +191,10 @@ def setup_simulation(num_agents: int):
 
 def method_spatial_hashing(sim_core) -> Tuple[List, float]:
     """Method 1: Spatial Hashing (Current implementation)"""
+    # Mark all objects as moved to force a full check (fair comparison).
+    # Without this, check_collisions() short-circuits on the 2nd+ call
+    # because _moved_this_step is empty (no step_once() between iterations).
+    _mark_all_objects_moved(sim_core)
     t0 = time.perf_counter()
     collision_pairs, _ = sim_core.check_collisions(return_profiling=False)
     elapsed = (time.perf_counter() - t0) * 1000
@@ -187,8 +211,8 @@ def method_brute_force(sim_core) -> Tuple[List, float]:
     for i in range(len(objects)):
         for j in range(i + 1, len(objects)):
             # AABB overlap check
-            aabb_a = p.getAABB(objects[i].body_id)
-            aabb_b = p.getAABB(objects[j].body_id)
+            aabb_a = p.getAABB(objects[i].body_id, physicsClientId=sim_core._client)
+            aabb_b = p.getAABB(objects[j].body_id, physicsClientId=sim_core._client)
 
             # Check AABB overlap
             if (
@@ -201,7 +225,7 @@ def method_brute_force(sim_core) -> Tuple[List, float]:
             ):
 
                 # Detailed collision check
-                contact_points = p.getContactPoints(objects[i].body_id, objects[j].body_id)
+                contact_points = p.getContactPoints(objects[i].body_id, objects[j].body_id, physicsClientId=sim_core._client)
                 if contact_points:
                     collision_pairs.append((i, j))
 
@@ -218,7 +242,9 @@ def method_get_closest_points(sim_core, distance_threshold: float = 0.01) -> Tup
 
     for i in range(len(objects)):
         for j in range(i + 1, len(objects)):
-            closest_points = p.getClosestPoints(objects[i].body_id, objects[j].body_id, distance=distance_threshold)
+            closest_points = p.getClosestPoints(
+                objects[i].body_id, objects[j].body_id, distance=distance_threshold, physicsClientId=sim_core._client
+            )
             if closest_points and len(closest_points) > 0:
                 # Check if distance is below threshold
                 if closest_points[0][8] < distance_threshold:  # distance is at index 8
@@ -229,13 +255,17 @@ def method_get_closest_points(sim_core, distance_threshold: float = 0.01) -> Tup
 
 
 def method_get_contact_points_all(sim_core) -> Tuple[List, float]:
-    """Method 4: PyBullet getContactPoints (no args - batch all contacts)"""
+    """Method 4: PyBullet getContactPoints (no args - batch all contacts)
+
+    Note: Calls stepSimulation() first to populate PyBullet's internal contact
+    buffer, then retrieves ALL contacts in a single getContactPoints() call.
+    """
     t0 = time.perf_counter()
 
     # Step simulation to populate the contact buffer before querying
-    p.stepSimulation()
+    p.stepSimulation(physicsClientId=sim_core._client)
     # Call getContactPoints() without arguments to retrieve all contact points in batch
-    all_contacts = p.getContactPoints()
+    all_contacts = p.getContactPoints(physicsClientId=sim_core._client)
 
     # Extract body_id pairs (use set to avoid duplicates)
     collision_pairs_set = set()
@@ -268,7 +298,7 @@ def method_get_contact_points_pairwise(sim_core) -> Tuple[List, float]:
 
     for i in range(len(objects)):
         for j in range(i + 1, len(objects)):
-            contact_points = p.getContactPoints(objects[i].body_id, objects[j].body_id)
+            contact_points = p.getContactPoints(objects[i].body_id, objects[j].body_id, physicsClientId=sim_core._client)
             if contact_points:
                 collision_pairs.append((i, j))
 
@@ -336,6 +366,24 @@ def print_comparison_table(results_list: List[Dict], num_agents: int):
         speedup = baseline_time / fastest["time_mean"]
         print(f"  {speedup:.2f}x faster than Spatial Hashing")
 
+    # Warnings for unreliable results
+    all_zero = all(r["collisions_mean"] == 0 for r in results_list)
+    if all_zero:
+        print("\n  WARNING: All methods detected 0 collisions.")
+        print("  Objects may be too far apart (spacing too large for object size).")
+        print("  Speed comparison is unreliable — methods doing no work appear fast.")
+        print("  Reduce spacing or increase object size to generate actual collisions.")
+
+    # Check for collision count mismatches between methods
+    counts = {r["method"]: r["collisions_mean"] for r in results_list}
+    unique_counts = set(counts.values())
+    if len(unique_counts) > 1 and not all_zero:
+        print("\n  WARNING: Collision count mismatch between methods!")
+        for method, count in counts.items():
+            print(f"    {method}: {count:.0f}")
+        print("  getContactPoints variants cannot detect kinematic-kinematic collisions.")
+        print("  Only getClosestPoints (used by Spatial Hashing) works for mass=0 objects.")
+
 
 def main():
     import argparse
@@ -346,7 +394,12 @@ def main():
         "--methods", type=str, default="all", help="Methods to test: all, spatial, brute, closest, contact, pairwise"
     )
     parser.add_argument("--iterations", type=int, default=100, help="Iterations per configuration")
-    parser.add_argument("--profile", action="store_true", help="Enable detailed profiling")
+    parser.add_argument(
+        "--spacing",
+        type=float,
+        default=1.0,
+        help="Grid spacing in meters (default: 1.0). Use <=0.09 for collisions with simple_cube.",
+    )
     args = parser.parse_args()
 
     # Parse agent counts
@@ -374,6 +427,7 @@ def main():
     print("\nTest Configuration:")
     print(f"  Agents: {', '.join(map(str, agent_counts))}")
     print(f"  Methods: {', '.join([v[0] for v in selected_methods.values()])}")
+    print(f"  Spacing: {args.spacing}m")
     print(f"  Iterations: {args.iterations} per configuration")
 
     # Run benchmarks
@@ -382,32 +436,26 @@ def main():
     for num_agents in agent_counts:
         print(f"\n[{agent_counts.index(num_agents)+1}/{len(agent_counts)}] Benchmarking {num_agents} agents...")
 
-        sim_core, agents = setup_simulation(num_agents)
+        sim_core, agents = setup_simulation(num_agents, spacing=args.spacing)
 
         results = []
         for method_key, (method_name, method_func) in selected_methods.items():
             print(f"  Testing {method_name}...")
+            if method_name == "getContactPoints() [No Args]":
+                print("    (calls stepSimulation() + getContactPoints() with no arguments)")
             result = benchmark_method(method_name, method_func, sim_core, args.iterations)
             results.append(result)
 
         all_results[num_agents] = results
 
-        p.disconnect()
+        try:
+            p.disconnect(sim_core._client)
+        except p.error:
+            pass
 
     # Print results
     for num_agents in agent_counts:
         print_comparison_table(all_results[num_agents], num_agents)
-
-    # Summary
-    print("\n" + "=" * 70)
-    print("Recommendation")
-    print("=" * 70)
-    print("\n- Small simulations (<100 agents): Brute Force (simpler, potentially faster)")
-    print("- Medium simulations (100-500 agents): Spatial Hashing (balanced)")
-    print("- Large simulations (>500 agents): Spatial Hashing (best scalability)")
-    print("\nSpatial Hashing scales as O(N), Brute Force as O(N²)")
-    print("\nFor maximum accuracy, all methods should detect the same collisions.")
-    print("=" * 70)
 
 
 if __name__ == "__main__":

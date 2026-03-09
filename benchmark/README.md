@@ -188,16 +188,16 @@ benchmark/
 │
 ├── experiments/                       # Experiment scripts → see experiments/README.md
 │   ├── README.md
-│   ├── collision_detection_methods_benchmark.py
 │   ├── collision_methods_config_based.py
 │   ├── collision_method_comparison.py
 │   ├── collision_mode_comparison.py   # NORMAL_3D vs NORMAL_2D vs DISABLED
-│   ├── performance_analysis.py
-│   ├── list_filtering_benchmark.py
-│   └── getaabb_performance.py
+│   └── performance_analysis.py
 │
 └── archive/                           # Deprecated tools
     ├── collision_check_v1.py
+    ├── collision_detection_methods_benchmark.py
+    ├── getaabb_performance.py
+    ├── list_filtering_benchmark.py
     ├── parse_profile.py
     ├── simple_agent_profile.py
     └── update_benchmark.py
