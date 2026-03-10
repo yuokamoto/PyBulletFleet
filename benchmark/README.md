@@ -95,10 +95,10 @@ python benchmark/profiling/agent_update.py --agents=1000 --test=cprofile
 
 | Agents | RTF (×) | Step Time (ms) | Collisions Scale |
 |--------|---------|-----------------|------------------|
-| 100    | 46.0    | 2.2             | Excellent        |
-| 500    | 7.1     | 14.1            | Good             |
-| 1000   | 3.1     | 32.0            | Good             |
-| 2000   | 1.2     | 84.6            | Real-time limit  |
+| 100    | 41.4    | 2.4             | Excellent        |
+| 500    | 6.7     | 15.0            | Excellent        |
+| 1000   | 2.4     | 42.4            | Excellent        |
+| 2000   | 1.1     | 88.6            | Good             |
 
 **Real-Time Factor (RTF):** How many seconds of simulation time per 1 second of wall-clock time (higher is better; >1.0 = faster than real-time).
 
@@ -121,11 +121,11 @@ All runs use kinematics mode (physics OFF), headless (DIRECT), half of agents mo
 
 | Agents | RTF (×) | Step Time (ms) | Spawn Time (s) | Memory Delta (MB) |
 |--------|---------|----------------|------------------|--------------------|
-| 100    | 46.03±4.06 | 2.17±0.18  | 0.026±0.001      | −23.83±0.06        |
-| 250    | 16.12±1.41 | 6.20±0.50  | 0.062±0.001      | −19.68±0.09        |
-| 500    | 7.11±0.11  | 14.06±0.22 | 0.128±0.004      | −12.12±0.02        |
-| 1000   | 3.12±0.09  | 32.04±0.87 | 0.254±0.003      | 3.04±0.20          |
-| 2000   | 1.18±0.02  | 84.63±1.72 | 0.653±0.051      | 29.52±0.02         |
+| 100    | 41.41±2.56 | 2.42±0.15  | 0.028±0.002      | −23.75±0.02        |
+| 250    | 14.99±0.57 | 6.68±0.25  | 0.066±0.001      | −19.60±0.10        |
+| 500    |  6.66±0.10 | 15.01±0.23 | 0.134±0.001      | −12.18±0.04        |
+| 1000   |  2.36±0.06 | 42.36±0.99 | 0.368±0.004      |  +3.02±0.08        |
+| 2000   |  1.13±0.01 | 88.63±1.01 | 0.778±0.088      | +29.50±0.04        |
 
 Negative memory delta = OS page-cache effects (process used less than baseline).
 
@@ -149,15 +149,15 @@ Agent Update dominates (path-following, velocity computation, `resetBasePosition
 
 ```text
 Agents:     100  →   250  →   500  →  1000  →  2000
-Step (ms):  2.17 →  6.20 → 14.06 → 32.04 → 84.63
-Ratio:      1.0x →  2.9x →  6.5x → 14.8x → 39.0x
+Step (ms):  2.42 →  6.68 → 15.01 → 42.36 → 88.63
+Ratio:      1.0x →  2.8x →  6.2x → 17.5x → 36.6x
 ```
 
 - **Step Time:** ~O(n^1.3). Near-linear below 500 agents; super-linear above due to collision-pair density.
 - **Spawn Time:** Linear (~0.25 ms per agent).
 - **Memory:** Linear above ~500 agents (~20 KB per agent).
 
-*Data collected 2026-03-08 on the test environment described above.*
+*Data collected 2026-03-10 on the test environment described above.*
 
 ---
 
