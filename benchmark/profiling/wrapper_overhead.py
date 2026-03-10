@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-test_performance_analysis.py
-Performance analysis with process isolation + CPU time metrics.
+wrapper_overhead.py
+Wrapper-layer overhead analysis with process isolation + CPU time metrics.
 
 Measures:
 - Spawn time and memory overhead for SimObject, Agent, and their Manager classes
@@ -31,7 +31,7 @@ import statistics
 import subprocess
 import argparse
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 import pybullet as p
 from pybullet_fleet.core_simulation import MultiRobotSimulationCore, SimulationParams
@@ -338,12 +338,13 @@ def test_simobject_manager(num_objects: int) -> dict:
     get_pose_wall_s = time.perf_counter() - w1
     get_pose_cpu_s = cpu_time_s(proc) - cpu1
 
-    # Update: set_pose (bulk) - wall + CPU
-    new_poses = [Pose.from_xyz(p.position[0], p.position[1], p.position[2] + 0.01) for p in poses]
+    # Update: set_pose_all (bulk) - wall + CPU
+    new_pose_map = {
+        obj: Pose.from_xyz(pos.position[0], pos.position[1], pos.position[2] + 0.01) for obj, pos in zip(objects, poses)
+    }
     cpu2 = cpu_time_s(proc)
     w2 = time.perf_counter()
-    for obj, new_pose in zip(objects, new_poses):
-        obj.set_pose(new_pose)
+    manager.set_pose_all(lambda obj, _m=new_pose_map: _m[obj])
     set_pose_wall_s = time.perf_counter() - w2
     set_pose_cpu_s = cpu_time_s(proc) - cpu2
 
@@ -363,7 +364,7 @@ def test_simobject_manager(num_objects: int) -> dict:
     if p.isConnected():
         p.disconnect()
     tracemalloc.stop()
-    del objects, poses, new_poses, manager, sim_core
+    del objects, poses, new_pose_map, manager, sim_core
     force_cleanup()
 
     return {
@@ -542,15 +543,16 @@ def test_agent_manager(num_objects: int) -> dict:
     get_pose_wall_s = time.perf_counter() - w1
     get_pose_cpu_s = cpu_time_s(proc) - cpu1
 
-    # Update: set_pose (bulk) - wall + CPU
+    # Update: set_pose_all (bulk) - wall + CPU
     # Note: Using set_pose instead of set_goal_pose because set_goal_pose is not
     # intended to be called every step (it recalculates trajectories).
     # set_pose is the equivalent of SimObject.set_pose for direct position updates.
-    new_poses = [Pose.from_xyz(p.position[0], p.position[1], p.position[2] + 0.01) for p in poses]
+    new_pose_map = {
+        agent: Pose.from_xyz(pos.position[0], pos.position[1], pos.position[2] + 0.01) for agent, pos in zip(agents, poses)
+    }
     cpu2 = cpu_time_s(proc)
     w2 = time.perf_counter()
-    for i, agent in enumerate(agents):
-        agent.set_pose(new_poses[i])
+    manager.set_pose_all(lambda agent, _m=new_pose_map: _m[agent])
     set_pose_wall_s = time.perf_counter() - w2
     set_pose_cpu_s = cpu_time_s(proc) - cpu2
 
@@ -570,7 +572,7 @@ def test_agent_manager(num_objects: int) -> dict:
     if p.isConnected():
         p.disconnect()
     tracemalloc.stop()
-    del agents, poses, new_poses, manager, sim_core
+    del agents, poses, new_pose_map, manager, sim_core
     force_cleanup()
 
     return {
@@ -749,67 +751,10 @@ def print_stats(label: str, st: dict):
         )
 
 
-def print_stats_run_simulation(label: str, st: dict):
-    """Print statistics for run_simulation test."""
-    print(f"\n{label}:")
-    print(
-        f"  Spawn time: {st['spawn_time_s']['median']:.3f}s "
-        f"(±{st['spawn_time_s']['stdev']:.3f}s, "
-        f"min={st['spawn_time_s']['min']:.3f}, max={st['spawn_time_s']['max']:.3f})"
-    )
-
-    if "simulation_duration_s" in st:
-        print(f"  Simulation duration: {st['simulation_duration_s']['median']:.2f}s")
-
-    if "simulation_wall_s" in st:
-        print(
-            f"  Wall time (simulation): {st['simulation_wall_s']['median']:.3f}s "
-            f"(±{st['simulation_wall_s']['stdev']:.3f}s, "
-            f"min={st['simulation_wall_s']['min']:.3f}, "
-            f"max={st['simulation_wall_s']['max']:.3f})"
-        )
-
-    if "real_time_factor" in st:
-        print(
-            f"  Real-Time Factor: {st['real_time_factor']['median']:.2f}x "
-            f"(±{st['real_time_factor']['stdev']:.2f}x, "
-            f"min={st['real_time_factor']['min']:.2f}x, "
-            f"max={st['real_time_factor']['max']:.2f}x)"
-        )
-
-    if "expected_steps" in st:
-        print(f"  Expected steps: {st['expected_steps']['median']:.0f}")
-
-    if "avg_step_time_ms" in st:
-        print(f"  Avg step time: {st['avg_step_time_ms']['median']:.2f}ms " f"(±{st['avg_step_time_ms']['stdev']:.2f}ms)")
-
-    print(f"  RSS delta: {st['mem_rss_mb']['median']:.2f}MB (±{st['mem_rss_mb']['stdev']:.2f}MB)")
-    print(f"  tracemalloc delta: {st['mem_py_traced_mb']['median']:.2f}MB " f"(±{st['mem_py_traced_mb']['stdev']:.2f}MB)")
-    print(
-        f"  RSS - tracemalloc: {st['mem_rss_minus_tracemalloc_mb']['median']:.2f}MB "
-        f"(±{st['mem_rss_minus_tracemalloc_mb']['stdev']:.2f}MB)"
-    )
-
-    print(
-        f"  CPU time (spawn): {st['cpu_spawn_s']['median']:.3f}s "
-        f"(±{st['cpu_spawn_s']['stdev']:.3f}s)  "
-        f"util~{st['cpu_spawn_percent']['median']:.1f}%"
-    )
-
-    if "cpu_simulation_s" in st:
-        print(
-            f"  CPU time (simulation): {st['cpu_simulation_s']['median']:.3f}s "
-            f"(±{st['cpu_simulation_s']['stdev']:.3f}s)  "
-            f"util~{st['cpu_simulation_percent']['median']:.1f}%"
-        )
-
-    print(f"  CPU time (total): {st['cpu_total_s']['median']:.3f}s (±{st['cpu_total_s']['stdev']:.3f}s)")
-
-
 # ==================== Main (PARENT) ====================
 def main_parent(args):
     print("=" * 70)
-    print("PyBullet Fleet Performance Analysis - Process Isolated")
+    print("PyBullet Fleet Wrapper Overhead Analysis - Process Isolated")
     print("=" * 70)
     print("\nConfiguration:")
     print(f"  Test objects: {args.n}")
@@ -865,23 +810,36 @@ def main_parent(args):
     agent_update_over_ms = agent["update_time_ms"]["median"] - baseline["update_time_ms"]["median"]
     agent_mem_over_mb = agent["mem_rss_mb"]["median"] - baseline["mem_rss_mb"]["median"]
 
-    print("\nSimObject vs Direct PyBullet:")
-    print(f"  Spawn overhead (wall): +{spawn_over_s:.3f}s")
-    print(f"  Spawn overhead (CPU):  +{cpu_spawn_over_s:.3f}s")
-    print(f"  Update overhead (wall): +{update_over_ms:.2f}ms")
-    print(f"  Update overhead (CPU):  +{cpu_update_over_s:.3f}s")
+    spawn_over_us_per_obj = spawn_over_s / args.n * 1e6
+    update_over_us_per_obj = update_over_ms / args.n * 1e3
+    cpu_spawn_over_us_per_obj = cpu_spawn_over_s / args.n * 1e6
+    cpu_update_over_us_per_obj = cpu_update_over_s / args.n * 1e6
     mem_per_obj_kb = mem_over_mb / args.n * 1024
+
+    agent_spawn_over_us_per_obj = agent_spawn_over_s / args.n * 1e6
+    agent_update_over_us_per_obj = agent_update_over_ms / args.n * 1e3
+    agent_mem_per_obj_kb = agent_mem_over_mb / args.n * 1024
+
+    print("\nSimObject vs Direct PyBullet:")
+    print(f"  Spawn overhead (wall): +{spawn_over_s:.3f}s  ({spawn_over_us_per_obj:.2f}μs/obj)")
+    print(f"  Spawn overhead (CPU):  +{cpu_spawn_over_s:.3f}s  ({cpu_spawn_over_us_per_obj:.2f}μs/obj)")
+    print(f"  Update overhead (wall): +{update_over_ms:.2f}ms  ({update_over_us_per_obj:.3f}μs/obj)")
+    print(f"  Update overhead (CPU):  +{cpu_update_over_s:.3f}s  ({cpu_update_over_us_per_obj:.3f}μs/obj)")
     print(f"  Memory overhead (RSS):  +{mem_over_mb:.2f}MB  ({mem_per_obj_kb:.2f}KB/obj)")
 
     print("\nAgent vs Direct PyBullet:")
-    print(f"  Spawn overhead (wall): +{agent_spawn_over_s:.3f}s")
-    print(f"  Update overhead (wall): +{agent_update_over_ms:.2f}ms")
+    print(f"  Spawn overhead (wall): +{agent_spawn_over_s:.3f}s  ({agent_spawn_over_us_per_obj:.2f}μs/obj)")
+    print(f"  Update overhead (wall): +{agent_update_over_ms:.2f}ms  ({agent_update_over_us_per_obj:.3f}μs/obj)")
     if "get_pose_time_ms" in agent:
         get_pose_overhead = agent["get_pose_time_ms"]["median"] - baseline["update_time_ms"]["median"]
-        print(f"    ├─ get_pose overhead: +{get_pose_overhead:.2f}ms")
+        get_pose_us_per_obj = get_pose_overhead / args.n * 1e3
+        print(f"    ├─ get_pose overhead: +{get_pose_overhead:.2f}ms  ({get_pose_us_per_obj:.3f}μs/obj)")
     if "set_pose_time_ms" in agent:
-        print(f"    └─ set_pose overhead: +{agent['set_pose_time_ms']['median']:.2f}ms (vs 0 baseline)")
-    agent_mem_per_obj_kb = agent_mem_over_mb / args.n * 1024
+        set_pose_us_per_obj = agent["set_pose_time_ms"]["median"] / args.n * 1e3
+        print(
+            f"    └─ set_pose overhead: +{agent['set_pose_time_ms']['median']:.2f}ms"
+            f"  ({set_pose_us_per_obj:.3f}μs/obj) (vs 0 baseline)"
+        )
     print(f"  Memory overhead (RSS):  +{agent_mem_over_mb:.2f}MB  ({agent_mem_per_obj_kb:.2f}KB/obj)")
 
     # Extrapolate to production scale (reference)

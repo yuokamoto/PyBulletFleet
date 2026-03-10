@@ -6,6 +6,7 @@ Performance benchmarking tools, results, and optimization guides for PyBulletFle
 :maxdepth: 2
 
 benchmark-suite
+results
 profiling-guide
 experiments
 optimization-guide

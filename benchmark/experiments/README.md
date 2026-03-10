@@ -2,7 +2,7 @@
 
 Experiments validate optimization hypotheses and compare different implementation approaches. Unlike profiling tools (which measure *what is happening*), these scripts answer specific questions about algorithm and API choices.
 
-All scripts live in `benchmark/experiments/`. For profiling tools, see `benchmark/profiling/README.md`. For overall benchmark results, see `benchmark/README.md`.
+All scripts live in `benchmark/experiments/`. For profiling tools, see [`profiling/README.md`](../profiling/README.md). For overall benchmark results, see the [Benchmark Suite README](../README.md).
 
 ---
 
@@ -44,35 +44,19 @@ See the Collision Detection Architecture page in the project documentation for d
 
 ### `collision_mode_comparison.py`
 
-**Purpose:** Compare step-level performance across collision detection modes (NORMAL_3D vs NORMAL_2D vs DISABLED).
+**Purpose:** Compare `CollisionMode` settings — disabled, 2D (9 neighbors), and 3D (27 neighbors) — at scale.
 
 ```bash
-python benchmark/experiments/collision_mode_comparison.py --agents=1000 --iterations=100
+python benchmark/experiments/collision_mode_comparison.py
 ```
 
 **What it tests:**
-- No Collision (`CollisionMode.DISABLED`) — baseline with collision detection off
-- 2D Collision (`CollisionMode.NORMAL_2D`) — ignores Z-axis neighbors (9 neighbors)
-- 3D Collision (`CollisionMode.NORMAL_3D`) — checks all directions (27 neighbors)
+- `DISABLED`: No collision check (baseline)
+- `NORMAL_2D`: Spatial hashing with 9 neighbors (ignore Z-axis)
+- `NORMAL_3D`: Spatial hashing with 27 neighbors (all directions)
 
-Outputs a comparison table with step time per mode and the relative cost of each collision mode.
+Outputs per-mode step time and collision check breakdown to quantify the 2D vs 3D speedup.
 
----
 
-## General Performance Experiments
-
-### `performance_analysis.py`
-
-**Purpose:** Measure wrapper-layer overhead — direct PyBullet vs SimObject vs Manager APIs.
-
-```bash
-python benchmark/experiments/performance_analysis.py
-```
-
-**What it tests:**
-- SimObject spawn/update performance
-- SimObjectManager bulk operations
-- Agent spawn/update performance
-- AgentManager bulk operations
-
-Each test runs in process isolation with CPU time (user+sys) and memory tracking. Outputs statistical summaries (median, mean, stdev) across repetitions.
+> **Note:** `wrapper_overhead.py` (wrapper-layer overhead: PyBullet vs SimObject vs Agent)
+> has moved to `benchmark/profiling/`. See the [Profiling Guide](profiling-guide.md) for details.

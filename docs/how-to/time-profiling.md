@@ -208,5 +208,5 @@ log_level: "info"
 
 - [Memory Profiling User Guide](memory-profiling) — Memory usage tracking
 - [Spatial Hash Configuration](spatial-hash-config) — Collision cell size tuning
-- [Profiling Tools Guide](../benchmarking/benchmark-suite) — External profiling scripts in `benchmark/profiling/`
-- [Optimization Guide](../benchmarking/benchmark-suite) — Performance optimization workflow
+- [Profiling Guide](../benchmarking/profiling-guide) — External benchmark scripts in `benchmark/profiling/` (`simulation_profiler.py`, `collision_check.py`, etc.)
+- [Optimization Guide](../benchmarking/optimization-guide) — Parameter tuning and configuration patterns

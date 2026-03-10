@@ -457,6 +457,28 @@ class TestQueries:
         assert mgr.get_pose(-1) is None
         assert mgr.get_pose(999) is None
 
+    def test_set_pose_all(self, pybullet_env, mock_sim_core, manager_cls):
+        """set_pose_all calls the factory for every object and applies the resulting pose."""
+        mgr = _create_manager(manager_cls, mock_sim_core)
+        initial = [(float(i), 0.0, 0.5) for i in range(3)]
+        params_list = [_make_posed_params(manager_cls, Pose.from_xyz(*xyz)) for xyz in initial]
+        mgr.spawn_objects_batch(params_list)
+
+        called_objects = []
+
+        def shift_x(obj):
+            called_objects.append(obj)
+            p = obj.get_pose()
+            return Pose.from_xyz(p.x + 100.0, p.y, p.z)
+
+        mgr.set_pose_all(shift_x)
+
+        assert len(called_objects) == 3
+        assert set(called_objects) == set(mgr.objects)
+        for i, pose in enumerate(mgr.get_all_poses()):
+            assert pose.x == pytest.approx(i + 100.0, abs=1e-3)
+            assert pose.y == pytest.approx(0.0, abs=1e-3)
+
     def test_add_object_directly(self, pybullet_env, mock_sim_core, manager_cls):
         """Manually add an object — tracked in objects/body_ids/object_ids."""
         mgr = _create_manager(manager_cls, mock_sim_core)

@@ -20,7 +20,7 @@ Characteristics of Each Method:
 
     Brute Force AABB:
         - O(N^2) checks all pairs
-        - Performs AABB overlap check
+        - Performs AABB overlap check + getClosestPoints confirmation
         - Fast for small simulations (<100 objects)
         - Simple implementation
 
@@ -50,66 +50,32 @@ Usage:
     # Compare two methods
     python collision_method_comparison.py --agents=100 --methods=spatial,contact
 
+Notes:
+    - Default spacing=0.08m with simple_cube (0.1m box) creates dense overlaps.
+    - getContactPoints variants (No Args / Pairwise) CANNOT detect kinematic-
+      kinematic (mass=0) collisions.  Only getClosestPoints-based methods
+      (Spatial Hashing, PyBullet getClosestPoints) work for kinematic objects.
+    - Use --spacing=1.0 for a no-collision baseline to measure pure overhead.
+
 Example Output:
     ===================================================================
-    Collision Method Comparison
-    ===================================================================
-
-    Test Configuration:
-      Agents: 100, 500, 1000
-      Methods: Spatial Hashing, Brute Force, getClosestPoints, getContactPoints
-      Iterations: 100 per configuration
-
-    -------------------------------------------------------------------
     Results for 100 Agents
-    -------------------------------------------------------------------
-
-    Method                    Time (ms)    Speedup    Collisions    Accuracy
-    -------------------------------------------------------------------------
-    Spatial Hashing (Current)    1.234      1.00x         12         100%
-    Brute Force                  0.987      1.25x         12         100%
-    PyBullet getClosestPoints    2.456      0.50x         12         100%
-    PyBullet getContactPoints    3.789      0.33x         12         100%
-
-    Winner: Brute Force (best for <100 agents)
-
-    -------------------------------------------------------------------
-    Results for 500 Agents
-    -------------------------------------------------------------------
-
-    Method                    Time (ms)    Speedup    Collisions    Accuracy
-    -------------------------------------------------------------------------
-    Spatial Hashing (Current)    5.678      1.00x         45         100%
-    Brute Force                 12.345      0.46x         45         100%
-    PyBullet getClosestPoints   28.901      0.20x         45         100%
-    PyBullet getContactPoints   45.678      0.12x         45         100%
-
-    Winner: Spatial Hashing (1.85x faster than Brute Force)
-
-    -------------------------------------------------------------------
-    Results for 1000 Agents
-    -------------------------------------------------------------------
-
-    Method                    Time (ms)    Speedup    Collisions    Accuracy
-    -------------------------------------------------------------------------
-    Spatial Hashing (Current)   12.345      1.00x        123         100%
-    Brute Force                 56.789      0.22x        123         100%
-    PyBullet getClosestPoints  145.678      0.08x        123         100%
-    PyBullet getContactPoints  234.567      0.05x        123         100%
-
-    Winner: Spatial Hashing (4.6x faster than Brute Force)
-
-    ===================================================================
-    Recommendation
     ===================================================================
 
-    - Small simulations (<100 agents): Brute Force (simpler, faster)
-    - Medium simulations (100-500 agents): Spatial Hashing (balanced)
-    - Large simulations (>500 agents): Spatial Hashing (best scalability)
+    Method                         Time (ms)    Speedup    Collisions   Accuracy
+    ----------------------------------------------------------------------
+    Spatial Hashing (Current)         1.234      1.00x        44.0      100.0%
+    Brute Force AABB                  4.567      0.27x        44.0      100.0%
+    PyBullet getClosestPoints         2.456      0.50x        44.0      100.0%
+    getContactPoints() [No Args]      0.024     51.42x         0.0        0.0%
+    getContactPoints(A,B) [Pairwise]  3.789      0.33x         0.0        0.0%
 
-    Spatial Hashing scales as O(N), Brute Force as O(N^2)
-
-    For maximum accuracy, all methods detect the same collisions.
+      WARNING: Collision count mismatch between methods!
+        Spatial Hashing (Current): 44
+        getContactPoints() [No Args]: 0
+        getContactPoints(A,B) [Pairwise]: 0
+      getContactPoints variants cannot detect kinematic-kinematic collisions.
+      Only getClosestPoints-based methods work for mass=0 objects.
 """
 import os
 import sys
@@ -140,13 +106,13 @@ def _mark_all_objects_moved(sim_core) -> None:
         sim_core._moved_this_step.add(obj.object_id)
 
 
-def setup_simulation(num_agents: int, spacing: float = 1.0):
+def setup_simulation(num_agents: int, spacing: float = 0.08):
     """Set up the simulation environment
 
     Args:
         num_agents: Number of agents to spawn
-        spacing: Grid spacing in meters. Default 1.0m gives no collisions
-            with simple_cube (0.1m). Use <=0.09 for dense/overlapping placement.
+        spacing: Grid spacing in meters. Default 0.08m causes overlaps
+            with simple_cube (0.1m box). Use >=1.0 for no-collision baseline.
     """
     if p.isConnected():
         p.disconnect()
@@ -201,8 +167,12 @@ def method_spatial_hashing(sim_core) -> Tuple[List, float]:
     return collision_pairs, elapsed
 
 
-def method_brute_force(sim_core) -> Tuple[List, float]:
-    """Method 2: Brute Force AABB (all pairs with AABB overlap check)"""
+def method_brute_force(sim_core, distance_threshold: float = 0.01) -> Tuple[List, float]:
+    """Method 2: Brute Force AABB (all pairs with AABB overlap + getClosestPoints)
+
+    Uses getClosestPoints for the final check (not getContactPoints) so that
+    kinematic-kinematic (mass=0) collisions are correctly detected.
+    """
     t0 = time.perf_counter()
 
     collision_pairs = []
@@ -223,10 +193,14 @@ def method_brute_force(sim_core) -> Tuple[List, float]:
                 and aabb_a[0][2] <= aabb_b[1][2]
                 and aabb_a[1][2] >= aabb_b[0][2]
             ):
-
-                # Detailed collision check
-                contact_points = p.getContactPoints(objects[i].body_id, objects[j].body_id, physicsClientId=sim_core._client)
-                if contact_points:
+                # Use getClosestPoints (works for kinematic objects, unlike getContactPoints)
+                closest_points = p.getClosestPoints(
+                    objects[i].body_id,
+                    objects[j].body_id,
+                    distance=distance_threshold,
+                    physicsClientId=sim_core._client,
+                )
+                if closest_points and closest_points[0][8] < distance_threshold:
                     collision_pairs.append((i, j))
 
     elapsed = (time.perf_counter() - t0) * 1000
@@ -382,7 +356,7 @@ def print_comparison_table(results_list: List[Dict], num_agents: int):
         for method, count in counts.items():
             print(f"    {method}: {count:.0f}")
         print("  getContactPoints variants cannot detect kinematic-kinematic collisions.")
-        print("  Only getClosestPoints (used by Spatial Hashing) works for mass=0 objects.")
+        print("  Only getClosestPoints-based methods work for mass=0 objects.")
 
 
 def main():
@@ -397,8 +371,8 @@ def main():
     parser.add_argument(
         "--spacing",
         type=float,
-        default=1.0,
-        help="Grid spacing in meters (default: 1.0). Use <=0.09 for collisions with simple_cube.",
+        default=0.08,
+        help="Grid spacing in meters (default: 0.08). Use >=1.0 for no-collision baseline.",
     )
     args = parser.parse_args()
 

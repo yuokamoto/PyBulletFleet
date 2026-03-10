@@ -392,3 +392,10 @@ base_time = benchmark(Agent, "Base Agent")
 - **Warm up** before measuring (3-5 steps) to avoid PyBullet initialization costs.
 - **Run multiple iterations** and report mean/median — single measurements are noisy.
 - **Profile with realistic conditions** — use the same agent count, collision settings, and goal patterns as production.
+
+---
+
+## See Also
+
+- [Time Profiling User Guide](time-profiling) — Using `enable_time_profiling` and `step_once(return_profiling=True)`
+- [Profiling Guide](../benchmarking/profiling-guide) — Standalone benchmark scripts (`simulation_profiler.py`, `agent_update.py`, etc.) for deeper analysis

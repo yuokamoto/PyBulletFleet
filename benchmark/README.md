@@ -184,23 +184,16 @@ benchmark/
 │   ├── collision_check.py             # Collision pipeline 4-stage analysis
 │   ├── agent_update.py                # Agent.update() detailed analysis
 │   ├── agent_manager_set_goal.py      # set_goal_pose() profiling
+│   ├── wrapper_overhead.py             # Wrapper overhead: PyBullet vs SimObject vs Agent
 │   └── profiling_config.yaml          # Shared profiling configuration
 │
 ├── experiments/                       # Experiment scripts → see experiments/README.md
 │   ├── README.md
 │   ├── collision_methods_config_based.py
 │   ├── collision_method_comparison.py
-│   ├── collision_mode_comparison.py   # NORMAL_3D vs NORMAL_2D vs DISABLED
-│   └── performance_analysis.py
+│   └── collision_mode_comparison.py   # NORMAL_3D vs NORMAL_2D vs DISABLED
 │
-└── archive/                           # Deprecated tools
-    ├── collision_check_v1.py
-    ├── collision_detection_methods_benchmark.py
-    ├── getaabb_performance.py
-    ├── list_filtering_benchmark.py
-    ├── parse_profile.py
-    ├── simple_agent_profile.py
-    └── update_benchmark.py
+└── archive/                           # Deprecated tools (superseded scripts)
 ```
 
 ---

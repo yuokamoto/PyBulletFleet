@@ -1,8 +1,10 @@
 # Profiling Guide
 
-Detailed CPU time analysis tools for identifying performance bottlenecks in PyBulletFleet simulation components.
+Standalone scripts for identifying performance bottlenecks in PyBulletFleet simulation components. These scripts are run from the command line against a live simulation.
 
 All scripts live in `benchmark/profiling/`. For overall benchmark results and quick start, see `benchmark/README.md`.
+
+> **Looking to add profiling to your own code?** See the [Time Profiling User Guide](../how-to/time-profiling) (API-based) or [Custom Class Profiling](../how-to/custom-profiling) (subclass profiling).
 
 ---
 
@@ -14,6 +16,7 @@ All scripts live in `benchmark/profiling/`. For overall benchmark results and qu
 | `collision_check.py` | Detailed collision detection analysis | Get AABBs, Spatial Hashing, AABB Filtering, Contact Points |
 | `agent_update.py` | Detailed `Agent.update()` analysis | 5 methods (cProfile, Manual, PyBullet API, Stationary, Motion Modes) |
 | `agent_manager_set_goal.py` | Goal setting profiling | `set_goal_pose()` overhead and trajectory calculation |
+| `wrapper_overhead.py` | Wrapper-layer overhead | Spawn time, update time, and memory: direct PyBullet vs SimObject vs Agent vs Manager |
 
 ## Measurement Methods by Script
 
@@ -33,9 +36,20 @@ Each profiling script uses one or more measurement techniques. The table below s
 | | `motion_modes` | `time.perf_counter` | Per-motion-mode update cost |
 | `agent_manager_set_goal.py` | _(no option)_ | Both | `time.perf_counter` for wall time + `cProfile` for call graph (always runs both) |
 
-**Technique summary:**
-- **`time.perf_counter`** — Measures wall-clock time of specific code sections. Low overhead, best for targeted measurements.
-- **`cProfile`** — Python's built-in profiler, captures all function calls with call counts and cumulative time. Higher overhead but reveals unexpected bottlenecks.
+## Measurement Method Comparison
+
+| Attribute | cProfile | CPU Time | Wall Time |
+|-----------|----------|----------|-----------|
+| **Goal** | Bottleneck identification | CPU usage measurement | Real-time measurement |
+| **Granularity** | Function level | Process-wide | Process-wide |
+| **Overhead** | Yes (high if many calls) | Almost none | Almost none |
+| **Detail** | High (Python layer) | Low | Low |
+| **Stability** | Medium | High (same environment) | Low (environment-sensitive) |
+| **Use case** | Find optimization targets | Perf evaluation / regression | Perceived speed / RTF |
+
+- **cProfile** — Function-level call counts and cumulative times. Adds 5-50% overhead. Cannot see inside PyBullet C++ internals.
+- **CPU Time** (`psutil` / `time.process_time()`) — Actual CPU consumption. Near-zero overhead. Best for regression detection and before/after comparison.
+- **Wall Time** (`time.perf_counter()`) — Real elapsed time including I/O waits. Best for perceived speed / RTF. Higher variance.
 - **`step_once(return_profiling=True)`** — Built-in profiling in `MultiRobotSimulationCore` that returns per-component timing dict (agent_update, collision_check, etc.).
 
 ## When to Use Each Tool
@@ -44,6 +58,7 @@ Each profiling script uses one or more measurement techniques. The table below s
 2. **Collision detection is slow** → `collision_check.py`
 3. **Agent Update is slow** → `agent_update.py`
 4. **Goal setting is slow** → `agent_manager_set_goal.py`
+5. **Wrapper-layer overhead?** → `wrapper_overhead.py`
 
 ---
 
@@ -246,23 +261,6 @@ ncalls  tottime  cumtime  function
 
 ---
 
-## Measurement Method Comparison
-
-| Attribute | cProfile | CPU Time | Wall Time |
-|-----------|----------|----------|-----------|
-| **Goal** | Bottleneck identification | CPU usage measurement | Real-time measurement |
-| **Granularity** | Function level | Process-wide | Process-wide |
-| **Overhead** | Yes (high if many calls) | Almost none | Almost none |
-| **Detail** | High (Python layer) | Low | Low |
-| **Stability** | Medium | High (same environment) | Low (environment-sensitive) |
-| **Use case** | Find optimization targets | Perf evaluation / regression | Perceived speed / RTF |
-
-- **cProfile** — Function-level call counts and cumulative times. Adds 5-50% overhead. Cannot see inside PyBullet C++ internals.
-- **CPU Time** (`psutil` / `time.process_time()`) — Actual CPU consumption. Near-zero overhead. Best for regression detection and before/after comparison.
-- **Wall Time** (`time.perf_counter()`) — Real elapsed time including I/O waits. Best for perceived speed / RTF. Higher variance.
-
----
-
 ## Typical Bottlenecks and Fixes
 
 ### 1. Collision Check is slow (> 20% of step time)
@@ -302,6 +300,42 @@ python benchmark/profiling/agent_update.py --agents=100  --test=pybullet
 ```bash
 python benchmark/profiling/agent_manager_set_goal.py --agents=1000
 ```
+
+---
+
+## Wrapper Overhead (`wrapper_overhead.py`)
+
+Measures the overhead introduced by PyBulletFleet wrapper classes relative to bare PyBullet API calls. Useful for detecting regressions after refactoring SimObject, Agent, or Manager layers.
+
+### What It Measures
+
+| Test | Description |
+|------|-------------|
+| Direct PyBullet (baseline) | Bare `createMultiBody` / `resetBasePositionAndOrientation` |
+| SimObject Wrapper | `SimObject.spawn()` + `get_pose()` + `set_pose()` |
+| SimObjectManager (Bulk) | `SimObjectManager.spawn_grid()` + bulk pose operations |
+| Agent Wrapper | `Agent.from_params()` + `get_pose()` + `set_pose()` |
+| AgentManager (Bulk) | `AgentManager.spawn_agents_grid()` + `get_all_poses()` |
+
+Each test runs in a **separate child process** (via `subprocess`) to eliminate cross-test contamination and measure clean-state memory.
+
+### CLI Usage
+
+```bash
+# Default: 10000 objects, 5 repetitions
+python benchmark/profiling/wrapper_overhead.py
+
+# Custom object count and repetitions
+python benchmark/profiling/wrapper_overhead.py --n=1000 --reps=3
+```
+
+### Metrics
+
+- **Spawn time** — wall-clock and CPU (user+sys) time to create N objects
+- **Update time** — wall-clock and CPU time for get_pose + set_pose per step
+- **Memory overhead** — RSS delta between before/after spawn (MB, per-object KB)
+- **CPU utilization** — `cpu_time / wall_time` ratio (stability indicator)
+- **Extrapolation** — scaled to production `N_MAX_OBJECTS` with PASS/FAIL thresholds
 
 ---
 

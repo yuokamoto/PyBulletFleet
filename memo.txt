@@ -40,5 +40,4 @@ doc review
 2. exampleの追加
 
 benchmark
-- experiments
-- doc
+- resultのまとめ

@@ -398,6 +398,27 @@ class SimObjectManager(Generic[T]):
         """
         return {obj.body_id: obj.get_pose() for obj in self.objects}
 
+    def set_pose_all(self, pose_factory: Callable[[T], Pose]) -> None:
+        """
+        Set pose for all objects using a factory function.
+
+        Applies *pose_factory* to each object and immediately calls ``set_pose``
+        with the returned value.  Works for both SimObject and Agent instances.
+
+        Args:
+            pose_factory: Function that takes an object and returns a target Pose.
+
+        Example:
+            # Shift every object 1 m along X
+            manager.set_pose_all(lambda obj: Pose.from_xyz(
+                obj.get_pose().x + 1.0,
+                obj.get_pose().y,
+                obj.get_pose().z,
+            ))
+        """
+        for obj in self.objects:
+            obj.set_pose(pose_factory(obj))
+
     def get_object_count(self) -> int:
         """Get total number of managed objects."""
         return len(self.objects)
