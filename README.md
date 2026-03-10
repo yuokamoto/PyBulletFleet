@@ -39,10 +39,10 @@ python examples/100robots_grid_demo.py
 
 | Agents | Real-Time Factor | Step Time |
 |--------|-----------------|-----------|
-| 100    | 46× | 2.2 ms  |
-| 500    | 7×  | 14.1 ms |
-| 1000   | 3×  | 32.0 ms |
-| 2000   | 1.2×| 84.6 ms |
+| 100    | 41× | 2.4 ms  |
+| 500    | 6.7×| 15.0 ms |
+| 1000   | 2.4×| 42.4 ms |
+| 2000   | 1.1×| 88.6 ms |
 
 Kinematics mode (physics OFF), headless. See [Benchmark Results](benchmark/README.md#benchmark-results) for full data, component breakdown, and methodology.
 
