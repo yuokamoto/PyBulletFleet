@@ -43,6 +43,7 @@ fleets rather than the software that *controls* individual robots.
 :caption: Contents
 
 getting-started/quickstart
+examples/index
 architecture/index
 how-to/index
 configuration/index
@@ -56,6 +57,7 @@ api/index
 | Section | What you'll find | When to read |
 |---------|-----------------|--------------|
 | **Getting Started** | Installation and first simulation | First visit |
+| **Examples** | Step-by-step tutorials: spawn objects, action queue, 100-robot fleet | Writing your first simulation |
 | **Architecture** | Design decisions, class relationships, collision system internals | Understanding *why* things work the way they do |
 | **How-to Guides** | Task-oriented guides: enable time/memory profiling, configure spatial hashing, set up logging | You want to *do* something specific |
 | **Configuration** | YAML parameter reference, collision detection method selection | Looking up a specific setting |
@@ -76,10 +78,10 @@ api/index
 
 | Agents | Real-Time Factor | Step Time |
 |--------|-----------------|-----------|
-| 100    | 46× | 2.2 ms  |
-| 500    | 7×  | 14.1 ms |
-| 1000   | 3×  | 32.0 ms |
-| 2000   | 1.2×| 84.6 ms |
+| 100    | 41× | 2.4 ms  |
+| 500    | 6.7×| 15.0 ms |
+| 1000   | 2.4×| 42.4 ms |
+| 2000   | 1.1×| 88.6 ms |
 
 Kinematics mode (physics OFF), headless. See {doc}`benchmarking/benchmark-suite` for full data, component breakdown, and methodology.
 
