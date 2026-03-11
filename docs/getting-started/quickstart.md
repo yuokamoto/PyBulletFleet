@@ -65,7 +65,7 @@ physics: true
 collision_detection_method: "contact_points"
 ```
 
-See `config/README.md` for the full list of parameters.
+See [`config/config.yaml`](https://github.com/rapyuta-robotics/PyBulletFleet/blob/main/config/config.yaml) for the full list of parameters — every key is documented with inline comments.
 
 ## Keyboard Controls
 
@@ -115,5 +115,5 @@ python examples/<script_name>.py
   abstractions (simulation core, agents, actions, collision).
 - **How-to guides** — see the `docs/` directory for topic-specific guides
   (collision tuning, memory profiling, performance optimisation).
-- **Configuration reference** — `config/README.md` documents every YAML key.
+- **Configuration reference** — [`config/config.yaml`](https://github.com/rapyuta-robotics/PyBulletFleet/blob/main/config/config.yaml) documents every YAML key with inline comments. See also the [Configuration Files Guide](../configuration/reference).
 - **API reference** — auto-generated from docstrings (coming soon).

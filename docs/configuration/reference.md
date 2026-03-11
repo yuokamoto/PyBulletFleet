@@ -12,6 +12,7 @@ PyBulletFleet provides multiple configuration files for different simulation mod
 - General-purpose configuration
 - Auto-selects collision detection method based on physics mode
 - Recommended starting point for most use cases
+- **All parameters are documented with inline comments** — open [`config/config.yaml`](https://github.com/rapyuta-robotics/PyBulletFleet/blob/main/config/config.yaml) for the full reference with explanations, recommended values, and usage examples
 
 #### `config_physics_off.yaml` (Kinematics Mode) ✅ Recommended
 - **Use case**: Path planning, collision avoidance, high-speed simulation
@@ -24,8 +25,8 @@ PyBulletFleet provides multiple configuration files for different simulation mod
   - Stable with `resetBasePositionAndOrientation()`
   - Safety margin detection (near-miss detection)
 
-#### `config_physics_on.yaml` (Physics Mode) 🔬 Verification
-- **Use case**: Physics verification, debugging, contact analysis
+#### `config_physics_on.yaml` (Physics Mode) 🔬
+- **Use case**: Physics simulation, debugging, contact analysis
 - **Physics**: ON (`stepSimulation()` every step)
 - **Collision method**: `CONTACT_POINTS` (actual contact manifold)
 - **Target RTF**: 1x real-time
@@ -92,6 +93,8 @@ This will compare:
 
 ## Key Parameters Explained
 
+This section highlights the most important parameters. For a **complete list with detailed explanations**, see the inline comments in [`config/config.yaml`](https://github.com/rapyuta-robotics/PyBulletFleet/blob/main/config/config.yaml).
+
 ### `physics` (bool)
 - `false`: Kinematics mode (no `stepSimulation()`, fast, deterministic)
 - `true`: Physics mode (`stepSimulation()` every step, realistic dynamics)
@@ -101,13 +104,13 @@ This will compare:
 - `"contact_points"`: Physics contact manifold (recommended for physics)
 - `"hybrid"`: Mixed approach — physics pairs use contact, kinematic pairs use closest (advanced)
 
-See [Collision Detection Architecture](../architecture/collision-detection) for design rationale, trade-offs, and method comparison.
+See [Collision Detection Narrow-Phase Details](narrow-phase-details-pybullet-apis) for design rationale, trade-offs, and method comparison.
 
 ### `collision_margin` (float, meters)
 Safety clearance for `getClosestPoints()`. Default: `0.02` (2cm).
 Only affects `CLOSEST_POINTS` and `HYBRID` modes.
 
-See [Collision Detection Architecture](../architecture/collision-detection) for tuning guidance.
+See [Collision Configuration Guide](collision-margin) for tuning guidance.
 
 ### `multi_cell_threshold` (float, dimensionless multiplier)
 Controls when objects are registered in multiple spatial-hash cells.
@@ -156,11 +159,11 @@ Are you doing physics simulation (mass, friction, dynamics)?
 |----------|-------------------|-----|
 | Path planning | `config_physics_off.yaml` | Fast, deterministic, safety margin |
 | Multi-robot coordination | `config_physics_off.yaml` | High-speed, collision avoidance |
-| Physics verification | `config_physics_on.yaml` | Realistic dynamics |
+| Physics simulation | `config_physics_on.yaml` | Realistic dynamics |
 | Mixed physics/kinematics | `config_hybrid.yaml` | Different detection per type |
 
 ## See Also
 
-- [Collision Detection Design](../architecture/collision-detection) - Design philosophy
-- Collision Methods Realistic Analysis - Performance analysis
-- PyBullet Collision Detection Design Summary - Original design document
+- [Collision Detection Overview](../architecture/collision-overview) - Design philosophy
+- [Collision Configuration Guide](../how-to/collision-config) - Practical collision settings
+- [Collision Detection Narrow-Phase Details](../architecture/collision-internals) - Implementation details

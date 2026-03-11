@@ -50,20 +50,33 @@ configuration/index
 benchmarking/index
 testing/index
 api/index
+roadmap
 ```
 
 ### How to read this documentation
 
+**📘 Simulation Users** — building simulations with PyBulletFleet:
+
 | Section | What you'll find | When to read |
-|---------|-----------------|--------------|
-| **Getting Started** | Installation and first simulation | First visit |
-| **Examples** | Step-by-step tutorials: spawn objects, action queue, 100-robot fleet | Writing your first simulation |
-| **Architecture** | Design decisions, class relationships, collision system internals | Understanding *why* things work the way they do |
-| **How-to Guides** | Task-oriented guides: enable time/memory profiling, configure spatial hashing, set up logging | You want to *do* something specific |
-| **Configuration** | YAML parameter reference, collision detection method selection | Looking up a specific setting |
-| **Benchmarking** | External profiling scripts, optimization workflows, benchmark results | Deep performance analysis with `benchmark/profiling/` tools |
-| **Testing** | Test strategy, running tests, coverage | Contributing or debugging |
-| **API Reference** | Auto-generated module docs | Looking up a specific class or method |
+|---------|------------------|--------------|
+| [Quickstart](getting-started/quickstart) | Installation and first simulation | First visit |
+| [Examples](examples/index) | Step-by-step tutorials: spawn objects, action queue, 100-robot fleet | Writing your first simulation |
+| [How-to](how-to/index) › [Collision Config](how-to/collision-config) | Detection method, per-object modes, spatial hash tuning | Configuring collision for your scene |
+| [How-to](how-to/index) › [Custom Profiling](how-to/custom-profiling) | Adding your own profiling metrics | Measuring your custom logic |
+| [Configuration](configuration/index) | YAML parameter reference | Looking up a specific setting |
+| [Architecture](architecture/index) › [Collision Overview](architecture/collision-overview) | Design goals, mode summary, two-phase pipeline | Understanding the collision system |
+| [Benchmarking](benchmarking/index) › [Optimization Guide](benchmarking/optimization-guide) | Performance tuning workflow | Improving simulation speed |
+| [API Reference](api/index) | Auto-generated module docs | Looking up a specific class or method |
+
+**🔧 PyBulletFleet Developers** — extending or debugging the framework:
+
+| Section | What you'll find | When to read |
+|---------|------------------|--------------|
+| [Architecture](architecture/index) | Design decisions, collision internals, spatial hash grid | Understanding *why* things work the way they do |
+| [How-to](how-to/index) › [Time](how-to/time-profiling) / [Memory](how-to/memory-profiling) Profiling | Internal component profiling | Diagnosing bottlenecks |
+| [How-to](how-to/index) › [Logging](how-to/logging) | LazyLogger, performance-safe logging | Adding or reviewing log output |
+| [Benchmarking](benchmarking/index) | Benchmark suite, profiling scripts, experiments | Deep performance analysis |
+| [Testing](testing/index) | Test strategy, running tests, coverage | Contributing or debugging |
 
 ## Key Features
 
@@ -85,10 +98,7 @@ api/index
 
 Kinematics mode (physics OFF), headless. See {doc}`benchmarking/benchmark-suite` for full data, component breakdown, and methodology.
 
-### Planned
-
-- **Snapshot-based state** — Full and delta snapshot serialization for logging, replay, and external synchronization
-- **External integration** — gRPC / ROS 2 interfaces for connecting to orchestrators, WMS, and fleet managers
+See the {doc}`roadmap` for upcoming features and integrations.
 
 ## Indices and tables
 

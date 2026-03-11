@@ -90,7 +90,7 @@ interval for both systems.
 ```
 
 - `collision_check` > 80% → optimize spatial hash cell size or reduce collision-enabled objects
-- See [Spatial Hash Configuration](spatial-hash-config) for tuning
+- See [Collision Configuration](collision-config) for tuning
 
 ### Bottleneck: Agent Update
 
@@ -192,6 +192,6 @@ log_level: "info"
 ## References
 
 - [Memory Profiling User Guide](memory-profiling) — Memory usage tracking
-- [Spatial Hash Configuration](spatial-hash-config) — Collision cell size tuning
+- [Collision Configuration](collision-config) — Collision settings and cell size tuning
 - [Profiling Guide](../benchmarking/profiling-guide) — External benchmark scripts in `benchmark/profiling/` (`simulation_profiler.py`, `collision_check.py`, etc.)
 - [Optimization Guide](../benchmarking/optimization-guide) — Parameter tuning and configuration patterns

@@ -290,5 +290,5 @@ Memory profiling enabled but no `[MEMORY]` logs appear.
 
 - [Python tracemalloc Documentation](https://docs.python.org/3/library/tracemalloc.html)
 - [Real-time Synchronization Design](../architecture/realtime-sync) - Real-time synchronization design
-- [Collision Detection Design](../architecture/collision-detection) - Collision detection system
+- [Collision Detection Overview](../architecture/collision-overview) - Collision detection system
 - [Profiling Guide](../benchmarking/profiling-guide) — Benchmark scripts for CPU time analysis (`simulation_profiler.py`, `wrapper_overhead.py`, etc.)

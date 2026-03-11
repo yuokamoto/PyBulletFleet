@@ -1,0 +1,35 @@
+# Roadmap
+
+Planned additions and improvements for PyBulletFleet.
+Items are grouped by category; ordering within a group does not imply priority.
+
+## Components
+
+New simulation building blocks:
+
+- **Linear Joint** — Prismatic (sliding) joint entity for gates, sliding doors, and linear actuators
+
+## Assets
+
+New robot and infrastructure models:
+
+- **Kinematic Robot Arm** — Articulated arm controlled via inverse kinematics (kinematics mode)
+- **Physics Mobile Robot** — Wheeled robot driven by PyBullet physics (motor torques, friction, contact forces)
+- **Physics / Kinematic Mobile Manipulator** — Mobile base + arm composite; switchable between kinematics and physics modes
+- **Conveyor / Elevator / Mobile Rack** — Warehouse infrastructure entities for material handling scenarios
+
+## Features
+
+- **Snapshot & Replay** — Full and delta snapshot serialization for logging, replay, and external synchronization ([USO](https://github.com/yuokamoto/Unified-Simulation-Orchestrator) integration)
+
+## Interfaces
+
+External communication layers:
+
+- **ROS 2** — Topic / service / action bridge for ROS 2 ecosystem integration
+- **gRPC** — Language-agnostic RPC interface for orchestrators, WMS, and fleet managers
+
+## CI / DevOps
+
+- **GitHub Actions refactoring** — Streamlined CI pipeline
+- **Automated performance tracking** — Run time / memory benchmarks in CI, auto-update results in documentation, and alert on significant performance regressions

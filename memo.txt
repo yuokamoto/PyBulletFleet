@@ -33,11 +33,3 @@ ROS 2
 https://github.com/yuokamoto/Unified-Simulation-Orchestrator のシミュレータに一つして使う
 USO準拠のsnapshot/replay feature
 github actionのリファクタリング。time/memory 計測を実施して自動更新。大きく変動がある場合にはアラートをだすなど
-
-
-doc review
-1. benchmarking cleanup
-2. exampleの追加
-
-benchmark
-- resultのまとめ
