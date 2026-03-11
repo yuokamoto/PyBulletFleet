@@ -1923,7 +1923,7 @@ class TestAgentVelocityCapping:
             agent.update(dt)
             vel = agent.velocity
             for axis in range(3):
-                max_per_axis[axis] = max(max_per_axis[axis], abs(vel[axis]))
+                max_per_axis[axis] = float(max(max_per_axis[axis], abs(vel[axis])))
             if not agent.is_moving:
                 break
 

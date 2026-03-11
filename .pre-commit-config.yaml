@@ -38,6 +38,7 @@ repos:
           - scipy
           - PyYAML
           - two-point-interpolation
+          - pytest
 
   # Flake8 style checking
   - repo: https://github.com/PyCQA/flake8
