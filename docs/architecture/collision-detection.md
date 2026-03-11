@@ -923,16 +923,6 @@ ignore_static_collision: false
 
 ## Advanced Features
 
-### Multi-Cell Registration (Large Objects)
-
-**See dedicated section**: [Multi-Cell Registration](#multi-cell-registration)
-
-**Summary**:
-- Automatic size-based detection
-- Objects > 1.5× cell_size → Multi-cell
-- No manual configuration needed
-- Prevents missed collisions for large objects
-
 ### Incremental Updates
 
 **Concept**: Only update what changed

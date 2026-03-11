@@ -68,8 +68,23 @@ sim = MultiRobotSimulationCore(
 
 ### Get Current Memory Usage
 
+`get_memory_usage()` can be called **at any time** while `tracemalloc` is active —
+including inside a callback during `run_simulation()`:
+
 ```python
-# Get current memory usage (returns None if profiling not enabled)
+# Inside a callback: monitor memory every N steps
+def memory_monitor(sim_core, dt):
+    mem = sim_core.get_memory_usage()
+    if mem:
+        print(f"Heap: {mem['current_mb']:.2f} MB, Peak: {mem['peak_mb']:.2f} MB")
+
+sim.register_callback(memory_monitor, frequency=10)
+sim.run_simulation()
+```
+
+You can also call it after the simulation ends to get the final snapshot:
+
+```python
 mem_usage = sim.get_memory_usage()
 
 if mem_usage:
@@ -115,83 +130,43 @@ if mem_usage:
 
 ---
 
-## Use Cases
-
-### 1. Detecting Memory Leaks in Long-Running Simulations
+## Use Case: Detecting Memory Leaks in Long-Running Simulations
 
 ```python
-# Enable memory profiling for long simulation
 config = {
     "enable_memory_profiling": True,
     "profiling_interval": 500,  # Report every 500 steps
-    "duration": 3600.0,  # 1 hour simulation
 }
 
 sim = MultiRobotSimulationCore.from_config(config)
-sim.run_simulation()
+# ... spawn agents ...
+sim.run_simulation()  # Ctrl+C or GUI close returns normally
 
 # Check final memory usage
 final_mem = sim.get_memory_usage()
-print(f"Final memory: {final_mem['current_mb']:.2f} MB")
+if final_mem:
+    print(f"Final memory: {final_mem['current_mb']:.2f} MB")
 ```
 
-**Expected Output:**
+During the run, watch the `growth` field in the periodic reports:
+
 ```
-[MEMORY] Last 500 steps: current=250.45MB (...), growth=+0.12MB
-[MEMORY] Last 500 steps: current=250.58MB (...), growth=+0.15MB
-[MEMORY] Last 500 steps: current=251.02MB (...), growth=+0.45MB  # Potential leak!
+[MEMORY] Last 500 steps: current=250.45MB (...), growth=+0.12MB   # stable ✓
+[MEMORY] Last 500 steps: current=250.58MB (...), growth=+0.15MB   # stable ✓
+[MEMORY] Last 500 steps: current=251.02MB (...), growth=+5.45MB   # investigate!
 ```
 
-### 2. Comparing Memory Usage Between Configurations
+For CI, assert a ceiling in a test:
 
 ```python
-import pytest
-
 def test_memory_usage_within_limits():
     """Ensure simulation memory stays below threshold."""
-    config = {
-        "enable_memory_profiling": True,
-        "duration": 60.0,
-    }
-
-    sim = MultiRobotSimulationCore.from_config(config)
-    sim.run_simulation()
-
-    mem_usage = sim.get_memory_usage()
-    assert mem_usage["current_mb"] < 500.0, "Memory usage exceeds 500MB limit"
-```
-
-### 3. Profiling Multi-Robot Scenarios
-
-```python
-# Test memory scaling with robot count
-for num_robots in [10, 50, 100, 200]:
-    config = {
-        "enable_memory_profiling": True,
-        "profiling_interval": 100,
-    }
-
-    sim = MultiRobotSimulationCore.from_config(config)
-
-    # Spawn robots
-    for i in range(num_robots):
-        sim.spawn_robot(f"robot_{i}", position=[i, 0, 0])
-
-    # Run for a while
-    sim.run_simulation(duration=10.0)
-
+    sim = MultiRobotSimulationCore(
+        enable_memory_profiling=True,
+    )
+    # ... spawn agents, run ...
     mem = sim.get_memory_usage()
-    print(f"{num_robots} robots: {mem['current_mb']:.2f} MB")
-
-    sim.close()
-```
-
-**Expected Output:**
-```
-10 robots: 125.34 MB
-50 robots: 156.78 MB
-100 robots: 245.12 MB
-200 robots: 478.56 MB
+    assert mem and mem["current_mb"] < 500.0, "Memory usage exceeds 500 MB limit"
 ```
 
 ---
@@ -284,22 +259,6 @@ Memory profiling enabled but no `[MEMORY]` logs appear.
    mprof run python examples/your_demo.py
    mprof plot
    ```
-
----
-
-## Comparison: Memory Profiling vs Time Profiling
-
-| Feature | Memory Profiling | Time Profiling |
-|---------|------------------|----------------|
-| **Measures** | Memory usage (MB) | Execution time (ms) |
-| **Detects** | Memory leaks, high memory usage | Performance bottlenecks |
-| **Tool** | `tracemalloc` (built-in) | `time.perf_counter()` |
-| **Overhead** | ~5-10% memory | < 0.1% CPU |
-| **Use case** | Long-running stability | Optimization |
-| **Config** | `enable_memory_profiling` | `enable_time_profiling` |
-
-**Recommendation:** Use both together for comprehensive performance analysis.
-For time profiling details, see [Time Profiling User Guide](time-profiling).
 
 ---
 

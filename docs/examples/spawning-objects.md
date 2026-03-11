@@ -7,7 +7,7 @@ This tutorial walks through the fundamental building blocks of every PyBulletFle
 - Creating a simulation world (`SimulationParams`, `MultiRobotSimulationCore`)
 - Spawning passive objects (`SimObject`)
 - Spawning active agents (`Agent`) — from mesh, URDF, or raw PyBullet body
-- Reading and writing poses (`get_pose`, `set_pose`)
+- Getting and setting poses (`get_pose`, `set_pose`)
 - Setting a movement goal (`set_goal_pose`)
 - Controlling arm joints (`set_all_joints_targets`)
 - Running per-step logic with callbacks (`register_callback`)
@@ -18,7 +18,7 @@ After this tutorial you can move on to
 
 ---
 
-## 1. Initialise the Simulation
+## 1. Initialize the Simulation
 
 Every simulation starts with two objects: `SimulationParams` and `MultiRobotSimulationCore`.
 
@@ -173,12 +173,15 @@ Leave it `False` for mobile robots.
 
 ---
 
-## 6. Reading and Writing Poses
+## 6. Getting and Setting Poses
 
 All `SimObject` and `Agent` instances expose `get_pose()` and `set_pose()`:
 
+> **Note:** The snippets below are not in `robot_demo.py`. They show API usage
+> you can add to your own scripts.
+
 ```python
-# Read current pose
+# Get current pose
 pose = cube_agent.get_pose()
 print(pose.position)    # [x, y, z] as a list
 print(pose.orientation) # quaternion [x, y, z, w]
@@ -198,6 +201,9 @@ cube_agent.set_pose(Pose.from_xyz(1, 2, 0.5))
 
 `set_goal_pose` tells the agent to navigate to a target pose over multiple simulation steps,
 respecting its velocity and acceleration limits:
+
+> **Note:** The standalone call below is not in `robot_demo.py` (the demo uses
+> `set_goal_pose` inside a callback in Section 8).
 
 ```python
 goal = Pose.from_xyz(3, 2, 0.5)
@@ -288,7 +294,6 @@ All registered callbacks fire automatically each step.
 | `Space` | Pause / Resume |
 | `v` | Toggle visual shapes |
 | `c` | Toggle collision wireframes |
-| `t` | Toggle transparency |
 
 ---
 

@@ -158,6 +158,9 @@ print(f"Spawned: {len(manager.objects)} agents")
 
 After spawning, each agent is accessible through `manager.objects`:
 
+> **Note:** The snippets below are not in the demo script. They show
+> additional usage patterns you can use in your own code.
+
 ```python
 for agent in manager.objects:
     print(agent.motion_mode, agent.get_pose().position)
@@ -172,6 +175,10 @@ manager.spawn_agents_grid(
     spawn_params=spawn_omni,
 )
 ```
+
+> `spawn_agents_grid` is used in
+> `examples/pick_drop_mobile_100robots_demo.py`, which also demonstrates
+> `SimObjectManager` for batch-spawning pickable objects alongside agents.
 
 ---
 
@@ -195,7 +202,8 @@ waypoints = [
 ]
 path = Path(waypoints=waypoints)
 
-# Or build from positions only (orientation = identity on all waypoints):
+# Or build from positions only (orientation = identity on all waypoints).
+# This shorthand is not used in the demo, but is handy for quick tests:
 path = Path.from_positions([
     [5, 5, 0.3], [-5, 5, 0.3], [-5, -5, 0.3], [5, -5, 0.3]
 ])
@@ -226,11 +234,11 @@ useful for robots that should always face a particular way (e.g., a forklift mas
 ## 8. Assign Individual Paths to All 100 Agents
 
 Here each robot patrols a cube centred on its own spawn position.
-The key is reading each robot's spawn pose to build a per-robot path:
+The key is getting each robot's spawn pose to build a per-robot path:
 
 ```python
 for robot in manager.objects:
-    spawn_pos = robot.get_pose().position    # read current (= spawn) position
+    spawn_pos = robot.get_pose().position    # current (= spawn) position
 
     # Build a path centred at this robot's position
     cx, cy = spawn_pos[0], spawn_pos[1]
@@ -250,8 +258,8 @@ for robot in manager.objects:
         robot.set_path(patrol_waypoints)
 ```
 
-This pattern — iterate `manager.objects`, read pose, compute per-robot data, call
-single-agent API — is the standard way to initialise heterogeneous fleets.
+This pattern — iterate `manager.objects`, get pose, compute per-robot data, call
+single-agent API — is the standard way to initialize heterogeneous fleets.
 
 ---
 
@@ -272,7 +280,7 @@ manager.set_goal_pose_all(
     )
 )
 
-# Read all poses at once
+# Get all poses at once
 poses = manager.get_poses_dict()   # {agent_index: Pose}
 
 # Teleport all agents to new poses
@@ -283,6 +291,9 @@ manager.set_pose_all(
 
 All bulk methods accept a **factory callable** `(Agent) → result` that is called
 once per agent.
+
+> **Note:** These snippets are not in the demo script `100robots_cube_patrol_demo.py`.
+> They show additional `AgentManager` APIs you can use in your own code.
 
 ---
 
@@ -326,7 +337,8 @@ For large grids, let the simulation auto-fit the camera to all spawned agents:
 sim.setup_camera()   # auto-scales to bounding box of all objects
 ```
 
-Or pass an explicit config:
+Or pass an explicit config (the demo uses YAML config instead, but you can
+override programmatically):
 
 ```python
 sim.setup_camera(camera_config={

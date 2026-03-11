@@ -156,21 +156,6 @@ This is useful for custom analysis, plotting, or CI performance regression tests
 
 ---
 
-## Comparison: Time Profiling vs Memory Profiling
-
-| Feature | Time Profiling | Memory Profiling |
-|---------|----------------|------------------|
-| **Measures** | Execution time (ms) | Memory usage (MB) |
-| **Detects** | Performance bottlenecks | Memory leaks, high usage |
-| **Tool** | `time.perf_counter()` | `tracemalloc` (built-in) |
-| **Overhead** | < 0.1% CPU | ~5-10% memory |
-| **Use case** | Optimization | Long-running stability |
-| **Config** | `enable_time_profiling` | `enable_memory_profiling` |
-
-For memory profiling details, see [Memory Profiling User Guide](memory-profiling).
-
----
-
 ## Troubleshooting
 
 ### No profiling output appears

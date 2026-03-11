@@ -8,7 +8,7 @@ run it, and follow along in the docs at the same time.
 
 | I want to… | Start here |
 |---|---|
-| Spawn objects in a scene, read/write poses, and move a single robot | [Tutorial 1 — Spawning Objects](spawning-objects) |
+| Spawn objects in a scene, get/set poses, and move a single robot | [Tutorial 1 — Spawning Objects](spawning-objects) |
 | Execute a sequence of high-level tasks (pick, drop, move, charge) | [Tutorial 2 — Action System](action-system) |
 | Simulate 100 robots at once with a manager and per-robot paths | [Tutorial 3 — Managing a Fleet](multi-robot-fleet) |
 
