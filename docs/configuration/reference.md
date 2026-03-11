@@ -126,7 +126,7 @@ Objects larger than `cell_size × multi_cell_threshold` span multiple cells.
 If `collision_detection_method` is not specified in config:
 ```python
 # Auto-selection
-if physics == false:
+if not physics:
     collision_detection_method = "closest_points"  # Kinematics-safe
 else:
     collision_detection_method = "contact_points"  # Physics-accurate

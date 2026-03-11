@@ -21,7 +21,7 @@ Usage:
     python benchmark/run_benchmark.py --sweep 100 500 1000 2000
 
     # Compare scenarios
-    python benchmark/run_benchmark.py --compare no_collision collision_2d_10hz collision_3d_full
+    python benchmark/run_benchmark.py --compare no_collision collision_10hz collision_3d_full
 """
 import os
 import sys

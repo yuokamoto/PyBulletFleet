@@ -226,7 +226,7 @@ def run_benchmark(
     # Set random goals for some agents (to simulate real usage)
     import random
 
-    num_moving_agents = max(num_agents // 2, min(num_agents, 10))  # Move at least half (or all if < 20)
+    num_moving_agents = max(num_agents // 2, min(num_agents, 10))  # Move max(half, 10) agents, capped to total agent count
     moving_indices = random.sample(range(len(agents)), num_moving_agents)
     for agent_idx in moving_indices:
         target_x = random.uniform(-10, grid_size + 10)
