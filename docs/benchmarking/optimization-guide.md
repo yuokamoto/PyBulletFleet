@@ -84,22 +84,24 @@ sim_core.set_profiling_log_frequency(10)  # Log every 10 steps
 
 ## Configuration Examples
 
+> **Note:** PyBulletFleet configs use flat top-level keys (not nested under `simulation:`).
+> See `config/config.yaml` for the canonical format.
+
 ### Offline / Production
 
 ```yaml
-simulation:
-  timestep: 0.1
-  target_rtf: 0                    # Maximum speed
-  physics: false
-  gui: false
-  collision_check_frequency: 1.0   # Every 10 steps with timestep=0.1 (use null for every step)
-  ignore_static_collision: true
-  monitor: true
-  enable_monitor_gui: false
-  enable_time_profiling: false
-  enable_collision_shapes: false
-  enable_shadows: false
-  # collision_mode is per-agent: AgentSpawnParams(..., collision_mode=CollisionMode.NORMAL_2D)
+timestep: 0.1
+target_rtf: 0                    # Maximum speed
+physics: false
+gui: false
+collision_check_frequency: 1.0   # Every 10 steps with timestep=0.1 (use null for every step)
+ignore_static_collision: true
+monitor: true
+enable_monitor_gui: false
+enable_time_profiling: false
+enable_collision_shapes: false
+enable_shadows: false
+# collision_mode is per-agent: AgentSpawnParams(..., collision_mode=CollisionMode.NORMAL_2D)
 ```
 
 **Expected:** ~6.8× RTF (500 agents), ~2.4× RTF (1000 agents)
@@ -109,18 +111,17 @@ simulation:
 ### Development / Debugging
 
 ```yaml
-simulation:
-  timestep: 0.01
-  target_rtf: 1.0
-  physics: false
-  gui: true
-  collision_check_frequency: null  # Every step
-  enable_collision_shapes: true
-  enable_collision_color_change: true
-  monitor: true
-  enable_monitor_gui: true
-  enable_time_profiling: true
-  # collision_mode is per-agent: AgentSpawnParams(..., collision_mode=CollisionMode.NORMAL_3D)
+timestep: 0.01
+target_rtf: 1.0
+physics: false
+gui: true
+collision_check_frequency: null  # Every step
+enable_collision_shapes: true
+enable_collision_color_change: true
+monitor: true
+enable_monitor_gui: true
+enable_time_profiling: true
+# collision_mode is per-agent: AgentSpawnParams(..., collision_mode=CollisionMode.NORMAL_3D)
 ```
 
 ---

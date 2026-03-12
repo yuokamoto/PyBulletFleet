@@ -75,7 +75,7 @@ python benchmark/run_benchmark.py --agents 1000 --duration 10
 python benchmark/run_benchmark.py --sweep 100 500 1000 2000 5000
 
 # Scenario comparison
-python benchmark/run_benchmark.py --compare no_collision collision_2d_10hz collision_3d_full --agents 1000
+python benchmark/run_benchmark.py --compare no_collision collision_10hz collision_3d_full --agents 1000
 
 # Identify bottleneck
 python benchmark/profiling/simulation_profiler.py --agents=1000 --steps=100

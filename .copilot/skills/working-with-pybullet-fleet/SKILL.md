@@ -45,7 +45,7 @@ Before modifying PyBulletFleet code, read these files for current state:
 
 ```bash
 # Architecture overview
-cat DESIGN.md
+cat docs/architecture/overview.md
 
 # All enums (CollisionMode, MotionMode, ActionStatus, etc.)
 cat pybullet_fleet/types.py

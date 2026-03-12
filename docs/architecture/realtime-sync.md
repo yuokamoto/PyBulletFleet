@@ -150,7 +150,7 @@ sim.run_simulation(duration=60.0)  # Smooth, no spawn delay impact
 
 **Correct pattern:**
 ```python
-# Method 1: Programmatic pause
+# Method 1: Programmatic pause (internal API — may change in future versions)
 sim._simulation_paused = True
 #spawn objects here. Won't affect time_diff
 sim._simulation_paused = False  # Auto-resets start_time

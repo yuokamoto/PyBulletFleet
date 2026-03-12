@@ -9,7 +9,7 @@ This is a clean worker process that:
 - No self-recursion, no process management
 
 Usage (typically called by run_benchmark.py):
-    python benchmark/performance_benchmark_worker.py --agents 1000 --duration 10
+    python benchmark/performance_benchmark.py --agents 1000 --duration 10
 """
 import os
 import sys
@@ -167,7 +167,7 @@ def run_benchmark(
         physics=sim_config.get("physics", False),
         monitor=sim_config.get("monitor", True),
         enable_monitor_gui=sim_config.get("enable_monitor_gui", False),
-        enable_time_profiling=sim_config.get("enable_time_profiling", False),  # Disable for benchmark
+        enable_time_profiling=sim_config.get("enable_time_profiling", False),  # Default: disabled for benchmark accuracy
         log_level=sim_config.get("log_level", "WARN"),  # Quiet for benchmark
         collision_check_frequency=sim_config.get("collision_check_frequency", None),
         ignore_static_collision=sim_config.get("ignore_static_collision", sim_config.get("ignore_structure_collision", True)),
