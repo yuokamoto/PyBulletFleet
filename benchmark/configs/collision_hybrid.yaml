@@ -1,0 +1,29 @@
+# ========================================
+# Benchmark: Physics ON + HYBRID
+# ========================================
+# Mixed mode (contact for physics, closest for kinematic)
+# ========================================
+
+target_rtf: 0                # Maximum speed (no sleep)
+timestep: 0.00416666         # 1/240s
+duration: 10.0               # 10 seconds
+gui: false                   # Headless for benchmarking
+physics: true                # 🔴 Physics ON (required for hybrid)
+monitor: false
+ignore_static_collision: true
+enable_time_profiling: true       # 🔴 Enable profiling
+
+# Collision Detection
+collision_detection_method: "hybrid"
+collision_margin: 0.02       # Used for kinematic pairs
+
+# Optimization
+enable_monitor_gui: false
+log_level: error             # Suppress logs for clean benchmark output
+
+# Visualizer (disabled for performance)
+enable_collision_shapes: false
+enable_structure_transparency: false
+enable_shadows: false
+enable_gui_panel: false
+enable_collision_color_change: false

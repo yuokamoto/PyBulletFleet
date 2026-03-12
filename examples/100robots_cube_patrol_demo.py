@@ -15,8 +15,6 @@ Features:
 - Random mix of omnidirectional and differential drive (50/50)
 - Random forward/backward direction for differential drive only (50/50) - tests both orientations
 - All robots move in parallel, creating synchronized swarm behavior
-- Color-coded by motion mode (blue=omni, red=differential)
-- Realistic acceleration/deceleration constraints
 """
 
 import os
@@ -57,7 +55,7 @@ def create_cube_patrol_path(
     cx, cy, cz = cube_center
 
     # Bottom level Z coordinate
-    z_bottom = cz - half_size
+    z_bottom = cz - half_size + 0.3  # offset
     # Top level Z coordinate
     z_top = cz + half_size
 
@@ -87,8 +85,9 @@ def main():
     # Seed for reproducibility
     np.random.seed(42)
 
-    # Create simulation
-    params = SimulationParams(gui=True, timestep=1.0 / 60.0, speed=5.0)
+    # Create simulation with config file
+    config_path = os.path.join(os.path.dirname(__file__), "..", "config", "100robots_config.yaml")
+    params = SimulationParams.from_config(config_path)
     sim = MultiRobotSimulationCore(params)
 
     # Get absolute path to URDF
@@ -104,7 +103,6 @@ def main():
     print("  - Random mix: 50% omnidirectional, 50% differential drive")
     print("  - Random direction for differential only: 50% forward, 50% backward")
     print("  - Patrol: bottom XY → climb → top XY → descend → repeat")
-    print("  - Color coding: Blue=omni, Red=differential")
     print("=" * 70)
 
     # Create cube patrol path (corners only, no intermediate points)
@@ -177,8 +175,8 @@ def main():
     num_diff = sum(1 for robot in manager.objects if robot.motion_mode == MotionMode.DIFFERENTIAL)
 
     print(f"✓ Spawned {len(manager.objects)} robots:")
-    print(f"  - Omnidirectional: {num_omni} (blue)")
-    print(f"  - Differential: {num_diff} (red)")
+    print(f"  - Omnidirectional: {num_omni} ")
+    print(f"  - Differential: {num_diff} ")
 
     # Set patrol path for each robot (centered at their spawn position)
     print("\nSetting patrol paths (each robot patrols 5m×5m×5m cube, corners only)...")
@@ -191,7 +189,7 @@ def main():
 
         # Create individual patrol path centered at spawn position
         robot_patrol_path = create_cube_patrol_path(
-            cube_center=[spawn_pos[0], spawn_pos[1], spawn_pos[2] + 2.2],  # Center cube above spawn
+            cube_center=[spawn_pos[0], spawn_pos[1], spawn_pos[2] + 2.5],  # Center cube above spawn
             cube_size=5.0,
         )
 
@@ -224,21 +222,25 @@ def main():
     print(f"  - Differential drive - Backward: {num_backward} robots")
     print(f"  - Omnidirectional (direction N/A): {num_omni_skipped} robots")
 
-    # Set camera to view the grid center
-    # Grid center from offset + middle of the grid
+    # Camera setup using config file settings
+    # setup_camera() automatically uses params.camera_config if camera_config is None
+    # and calculates entity_positions from all objects if entity_positions is None
+    sim.setup_camera()
+
+    if params.camera_config:
+        print(f"✓ Camera configured from config file: {params.camera_config.get('camera_mode', 'none')} mode")
+        if "camera_auto_scale" in params.camera_config:
+            print(f"  Camera auto scale: {params.camera_config['camera_auto_scale']}")
+    else:
+        print("✓ Camera setup completed (no camera_config in config file)")
+
+    # Add labels
+    # Calculate grid center for label positioning
     grid_center = [
         grid_params.offset[0] + (grid_params.x_max - grid_params.x_min) * grid_params.spacing[0] / 2,
         grid_params.offset[1] + (grid_params.y_max - grid_params.y_min) * grid_params.spacing[1] / 2,
         2.5,
     ]
-    p.resetDebugVisualizerCamera(
-        cameraDistance=60.0,  # Increased to see wider grid
-        cameraYaw=45,
-        cameraPitch=-35,
-        cameraTargetPosition=grid_center,
-    )
-
-    # Add labels
     p.addUserDebugText(
         "100 Robots Parallel Patrol",
         [grid_center[0], grid_center[1], grid_center[2] + 5.0],
@@ -248,15 +250,6 @@ def main():
 
     print("\n" + "=" * 70)
     print("Simulation started!")
-    print("=" * 70)
-    print("Watch 100 robots patrol in parallel:")
-    print("  Each robot follows its own cube path (5m×5m×5m)")
-    print("  1. Bottom XY circuit")
-    print("  2. Vertical climb")
-    print("  3. Top XY circuit")
-    print("  4. Vertical descent")
-    print("  5. Repeat...")
-    print("\nPress Ctrl+C to exit")
     print("=" * 70)
 
     # Velocity monitoring callback

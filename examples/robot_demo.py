@@ -21,7 +21,7 @@ from pybullet_fleet.core_simulation import MultiRobotSimulationCore, SimulationP
 from pybullet_fleet.sim_object import Pose, SimObject, ShapeParams
 
 # Initialize simulation
-params = SimulationParams(gui=True, timestep=0.01)
+params = SimulationParams(gui=True, timestep=0.01, physics=True)  # for robot arm
 sim_core = MultiRobotSimulationCore(params)
 
 # 1. SimObject with mesh (pallet visual)
@@ -62,7 +62,15 @@ arm_agent = Agent.from_urdf(
 )
 
 # Setup camera
-p.resetDebugVisualizerCamera(10.0, 45, -25, [0.5, 0.5, 0.5])
+sim_core.setup_camera(
+    camera_config={
+        "camera_mode": "manual",
+        "camera_distance": 10.0,
+        "camera_yaw": 45,
+        "camera_pitch": -25,
+        "camera_target": [0.5, 0.5, 0.5],
+    }
+)
 
 
 # Callbacks
@@ -81,7 +89,7 @@ def arm_joint_control_callback(sim_core, dt):
     if sim_core.step_count % 10 == 0:
         t = sim_core.sim_time
         joint_targets = [0.5 * np.sin(t + j * 0.5) for j in range(arm_agent.get_num_joints())]
-        arm_agent.set_all_joint_targets(joint_targets)
+        arm_agent.set_all_joints_targets(joint_targets)
 
 
 # Register and run

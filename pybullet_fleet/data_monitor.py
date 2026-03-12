@@ -16,8 +16,9 @@ from typing import Dict, Optional
 class DataMonitor:
     """Real-time data monitoring window"""
 
-    def __init__(self, title: str = "Simulation Monitor") -> None:
+    def __init__(self, title: str = "Simulation Monitor", enable_gui: bool = True) -> None:
         self.title: str = title
+        self.enable_gui: bool = enable_gui
         self.running: bool = False
         self.window: Optional[tk.Tk] = None
         self.labels: Dict[str, ttk.Label] = {}
@@ -32,8 +33,11 @@ class DataMonitor:
             return
 
         self.running = True
-        self.monitor_thread = threading.Thread(target=self._run_monitor, daemon=True)
-        self.monitor_thread.start()
+
+        # Only start GUI thread if GUI is enabled
+        if self.enable_gui:
+            self.monitor_thread = threading.Thread(target=self._run_monitor, daemon=True)
+            self.monitor_thread.start()
 
     def stop(self) -> None:
         """Stop the monitor window"""
@@ -65,12 +69,14 @@ class DataMonitor:
         fields = [
             "Simulation Time",
             "Real Time",
-            "Target Speed",
-            "Actual Speed",
+            "Target RTF",
+            "Actual RTF",
             "Time Step",
             "Physics",
-            "Robots",
-            "Collisions",
+            "Agents",
+            "Objects",
+            "Active Collisions",
+            "Total Collisions",
             "Steps",
         ]
 
@@ -108,14 +114,16 @@ class DataMonitor:
                 # Update labels
                 self.labels["Simulation Time"].config(text=f"Simulation Time: {data.get('sim_time', 0):.1f}s")
                 self.labels["Real Time"].config(text=f"Real Time: {data.get('real_time', 0):.1f}s")
-                self.labels["Target Speed"].config(text=f"Target Speed: {data.get('target_speed', 0):.1f}x")
-                self.labels["Actual Speed"].config(text=f"Actual Speed: {data.get('actual_speed', 0):.1f}x")
+                self.labels["Target RTF"].config(text=f"Target RTF: {data.get('target_rtf', 0):.1f}x")
+                self.labels["Actual RTF"].config(text=f"Actual RTF: {data.get('actual_rtf', 0):.1f}x")
                 self.labels["Time Step"].config(
                     text=f"Time Step: {data.get('time_step', 0):.4f}s ({data.get('frequency', 0):.0f}Hz)"
                 )
                 self.labels["Physics"].config(text=f"Physics: {data.get('physics', 'Unknown')}")
-                self.labels["Robots"].config(text=f"Robots: {data.get('robots', {})}")
-                self.labels["Collisions"].config(text=f"Collisions: {data.get('collisions', 0)}")
+                self.labels["Agents"].config(text=f"Agents: {data.get('agents', 0)}")
+                self.labels["Objects"].config(text=f"Objects: {data.get('objects', 0)}")
+                self.labels["Active Collisions"].config(text=f"Active Collisions: {data.get('active_collisions', 0)}")
+                self.labels["Total Collisions"].config(text=f"Total Collisions: {data.get('collisions', 0)}")
                 self.labels["Steps"].config(text=f"Steps: {data.get('steps', 0)}")
 
                 self.status_label.config(text=f"Status: Connected (Updated: {time.strftime('%H:%M:%S')})")

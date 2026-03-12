@@ -1,0 +1,82 @@
+# ========================================
+# Profiling Configuration
+# ========================================
+#
+# Optimized settings for profiling tools.
+#
+# NOTE: Uses flat keys (not nested under 'simulation:') because
+# profiling scripts load this via SimulationParams.from_config()
+# which expects flat keys. This differs from general.yaml which
+# uses nested 'simulation:' structure for performance_benchmark.py.
+#
+# ========================================
+
+# ========================================
+# Simulation Parameters
+# ========================================
+
+# Target RTF (Real-Time Factor)
+# 0 = maximum speed (no sleep, no real-time sync)
+target_rtf: 0
+
+# Simulation timestep (seconds per step)
+# Default: 0.1 for kinematics (finer resolution not needed)
+timestep: 0.1
+
+# Simulation duration (seconds, 0=unlimited)
+duration: 0
+
+# Enable GUI window (false for profiling - no rendering overhead)
+gui: false
+
+# Enable physics engine (false for kinematics-only profiling)
+physics: false
+
+# Enable external data monitor (true for data collection)
+monitor: true
+
+# Enable monitor GUI (false for profiling - no GUI overhead)
+enable_monitor_gui: false
+
+# Collision check frequency (times per second)
+# null = check every step (recommended for accurate profiling)
+collision_check_frequency: null
+
+# Ignore collisions with structure (True/False)
+ignore_static_collision: true
+
+# Enable profiling output (False - profiling tools use return_profiling)
+enable_time_profiling: false
+
+# ========================================
+# Performance Optimization Settings
+# ========================================
+
+# 2D collision optimization is now per-object via CollisionMode enum
+# (CollisionMode.NORMAL_2D = 9 neighbors, CollisionMode.NORMAL_3D = 27 neighbors)
+
+# ========================================
+# Logging Settings
+# ========================================
+
+# Logging level for profiling (reduce noise)
+# Options: debug, info, warning, error, critical
+# Note: 'warning' shows AABB init warnings during spawn (harmless in kinematics mode).
+# Use 'error' to suppress them.
+log_level: error
+
+# ========================================
+# Camera Settings (not used in profiling)
+# ========================================
+
+camera:
+  camera_mode: none
+
+# ========================================
+# Visualizer Settings (not used in profiling)
+# ========================================
+
+enable_collision_shapes: false
+enable_structure_transparency: false
+enable_shadows: false
+enable_gui_panel: false

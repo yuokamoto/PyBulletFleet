@@ -37,3 +37,9 @@ dist/
 
 # Pre-commit
 .pre-commit-config.yaml.backup
+
+# Conversation-generated documents (not for final repo)
+docs_conversation/
+
+# Sphinx build output
+docs/_build/

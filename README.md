@@ -1,6 +1,26 @@
 # PyBulletFleet
 
-General-purpose PyBullet simulation library for multi-robot fleets .
+A PyBullet-based simulation framework for large-scale multi-robot fleets, designed for **fast N× speed simulation**.
+
+## Why PyBulletFleet?
+
+Evaluating fleet-level logistics (e.g., warehouse AGV/AMR operations) requires simulating **hundreds to thousands of robots** far faster than real time. PyBullet alone provides a physics engine but lacks the abstractions needed to orchestrate large fleets efficiently.
+
+PyBulletFleet fills this gap by providing:
+
+- **N× speed simulation** — Kinematic (teleport-based) control as the primary motion mode, enabling simulation speeds far exceeding real time without being bottlenecked by physics step overhead.
+- **Scalability** — Designed for 100–10,000 robot-scale environments. Spatial-hash collision detection and shared-shape caching keep per-step update times low even at large scale (target: ≤ 10 ms per step).
+- **Physics as an option** — Full PyBullet physics can be turned on when needed (e.g., grasping, conveyor dynamics) but is off by default so that pure fleet-level evaluation runs as fast as possible.
+- **High-level abstractions** — Action system (MoveTo, Pick, Drop, Wait), agent managers with grid spawning, YAML-driven configuration, and a callback-based simulation loop let users focus on fleet logic rather than low-level PyBullet API calls.
+
+### Target Use Cases
+
+| Use Case | Description |
+|----------|-------------|
+| Fleet algorithm evaluation | Test path planning, task allocation, and traffic control for large robot fleets at N× real-time speed |
+| Warehouse simulation | Simulate pick-and-place, patrol, and transport operations with mobile robots and arms |
+| Scalability benchmarking | Measure how fleet software scales from tens to thousands of agents |
+| Rapid prototyping | Quickly iterate on multi-robot behaviors with minimal boilerplate |
 
 ## Quick Start
 
@@ -10,278 +30,31 @@ cd PyBulletFleet
 pip install -e .
 
 # 2. Run demo
-python examples/100robots_demo.py
-
-
-```
-
-## Overview
-
-This package provides reusable simulation components for multi-robot PyBullet environments.
-## Features
-
-- **MultiRobotSimulationCore**: Main simulation engine with configurable rendering, and monitoring
-- **Robot**: Goal-based navigation for mobile and static robots
-- **RobotManager**: Multi-robot coordination and grid-based spawning
-- **DataMonitor**: Real-time performance monitoring
-
-## Directory Structure
-
-```
-PyBulletFleet/
-├── pybullet_fleet/
-│   ├── __init__.py
-│   ├── core_simulation.py             # Main simulation engine
-│   ├── robot.py                       # Robot implementation (mobile & static)
-│   ├── robot_manager.py               # Multi-robot management
-│   ├── collision_visualizer.py        # Collision visualization
-│   ├── data_monitor.py                # Performance monitoring
-│   └── tools.py                       # Grid utilities
-├── examples/
-│   └── 100robots_demo.py              # 100 robots demo
-├── config/
-│   └── config.yaml                     # Default configuration
-├── robots/
-│   ├── mobile_robot.urdf
-│   └── arm_robot.urdf
-├── setup.py                            # Standard Python package setup
-└── DESIGN.md                           # Architecture documentation
-```
-
-## Installation
-
-Install in development mode:
-
-```bash
-cd PyBulletFleet
-pip install -e .
-```
-
-This makes the package importable from anywhere while keeping it editable.
-
-## Configuration
-
-Edit `config/config.yaml` to customize simulation behavior.
-
-### Keyboard Controls (GUI Mode)
-
-When running with `gui: true`, the following keyboard shortcuts are available:
-
-| Key | Function | Description |
-|-----|----------|-------------|
-| `SPACE` | Pause/Resume | Toggle simulation pause |
-| `v` | Visual shapes | Toggle visual shapes ON/OFF |
-| `c` | Collision shapes | Toggle collision wireframes ON/OFF |
-| `t` | Transparency | Toggle structure transparency ON/OFF |
-
-**⚠️ Transparency Performance Note:**
-- The `t` key toggles transparency **one object at a time** in the registered structure bodies
-- For scenes with **hundreds or thousands of objects**, the transparency toggle may be **slow**
-- The initial transparency state can be set via `enable_structure_transparency: true/false` in config.yaml
-- **Recommendation**: Set the desired transparency in the config file rather than toggling at runtime for large scenes
-
-## Core Components
-
-See [DESIGN.md](DESIGN.md) for detailed architecture documentation.
-
-### 1. MultiRobotSimulationCore
-
-Main simulation engine for PyBullet-based simulations.
-
-**Key Features:**
-- PyBullet engine initialization and management
-- GUI/headless mode switching
-- Simulation speed control
-- Automatic/manual camera positioning
-- Collision detection and visualization
-- Performance monitoring
-- Log level management
-
-
-### 2. Robot
-
-Robot.
-
-**Key Features:**
-- Automatic navigation to goal pose
-- Velocity and acceleration limits
-- Pose control
-- Kinematic teleportation
-
-### 3. RobotManager
-
-Manager for creating and coordinating multiple robots.
-
-**Key Features:**
-- Grid-based batch spawning
-- Probabilistic robot type selection
-- Automatic robot placement
-- Multi-robot management
-- Bulk goal setting
-
-**Spawning Methods:**
-- `spawn_robots_grid()`: Spawn single robot type in grid
-- `spawn_robots_grid_probabilistic()`: Spawn mixed robot types with probabilities
-
-
-## Examples
-
-### Recommended Demos (New API)
-
-#### 100robots_grid_demo.py
-**概要:**
-シンプルな単一タイプのグリッド生成デモ。`RobotManager.spawn_robots_grid()` を使用。
-
-**特徴:**
-- YAML設定ファイルベース
-- 自動グリッド配置
-- ゴールベースナビゲーション
-- 共有シェイプ最適化
-
-**用途:** 初心者向け、単一タイプのロボット群
-
-```bash
 python examples/100robots_grid_demo.py
 ```
 
-#### path_following_demo.py
-**概要:**
-2つのモーションモード（全方向移動と差動駆動）を比較するデモ。
+## Performance
 
-**特徴:**
-- 全方向移動（Omnidirectional）: 回転せずに任意の方向に移動可能
-- 差動駆動（Differential Drive）: 目標方向に回転してから前進
-- 事前定義されたパス追従（円形と正方形）
-- 速度・加速度制限による現実的な動き
-- Pathデータクラスによるウェイポイント管理
+<!-- sync with docs/benchmarking/results.md -->
+> Results from a single test environment (Intel i7-1185G7, 32 GB RAM, Ubuntu 20.04). Your numbers will vary depending on hardware.
 
-**用途:** モーションプランニング、異なる駆動方式の比較
+| Agents | Real-Time Factor | Step Time |
+|--------|-----------------|-----------|
+| 100    | 48× | 2.1 ms  |
+| 500    | 6.8×| 14.7 ms |
+| 1000   | 2.4×| 40.9 ms |
+| 2000   | 1.1×| 94.8 ms |
 
+Kinematics mode (physics OFF), headless. See [Benchmark Results](benchmark/README.md#benchmark-results) for full data, component breakdown, and methodology.
+
+## Documentation
+
+📖 **Full documentation:** [Read the Docs](https://pybulletfleet.readthedocs.io)
+
+For local builds:
 ```bash
-python examples/path_following_demo.py
+cd docs && sphinx-build -b html . _build/html
 ```
-
-#### 100robots_probabilistic_demo.py
-**概要:**
-確率ベースの混合ロボット生成デモ。辞書設定で複数タイプを確率指定。
-
-**特徴:**
-- 辞書ベースのロボットタイプ設定
-- 確率による重み付け選択（例: 50% mobile, 20% arm, 30% スキップ）
-- 確率 < 100% 時のグリッド位置自動スキップ
-- robot.user_data でのタイプ追跡
-- 複数の設定例（100%カバー、スパース倉庫、可変密度）
-
-**用途:** 高度な用途、混合ロボットタイプ、スパース配置
-
-```bash
-python examples/100robots_probabilistic_demo.py
-```
-
-**使用例:**
-```python
-# 確率でロボットタイプを定義
-robot_type_params = {
-    'mobile_robot': (mobile_spawn_params, 0.50),  # 50% の確率
-    'arm_robot': (arm_spawn_params, 0.20)          # 20% の確率
-    # 残り 30% は自動スキップ（ロボットを配置しない）
-}
-
-robots = robot_manager.spawn_robots_grid_probabilistic(
-    num_positions=100,
-    grid_params=grid_params,
-    robot_type_params=robot_type_params
-)
-# 結果: ~50 mobile + ~20 arm + ~30 空き位置
-```
-
-#### robot_urdf_demo.py
-**概要:**
-Robot クラスの基本チュートリアル。Mesh と URDF の両方をサポート。
-
-**特徴:**
-- Robot.from_mesh() の例
-- Robot.from_urdf() の例
-- SimObject 継承（attach/detach）
-- URDF ロボットの関節制御
-
-**用途:** Robot クラスの基本学習
-
-```bash
-python examples/robot_urdf_demo.py
-```
-
-#### shape_params_demo.py
-**概要:**
-新しい ShapeParams API を使用したデモ。URDF single-linkと同等の柔軟な形状制御。
-
-**特徴:**
-- プリミティブ形状のサポート（box, sphere, cylinder, mesh）
-- ビジュアルとコリジョンの独立制御
-- 形状ごとの色、スケール、フレームオフセット
-- URDFと同等の柔軟性
-
-**用途:** 高度な形状制御、プリミティブ形状の使用
-
-**使用例:**
-```python
-from pybullet_fleet.sim_object import SimObject, ShapeParams
-from pybullet_fleet.geometry import Pose
-
-# Box visual + Sphere collision
-obj = SimObject.from_mesh(
-    visual_shape=ShapeParams(
-        shape_type="box",
-        half_extents=[0.5, 0.3, 0.2],
-        rgba_color=[1.0, 0.0, 0.0, 1.0]
-    ),
-    collision_shape=ShapeParams(
-        shape_type="sphere",
-        radius=0.3
-    ),
-    pose=Pose.from_xyz(0, 0, 1),
-    mass=1.0
-)
-
-# Mesh with rotated frame
-agent = Agent.from_mesh(
-    visual_shape=ShapeParams(
-        shape_type="mesh",
-        mesh_path="robot.obj",
-        mesh_scale=[1.0, 1.0, 1.0],
-        rgba_color=[0.2, 0.2, 0.2, 1.0],
-        frame_pose=Pose.from_euler(0, 0, 0, roll=np.pi/2, yaw=np.pi/2)
-    ),
-    collision_shape=ShapeParams(
-        shape_type="box",
-        half_extents=[0.2, 0.1, 0.2]
-    ),
-    pose=Pose.from_xyz(0, 0, 0.5),
-    max_linear_vel=2.0
-)
-```
-
-```bash
-python examples/shape_params_demo.py
-```
-
-### Legacy Demo
-
-#### 100robots_demo.py
-**概要:**
-旧 API（URDFObject ベース）のデモ。後方互換性のための参照用。
-
-**注意:**
-このデモはレガシー API を使用しています。新規プロジェクトでは上記のデモを使用してください。
-
-```bash
-python examples/100robots_demo.py
-```
-
-
-## Todo
-- ~~Merge MeshObject and URDFObject~~ ✅ Done (Robot class)
-- ~~Update examples to use Robot and RobotManager~~ ✅ Done
 
 ## Dependencies
 
@@ -296,6 +69,12 @@ python examples/100robots_demo.py
 
 ```bash
 pip install -e ".[dev]"
+```
+
+### Run tests
+
+```bash
+pytest
 ```
 
 ### Pre-commit hooks
@@ -318,7 +97,6 @@ pre-commit run --all-files
 **Format code:**
 ```bash
 black pybullet_fleet examples
-isort pybullet_fleet examples
 ```
 
 **Lint code:**
@@ -328,14 +106,5 @@ flake8 pybullet_fleet
 
 **Type check:**
 ```bash
-mypy pybullet_fleet
+pyright pybullet_fleet
 ```
-
-### CI/CD
-
-GitHub Actions automatically runs linting and type checking on every push and pull request. Tests are currently commented out and will be enabled once test suite is created.
-
-## Documentation
-
-- **README.md** (this file): User guide and API reference
-- **DESIGN.md**: Architecture and design documentation

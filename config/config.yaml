@@ -11,10 +11,12 @@
 # Simulation Parameters
 # ========================================
 
-# Target simulation speed multiplier (e.g. 1=real time, 10=10x faster)
-speed: 100
+# Target RTF (Real-Time Factor): 1=real time, 10=10x faster, 0=max speed
+target_rtf: 100
 
 # Simulation timestep (seconds per step)
+# Default: 0.1 for kinematics simulation (finer resolution not needed)
+# For physics simulation: use 0.01 or smaller
 timestep: 0.1
 
 # Simulation duration (seconds, 0=unlimited)
@@ -32,36 +34,153 @@ monitor: true
 # Collision check frequency (times per second)
 # collision_check_frequency: 0.1
 # Ignore collisions with structure (True/False)
-ignore_structure_collision: true
+ignore_static_collision: true
 
 # Enable profiling output (True/False)
-enable_profiling: false
+enable_time_profiling: false
+
+# Enable memory profiling output (True/False)
+# Tracks memory usage using Python's tracemalloc module
+# Useful for detecting memory leaks in long-running simulations
+enable_memory_profiling: false
+
+# Profiling configuration
+# - profiling_interval: Number of steps to average before printing report (default: 100)
+#   Example: profiling_interval=100 → prints average every 100 steps
+#   This interval applies to both time profiling and memory profiling
+profiling_interval: 100
+
+# ========================================
+# Collision Detection Settings
+# ========================================
+
+# Collision detection method:
+#   - "closest_points": Distance-based (recommended for kinematics/physics=false)
+#   - "contact_points": Physics contact manifold (recommended for physics=true)
+#   - "hybrid": Mixed (contact_points for physics, closest_points for kinematic)
+#
+# Auto-selection (if not specified):
+#   physics=false → "closest_points"
+#   physics=true  → "contact_points"
+#
+# Design philosophy:
+#   - closest_points: Stable with resetBasePositionAndOrientation, supports safety margin
+#   - contact_points: Fast but requires stepSimulation(), unstable for kinematic-kinematic
+#   - hybrid: Advanced use, slower due to branching
+collision_detection_method: "closest_points"
+
+# Collision safety margin (meters)
+# Used by getClosestPoints() to detect near-misses before actual contact
+#
+# Recommended values:
+#   - 0.01-0.02: Tight spaces (1-2cm clearance)
+#   - 0.02-0.05: Normal operation (2-5cm safety buffer) [DEFAULT]
+#   - 0.05-0.10: Conservative (5-10cm extra safety for high-speed)
+#   - 0.0: Contact detection only (touching)
+#
+# Note: Only affects CLOSEST_POINTS and HYBRID modes
+#       CONTACT_POINTS always detects actual contact (margin=0)
+collision_margin: 0.02
+
+# ========================================
+# Performance Optimization Settings
+# ========================================
+
+# Spatial hash cell size mode for collision detection
+# Options: "auto_adaptive", "auto_initial", "constant"
+# - auto_adaptive: Recalculate cell size when objects are added/removed (recommended)
+# - auto_initial: Calculate once at initialization
+# - constant: Use fixed cell size (set spatial_hash_cell_size)
+# spatial_hash_cell_size_mode: "auto_adaptive"
+
+# Fixed cell size (only used when spatial_hash_cell_size_mode="constant")
+# spatial_hash_cell_size: 2.0
+
+# ========================================
+# Per-Object Collision Mode
+# ========================================
+
+# CollisionMode is set per-object via spawn parameters, not globally
+# Default mode: NORMAL_3D (full 3D collision detection)
+#
+# Available modes:
+#   - NORMAL_3D: Full 3D collision (27 neighbors) - DEFAULT
+#   - NORMAL_2D: 2D collision only (9 neighbors, XY plane) - for ground robots
+#   - STATIC: One-time AABB registration, never updated - for fixed structures
+#   - DISABLED: No collision detection at all - for visualization objects
+#
+# Example usage in code:
+#   from pybullet_fleet.types import CollisionMode
+#
+#   # Ground robot (2D) - via spawn parameters
+#   params = AgentSpawnParams(
+#       urdf_path="robot.urdf",
+#       collision_mode=CollisionMode.NORMAL_2D,  # 2D collision (9 neighbors)
+#   )
+#   agent = Agent.from_params(params, sim_core)
+#
+#   # Drone (3D) - default is NORMAL_3D
+#   params = AgentSpawnParams(
+#       urdf_path="drone.urdf",
+#       # collision_mode not specified → uses default NORMAL_3D
+#   )
+#
+#   # Structure (static) - direct creation
+#   structure = SimObject(
+#       body_id=body_id,
+#       sim_core=sim_core,
+#       collision_mode=CollisionMode.STATIC,
+#       is_static=True
+#   )
+#
+#   # Marker (no collision)
+#   marker = SimObject(
+#       body_id=body_id,
+#       sim_core=sim_core,
+#       collision_mode=CollisionMode.DISABLED
+#   )
+#
+# Migration from v1.x:
+#   OLD: collision_check_2d=True (global setting)
+#   NEW: collision_mode=CollisionMode.NORMAL_2D (per-object parameter in spawn params)
+
+# Enable monitor GUI (visualization)
+# Recommended: false for headless performance testing
+# Default: true (GUI enabled when monitor=true)
+enable_monitor_gui: true
+
+# ========================================
+# Logging Settings
+# ========================================
 
 # Logging level (debug/info/warning/error/critical)
-log_level: debug
+log_level: info
 
 # ========================================
 # Camera Settings
 # ========================================
+camera:
+  # Camera mode: 'manual' (use fixed values), 'auto', or 'none' (no camera setup)
+  camera_mode: manual
 
-# Camera mode: 'manual' (use fixed values) or 'none' (no camera setup)
-camera_mode: manual
+  # Camera view type: 'top_down' or 'perspective'
+  camera_view_type: perspective
 
-# Camera view type: 'top_down' or 'perspective'
-camera_view_type: perspective
-
-# Manual camera settings
-camera_distance: 20.0      # Distance from target (meters)
-camera_yaw: 45             # Horizontal angle (degrees)
-camera_pitch: -30          # Vertical angle (degrees)
-camera_target: [5, 5, 0]   # Target position [x, y, z]
+  # Manual camera settings
+  camera_distance: 20.0      # Distance from target (meters)
+  camera_yaw: 45             # Horizontal angle (degrees)
+  camera_pitch: -30          # Vertical angle (degrees)
+  camera_target: [5, 5, 0]   # Target position [x, y, z]
 
 # ========================================
 # Visualizer Settings
 # ========================================
 
-enable_visual_shapes: true           # Display visual shapes (meshes)
 enable_collision_shapes: false       # Display collision shapes (wireframes)
 enable_structure_transparency: false # Make structure bodies semi-transparent (initial value)
 enable_shadows: false                # Enable shadows
 enable_gui_panel: false              # Show GUI control panel
+
+# --- Feature Option ---
+# If true, robot color will change on collision (default: false)
+enable_collision_color_change: false

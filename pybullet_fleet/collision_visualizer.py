@@ -1,7 +1,20 @@
 """
 collision_visualizer.py
 Utilities for visualizing collision shapes in PyBullet.
+
+.. deprecated::
+    This module is not actively used. Collision visualization is handled
+    directly by ``core_simulation.py``. This file will be removed in a
+    future release.
 """
+
+import warnings
+
+warnings.warn(
+    "collision_visualizer is deprecated and will be removed in a future release.",
+    DeprecationWarning,
+    stacklevel=2,
+)
 
 import logging
 import math

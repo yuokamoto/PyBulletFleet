@@ -1,4 +1,5 @@
 # Development dependencies for PyBulletFleet
+# Runtime deps: install via `pip install -e .` or `pip install -r requirements.txt`
 
 # Code formatting
 black>=23.0.0
@@ -15,11 +16,9 @@ types-setuptools>=65.0.0
 # Pre-commit hooks
 pre-commit>=3.0.0
 
-# Testing (for future use)
+# Testing
 pytest>=7.0.0
 pytest-cov>=4.0.0
 
-# Runtime dependencies (in case requirements.txt is not installed)
-pybullet>=3.0.0
-numpy>=1.20.0
-pyyaml>=5.4.0
+# Benchmarking
+psutil>=5.9.0

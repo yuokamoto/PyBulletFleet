@@ -6,24 +6,25 @@ Supports both Mesh and URDF loading.
 """
 
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple, Union
-import time
 
 import numpy as np
 import pybullet as p
 from scipy.spatial.transform import Rotation as R
-from scipy.spatial.transform import Slerp
 
-from .geometry import Pose
+from .geometry import Pose, SlerpPrecomp, quat_slerp, quat_slerp_precompute
 from .sim_object import SimObject, SimObjectSpawnParams, ShapeParams
 from two_point_interpolation import TwoPointInterpolation
 from .action import Action
-from .types import MotionMode, DifferentialPhase, MovementDirection, ActionStatus
+from .types import MotionMode, DifferentialPhase, MovementDirection, ActionStatus, CollisionMode
 from .tools import normalize_vector_param
+from pybullet_fleet.tools import resolve_joint_index
+from .logging_utils import get_lazy_logger
 
 # Create logger for this module
 logger = logging.getLogger(__name__)
+lazy_logger = get_lazy_logger(__name__)
 
 
 @dataclass
@@ -47,11 +48,14 @@ class AgentSpawnParams(SimObjectSpawnParams):
         max_angular_accel: Maximum angular acceleration in rad/s² (for differential drive, default: 10.0)
         motion_mode: MotionMode.OMNIDIRECTIONAL (move in any direction) or MotionMode.DIFFERENTIAL (rotate then move forward)
         use_fixed_base: If True, robot base is fixed and doesn't move (default: False)
-        user_data: Optional dictionary for custom metadata (default: empty dict)
+
+    Inherited from SimObjectSpawnParams:
+        name: Optional string name for human-readable identification.
+              Duplicates allowed - use for debugging/filtering, not unique lookup.
+              For unique identification, use object_id after spawning.
 
     Note:
-        initial_pose is optional and mainly used by Agent.from_params().
-        AgentManager.spawn_agents_grid() calculates positions automatically and ignores this field.
+        AgentManager.spawn_agents_grid() calculates positions automatically and may override initial_pose.
     """
 
     urdf_path: Optional[str] = None
@@ -61,7 +65,6 @@ class AgentSpawnParams(SimObjectSpawnParams):
     max_angular_accel: Union[float, List[float]] = 10.0
     motion_mode: Union[MotionMode, str] = MotionMode.OMNIDIRECTIONAL
     use_fixed_base: bool = False
-    user_data: Dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self):
         """Validate agent spawn parameters."""
@@ -86,7 +89,7 @@ class AgentSpawnParams(SimObjectSpawnParams):
 
         Args:
             config: Dictionary with robot parameters including:
-                    - mesh_path or urdf_path (required)
+                    - visual_shape/collision_shape or urdf_path
                     - initial_pose: Pose object (optional)
                     - max_linear_vel, max_linear_accel, use_fixed_base, etc. (optional)
 
@@ -125,39 +128,29 @@ class AgentSpawnParams(SimObjectSpawnParams):
         if isinstance(motion_mode_value, str):
             motion_mode_value = MotionMode(motion_mode_value)
 
-        # Create visual_shape from legacy parameters if provided
-        visual_shape = config.get("visual_shape")
-        if visual_shape is None and config.get("mesh_path"):
-            visual_shape = ShapeParams(
-                shape_type="mesh",
-                mesh_path=config["mesh_path"],
-                mesh_scale=config.get("mesh_scale", [1.0, 1.0, 1.0]),
-                rgba_color=config.get("rgba_color", [0.2, 0.2, 0.2, 1.0]),
-            )
-
-        # Create collision_shape from legacy parameters if provided
-        collision_shape = config.get("collision_shape")
-        if collision_shape is None and config.get("mesh_path"):
-            collision_shape = ShapeParams(shape_type="box", half_extents=config.get("collision_half_extents", [0.2, 0.1, 0.2]))
+        # Get base fields from parent
+        base = SimObjectSpawnParams.from_dict(config)
 
         return cls(
-            visual_shape=visual_shape,
-            collision_shape=collision_shape,
+            visual_shape=base.visual_shape,
+            collision_shape=base.collision_shape,
+            initial_pose=base.initial_pose,
+            mass=base.mass,
+            pickable=base.pickable,
+            name=base.name,
+            collision_mode=base.collision_mode,
+            user_data=base.user_data,
             urdf_path=config.get("urdf_path"),
-            initial_pose=config.get("initial_pose"),
             max_linear_vel=config.get("max_linear_vel", 2.0),
             max_linear_accel=config.get("max_linear_accel", 5.0),
             max_angular_vel=config.get("max_angular_vel", 3.0),
             max_angular_accel=config.get("max_angular_accel", 10.0),
             motion_mode=motion_mode_value,
-            mass=config.get("mass", 0.0),
             use_fixed_base=config.get("use_fixed_base", False),
         )
 
 
 class Agent(SimObject):
-    # Profiling flag (class variable)
-    PROFILE_UPDATE = False
     """
     Agent class with goal-based position control.
 
@@ -174,17 +167,17 @@ class Agent(SimObject):
     - URDF support with joint control
     - Attach/detach objects (inherited from SimObject)
 
+    Object Identification (inherited from SimObject):
+    - object_id: Unique integer ID (assigned by sim_core, use for lookups)
+    - name: Optional string name (duplicates allowed, use for debugging/filtering)
+
     This class is designed to be eventually controlled by ROS2 nodes,
     so the API follows ROS message conventions.
     """
 
-    # Class-level shared shapes (for optimization)
-    _shared_shapes: Dict[str, Tuple[int, int]] = {}
-
     def __init__(
         self,
         body_id: int,
-        mesh_path: Optional[str] = None,
         urdf_path: Optional[str] = None,
         max_linear_vel: Union[float, List[float]] = 2.0,
         max_linear_accel: Union[float, List[float]] = 5.0,
@@ -192,14 +185,16 @@ class Agent(SimObject):
         max_angular_accel: Union[float, List[float]] = 10.0,
         motion_mode: Union[MotionMode, str] = MotionMode.OMNIDIRECTIONAL,
         use_fixed_base: bool = False,
+        collision_mode: CollisionMode = CollisionMode.NORMAL_3D,
         sim_core=None,
+        name: Optional[str] = None,
+        user_data: Optional[Dict[str, Any]] = None,
     ):
         """
         Initialize Agent.
 
         Args:
             body_id: PyBullet body ID
-            mesh_path: Path to robot mesh file (if mesh-based)
             urdf_path: Path to robot URDF file (if URDF-based)
             max_linear_vel: Maximum velocity (m/s) - float or [vx, vy, vz] for per-axis limits
             max_linear_accel: Maximum acceleration (m/s²) - float or [ax, ay, az] for per-axis limits
@@ -207,6 +202,7 @@ class Agent(SimObject):
             max_angular_accel: Maximum angular acceleration (rad/s²) - float or [yaw, pitch, roll] for per-axis limits
             motion_mode: MotionMode.OMNIDIRECTIONAL or MotionMode.DIFFERENTIAL drive
             use_fixed_base: If True, robot base is fixed and doesn't move
+            collision_mode: Collision detection mode (default: NORMAL_3D)
             sim_core: Reference to simulation core (optional)
 
         Note:
@@ -214,10 +210,10 @@ class Agent(SimObject):
             For mesh robots, use Agent.from_mesh() factory method.
             For URDF robots, use Agent.from_urdf() factory method.
         """
-        # Initialize SimObject base class
-        super().__init__(body_id, sim_core=sim_core)
+        # Initialize SimObject base class (collision_mode is forwarded so
+        # add_object receives the correct mode directly – no post-hoc transition)
+        super().__init__(body_id, sim_core=sim_core, collision_mode=collision_mode, name=name, user_data=user_data)
 
-        self.mesh_path = mesh_path
         self.urdf_path = urdf_path
 
         # Normalize max_linear_vel and max_linear_accel to numpy arrays [vx, vy, vz]
@@ -233,8 +229,8 @@ class Agent(SimObject):
         # URDF-specific: joint information
         self.joint_info = []
         if urdf_path is not None:
-            num_joints = p.getNumJoints(body_id)
-            self.joint_info = [p.getJointInfo(body_id, j) for j in range(num_joints)]
+            num_joints = p.getNumJoints(body_id, physicsClientId=self._pid)
+            self.joint_info = [p.getJointInfo(body_id, j, physicsClientId=self._pid) for j in range(num_joints)]
 
         # Goal tracking (only used for non-static robots) - Private internal state
         self._goal_pose: Optional[Pose] = None
@@ -247,13 +243,14 @@ class Agent(SimObject):
         self._current_waypoint_index = 0
         self._final_target_orientation: Optional[np.ndarray] = None  # Final orientation to align to
         self._align_final_orientation: bool = False  # Whether to align to final orientation
+        self._is_final_orientation_aligning: bool = False  # True while performing final orientation rotation
         self._movement_direction: MovementDirection = MovementDirection.FORWARD  # Movement direction (differential mode only)
 
         # Two-point interpolation trajectory planners (initialized by set_motion_mode) - Private
         # Position trajectories [X, Y, Z] - shared by both omnidirectional and differential modes
-        self._tpi_pos: Optional[List[TwoPointInterpolation]] = None
-        # Rotation using scipy Slerp combined with TPI for angle progression - used by differential mode
-        self._rotation_slerp: Optional[Slerp] = None
+        self._tpi_pos: List[TwoPointInterpolation] = []
+        # Rotation using fast quaternion slerp combined with TPI for angle progression - used by differential mode
+        self._slerp_precomp = SlerpPrecomp(0.0, 0.0, 0.0, False)
         self._tpi_rotation_angle: Optional[TwoPointInterpolation] = None  # TPI for rotation angle (0 to total_angle)
         self._rotation_total_angle: float = 0.0  # Total rotation angle in radians
         # Forward distance for differential mode (tracks progress along path)
@@ -265,9 +262,6 @@ class Agent(SimObject):
 
         # Differential drive state - Private
         self._differential_phase: DifferentialPhase = DifferentialPhase.ROTATE
-
-        # User-extensible data storage
-        self.user_data: Dict[str, Any] = {}
 
         # Action queue system for high-level task execution
         self._action_queue: List[Action] = []
@@ -286,6 +280,9 @@ class Agent(SimObject):
         # Note: This will set _motion_mode and create TPI instances
         self._motion_mode = None  # Temporary: will be set by set_motion_mode()
         self.set_motion_mode(motion_mode)  # This normalizes mode and creates TPI instances
+
+        # Update log prefix to include Agent class name (SimObject sets it initially)
+        self._update_log_prefix()
 
     @property
     def is_moving(self) -> bool:
@@ -342,6 +339,16 @@ class Agent(SimObject):
             Current goal Pose, or None if no goal is set
         """
         return self._goal_pose
+
+    @property
+    def current_waypoint_index(self) -> int:
+        """
+        Read-only property: Get current waypoint index in the path.
+
+        Returns:
+            Current waypoint index (0-based), or 0 if no path is set
+        """
+        return self._current_waypoint_index
 
     @classmethod
     def from_params(cls, spawn_params: AgentSpawnParams, sim_core=None) -> "Agent":
@@ -403,7 +410,10 @@ class Agent(SimObject):
                 max_angular_accel=spawn_params.max_angular_accel,
                 motion_mode=spawn_params.motion_mode,
                 use_fixed_base=spawn_params.use_fixed_base,
+                collision_mode=spawn_params.collision_mode,
                 sim_core=sim_core,
+                name=spawn_params.name,
+                user_data=spawn_params.user_data,
             )
         else:
             # Mesh robot
@@ -418,12 +428,11 @@ class Agent(SimObject):
                 max_angular_accel=spawn_params.max_angular_accel,
                 motion_mode=spawn_params.motion_mode,
                 use_fixed_base=spawn_params.use_fixed_base,
+                collision_mode=spawn_params.collision_mode,
                 sim_core=sim_core,
+                name=spawn_params.name,
+                user_data=spawn_params.user_data,
             )
-
-        # Set user_data if provided
-        if spawn_params.user_data:
-            agent.user_data.update(spawn_params.user_data)
 
         return agent
 
@@ -440,7 +449,10 @@ class Agent(SimObject):
         max_angular_accel: Union[float, List[float]] = 10.0,
         motion_mode: Union[MotionMode, str] = MotionMode.OMNIDIRECTIONAL,
         use_fixed_base: bool = False,
+        collision_mode: CollisionMode = CollisionMode.NORMAL_3D,
         sim_core=None,
+        name: Optional[str] = None,
+        user_data: Optional[Dict[str, Any]] = None,
     ) -> "Agent":
         """
         Create a mesh-based Agent with flexible shape control.
@@ -498,20 +510,21 @@ class Agent(SimObject):
             mass=mass,
         )
 
-        # Store mesh_path for backward compatibility
-        stored_mesh_path = visual_shape.mesh_path if (visual_shape and visual_shape.shape_type == "mesh") else None
-
         # Create agent instance with Agent-specific parameters
+        # collision_mode is passed through __init__ -> super().__init__() -> add_object
+        # so the object is registered with the correct mode directly (no post-hoc transition)
         agent = cls(
             body_id=body_id,
-            mesh_path=stored_mesh_path,
             max_linear_vel=max_linear_vel,
             max_linear_accel=max_linear_accel,
             max_angular_vel=max_angular_vel,
             max_angular_accel=max_angular_accel,
             motion_mode=motion_mode,
             use_fixed_base=use_fixed_base,
+            collision_mode=collision_mode,
             sim_core=sim_core,
+            name=name,
+            user_data=user_data,
         )
 
         return agent
@@ -528,7 +541,10 @@ class Agent(SimObject):
         max_angular_accel: Union[float, List[float]] = 10.0,
         motion_mode: Union[MotionMode, str] = MotionMode.OMNIDIRECTIONAL,
         use_fixed_base: bool = False,
+        collision_mode: CollisionMode = CollisionMode.NORMAL_3D,
         sim_core=None,
+        name: Optional[str] = None,
+        user_data: Optional[Dict[str, Any]] = None,
     ) -> "Agent":
         """
         Create a URDF-based Agent (with joints).
@@ -565,19 +581,21 @@ class Agent(SimObject):
         # Get position and orientation from Pose
         position, orientation = pose.as_position_orientation()
 
-        body_id = p.loadURDF(urdf_path, position, orientation, useFixedBase=use_fixed_base)
+        _client = sim_core._client if sim_core is not None else 0
+        body_id = p.loadURDF(urdf_path, position, orientation, useFixedBase=use_fixed_base, physicsClientId=_client)
 
         # Override mass if explicitly set to 0.0 (kinematic control)
         # mass=1.0 (default) means use URDF's mass values
         if mass == 0.0:
             # Kinematic control: set mass to 0 for all links
             # This prevents gravity and inertia from affecting the robot
-            p.changeDynamics(body_id, -1, mass=0.0)
-            num_joints = p.getNumJoints(body_id)
+            p.changeDynamics(body_id, -1, mass=0.0, physicsClientId=_client)
+            num_joints = p.getNumJoints(body_id, physicsClientId=_client)
             for joint_idx in range(num_joints):
-                p.changeDynamics(body_id, joint_idx, mass=0.0)
+                p.changeDynamics(body_id, joint_idx, mass=0.0, physicsClientId=_client)
 
         # Create agent instance (SimObject.__init__ handles auto-registration)
+        # collision_mode is passed through __init__ -> super().__init__() -> add_object
         agent = cls(
             body_id=body_id,
             urdf_path=urdf_path,
@@ -587,7 +605,10 @@ class Agent(SimObject):
             max_angular_accel=max_angular_accel,
             motion_mode=motion_mode,
             use_fixed_base=use_fixed_base,
+            collision_mode=collision_mode,
             sim_core=sim_core,
+            name=name,
+            user_data=user_data,
         )
 
         return agent
@@ -617,7 +638,7 @@ class Agent(SimObject):
             True if mode was changed successfully, False if robot is moving
         """
         if self._is_moving:
-            logger.warning("Cannot change motion mode while robot is moving " f"(body_id={self.body_id}). Call stop() first.")
+            self._log.warning("Cannot change motion mode while robot is moving. Call stop() first.")
             return False
 
         # Normalize to enum
@@ -630,13 +651,12 @@ class Agent(SimObject):
         if mode == MotionMode.OMNIDIRECTIONAL:
             # Position trajectories: X, Y, Z
             self._tpi_pos = [TwoPointInterpolation(), TwoPointInterpolation(), TwoPointInterpolation()]
-            self._rotation_slerp = None
             self._tpi_forward = None
         elif mode == MotionMode.DIFFERENTIAL:
             # Position trajectories: X, Y, Z (shared with omnidirectional)
             self._tpi_pos = [TwoPointInterpolation(), TwoPointInterpolation(), TwoPointInterpolation()]
-            # Rotation: TPI for angle progression + Slerp for quaternion interpolation
-            self._rotation_slerp = None
+            # Rotation: TPI for angle progression + fast quaternion slerp
+            self._slerp_precomp = SlerpPrecomp(0.0, 0.0, 0.0, False)
             self._tpi_rotation_angle = None  # Will be initialized in set_path
             self._tpi_forward = TwoPointInterpolation()  # Forward distance
             self._differential_phase = DifferentialPhase.ROTATE
@@ -647,7 +667,7 @@ class Agent(SimObject):
         """Clear all path visualization debug lines."""
         for debug_id in self._path_debug_ids:
             try:
-                p.removeUserDebugItem(debug_id)
+                p.removeUserDebugItem(debug_id, physicsClientId=self._pid)
             except Exception:  # noqa: B902
                 pass  # Ignore errors if item was already removed
         self._path_debug_ids.clear()
@@ -672,7 +692,12 @@ class Agent(SimObject):
             end_pos = path[i + 1].position
 
             debug_id = p.addUserDebugLine(
-                start_pos, end_pos, lineColorRGB=color, lineWidth=width, lifeTime=0  # Permanent until manually removed
+                start_pos,
+                end_pos,
+                lineColorRGB=color,
+                lineWidth=width,
+                lifeTime=0,  # Permanent until manually removed
+                physicsClientId=self._pid,
             )
             self._path_debug_ids.append(debug_id)
 
@@ -699,11 +724,11 @@ class Agent(SimObject):
                             In omnidirectional mode, this parameter is ignored.
         """
         if self.use_fixed_base:
-            logger.warning(f"Cannot set path for fixed-base robot (body_id={self.body_id})")
+            self._log.warning("Cannot set path for fixed-base robot")
             return
 
         if len(path) == 0:
-            logger.warning("Empty path provided")
+            self._log.warning("Empty path provided")
             return
 
         # Normalize direction to enum
@@ -726,7 +751,9 @@ class Agent(SimObject):
             # Add current position as approach waypoint
             # This creates a path: current_pose -> path[0] -> path[1] -> ...
             final_path.append(current_pose)
-            logger.debug(f"Added approach waypoint at current position (distance to first: {distance_to_first:.2f}m)")
+            self._log.debug(
+                lambda: f"Added approach waypoint at current position (distance to first: {distance_to_first:.2f}m)"
+            )
 
         # Add all path waypoints
         final_path.extend(path)
@@ -767,15 +794,19 @@ class Agent(SimObject):
             current_pose: Current robot pose
         """
         # Teleport to exact goal position before updating waypoint
-        p.resetBasePositionAndOrientation(self.body_id, self._goal_pose.position, current_pose.orientation)
+        self.set_pose_raw(self._goal_pose.position, current_pose.orientation, preserve_velocity=False)
 
-        logger.debug(f"Agent {self.body_id} reached waypoint at position {self._goal_pose.position[:2]}")
-        r = R.from_quat(current_pose.orientation)
-        yaw_current = r.as_euler("xyz", degrees=False)[2]
-        logger.debug(f"  Current orientation: yaw={np.degrees(yaw_current):.1f}°, quat={current_pose.orientation}")
+        self._log.debug(lambda: f"Reached waypoint at position {self._goal_pose.position[:2]}")
+        self._log.debug(
+            lambda: (
+                f"  Current orientation: yaw="
+                f"{np.degrees(R.from_quat(current_pose.orientation).as_euler('xyz', degrees=False)[2]):.1f}°, "
+                f"quat={current_pose.orientation}"
+            )
+        )
 
         # Stop moving
-        self._current_velocity = np.array([0.0, 0.0, 0.0])
+        self._current_velocity[:] = 0.0
         self._current_angular_velocity = 0.0
         self._is_moving = False
 
@@ -783,7 +814,7 @@ class Agent(SimObject):
         if self._path:  # Simpler: empty list is falsy
             self._current_waypoint_index += 1
             if self._current_waypoint_index < len(self._path):
-                logger.debug(f"Agent {self.body_id} moving to next waypoint {self._current_waypoint_index}")
+                self._log.debug(lambda: f"Moving to next waypoint {self._current_waypoint_index}")
                 self._goal_pose = self._path[self._current_waypoint_index]
                 self._is_moving = True
                 # Initialize trajectory based on motion mode
@@ -795,15 +826,18 @@ class Agent(SimObject):
                 # Path complete - check if we need final orientation alignment
                 if self._align_final_orientation and self._final_target_orientation is not None:
                     # Start final rotation to match target orientation
-                    logger.info("Path complete, aligning to final orientation...")
+                    self._log.info("Path complete, aligning to final orientation...")
                     self._start_final_orientation_alignment()
                 else:
                     # Path complete - stop all motion in PyBullet
                     self._path = []  # Clear path (was None)
                     self._goal_pose = None
+                    self._is_final_orientation_aligning = False
                     # Reset velocity in PyBullet to stop any residual motion
-                    p.resetBaseVelocity(self.body_id, linearVelocity=[0, 0, 0], angularVelocity=[0, 0, 0])
-                    logger.info(f"Path complete (body_id={self.body_id})")
+                    p.resetBaseVelocity(
+                        self.body_id, linearVelocity=[0, 0, 0], angularVelocity=[0, 0, 0], physicsClientId=self._pid
+                    )
+                    self._log.info("Path complete")
 
     def _start_final_orientation_alignment(self):
         """Start rotation to align with final target orientation after reaching last position."""
@@ -827,6 +861,7 @@ class Agent(SimObject):
         # Mark that we're done with the path (just doing final rotation)
         self._path = []
         self._align_final_orientation = False  # Don't repeat this
+        self._is_final_orientation_aligning = True  # Signal update() to use differential rotation
 
     def _init_omnidirectional_trajectory(self, goal: Pose):
         """
@@ -845,8 +880,12 @@ class Agent(SimObject):
         t0 = self.sim_core.sim_time if self.sim_core is not None else 0.0
 
         # Reuse existing TPI instances (created by set_motion_mode)
-        if self._tpi_pos is None:
-            raise RuntimeError("_tpi_pos is not initialized. Call set_motion_mode() before setting path.")
+        if not self._tpi_pos:
+            self._log.warning(f"_tpi_pos is not initialized. " f"Auto-calling set_motion_mode({self._motion_mode}).")
+            self.set_motion_mode(self._motion_mode or MotionMode.OMNIDIRECTIONAL)
+            if not self._tpi_pos:
+                self._log.error("_tpi_pos is still empty after set_motion_mode. Skipping trajectory init.")
+                return
 
         # 3D: X, Y, Z with per-axis limits
         for axis in range(3):
@@ -865,23 +904,36 @@ class Agent(SimObject):
             except ValueError as e:
                 # TPI error: same position with different velocity (dp=0, dv!=0)
                 # This can happen when setting a new goal at the current position
-                # Warning only - robot will stay at current position
-                logger.warning(
-                    f"Agent {self.body_id}: Failed to initialize trajectory for axis {axis}: {e}. "
-                    f"Robot will stay at current position."
+                # Safety fallback: retry with v0=0 to move to goal in ~distance/max_vel time
+                self._log.warning(
+                    f"Failed to initialize trajectory for axis {axis}: {e}. " f"Retrying with v0=0 (safety fallback)."
                 )
-                # Initialize with zero movement (stay at current position)
-                self._tpi_pos[axis].init(
-                    p0=current_pos[axis],
-                    pe=current_pos[axis],  # Same position
-                    acc_max=self.max_linear_accel[axis],
-                    vmax=self.max_linear_vel[axis],
-                    t0=t0,
-                    v0=0.0,  # Zero velocity
-                    ve=0.0,
-                    dec_max=self.max_linear_accel[axis],
-                )
-                self._tpi_pos[axis].calc_trajectory()
+                try:
+                    self._tpi_pos[axis].init(
+                        p0=current_pos[axis],
+                        pe=goal_pos[axis],  # Still aim for the goal
+                        acc_max=self.max_linear_accel[axis],
+                        vmax=self.max_linear_vel[axis],
+                        t0=t0,
+                        v0=0.0,  # Reset velocity to avoid dp=0,dv!=0 error
+                        ve=0.0,
+                        dec_max=self.max_linear_accel[axis],
+                    )
+                    self._tpi_pos[axis].calc_trajectory()
+                except ValueError:
+                    # Both attempts failed (e.g. already at goal position)
+                    # Initialize with zero movement (stay at current position)
+                    self._tpi_pos[axis].init(
+                        p0=current_pos[axis],
+                        pe=current_pos[axis],
+                        acc_max=self.max_linear_accel[axis],
+                        vmax=self.max_linear_vel[axis],
+                        t0=t0,
+                        v0=0.0,
+                        ve=0.0,
+                        dec_max=self.max_linear_accel[axis],
+                    )
+                    self._tpi_pos[axis].calc_trajectory()
 
     def _update_omnidirectional(self, dt: float):
         """
@@ -893,14 +945,12 @@ class Agent(SimObject):
             dt: Time step (seconds)
         """
         current_pose = self.get_pose()
-        current_pos = np.array(current_pose.position)
-        goal_pos = np.array(self._goal_pose.position)
 
         # Get current simulation time
         current_time = self.sim_core.sim_time if self.sim_core is not None else 0.0
 
         # Get interpolated position and velocity from trajectories
-        if self._tpi_pos is None:
+        if not self._tpi_pos:
             # This should not happen if set_motion_mode and set_path were called correctly
             return
 
@@ -920,16 +970,12 @@ class Agent(SimObject):
             self._handle_goal_reached(current_pose)
             return
 
-        # Update position (full 3D)
-        new_pos = np.array([p_xyz[0], p_xyz[1], p_xyz[2]])
-
         # Update velocity (3D)
-        self._current_velocity = np.array([v_xyz[0], v_xyz[1], v_xyz[2]])
+        self._current_velocity[:] = v_xyz
 
         # Set new position (omnidirectional: keep original orientation, don't rotate)
-        # Use set_pose() to ensure attached objects are updated
-        new_pose = Pose(position=new_pos.tolist(), orientation=current_pose.orientation)
-        self.set_pose(new_pose)
+        # Use set_pose_raw() to avoid Pose allocation in hot path
+        self.set_pose_raw(p_xyz, current_pose.orientation)
 
     def _init_differential_rotation_trajectory(self, goal: Pose):
         """
@@ -952,9 +998,9 @@ class Agent(SimObject):
         current_pos = np.array(current_pose.position)
         goal_pos = np.array(goal.position)
 
-        logger.debug(f"Agent {self.body_id} initializing differential rotation trajectory")
-        logger.debug(f"  Current pos: {current_pos[:2]}, Goal pos: {goal_pos[:2]}")
-        logger.debug(f"  Goal orientation (quat): {goal.orientation}")
+        self._log.debug(lambda: "Initializing differential rotation trajectory")
+        self._log.debug(lambda: f"  Current pos: {current_pos[:2]}, Goal pos: {goal_pos[:2]}")
+        self._log.debug(lambda: f"  Goal orientation (quat): {goal.orientation}")
 
         # Calculate direction vector
         direction_vec = goal_pos - current_pos
@@ -969,6 +1015,14 @@ class Agent(SimObject):
 
         # Calculate 3D distance
         self._forward_total_distance_3d = float(np.linalg.norm(direction_vec))
+
+        # Cache direction vectors for FORWARD phase (avoid recomputing every tick)
+        if self._forward_total_distance_3d > 1e-6:
+            self._forward_direction_3d = self._forward_goal_pos - self._forward_start_pos
+            self._forward_direction_unit = self._forward_direction_3d / self._forward_total_distance_3d
+        else:
+            self._forward_direction_3d = np.zeros(3)
+            self._forward_direction_unit = np.zeros(3)
 
         # Forward movement: rotate to face target (or opposite for backward)
         # Calculate target orientation
@@ -1006,18 +1060,18 @@ class Agent(SimObject):
             # Use dot product to measure alignment (1.0 = perfectly aligned)
             alignment = np.dot(x_axis_goal, x_axis_target)
 
-            logger.debug(f"Agent {self.body_id} checking orientation alignment:")
-            logger.debug(f"  Movement direction: {x_axis_target}")
-            logger.debug(f"  Goal's X-axis: {x_axis_goal}")
-            logger.debug(f"  Alignment: {alignment:.3f} (threshold: 0.95)")
+            self._log.debug(lambda: "Checking orientation alignment:")
+            self._log.debug(lambda: f"  Movement direction: {x_axis_target}")
+            self._log.debug(lambda: f"  Goal's X-axis: {x_axis_goal}")
+            self._log.debug(lambda: f"  Alignment: {alignment:.3f} (threshold: 0.95)")
 
             # Threshold: cos(18°) ≈ 0.95 (allow up to 18 degrees deviation)
             if alignment > 0.95:
                 # Goal's X-axis is aligned with movement direction
                 # Use goal's complete orientation (including roll around X-axis)
                 self._rotation_target_quat = np.array(goal.orientation)
-                logger.debug(f"Agent {self.body_id} using goal's complete orientation")
-                logger.info(f"Using goal's complete orientation (alignment={alignment:.3f})")
+                self._log.debug("Using goal's complete orientation")
+                self._log.info(f"Using goal's complete orientation (alignment={alignment:.3f})")
             else:
                 # Goal's X-axis is NOT aligned with movement direction
                 # Build orientation with X pointing in movement direction
@@ -1051,8 +1105,8 @@ class Agent(SimObject):
                 self._rotation_target_quat = np.array(r.as_quat())  # [x, y, z, w]
         else:
             # No movement needed - this happens when waypoint is at current position
-            # Keep current orientation (don't rotate to waypoint orientation)
-            self._rotation_target_quat = self._rotation_start_quat
+            # For rotation in place, use the goal's orientation
+            self._rotation_target_quat = np.array(goal.orientation)
 
         # Calculate rotation angle between quaternions
         r_current = R.from_quat(self._rotation_start_quat)
@@ -1060,7 +1114,7 @@ class Agent(SimObject):
         r_delta = r_target * r_current.inv()
         rotation_angle = r_delta.magnitude()  # Total rotation angle in radians
 
-        logger.debug(f"Agent {self.body_id} rotation: {rotation_angle:.3f} rad ({np.degrees(rotation_angle):.1f}°)")
+        self._log.debug(lambda: f"Rotation: {rotation_angle:.3f} rad ({np.degrees(rotation_angle):.1f}°)")
 
         # Use TPI to calculate rotation trajectory with angular acceleration and velocity constraints
         if rotation_angle > 1e-6:
@@ -1086,24 +1140,19 @@ class Agent(SimObject):
                 )
                 self._tpi_rotation_angle.calc_trajectory()
 
-                # Create Slerp interpolator (we'll use angle ratio from TPI to query Slerp)
-                # Slerp will be queried with ratio = current_angle / total_angle
-                key_rots = R.from_quat([self._rotation_start_quat, self._rotation_target_quat])
-                # Slerp with normalized time [0, 1]
-                self._rotation_slerp = Slerp([0.0, 1.0], key_rots)
+                # Precompute slerp constants for fast quaternion interpolation
+                self._slerp_precomp = quat_slerp_precompute(self._rotation_start_quat, self._rotation_target_quat)
             except ValueError as e:
                 # TPI error: skip rotation and go directly to forward phase
-                logger.warning(
-                    f"Agent {self.body_id}: Failed to initialize rotation trajectory: {e}. " f"Skipping rotation phase."
-                )
+                self._log.warning(f"Failed to initialize rotation trajectory: {e}. Skipping rotation phase.")
                 # Teleport to target orientation
-                p.resetBasePositionAndOrientation(self.body_id, current_pos.tolist(), self._rotation_target_quat.tolist())
+                self.set_pose_raw(current_pos.tolist(), self._rotation_target_quat.tolist(), preserve_velocity=False)
                 # Skip to FORWARD phase
                 self._differential_phase = DifferentialPhase.FORWARD
                 self._init_differential_forward_distance_trajectory(self._forward_total_distance_3d)
         else:
             # No rotation needed, teleport to target orientation and skip to FORWARD phase
-            p.resetBasePositionAndOrientation(self.body_id, current_pos.tolist(), self._rotation_target_quat.tolist())
+            self.set_pose_raw(current_pos.tolist(), self._rotation_target_quat.tolist(), preserve_velocity=False)
 
             # Calculate 3D distance for forward phase
             distance_3d = self._forward_total_distance_3d
@@ -1142,22 +1191,36 @@ class Agent(SimObject):
             self._tpi_forward.calc_trajectory()  # Calculate trajectory
         except ValueError as e:
             # TPI error: distance is zero or invalid
-            logger.warning(
-                f"Agent {self.body_id}: Failed to initialize forward trajectory: {e}. " f"Goal may already be reached."
-            )
-            # Initialize with zero movement (already at goal)
-            self._tpi_forward = TwoPointInterpolation()
-            self._tpi_forward.init(
-                p0=0.0,
-                pe=0.0,  # Zero distance
-                acc_max=avg_accel,
-                vmax=avg_vel,
-                t0=t0,
-                v0=0.0,
-                ve=0.0,
-                dec_max=avg_accel,
-            )
-            self._tpi_forward.calc_trajectory()
+            # Safety fallback: retry with v0=0 to move to goal
+            self._log.warning(f"Failed to initialize forward trajectory: {e}. " f"Retrying with v0=0 (safety fallback).")
+            try:
+                self._tpi_forward = TwoPointInterpolation()
+                self._tpi_forward.init(
+                    p0=0.0,
+                    pe=distance,  # Still aim for the goal
+                    acc_max=avg_accel,
+                    vmax=avg_vel,
+                    t0=t0,
+                    v0=0.0,  # Reset velocity to avoid dp=0,dv!=0 error
+                    ve=0.0,
+                    dec_max=avg_accel,
+                )
+                self._tpi_forward.calc_trajectory()
+            except ValueError:
+                # Both attempts failed (e.g. already at goal position)
+                # Initialize with zero movement (stay at current position)
+                self._tpi_forward = TwoPointInterpolation()
+                self._tpi_forward.init(
+                    p0=0.0,
+                    pe=0.0,  # Zero distance
+                    acc_max=avg_accel,
+                    vmax=avg_vel,
+                    t0=t0,
+                    v0=0.0,
+                    ve=0.0,
+                    dec_max=avg_accel,
+                )
+                self._tpi_forward.calc_trajectory()
 
     def _update_differential(self, dt: float):
         """
@@ -1179,8 +1242,6 @@ class Agent(SimObject):
             dt: Time step (seconds)
         """
         current_pose = self.get_pose()
-        current_pos = np.array(current_pose.position)
-        goal_pos = np.array(self._goal_pose.position)
 
         # Get current simulation time
         current_time = self.sim_core.sim_time if self.sim_core is not None else 0.0
@@ -1203,35 +1264,36 @@ class Agent(SimObject):
             if current_time >= self._tpi_rotation_angle.get_end_time():
                 # Rotation complete, switch to forward phase
                 # Set exact final rotation (target quaternion)
-                final_pose = Pose(position=current_pos.tolist(), orientation=self._rotation_target_quat.tolist())
-                self.set_pose(final_pose)
+                self.set_pose_raw(current_pose.position, self._rotation_target_quat.tolist())
 
                 # Initialize forward trajectory
                 self._differential_phase = DifferentialPhase.FORWARD
                 self._init_differential_forward_distance_trajectory(self._forward_total_distance_3d)
                 return
 
-            # Apply Slerp interpolation with TPI-calculated angle ratio
+            # Apply fast quaternion slerp with TPI-calculated angle ratio
             # Ratio = current_angle / total_angle (normalized to [0, 1])
-            if self._rotation_slerp is not None and self._rotation_total_angle > 1e-6:
+            if self._rotation_total_angle > 1e-6:
                 angle_ratio = current_angle / self._rotation_total_angle
-                angle_ratio = np.clip(angle_ratio, 0.0, 1.0)  # Ensure [0, 1] range
+                angle_ratio = max(0.0, min(1.0, angle_ratio))  # Ensure [0, 1] range
 
-                r_interpolated = self._rotation_slerp(angle_ratio)
-                new_orientation = r_interpolated.as_quat().tolist()
-                new_pose = Pose(position=current_pos.tolist(), orientation=new_orientation)
-                self.set_pose(new_pose)
+                new_orientation = quat_slerp(
+                    self._rotation_start_quat,
+                    self._rotation_target_quat,
+                    angle_ratio,
+                    self._slerp_precomp,
+                ).tolist()
+                self.set_pose_raw(current_pose.position, new_orientation)
             else:
                 # Fallback: use target orientation directly
-                fallback_pose = Pose(position=current_pos.tolist(), orientation=self._rotation_target_quat.tolist())
-                self.set_pose(fallback_pose)
+                self.set_pose_raw(current_pose.position, self._rotation_target_quat.tolist())
 
             # Update angular velocity from TPI
             self._current_angular_velocity = angular_vel
-            self._current_velocity = np.array([0.0, 0.0, 0.0])
+            self._current_velocity[:] = 0.0
 
             # Log current yaw during rotation (debug level)
-            logger.debug(f"Agent {self.body_id} rotating, current yaw: {self.get_pose().yaw:.1f}°")
+            self._log.debug(lambda: f"Rotating, current yaw: {self.get_pose().yaw:.1f}°")
 
         elif self._differential_phase == DifferentialPhase.FORWARD:
             # Phase 2: Move forward/backward using TPI
@@ -1246,13 +1308,12 @@ class Agent(SimObject):
                 self._handle_goal_reached(current_pose)
                 return
 
-            # Move along straight 3D line from start to goal
-            direction_3d = self._forward_goal_pos - self._forward_start_pos
+            # Move along straight 3D line from start to goal (use cached direction vectors)
             total_distance = self._forward_total_distance_3d
             ratio = distance_traveled / total_distance if total_distance > 1e-6 else 0.0
 
             # Position: interpolate along 3D line
-            new_pos = self._forward_start_pos + direction_3d * ratio
+            new_pos = self._forward_start_pos + self._forward_direction_3d * ratio
 
             # Orientation: use orientation from rotation phase
             # (For FORWARD: X+ towards target, for BACKWARD: X- towards target)
@@ -1260,60 +1321,11 @@ class Agent(SimObject):
 
             # Velocity: along 3D direction (same for both forward and backward)
             # Note: Position interpolates from start to goal regardless of orientation
-            direction_3d_unit = direction_3d / total_distance if total_distance > 1e-6 else np.array([0.0, 0.0, 0.0])
-            self._current_velocity = direction_3d_unit * forward_vel
+            np.multiply(self._forward_direction_unit, forward_vel, out=self._current_velocity)
 
-            # Update position/orientation - use set_pose() to update attached objects
-            new_pose = Pose(position=new_pos.tolist(), orientation=new_orientation)
-            self.set_pose(new_pose)
+            # Update position/orientation - use set_pose_raw() to avoid Pose allocation in hot path
+            self.set_pose_raw(new_pos.tolist(), new_orientation)
             self._current_angular_velocity = 0.0
-
-    def _direction_and_up_to_quaternion(self, x_axis: np.ndarray, z_axis: np.ndarray) -> List[float]:
-        """
-        Create quaternion from desired X-axis (forward) and Z-axis (up) directions.
-
-        The Y-axis is computed as Z × X to form a right-handed coordinate system.
-        If X and Z are not perpendicular, Z-axis takes priority and X is adjusted.
-
-        Args:
-            x_axis: Desired forward direction (will be normalized)
-            z_axis: Desired up direction (will be normalized, takes priority)
-
-        Returns:
-            Quaternion [x, y, z, w] representing the orientation
-        """
-        # Normalize inputs
-        z_norm = z_axis / np.linalg.norm(z_axis)
-        x_initial = x_axis / np.linalg.norm(x_axis)
-
-        # Y-axis = Z × X (right-hand rule)
-        y_axis = np.cross(z_norm, x_initial)
-        y_norm_magnitude = np.linalg.norm(y_axis)
-
-        # Check if X and Z are parallel (or nearly so)
-        if y_norm_magnitude < 1e-6:
-            # X and Z are parallel, cannot form a valid coordinate system
-            # Fall back to a default Y-axis
-            # Choose Y perpendicular to Z
-            if abs(z_norm[2]) < 0.9:
-                # Z is not vertical, use world up × Z
-                y_axis = np.cross(np.array([0, 0, 1]), z_norm)
-            else:
-                # Z is nearly vertical, use world X × Z
-                y_axis = np.cross(np.array([1, 0, 0]), z_norm)
-            y_axis = y_axis / np.linalg.norm(y_axis)
-        else:
-            y_axis = y_axis / y_norm_magnitude
-
-        # Recompute X-axis to ensure orthogonality: X = Y × Z
-        x_final = np.cross(y_axis, z_norm)
-
-        # Build rotation matrix with [X, Y, Z] as columns
-        rotation_matrix = np.column_stack([x_final, y_axis, z_norm])
-
-        # Convert to quaternion
-        r = R.from_matrix(rotation_matrix)
-        return r.as_quat().tolist()  # [x, y, z, w]
 
     # ============================================================================
     # Action Queue System
@@ -1333,7 +1345,7 @@ class Agent(SimObject):
             agent.add_action(WaitAction(duration=5.0))
         """
         self._action_queue.append(action)
-        logger.info(f"Added {action.__class__.__name__} to queue (queue size: {len(self._action_queue)})")
+        self._log.info(f"Added {action.__class__.__name__} to queue (queue size: {len(self._action_queue)})")
 
     def add_action_sequence(self, actions: List[Action]):
         """
@@ -1347,11 +1359,11 @@ class Agent(SimObject):
                 MoveAction(path=path1),
                 PickAction(target_object_id=obj.body_id),
                 MoveAction(path=path2),
-                DropAction(drop_position=[10, 5, 0])
+                DropAction(drop_pose=Pose(position=[10, 5, 0]))
             ])
         """
         self._action_queue.extend(actions)
-        logger.info(f"Added {len(actions)} actions to queue (queue size: {len(self._action_queue)})")
+        self._log.info(f"Added {len(actions)} actions to queue (queue size: {len(self._action_queue)})")
 
     def clear_actions(self):
         """
@@ -1361,7 +1373,7 @@ class Agent(SimObject):
         if self._current_action is not None:
             self._current_action.cancel()
             self._current_action = None
-        logger.info("Cleared all actions")
+        self._log.info("Cleared all actions")
 
     def get_current_action(self) -> Optional[Action]:
         """
@@ -1381,6 +1393,15 @@ class Agent(SimObject):
         """
         return len(self._action_queue)
 
+    def is_action_queue_empty(self) -> bool:
+        """
+        Check if action queue is empty and no action is currently executing.
+
+        Returns:
+            True if no actions are queued or executing, False otherwise
+        """
+        return len(self._action_queue) == 0 and self._current_action is None
+
     def _update_actions(self, dt: float):
         """
         Update action execution system.
@@ -1394,7 +1415,7 @@ class Agent(SimObject):
         if self._current_action is None:
             if self._action_queue:
                 self._current_action = self._action_queue.pop(0)
-                logger.info(
+                self._log.info(
                     f"Starting {self._current_action.__class__.__name__} " f"(remaining in queue: {len(self._action_queue)})"
                 )
             else:
@@ -1408,20 +1429,16 @@ class Agent(SimObject):
             status = self._current_action.status
 
             if status == ActionStatus.COMPLETED:
-                logger.info(f"{action_name} completed successfully")
+                self._log.info(f"{action_name} completed successfully")
             elif status == ActionStatus.FAILED:
-                logger.error(f"{action_name} failed: {self._current_action.error_message}")
+                self._log.error(f"{action_name} failed: {self._current_action.error_message}")
             elif status == ActionStatus.CANCELLED:
-                logger.warning(f"{action_name} was cancelled")
+                self._log.warning(f"{action_name} was cancelled")
 
             # Move to next action
             self._current_action = None
 
-    def update(self, dt: float):
-        t0 = None
-        elapsed = None
-        if Agent.PROFILE_UPDATE:
-            t0 = time.perf_counter()
+    def update(self, dt: float) -> bool:
         """
         Update robot position towards goal with velocity/acceleration constraints.
 
@@ -1435,34 +1452,41 @@ class Agent(SimObject):
 
         Args:
             dt: Time step (seconds)
+
+        Returns:
+            True if the robot moved (position or orientation changed), False otherwise
         """
         # Process action queue first (actions may set goals/paths)
         self._update_actions(dt)
 
-        if self.use_fixed_base:
-            return
+        if not self.use_fixed_base:
+            if not self._is_moving or self._goal_pose is None:
+                # # Ensure robot is completely stopped when not following a path
+                # # Reset velocity to zero every frame to counteract physics (gravity, etc.)
+                # p.resetBaseVelocity(self.body_id, linearVelocity=[0, 0, 0], angularVelocity=[0, 0, 0])
+                # # Also fix position to prevent any drift from physics simulation
+                # current_pos, current_orn = p.getBasePositionAndOrientation(self.body_id)
+                # p.resetBasePositionAndOrientation(self.body_id, current_pos, current_orn)
+                return False  # No movement if not moving
 
-        if not self._is_moving or self._goal_pose is None:
-            # Ensure robot is completely stopped when not following a path
-            # Reset velocity to zero every frame to counteract physics (gravity, etc.)
-            p.resetBaseVelocity(self.body_id, linearVelocity=[0, 0, 0], angularVelocity=[0, 0, 0])
-            # Also fix position to prevent any drift from physics simulation
-            current_pos, current_orn = p.getBasePositionAndOrientation(self.body_id)
-            p.resetBasePositionAndOrientation(self.body_id, current_pos, current_orn)
-            return
+            # Dispatch to appropriate motion controller
+            if self._is_final_orientation_aligning:
+                # Final orientation alignment: always use differential rotation
+                # (even for omnidirectional robots, we rotate in place)
+                self._update_differential(dt)
+            elif self._motion_mode == MotionMode.OMNIDIRECTIONAL:
+                self._update_omnidirectional(dt)
+            elif self._motion_mode == MotionMode.DIFFERENTIAL:
+                self._update_differential(dt)
+            else:
+                self._log.warning(f"Unknown motion mode: {self._motion_mode}")
 
-        # Dispatch to appropriate motion controller
-        if self._motion_mode == MotionMode.OMNIDIRECTIONAL:
-            self._update_omnidirectional(dt)
-        elif self._motion_mode == MotionMode.DIFFERENTIAL:
-            self._update_differential(dt)
-        else:
-            logger.warning(f"Unknown motion mode: {self._motion_mode}")
+        if self.is_urdf_robot():
+            self.update_attached_objects_kinematics()
 
-        if Agent.PROFILE_UPDATE and t0 is not None:
-            elapsed = (time.perf_counter() - t0) * 1000.0  # ms
-            if elapsed > 10.0:
-                logger.info(f"Agent.update() took {elapsed:.2f} ms (body_id={self.body_id})")
+        # Movement detection is handled by set_pose() in _update_omnidirectional() and _update_differential()
+        # Return True to indicate update was called (actual movement is tracked by sim_core)
+        return True
 
     def get_velocity(self) -> np.ndarray:
         """
@@ -1479,11 +1503,12 @@ class Agent(SimObject):
         self._path = []  # Clear path (empty list instead of None)
         self._current_waypoint_index = 0
         self._is_moving = False
-        self._current_velocity = np.array([0.0, 0.0, 0.0])
+        self._current_velocity[:] = 0.0
         self._current_angular_velocity = 0.0
         self._differential_phase = DifferentialPhase.ROTATE
         self._final_target_orientation = None
         self._align_final_orientation = False
+        self._is_final_orientation_aligning = False
         self._movement_direction = MovementDirection.FORWARD
         self._clear_path_visualization()  # Clear visualization when stopping
 
@@ -1499,34 +1524,6 @@ class Agent(SimObject):
         """Get number of joints (0 for mesh robots)."""
         return len(self.joint_info)
 
-    def set_joint_target(self, joint_index: int, target_position: float, max_force: float = 500.0):
-        """
-        Set target position for a joint (for URDF robots only).
-
-        Args:
-            joint_index: Joint index (0-based)
-            target_position: Target position (radians for revolute, meters for prismatic)
-            max_force: Maximum force to apply
-
-        Example:
-            robot.set_joint_target(0, 1.57)  # Move first joint to 90 degrees
-        """
-        if not self.is_urdf_robot():
-            logger.warning("set_joint_target() only works for URDF robots")
-            return
-
-        if joint_index >= len(self.joint_info):
-            logger.warning(f"joint_index {joint_index} out of range (max: {len(self.joint_info)-1})")
-            return
-
-        p.setJointMotorControl2(
-            bodyUniqueId=self.body_id,
-            jointIndex=joint_index,
-            controlMode=p.POSITION_CONTROL,
-            targetPosition=target_position,
-            force=max_force,
-        )
-
     def get_joint_state(self, joint_index: int) -> Tuple[float, float]:
         """
         Get joint state (position and velocity).
@@ -1541,13 +1538,101 @@ class Agent(SimObject):
             pos, vel = robot.get_joint_state(0)
         """
         if not self.is_urdf_robot():
-            logger.warning("get_joint_state() only works for URDF robots")
+            self._log.warning("get_joint_state() only works for URDF robots")
             return (0.0, 0.0)
 
-        joint_state = p.getJointState(self.body_id, joint_index)
+        joint_state = p.getJointState(self.body_id, joint_index, physicsClientId=self._pid)
         return (joint_state[0], joint_state[1])  # position, velocity
 
-    def set_all_joint_targets(self, target_positions: List[float], max_force: float = 500.0):
+    def get_joint_state_by_name(self, joint_name: str) -> tuple:
+        """
+        Get (position, velocity) for a single joint by name.
+        Returns (position, velocity) or (0.0, 0.0) if not found.
+        """
+        idx = resolve_joint_index(self.body_id, joint_name)
+        if idx == -1:
+            self._log.warning(f"Joint name '{joint_name}' not found.")
+            return (0.0, 0.0)
+        return self.get_joint_state(idx)
+
+    def get_all_joints_state(self) -> list:
+        """
+        Return a list of (position, velocity) for all joints.
+        Example: [(pos0, vel0), (pos1, vel1), ...]
+        """
+        if not self.is_urdf_robot():
+            self._log.warning("get_all_joints_state() only works for URDF robots")
+            return []
+        return [self.get_joint_state(i) for i in range(self.get_num_joints())]
+
+    def get_all_joints_state_by_name(self) -> dict:
+        """
+        Return a dict of {joint_name: (position, velocity)} for all joints.
+        Example: {joint_name: (pos, vel), ...}
+        """
+        if not self.is_urdf_robot():
+            self._log.warning("get_all_joints_state_by_name() only works for URDF robots")
+            return {}
+        joint_names = [self.joint_info[i][1].decode("utf-8") for i in range(self.get_num_joints())]
+        result = {}
+        for name in joint_names:
+            result[name] = self.get_joint_state_by_name(name)
+        return result
+
+    def get_joints_state_by_name(self, joint_names: list) -> dict:
+        """
+        Return a dict of {joint_name: (position, velocity)} for the specified joint_names.
+        Example: {joint_name: (pos, vel), ...}
+        """
+        result = {}
+        for name in joint_names:
+            idx = resolve_joint_index(self.body_id, name)
+            if idx == -1:
+                self._log.warning(f"Joint name '{name}' not found.")
+                continue
+            result[name] = self.get_joint_state(idx)
+        return result
+
+    def set_joint_target(self, joint_index: int, target_position: float, max_force: float = 500.0):
+        """
+        Set target position for a joint (for URDF robots only).
+
+        Args:
+            joint_index: Joint index (0-based)
+            target_position: Target position (radians for revolute, meters for prismatic)
+            max_force: Maximum force to apply
+
+        Example:
+            robot.set_joint_target(0, 1.57)  # Move first joint to 90 degrees
+        """
+        if not self.is_urdf_robot():
+            self._log.warning("set_joint_target() only works for URDF robots")
+            return
+
+        if joint_index >= len(self.joint_info):
+            self._log.warning(f"joint_index {joint_index} out of range (max: {len(self.joint_info)-1})")
+            return
+
+        p.setJointMotorControl2(
+            bodyUniqueId=self.body_id,
+            jointIndex=joint_index,
+            controlMode=p.POSITION_CONTROL,
+            targetPosition=target_position,
+            force=max_force,
+            physicsClientId=self._pid,
+        )
+
+    def set_joint_target_by_name(self, joint_name: str, target_position: float, max_force: float = 500.0):
+        """
+        Set target position for a joint by joint name.
+        """
+        joint_index = resolve_joint_index(self.body_id, joint_name)
+        if joint_index == -1:
+            self._log.warning(f"Joint name '{joint_name}' not found.")
+            return
+        self.set_joint_target(joint_index, target_position, max_force)
+
+    def set_all_joints_targets(self, target_positions: List[float], max_force: float = 500.0):
         """
         Set target positions for all joints at once.
 
@@ -1556,18 +1641,155 @@ class Agent(SimObject):
             max_force: Maximum force to apply
 
         Example:
-            robot.set_all_joint_targets([0.0, 1.57, -1.57, 0.0])
+            robot.set_all_joints_targets([0.0, 1.57, -1.57, 0.0])
         """
         if not self.is_urdf_robot():
-            logger.warning("set_all_joint_targets() only works for URDF robots")
+            self._log.warning("set_all_joints_targets() only works for URDF robots")
             return
 
         if len(target_positions) != len(self.joint_info):
-            logger.warning(f"Expected {len(self.joint_info)} targets, got {len(target_positions)}")
+            self._log.warning(f"Expected {len(self.joint_info)} targets, got {len(target_positions)}")
             return
 
         for i, target in enumerate(target_positions):
             self.set_joint_target(i, target, max_force)
+
+    def set_joints_targets_by_name(self, joint_targets: dict, max_force: float = 500.0):
+        """
+        Set multiple joint targets by dict {joint_name: target_position} (partial update allowed).
+        """
+        for joint_name, target in joint_targets.items():
+            joint_index = resolve_joint_index(self.body_id, joint_name)
+            if joint_index == -1:
+                self._log.warning(f"Joint name '{joint_name}' not found.")
+                continue
+            self.set_joint_target(joint_index, target, max_force)
+
+    def set_joints_targets(self, targets: Union[list, dict], max_force: float = 500.0):
+        """
+        Set joint targets (accepts both list and dict).
+
+        Args:
+            targets: List of target positions for all joints, or dict {joint_name: position}
+            max_force: Maximum force to apply
+
+        Example:
+            # Using list
+            robot.set_joints_targets([0.0, 1.57, -1.57, 0.0])
+
+            # Using dict
+            robot.set_joints_targets({"joint1": 1.57, "joint2": -1.57})
+        """
+        if isinstance(targets, dict):
+            self.set_joints_targets_by_name(targets, max_force)
+        else:
+            self.set_all_joints_targets(targets, max_force)
+
+    def is_joint_at_target(self, joint_index: int, target: float, tolerance: float = 0.01) -> bool:
+        """
+        Check if a single joint (by index) is within tolerance of the target position.
+        """
+        if not self.is_urdf_robot():
+            self._log.warning("is_joint_at_target() only works for URDF robots")
+            return False
+        if joint_index < 0 or joint_index >= len(self.joint_info):
+            self._log.warning(f"joint_index {joint_index} out of range (max: {len(self.joint_info)-1})")
+            return False
+        pos, _ = self.get_joint_state(joint_index)
+        return abs(pos - target) <= tolerance
+
+    def is_joint_at_target_by_name(self, joint_name: str, target: float, tolerance: float = 0.01) -> bool:
+        """
+        Check if a single joint (by name) is within tolerance of the target position.
+        """
+        joint_index = resolve_joint_index(self.body_id, joint_name)
+        if joint_index == -1:
+            return False
+        return self.is_joint_at_target(joint_index, target, tolerance)
+
+    def are_all_joints_at_targets(self, target_positions: list, tolerance: Union[float, list] = 0.01) -> bool:
+        """
+        target_positions: list of target positions for each joint
+        tolerance: float or list of tolerances for each joint
+        Returns True if all joints are within tolerance of their targets, False otherwise
+        """
+        if not self.is_urdf_robot():
+            self._log.warning("are_all_joints_at_targets() only works for URDF robots")
+            return False
+        if len(target_positions) == 0:
+            return True
+        if isinstance(tolerance, (list, tuple)):
+            tol_list = list(tolerance)
+        else:
+            tol_list = [tolerance] * len(target_positions)
+        for i, target in enumerate(target_positions):
+            tol = tol_list[i] if i < len(tol_list) else tol_list[-1]
+            if not self.is_joint_at_target(i, target, tol):
+                return False
+        return True
+
+    def are_joints_at_targets_by_name(self, joint_targets: dict, tolerance: Union[float, list, dict] = 0.01) -> bool:
+        """
+        Check if all specified joints (by name) are within tolerance of their target positions.
+        Args:
+            joint_targets: dict {joint_name: target}
+            tolerance: float (all), list/tuple (joint_targets order), or dict (joint_name: tol)
+        Returns:
+            True if all joints are within tolerance, False otherwise
+        """
+        if isinstance(tolerance, dict):
+            tol_map = tolerance
+        elif isinstance(tolerance, (list, tuple)):
+            tol_map = {jn: tolerance[i] for i, jn in enumerate(joint_targets.keys())}
+        else:
+            tol_map = {jn: tolerance for jn in joint_targets.keys()}
+        for joint_name, target in joint_targets.items():
+            tol = tol_map.get(joint_name, 0.01)
+            if not self.is_joint_at_target_by_name(joint_name, target, tol):
+                return False
+        return True
+
+    def are_joints_at_targets(self, targets: Union[list, dict], tolerance: Union[float, list, dict] = 0.01) -> bool:
+        """
+        Check if joints are at target positions (accepts both list and dict).
+
+        Args:
+            targets: List of target positions for all joints, or dict {joint_name: position}
+            tolerance: Tolerance value(s) - float, list, or dict
+
+        Returns:
+            True if all joints are within tolerance, False otherwise
+
+        Example:
+            # Using list
+            if robot.are_joints_at_targets([0.0, 1.57, -1.57, 0.0], tolerance=0.01):
+                print("Reached target")
+
+            # Using dict
+            if robot.are_joints_at_targets({"joint1": 1.57, "joint2": -1.57}, tolerance=0.01):
+                print("Reached target")
+        """
+        if isinstance(targets, dict):
+            return self.are_joints_at_targets_by_name(targets, tolerance)
+        else:
+            return self.are_all_joints_at_targets(targets, tolerance)
+
+    def update_attached_objects_kinematics(self):
+        """
+        For URDF robots: update attached objects' pose to follow the parent link (kinematics attach).
+        This is called every step for kinematic (mass=0) attached objects.
+        """
+        for obj in self.attached_objects:
+            # Only update if attached to a link (not base) and no constraint (mass=0)
+            if obj._attached_link_index >= 0 and getattr(obj, "_constraint_id", None) is None:
+                # Get parent link's world coordinates
+                link_state = p.getLinkState(self.body_id, obj._attached_link_index, physicsClientId=self._pid)
+                parent_pos, parent_orn = link_state[0], link_state[1]
+                # Apply relative offset
+                new_pos, new_orn = p.multiplyTransforms(
+                    parent_pos, parent_orn, obj._attach_offset.position, obj._attach_offset.orientation
+                )
+                obj.set_pose_raw(new_pos, new_orn)
 
     def __repr__(self):
         pose = self.get_pose()

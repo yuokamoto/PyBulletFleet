@@ -4,7 +4,13 @@ General-purpose PyBullet simulation library for multi-robot fleets
 """
 
 # Type definitions
-from pybullet_fleet.types import ActionStatus, DifferentialPhase, MotionMode, MovementDirection
+from pybullet_fleet.types import (
+    ActionStatus,
+    DifferentialPhase,
+    MotionMode,
+    MovementDirection,
+    SpatialHashCellSizeMode,
+)
 
 # Geometry primitives
 from pybullet_fleet.geometry import Path, Pose
@@ -14,10 +20,13 @@ from pybullet_fleet.agent import Agent, AgentSpawnParams
 from pybullet_fleet.agent_manager import AgentManager, GridSpawnParams
 
 # Core simulation classes
-from pybullet_fleet.core_simulation import LogLevelManager, MultiRobotSimulationCore, SimulationParams
+from pybullet_fleet.core_simulation import (
+    MultiRobotSimulationCore,
+    SimulationParams,
+)
 
 # Base classes
-from pybullet_fleet.sim_object import MeshObject, SimObject, URDFObject
+from pybullet_fleet.sim_object import SimObject
 
 # Utilities
 from pybullet_fleet.tools import grid_to_world, world_to_grid, normalize_vector_param
@@ -34,10 +43,8 @@ __all__ = [
     # Core simulation
     "MultiRobotSimulationCore",
     "SimulationParams",
+    "SpatialHashCellSizeMode",
     "SimObject",
-    "MeshObject",
-    "URDFObject",
-    "LogLevelManager",
     # Agent management
     "Agent",
     "AgentSpawnParams",

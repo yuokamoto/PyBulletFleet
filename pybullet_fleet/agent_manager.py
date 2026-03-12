@@ -5,14 +5,17 @@ Management classes for simulation objects and agents.
 - AgentManager: Extended manager with movement control for agents
 """
 
+import logging
 import random
 import time
 from dataclasses import dataclass, replace
-from typing import Any, Callable, Dict, Generic, List, Optional, Tuple, TypeVar
+from typing import Any, Callable, Dict, Generic, List, Optional, Tuple, TypeVar, Union
 
 from .agent import Agent, AgentSpawnParams, Pose
 from .sim_object import SimObject, SimObjectSpawnParams
 from .tools import grid_to_world
+
+logger = logging.getLogger(__name__)
 
 # Type variable for generic SimObjectManager
 T = TypeVar("T", bound=SimObject)
@@ -64,16 +67,24 @@ class SimObjectManager(Generic[T]):
         T: Type of objects managed (must be SimObject or its subclass)
     """
 
-    def __init__(self, sim_core=None):
+    def __init__(self, sim_core=None, object_class: type = SimObject, enable_profiling: bool = False):
         """
         Initialize SimObjectManager.
 
         Args:
             sim_core: Reference to simulation core (optional)
+            object_class: Default class to instantiate when spawning
+                          (SimObject or a subclass such as Agent).
+            enable_profiling: If ``True``, spawn methods log elapsed time via
+                ``logger.info``.  Default ``False``.
+                Can be overridden later: ``mgr.enable_profiling = True``.
         """
         self.sim_core = sim_core
+        self._object_class: type = object_class
+        self.enable_profiling: bool = enable_profiling
         self.objects: List[T] = []
-        self.object_ids: Dict[int, T] = {}  # body_id -> object mapping
+        self.body_ids: Dict[int, T] = {}  # body_id -> object mapping (PyBullet layer)
+        self.object_ids: Dict[int, T] = {}  # object_id -> object mapping (Manager layer)
 
     def add_object(self, obj: T) -> None:
         """
@@ -81,26 +92,41 @@ class SimObjectManager(Generic[T]):
 
         Args:
             obj: SimObject or Agent instance to add
+
+        Returns:
+            None.  The object is silently skipped (with a warning) when its
+            ``object_id`` is invalid (< 0), which typically means it was
+            created without a sim_core.
+
+        Note:
+            Objects are automatically registered to sim_core.sim_objects
+            via SimObject.__init__(), so we don't register them here again.
         """
+        if obj.object_id < 0:
+            logger.warning(
+                "object (body_id=%d) has invalid object_id=%d. " "Was it created without sim_core?  Skipping add_object().",
+                obj.body_id,
+                obj.object_id,
+            )
+            return
         self.objects.append(obj)
-        self.object_ids[obj.body_id] = obj
+        self.body_ids[obj.body_id] = obj
+        self.object_ids[obj.object_id] = obj
 
     def spawn_objects_grid(
         self, num_objects: int, grid_params: GridSpawnParams, spawn_params: SimObjectSpawnParams
     ) -> List[T]:
         """
-        Spawn multiple SimObjects in a grid pattern.
+        Spawn multiple objects in a grid pattern.
         This is a convenience wrapper around spawn_grid_counts for spawning a single object type with a specified count.
         Args:
             num_objects: Number of objects to spawn
             grid_params: GridSpawnParams instance with grid configuration
             spawn_params: SimObjectSpawnParams instance with object parameters
         Returns:
-            List of spawned SimObject instances
+            List of spawned object instances
         """
-        return self.spawn_grid_counts(
-            grid_params=grid_params, spawn_params_count_list=[(spawn_params, num_objects)], object_class=SimObject
-        )
+        return self.spawn_grid_counts(grid_params=grid_params, spawn_params_count_list=[(spawn_params, num_objects)])
 
     def spawn_grid_mixed(
         self, num_objects: int, grid_params: GridSpawnParams, spawn_params_list: List[Tuple[SimObjectSpawnParams, float]]
@@ -135,7 +161,6 @@ class SimObjectManager(Generic[T]):
             num_objects=num_objects,
             grid_params=grid_params,
             spawn_params_list=spawn_params_list,
-            object_class=SimObject,
         )
 
     def _spawn_grid_mixed_impl(
@@ -143,10 +168,9 @@ class SimObjectManager(Generic[T]):
         num_objects: int,
         grid_params: GridSpawnParams,
         spawn_params_list: List[Tuple[Any, float]],
-        object_class: type,
     ) -> List[Any]:
         """
-        Internal implementation for spawn_grid_mixed methods.
+        Internal implementation for spawn_grid_mixed.
 
         This method contains the common logic for spawning mixed object types in a grid.
 
@@ -154,18 +178,16 @@ class SimObjectManager(Generic[T]):
             num_objects: Maximum number of objects to spawn
             grid_params: GridSpawnParams instance with grid configuration
             spawn_params_list: List of (spawn_params, probability) tuples
-            object_class: Class to instantiate (SimObject or Agent)
-            manager_name: Name for logging messages
 
         Returns:
             List of spawned object instances
         """
+        start = time.perf_counter() if self.enable_profiling else None
 
         # Normalize probabilities if total > 1.0
-        manager_name = self.__class__.__name__
         total_prob = sum(prob for _, prob in spawn_params_list)
         if total_prob > 1.0:
-            print(f"[{manager_name}] Warning: Total probability {total_prob:.2f} > 1.0, normalizing to 1.0")
+            logger.warning("Total probability %.2f > 1.0, normalizing to 1.0", total_prob)
             # Normalize: divide each probability by total
             spawn_params_list = [(params, prob / total_prob) for params, prob in spawn_params_list]
             total_prob = 1.0
@@ -179,6 +201,8 @@ class SimObjectManager(Generic[T]):
         z_max = grid_params.z_max
         spacing = grid_params.spacing
         offset = grid_params.offset
+
+        cls = self._object_class
 
         # Spawn objects sequentially
         spawned_objects = []
@@ -204,18 +228,13 @@ class SimObjectManager(Generic[T]):
 
             # If selected, spawn object
             if selected_params is not None:
-                # Create Pose from spawn position
-                if selected_params.initial_pose is not None:
-                    # Preserve orientation from spawn_params
-                    spawn_pose = Pose(position=spawn_pos, orientation=selected_params.initial_pose.orientation)
-                else:
-                    spawn_pose = Pose.from_xyz(spawn_pos[0], spawn_pos[1], spawn_pos[2])
+                spawn_pose = self._make_spawn_pose(selected_params, spawn_pos)
 
                 # Create a copy of spawn_params with the calculated pose
                 grid_spawn_params = replace(selected_params, initial_pose=spawn_pose)
 
                 # Spawn object using from_params()
-                obj = object_class.from_params(spawn_params=grid_spawn_params, sim_core=self.sim_core)
+                obj = cls.from_params(spawn_params=grid_spawn_params, sim_core=self.sim_core)
 
                 # Track object
                 self.add_object(obj)
@@ -232,122 +251,117 @@ class SimObjectManager(Generic[T]):
                     if current_z > z_max:
                         # Grid exhausted
                         if i < num_objects - 1:
-                            print(
-                                f"[{manager_name}] Warning: Grid exhausted after {i + 1} iterations "
-                                f"(requested {num_objects})"
+                            logger.warning(
+                                "Grid exhausted after %d iterations (requested %d)",
+                                i + 1,
+                                num_objects,
                             )
                         break
 
+        if start is not None:
+            elapsed = time.perf_counter() - start
+            logger.info(
+                "spawn_grid_mixed: %d objects in %.3f sec",
+                len(spawned_objects),
+                elapsed,
+            )
         return spawned_objects
+
+    def _make_spawn_pose(self, params: SimObjectSpawnParams, spawn_pos: List[float]) -> Pose:
+        """Create a Pose for grid spawning, preserving orientation from *params* if set."""
+        if params.initial_pose is not None:
+            return Pose(position=spawn_pos, orientation=params.initial_pose.orientation)
+        return Pose.from_xyz(*spawn_pos)
 
     def spawn_grid_counts(
         self,
         grid_params: GridSpawnParams,
         spawn_params_count_list: List[Tuple[SimObjectSpawnParams, int]],
-        object_class: type = None,
     ) -> List[T]:
         """
         Spawn objects on a grid according to the specified count for each type.
-        - Does not exceed the specified count for each type.
-        - If the remaining grid count matches the remaining spawn count, all remaining objects are assigned.
-        - Raises an error if the total count exceeds the number of grid cells.
+
+        Each type is spawned exactly the requested number of times.
+        Grid positions are randomly shuffled so that types are distributed
+        uniformly across the grid.
+
         Args:
             grid_params: GridSpawnParams
             spawn_params_count_list: List of (spawn_params, count)
-            object_class: Class to instantiate (SimObject/Agent)
+
         Returns:
             List of spawned objects
+
+        Raises:
+            ValueError: If the total count exceeds the number of grid cells.
         """
-        manager_name = self.__class__.__name__
+        # --- Validate --------------------------------------------------
         total_count = sum(count for _, count in spawn_params_count_list)
         grid_x = grid_params.x_max - grid_params.x_min + 1
         grid_y = grid_params.y_max - grid_params.y_min + 1
         grid_z = grid_params.z_max - grid_params.z_min + 1
         grid_num = grid_x * grid_y * grid_z
         if total_count > grid_num:
-            raise ValueError(f"[{manager_name}] Error: Total spawn count ({total_count}) exceeds grid cell count ({grid_num})")
+            raise ValueError(f"Total spawn count ({total_count}) exceeds grid cell count ({grid_num})")
 
-        # Create a pool of indices for each type according to their count
-        spawn_pool = []
-        for idx, (params, count) in enumerate(spawn_params_count_list):
-            spawn_pool.extend([idx] * count)
-        random.shuffle(spawn_pool)
+        start = time.perf_counter() if self.enable_profiling else None
 
-        # Create a list of all grid coordinates
-        grid_coords = []
-        for z in range(grid_params.z_min, grid_params.z_max + 1):
-            for y in range(grid_params.y_min, grid_params.y_max + 1):
-                for x in range(grid_params.x_min, grid_params.x_max + 1):
-                    grid_coords.append([x, y, z])
+        # --- Build assignment list: one (params, grid_coord) per object -
+        # Flatten spawn_params_count_list into a list of params, one entry
+        # per object to spawn.  e.g. [(paramsA,3),(paramsB,2)]
+        #   → [paramsA, paramsA, paramsA, paramsB, paramsB]
+        flat_params: List[SimObjectSpawnParams] = []
+        for params, count in spawn_params_count_list:
+            flat_params.extend([params] * count)
+        random.shuffle(flat_params)
+
+        # Build shuffled grid coordinates
+        grid_coords = [
+            [x, y, z]
+            for z in range(grid_params.z_min, grid_params.z_max + 1)
+            for y in range(grid_params.y_min, grid_params.y_max + 1)
+            for x in range(grid_params.x_min, grid_params.x_max + 1)
+        ]
         random.shuffle(grid_coords)
 
-        spawned_objects = []
-        used_counts = [0] * len(spawn_params_count_list)
-        pool_idx = 0
-        grid_idx = 0
-        num_grids = len(grid_coords)
-        while sum([c - used_counts[j] for j, (_, c) in enumerate(spawn_params_count_list)]) > 0 and grid_idx < num_grids:
-            remain_grids = num_grids - grid_idx
-            remain_counts = [c - used_counts[j] for j, (_, c) in enumerate(spawn_params_count_list)]
-            remain_total = sum(remain_counts)
-            grid = grid_coords[grid_idx]
-            if remain_total == 0:
-                break  # No more objects to spawn
-            # If the remaining grid count matches the remaining spawn count, assign all remaining objects to unique grids
-            if remain_grids == remain_total:
-                obj_idx = 0
-                for j, cnt in enumerate(remain_counts):
-                    for _ in range(cnt):
-                        spawn_pos = grid_to_world(grid_coords[grid_idx], grid_params.spacing, grid_params.offset)
-                        params = spawn_params_count_list[j][0]
-                        if params.initial_pose is not None:
-                            spawn_pose = Pose(position=spawn_pos, orientation=params.initial_pose.orientation)
-                        else:
-                            spawn_pose = Pose.from_xyz(*spawn_pos)
-                        grid_spawn_params = replace(params, initial_pose=spawn_pose)
-                        cls = object_class if object_class else SimObject
-                        obj = cls.from_params(spawn_params=grid_spawn_params, sim_core=self.sim_core)
-                        self.add_object(obj)
-                        spawned_objects.append(obj)
-                        used_counts[j] += 1
-                        grid_idx += 1
-                break
-            # Otherwise, assign randomly from the pool
-            while pool_idx < len(spawn_pool):
-                idx = spawn_pool[pool_idx]
-                if used_counts[idx] < spawn_params_count_list[idx][1]:
-                    spawn_pos = grid_to_world(grid, grid_params.spacing, grid_params.offset)
-                    params = spawn_params_count_list[idx][0]
-                    if params.initial_pose is not None:
-                        spawn_pose = Pose(position=spawn_pos, orientation=params.initial_pose.orientation)
-                    else:
-                        spawn_pose = Pose.from_xyz(*spawn_pos)
-                    grid_spawn_params = replace(params, initial_pose=spawn_pose)
-                    cls = object_class if object_class else SimObject
-                    obj = cls.from_params(spawn_params=grid_spawn_params, sim_core=self.sim_core)
-                    self.add_object(obj)
-                    spawned_objects.append(obj)
-                    used_counts[idx] += 1
-                    pool_idx += 1
-                    break
-                pool_idx += 1
-            grid_idx += 1
+        # --- Spawn: zip flat_params with grid_coords 1-to-1 -----------
+        # len(flat_params) <= len(grid_coords) is guaranteed by the
+        # validation above, so zip stops after all objects are placed.
+        # Remaining grid cells are simply left empty.
+        cls = self._object_class
+        spawned_objects: List[T] = []
+        for params, coord in zip(flat_params, grid_coords):
+            spawn_pos = grid_to_world(coord, grid_params.spacing, grid_params.offset)
+            spawn_pose = self._make_spawn_pose(params, spawn_pos)
+            grid_spawn_params = replace(params, initial_pose=spawn_pose)
+            obj = cls.from_params(spawn_params=grid_spawn_params, sim_core=self.sim_core)
+            self.add_object(obj)
+            spawned_objects.append(obj)
+
+        if start is not None:
+            elapsed = time.perf_counter() - start
+            logger.info(
+                "spawn_grid_counts: %d objects in %.3f sec",
+                len(spawned_objects),
+                elapsed,
+            )
         return spawned_objects
 
     def spawn_objects_batch(self, params_list: List[SimObjectSpawnParams]) -> List[T]:
         """
-        Batch API to spawn multiple SimObject instances at once.
-        params_list: List of SimObjectSpawnParams for each SimObject
-        Returns: List of created SimObject instances
+        Batch API to spawn multiple object instances at once.
+        params_list: List of spawn params for each object
+        Returns: List of created object instances
         """
-        start = time.perf_counter()
+        start = time.perf_counter() if self.enable_profiling else None
         objects = []
         for params in params_list:
-            obj = SimObject.from_params(params, sim_core=self.sim_core)
+            obj = self._object_class.from_params(params, sim_core=self.sim_core)
             self.add_object(obj)
             objects.append(obj)
-        elapsed = time.perf_counter() - start
-        print(f"[SimObjectManager] spawn_objects_batch: {len(params_list)} objects in {elapsed:.3f} sec")
+        if start is not None:
+            elapsed = time.perf_counter() - start
+            logger.info("spawn_objects_batch: %d objects in %.3f sec", len(params_list), elapsed)
         return objects
 
     def get_pose(self, object_index: int) -> Optional[Pose]:
@@ -363,7 +377,7 @@ class SimObjectManager(Generic[T]):
         if 0 <= object_index < len(self.objects):
             return self.objects[object_index].get_pose()
         else:
-            print(f"[SimObjectManager] Warning: Invalid object index {object_index}")
+            logger.warning("Invalid object index %d", object_index)
             return None
 
     def get_all_poses(self) -> List[Pose]:
@@ -383,6 +397,27 @@ class SimObjectManager(Generic[T]):
             Dictionary mapping body_id to Pose
         """
         return {obj.body_id: obj.get_pose() for obj in self.objects}
+
+    def set_pose_all(self, pose_factory: Callable[[T], Pose]) -> None:
+        """
+        Set pose for all objects using a factory function.
+
+        Applies *pose_factory* to each object and immediately calls ``set_pose``
+        with the returned value.  Works for both SimObject and Agent instances.
+
+        Args:
+            pose_factory: Function that takes an object and returns a target Pose.
+
+        Example:
+            # Shift every object 1 m along X
+            manager.set_pose_all(lambda obj: Pose.from_xyz(
+                obj.get_pose().x + 1.0,
+                obj.get_pose().y,
+                obj.get_pose().z,
+            ))
+        """
+        for obj in self.objects:
+            obj.set_pose(pose_factory(obj))
 
     def get_object_count(self) -> int:
         """Get total number of managed objects."""
@@ -414,88 +449,48 @@ class AgentManager(SimObjectManager[Agent]):
     - Agent-specific state can be stored in each Agent.user_data dict
     """
 
-    def __init__(self, sim_core=None, update_frequency: float = 10.0):
+    def __init__(
+        self,
+        sim_core=None,
+        update_frequency: float = 10.0,
+        object_class: type = Agent,
+        enable_profiling: bool = False,
+    ):
         """
         Initialize AgentManager.
 
         Args:
             sim_core: Reference to simulation core (optional)
             update_frequency: Default update callback frequency in Hz (default: 10.0)
+            object_class: Class to instantiate when spawning (default: Agent).
+                          Pass an Agent subclass to manage custom agent types.
+            enable_profiling: If ``True``, spawn methods log elapsed time.
+                Default ``False``.
         """
-        super().__init__(sim_core)
+        super().__init__(sim_core, object_class=object_class, enable_profiling=enable_profiling)
         self._callbacks: List[Dict[str, Any]] = []  # List of registered callbacks
         self._update_frequency: float = update_frequency  # Default callback frequency in Hz
 
+    # ------------------------------------------------------------------
+    # Convenience aliases (delegate to SimObjectManager methods)
+    # ------------------------------------------------------------------
     def spawn_agents_grid(self, num_agents: int, grid_params: GridSpawnParams, spawn_params: AgentSpawnParams) -> List[Agent]:
-        """
-        Spawn multiple agents in a grid pattern.
-        This is a convenience wrapper around spawn_agent_grid_counts for spawning a single agent type with a specified count.
-        Args:
-            num_agents: Number of agents to spawn
-            grid_params: GridSpawnParams instance with grid configuration
-            spawn_params: AgentSpawnParams instance with agent parameters
-        Returns:
-            List of spawned Agent instances
-        """
-        return self.spawn_agent_grid_counts(grid_params=grid_params, spawn_params_count_list=[(spawn_params, num_agents)])
+        """Spawn agents in a grid.  Alias for :meth:`spawn_objects_grid`."""
+        return self.spawn_objects_grid(num_objects=num_agents, grid_params=grid_params, spawn_params=spawn_params)
 
     def spawn_agents_grid_mixed(
         self, num_agents: int, grid_params: GridSpawnParams, spawn_params_list: List[Tuple[AgentSpawnParams, float]]
     ) -> List[Agent]:
-        """
-        Spawn multiple agents in a grid pattern with mixed types.
-
-        This method allows spawning different types of agents with specified probabilities.
-        If probabilities don't sum to 1.0, some grid positions may remain empty.
-
-        Args:
-            num_agents: Maximum number of agents to spawn
-            grid_params: GridSpawnParams instance with grid configuration
-            spawn_params_list: List of (spawn_params, probability) tuples
-                             - spawn_params: AgentSpawnParams for this type
-                             - probability: Spawn probability (0.0 to 1.0)
-                             Note: Probabilities don't need to sum to 1.0
-
-        Returns:
-            List of spawned Agent instances
-
-        Example:
-            # Spawn 100 agents: 60% mobile, 30% arm, 10% empty
-            spawn_params_list = [
-                (mobile_params, 0.6),
-                (arm_params, 0.3),
-            ]
-            manager.spawn_agents_grid_mixed(100, grid_params, spawn_params_list)
-        """
-
-        return self._spawn_grid_mixed_impl(
-            num_objects=num_agents,
-            grid_params=grid_params,
-            spawn_params_list=spawn_params_list,
-            object_class=Agent,
-        )
+        """Spawn mixed agent types.  Alias for :meth:`spawn_grid_mixed`."""
+        return self.spawn_grid_mixed(num_objects=num_agents, grid_params=grid_params, spawn_params_list=spawn_params_list)
 
     def spawn_agent_grid_counts(
         self,
         grid_params: GridSpawnParams,
         spawn_params_count_list: List[Tuple[AgentSpawnParams, int]],
-        object_class: type = None,
     ) -> List[Agent]:
-        """
-        Spawn agents on a grid according to the specified count for each type.
-        This is an override for AgentManager to use Agent and AgentSpawnParams.
-        Args:
-            grid_params: GridSpawnParams
-            spawn_params_count_list: List of (AgentSpawnParams, count)
-            object_class: Class to instantiate (default: Agent)
-        Returns:
-            List of spawned Agent instances
-        """
-        return super().spawn_grid_counts(
-            grid_params=grid_params,
-            spawn_params_count_list=spawn_params_count_list,
-            object_class=object_class if object_class else Agent,
-        )
+        """Spawn exact counts per type.  Alias for :meth:`spawn_grid_counts`."""
+        return self.spawn_grid_counts(grid_params=grid_params, spawn_params_count_list=spawn_params_count_list)
 
     def set_goal_pose(self, agent_index: int, goal: Pose):
         """
@@ -508,29 +503,170 @@ class AgentManager(SimObjectManager[Agent]):
         if 0 <= agent_index < len(self.objects):
             self.objects[agent_index].set_goal_pose(goal)
         else:
-            print(f"[AgentManager] Warning: Invalid agent index {agent_index}")
+            logger.warning("Invalid agent index %d", agent_index)
 
-    def set_goal_pose_by_id(self, body_id: int, goal: Pose):
+    def set_goal_pose_by_body_id(self, body_id: int, goal: Pose):
         """
         Set goal pose for an agent by its PyBullet body ID.
+
+        Note:
+            This method uses PyBullet's internal body_id for compatibility
+            with direct PyBullet API usage. For manager-level operations,
+            prefer using set_goal_pose_by_object_id() instead.
 
         Args:
             body_id: PyBullet body ID
             goal: Target Pose
         """
-        if body_id in self.object_ids:
-            self.object_ids[body_id].set_goal_pose(goal)
+        if body_id in self.body_ids:
+            self.body_ids[body_id].set_goal_pose(goal)
         else:
-            print(f"[AgentManager] Warning: Unknown agent body_id {body_id}")
+            logger.warning("Unknown agent body_id %d", body_id)
+
+    def set_goal_pose_by_object_id(self, object_id: int, goal: Pose):
+        """
+        Set goal pose for an agent by its simulation object ID.
+
+        This is the preferred method for manager-level operations, as it uses
+        the simulation's unique object_id rather than PyBullet's internal body_id.
+
+        Args:
+            object_id: Simulation object ID (from SimObject.object_id)
+            goal: Target Pose
+        """
+        if object_id in self.object_ids:
+            self.object_ids[object_id].set_goal_pose(goal)
+        else:
+            logger.warning("Unknown agent object_id %d", object_id)
 
     def stop_all(self):
         """Stop all agents and clear their goals."""
         for agent in self.objects:
             agent.stop()
 
+    def set_goal_pose_all(self, goal_factory: Callable[[Agent], Pose]) -> None:
+        """
+        Set goal pose for all agents using a factory function.
+
+        This helper method simplifies bulk goal assignment by applying
+        a factory function to each agent. The factory can use agent-specific
+        data (current pose, user_data, etc.) to create customized goals.
+
+        Args:
+            goal_factory: Function that takes an Agent and returns a Pose
+
+        Example:
+            # Set all agents to move to their designated home positions
+            def get_home_goal(robot):
+                return robot.user_data['home_position']
+
+            manager.set_goal_pose_all(get_home_goal)
+
+            # Move all agents 5 meters forward from their current position
+            def move_forward(robot):
+                current_pos = robot.get_pose().position
+                return Pose.from_xyz(current_pos[0] + 5, current_pos[1], current_pos[2])
+
+            manager.set_goal_pose_all(move_forward)
+
+        Note:
+            This is a convenience wrapper around individual set_goal_pose calls.
+            No performance benefit over explicit loops, but improves code clarity.
+        """
+        for agent in self.objects:
+            goal = goal_factory(agent)
+            agent.set_goal_pose(goal)
+
+    def set_joints_targets_all(self, targets_factory: Callable[[Agent], Union[list, dict]], max_force: float = 500.0) -> None:
+        """
+        Set joint targets for all agents using a factory function.
+
+        This helper method simplifies bulk joint control by applying
+        a factory function to each agent. Useful for coordinated multi-robot
+        arm movements.
+
+        Args:
+            targets_factory: Function that takes an Agent and returns joint targets
+                           (list of positions or dict of {joint_name: position})
+            max_force: Maximum force for joint control (default: 500.0)
+
+        Example:
+            # Set all robot arms to neutral position
+            def get_neutral_joints(robot):
+                return [0.0, 0.0, 0.0, 0.0]
+
+            manager.set_joints_targets_all(get_neutral_joints)
+
+            # Set custom positions based on robot index
+            def get_custom_joints(robot):
+                idx = robot.user_data.get('index', 0)
+                return [idx * 0.1, 0.0, 0.0, 0.0]
+
+            manager.set_joints_targets_all(get_custom_joints, max_force=1000.0)
+
+        Note:
+            Only applicable to agents with controllable joints (robot arms, etc.).
+            Mobile robots without arm joints will ignore this command.
+        """
+        for agent in self.objects:
+            targets = targets_factory(agent)
+            agent.set_joints_targets(targets, max_force=max_force)
+
     def get_moving_count(self) -> int:
         """Get number of agents currently moving."""
         return sum(1 for agent in self.objects if agent.is_moving)
+
+    def add_action_sequence_all(self, action_factory: Callable[[Agent], List[Any]]) -> None:
+        """
+        Apply action sequence to all agents using a factory function.
+
+        This helper method simplifies bulk action assignment by applying
+        a factory function to each agent. The factory can use agent-specific
+        data (pose, user_data, etc.) to create customized action sequences.
+
+        Args:
+            action_factory: Function that takes an Agent and returns a list of Actions
+
+        Example:
+            def create_pick_drop_sequence(robot):
+                target = robot.user_data['target_object']
+                return [
+                    PickAction(target_object_id=target.body_id),
+                    MoveAction(path=Path.from_positions([[10, 10, 0]])),
+                    DropAction(drop_pose=Pose(position=[10, 10, 0]))
+                ]
+
+            # Apply to all agents at once
+            manager.add_action_sequence_all(create_pick_drop_sequence)
+
+        Note:
+            This is a convenience wrapper. Internally it still loops through agents,
+            so there's no performance benefit over explicit loops. The main advantage
+            is code clarity and reduced boilerplate.
+        """
+        for agent in self.objects:
+            actions = action_factory(agent)
+            agent.add_action_sequence(actions)
+
+    def add_action_all(self, action_factory: Callable[[Agent], Any]) -> None:
+        """
+        Add a single action to all agents using a factory function.
+
+        Similar to add_action_sequence_all, but adds a single action instead of a sequence.
+
+        Args:
+            action_factory: Function that takes an Agent and returns a single Action
+
+        Example:
+            def create_move_action(robot):
+                goal_pos = robot.user_data['next_position']
+                return MoveAction(path=Path.from_positions([goal_pos]))
+
+            manager.add_action_all(create_move_action)
+        """
+        for agent in self.objects:
+            action = action_factory(agent)
+            agent.add_action(action)
 
     def register_callback(self, callback: Callable[["AgentManager", float], None], frequency: Optional[float] = None):
         """
@@ -592,11 +728,15 @@ class AgentManager(SimObjectManager[Agent]):
                 callback(self, dt)
 
             self.sim_core.register_callback(_callback_wrapper, frequency=frequency)
-            print(f"[AgentManager] Registered callback at {frequency} Hz (total: {len(self._callbacks)} callback(s))")
+            logger.info(
+                "Registered callback at %s Hz (total: %d callback(s))",
+                frequency,
+                len(self._callbacks),
+            )
         else:
-            print(
-                f"[AgentManager] Warning: sim_core not set, callback registered but not active. "
-                f"Total: {len(self._callbacks)} callback(s)"
+            logger.warning(
+                "sim_core not set, callback registered but not active. " "Total: %d callback(s)",
+                len(self._callbacks),
             )
 
     def setup_camera(self, camera_config: Optional[Dict] = None) -> None:
@@ -627,7 +767,7 @@ class AgentManager(SimObjectManager[Agent]):
             Only works when GUI is enabled.
         """
         if self.sim_core is None:
-            print("[AgentManager] Warning: Cannot setup camera - sim_core is not set")
+            logger.warning("Cannot setup camera - sim_core is not set")
             return
 
         if camera_config is None:
@@ -639,16 +779,16 @@ class AgentManager(SimObjectManager[Agent]):
             entity_positions = [pose.position for pose in poses]
 
             if len(entity_positions) == 0:
-                print("[AgentManager] Warning: No objects to setup camera for")
+                logger.warning("No objects to setup camera for")
                 return
 
             # Call sim_core's setup_camera with extracted positions
             self.sim_core.setup_camera(camera_config=camera_config, entity_positions=entity_positions)
 
-            print(f"[AgentManager] Camera setup complete for {len(entity_positions)} objects")
+            logger.info("Camera setup complete for %d objects", len(entity_positions))
 
         except Exception as e:
-            print(f"[AgentManager] Error setting up camera: {e}")
+            logger.error("Error setting up camera: %s", e)
 
     def __repr__(self):
         return f"AgentManager(total={len(self.objects)}, " f"moving={self.get_moving_count()})"

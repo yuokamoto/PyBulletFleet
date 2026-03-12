@@ -79,10 +79,12 @@ print(f"Grid size: {grid_size}x{grid_size}")
 if mode == "mixed":
     print(f"Mobile robot probability: {mobile_robot_prob*100:.0f}%")
     print(f"Arm robot probability: {arm_robot_prob*100:.0f}%")
-
-# ========================================
-# Initialize Simulation
-# ========================================
+    if arm_robot_prob > 0:
+        config["physics"] = True
+        print("Mode: mixed (mobile + arm) - Physics enabled for robot arm")
+else:
+    config["physics"] = False
+    print("Mode: mixed (mobile + arm) - Physics disabled for maximum performance")
 
 params = SimulationParams.from_dict(config)
 sim_core = MultiRobotSimulationCore(params)
@@ -120,11 +122,12 @@ mobile_params = AgentSpawnParams(
     user_data={"robot_type": "mobile_robot"},
 )
 
-if mode == "mixed":
-    # ========================================
-    # Mixed Mode: Spawn mixed robot types
-    # ========================================
+# ========================================
+# Prepare Spawn Parameters List
+# ========================================
 
+if mode == "mixed":
+    # Mixed Mode: Spawn mixed robot types
     # Arm robot spawn params - from config
     arm_urdf_path = arm_robot_config.get("urdf_path", "robots/arm_robot.urdf")
     arm_urdf = os.path.join(os.path.dirname(__file__), "..", arm_urdf_path)
@@ -137,6 +140,7 @@ if mode == "mixed":
         use_fixed_base=arm_robot_config.get("use_fixed_base", True),
         max_linear_vel=arm_robot_config.get("max_linear_vel", 0.0),
         max_linear_accel=arm_robot_config.get("max_linear_accel", 0.0),
+        mass=arm_robot_config.get("mass", 1.0),  # Use URDF mass (1.0) for physics simulation
         user_data={"robot_type": "arm_robot"},
     )
 
@@ -144,30 +148,27 @@ if mode == "mixed":
     print(f"  - Mobile: {mobile_urdf}")
     print(f"  - Arm: {arm_urdf}")
 
-    # Spawn mixed agents
-    print(f"\nSpawning {num_robots} agents with mixed types...")
+    # Create spawn params list with probabilities
     spawn_params_list = [(mobile_params, mobile_robot_prob), (arm_params, arm_robot_prob)]
-
-    spawned_agents = agent_manager.spawn_agents_grid_mixed(
-        num_agents=num_robots, grid_params=grid_params, spawn_params_list=spawn_params_list
-    )
-
-    print(f"✓ Spawned {len(spawned_agents)} agents using spawn_agents_grid_mixed()")
+    print(f"\nSpawning {num_robots} agents with mixed types...")
 
 else:  # mode == 'single'
-    # ========================================
-    # Single Mode: Spawn single robot type
-    # ========================================
-
+    # Single Mode: Spawn single robot type only
     print(f"\n✓ Using URDF: {mobile_urdf}")
 
-    # Spawn agents in grid
-    print(f"\nSpawning {num_robots} agents...")
-    spawned_agents = agent_manager.spawn_agents_grid(
-        num_agents=num_robots, grid_params=grid_params, spawn_params=mobile_params
-    )
+    # Create spawn params list with 100% probability for mobile robot
+    spawn_params_list = [(mobile_params, 1.0)]
+    print(f"\nSpawning {num_robots} agents (mobile only)...")
 
-    print(f"✓ Spawned {len(spawned_agents)} agents using spawn_agents_grid()")
+# ========================================
+# Spawn Agents (unified call)
+# ========================================
+
+spawned_agents = agent_manager.spawn_agents_grid_mixed(
+    num_agents=num_robots, grid_params=grid_params, spawn_params_list=spawn_params_list
+)
+
+print(f"✓ Spawned {len(spawned_agents)} agents using spawn_agents_grid_mixed()")
 
 print("\n=== AgentManager Status ===")
 print(agent_manager)
@@ -176,9 +177,17 @@ print(agent_manager)
 # Setup Camera
 # ========================================
 
-# Setup camera view using agent_manager (automatically extracts all object positions)
-camera_config = config.get("camera", {})
-agent_manager.setup_camera(camera_config)
+# Setup camera view using config file settings (auto mode with agent positions)
+camera_config = params.camera_config
+if camera_config:
+    # Provide agent positions for auto mode
+    agent_positions = [agent.get_pose().position for agent in agent_manager.objects]
+    sim_core.setup_camera(camera_config=camera_config, entity_positions=agent_positions)
+    print(f"✓ Camera configured from config file: {camera_config.get('camera_mode', 'auto')} mode")
+else:
+    # Fallback: use agent_manager's setup_camera (auto mode)
+    agent_manager.setup_camera({})
+    print("✓ Camera configured with default auto mode")
 
 # ========================================
 # Movement Callback
@@ -199,7 +208,7 @@ def batch_agent_movement_callback(sim_core, dt):
         robot_type = agent.user_data.get("robot_type", "mobile_robot")
 
         if robot_type == "mobile_robot":
-            # Mobile robot movement
+            # Mobile robot movement (position-based)
             pose = agent.get_pose()
             pos, orn = pose.as_tuple()
             euler = p.getEulerFromQuaternion(orn)
@@ -210,15 +219,19 @@ def batch_agent_movement_callback(sim_core, dt):
             forward_vel = np.random.uniform(-max_linear_speed, max_linear_speed)
             yaw_vel = np.random.uniform(-max_angular_speed, max_angular_speed)
 
-            forward_x = forward_vel * np.cos(yaw)
-            forward_y = forward_vel * np.sin(yaw)
-            linear_vel = [forward_x, forward_y, 0]
-            angular_vel = [0, 0, yaw_vel]
+            # Calculate new position based on velocity and dt
+            forward_x = forward_vel * np.cos(yaw) * dt
+            forward_y = forward_vel * np.sin(yaw) * dt
+            new_x = pos[0] + forward_x
+            new_y = pos[1] + forward_y
 
-            corrected_orn = p.getQuaternionFromEuler([0, 0, yaw])
-            new_pose = Pose.from_pybullet([pos[0], pos[1], 0.3], corrected_orn)
+            # Calculate new orientation
+            new_yaw = yaw + yaw_vel * dt
+            corrected_orn = p.getQuaternionFromEuler([0, 0, new_yaw])
+
+            # Set new pose (position-based control)
+            new_pose = Pose.from_pybullet([new_x, new_y, 0.3], corrected_orn)
             agent.set_pose(new_pose)
-            p.resetBaseVelocity(agent.body_id, linear_vel, angular_vel)
 
         elif robot_type == "arm_robot":
             # Arm robot joint control

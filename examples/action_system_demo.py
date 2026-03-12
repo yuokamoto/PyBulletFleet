@@ -11,7 +11,6 @@ Demonstrates:
 """
 
 import os
-import logging
 import numpy as np
 import pybullet as p
 
@@ -21,21 +20,21 @@ from pybullet_fleet.geometry import Pose, Path
 from pybullet_fleet.sim_object import SimObject, SimObjectSpawnParams, ShapeParams
 from pybullet_fleet.action import MoveAction, WaitAction, PickAction, DropAction
 
-# Setup logging
-logging.basicConfig(level=logging.DEBUG, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
-
 
 def main():
-    # Initialize simulation
-    params = SimulationParams(gui=True, timestep=0.1, speed=3)
+    # Initialize simulation with DEBUG logging
+    params = SimulationParams(gui=True, timestep=0.1, target_rtf=3, log_level="info", physics=False)
     sim = MultiRobotSimulationCore(params)
 
     # Camera setup
-    p.resetDebugVisualizerCamera(
-        cameraDistance=10.0,
-        cameraYaw=45,
-        cameraPitch=-30,
-        cameraTargetPosition=[2, 0, 0],
+    sim.setup_camera(
+        camera_config={
+            "camera_mode": "manual",
+            "camera_distance": 10.0,
+            "camera_yaw": 45,
+            "camera_pitch": -30,
+            "camera_target": [2, 0, 0],
+        }
     )
 
     print("\n" + "=" * 70)
@@ -63,7 +62,7 @@ def main():
     agent = Agent.from_params(agent_params, sim_core=sim)
 
     # Enable path visualization for all actions
-    agent.path_visualize = False
+    agent.path_visualize = True
     agent.path_visualize_width = 3.0
 
     # Get mesh paths (absolute)
@@ -119,8 +118,7 @@ def main():
     # DropAction automatically calculates approach pose from drop position
     # Keep pallet's horizontal orientation when dropped
     task2 = DropAction(
-        drop_position=[5, 5, 0.1],
-        drop_orientation=list(pallet_orientation_quat),  # Keep horizontal orientation
+        drop_pose=Pose(position=[5, 5, 0.1], orientation=list(pallet_orientation_quat)),
         place_gently=True,
         use_approach=True,  # Use approach phase
         approach_offset=1.5,  # Approach from 1.5m away

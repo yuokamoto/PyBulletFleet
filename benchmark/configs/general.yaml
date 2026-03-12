@@ -1,0 +1,118 @@
+# Benchmark Configuration
+# This file controls performance-critical parameters for benchmarking
+
+# Simulation Parameters
+simulation:
+  timestep: 0.1  # Simulation timestep in seconds (default: 0.1 = 10 Hz)
+  target_rtf: 0.0  # Target RTF (0.0 = maximum speed, no sleep)
+  duration: 10.0  # Default simulation duration in seconds
+  physics: false  # Enable physics engine (false = kinematic only, faster)
+
+  # Collision Detection
+  collision_check_frequency: null  # Collision check frequency in Hz (null = every step)
+                                   # Set to 0 to disable collision checks completely
+                                   # Use this to measure baseline performance without collision overhead
+  ignore_static_collision: true  # Ignore collisions with structure objects
+
+  # Collision Detection Method (auto-selected based on physics mode if not specified)
+  # collision_detection_method: "closest_points"  # Options: "closest_points", "contact_points", "hybrid"
+  #   - closest_points: Distance-based (best for kinematics, physics=false)
+  #   - contact_points: Physics-based (best for dynamics, physics=true)
+  #   - hybrid: Both methods (advanced use)
+
+  # Performance Monitoring
+  enable_time_profiling: true  # Enable detailed profiling output
+  enable_monitor_gui: false  # Disable GUI monitor for headless benchmarking
+  log_level: "WARN"  # Log level: DEBUG, INFO, WARN, ERROR (DEBUG shows profiling)
+
+# Agent Configuration
+agents:
+  num_agents: 1000  # Default number of agents to spawn
+  urdf_path: "../robots/simple_cube.urdf"  # Path to robot URDF (relative to benchmark/)
+  motion_mode: "OMNIDIRECTIONAL"  # OMNIDIRECTIONAL, DIFFERENTIAL, ACKERMANN
+  max_linear_vel: 2.0  # Maximum linear velocity (m/s)
+  max_angular_vel: 3.0  # Maximum angular velocity (rad/s)
+  mass: 0.0  # Agent mass (0.0 = kinematic control, faster)
+  moving_agents_ratio: 0.1  # Ratio of agents with random goals (0.0-1.0)
+  max_moving_agents: 100  # Maximum number of agents with goals
+
+# Grid Spawn Configuration
+spawn:
+  spacing: [1.0, 1.0, 0.0]  # Grid spacing in [x, y, z] meters
+  offset: [0.0, 0.0, 0.1]  # Spawn offset from grid origin
+
+# Benchmark Test Configuration
+benchmark:
+  repetitions: 3  # Number of repetitions for statistical analysis
+  gui: false  # Enable GUI for visualization (slower)
+  output_dir: "results"  # Output directory for benchmark results
+
+# Performance Test Scenarios
+# Uncomment and modify these scenarios to test different configurations
+scenarios:
+  # Baseline: No collision checks (maximum performance)
+  no_collision:
+    simulation:
+      collision_check_frequency: 0  # Disable collision checks (0 = disabled)
+      physics: false  # Kinematic mode for maximum speed
+    agents:
+      num_agents: 1000
+    benchmark:
+      repetitions: 3
+
+  # Standard: Full 3D collision checks every step
+  collision_3d_full:
+    simulation:
+      collision_check_frequency: null  # Every step
+      physics: false  # Kinematic mode for maximum speed
+    agents:
+      num_agents: 1000
+    benchmark:
+      repetitions: 3
+
+  # Optimized: Reduced collision check frequency (10 Hz)
+  collision_10hz:
+    simulation:
+      collision_check_frequency: 10.0  # 10 Hz
+      physics: false  # Kinematic mode
+    agents:
+      num_agents: 1000
+    benchmark:
+      repetitions: 3
+
+  # Stress test: 5000 agents
+  stress_5k_agents:
+    simulation:
+      collision_check_frequency: 10.0
+    agents:
+      num_agents: 5000
+    benchmark:
+      repetitions: 1  # Single run for stress test
+
+# Notes:
+# - collision_check_frequency: 0 to disable, null for every step, or Hz value (e.g., 10.0)
+# - CollisionMode: Set per-object via spawn parameters (not in config file)
+#   Available modes (default: NORMAL_3D):
+#     - NORMAL_3D: Full 3D collision (27 neighbors) - default for all moving objects
+#     - NORMAL_2D: 2D collision only (9 neighbors, XY plane) - for ground robots
+#     - STATIC: One-time AABB registration - for fixed structures
+#     - DISABLED: No collision detection - for visualization objects
+#
+#   Example in code:
+#     from pybullet_fleet.types import CollisionMode
+#
+#     # 2D ground robot
+#     params = AgentSpawnParams(
+#         urdf_path="robot.urdf",
+#         collision_mode=CollisionMode.NORMAL_2D,  # 9 neighbors
+#     )
+#
+#     # 3D drone (default)
+#     params = AgentSpawnParams(
+#         urdf_path="drone.urdf",
+#         # collision_mode=CollisionMode.NORMAL_3D (default, can be omitted)
+#     )
+#
+# - timestep: Larger timesteps = fewer steps per second = faster simulation
+# - physics: false (kinematic) is significantly faster than true (full physics)
+# - enable_time_profiling: true enables detailed timing breakdown in logs (requires log_level: DEBUG)

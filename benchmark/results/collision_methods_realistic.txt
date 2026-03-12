@@ -1,0 +1,242 @@
+pybullet build time: Jan 29 2025 23:19:57
+======================================================================
+REALISTIC COLLISION DETECTION METHOD COMPARISON
+======================================================================
+
+Using actual PyBulletFleet simulation with:
+  - Mixed physics/kinematic objects
+  - Continuous movement
+  - Real collision detection
+  - Spatial hashing + AABB filtering
+
+######################################################################
+Configuration: 50 objects, size=0.5m, physics=30%
+######################################################################
+
+======================================================================
+Testing: CONTACT_POINTS
+======================================================================
+Objects: 50 (physics: 15, kinematic: 35)
+Steps: 500
+Warming up simulation...
+Active collisions after warmup: 9
+
+Running benchmark...
+  Step 0: 0.694ms (9 collisions)
+  Step 100: 0.690ms (6 collisions)
+  Step 200: 0.638ms (6 collisions)
+  Step 300: 0.619ms (4 collisions)
+  Step 400: 0.628ms (6 collisions)
+
+Results:
+  Average time: 0.679 ± 0.072 ms
+  Min time: 0.613 ms
+  Max time: 1.083 ms
+  Average collisions: 5.5
+
+======================================================================
+Testing: CLOSEST_POINTS
+======================================================================
+Objects: 50 (physics: 15, kinematic: 35)
+Steps: 500
+Warming up simulation...
+Active collisions after warmup: 32
+
+Running benchmark...
+  Step 0: 0.803ms (30 collisions)
+  Step 100: 0.811ms (20 collisions)
+  Step 200: 0.763ms (10 collisions)
+  Step 300: 1.098ms (7 collisions)
+  Step 400: 0.686ms (6 collisions)
+
+Results:
+  Average time: 0.728 ± 0.080 ms
+  Min time: 0.635 ms
+  Max time: 1.383 ms
+  Average collisions: 12.2
+
+======================================================================
+Testing: HYBRID
+======================================================================
+Objects: 50 (physics: 15, kinematic: 35)
+Steps: 500
+Warming up simulation...
+Active collisions after warmup: 38
+
+Running benchmark...
+  Step 0: 0.769ms (38 collisions)
+  Step 100: 0.831ms (25 collisions)
+  Step 200: 0.723ms (14 collisions)
+  Step 300: 0.642ms (13 collisions)
+  Step 400: 0.638ms (10 collisions)
+
+Results:
+  Average time: 0.723 ± 0.080 ms
+  Min time: 0.629 ms
+  Max time: 1.069 ms
+  Average collisions: 16.6
+
+######################################################################
+Configuration: 100 objects, size=0.5m, physics=30%
+######################################################################
+
+======================================================================
+Testing: CONTACT_POINTS
+======================================================================
+Objects: 100 (physics: 30, kinematic: 70)
+Steps: 500
+Warming up simulation...
+Active collisions after warmup: 15
+
+Running benchmark...
+  Step 0: 1.382ms (16 collisions)
+  Step 100: 1.317ms (13 collisions)
+  Step 200: 1.477ms (7 collisions)
+  Step 300: 1.668ms (8 collisions)
+  Step 400: 1.596ms (7 collisions)
+
+Results:
+  Average time: 1.451 ± 0.194 ms
+  Min time: 1.282 ms
+  Max time: 3.062 ms
+  Average collisions: 9.5
+
+======================================================================
+Testing: CLOSEST_POINTS
+======================================================================
+Objects: 100 (physics: 30, kinematic: 70)
+Steps: 500
+Warming up simulation...
+Active collisions after warmup: 71
+
+Running benchmark...
+  Step 0: 1.610ms (71 collisions)
+  Step 100: 1.516ms (43 collisions)
+  Step 200: 2.643ms (22 collisions)
+  Step 300: 1.415ms (15 collisions)
+  Step 400: 1.387ms (7 collisions)
+
+Results:
+  Average time: 1.541 ± 0.163 ms
+  Min time: 1.332 ms
+  Max time: 2.643 ms
+  Average collisions: 23.7
+
+======================================================================
+Testing: HYBRID
+======================================================================
+Objects: 100 (physics: 30, kinematic: 70)
+Steps: 500
+Warming up simulation...
+Active collisions after warmup: 74
+
+Running benchmark...
+  Step 0: 1.679ms (75 collisions)
+  Step 100: 1.535ms (46 collisions)
+  Step 200: 1.693ms (21 collisions)
+  Step 300: 1.455ms (14 collisions)
+  Step 400: 1.820ms (9 collisions)
+
+Results:
+  Average time: 1.599 ± 0.165 ms
+  Min time: 1.387 ms
+  Max time: 2.737 ms
+  Average collisions: 25.5
+
+######################################################################
+Configuration: 200 objects, size=0.5m, physics=30%
+######################################################################
+
+======================================================================
+Testing: CONTACT_POINTS
+======================================================================
+Objects: 200 (physics: 60, kinematic: 140)
+Steps: 500
+Warming up simulation...
+Active collisions after warmup: 30
+
+Running benchmark...
+  Step 0: 3.474ms (30 collisions)
+  Step 100: 3.187ms (25 collisions)
+  Step 200: 3.234ms (26 collisions)
+  Step 300: 3.090ms (24 collisions)
+  Step 400: 3.019ms (21 collisions)
+
+Results:
+  Average time: 3.163 ± 0.262 ms
+  Min time: 2.875 ms
+  Max time: 5.469 ms
+  Average collisions: 23.9
+
+======================================================================
+Testing: CLOSEST_POINTS
+======================================================================
+Objects: 200 (physics: 60, kinematic: 140)
+Steps: 500
+Warming up simulation...
+Active collisions after warmup: 130
+
+Running benchmark...
+  Step 0: 3.469ms (128 collisions)
+  Step 100: 3.350ms (77 collisions)
+  Step 200: 4.407ms (41 collisions)
+  Step 300: 3.176ms (26 collisions)
+  Step 400: 12.494ms (14 collisions)
+
+Results:
+  Average time: 4.518 ± 2.080 ms
+  Min time: 3.057 ms
+  Max time: 22.117 ms
+  Average collisions: 45.0
+
+======================================================================
+Testing: HYBRID
+======================================================================
+Objects: 200 (physics: 60, kinematic: 140)
+Steps: 500
+Warming up simulation...
+Active collisions after warmup: 135
+
+Running benchmark...
+  Step 0: 6.704ms (135 collisions)
+  Step 100: 6.843ms (89 collisions)
+  Step 200: 4.020ms (46 collisions)
+  Step 300: 3.997ms (29 collisions)
+  Step 400: 3.904ms (18 collisions)
+
+Results:
+  Average time: 5.314 ± 1.779 ms
+  Min time: 3.741 ms
+  Max time: 12.391 ms
+  Average collisions: 49.6
+
+======================================================================
+SUMMARY
+======================================================================
+
+50 objects (physics=30%, size=0.5m):
+  contact_points      :  0.679 ± 0.072 ms (1.00x baseline)
+  closest_points      :  0.728 ± 0.080 ms (1.07x baseline)
+  hybrid              :  0.723 ± 0.080 ms (1.06x baseline)
+
+100 objects (physics=30%, size=0.5m):
+  contact_points      :  1.451 ± 0.194 ms (1.00x baseline)
+  closest_points      :  1.541 ± 0.163 ms (1.06x baseline)
+  hybrid              :  1.599 ± 0.165 ms (1.10x baseline)
+
+200 objects (physics=30%, size=0.5m):
+  contact_points      :  3.163 ± 0.262 ms (1.00x baseline)
+  closest_points      :  4.518 ± 2.080 ms (1.43x baseline)
+  hybrid              :  5.314 ± 1.779 ms (1.68x baseline)
+
+======================================================================
+CONCLUSION
+======================================================================
+
+Total time across all configurations:
+  CONTACT_POINTS: 5.293 ms
+  CLOSEST_POINTS: 6.787 ms (1.28x slower)
+  HYBRID:         7.635 ms (1.44x slower)
+
+✅ WINNER: CONTACT_POINTS (current default)
+   Recommendation: Keep current implementation
