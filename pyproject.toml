@@ -72,7 +72,6 @@ no_strict_optional = true
 exclude = [
     "external/",
     "examples/",
-    "setup.py",
 ]
 
 [[tool.mypy.overrides]]

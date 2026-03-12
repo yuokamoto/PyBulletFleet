@@ -71,6 +71,12 @@ cd docs && sphinx-build -b html . _build/html
 pip install -e ".[dev]"
 ```
 
+### Run tests
+
+```bash
+pytest
+```
+
 ### Pre-commit hooks
 
 Install pre-commit hooks for automatic code formatting and linting:
