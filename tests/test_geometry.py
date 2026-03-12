@@ -574,8 +574,8 @@ class TestQuatSlerp:
         rng = np.random.default_rng(42)
         for _ in range(20):
             # Generate random quaternion pair
-            q0 = R.random(random_state=rng).as_quat()  # [x, y, z, w]
-            q1 = R.random(random_state=rng).as_quat()
+            q0 = R.random(random_state=rng).as_quat()  # type: ignore[call-arg]  # [x, y, z, w]
+            q1 = R.random(random_state=rng).as_quat()  # type: ignore[call-arg]
 
             # Scipy reference
             key_rots = R.from_quat([q0, q1])
