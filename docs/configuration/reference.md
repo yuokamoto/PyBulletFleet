@@ -17,7 +17,7 @@ PyBulletFleet provides multiple configuration files for different simulation mod
 #### `config_physics_off.yaml` (Kinematics Mode) ✅ Recommended
 - **Use case**: Path planning, collision avoidance, high-speed simulation
 - **Physics**: OFF (no `stepSimulation()`)
-- **Collision method**: `CLOSEST_POINTS` (distance-based, kinematics-safe)
+- **Collision method**: `closest_points` (distance-based, kinematics-safe)
 - **Collision margin**: 2cm safety clearance
 - **Target RTF**: 100x real-time
 - **Key features**:
@@ -28,7 +28,7 @@ PyBulletFleet provides multiple configuration files for different simulation mod
 #### `config_physics_on.yaml` (Physics Mode) 🔬
 - **Use case**: Physics simulation, debugging, contact analysis
 - **Physics**: ON (`stepSimulation()` every step)
-- **Collision method**: `CONTACT_POINTS` (actual contact manifold)
+- **Collision method**: `contact_points` (actual contact manifold)
 - **Target RTF**: 1x real-time
 - **Key features**:
   - Realistic physics behavior (mass, friction, push-back)
@@ -38,7 +38,7 @@ PyBulletFleet provides multiple configuration files for different simulation mod
 #### `config_hybrid.yaml` (Mixed Mode) 🚧 Advanced
 - **Use case**: Mixed physics/kinematic scenarios
 - **Physics**: ON (required)
-- **Collision method**: `HYBRID` (contact for physics, closest for kinematic)
+- **Collision method**: `hybrid` (contact for physics, closest for kinematic)
 - **Collision margin**: 5cm safety for kinematic pairs
 - **Key features**:
   - Different detection for different object types

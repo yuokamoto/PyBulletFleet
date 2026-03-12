@@ -110,7 +110,7 @@ class SimulationParams:
             SimulationParams instance
         """
         return cls(
-            target_rtf=config.get("target_rtf", config.get("speed", 1.0)),
+            target_rtf=config.get("target_rtf", 1.0),
             timestep=config.get("timestep", 1.0 / 10.0),
             duration=config.get("duration", 0),
             gui=config.get("gui", True),

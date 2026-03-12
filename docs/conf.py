@@ -30,7 +30,7 @@ myst_enable_extensions = [
     "tasklist",
 ]
 myst_heading_anchors = 3
-myst_fence_as_directive = {"mermaid"}
+myst_fence_as_directive = ["mermaid"]
 
 source_suffix = {
     ".rst": "restructuredtext",
