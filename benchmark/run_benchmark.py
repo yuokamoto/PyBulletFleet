@@ -231,7 +231,7 @@ def parse_args():
     # Sweep options
     parser.add_argument("--sweep", type=int, nargs="+", help="Sweep agent counts (e.g., --sweep 100 500 1000)")
     parser.add_argument(
-        "--compare", type=str, nargs="+", help="Compare scenarios (e.g., --compare no_collision collision_2d_10hz)"
+        "--compare", type=str, nargs="+", help="Compare scenarios (e.g., --compare no_collision collision_10hz)"
     )
 
     return parser.parse_args()
