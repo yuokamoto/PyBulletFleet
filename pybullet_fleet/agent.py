@@ -12,9 +12,8 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 import numpy as np
 import pybullet as p
 from scipy.spatial.transform import Rotation as R
-from scipy.spatial.transform import Slerp
 
-from .geometry import Pose
+from .geometry import Pose, SlerpPrecomp, quat_slerp, quat_slerp_precompute
 from .sim_object import SimObject, SimObjectSpawnParams, ShapeParams
 from two_point_interpolation import TwoPointInterpolation
 from .action import Action
@@ -250,8 +249,8 @@ class Agent(SimObject):
         # Two-point interpolation trajectory planners (initialized by set_motion_mode) - Private
         # Position trajectories [X, Y, Z] - shared by both omnidirectional and differential modes
         self._tpi_pos: List[TwoPointInterpolation] = []
-        # Rotation using scipy Slerp combined with TPI for angle progression - used by differential mode
-        self._rotation_slerp: Optional[Slerp] = None
+        # Rotation using fast quaternion slerp combined with TPI for angle progression - used by differential mode
+        self._slerp_precomp = SlerpPrecomp(0.0, 0.0, 0.0, False)
         self._tpi_rotation_angle: Optional[TwoPointInterpolation] = None  # TPI for rotation angle (0 to total_angle)
         self._rotation_total_angle: float = 0.0  # Total rotation angle in radians
         # Forward distance for differential mode (tracks progress along path)
@@ -652,13 +651,12 @@ class Agent(SimObject):
         if mode == MotionMode.OMNIDIRECTIONAL:
             # Position trajectories: X, Y, Z
             self._tpi_pos = [TwoPointInterpolation(), TwoPointInterpolation(), TwoPointInterpolation()]
-            self._rotation_slerp = None
             self._tpi_forward = None
         elif mode == MotionMode.DIFFERENTIAL:
             # Position trajectories: X, Y, Z (shared with omnidirectional)
             self._tpi_pos = [TwoPointInterpolation(), TwoPointInterpolation(), TwoPointInterpolation()]
-            # Rotation: TPI for angle progression + Slerp for quaternion interpolation
-            self._rotation_slerp = None
+            # Rotation: TPI for angle progression + fast quaternion slerp
+            self._slerp_precomp = SlerpPrecomp(0.0, 0.0, 0.0, False)
             self._tpi_rotation_angle = None  # Will be initialized in set_path
             self._tpi_forward = TwoPointInterpolation()  # Forward distance
             self._differential_phase = DifferentialPhase.ROTATE
@@ -808,7 +806,7 @@ class Agent(SimObject):
         )
 
         # Stop moving
-        self._current_velocity = np.array([0.0, 0.0, 0.0])
+        self._current_velocity[:] = 0.0
         self._current_angular_velocity = 0.0
         self._is_moving = False
 
@@ -947,8 +945,6 @@ class Agent(SimObject):
             dt: Time step (seconds)
         """
         current_pose = self.get_pose()
-        current_pos = np.array(current_pose.position)
-        goal_pos = np.array(self._goal_pose.position)
 
         # Get current simulation time
         current_time = self.sim_core.sim_time if self.sim_core is not None else 0.0
@@ -975,7 +971,7 @@ class Agent(SimObject):
             return
 
         # Update velocity (3D)
-        self._current_velocity = np.array(v_xyz)
+        self._current_velocity[:] = v_xyz
 
         # Set new position (omnidirectional: keep original orientation, don't rotate)
         # Use set_pose_raw() to avoid Pose allocation in hot path
@@ -1019,6 +1015,14 @@ class Agent(SimObject):
 
         # Calculate 3D distance
         self._forward_total_distance_3d = float(np.linalg.norm(direction_vec))
+
+        # Cache direction vectors for FORWARD phase (avoid recomputing every tick)
+        if self._forward_total_distance_3d > 1e-6:
+            self._forward_direction_3d = self._forward_goal_pos - self._forward_start_pos
+            self._forward_direction_unit = self._forward_direction_3d / self._forward_total_distance_3d
+        else:
+            self._forward_direction_3d = np.zeros(3)
+            self._forward_direction_unit = np.zeros(3)
 
         # Forward movement: rotate to face target (or opposite for backward)
         # Calculate target orientation
@@ -1136,11 +1140,8 @@ class Agent(SimObject):
                 )
                 self._tpi_rotation_angle.calc_trajectory()
 
-                # Create Slerp interpolator (we'll use angle ratio from TPI to query Slerp)
-                # Slerp will be queried with ratio = current_angle / total_angle
-                key_rots = R.from_quat([self._rotation_start_quat, self._rotation_target_quat])
-                # Slerp with normalized time [0, 1]
-                self._rotation_slerp = Slerp([0.0, 1.0], key_rots)
+                # Precompute slerp constants for fast quaternion interpolation
+                self._slerp_precomp = quat_slerp_precompute(self._rotation_start_quat, self._rotation_target_quat)
             except ValueError as e:
                 # TPI error: skip rotation and go directly to forward phase
                 self._log.warning(f"Failed to initialize rotation trajectory: {e}. Skipping rotation phase.")
@@ -1241,8 +1242,6 @@ class Agent(SimObject):
             dt: Time step (seconds)
         """
         current_pose = self.get_pose()
-        current_pos = np.array(current_pose.position)
-        goal_pos = np.array(self._goal_pose.position)
 
         # Get current simulation time
         current_time = self.sim_core.sim_time if self.sim_core is not None else 0.0
@@ -1265,29 +1264,33 @@ class Agent(SimObject):
             if current_time >= self._tpi_rotation_angle.get_end_time():
                 # Rotation complete, switch to forward phase
                 # Set exact final rotation (target quaternion)
-                self.set_pose_raw(current_pos.tolist(), self._rotation_target_quat.tolist())
+                self.set_pose_raw(current_pose.position, self._rotation_target_quat.tolist())
 
                 # Initialize forward trajectory
                 self._differential_phase = DifferentialPhase.FORWARD
                 self._init_differential_forward_distance_trajectory(self._forward_total_distance_3d)
                 return
 
-            # Apply Slerp interpolation with TPI-calculated angle ratio
+            # Apply fast quaternion slerp with TPI-calculated angle ratio
             # Ratio = current_angle / total_angle (normalized to [0, 1])
-            if self._rotation_slerp is not None and self._rotation_total_angle > 1e-6:
+            if self._rotation_total_angle > 1e-6:
                 angle_ratio = current_angle / self._rotation_total_angle
-                angle_ratio = np.clip(angle_ratio, 0.0, 1.0)  # Ensure [0, 1] range
+                angle_ratio = max(0.0, min(1.0, angle_ratio))  # Ensure [0, 1] range
 
-                r_interpolated = self._rotation_slerp(angle_ratio)
-                new_orientation = r_interpolated.as_quat().tolist()
-                self.set_pose_raw(current_pos.tolist(), new_orientation)
+                new_orientation = quat_slerp(
+                    self._rotation_start_quat,
+                    self._rotation_target_quat,
+                    angle_ratio,
+                    self._slerp_precomp,
+                ).tolist()
+                self.set_pose_raw(current_pose.position, new_orientation)
             else:
                 # Fallback: use target orientation directly
-                self.set_pose_raw(current_pos.tolist(), self._rotation_target_quat.tolist())
+                self.set_pose_raw(current_pose.position, self._rotation_target_quat.tolist())
 
             # Update angular velocity from TPI
             self._current_angular_velocity = angular_vel
-            self._current_velocity = np.array([0.0, 0.0, 0.0])
+            self._current_velocity[:] = 0.0
 
             # Log current yaw during rotation (debug level)
             self._log.debug(lambda: f"Rotating, current yaw: {self.get_pose().yaw:.1f}°")
@@ -1305,13 +1308,12 @@ class Agent(SimObject):
                 self._handle_goal_reached(current_pose)
                 return
 
-            # Move along straight 3D line from start to goal
-            direction_3d = self._forward_goal_pos - self._forward_start_pos
+            # Move along straight 3D line from start to goal (use cached direction vectors)
             total_distance = self._forward_total_distance_3d
             ratio = distance_traveled / total_distance if total_distance > 1e-6 else 0.0
 
             # Position: interpolate along 3D line
-            new_pos = self._forward_start_pos + direction_3d * ratio
+            new_pos = self._forward_start_pos + self._forward_direction_3d * ratio
 
             # Orientation: use orientation from rotation phase
             # (For FORWARD: X+ towards target, for BACKWARD: X- towards target)
@@ -1319,8 +1321,7 @@ class Agent(SimObject):
 
             # Velocity: along 3D direction (same for both forward and backward)
             # Note: Position interpolates from start to goal regardless of orientation
-            direction_3d_unit = direction_3d / total_distance if total_distance > 1e-6 else np.array([0.0, 0.0, 0.0])
-            self._current_velocity = direction_3d_unit * forward_vel
+            np.multiply(self._forward_direction_unit, forward_vel, out=self._current_velocity)
 
             # Update position/orientation - use set_pose_raw() to avoid Pose allocation in hot path
             self.set_pose_raw(new_pos.tolist(), new_orientation)
@@ -1502,7 +1503,7 @@ class Agent(SimObject):
         self._path = []  # Clear path (empty list instead of None)
         self._current_waypoint_index = 0
         self._is_moving = False
-        self._current_velocity = np.array([0.0, 0.0, 0.0])
+        self._current_velocity[:] = 0.0
         self._current_angular_velocity = 0.0
         self._differential_phase = DifferentialPhase.ROTATE
         self._final_target_orientation = None

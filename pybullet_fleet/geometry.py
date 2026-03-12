@@ -1,7 +1,8 @@
-"""Geometric primitives: Pose and Path classes for spatial representation."""
+"""Geometric primitives: Pose, Path, and quaternion slerp utilities."""
 
+import math
 from dataclasses import dataclass, field
-from typing import Iterable, List, Optional, Tuple
+from typing import Iterable, List, NamedTuple, Optional, Tuple
 
 import numpy as np
 import pybullet as p
@@ -714,3 +715,106 @@ class Path:
                 debug_ids.append(debug_id)
 
         return debug_ids
+
+
+# ============================================================================
+# Fast two-keyframe scalar quaternion slerp
+#
+# Why not scipy.spatial.transform.Slerp?
+# ---------------------------------------
+# The main reason SciPy's Slerp appears slow for single-scalar calls is not
+# the interpolation formula itself, but the fixed overhead of a general-purpose
+# API:
+#   - Input normalization, array promotion, and dtype coercion for both
+#     scalar and array inputs
+#   - Backend selection (including Array API support in recent SciPy)
+#   - Shape and range validation
+#   - Wrapping the result as a Rotation object
+#
+# Slerp is designed for array-oriented use cases where many query points are
+# interpolated in a single call.  For a hot path that interpolates one scalar
+# per tick, this generality becomes overhead.
+#
+# This implementation is specialized for the two-keyframe case where q0/q1
+# are fixed and only t varies each call.  By precomputing dot/theta/sin(theta)
+# and using math.sin/cos for scalar arithmetic, the above generalization costs
+# are avoided entirely.
+#
+# Benchmark measurements (environment-dependent, shown as a rough reference):
+#   scipy Slerp + as_quat + tolist : ~29 µs/call
+#   this implementation + tolist   : ~2.4 µs/call  (~12x)
+# Absolute numbers vary with SciPy/NumPy version, CPU, and Python version;
+# treat them as indicative, not definitive.
+# ============================================================================
+
+
+class SlerpPrecomp(NamedTuple):
+    """Precomputed constants for fast quaternion slerp between two keyframes."""
+
+    dot: float
+    theta_0: float
+    sin_theta_0: float
+    needs_flip: bool
+
+
+def quat_slerp_precompute(q0: np.ndarray, q1: np.ndarray) -> SlerpPrecomp:
+    """Precompute constants for fast scalar quaternion slerp.
+
+    Args:
+        q0: Normalized start quaternion [x, y, z, w], shape (4,).
+        q1: Normalized end quaternion [x, y, z, w], shape (4,).
+
+    Returns:
+        SlerpPrecomp with (dot, theta_0, sin_theta_0, needs_flip).
+    """
+    dot = float(np.dot(q0, q1))
+    # Shortest-path: flip if hemispheres differ
+    needs_flip = dot < 0.0
+    if needs_flip:
+        dot = -dot
+    # Clamp to valid acos domain (both sides, for rounding safety)
+    dot = max(0.0, min(dot, 1.0))
+    theta_0 = math.acos(dot)
+    sin_theta_0 = math.sin(theta_0)
+    return SlerpPrecomp(dot, theta_0, sin_theta_0, needs_flip)
+
+
+def quat_slerp(
+    q0: np.ndarray,
+    q1: np.ndarray,
+    t: float,
+    precomp: SlerpPrecomp,
+) -> np.ndarray:
+    """Fast scalar quaternion slerp for normalized quaternions.
+
+    Specialized for the two-keyframe case where q0/q1 are fixed and only t
+    varies per call.  Uses math.sin/cos for scalar operations instead of numpy.
+
+    Note:
+        q0 and q1 must be unit quaternions.  The normal slerp path preserves
+        unit length by construction; the near-identical fallback normalizes
+        explicitly.
+
+    Args:
+        q0: Normalized start quaternion [x, y, z, w], shape (4,).
+        q1: Normalized end quaternion [x, y, z, w], shape (4,).
+        t: Interpolation parameter (typically [0, 1]; extrapolation permitted).
+        precomp: Precomputed constants from quat_slerp_precompute().
+
+    Returns:
+        Interpolated quaternion as numpy array [x, y, z, w].
+    """
+    q1_effective = -q1 if precomp.needs_flip else q1
+
+    # Near-identical quaternions: fall back to normalized lerp.
+    # Threshold 1e-8 balances numerical stability of sin division against
+    # precision loss from the lerp approximation.
+    if precomp.sin_theta_0 < 1e-8:
+        result = q0 + t * (q1_effective - q0)
+        return result / np.linalg.norm(result)
+
+    theta = precomp.theta_0 * t
+    sin_theta = math.sin(theta)
+    s0 = math.cos(theta) - precomp.dot * sin_theta / precomp.sin_theta_0
+    s1 = sin_theta / precomp.sin_theta_0
+    return s0 * q0 + s1 * q1_effective

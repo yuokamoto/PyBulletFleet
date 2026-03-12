@@ -1,11 +1,12 @@
 """
-Tests for geometry module (Pose and Path classes).
+Tests for geometry module (Pose, Path, and quaternion slerp).
 
 This module tests:
 - Pose creation from various formats
 - Pose conversions
 - Distance calculations
 - Path creation and waypoint management
+- Fast quaternion slerp (quat_slerp / quat_slerp_precompute)
 """
 
 import pytest
@@ -534,3 +535,114 @@ class TestPathAdvancedFeatures:
         # Single waypoint
         single_path = Path.from_positions([[0, 0, 0]])
         assert single_path.get_total_distance() == 0.0
+
+
+# ============================================================================
+# Quaternion slerp utility tests
+# ============================================================================
+
+from scipy.spatial.transform import Rotation as R, Slerp
+from pybullet_fleet.geometry import quat_slerp, quat_slerp_precompute
+
+
+class TestQuatSlerp:
+    """Test the fast quaternion slerp implementation against scipy Slerp."""
+
+    def test_quat_slerp_antipodal_fallback(self):
+        """Bug: lerp fallback must use needs_flip when q0 ≈ -q1 (antipodal).
+
+        When quaternions are nearly antipodal, precompute sets needs_flip=True
+        and after flip sin_theta_0 ≈ 0, triggering the lerp fallback. The
+        fallback must interpolate toward -q1 (not raw q1) for shortest path.
+        """
+        q0 = np.array([0.0, 0.0, 0.0, 1.0])
+        # q1 ≈ -q0  (same rotation, opposite sign — antipodal)
+        q1 = np.array([0.0, 0.0, 0.0, -1.0])
+
+        precomp = quat_slerp_precompute(q0, q1)
+        # After flip, these should be near-identical, so lerp fallback triggers
+        assert precomp.needs_flip is True
+
+        result = quat_slerp(q0, q1, 0.5, precomp)
+        # Midpoint of identity with itself must be identity (or its antipode)
+        assert abs(np.linalg.norm(result) - 1.0) < 1e-10
+        # Result should be close to q0 (identity), not diverging
+        assert abs(np.dot(result, q0)) > 0.999
+
+    def test_quat_slerp_matches_scipy(self):
+        """Manual quat_slerp must match scipy Slerp across many rotation pairs."""
+        rng = np.random.default_rng(42)
+        for _ in range(20):
+            # Generate random quaternion pair
+            q0 = R.random(random_state=rng).as_quat()  # [x, y, z, w]
+            q1 = R.random(random_state=rng).as_quat()
+
+            # Scipy reference
+            key_rots = R.from_quat([q0, q1])
+            scipy_slerp = Slerp([0.0, 1.0], key_rots)
+
+            # Precompute constants
+            precomp = quat_slerp_precompute(q0, q1)
+
+            for t in [0.0, 0.1, 0.25, 0.5, 0.75, 0.9, 1.0]:
+                expected = scipy_slerp(t).as_quat()
+                actual = quat_slerp(q0, q1, t, precomp)
+                # Quaternions q and -q represent the same rotation
+                if np.dot(expected, actual) < 0:
+                    actual = -actual
+                np.testing.assert_allclose(
+                    actual,
+                    expected,
+                    atol=1e-10,
+                    err_msg=f"Slerp mismatch at t={t}, q0={q0}, q1={q1}",
+                )
+
+    def test_quat_slerp_near_identity(self):
+        """Slerp between nearly identical quaternions (small angle)."""
+        q0 = np.array([0.0, 0.0, 0.0, 1.0])
+        q1 = np.array([0.0, 0.0, 0.001, 0.9999995])  # ~0.1° rotation
+        q1 = q1 / np.linalg.norm(q1)
+
+        precomp = quat_slerp_precompute(q0, q1)
+        result = quat_slerp(q0, q1, 0.5, precomp)
+
+        # Should be a valid unit quaternion
+        assert abs(np.linalg.norm(result) - 1.0) < 1e-10
+        # Should be between q0 and q1
+        assert np.dot(result, q0) > 0.999
+
+    def test_quat_slerp_endpoints(self):
+        """Slerp at t=0 returns q0, at t=1 returns q1."""
+        q0 = R.from_euler("z", 0, degrees=True).as_quat()
+        q1 = R.from_euler("z", 90, degrees=True).as_quat()
+        precomp = quat_slerp_precompute(q0, q1)
+
+        r0 = quat_slerp(q0, q1, 0.0, precomp)
+        r1 = quat_slerp(q0, q1, 1.0, precomp)
+
+        np.testing.assert_allclose(r0, q0, atol=1e-12)
+        np.testing.assert_allclose(r1, q1, atol=1e-12)
+
+    def test_quat_slerp_180_degrees(self):
+        """Slerp across 180° rotation."""
+        q0 = R.from_euler("z", 0, degrees=True).as_quat()
+        q1 = R.from_euler("z", 170, degrees=True).as_quat()  # near 180°
+        precomp = quat_slerp_precompute(q0, q1)
+
+        mid = quat_slerp(q0, q1, 0.5, precomp)
+        # Midpoint should be at 85°
+        expected = R.from_euler("z", 85, degrees=True).as_quat()
+        if np.dot(mid, expected) < 0:
+            mid = -mid
+        np.testing.assert_allclose(mid, expected, atol=1e-10)
+
+    def test_quat_slerp_returns_ndarray(self):
+        """quat_slerp returns a numpy array (can call .tolist() on it)."""
+        q0 = np.array([0.0, 0.0, 0.0, 1.0])
+        q1 = np.array([0.0, 0.0, 0.3827, 0.9239])
+        q1 = q1 / np.linalg.norm(q1)
+        precomp = quat_slerp_precompute(q0, q1)
+
+        result = quat_slerp(q0, q1, 0.5, precomp)
+        assert isinstance(result, np.ndarray)
+        assert len(result.tolist()) == 4
