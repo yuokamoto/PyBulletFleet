@@ -1,6 +1,6 @@
 # Benchmark Results Reference
 
-All results below were measured in the same session (2026-03-10). For how to reproduce them,
+All results below were measured in the same session (2026-03-12). For how to reproduce them,
 see [Benchmark Suite](benchmark-suite) and [Profiling Guide](profiling-guide).
 
 ---
@@ -24,11 +24,11 @@ see [Benchmark Suite](benchmark-suite) and [Profiling Guide](profiling-guide).
 
 | Agents | Step Time (ms) | RTF | Spawn Time | Memory Delta |
 |--------|---------------|-----|------------|--------------|
-| 100    | 2.44 ± 0.15   | 41× | 27 ms      | −23.8 MB     |
-| 250    | 6.71 ± 0.25   | 15× | 65 ms      | −19.6 MB     |
-| 500    | 15.12 ± 0.23  | 6.6×| 134 ms     | −12.2 MB     |
-| 1000   | 42.65 ± 0.99  | 2.3×| 368 ms     | +3.0 MB      |
-| 2000   | 88.44 ± 1.01  | 1.1×| 731 ms     | +29.5 MB     |
+| 100    | 2.10 ± 0.09   | 48× | 27 ms      | −23.8 MB     |
+| 250    | 6.45 ± 0.30   | 16× | 65 ms      | −19.7 MB     |
+| 500    | 14.66 ± 0.18  | 6.8×| 134 ms     | −12.3 MB     |
+| 1000   | 40.94 ± 2.39  | 2.4×| 368 ms     | +3.0 MB      |
+| 2000   | 94.82 ± 5.81  | 1.1×| 731 ms     | +29.6 MB     |
 
 **Source:** `benchmark/results/benchmark_sweep_10.0s.json`
 
@@ -44,9 +44,9 @@ see [Benchmark Suite](benchmark-suite) and [Profiling Guide](profiling-guide).
 
 | Component | Share | Notes |
 |-----------|-------|-------|
-| Agent Update | ~83% | Dominant cost; much higher for moving than stationary |
-| Collision Check | ~15% | Periodic (bursty); minimal cost on non-check steps |
-| Monitor Update | ~2% | Near-zero if monitor disabled |
+| Agent Update | ~81% | Dominant cost; much higher for moving than stationary |
+| Collision Check | ~18% | Periodic (bursty); minimal cost on non-check steps |
+| Monitor Update | ~1% | Near-zero if monitor disabled |
 | Step Simulation | 0% | Physics off; up to ~40% with physics on |
 
 > **Note on variance:** Profiler timestamps show high variance (stdev > mean) because collision checks
@@ -63,9 +63,9 @@ see [Benchmark Suite](benchmark-suite) and [Profiling Guide](profiling-guide).
 
 | State | Total time | Per agent |
 |-------|-----------|-----------|
-| Stationary | 0.30 ms | 0.6 μs |
-| Moving | 87.00 ms | 174 μs |
-| Ratio | **288×** | |
+| Stationary | 0.29 ms | 0.57 μs |
+| Moving | 61.27 ms | 122.5 μs |
+| Ratio | **214×** | |
 
 **→ Design decision:** Benchmarks use 50% moving agents as a representative workload.
 Moving agent cost dominates: kinematics, trajectory following, and PyBullet API calls
@@ -75,11 +75,15 @@ only execute for agents with an active goal.
 
 | Mode | Total time | Per agent | Relative |
 |------|-----------|-----------|---------|
-| OMNIDIRECTIONAL | 9.12 ms | 18.3 μs | 1× (baseline) |
-| DIFFERENTIAL | 45.31 ms | 90.6 μs | 5.0× slower |
+| OMNIDIRECTIONAL | 9.26 ms | 18.5 μs | 1× (baseline) |
+| DIFFERENTIAL | 26.66 ms | 53.3 μs | 2.9× slower |
+
+**→ Optimisation note (2026-03-12):** DIFFERENTIAL was previously ~5× slower (90.6 μs/agent).
+Replacing scipy Slerp with a precomputed quaternion slerp and removing per-tick numpy allocations
+reduced the ROTATE phase from 37 μs to 5 μs. See [Differential Drive Optimization](#differential-drive-optimization) below.
 
 **→ Design decision:** Benchmarks default to OMNIDIRECTIONAL. DIFFERENTIAL requires
-heading alignment computation which adds ~4× update cost.
+heading alignment computation which adds ~2.9× update cost.
 
 ---
 
@@ -90,21 +94,23 @@ heading alignment computation which adds ~4× update cost.
 
 | Layer | Spawn time | Update time (get+set pose) | Memory (RSS delta) |
 |-------|-----------|---------------------------|-------------------|
-| Direct PyBullet (baseline) | 71 ms | 2.07 ms | 5.1 MB |
-| SimObject | 101 ms (+42%) | 5.83 ms (+2.8×) | 9.2 MB |
-| SimObjectManager | 108 ms (+52%) | 5.88 ms (+2.8×) | 9.4 MB |
-| Agent | 139 ms (+96%) | 7.37 ms (+3.6×) | 11.4 MB |
-| AgentManager | 149 ms (+110%) | 7.60 ms (+3.7×) | 11.6 MB |
+| Direct PyBullet (baseline) | 63 ms | 2.21 ms | 5.2 MB |
+| SimObject | 106 ms (+68%) | 6.80 ms (+3.1×) | 9.2 MB |
+| SimObjectManager | 207 ms (+229%) | 10.75 ms (+4.9×) | 9.3 MB |
+| Agent | 237 ms (+276%) | 10.60 ms (+4.8×) | 11.5 MB |
+| AgentManager | 255 ms (+305%) | 10.20 ms (+4.6×) | 11.6 MB |
 
 **Extrapolated to 10,000 objects (production feasibility, thresholds: spawn < 10 s, update < 150 ms/step, memory < +200 MB):**
 
 | Layer | Spawn | Update/step | Memory | Pass? |
 |-------|-------|-------------|--------|-------|
-| SimObject | 2.0 s | 117 ms | +81 MB | ✅ all pass |
-| Agent | 2.8 s | 147 ms | +126 MB | ✅ all pass |
+| SimObject | 2.1 s | 136 ms | +81 MB | ✅ all pass |
+| Agent | 4.7 s | 212 ms | +127 MB | spawn/mem ✅, update ❌ |
 
-**→ Design decision:** Both SimObject and Agent layers are production-viable at 10,000 scale.
-The ~3–4× update overhead vs raw PyBullet covers the pose cache, type safety, and callback system.
+**→ Design decision:** SimObject layer is production-viable at 10,000 scale.
+Agent layer exceeds the 150 ms/step update threshold at 10,000 (extrapolated 212 ms),
+but comfortably passes at 5,000 or below. For ≥10,000 agents, consider using SimObject
+directly or batching update calls.
 
 ---
 
@@ -114,11 +120,9 @@ The ~3–4× update overhead vs raw PyBullet covers the pose cache, type safety,
 
 | Mode | Step time (mean) | Collision time | vs Disabled |
 |------|-----------------|---------------|-------------|
-| DISABLED | 0.96 ms | — | baseline |
-| NORMAL_2D (9 neighbors) | 1.65 ms | 0.13 ms | +72% |
-| NORMAL_3D (27 neighbors) | 1.77 ms | 0.29 ms | +84% |
-
-**2D vs 3D speedup at 500 agents: 1.07× (7% faster)**
+| DISABLED | 1.37 ms | — | baseline |
+| NORMAL_2D (9 neighbors) | 2.43 ms | 0.21 ms | +77% |
+| NORMAL_3D (27 neighbors) | 2.26 ms | 0.39 ms | +64% |
 
 Collision check breakdown (both modes): AABB Filtering accounts for ~97–99% of collision check time.
 Spatial Hashing and Contact Points together are <3%.
@@ -136,11 +140,11 @@ are irrelevant for correctness, not for dramatic performance gains.
 
 | Method | 100 agents | 500 agents | Collisions detected | Valid? |
 |--------|-----------|-----------|---------------------|--------|
-| Spatial Hashing (current) | 7.1 ms | 59.5 ms | ✅ correct | ✅ |
-| Brute Force AABB | 7.4 ms | 177.6 ms (3.0×) | ✅ correct | ✅ |
-| `getClosestPoints` all-pairs | 11.3 ms | 348.5 ms (5.9×) | ✅ correct | ✅ |
-| `getContactPoints()` no-args | 0.03 ms | 0.22 ms | ❌ 0 — invalid | ❌ |
-| `getContactPoints(A,B)` pairwise | 5.4 ms | 185.1 ms | ❌ 0 — invalid | ❌ |
+| Spatial Hashing (current) | 8.0 ms | 92.1 ms | ✅ correct | ✅ |
+| Brute Force AABB | 8.7 ms | 231.9 ms (2.5×) | ✅ correct | ✅ |
+| `getClosestPoints` all-pairs | 23.0 ms | 370.6 ms (4.0×) | ✅ correct | ✅ |
+| `getContactPoints()` no-args | 0.06 ms | 0.24 ms | ❌ 0 — invalid | ❌ |
+| `getContactPoints(A,B)` pairwise | 12.1 ms | 190.3 ms | ❌ 0 — invalid | ❌ |
 
 **Key finding:** `getContactPoints` variants return 0 collisions for kinematic objects (mass=0).
 PyBullet's contact point solver only activates between physics-enabled bodies.
@@ -148,7 +152,46 @@ Spatial hashing with `getClosestPoints` is the only valid fast method for kinema
 
 **→ Design decision:** Spatial hashing (O(N) average) is used because:
 1. It is the only algorithmically valid method for kinematic robots.
-2. It is 3–6× faster than the valid alternatives at 500 agents.
+2. It is 2.5–4× faster than the valid alternatives at 500 agents.
+
+---
+
+## Differential Drive Optimization
+
+**Script:** `benchmark/profiling/differential_breakdown.py`
+**Conditions:** 1000 agents, DIFFERENTIAL mode (ROTATE phase)
+
+The differential drive ROTATE phase was the single most expensive per-agent per-tick operation.
+Profiling identified two root causes:
+
+| Operation | Before | After | Speedup |
+|-----------|--------|-------|---------|
+| Quaternion slerp (scipy Slerp → `_quat_slerp`) | 26.8 μs | 2.3 μs | **11.8×** |
+| Scalar clip (`np.clip` → `max/min`) | 6.8 μs | 0.15 μs | **44×** |
+| Dead `np.array()` allocations (P0) | ~0.6 μs | 0 μs | eliminated |
+| Redundant `np.dot` in slerp (P1) | ~0.3 μs | 0 μs | eliminated |
+| Velocity array reallocation (P2) | ~0.3 μs | 0 μs | in-place |
+| FORWARD direction recompute (P3) | ~0.5 μs | 0 μs | cached |
+| **ROTATE phase total** | **36.1 μs** | **4.9 μs** | **7.3×** |
+
+**End-to-end impact (1000 agents, differential):**
+
+| Metric | Before | After | Improvement |
+|--------|--------|-------|-------------|
+| Per-agent update | 57 μs | 12.4 μs | 4.6× faster |
+| DIFFERENTIAL / OMNIDIRECTIONAL ratio | 5.0× | 2.9× | Closer to parity |
+| 500-agent ROTATE frame time | 18.0 ms | 2.5 ms | −15.6 ms/frame |
+
+**Why was scipy Slerp slow?**
+
+`scipy.spatial.transform.Slerp` is a generic array-oriented API designed for batch interpolation
+(e.g., `slerp(np.linspace(0, 1, 10000))`). When called with a single scalar `t` per agent per tick,
+the fixed overhead — input normalisation, dtype promotion, Rotation object wrapping — dominates
+the actual trigonometry. The replacement `_quat_slerp` sidesteps this by precomputing
+`dot/theta/sin(theta)` once per waypoint transition and using `math.sin`/`math.cos` (C-level scalar
+functions) instead of numpy array dispatch.
+
+Absolute timings vary by environment; the ratios above are the meaningful comparison metric.
 
 ---
 

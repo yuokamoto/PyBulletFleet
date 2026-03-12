@@ -2,7 +2,7 @@
 
 This directory contains the benchmark scripts, profiling tools, experiment scripts, and configuration files for PyBulletFleet performance measurement and optimization. This file also renders as part of the project documentation on ReadTheDocs.
 
-Last Updated: 2026-03-08
+Last Updated: 2026-03-12
 
 ---
 
@@ -95,10 +95,10 @@ python benchmark/profiling/agent_update.py --agents=1000 --test=cprofile
 
 | Agents | RTF (×) | Step Time (ms) | Collisions Scale |
 |--------|---------|-----------------|------------------|
-| 100    | 41.4    | 2.4             | Excellent        |
-| 500    | 6.7     | 15.0            | Excellent        |
-| 1000   | 2.4     | 42.4            | Excellent        |
-| 2000   | 1.1     | 88.6            | Good             |
+| 100    | 47.7    | 2.1             | Excellent        |
+| 500    | 6.8     | 14.7            | Excellent        |
+| 1000   | 2.4     | 40.9            | Excellent        |
+| 2000   | 1.1     | 94.8            | Good             |
 
 **Real-Time Factor (RTF):** How many seconds of simulation time per 1 second of wall-clock time (higher is better; >1.0 = faster than real-time).
 
@@ -121,11 +121,11 @@ All runs use kinematics mode (physics OFF), headless (DIRECT), half of agents mo
 
 | Agents | RTF (×) | Step Time (ms) | Spawn Time (s) | Memory Delta (MB) |
 |--------|---------|----------------|------------------|--------------------|
-| 100    | 41.41±2.56 | 2.42±0.15  | 0.028±0.002      | −23.75±0.02        |
-| 250    | 14.99±0.57 | 6.68±0.25  | 0.066±0.001      | −19.60±0.10        |
-| 500    |  6.66±0.10 | 15.01±0.23 | 0.134±0.001      | −12.18±0.04        |
-| 1000   |  2.36±0.06 | 42.36±0.99 | 0.368±0.004      |  +3.02±0.08        |
-| 2000   |  1.13±0.01 | 88.63±1.01 | 0.778±0.088      | +29.50±0.04        |
+| 100    | 47.65±2.24 | 2.10±0.09  | 0.027±0.002      | −23.84±0.09        |
+| 250    | 15.52±0.74 | 6.45±0.30  | 0.065±0.001      | −19.70±0.04        |
+| 500    |  6.82±0.08 | 14.66±0.18 | 0.134±0.001      | −12.28±0.07        |
+| 1000   |  2.44±0.16 | 40.94±2.39 | 0.368±0.004      |  +2.96±0.04        |
+| 2000   |  1.05±0.07 | 94.82±5.81 | 0.731±0.088      | +29.57±0.06        |
 
 Negative memory delta = OS page-cache effects (process used less than baseline).
 
@@ -135,11 +135,11 @@ Negative memory delta = OS page-cache effects (process used less than baseline).
 
 | Component        | Time (ms) | Share (%) |
 |------------------|-----------|-----------|
-| Agent Update     | 13.79     | 88.2      |
+| Agent Update     | 12.35     | 88.2      |
 | Collision Check  | 1.76      | 11.2      |
 | Monitor Update   | 0.08      | 0.5       |
 | Step Simulation  | 0.00      | 0.0       |
-| **Total**        | **15.63** | **100.0** |
+| **Total**        | **14.19** | **100.0** |
 
 Agent Update dominates (path-following, velocity computation, `resetBasePositionAndOrientation()` per agent per step). Step Simulation is 0 ms because `physics=false`.
 
@@ -149,15 +149,15 @@ Agent Update dominates (path-following, velocity computation, `resetBasePosition
 
 ```text
 Agents:     100  →   250  →   500  →  1000  →  2000
-Step (ms):  2.42 →  6.68 → 15.01 → 42.36 → 88.63
-Ratio:      1.0x →  2.8x →  6.2x → 17.5x → 36.6x
+Step (ms):  2.10 →  6.45 → 14.66 → 40.94 → 94.82
+Ratio:      1.0x →  3.1x →  7.0x → 19.5x → 45.2x
 ```
 
 - **Step Time:** ~O(n^1.3). Near-linear below 500 agents; super-linear above due to collision-pair density.
 - **Spawn Time:** Linear (~0.25 ms per agent).
 - **Memory:** Linear above ~500 agents (~20 KB per agent).
 
-*Data collected 2026-03-10 on the test environment described above.*
+*Data collected 2026-03-12 on the test environment described above.*
 
 ---
 
@@ -262,4 +262,4 @@ log_level: error            # Suppress logs
 - **Experiments Guide** (`experiments/README.md`) — Algorithm and API comparison scripts
 - **Optimization Guide** (`docs/benchmarking/optimization-guide.md`) — Parameter tuning, configuration examples, use case recommendations
 
-**Last Updated:** 2026-03-08
+**Last Updated:** 2026-03-12

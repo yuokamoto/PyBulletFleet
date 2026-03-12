@@ -52,8 +52,8 @@ interval (steps) = 1 / (frequency × timestep)
 
 | Mode | Neighbors | Speedup | Use Case |
 |------|-----------|---------|----------|
-| `CollisionMode.NORMAL_2D` | 9 (XY plane) | ~67% faster | Ground robots (AGVs) |
-| `CollisionMode.NORMAL_3D` | 27 (3D cube) | baseline | Drones, lifts |
+| `CollisionMode.NORMAL_2D` | 9 (XY plane) | ~77% overhead vs disabled | Ground robots (AGVs) |
+| `CollisionMode.NORMAL_3D` | 27 (3D cube) | ~64% overhead vs disabled | Drones, lifts |
 | `CollisionMode.DISABLED` | 0 | no overhead | Visualization-only objects |
 
 ```python
@@ -102,7 +102,7 @@ simulation:
   # collision_mode is per-agent: AgentSpawnParams(..., collision_mode=CollisionMode.NORMAL_2D)
 ```
 
-**Expected:** ~6.6× RTF (500 agents), ~2.3× RTF (1000 agents)
+**Expected:** ~6.8× RTF (500 agents), ~2.4× RTF (1000 agents)
 
 ---
 
@@ -129,15 +129,16 @@ simulation:
 
 ### Benchmark Results
 
-Based on latest measurement (2026-03-10, kinematics mode, 50% agents moving, headless):
+<!-- sync with results.md -->
+Based on latest measurement (2026-03-12, kinematics mode, 50% agents moving, headless):
 
 | Agents | RTF  | Step Time    |
 |--------|------|--------------|
-| 100    | 41×  | 2.44 ± 0.15 ms |
-| 250    | 15×  | 6.71 ± 0.25 ms |
-| 500    | 6.6× | 15.12 ± 0.23 ms |
-| 1000   | 2.3× | 42.65 ± 0.99 ms |
-| 2000   | 1.1× | 88.44 ± 1.01 ms |
+| 100    | 48×  | 2.10 ± 0.09 ms |
+| 250    | 16×  | 6.45 ± 0.30 ms |
+| 500    | 6.8× | 14.66 ± 0.18 ms |
+| 1000   | 2.4× | 40.94 ± 2.39 ms |
+| 2000   | 1.1× | 94.82 ± 5.81 ms |
 
 Scalability: O(n^1.3) — near-linear up to 500 agents, slightly super-linear above.
 
@@ -152,12 +153,12 @@ Scalability: O(n^1.3) — near-linear up to 500 agents, slightly super-linear ab
 ### Component Breakdown (1000 agents)
 
 ```
-Agent Update     13.79 ms   88.2%
+Agent Update     12.35 ms   88.2%
 Collision Check   1.76 ms   11.2%
 Monitor Update    0.08 ms    0.5%
 Step Simulation   0.00 ms    0.0%
 ─────────────────────────────────
-Total            15.63 ms
+Total            14.19 ms
 ```
 
 ### Memory
@@ -211,4 +212,4 @@ From fastest to slowest collision configuration (assuming `timestep=0.1`):
 
 ---
 
-**Last Updated:** 2026-03-08
+**Last Updated:** 2026-03-12

@@ -29,6 +29,10 @@ External communication layers:
 - **ROS 2** — Topic / service / action bridge for ROS 2 ecosystem integration
 - **gRPC** — Language-agnostic RPC interface for orchestrators, WMS, and fleet managers
 
+## Refactoring
+
+- **Remove scipy dependency** — Currently only `scipy.spatial.transform.Rotation` is used (9 call sites for quat↔euler, quat↔matrix, relative rotation). Replace with PyBullet utilities + lightweight helpers in `geometry.py` to eliminate the ~150 MB transitive dependency. Low priority: no runtime performance impact, only install size.
+
 ## CI / DevOps
 
 - **GitHub Actions refactoring** — Streamlined CI pipeline
