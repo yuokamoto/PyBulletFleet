@@ -334,7 +334,8 @@ class MultiRobotSimulationCore:
                      - dt: Time elapsed since last callback execution (seconds)
             frequency: Callback frequency in Hz. If None, called every simulation step.
 
-        Example:
+        Example::
+
             def my_callback(sim_core, dt):
                 for obj in sim_core.sim_objects:
                     if isinstance(obj, Agent):
@@ -355,7 +356,8 @@ class MultiRobotSimulationCore:
                       - 0: Disable collision checking (no collision detection)
                       - > 0: Check at specified frequency (e.g., 1.0 = once per second)
 
-        Example:
+        Example::
+
             sim.set_collision_check_frequency(None)  # Every step
             sim.set_collision_check_frequency(1.0)   # 1 Hz (once per second)
             sim.set_collision_check_frequency(10.0)  # 10 Hz
@@ -435,7 +437,8 @@ class MultiRobotSimulationCore:
         Returns:
             Calculated cell_size, or None if no AABBs available
 
-        Example:
+        Example::
+
             # Use cached AABBs
             cell_size = sim._calculate_cell_size_from_aabbs()
 
@@ -547,6 +550,7 @@ class MultiRobotSimulationCore:
             True if object should use multi-cell registration, False otherwise
 
         Note:
+
             - Threshold is controlled by params.multi_cell_threshold (default: 1.5)
             - Only considers XY plane (ignores Z for 2D collision compatibility)
             - Automatically called during spatial grid updates
@@ -614,7 +618,8 @@ class MultiRobotSimulationCore:
         Returns:
             List of cell tuples (x, y, z) that overlap with the object's AABB
 
-        Example:
+        Example::
+
             # Object with 5m x 5m AABB, cell_size=2m
             cells = sim._get_overlapping_cells(obj_id)
             # Returns: [(0,0,0), (0,1,0), (1,0,0), (1,1,0), ...] (9 cells in XY)
@@ -653,7 +658,8 @@ class MultiRobotSimulationCore:
             remove_only: If True, only remove from grid without adding to new cell(s)
                         Used when objects become static or are deleted
 
-        Example:
+        Example::
+
             # First time (add)
             sim._update_object_spatial_grid(obj_id)  # Adds to cell(s)
 
@@ -907,7 +913,8 @@ class MultiRobotSimulationCore:
         Returns:
             The calculated cell_size (always > 0, falls back to 1.0 if no AABBs available)
 
-        Example:
+        Example::
+
             # Recalculate with current mode
             sim_core.set_collision_spatial_hash_cell_size_mode()
 
@@ -992,7 +999,8 @@ class MultiRobotSimulationCore:
         Args:
             obj: The SimObject instance to add
 
-        Example:
+        Example::
+
             # Manual addition (not recommended - SimObject does this automatically)
             obj = SimObject(body_id=body_id, sim_core=None)
             sim_core.add_object(obj)
@@ -1051,7 +1059,8 @@ class MultiRobotSimulationCore:
         Args:
             obj: The SimObject instance to remove
 
-        Example:
+        Example::
+
             obj = sim_core.spawn_robot(...)
             # ... later ...
             sim_core.remove_object(obj)
@@ -1393,7 +1402,8 @@ class MultiRobotSimulationCore:
             - pairs: List of (obj_id_i, obj_id_j) tuples for candidate collision pairs
             - timings: dict with get_aabbs, spatial_hashing, aabb_filtering (in ms) if return_profiling=True, else None
 
-        Example:
+        Example::
+
             # Without profiling
             pairs, _ = sim.filter_aabb_pairs()
 
@@ -1594,7 +1604,8 @@ class MultiRobotSimulationCore:
             - timings: dict with get_aabbs, spatial_hashing, aabb_filtering, contact_points, total (in ms)
               if return_profiling=True, else None
 
-        Example:
+        Example::
+
             # Without profiling
             active_pairs, _ = sim.check_collisions()
 
@@ -1779,7 +1790,8 @@ class MultiRobotSimulationCore:
             List of (object_id_i, object_id_j) tuples for all active collisions.
             Pairs are sorted such that object_id_i < object_id_j.
 
-        Example:
+        Example::
+
             # Check if any collisions are active
             if sim_core.get_active_collision_pairs():
                 print("Collisions detected!")
@@ -1867,7 +1879,8 @@ class MultiRobotSimulationCore:
         Called automatically by run_simulation(), but can also be called manually
         for custom simulation loops or when restarting simulation.
 
-        Example:
+        Example::
+
             # Automatic (recommended)
             sim.run_simulation(duration=10.0)
 
@@ -1944,7 +1957,8 @@ class MultiRobotSimulationCore:
             duration: Simulation duration in seconds (simulation time, not real time).
                      If None, uses self._params.duration. If duration <= 0, runs indefinitely.
 
-        Example:
+        Example::
+
             # Run for 10 seconds (simulation time)
             sim.run_simulation(duration=10.0)
 
@@ -2071,7 +2085,8 @@ class MultiRobotSimulationCore:
                   Auto-registered on first call — no separate setup needed.
             value_ms: Time measurement in milliseconds
 
-        Example:
+        Example::
+
             # Inside your custom Agent.update():
             t0 = time.perf_counter()
             self._do_custom_logic(dt)
@@ -2110,7 +2125,8 @@ class MultiRobotSimulationCore:
                              Useful for external profiling tools.
 
         Returns:
-            If return_profiling=True, returns dict with timing breakdown in milliseconds:
+            If return_profiling=True, returns dict with timing breakdown in milliseconds::
+
                 {
                     'agent_update': float,
                     'callbacks': float,
@@ -2127,6 +2143,7 @@ class MultiRobotSimulationCore:
                     'monitor_update': float,
                     'total': float,
                 }
+
             Otherwise returns None.
 
         Performance note: time.perf_counter() calls have negligible overhead (<0.1% for 10k objects).
@@ -2395,12 +2412,14 @@ class MultiRobotSimulationCore:
             Keys: 'current_mb', 'peak_mb'
 
         Note:
+
             - Returns **Python heap memory** tracked by tracemalloc, NOT RSS (process memory).
             - tracemalloc tracks Python object allocations, not C extensions or OS-level memory.
             - For total process memory (RSS), use: psutil.Process().memory_info().rss
             - Peak is cumulative since last reset_peak() call (interval-based in profiling).
 
-        Example:
+        Example::
+
             >>> sim = MultiRobotSimulationCore.from_dict(config)
             >>> # ... run simulation with enable_memory_profiling=True ...
             >>> mem = sim.get_memory_usage()

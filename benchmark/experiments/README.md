@@ -2,7 +2,7 @@
 
 Experiments validate optimization hypotheses and compare different implementation approaches. Unlike profiling tools (which measure *what is happening*), these scripts answer specific questions about algorithm and API choices.
 
-All scripts live in `benchmark/experiments/`. For profiling tools, see [`profiling/README.md`](../profiling/README.md). For overall benchmark results, see the [Benchmark Suite README](../README.md).
+All scripts live in `benchmark/experiments/`. For profiling tools, see the Profiling Guide (`benchmark/profiling/README.md`). For overall benchmark results, see the Benchmark Suite README (`benchmark/README.md`).
 
 ---
 
@@ -59,4 +59,4 @@ Outputs per-mode step time and collision check breakdown to quantify the 2D vs 3
 
 
 > **Note:** `wrapper_overhead.py` (wrapper-layer overhead: PyBullet vs SimObject vs Agent)
-> has moved to `benchmark/profiling/`. See the [Profiling Guide](profiling-guide.md) for details.
+> has moved to `benchmark/profiling/`. See the Profiling Guide for details.

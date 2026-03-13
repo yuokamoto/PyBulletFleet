@@ -240,8 +240,6 @@ def check_collisions(self):
 
 ---
 
----
-
 ## See Also
 
 - [Collision Detection Overview](collision-overview) — Design goals, mode summary, architecture

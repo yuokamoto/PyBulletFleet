@@ -220,7 +220,8 @@ class MoveAction(Action):
                   or MovementDirection.BACKWARD (maintain orientation, move backward).
                   Can also accept string "forward" or "backward" for convenience.
 
-    Example:
+    Example::
+
         # Move forward (normal)
         path = Path.from_positions([[0, 0, 0], [1, 0, 0], [1, 1, 0]])
         action = MoveAction(path=path)
@@ -287,7 +288,8 @@ class JointAction(Action):
         tolerance: Position tolerance to consider as reached (default: 0.01)
         wait_time: Optional seconds to wait after reaching target (default: 0.0)
 
-    Example:
+    Example::
+
         action = JointAction(target_joint_positions=[0.0, 1.0, 0.0, 0.0])
         agent.add_action(action)
     """
@@ -334,7 +336,8 @@ class WaitAction(Action):
         show_indicator: Show progress indicator (default: True)
         indicator_color: RGB color for indicator [r, g, b] (default: yellow)
 
-    Example:
+    Example::
+
         # Wait for 5 seconds (charging)
         action = WaitAction(duration=5.0, action_type="charge")
         agent.add_action(action)
@@ -399,7 +402,8 @@ class PickAction(Action):
     Note:
         Path visualization is controlled by agent.path_visualize setting.
 
-    Example:
+    Example::
+
         # Pick specific object with position offset (using link index)
         action = PickAction(
             target_object_id=pallet.body_id,
@@ -713,7 +717,8 @@ class DropAction(Action):
         drop_height: Height above drop_pose to release if not gentle (default: 0.1m)
         target_object_id: Specific object to drop (None = drop first attached)
 
-    Example:
+    Example::
+
         # Drop at specific location
         action = DropAction(
             drop_pose=Pose(position=[10, 5, 0.1]),

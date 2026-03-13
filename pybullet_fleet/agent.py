@@ -96,7 +96,8 @@ class AgentSpawnParams(SimObjectSpawnParams):
         Returns:
             AgentSpawnParams instance
 
-        Example:
+        Example::
+
             config = {
                 'visual_shape': ShapeParams(
                     shape_type='mesh',
@@ -365,7 +366,8 @@ class Agent(SimObject):
         Returns:
             Agent instance
 
-        Example (Mesh):
+        Example (Mesh)::
+
             params = AgentSpawnParams(
                 visual_shape=ShapeParams(
                     shape_type="mesh",
@@ -382,7 +384,8 @@ class Agent(SimObject):
             )
             robot = Agent.from_params(spawn_params=params)
 
-        Example (URDF):
+        Example (URDF)::
+
             params = AgentSpawnParams(
                 urdf_path="arm_robot.urdf",
                 initial_pose=Pose.from_xyz(0.0, 0.0, 0.0),
@@ -390,7 +393,8 @@ class Agent(SimObject):
             )
             robot = Agent.from_params(spawn_params=params)
 
-        Example (Virtual Agent - invisible, no collision):
+        Example (Virtual Agent - invisible, no collision)::
+
             params = AgentSpawnParams(
                 initial_pose=Pose.from_xyz(0.0, 0.0, 0.0),
                 max_linear_vel=2.0
@@ -473,7 +477,8 @@ class Agent(SimObject):
         Returns:
             Agent instance
 
-        Example:
+        Example::
+
             # Mesh visual with rotated frame + box collision
             agent = Agent.from_mesh(
                 visual_shape=ShapeParams(
@@ -568,7 +573,8 @@ class Agent(SimObject):
             - mass=1.0 (default): Uses URDF file's mass values for physics simulation
             - mass=0.0: Override all links to mass=0 for kinematic control (no physics)
 
-        Example:
+        Example::
+
             # Use URDF mass values (physics enabled)
             robot = Agent.from_urdf(urdf_path="arm_robot.urdf")
 
@@ -721,7 +727,7 @@ class Agent(SimObject):
                       MovementDirection.BACKWARD (maintain current orientation, move backward).
                       Can also accept string "forward" or "backward" for convenience.
                       Note: Only used in differential drive mode (MotionMode.DIFFERENTIAL).
-                            In omnidirectional mode, this parameter is ignored.
+                      In omnidirectional mode, this parameter is ignored.
         """
         if self.use_fixed_base:
             self._log.warning("Cannot set path for fixed-base robot")
@@ -1340,7 +1346,8 @@ class Agent(SimObject):
         Args:
             action: Action instance to add to queue
 
-        Example:
+        Example::
+
             agent.add_action(MoveAction(path=my_path))
             agent.add_action(WaitAction(duration=5.0))
         """
@@ -1354,7 +1361,8 @@ class Agent(SimObject):
         Args:
             actions: List of Action instances to add
 
-        Example:
+        Example::
+
             agent.add_action_sequence([
                 MoveAction(path=path1),
                 PickAction(target_object_id=obj.body_id),
@@ -1534,7 +1542,8 @@ class Agent(SimObject):
         Returns:
             (position, velocity) tuple
 
-        Example:
+        Example::
+
             pos, vel = robot.get_joint_state(0)
         """
         if not self.is_urdf_robot():
@@ -1602,7 +1611,8 @@ class Agent(SimObject):
             target_position: Target position (radians for revolute, meters for prismatic)
             max_force: Maximum force to apply
 
-        Example:
+        Example::
+
             robot.set_joint_target(0, 1.57)  # Move first joint to 90 degrees
         """
         if not self.is_urdf_robot():
@@ -1640,7 +1650,8 @@ class Agent(SimObject):
             target_positions: List of target positions for each joint
             max_force: Maximum force to apply
 
-        Example:
+        Example::
+
             robot.set_all_joints_targets([0.0, 1.57, -1.57, 0.0])
         """
         if not self.is_urdf_robot():
@@ -1673,7 +1684,8 @@ class Agent(SimObject):
             targets: List of target positions for all joints, or dict {joint_name: position}
             max_force: Maximum force to apply
 
-        Example:
+        Example::
+
             # Using list
             robot.set_joints_targets([0.0, 1.57, -1.57, 0.0])
 
@@ -1760,7 +1772,8 @@ class Agent(SimObject):
         Returns:
             True if all joints are within tolerance, False otherwise
 
-        Example:
+        Example::
+
             # Using list
             if robot.are_joints_at_targets([0.0, 1.57, -1.57, 0.0], tolerance=0.01):
                 print("Reached target")

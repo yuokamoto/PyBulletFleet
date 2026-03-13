@@ -25,11 +25,13 @@ class LazyLogger:
     This prevents expensive string formatting (e.g., NumPy array conversion)
     when the log level is not enabled.
 
-    Usage:
+    Usage::
+
         logger = LazyLogger(__name__)
         logger.debug(lambda: f"Expensive array: {numpy_array}")
 
-    Or with the decorator:
+    Or with the decorator::
+
         @lazy_log
         def my_logger():
             return logging.getLogger(__name__)
@@ -54,13 +56,13 @@ class LazyLogger:
             raise ValueError("Either 'name' or 'logger' must be provided")
 
     def _log_lazy(self, level: int, msg_func: Callable[[], str], *args, **kwargs):
-        """
+        r"""
         Internal method to handle lazy logging.
 
         Args:
             level: Logging level (e.g., logging.DEBUG)
             msg_func: Callable that returns the log message
-            *args, **kwargs: Additional arguments for logger
+            \*args, \*\*kwargs: Additional arguments for logger
         """
         if self._logger.isEnabledFor(level):
             # Only evaluate the message if logging is enabled
@@ -68,12 +70,12 @@ class LazyLogger:
             self._logger.log(level, message, *args, **kwargs)
 
     def debug(self, msg_func: Union[Callable[[], str], str], *args, **kwargs):
-        """
+        r"""
         Log debug message with lazy evaluation.
 
         Args:
             msg_func: Callable that returns message, or plain string
-            *args, **kwargs: Additional arguments for logger
+            \*args, \*\*kwargs: Additional arguments for logger
         """
         self._log_lazy(logging.DEBUG, msg_func, *args, **kwargs)
 
@@ -207,7 +209,8 @@ def get_lazy_logger(name: str) -> LazyLogger:
     Returns:
         LazyLogger instance
 
-    Example:
+    Example::
+
         logger = get_lazy_logger(__name__)
         logger.debug(lambda: f"Expensive: {numpy_array}")
     """
@@ -224,7 +227,8 @@ def wrap_existing_logger(logger: logging.Logger) -> LazyLogger:
     Returns:
         LazyLogger wrapping the existing logger
 
-    Example:
+    Example::
+
         standard_logger = logging.getLogger(__name__)
         lazy_logger = wrap_existing_logger(standard_logger)
         lazy_logger.debug(lambda: f"Array: {arr}")
