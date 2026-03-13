@@ -39,7 +39,8 @@ class ShapeParams:
         rgba_color: RGBA color [r, g, b, a] (for visual shapes, ignored for collision)
         frame_pose: Shape offset as Pose object (relative to body frame)
 
-    Example:
+    Example::
+
         # Box visual
         visual = ShapeParams(
             shape_type="box",
@@ -93,7 +94,8 @@ class SimObjectSpawnParams:
     Note:
         Managers calculate positions automatically and may override initial_pose.
 
-    Example:
+    Example::
+
         # Box visual + sphere collision with name
         params = SimObjectSpawnParams(
             visual_shape=ShapeParams(
@@ -140,7 +142,8 @@ class SimObjectSpawnParams:
         Returns:
             SimObjectSpawnParams instance
 
-        Example:
+        Example::
+
             config = {
                 'visual_shape': ShapeParams(shape_type='box', half_extents=[0.5, 0.3, 0.2]),
                 'collision_shape': ShapeParams(shape_type='sphere', radius=0.3),
@@ -329,7 +332,8 @@ class SimObject:
         Returns:
             (visual_id, collision_id) tuple
 
-        Example:
+        Example::
+
             visual_id, collision_id = create_shared_shapes(
                 visual_shape=ShapeParams(
                     shape_type="mesh",
@@ -551,7 +555,8 @@ class SimObject:
         Returns:
             SimObject instance
 
-        Example:
+        Example::
+
             # Box visual + sphere collision
             obj = SimObject.from_mesh(
                 visual_shape=ShapeParams(
@@ -612,7 +617,8 @@ class SimObject:
         Returns:
             SimObject instance
 
-        Example:
+        Example::
+
             params = SimObjectSpawnParams(
                 visual_shape=ShapeParams(
                     shape_type="mesh",
@@ -664,7 +670,8 @@ class SimObject:
         Args:
             mode: New CollisionMode
 
-        Example:
+        Example::
+
             # Change to static
             obj.set_collision_mode(CollisionMode.STATIC)
 
@@ -699,6 +706,7 @@ class SimObject:
         Return current position and orientation as Pose object.
 
         Performance optimization:
+
         - Kinematic objects (mass=0): Always returns cached pose since position
           only changes via set_pose(), which updates the cache.
         - Dynamic objects: Caches within the same simulation timestep to avoid
@@ -900,7 +908,8 @@ class SimObject:
         Returns:
             True if attachment successful, False otherwise
 
-        Example:
+        Example::
+
             # Attach to base link at 0.5m in front
             agent.attach_object(pallet, relative_pose=Pose.from_xyz(0.5, 0, 0))
 
@@ -994,7 +1003,8 @@ class SimObject:
         Returns:
             True if detachment successful, False otherwise
 
-        Example:
+        Example::
+
             agent.detach_object(pallet)
         """
 

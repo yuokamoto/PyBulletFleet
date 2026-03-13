@@ -131,7 +131,8 @@ class Path:
     Attributes:
         waypoints: List of Pose objects representing the path
 
-    Example:
+    Example::
+
         # Create from Pose list (recommended)
         path = Path([
             Pose.from_xyz(0, 0, 0),
@@ -189,7 +190,8 @@ class Path:
         Returns:
             Path instance
 
-        Example:
+        Example::
+
             path = Path.from_positions([
                 [0, 0, 0],
                 [1, 0, 0],
@@ -265,7 +267,8 @@ class Path:
         Returns:
             Path instance with waypoints at rectangle corners
 
-        Example:
+        Example::
+
             rect = Path.create_rectangle(center=[0, 0, 1], width=3.0, height=2.0)
             tilted_rect = Path.create_rectangle(center=[0, 0, 1], width=3.0, height=2.0,
                                                 rpy=[0.1, 0.2, 0])
@@ -350,12 +353,14 @@ class Path:
         Returns:
             Path instance with waypoints at square corners
 
-        Example:
+        Example::
+
             square = Path.create_square(center=[0, 0, 0], side_length=2.0)
             tilted_square = Path.create_square(center=[0, 0, 1], side_length=2.0,
                                               rpy=[0.1, 0.2, 0])
 
-        Note:
+        Note::
+
             This is a wrapper for create_rectangle with width == height.
         """
         return cls.create_rectangle(center=center, width=side_length, height=side_length, rpy=rpy)
@@ -385,7 +390,8 @@ class Path:
         Returns:
             Path instance with waypoints along ellipse
 
-        Example:
+        Example::
+
             ellipse = Path.create_ellipse(center=[0, 0, 0], radius_x=2.0, radius_y=1.0)
             tilted_ellipse = Path.create_ellipse(center=[0, 0, 1], radius_x=2.0, radius_y=1.0,
                                                  rpy=[0, 0.3, 0])
@@ -473,12 +479,14 @@ class Path:
         Returns:
             Path instance with waypoints along circle
 
-        Example:
+        Example::
+
             circle = Path.create_circle(center=[0, 0, 0], radius=1.5)
             arc = Path.create_circle(center=[0, 0, 0], radius=1.5,
                                     start_angle=0, end_angle=np.pi)
 
-        Note:
+        Note::
+
             This is a wrapper for create_ellipse with radius_x == radius_y.
         """
         return cls.create_ellipse(
@@ -498,7 +506,8 @@ class Path:
     def append(self, other: "Path") -> None:
         """Append waypoints from another path in-place.
 
-        Note:
+        Note::
+
             This mutates the current Path. For a non-mutating version,
             use `combined = path1 + path2`.
         """
@@ -517,7 +526,8 @@ class Path:
     def from_paths(cls, paths: Iterable["Path"]) -> "Path":
         """Create a single Path by concatenating multiple paths.
 
-        Example:
+        Example::
+
             circle_arc = Path.create_circle(center=[0, 0, 0.5], radius=2.0,
                                            num_points=16,
                                            start_angle=0.0,
@@ -578,7 +588,8 @@ class Path:
         Returns:
             List of debug item IDs (for later removal if needed)
 
-        Example:
+        Example::
+
             # Just show path lines
             path = Path.create_circle(center=[0, 0, 0.5], radius=2.0)
             path.visualize(line_color=[1, 0, 0])
@@ -634,7 +645,8 @@ class Path:
         Returns:
             List of debug item IDs (for later removal if needed)
 
-        Example:
+        Example::
+
             path = Path.create_square(center=[0, 0, 1], side_length=2.0, rpy=[0.1, 0.2, 0])
             debug_ids = path.visualize_waypoints(axis_length=0.5)
         """
@@ -790,7 +802,8 @@ def quat_slerp(
     Specialized for the two-keyframe case where q0/q1 are fixed and only t
     varies per call.  Uses math.sin/cos for scalar operations instead of numpy.
 
-    Note:
+    Note::
+
         q0 and q1 must be unit quaternions.  The normal slerp path preserves
         unit length by construction; the near-identical fallback normalizes
         explicitly.

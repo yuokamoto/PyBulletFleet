@@ -32,7 +32,8 @@ def normalize_vector_param(value: Union[float, List[float]], param_name: str, di
     Raises:
         ValueError: If list length doesn't match dimension
 
-    Example:
+    Example::
+
         >>> normalize_vector_param(2.0, "max_vel", 3)
         array([2., 2., 2.])
         >>> normalize_vector_param([1.0, 2.0, 3.0], "max_vel", 3)
@@ -58,7 +59,8 @@ def resolve_link_index(body_id: int, link: Union[int, str]) -> int:
     Returns:
         Link index (int). Returns -1 if link is "base_link" or if link name not found.
 
-    Example:
+    Example::
+
         >>> index = resolve_link_index(robot.body_id, "sensor_mast")
         >>> index = resolve_link_index(robot.body_id, 2)  # Also accepts int
         >>> index = resolve_link_index(robot.body_id, "base_link")  # Returns -1
@@ -94,7 +96,8 @@ def resolve_joint_index(body_id: int, joint: Union[int, str]) -> int:
     Returns:
         Joint index (int). Returns -1 if joint name not found.
 
-    Example:
+    Example::
+
         >>> idx = resolve_joint_index(robot.body_id, "elbow_joint")
         >>> idx = resolve_joint_index(robot.body_id, 2)
     """
@@ -130,7 +133,8 @@ def calculate_offset_pose(
     Returns:
         Pose object at the offset position, oriented to face the target
 
-    Example:
+    Example::
+
         >>> # Approach pose (1.5m away from target)
         >>> approach = calculate_offset_pose([5, 0, 0.1], [0, 0, 0.3], offset=1.5)
         >>>
@@ -264,14 +268,14 @@ def grid_execution(
     func: Optional[Callable] = None,
     args: Optional[Dict] = None,
 ) -> None:
-    """
-    Calls the callback function func(grid_index, world_pos, **args) at each grid point.
+    r"""
+    Calls the callback function func(grid_index, world_pos, \*\*args) at each grid point.
 
     Args:
         grid_num: [x_num, y_num, z_num] number of grids in each axis (default: [1, 1, 1])
         spacing: [spacing_x, spacing_y, spacing_z] grid spacing (default: [1.0, 1.0, 1.0])
         offset: [offset_x, offset_y, offset_z] offset (default: [0.0, 0.0, 0.0])
-        func: Callback function(grid_index: List[int], world_pos: List[float], **args)
+        func: Callback function(grid_index: List[int], world_pos: List[float], \*\*args)
               - grid_index: [ix, iy, iz] grid indices
               - world_pos: [x, y, z] world coordinates
         args: Additional arguments to pass to the callback function

@@ -148,7 +148,8 @@ class SimObjectManager(Generic[T]):
         Returns:
             List of spawned SimObject instances
 
-        Example:
+        Example::
+
             # Spawn 100 objects: 60% typeA, 30% typeB, 10% empty
             spawn_params_list = [
                 (typeA_params, 0.6),
@@ -408,7 +409,8 @@ class SimObjectManager(Generic[T]):
         Args:
             pose_factory: Function that takes an object and returns a target Pose.
 
-        Example:
+        Example::
+
             # Shift every object 1 m along X
             manager.set_pose_all(lambda obj: Pose.from_xyz(
                 obj.get_pose().x + 1.0,
@@ -555,7 +557,8 @@ class AgentManager(SimObjectManager[Agent]):
         Args:
             goal_factory: Function that takes an Agent and returns a Pose
 
-        Example:
+        Example::
+
             # Set all agents to move to their designated home positions
             def get_home_goal(robot):
                 return robot.user_data['home_position']
@@ -590,7 +593,8 @@ class AgentManager(SimObjectManager[Agent]):
                            (list of positions or dict of {joint_name: position})
             max_force: Maximum force for joint control (default: 500.0)
 
-        Example:
+        Example::
+
             # Set all robot arms to neutral position
             def get_neutral_joints(robot):
                 return [0.0, 0.0, 0.0, 0.0]
@@ -627,7 +631,8 @@ class AgentManager(SimObjectManager[Agent]):
         Args:
             action_factory: Function that takes an Agent and returns a list of Actions
 
-        Example:
+        Example::
+
             def create_pick_drop_sequence(robot):
                 target = robot.user_data['target_object']
                 return [
@@ -657,7 +662,8 @@ class AgentManager(SimObjectManager[Agent]):
         Args:
             action_factory: Function that takes an Agent and returns a single Action
 
-        Example:
+        Example::
+
             def create_move_action(robot):
                 goal_pos = robot.user_data['next_position']
                 return MoveAction(path=Path.from_positions([goal_pos]))
@@ -688,7 +694,8 @@ class AgentManager(SimObjectManager[Agent]):
             frequency: Update frequency in Hz. If None, uses the default frequency
                       from __init__ (default: None)
 
-        Example (Goal management):
+        Example (Goal management)::
+
             def goal_update_logic(manager, dt):
                 for agent in manager.objects:
                     if not agent.is_moving:
@@ -698,7 +705,8 @@ class AgentManager(SimObjectManager[Agent]):
 
             manager.register_callback(goal_update_logic, frequency=4.0)
 
-        Example (State tracking):
+        Example (State tracking)::
+
             def state_tracker(manager, dt):
                 for agent in manager.objects:
                     # Track agent statistics
@@ -709,6 +717,7 @@ class AgentManager(SimObjectManager[Agent]):
             manager.register_callback(state_tracker, frequency=10.0)
 
         Comparison with sim_core.register_callback():
+
         - AgentManager callback: Provides manager reference and filtered agent list
         - sim_core callback: Provides sim_core reference for all objects
         - Use AgentManager for agent-specific operations
@@ -750,7 +759,8 @@ class AgentManager(SimObjectManager[Agent]):
             camera_config: Dictionary with camera settings (from yaml config).
                           If None, uses default settings.
 
-        Example:
+        Example::
+
             # Basic usage with default settings
             agent_manager.setup_camera()
 

@@ -1,1 +1,2 @@
-../../benchmark/profiling/README.md
+```{include} ../../benchmark/profiling/README.md
+```
