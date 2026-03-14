@@ -52,6 +52,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.validate.outputs.tag }}
       - name: Set up Python 3.11
         uses: actions/setup-python@v5
         with:
@@ -66,10 +68,12 @@ jobs:
 
   build:
     name: Build and Verify Package
-    needs: test
+    needs: [validate, test]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.validate.outputs.tag }}
       - name: Set up Python 3.11
         uses: actions/setup-python@v5
         with:
@@ -111,6 +115,8 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.validate.outputs.tag }}
       - name: Extract changelog for this version
         run: |
           VERSION="${{ needs.validate.outputs.version }}"

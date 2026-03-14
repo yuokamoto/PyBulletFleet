@@ -70,8 +70,8 @@ if [ "$BRANCH" != "main" ]; then
     error "Must be on 'main' branch (currently on '${BRANCH}')"
 fi
 
-# Working tree must be clean
-if ! git diff --quiet HEAD 2>/dev/null; then
+# Working tree must be clean (no modified, staged, or untracked files)
+if [ -n "$(git status --porcelain)" ]; then
     error "Working tree is not clean. Commit or stash changes first."
 fi
 
@@ -84,7 +84,7 @@ if [ "$LOCAL" != "$REMOTE" ]; then
 fi
 
 # Version in pyproject.toml must match argument
-TOML_VERSION=$(grep -oP '(?<=^version = ")[^"]+' pyproject.toml)
+TOML_VERSION=$(awk -F'"' '/^version[[:space:]]*=/ { print $2; exit }' pyproject.toml)
 if [ "$TOML_VERSION" != "$VERSION" ]; then
     error "pyproject.toml version '${TOML_VERSION}' does not match '${VERSION}'. Update pyproject.toml first."
 fi
@@ -220,6 +220,11 @@ NOTES=$(generate_release_notes "$PREV_TAG" "$VERSION")
 # 4. Update CHANGELOG.md
 # ---------------------------------------------------------------------------
 info "Updating CHANGELOG.md..."
+
+# Prevent duplicate release sections for the same version
+if grep -q "^## v${VERSION} " CHANGELOG.md; then
+    error "CHANGELOG.md already contains release notes for v${VERSION}. Remove the existing section first."
+fi
 
 # Insert release notes after "## [Unreleased]" line
 TMPFILE=$(mktemp)

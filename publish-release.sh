@@ -45,12 +45,21 @@ if [ "$BRANCH" != "main" ]; then
     error "Must be on 'main' branch (currently on '${BRANCH}')"
 fi
 
-# Only CHANGELOG.md should be modified (check both staged and unstaged)
+# Must be up to date with remote
+git fetch origin main --quiet
+LOCAL=$(git rev-parse HEAD)
+REMOTE=$(git rev-parse origin/main)
+if [ "$LOCAL" != "$REMOTE" ]; then
+    error "Local main is not up to date with origin/main. Run 'git pull' first."
+fi
+
+# Only CHANGELOG.md should be modified (check staged, unstaged, and untracked)
 DIRTY_UNSTAGED=$(git diff --name-only 2>/dev/null | grep -v '^CHANGELOG.md$' || true)
 DIRTY_STAGED=$(git diff --cached --name-only 2>/dev/null | grep -v '^CHANGELOG.md$' || true)
-DIRTY_FILES="${DIRTY_UNSTAGED}${DIRTY_STAGED}"
+UNTRACKED=$(git ls-files --others --exclude-standard | grep -v '^CHANGELOG.md$' || true)
+DIRTY_FILES="${DIRTY_UNSTAGED}${DIRTY_STAGED}${UNTRACKED}"
 if [ -n "$DIRTY_FILES" ]; then
-    error "Unexpected uncommitted changes:\n${DIRTY_FILES}\nOnly CHANGELOG.md should be modified."
+    error "Unexpected uncommitted/untracked changes:\n${DIRTY_FILES}\nOnly CHANGELOG.md should be modified."
 fi
 
 # CHANGELOG.md must actually be modified (staged or unstaged)
@@ -59,7 +68,7 @@ if git diff --quiet -- CHANGELOG.md 2>/dev/null && git diff --cached --quiet -- 
 fi
 
 # Version in pyproject.toml must match
-TOML_VERSION=$(grep -oP '(?<=^version = ")[^"]+' pyproject.toml)
+TOML_VERSION=$(awk -F'"' '/^version[[:space:]]*=/ { print $2; exit }' pyproject.toml)
 if [ "$TOML_VERSION" != "$VERSION" ]; then
     error "pyproject.toml version '${TOML_VERSION}' does not match '${VERSION}'."
 fi

@@ -124,7 +124,7 @@ jobs:
             [ -n "$cve" ] && AUDIT_ARGS="$AUDIT_ARGS --ignore-vuln $cve"
           done < .pip-audit-ignore.txt
         fi
-        eval pip-audit $AUDIT_ARGS
+        pip-audit $AUDIT_ARGS
 
     - name: License compatibility check
       run: |
