@@ -6,7 +6,7 @@
 
 **Architecture:** 3 段階で進める。(1) 既存のスタンドアロンスクリプト 5 ファイルを整理し、pytest 互換の `test_collision_comprehensive.py` に統合する。(2) `test_core_simulation.py` を新規作成し、`add_object`/`remove_object`/`step_once` 等の単体テストを書く。(3) `test_e2e.py` を新規作成し、Pick→Move→Drop ワークフローやマルチエージェント衝突検知の E2E テストを書く。
 
-**Tech Stack:** Python 3.8+, pytest, PyBullet (DIRECT mode), numpy
+**Tech Stack:** Python 3.10+, pytest, PyBullet (DIRECT mode), numpy
 
 ---
 

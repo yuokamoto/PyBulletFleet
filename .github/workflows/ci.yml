@@ -6,6 +6,13 @@ on:
   pull_request:
     branches: [ main ]
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
 jobs:
   lint:
     name: Lint and Type Check
@@ -17,6 +24,7 @@ jobs:
       uses: actions/setup-python@v5
       with:
         python-version: '3.11'
+        cache: 'pip'
 
     - name: Cache pre-commit environments
       uses: actions/cache@v4
@@ -36,15 +44,21 @@ jobs:
         pre-commit run --all-files --show-diff-on-failure
 
   test:
-    name: Test
+    name: Test (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 3.10 = minimum supported; 3.11 = CI/RTD default; 3.12 = latest
+        python-version: ['3.10', '3.11', '3.12']
     steps:
     - uses: actions/checkout@v5
 
-    - name: Set up Python 3.11
+    - name: Set up Python ${{ matrix.python-version }}
       uses: actions/setup-python@v5
       with:
-        python-version: '3.11'
+        python-version: ${{ matrix.python-version }}
+        cache: 'pip'
 
     - name: Install dependencies
       run: |
@@ -53,4 +67,103 @@ jobs:
 
     - name: Run tests
       run: |
-        pytest tests/ -v --tb=short --cov=pybullet_fleet --cov-report=term-missing
+        pytest tests/ -v --tb=short --cov=pybullet_fleet --cov-report=term-missing --cov-fail-under=75
+
+  test-gate:
+    name: Test
+    needs: test
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          if [[ "${{ needs.test.result }}" != "success" ]]; then
+            echo "::error::One or more test matrix jobs failed"
+            exit 1
+          fi
+
+  docs:
+    name: Documentation Build
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v5
+
+    - name: Set up Python 3.11
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+        cache: 'pip'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -e ".[dev,docs]"
+
+    - name: Build docs with warnings as errors
+      run: |
+        cd docs && sphinx-build -W -b html . _build/html
+
+  security:
+    name: Security and License Check
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write   # Required by gitleaks-action for SARIF upload
+    steps:
+    - uses: actions/checkout@v5
+      with:
+        fetch-depth: 0   # Full history needed for gitleaks PR diff scan
+
+    - name: Set up Python 3.11
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+        cache: 'pip'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -e .
+        pip install pip-audit pip-licenses
+
+    - name: Scan for secrets
+      uses: gitleaks/gitleaks-action@v2
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Security audit
+      run: |
+        AUDIT_ARGS=""
+        if [ -f .pip-audit-ignore.txt ]; then
+          # Each line: CVE ID to ignore (e.g., PYSEC-2024-1234)
+          while IFS= read -r cve; do
+            cve=$(echo "$cve" | sed 's/#.*//' | xargs)
+            [ -n "$cve" ] && AUDIT_ARGS="$AUDIT_ARGS --ignore-vuln $cve"
+          done < .pip-audit-ignore.txt
+        fi
+        pip-audit $AUDIT_ARGS
+
+    - name: License compatibility check
+      run: |
+        # Generate license name column only (no --with-license-file to avoid
+        # false positives from license body text mentioning GPL exceptions)
+        pip-licenses --format=csv > licenses.csv
+
+        # Policy: Apache 2.0 project — block strong copyleft and non-commercial
+        BLOCKED='(GNU General Public License v3|GPLv3|AGPL|SSPL|EUPL|CC-BY-NC|CC-BY-ND)'
+        if grep -iE "$BLOCKED" licenses.csv; then
+          echo "::error::Incompatible license detected (strong copyleft or non-commercial)"
+          exit 1
+        fi
+
+        # Warn on LGPL (weak copyleft — allowed for dynamic linking but flag for review)
+        if grep -iE '(LGPL|GNU Lesser)' licenses.csv; then
+          echo "::warning::LGPL dependency detected — acceptable for dynamic linking but review if bundling"
+        fi
+
+        # Fail on UNKNOWN or missing licenses (match with or without CSV quoting)
+        if grep -iE '(^|,|")(UNKNOWN|Proprietary)($|,|")' licenses.csv; then
+          echo "::error::Package with UNKNOWN or Proprietary license detected — manual review required"
+          exit 1
+        fi
+
+        echo "All licenses compatible with Apache 2.0"

@@ -1,5 +1,7 @@
 # PyBulletFleet
 
+[![Documentation](https://readthedocs.org/projects/pybulletfleet/badge/?version=latest)](https://pybulletfleet.readthedocs.io/en/latest/)
+
 A PyBullet-based simulation framework for large-scale multi-robot fleets, designed for **fast N× speed simulation**.
 
 ## Why PyBulletFleet?
@@ -58,7 +60,7 @@ cd docs && sphinx-build -b html . _build/html
 
 ## Dependencies
 
-- Python 3.8+
+- Python 3.10+
 - PyBullet
 - NumPy
 - PyYAML

@@ -1,4 +1,6 @@
 # docs/requirements-docs.txt
+# NOTE: Dependencies are now managed in pyproject.toml [project.optional-dependencies.docs]
+# This file is kept for reference only. Use: pip install -e ".[docs]"
 sphinx>=7.0
 sphinx-rtd-theme>=2.0
 sphinx-autodoc-typehints>=2.0
