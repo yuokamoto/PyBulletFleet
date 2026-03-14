@@ -7,7 +7,7 @@ and understanding the key configuration options.
 
 Make sure you have the following installed:
 
-- **Python 3.8+**
+- **Python 3.10+**
 - **PyBullet** — physics engine backend
 - **NumPy** — numerical operations
 - **PyYAML** — configuration file parsing

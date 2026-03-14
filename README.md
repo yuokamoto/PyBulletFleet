@@ -58,7 +58,7 @@ cd docs && sphinx-build -b html . _build/html
 
 ## Dependencies
 
-- Python 3.8+
+- Python 3.10+
 - PyBullet
 - NumPy
 - PyYAML

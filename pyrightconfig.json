@@ -28,7 +28,7 @@
   // Allow return type mismatches (PyBullet functions often return Any type)
   "reportReturnType": false,
 
-  "pythonVersion": "3.9",
+  "pythonVersion": "3.10",
   "pythonPlatform": "Linux",
 
   // Enable basic type checking (balanced between strictness and practicality)

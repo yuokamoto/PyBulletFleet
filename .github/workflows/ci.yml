@@ -49,9 +49,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # 3.8 = minimum supported; 3.11 = CI/RTD default; 3.12 = latest
-        # Note: docs extras (myst-parser>=3.0) require Python >=3.10
-        python-version: ['3.8', '3.11', '3.12']
+        # 3.10 = minimum supported; 3.11 = CI/RTD default; 3.12 = latest
+        python-version: ['3.10', '3.11', '3.12']
     steps:
     - uses: actions/checkout@v5
 
