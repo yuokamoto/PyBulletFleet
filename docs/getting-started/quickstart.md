@@ -16,11 +16,20 @@ All dependencies are installed automatically during the package install step bel
 
 ## Installation
 
-Clone the repository and install in editable (development) mode:
+### From PyPI (recommended)
 
 ```bash
+pip install pybullet-fleet
+```
+
+### From source (for development)
+
+Clone the repository and install in editable mode with development dependencies:
+
+```bash
+git clone https://github.com/yuokamoto/PyBulletFleet.git
 cd PyBulletFleet
-pip install -e .
+pip install -e ".[dev]"
 ```
 
 This makes the `pybullet_fleet` package importable from anywhere while keeping

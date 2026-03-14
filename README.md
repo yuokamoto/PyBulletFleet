@@ -30,12 +30,24 @@ PyBulletFleet sits in a different part of the design space: it is a **kinematics
 
 ## Quick Start
 
-```bash
-# 1. Install package
-cd PyBulletFleet
-pip install -e .
+### Install from PyPI
 
-# 2. Run demo
+```bash
+pip install pybullet-fleet
+```
+
+### Or install from source (for development)
+
+```bash
+git clone https://github.com/yuokamoto/PyBulletFleet.git
+cd PyBulletFleet
+pip install -e ".[dev]"
+```
+
+### Run a demo
+
+```bash
+# If installed from source:
 python examples/100robots_grid_demo.py
 ```
 
@@ -62,20 +74,7 @@ For local builds:
 cd docs && sphinx-build -b html . _build/html
 ```
 
-## Dependencies
-
-- Python 3.10+
-- PyBullet
-- NumPy
-- PyYAML
-
 ## Development Setup
-
-### Install development dependencies
-
-```bash
-pip install -e ".[dev]"
-```
 
 ### Run tests
 
