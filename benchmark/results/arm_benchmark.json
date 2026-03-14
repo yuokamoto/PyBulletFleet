@@ -1,0 +1,148 @@
+{
+  "benchmark": "arm_performance",
+  "system_info": {
+    "platform": "Linux",
+    "processor": "x86_64",
+    "python_version": "3.8.10",
+    "cpu_count": 4,
+    "cpu_count_logical": 8,
+    "total_memory_gb": 31.06,
+    "cpu_model": "11th Gen Intel(R) Core(TM) i7-1185G7 @ 3.00GHz"
+  },
+  "config": {
+    "duration": 5.0,
+    "timestep": 0.01,
+    "arm_counts": [
+      1,
+      10,
+      50,
+      100
+    ],
+    "modes": [
+      "physics",
+      "kinematic"
+    ]
+  },
+  "results": [
+    {
+      "num_arms": 1,
+      "total_joints": 4,
+      "mass": 1.0,
+      "mode": "physics",
+      "physics_engine": true,
+      "timestep": 0.01,
+      "duration_s": 5.0,
+      "spawn_time_s": 0.0059,
+      "sim_wall_s": 0.0129,
+      "actual_steps": 500,
+      "real_time_factor": 387.99,
+      "avg_step_ms": 0.026,
+      "mem_delta_mb": -27.87
+    },
+    {
+      "num_arms": 1,
+      "total_joints": 4,
+      "mass": 0.0,
+      "mode": "kinematic",
+      "physics_engine": false,
+      "timestep": 0.01,
+      "duration_s": 5.0,
+      "spawn_time_s": 0.0063,
+      "sim_wall_s": 0.0087,
+      "actual_steps": 500,
+      "real_time_factor": 575.19,
+      "avg_step_ms": 0.017,
+      "mem_delta_mb": -28.5
+    },
+    {
+      "num_arms": 10,
+      "total_joints": 40,
+      "mass": 1.0,
+      "mode": "physics",
+      "physics_engine": true,
+      "timestep": 0.01,
+      "duration_s": 5.0,
+      "spawn_time_s": 0.0282,
+      "sim_wall_s": 0.0652,
+      "actual_steps": 500,
+      "real_time_factor": 76.7,
+      "avg_step_ms": 0.13,
+      "mem_delta_mb": 0.0
+    },
+    {
+      "num_arms": 10,
+      "total_joints": 40,
+      "mass": 0.0,
+      "mode": "kinematic",
+      "physics_engine": false,
+      "timestep": 0.01,
+      "duration_s": 5.0,
+      "spawn_time_s": 0.0261,
+      "sim_wall_s": 0.0171,
+      "actual_steps": 500,
+      "real_time_factor": 292.46,
+      "avg_step_ms": 0.034,
+      "mem_delta_mb": 0.0
+    },
+    {
+      "num_arms": 50,
+      "total_joints": 200,
+      "mass": 1.0,
+      "mode": "physics",
+      "physics_engine": true,
+      "timestep": 0.01,
+      "duration_s": 5.0,
+      "spawn_time_s": 0.133,
+      "sim_wall_s": 0.3686,
+      "actual_steps": 500,
+      "real_time_factor": 13.56,
+      "avg_step_ms": 0.737,
+      "mem_delta_mb": 0.0
+    },
+    {
+      "num_arms": 50,
+      "total_joints": 200,
+      "mass": 0.0,
+      "mode": "kinematic",
+      "physics_engine": false,
+      "timestep": 0.01,
+      "duration_s": 5.0,
+      "spawn_time_s": 0.1342,
+      "sim_wall_s": 0.0841,
+      "actual_steps": 500,
+      "real_time_factor": 59.45,
+      "avg_step_ms": 0.168,
+      "mem_delta_mb": 0.0
+    },
+    {
+      "num_arms": 100,
+      "total_joints": 400,
+      "mass": 1.0,
+      "mode": "physics",
+      "physics_engine": true,
+      "timestep": 0.01,
+      "duration_s": 5.0,
+      "spawn_time_s": 0.2685,
+      "sim_wall_s": 0.8866,
+      "actual_steps": 500,
+      "real_time_factor": 5.64,
+      "avg_step_ms": 1.773,
+      "mem_delta_mb": 0.0
+    },
+    {
+      "num_arms": 100,
+      "total_joints": 400,
+      "mass": 0.0,
+      "mode": "kinematic",
+      "physics_engine": false,
+      "timestep": 0.01,
+      "duration_s": 5.0,
+      "spawn_time_s": 0.2687,
+      "sim_wall_s": 0.1655,
+      "actual_steps": 500,
+      "real_time_factor": 30.21,
+      "avg_step_ms": 0.331,
+      "mem_delta_mb": 0.0
+    }
+  ]
+}
