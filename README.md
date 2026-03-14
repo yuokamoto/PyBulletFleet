@@ -2,18 +2,22 @@
 
 [![Documentation](https://readthedocs.org/projects/pybulletfleet/badge/?version=latest)](https://pybulletfleet.readthedocs.io/en/latest/)
 
-A PyBullet-based simulation framework for large-scale multi-robot fleets, designed for **fast N× speed simulation**.
+A **kinematics-first** simulation framework for large-scale multi-robot fleets, built on PyBullet and designed for **fast N× real-time** evaluation.
 
-## Why PyBulletFleet?
+## What is PyBulletFleet?
 
-Evaluating fleet-level logistics (e.g., warehouse AGV/AMR operations) requires simulating **hundreds to thousands of robots** far faster than real time. PyBullet alone provides a physics engine but lacks the abstractions needed to orchestrate large fleets efficiently.
+Different simulation goals call for different tools.
+Physics-focused simulators (Gazebo, Isaac Sim, MuJoCo, etc.) excel at accurate contact dynamics, sensor modelling, and single-robot control — but stepping a full physics engine for every robot becomes the bottleneck when you need to evaluate **fleet-level** systems at scale.
 
-PyBulletFleet fills this gap by providing:
+PyBulletFleet sits in a different part of the design space: it is a **kinematics-first, fleet-scale** simulation engine whose primary goal is to enable fast development and testing of the software that *orchestrates* robot fleets rather than the software that *controls* individual robots.
 
-- **N× speed simulation** — Kinematic (teleport-based) control as the primary motion mode, enabling simulation speeds far exceeding real time without being bottlenecked by physics step overhead.
-- **Scalability** — Designed for 100–10,000 robot-scale environments. Spatial-hash collision detection and shared-shape caching keep per-step update times low even at large scale (target: ≤ 10 ms per step).
-- **Physics as an option** — Full PyBullet physics can be turned on when needed (e.g., grasping, conveyor dynamics) but is off by default so that pure fleet-level evaluation runs as fast as possible.
-- **High-level abstractions** — Action system (MoveTo, Pick, Drop, Wait), agent managers with grid spawning, YAML-driven configuration, and a callback-based simulation loop let users focus on fleet logic rather than low-level PyBullet API calls.
+### Design Priorities
+
+- **Speed over fidelity** — Fleet algorithms (task allocation, traffic control, path planning) must be tested with hundreds to thousands of robots running *much faster* than real time. Kinematics-based stepping — teleporting each robot to its next pose without calling `stepSimulation()` — removes the physics bottleneck and enables N× real-time execution.
+- **System integration over low-level control** — The primary consumers are high-level systems: WMS (Warehouse Management Systems), task orchestrators, fleet managers, and monitoring dashboards. These systems issue goals, observe progress via state snapshots, and react to events — they do not need joint-level torque feedback.
+- **Scale over detail** — Validating behaviour at 100+ robot scale matters more than modelling individual link dynamics or sensor noise.
+- **Interoperability** — The simulation is designed around a callback-driven step loop and snapshot-friendly state model, so that it can be plugged into larger orchestration frameworks, replay pipelines, or external control systems (e.g., gRPC / ROS 2) as those interfaces are built out.
+- **Physics as an option** — When physical interaction *is* needed (grasping, conveyor dynamics, contact verification), full PyBullet physics can be switched on per-scenario without changing the rest of the stack.
 
 ### Target Use Cases
 
