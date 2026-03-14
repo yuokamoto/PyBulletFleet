@@ -1,0 +1,8 @@
+# .pip-audit-ignore.txt — Known CVEs to ignore in CI security audit
+#
+# Add CVE IDs (one per line) for vulnerabilities that have been reviewed
+# and determined to be non-applicable or acceptable for this project.
+# Include a comment explaining why each is ignored.
+#
+# Example:
+# PYSEC-2024-1234  # Not applicable: only affects feature X which we don't use
