@@ -1,0 +1,12 @@
+# .gitleaks.toml — Gitleaks configuration for PyBulletFleet
+# https://github.com/gitleaks/gitleaks#configuration
+
+title = "PyBulletFleet gitleaks config"
+
+[allowlist]
+  description = "Allowlisted patterns and paths"
+
+  # Design docs contain example grep patterns for secret detection (not actual secrets)
+  paths = [
+    '''docs/design/.*\.md$''',
+  ]

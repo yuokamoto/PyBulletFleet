@@ -94,6 +94,9 @@ jobs:
   security:
     name: Security and License Check
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write   # Required by gitleaks-action for SARIF upload
     steps:
     - uses: actions/checkout@v5
 
