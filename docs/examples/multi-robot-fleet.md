@@ -1,6 +1,6 @@
 # Tutorial 3: Managing a 100-Robot Fleet
 
-**Source file:** [`examples/100robots_cube_patrol_demo.py`](https://github.com/rapyuta-robotics/PyBulletFleet/blob/main/examples/100robots_cube_patrol_demo.py)
+**Source file:** [`examples/100robots_cube_patrol_demo.py`](https://github.com/yuokamoto/PyBulletFleet/blob/main/examples/100robots_cube_patrol_demo.py)
 
 This tutorial scales up from a single agent to a fleet of 100 robots.
 You will learn how to:

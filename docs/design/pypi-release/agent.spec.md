@@ -56,13 +56,12 @@
       # 機密情報スキャン
       - name: Scan for secrets
         run: |
-          # API keys, tokens, passwords, internal URLs
+          # API keys, tokens, passwords
           ! grep -rn \
             -e 'AKIA[0-9A-Z]\{16\}' \
             -e 'sk-[a-zA-Z0-9]\{20,\}' \
             -e 'password\s*=' \
             -e 'secret\s*=' \
-            -e '\.rapyuta-robotics\.' \
             --include='*.py' --include='*.yaml' --include='*.yml' --include='*.toml' \
             pybullet_fleet/ docs/ .github/ || exit 1
       # セキュリティ監査

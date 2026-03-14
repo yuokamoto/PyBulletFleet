@@ -1,6 +1,6 @@
 # Tutorial 2: High-Level Actions — Pick, Drop, Move, Wait
 
-**Source file:** [`examples/action_system_demo.py`](https://github.com/rapyuta-robotics/PyBulletFleet/blob/main/examples/action_system_demo.py)
+**Source file:** [`examples/action_system_demo.py`](https://github.com/yuokamoto/PyBulletFleet/blob/main/examples/action_system_demo.py)
 
 This tutorial introduces PyBulletFleet's **action queue system**: a way to give an agent
 an ordered list of tasks — pick up a pallet, carry it to a drop-off, drive to a charging

@@ -1,6 +1,6 @@
 # Tutorial 1: Spawning Objects and Controlling Agents
 
-**Source file:** [`examples/robot_demo.py`](https://github.com/rapyuta-robotics/PyBulletFleet/blob/main/examples/robot_demo.py)
+**Source file:** [`examples/robot_demo.py`](https://github.com/yuokamoto/PyBulletFleet/blob/main/examples/robot_demo.py)
 
 This tutorial walks through the fundamental building blocks of every PyBulletFleet simulation:
 
@@ -312,5 +312,5 @@ python examples/robot_demo.py
 
 - [Tutorial 2 — Action System](action-system): sequence Pick, Drop, Move, and Wait tasks
 - [Tutorial 3 — Managing a Fleet](multi-robot-fleet): `AgentManager`, grid spawn, `set_path`
-- [`examples/path_following_demo.py`](https://github.com/rapyuta-robotics/PyBulletFleet/blob/main/examples/path_following_demo.py): detailed `set_path` demo with 2D and 3D waypoints
+- [`examples/path_following_demo.py`](https://github.com/yuokamoto/PyBulletFleet/blob/main/examples/path_following_demo.py): detailed `set_path` demo with 2D and 3D waypoints
 - [API Reference](../api/index): full Agent, SimObject, and related class documentation

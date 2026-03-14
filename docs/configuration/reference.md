@@ -12,7 +12,7 @@ PyBulletFleet provides multiple configuration files for different simulation mod
 - General-purpose configuration
 - Auto-selects collision detection method based on physics mode
 - Recommended starting point for most use cases
-- **All parameters are documented with inline comments** — open [`config/config.yaml`](https://github.com/rapyuta-robotics/PyBulletFleet/blob/main/config/config.yaml) for the full reference with explanations, recommended values, and usage examples
+- **All parameters are documented with inline comments** — open [`config/config.yaml`](https://github.com/yuokamoto/PyBulletFleet/blob/main/config/config.yaml) for the full reference with explanations, recommended values, and usage examples
 
 #### `config_physics_off.yaml` (Kinematics Mode) ✅ Recommended
 - **Use case**: Path planning, collision avoidance, high-speed simulation
@@ -93,7 +93,7 @@ This will compare:
 
 ## Key Parameters Explained
 
-This section highlights the most important parameters. For a **complete list with detailed explanations**, see the inline comments in [`config/config.yaml`](https://github.com/rapyuta-robotics/PyBulletFleet/blob/main/config/config.yaml).
+This section highlights the most important parameters. For a **complete list with detailed explanations**, see the inline comments in [`config/config.yaml`](https://github.com/yuokamoto/PyBulletFleet/blob/main/config/config.yaml).
 
 ### `physics` (bool)
 - `false`: Kinematics mode (no `stepSimulation()`, fast, deterministic)
