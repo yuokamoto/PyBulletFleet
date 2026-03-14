@@ -14,11 +14,11 @@
 ## Constraints
 
 - バージョンは `pyproject.toml` の `version` フィールドで手動管理
-- `pre-release.sh` と `publish-release.sh` は bash スクリプト（外部ツール依存なし、git log のみ使用）
+- `pre-release.sh` と `publish-release.sh` は bash スクリプト（サードパーティツール不使用、POSIX標準ユーティリティ + git のみ使用）
 - Conventional Commits 形式を前提にパース
 - 既存の `.github/workflows/ci.yml` のジョブ構造を維持しつつ拡張
 - Python 3.11 でビルド（`.readthedocs.yaml` と統一）
-- Skill は `~/.copilot/skills/releasing/SKILL.md` に配置（プロジェクト横断で使用可能）
+- Skill は `.copilot/skills/releasing/SKILL.md` に配置（プロジェクトローカル）
 
 ## Approach
 
@@ -40,8 +40,7 @@
         with:
           python-version: '3.11'
       - run: |
-          pip install -e ".[dev]"
-          pip install -r docs/requirements-docs.txt
+          pip install -e ".[dev,docs]"
       - run: |
           cd docs && sphinx-build -W -b html . _build/html
 

@@ -103,6 +103,11 @@ info "Validating semantic version increment..."
 
 PREV_TAG=$(git tag --sort=-v:refname | head -1 || true)
 
+# Validate version format unconditionally (MAJOR.MINOR.PATCH, integers only)
+if ! echo "$VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+    error "Invalid version format '${VERSION}'. Expected MAJOR.MINOR.PATCH (e.g., 0.1.0)"
+fi
+
 if [ -n "$PREV_TAG" ]; then
     # Strip leading 'v' from previous tag
     PREV_VERSION="${PREV_TAG#v}"

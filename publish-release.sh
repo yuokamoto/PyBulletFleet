@@ -57,7 +57,11 @@ fi
 DIRTY_UNSTAGED=$(git diff --name-only 2>/dev/null | grep -v '^CHANGELOG.md$' || true)
 DIRTY_STAGED=$(git diff --cached --name-only 2>/dev/null | grep -v '^CHANGELOG.md$' || true)
 UNTRACKED=$(git ls-files --others --exclude-standard | grep -v '^CHANGELOG.md$' || true)
-DIRTY_FILES="${DIRTY_UNSTAGED}${DIRTY_STAGED}${UNTRACKED}"
+# Join with newlines to keep filenames readable in error output
+DIRTY_FILES=""
+[ -n "$DIRTY_UNSTAGED" ] && DIRTY_FILES="${DIRTY_FILES}${DIRTY_UNSTAGED}\n"
+[ -n "$DIRTY_STAGED" ] && DIRTY_FILES="${DIRTY_FILES}${DIRTY_STAGED}\n"
+[ -n "$UNTRACKED" ] && DIRTY_FILES="${DIRTY_FILES}${UNTRACKED}"
 if [ -n "$DIRTY_FILES" ]; then
     error "Unexpected uncommitted/untracked changes:\n${DIRTY_FILES}\nOnly CHANGELOG.md should be modified."
 fi

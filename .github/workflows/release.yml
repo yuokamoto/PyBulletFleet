@@ -33,7 +33,10 @@ jobs:
         id: version
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            TAG="v${{ inputs.version }}"
+            # Strip leading 'v' if user entered 'v0.1.0' instead of '0.1.0'
+            INPUT="${{ inputs.version }}"
+            INPUT="${INPUT#v}"
+            TAG="v${INPUT}"
           else
             TAG="${GITHUB_REF_NAME}"
           fi
@@ -121,7 +124,8 @@ jobs:
         run: |
           VERSION="${{ needs.validate.outputs.version }}"
           TAG="${{ needs.validate.outputs.tag }}"
-          awk "/^## v${VERSION}/,/^## (v[0-9]|\[Unreleased\])/" CHANGELOG.md | sed '$ d' > release_notes.md
+          # Extract section: start at matching header, stop at next ## header
+          awk '/^## v'"${VERSION}"'/{found=1} found && /^## /{if(c++) exit} found' CHANGELOG.md > release_notes.md
           if [ ! -s release_notes.md ]; then
             echo "Release ${TAG}" > release_notes.md
           fi
