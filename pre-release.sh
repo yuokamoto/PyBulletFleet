@@ -231,6 +231,11 @@ if grep -q "^## v${VERSION} " CHANGELOG.md; then
     error "CHANGELOG.md already contains release notes for v${VERSION}. Remove the existing section first."
 fi
 
+# Verify ## [Unreleased] header exists
+if ! grep -q '^## \[Unreleased\]' CHANGELOG.md; then
+    error "CHANGELOG.md is missing the '## [Unreleased]' header. Add it before running this script."
+fi
+
 # Insert release notes after "## [Unreleased]" line
 TMPFILE=$(mktemp)
 awk -v notes="$NOTES" '

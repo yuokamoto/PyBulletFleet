@@ -161,8 +161,8 @@ jobs:
           echo "::warning::LGPL dependency detected — acceptable for dynamic linking but review if bundling"
         fi
 
-        # Fail on UNKNOWN or missing licenses
-        if grep -iE '"(UNKNOWN|Proprietary)"' licenses.csv; then
+        # Fail on UNKNOWN or missing licenses (match with or without CSV quoting)
+        if grep -iE '(^|,|")(UNKNOWN|Proprietary)($|,|")' licenses.csv; then
           echo "::error::Package with UNKNOWN or Proprietary license detected — manual review required"
           exit 1
         fi

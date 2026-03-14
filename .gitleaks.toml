@@ -6,7 +6,7 @@ title = "PyBulletFleet gitleaks config"
 [allowlist]
   description = "Allowlisted patterns and paths"
 
-  # Design docs contain example grep patterns for secret detection (not actual secrets)
+  # Only the specific design doc that contains example grep patterns (not actual secrets)
   paths = [
-    '''docs/design/.*\.md$''',
+    '''docs/design/pypi-release/agent\.spec\.md$''',
   ]

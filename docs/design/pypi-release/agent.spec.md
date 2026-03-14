@@ -282,7 +282,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### 5. Releasing Skill
 
-Location: `~/.copilot/skills/releasing/SKILL.md`
+Location: `.copilot/skills/releasing/SKILL.md` (プロジェクトローカル)
 
 Skill がエージェントに指示するフロー:
 
@@ -330,7 +330,7 @@ Skill の設計方針:
 - `pybullet_fleet/__init__.py` — パッケージの `__version__` の有無を確認
 - `LICENSE` — PyPI メタデータに必要
 - `docs/conf.py` — Sphinx 設定（CI で使用）
-- `docs/requirements-docs.txt` — ドキュメント依存（CI で使用）
+- `pyproject.toml` の `[project.optional-dependencies.docs]` — ドキュメント依存（`pip install -e ".[docs]"` で使用）
 - `benchmark/run_benchmark.py` — ベンチマーク実行スクリプト（skill で使用）
 - `~/.copilot/skills/verification-before-completion/SKILL.md` — 既存 skill の構造を参考
 - `~/.copilot/skills/finishing-a-development-branch/SKILL.md` — 既存 skill の構造を参考

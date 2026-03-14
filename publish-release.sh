@@ -87,7 +87,7 @@ info "All preconditions passed"
 # ---------------------------------------------------------------------------
 # 2. Show release notes and confirm
 # ---------------------------------------------------------------------------
-NOTES_DISPLAY=$(awk '/^## v'"${VERSION}"'/,/^## (v[0-9]|\[Unreleased\])/' CHANGELOG.md | sed '$ d')
+NOTES_DISPLAY=$(awk '/^## v'"${VERSION}"'/{found=1} found && /^## /{if(c++) exit} found' CHANGELOG.md)
 if [ -z "$NOTES_DISPLAY" ]; then
     NOTES_DISPLAY="(No release notes found for v${VERSION} in CHANGELOG.md)"
 fi
