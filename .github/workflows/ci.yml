@@ -70,6 +70,18 @@ jobs:
       run: |
         pytest tests/ -v --tb=short --cov=pybullet_fleet --cov-report=term-missing --cov-fail-under=75
 
+  test-gate:
+    name: Test
+    needs: test
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          if [[ "${{ needs.test.result }}" != "success" ]]; then
+            echo "::error::One or more test matrix jobs failed"
+            exit 1
+          fi
+
   docs:
     name: Documentation Build
     runs-on: ubuntu-latest
@@ -99,6 +111,8 @@ jobs:
       security-events: write   # Required by gitleaks-action for SARIF upload
     steps:
     - uses: actions/checkout@v5
+      with:
+        fetch-depth: 0   # Full history needed for gitleaks PR diff scan
 
     - name: Set up Python 3.11
       uses: actions/setup-python@v5
