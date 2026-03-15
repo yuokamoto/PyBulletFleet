@@ -205,7 +205,7 @@ class SimObject:
         body_id: int,
         sim_core=None,
         pickable: bool = True,
-        mass: float = None,
+        mass: Optional[float] = None,
         collision_mode: CollisionMode = CollisionMode.NORMAL_3D,
         name: Optional[str] = None,
         user_data: Optional[Dict[str, Any]] = None,
@@ -962,7 +962,7 @@ class SimObject:
         if parent_link_index == -1:
             parent_pos, parent_orn = p.getBasePositionAndOrientation(self.body_id, physicsClientId=self._pid)
         else:
-            link_state = p.getLinkState(self.body_id, parent_link_index, physicsClientId=self._pid)
+            link_state = p.getLinkState(self.body_id, parent_link_index, computeForwardKinematics=1, physicsClientId=self._pid)
             parent_pos, parent_orn = link_state[0], link_state[1]
 
         # Save attachment state with user-specified relative pose

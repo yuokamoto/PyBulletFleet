@@ -148,6 +148,61 @@ cube_agent = Agent.from_mesh(
 | `motion_mode` | `MotionMode.OMNIDIRECTIONAL` (default) or `MotionMode.DIFFERENTIAL` |
 | `mass` | `0.0` for kinematic (teleport-based), `> 0` for physics-driven |
 
+### Understanding `mass` and Kinematic Mode
+
+The `mass` parameter determines whether an object behaves **kinematically** (teleport-based)
+or **dynamically** (physics-driven).  The default value and resolution logic differ between
+`SimObject` and `Agent`, and the simulation-level `physics` flag also affects joint behaviour.
+
+#### SimObject
+
+| Factory / Constructor | `mass` default | Resulting mode |
+|-----------------------|---------------|----------------|
+| `SimObject.__init__`  | `None` | Queries PyBullet via `getDynamicsInfo` — typically `0.0` for primitives |
+| `SimObject.from_mesh` | `0.0` | Kinematic (static/teleport) |
+| `SimObject.from_params` | from config | Uses YAML `mass` value; defaults to `0.0` if omitted |
+
+- **`mass == 0.0` (kinematic):** The object does not respond to gravity or collision forces.
+  Move it explicitly with `set_pose()`.
+- **`mass > 0` (dynamic):** Subject to gravity, friction, and collision forces.
+  Requires `physics=True` in `SimulationParams` for movement to take effect.
+
+#### Agent (extends SimObject)
+
+| Factory | `mass` default | Resolution |
+|---------|---------------|------------|
+| `Agent.from_mesh` | `0.0` | Passed directly — kinematic by default |
+| `Agent.from_urdf` | `None` | **Auto-computed:** sums all link masses from the URDF. Result is typically `> 0`, so the agent is **dynamic by default**. Pass `mass=0.0` explicitly to force kinematic mode. |
+| `Agent.__init__` | `None` | If `None`, queries PyBullet `getDynamicsInfo` (base link only) |
+
+**Kinematic Agent** (`mass == 0.0`):
+- Base movement via `set_pose()` / `set_goal_pose()` / `set_path()` — proportional-control interpolation, no physics step needed.
+- Joint control via `set_joint_target()` / `set_all_joints_targets()` — internally uses PyBullet's `resetJointState()` with per-step interpolation at URDF velocity limits.
+
+**Dynamic Agent** (`mass > 0`):
+- Base movement via `set_goal_pose()` — same interpolation logic, but collisions and gravity also apply when `physics=True`.
+- Joint control via `set_joint_target()` / `set_all_joints_targets()` — internally uses PyBullet's `setJointMotorControl2()` (position control with motor torques). Requires `physics=True` so `stepSimulation()` is called.
+
+#### Effect of `SimulationParams.physics`
+
+The simulation-level `physics` flag interacts with the per-object mass:
+
+| `mass` | `physics` | Base movement | Joint control |
+|--------|-----------|---------------|---------------|
+| `0.0`  | `False` (default) | Kinematic interpolation | Kinematic interpolation (`resetJointState`) |
+| `0.0`  | `True` | Kinematic interpolation | Kinematic interpolation (`resetJointState`) |
+| `> 0`  | `False` | Kinematic interpolation | **Kinematic fallback** — `stepSimulation()` is never called, so motor control would have no effect. PyBulletFleet auto-detects this and falls back to `resetJointState` interpolation. |
+| `> 0`  | `True` | Physics-driven (gravity, collisions) | Motor control (`setJointMotorControl2`) |
+
+This decision is computed once at agent creation by `_compute_use_kinematic_joints()` and
+cached in `_use_kinematic_joints`. Callers of `set_joint_target()` / `set_all_joints_targets()`
+do **not** need to know which mode is active — the API is the same.
+
+> **`use_fixed_base` and mass detection:** When `Agent.from_urdf` is called with
+> `use_fixed_base=True`, PyBullet sets the base link mass to 0. However, `from_urdf`
+> sums **all** link masses (base + joints), so a robot with heavy links is still
+> detected as dynamic. To force kinematic mode, pass `mass=0.0` explicitly.
+
 ---
 
 ## 5. Spawn an Agent from a URDF
@@ -274,7 +329,12 @@ sim_core.register_callback(arm_joint_control_callback, frequency=10)
 
 - `get_num_joints()` — returns the number of controllable joints (as found in the URDF).
 - `set_all_joints_targets(positions, max_force=500.0)` — sets position targets for joints
-  in joint-index order. Joint control requires `physics=True` in `SimulationParams`.
+  in joint-index order. Works in both physics and kinematic modes:
+  - **Physics mode** (`mass > 0`, `physics=True`): uses PyBullet motor control
+  - **Kinematic mode** (`mass=0.0` or `physics=False`): uses smooth interpolation
+    respecting URDF velocity limits
+
+For a dedicated arm tutorial with pick/drop, see [Tutorial 4 — Arm Pick & Drop](arm-pick-drop).
 
 ---
 

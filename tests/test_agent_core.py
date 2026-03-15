@@ -423,7 +423,7 @@ class TestAgentCreationFromURDF:
     """Test Agent creation from URDF files"""
 
     def test_from_urdf_basic(self, pybullet_env):
-        """Test creating agent from URDF with default properties"""
+        """Test creating agent from URDF with default mass=None (uses URDF values)"""
         agent = Agent.from_urdf(urdf_path="robots/mobile_robot.urdf", pose=Pose.from_xyz(0, 0, 0.5))
 
         assert_agent_properties(
@@ -435,12 +435,22 @@ class TestAgentCreationFromURDF:
         )
         assert agent.mass >= 0.5  # URDF should have some mass
 
+    def test_from_urdf_mass_none_uses_urdf_values(self, pybullet_env):
+        """mass=None (default) should use URDF mass values, not override them."""
+        agent = Agent.from_urdf(
+            urdf_path="robots/mobile_robot.urdf",
+            pose=Pose.from_xyz(0, 0, 0.5),
+            mass=None,  # explicit None — same as default
+        )
+        # URDF has non-zero mass → agent should not be kinematic
+        assert agent.mass > 0, "mass=None should preserve URDF mass values"
+        assert not agent.is_kinematic, "mass=None agent should not be kinematic"
+
     def test_from_urdf_with_custom_params(self, pybullet_env):
-        """Test URDF agent with custom velocity/mode parameters"""
+        """Test URDF agent with custom velocity/mode parameters (mass=None default)"""
         agent = Agent.from_urdf(
             urdf_path="robots/mobile_robot.urdf",
             pose=Pose.from_xyz(1, 1, 0.5),
-            mass=3.0,
             max_linear_vel=1.5,
             max_linear_accel=3.0,
             motion_mode=MotionMode.OMNIDIRECTIONAL,
@@ -448,7 +458,7 @@ class TestAgentCreationFromURDF:
 
         assert_agent_properties(
             agent,
-            mass=_SKIP,  # URDF mass, not overridden by parameter (mass>0 uses URDF values)
+            mass=_SKIP,  # URDF mass, not overridden
             is_kinematic=_SKIP,  # Depends on URDF mass
             position=(1, 1, 0.5),
             is_urdf=True,
@@ -1292,6 +1302,7 @@ class TestAgentMotionUpdate:
 # ============================================================================
 
 
+@pytest.mark.parametrize("mass", [None, 0.0], ids=["physics", "kinematic"])
 class TestAgentJointControl:
     """Test URDF joint state and control methods.
 
@@ -1300,6 +1311,9 @@ class TestAgentJointControl:
         1: shoulder_to_elbow  (axis X, ±2.0)
         2: elbow_to_wrist     (axis X, ±2.5)
         3: wrist_to_end       (axis Z, ±1.57)
+
+    Parametrized with mass=None (physics, URDF mass values) and mass=0.0
+    (kinematic interpolation) to verify both modes produce the same end results.
     """
 
     ARM_JOINT_NAMES = [
@@ -1309,7 +1323,7 @@ class TestAgentJointControl:
         "wrist_to_end",
     ]
 
-    def _create_arm(self, pybullet_env, *, use_fixed_base=True, mass=1.0):
+    def _create_arm(self, pybullet_env, mass, *, use_fixed_base=True):
         agent = Agent.from_urdf(
             urdf_path=ARM_URDF,
             pose=Pose.from_xyz(0, 0, 0.5),
@@ -1318,31 +1332,43 @@ class TestAgentJointControl:
         )
         return agent
 
+    def _step(self, agent, mass, n=500, dt=1.0 / 240.0):
+        """Advance simulation n steps using the right mechanism for the mode.
+
+        Physics (mass=None): p.stepSimulation() drives motor control.
+        Kinematic (mass=0.0): only agent.update(dt) drives interpolation.
+        agent.update(dt) is always called (handles base motion, actions, etc.).
+        """
+        for _ in range(n):
+            if mass != 0.0:
+                p.stepSimulation()
+            agent.update(dt)
+
     # -- Joint info / consistency ----------------------------------------
 
-    def test_num_joints_matches_urdf(self, pybullet_env):
+    def test_num_joints_matches_urdf(self, pybullet_env, mass):
         """get_num_joints() should match the URDF (4 joints for arm_robot)."""
-        agent = self._create_arm(pybullet_env)
+        agent = self._create_arm(pybullet_env, mass)
         assert agent.get_num_joints() == 4
 
-    def test_joint_names_match_urdf(self, pybullet_env):
+    def test_joint_names_match_urdf(self, pybullet_env, mass):
         """joint_info names should match the URDF joint names."""
-        agent = self._create_arm(pybullet_env)
+        agent = self._create_arm(pybullet_env, mass)
         names = [info[1].decode("utf-8") for info in agent.joint_info]
         assert names == self.ARM_JOINT_NAMES
 
-    def test_joint_types_all_revolute(self, pybullet_env):
+    def test_joint_types_all_revolute(self, pybullet_env, mass):
         """All arm_robot joints should be revolute (type 0 in pybullet)."""
-        agent = self._create_arm(pybullet_env)
+        agent = self._create_arm(pybullet_env, mass)
         for info in agent.joint_info:
             assert info[2] == p.JOINT_REVOLUTE, f"Joint {info[1]} should be revolute"
 
-    def test_is_urdf_robot(self, pybullet_env):
+    def test_is_urdf_robot(self, pybullet_env, mass):
         """URDF agent should return True from is_urdf_robot()."""
-        agent = self._create_arm(pybullet_env)
+        agent = self._create_arm(pybullet_env, mass)
         assert agent.is_urdf_robot() is True
 
-    def test_mesh_agent_no_joints(self, pybullet_env):
+    def test_mesh_agent_no_joints(self, pybullet_env, mass):
         """Mesh agent should have 0 joints."""
         agent = create_mesh_agent(pose=Pose.from_xyz(0, 0, 0.5))
         assert agent.get_num_joints() == 0
@@ -1350,9 +1376,9 @@ class TestAgentJointControl:
 
     # -- get_joint_state / set_joint_target (by index) -------------------
 
-    def test_initial_joint_positions_zero(self, pybullet_env):
+    def test_initial_joint_positions_zero(self, pybullet_env, mass):
         """All joints should start at position 0, consistent with pybullet."""
-        agent = self._create_arm(pybullet_env)
+        agent = self._create_arm(pybullet_env, mass)
         for i in range(agent.get_num_joints()):
             pos, vel = agent.get_joint_state(i)
             pb_state = p.getJointState(agent.body_id, i)
@@ -1361,14 +1387,13 @@ class TestAgentJointControl:
             assert abs(vel - pb_vel) < 1e-6, f"Joint {i}: get_joint_state vel={vel} != pybullet vel={pb_vel}"
             assert abs(pos) < 0.01, f"Joint {i} should start at 0, got {pos}"
 
-    def test_set_joint_target_and_simulate(self, pybullet_env):
+    def test_set_joint_target_and_simulate(self, pybullet_env, mass):
         """set_joint_target should move joint toward target after simulation steps."""
-        agent = self._create_arm(pybullet_env)
+        agent = self._create_arm(pybullet_env, mass)
         target = 0.5  # radians
         agent.set_joint_target(0, target)
 
-        for _ in range(500):
-            p.stepSimulation()
+        self._step(agent, mass, n=500)
 
         pos, _ = agent.get_joint_state(0)
         pb_pos = p.getJointState(agent.body_id, 0)[0]
@@ -1378,9 +1403,9 @@ class TestAgentJointControl:
 
     # -- get/set by name -------------------------------------------------
 
-    def test_get_joint_state_by_name(self, pybullet_env):
+    def test_get_joint_state_by_name(self, pybullet_env, mass):
         """get_joint_state_by_name should return same result as by index and pybullet."""
-        agent = self._create_arm(pybullet_env)
+        agent = self._create_arm(pybullet_env, mass)
         pos_idx, vel_idx = agent.get_joint_state(0)
         pos_name, vel_name = agent.get_joint_state_by_name("base_to_shoulder")
         pb_state = p.getJointState(agent.body_id, 0)
@@ -1393,9 +1418,9 @@ class TestAgentJointControl:
         assert abs(pos_idx - pb_pos) < 1e-6, f"pos by index={pos_idx} != pybullet={pb_pos}"
         assert abs(vel_idx - pb_vel) < 1e-6, f"vel by index={vel_idx} != pybullet={pb_vel}"
 
-    def test_set_joint_target_by_name(self, pybullet_env):
+    def test_set_joint_target_by_name(self, pybullet_env, mass):
         """set_joint_target_by_name should move joint like set_joint_target."""
-        agent = self._create_arm(pybullet_env)
+        agent = self._create_arm(pybullet_env, mass)
 
         # Initially at 0
         assert agent.is_joint_at_target_by_name("shoulder_to_elbow", 0.0, tolerance=0.01)
@@ -1403,16 +1428,15 @@ class TestAgentJointControl:
         target = 0.4
         agent.set_joint_target_by_name("shoulder_to_elbow", target)
 
-        for _ in range(500):
-            p.stepSimulation()
+        self._step(agent, mass, n=500)
 
         assert agent.is_joint_at_target_by_name("shoulder_to_elbow", target, tolerance=0.05)
 
     # -- Batch operations ------------------------------------------------
 
-    def test_get_all_joints_state(self, pybullet_env):
+    def test_get_all_joints_state(self, pybullet_env, mass):
         """get_all_joints_state returns list of (pos, vel) matching pybullet."""
-        agent = self._create_arm(pybullet_env)
+        agent = self._create_arm(pybullet_env, mass)
         states = agent.get_all_joints_state()
         assert len(states) == 4
         for i, (pos, vel) in enumerate(states):
@@ -1420,9 +1444,9 @@ class TestAgentJointControl:
             assert abs(pos - pb_state[0]) < 1e-6, f"Joint {i}: pos={pos} != pybullet={pb_state[0]}"
             assert abs(vel - pb_state[1]) < 1e-6, f"Joint {i}: vel={vel} != pybullet={pb_state[1]}"
 
-    def test_get_all_joints_state_by_name(self, pybullet_env):
+    def test_get_all_joints_state_by_name(self, pybullet_env, mass):
         """get_all_joints_state_by_name returns dict keyed by joint name matching pybullet."""
-        agent = self._create_arm(pybullet_env)
+        agent = self._create_arm(pybullet_env, mass)
         states = agent.get_all_joints_state_by_name()
         assert set(states.keys()) == set(self.ARM_JOINT_NAMES)
 
@@ -1433,58 +1457,88 @@ class TestAgentJointControl:
             assert abs(pos - pb_state[0]) < 1e-6, f"{name}: pos={pos} != pybullet={pb_state[0]}"
             assert abs(vel - pb_state[1]) < 1e-6, f"{name}: vel={vel} != pybullet={pb_state[1]}"
 
-    def test_set_all_joints_targets(self, pybullet_env):
+    def test_set_all_joints_targets(self, pybullet_env, mass):
         """set_all_joints_targets moves all joints to specified positions."""
-        agent = self._create_arm(pybullet_env)
+        agent = self._create_arm(pybullet_env, mass)
         targets = [0.3, 0.2, -0.2, 0.1]
         agent.set_all_joints_targets(targets)
 
-        for _ in range(1000):
-            p.stepSimulation()
+        self._step(agent, mass, n=1000)
 
         assert agent.are_all_joints_at_targets(targets, tolerance=0.05)
 
-    def test_set_joints_targets_by_name(self, pybullet_env):
+    def test_set_joints_targets_by_name(self, pybullet_env, mass):
         """set_joints_targets_by_name (partial update) works correctly."""
-        agent = self._create_arm(pybullet_env)
+        agent = self._create_arm(pybullet_env, mass)
         partial = {"base_to_shoulder": 0.5, "elbow_to_wrist": -0.3}
         agent.set_joints_targets_by_name(partial)
 
-        for _ in range(1000):
-            p.stepSimulation()
+        self._step(agent, mass, n=1000)
 
         assert agent.are_joints_at_targets_by_name(partial, tolerance=0.05)
 
-    def test_set_joints_targets_list_and_dict(self, pybullet_env):
+    def test_set_joints_targets_list_and_dict(self, pybullet_env, mass):
         """set_joints_targets accepts both list and dict."""
-        agent = self._create_arm(pybullet_env)
+        agent = self._create_arm(pybullet_env, mass)
 
         # list form
         targets_list = [0.1, 0.2, 0.3, 0.1]
         agent.set_joints_targets(targets_list)
-        for _ in range(1000):
-            p.stepSimulation()
+        self._step(agent, mass, n=1000)
         assert agent.are_joints_at_targets(targets_list, tolerance=0.05)
 
         # dict form
         targets_dict = {"base_to_shoulder": -0.2, "wrist_to_end": 0.4}
         agent.set_joints_targets(targets_dict)
-        for _ in range(1000):
-            p.stepSimulation()
+        self._step(agent, mass, n=1000)
         assert agent.are_joints_at_targets(targets_dict, tolerance=0.05)
 
     # -- Edge cases / warnings -------------------------------------------
 
-    def test_mesh_agent_joint_state_returns_zero(self, pybullet_env):
+    def test_kinematic_joint_cache_avoids_pybullet_call(self, pybullet_env, mass):
+        """Kinematic robots should cache joint positions internally.
+
+        After stepping, get_joint_state must return the cached position
+        WITHOUT calling p.getJointState.  We patch p.getJointState after
+        stepping to prove it is never invoked during the read path.
+        """
+        if mass != 0.0:
+            pytest.skip("cache only applies to kinematic (mass=0)")
+        agent = self._create_arm(pybullet_env, mass)
+
+        # Set target and step enough for interpolation to move
+        agent.set_joint_target(0, 0.5)
+        self._step(agent, mass, n=200)
+
+        # Record ground truth BEFORE patching
+        pb_pos = p.getJointState(agent.body_id, 0)[0]
+        cached_pos = agent._kinematic_joint_positions[0]
+
+        # Patch p.getJointState — if get_joint_state calls it, the test fails
+        from unittest.mock import patch
+
+        with patch(
+            "pybullet.getJointState", side_effect=AssertionError("p.getJointState should NOT be called for kinematic robots")
+        ):
+            pos, vel = agent.get_joint_state(0)
+
+        # Cached value should match what get_joint_state returns
+        assert abs(cached_pos - pos) < 1e-9, f"Cache ({cached_pos}) != get_joint_state ({pos})"
+        # And match pybullet ground truth
+        assert abs(cached_pos - pb_pos) < 1e-6, f"Cache ({cached_pos}) != pybullet ({pb_pos})"
+        # Velocity should be 0 for kinematic
+        assert vel == 0.0
+
+    def test_mesh_agent_joint_state_returns_zero(self, pybullet_env, mass):
         """Calling get_joint_state on mesh agent returns (0, 0) gracefully."""
         agent = create_mesh_agent(pose=Pose.from_xyz(0, 0, 0.5))
         pos, vel = agent.get_joint_state(0)
         assert pos == 0.0
         assert vel == 0.0
 
-    def test_get_joints_state_by_name_subset(self, pybullet_env):
+    def test_get_joints_state_by_name_subset(self, pybullet_env, mass):
         """get_joints_state_by_name with a subset of joint names."""
-        agent = self._create_arm(pybullet_env)
+        agent = self._create_arm(pybullet_env, mass)
         subset = ["base_to_shoulder", "wrist_to_end"]
         states = agent.get_joints_state_by_name(subset)
         assert set(states.keys()) == set(subset)
@@ -1510,8 +1564,7 @@ class TestAgentURDFLinkAttach:
         return Agent.from_urdf(
             urdf_path=ARM_URDF,
             pose=Pose.from_xyz(0, 0, 0.5),
-            mass=1.0,
-            use_fixed_base=True,
+            use_fixed_base=True,  # mass=None (default) uses URDF mass values
         )
 
     def _create_pickable_box(self, pos=(0, 0, 0)):

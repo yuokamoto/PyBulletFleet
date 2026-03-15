@@ -2,7 +2,7 @@
 
 This directory contains the benchmark scripts, profiling tools, experiment scripts, and configuration files for PyBulletFleet performance measurement and optimization. This file also renders as part of the project documentation on ReadTheDocs.
 
-Last Updated: 2026-03-12
+Last Updated: 2026-03-15
 
 ---
 
@@ -50,10 +50,11 @@ flowchart TD
 | Collision Check > 20% | `collision_check.py` | 2D collision mode (~67% reduction), reduce frequency to 10 Hz |
 | Agent Update > 40% | `agent_update.py` | Skip stationary agents, reduce PyBullet API calls |
 | Goal setting > 100ms | `agent_manager_set_goal.py` | Cache trajectory calculations |
+| Joint Update slow | `arm_joint_update.py` | Compare physics vs kinematic mode |
 
 ### Tool Categories
 
-- 🎯 **Benchmarking:** `run_benchmark.py`, `performance_benchmark.py` — measure overall performance
+- 🎯 **Benchmarking:** `run_benchmark.py`, `mobile_benchmark.py`, `arm_benchmark.py` — measure overall performance
 - 🔍 **Profiling:** `profiling/` — identify *what is slow* (see `profiling/README.md`)
 - 🧪 **Experiments:** `experiments/` — compare *which is faster* (see `experiments/README.md`)
 
@@ -68,22 +69,31 @@ flowchart TD
 ## Quick Start
 
 ```bash
-# Single benchmark (1000 agents, 10s, 3 repetitions)
+# Mobile: single benchmark (1000 agents, 10s, 3 repetitions)
 python benchmark/run_benchmark.py --agents 1000 --duration 10
 
-# Multi-agent sweep
+# Mobile: multi-agent sweep
 python benchmark/run_benchmark.py --sweep 100 500 1000 2000 5000
 
-# Scenario comparison
+# Mobile: scenario comparison
 python benchmark/run_benchmark.py --compare no_collision collision_10hz collision_3d_full --agents 1000
 
-# Identify bottleneck
+# Arm: single benchmark (10 arms, physics mode)
+python benchmark/run_benchmark.py --type arm --agents 10 --duration 5 --scenario physics
+
+# Arm: sweep arm counts (physics + kinematic)
+python benchmark/run_benchmark.py --type arm --sweep 1 10 50 100
+
+# Identify bottleneck (mobile)
 python benchmark/profiling/simulation_profiler.py --agents=1000 --steps=100
+
+# Identify bottleneck (arm)
+python benchmark/profiling/arm_joint_update.py --arms=10 --steps=100
 
 # Drill into collision detection
 python benchmark/profiling/collision_check.py --agents=1000
 
-# Drill into agent update
+# Drill into agent update (mobile)
 python benchmark/profiling/agent_update.py --agents=1000 --test=cprofile
 ```
 
@@ -167,6 +177,8 @@ Ratio:      1.0x →  3.1x →  7.0x → 19.5x → 45.2x
 benchmark/
 ├── README.md                          # This file (overview + results)
 │
+├── tools.py                           # Shared benchmark helpers (system info, memory, cleanup)
+│
 ├── configs/                           # Benchmark-specific YAML configurations
 │   ├── general.yaml                   # General performance benchmark (default)
 │   ├── collision_physics_off.yaml     # Physics OFF + closest_points (recommended)
@@ -175,16 +187,18 @@ benchmark/
 │
 ├── results/                           # JSON output files
 │
-├── performance_benchmark.py           # Worker: single benchmark execution
-├── run_benchmark.py                   # Orchestrator: multi-run, sweep, comparison
+├── mobile_benchmark.py                # Worker: mobile agent benchmark
+├── arm_benchmark.py                   # Worker: arm robot benchmark
+├── run_benchmark.py                   # Orchestrator: --type mobile|arm, sweep, comparison
 │
 ├── profiling/                         # Profiling tools → see profiling/README.md
 │   ├── README.md
 │   ├── simulation_profiler.py         # step_once() component breakdown
 │   ├── collision_check.py             # Collision pipeline 4-stage analysis
-│   ├── agent_update.py                # Agent.update() detailed analysis
+│   ├── agent_update.py                # Agent.update() detailed analysis (mobile)
+│   ├── arm_joint_update.py            # Arm joint update profiling (physics vs kinematic)
 │   ├── agent_manager_set_goal.py      # set_goal_pose() profiling
-│   ├── wrapper_overhead.py             # Wrapper overhead: PyBullet vs SimObject vs Agent
+│   ├── wrapper_overhead.py            # Wrapper overhead: PyBullet vs SimObject vs Agent
 │   └── profiling_config.yaml          # Shared profiling configuration
 │
 ├── experiments/                       # Experiment scripts → see experiments/README.md
@@ -200,37 +214,51 @@ benchmark/
 
 ## Architecture: Worker + Orchestrator Pattern
 
-### **Worker** (`performance_benchmark.py`)
-- Executes a single benchmark test
-- Loads YAML config, runs simulation, measures RTF / step time / memory
-- Outputs JSON to stdout
-- Each test runs in a separate process for clean memory state
+### **Workers** (`mobile_benchmark.py`, `arm_benchmark.py`)
+- Each executes a single benchmark test in a clean process
+- Mobile worker: loads YAML config, spawns cube agents, runs simulation
+- Arm workers: spawns arm robots with JointAction sequences (physics or kinematic)
+- Both output JSON to stdout
+- Process isolation ensures clean memory state between runs
+
+### **Shared Helpers** (`tools.py`)
+- `get_system_info()` — CPU, memory, OS detection
+- `get_memory_info()` — RSS + tracemalloc measurement
+- `force_cleanup()`, `cpu_time_s()`, `ensure_disconnected()`, `warmup_steps()`
 
 ### **Orchestrator** (`run_benchmark.py`)
 - Spawns worker processes, aggregates results
-- **Modes:** Single Test · Sweep (multiple agent counts) · Compare (multiple scenarios)
+- `--type mobile` (default): mobile agent benchmarks
+- `--type arm`: arm robot benchmarks (supports `--scenario physics|kinematic`)
+- **Modes:** Single Test · Sweep (multiple counts) · Compare (multiple scenarios)
 - Computes statistics (median, mean, stdev) and generates comparison tables
 
 ### CLI Reference
 
 ```bash
-# Single test
+# Mobile: single test
 python benchmark/run_benchmark.py --agents 1000 --scenario no_collision
 
-# Sweep
+# Mobile: sweep
 python benchmark/run_benchmark.py --sweep 100 500 1000 2000
 
-# Compare scenarios
-python benchmark/run_benchmark.py --compare no_collision collision_2d_10hz collision_3d_full --agents 1000
+# Mobile: compare scenarios
+python benchmark/run_benchmark.py --compare no_collision collision_2d_10hz --agents 1000
 
-# Worker (direct, usually called by orchestrator)
-python benchmark/performance_benchmark.py --agents 1000 --duration 10 --scenario no_collision
+# Arm: single test
+python benchmark/run_benchmark.py --type arm --agents 10 --scenario physics
+
+# Arm: sweep (physics + kinematic)
+python benchmark/run_benchmark.py --type arm --sweep 1 10 50 100
+
+# Workers (direct, usually called by orchestrator)
+python benchmark/mobile_benchmark.py --agents 1000 --duration 10 --scenario no_collision
+python benchmark/arm_benchmark.py --agents 10 --duration 5 --scenario physics
 ```
 
 **Output Files:**
-- `benchmark_results_<agents>agents_<duration>s_<scenario>.json`
-- `benchmark_sweep_<duration>s.json`
-- `benchmark_compare_<agents>agents_<duration>s.json`
+- Mobile: `benchmark_results_<agents>agents_<duration>s.json`, `benchmark_sweep_<duration>s.json`
+- Arm: `arm_results_<arms>arms_<duration>s.json`, `arm_sweep_<duration>s.json`
 
 ---
 
@@ -262,4 +290,4 @@ log_level: error            # Suppress logs
 - **Experiments Guide** (`experiments/README.md`) — Algorithm and API comparison scripts
 - **Optimization Guide** (`docs/benchmarking/optimization-guide.md`) — Parameter tuning, configuration examples, use case recommendations
 
-**Last Updated:** 2026-03-12
+**Last Updated:** 2026-03-15

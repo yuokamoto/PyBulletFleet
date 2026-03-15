@@ -13,7 +13,10 @@ from pybullet_fleet.core_simulation import MultiRobotSimulationCore, SimulationP
 from pybullet_fleet.sim_object import Pose, SimObject, ShapeParams
 
 # Simulation setup
-params = SimulationParams(gui=True, timestep=0.01, physics=True)
+params = SimulationParams(
+    gui=True, timestep=0.1, physics=False, target_rtf=10
+)  # for kinematics demo with faster execution (no physics means we can run faster than real-time)
+# params = SimulationParams(gui=True, timestep=0.01, physics=True) # for physics-based pick/drop with gravity and dynamics
 sim_core = MultiRobotSimulationCore(params)
 
 # Spawn robot arm (fixed base)
@@ -26,10 +29,10 @@ arm_agent = Agent.from_urdf(
 )
 
 
-# 目標関節角度（例）
-pick_joints = [1.5, 1.5, 1.5, 0.0]  # box方向に伸ばす
-place_joints = [-1.5, 1.5, 1.5, 0.0]  # 反対側に伸ばす
-moving_to_pick = True
+# Target joint angles
+pick_joints = [1.5, 1.5, 1.5, 0.0]  # Extend toward box
+place_joints = [-1.5, 1.5, 1.5, 0.0]  # Extend to opposite side
+
 # Spawn box to pick/drop
 box_sim = SimObject.from_mesh(
     visual_shape=ShapeParams(shape_type="box", half_extents=[0.05, 0.05, 0.05], rgba_color=[1, 0, 0, 1]),
@@ -41,117 +44,96 @@ box_sim = SimObject.from_mesh(
 
 # Pick/drop logic
 PICK_LINK_INDEX = p.getNumJoints(arm_agent.body_id) - 1  # End-effector link
-PICK_INTERVAL = 50  # steps
 
 
 picked = False
-# 0: box_pick_poseへ, 1:pick, 2:box_place_poseへ, 3:drop, 4:初期姿勢
-# 5:box_place_poseへ, 6:pick, 7:box_pick_poseへ, 8:drop, 9:初期姿勢
+# States: move_to_pick -> pick -> move_to_place -> drop -> move_to_init
+#       -> move_to_place2 -> pick2 -> move_to_pick2 -> drop2 -> move_to_init2 (loop)
 step_state = 0
-wait_counter = 0
-WAIT_STEPS = int(0.05 / params.timestep)  # 各動作間の待機(0.5秒)
+JOINT_TOL = 0.05  # tolerance for joint target check (radians)
 box_pick_pose = Pose.from_xyz(0.3, 0, 0.1)
 box_place_pose = Pose.from_xyz(-0.3, 0, 0.1)
 joint_init = [0.0, 0.0, 0.0, 0.0]
 box_offset = 0.14
 offset_pose = Pose.from_xyz(0, 0, box_offset)
+_targets_set = False  # Track whether targets were set for current state
 
 
 def pick_drop_callback(sim_core, dt):
-    global picked, step_state, wait_counter
+    global picked, step_state, _targets_set
     step = sim_core.step_count
 
-    # ステートマシンで順序制御
+    def _set_targets_once(targets):
+        """Set joint targets only once per state transition (avoids redundant calls)."""
+        global _targets_set
+        if not _targets_set:
+            arm_agent.set_all_joints_targets(targets)
+            _targets_set = True
+
+    def _advance(next_state, msg):
+        """Advance to next state and reset target flag."""
+        global step_state, _targets_set
+        step_state = next_state
+        _targets_set = False
+        print(f"[STEP {step}] {msg}")
+
     if step_state == 0:
-        # 1. box_pick_poseに移動
-        arm_agent.set_all_joints_targets(joint_init)
+        # Move to initial pose, place box at pick position
+        _set_targets_once(joint_init)
         box_sim.set_pose(box_pick_pose)
-        wait_counter += 1
-        if wait_counter >= WAIT_STEPS:
-            step_state = 1
-            wait_counter = 0
-            print(f"[STEP {step}] Move to box_pick_pose")
+        if arm_agent.are_all_joints_at_targets(joint_init, tolerance=JOINT_TOL):
+            _advance(1, "At init -> moving to pick")
+
     elif step_state == 1:
-        # 2. pick
-        arm_agent.set_all_joints_targets(pick_joints)
-        wait_counter += 1
-        if wait_counter >= WAIT_STEPS:
+        # Move arm to pick position
+        _set_targets_once(pick_joints)
+        if arm_agent.are_all_joints_at_targets(pick_joints, tolerance=JOINT_TOL):
             arm_agent.attach_object(box_sim, parent_link_index=PICK_LINK_INDEX, relative_pose=offset_pose)
             picked = True
-            step_state = 2
-            wait_counter = 0
-            print(f"[STEP {step}] Picked box (attached)")
+            _advance(2, "Picked box (attached)")
+
     elif step_state == 2:
-        # 3. box_place_poseに移動
-        arm_agent.set_all_joints_targets(place_joints)
-        box_sim.set_pose(box_place_pose)
-        wait_counter += 1
-        if wait_counter >= WAIT_STEPS:
-            step_state = 3
-            wait_counter = 0
-            print(f"[STEP {step}] Move to box_place_pose")
+        # Move arm to place position (box follows via attach)
+        _set_targets_once(place_joints)
+        if arm_agent.are_all_joints_at_targets(place_joints, tolerance=JOINT_TOL):
+            arm_agent.detach_object(box_sim)
+            picked = False
+            _advance(3, "Dropped box (detached)")
+
     elif step_state == 3:
-        # 4. drop
-        arm_agent.detach_object(box_sim)
-        picked = False
-        wait_counter += 1
-        if wait_counter >= WAIT_STEPS:
-            step_state = 4
-            wait_counter = 0
-            print(f"[STEP {step}] Dropped box (detached)")
+        # Return to initial pose
+        _set_targets_once(joint_init)
+        if arm_agent.are_all_joints_at_targets(joint_init, tolerance=JOINT_TOL):
+            _advance(4, "At init -> starting reverse")
+
     elif step_state == 4:
-        # 5. 初期姿勢に移動
-        arm_agent.set_all_joints_targets(joint_init)
-        wait_counter += 1
-        if wait_counter >= WAIT_STEPS:
-            step_state = 5
-            wait_counter = 0
-            print(f"[STEP {step}] Move to joint_init")
-    elif step_state == 5:
-        # 6. box_place_poseに移動
-        arm_agent.set_all_joints_targets(joint_init)
+        # Place box at place position, move to initial
+        _set_targets_once(joint_init)
         box_sim.set_pose(box_place_pose)
-        wait_counter += 1
-        if wait_counter >= WAIT_STEPS:
-            step_state = 6
-            wait_counter = 0
-            print(f"[STEP {step}] Move to box_place_pose (reverse)")
-    elif step_state == 6:
-        # 7. pick
-        arm_agent.set_all_joints_targets(place_joints)
-        wait_counter += 1
-        if wait_counter >= WAIT_STEPS:
+        if arm_agent.are_all_joints_at_targets(joint_init, tolerance=JOINT_TOL):
+            _advance(5, "Moving to place (reverse)")
+
+    elif step_state == 5:
+        # Move arm to place position to pick box
+        _set_targets_once(place_joints)
+        if arm_agent.are_all_joints_at_targets(place_joints, tolerance=JOINT_TOL):
             arm_agent.attach_object(box_sim, parent_link_index=PICK_LINK_INDEX, relative_pose=offset_pose)
             picked = True
-            step_state = 7
-            wait_counter = 0
-            print(f"[STEP {step}] Picked box (attached, reverse)")
+            _advance(6, "Picked box (attached, reverse)")
+
+    elif step_state == 6:
+        # Move arm to pick position (carrying box back)
+        _set_targets_once(pick_joints)
+        if arm_agent.are_all_joints_at_targets(pick_joints, tolerance=JOINT_TOL):
+            arm_agent.detach_object(box_sim)
+            picked = False
+            _advance(7, "Dropped box (detached, reverse)")
+
     elif step_state == 7:
-        # 8. box_pick_poseに移動
-        arm_agent.set_all_joints_targets(pick_joints)
-        box_sim.set_pose(box_pick_pose)
-        wait_counter += 1
-        if wait_counter >= WAIT_STEPS:
-            step_state = 8
-            wait_counter = 0
-            print(f"[STEP {step}] Move to box_pick_pose (reverse)")
-    elif step_state == 8:
-        # 9. drop
-        arm_agent.detach_object(box_sim)
-        picked = False
-        wait_counter += 1
-        if wait_counter >= WAIT_STEPS:
-            step_state = 9
-            wait_counter = 0
-            print(f"[STEP {step}] Dropped box (detached, reverse)")
-    elif step_state == 9:
-        # 10. 初期姿勢に移動
-        arm_agent.set_all_joints_targets(joint_init)
-        wait_counter += 1
-        if wait_counter >= WAIT_STEPS:
-            step_state = 0
-            wait_counter = 0
-            print(f"[STEP {step}] Move to joint_init (loop)")
+        # Return to initial pose, then loop
+        _set_targets_once(joint_init)
+        if arm_agent.are_all_joints_at_targets(joint_init, tolerance=JOINT_TOL):
+            _advance(0, "At init (loop)")
 
 
 # Register callback

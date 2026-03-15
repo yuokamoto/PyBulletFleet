@@ -532,22 +532,31 @@ class PickAction(Action):
 
         # Phase 3: Move forward to pick pose
         if self._phase == PickPhase.MOVING_TO_PICK:
-            # Create forward action once to move from current position to pick pose
-            if self._forward_action is None:
-                forward_path = Path([self._pick_pose])
-
-                self._forward_action = MoveAction(
-                    path=forward_path, auto_approach=True, final_orientation_align=False, direction=MovementDirection.FORWARD
-                )
-                current_pos = agent.get_pose().position
-                pick_pos = self._pick_pose.position
-                distance = np.linalg.norm(np.array(pick_pos[:2]) - np.array(current_pos[:2]))
-                self._log.info(f"Moving forward {distance:.3f}m to pick pose...")
-
-            if self._forward_action.execute(agent, dt):
+            # Fixed-base robots (arms) don't need base movement — skip directly to picking
+            if agent.use_fixed_base:
                 self._phase = PickPhase.PICKING
                 self._log_phase_transition(PickPhase.PICKING, agent)
-                self._log.info("Reached pick position, picking...")
+                self._log.info("Fixed-base robot, skipping base movement, picking...")
+            else:
+                # Create forward action once to move from current position to pick pose
+                if self._forward_action is None:
+                    forward_path = Path([self._pick_pose])
+
+                    self._forward_action = MoveAction(
+                        path=forward_path,
+                        auto_approach=True,
+                        final_orientation_align=False,
+                        direction=MovementDirection.FORWARD,
+                    )
+                    current_pos = agent.get_pose().position
+                    pick_pos = self._pick_pose.position
+                    distance = np.linalg.norm(np.array(pick_pos[:2]) - np.array(current_pos[:2]))
+                    self._log.info(f"Moving forward {distance:.3f}m to pick pose...")
+
+                if self._forward_action.execute(agent, dt):
+                    self._phase = PickPhase.PICKING
+                    self._log_phase_transition(PickPhase.PICKING, agent)
+                    self._log.info("Reached pick position, picking...")
 
         # Phase 4: Pick object (with optional joint control)
         if self._phase == PickPhase.PICKING:
@@ -564,9 +573,14 @@ class PickAction(Action):
 
             # Get attachment position in world coordinates
             if self._attach_link_index == -1:
-                parent_pos, parent_orn = p.getBasePositionAndOrientation(agent.body_id)
+                parent_pos, parent_orn = p.getBasePositionAndOrientation(agent.body_id, physicsClientId=agent._pid)
             else:
-                link_state = p.getLinkState(agent.body_id, self._attach_link_index)
+                link_state = p.getLinkState(
+                    agent.body_id,
+                    self._attach_link_index,
+                    computeForwardKinematics=1,
+                    physicsClientId=agent._pid,
+                )
                 parent_pos, parent_orn = link_state[0], link_state[1]
 
             # Calculate world position for attached object
@@ -827,21 +841,30 @@ class DropAction(Action):
 
         # Phase 3: Move forward to drop pose
         if self._phase == DropPhase.MOVING_TO_DROP:
-            # Create forward action once to move from current position to drop pose
-            if self._forward_action is None:
-                forward_path = Path([self._drop_pose])
-                self._forward_action = MoveAction(
-                    path=forward_path, auto_approach=True, final_orientation_align=False, direction=MovementDirection.FORWARD
-                )
-                current_pos = agent.get_pose().position
-                drop_pos = self._drop_pose.position
-                distance = np.linalg.norm(np.array(drop_pos[:2]) - np.array(current_pos[:2]))
-                self._log.info(f"Moving forward {distance:.3f}m to drop pose...")
-
-            if self._forward_action.execute(agent, dt):
+            # Fixed-base robots (arms) don't need base movement — skip directly to dropping
+            if agent.use_fixed_base:
                 self._phase = DropPhase.DROPPING
                 self._log_phase_transition(DropPhase.DROPPING, agent)
-                self._log.info("Reached drop position, dropping...")
+                self._log.info("Fixed-base robot, skipping base movement, dropping...")
+            else:
+                # Create forward action once to move from current position to drop pose
+                if self._forward_action is None:
+                    forward_path = Path([self._drop_pose])
+                    self._forward_action = MoveAction(
+                        path=forward_path,
+                        auto_approach=True,
+                        final_orientation_align=False,
+                        direction=MovementDirection.FORWARD,
+                    )
+                    current_pos = agent.get_pose().position
+                    drop_pos = self._drop_pose.position
+                    distance = np.linalg.norm(np.array(drop_pos[:2]) - np.array(current_pos[:2]))
+                    self._log.info(f"Moving forward {distance:.3f}m to drop pose...")
+
+                if self._forward_action.execute(agent, dt):
+                    self._phase = DropPhase.DROPPING
+                    self._log_phase_transition(DropPhase.DROPPING, agent)
+                    self._log.info("Reached drop position, dropping...")
 
         # Phase 4: Drop object (with optional joint control)
         if self._phase == DropPhase.DROPPING:

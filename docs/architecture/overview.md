@@ -142,6 +142,17 @@ object attachment via `update_attached_objects_kinematics()`.
 - Linear interpolation for smooth motion
 - Velocity clamping based on max_linear_vel and max_linear_accel
 
+**Joint Control Modes:**
+- **Physics mode** (`mass > 0`, `physics=True`): `setJointMotorControl2` — PyBullet motor control with torque limits
+- **Kinematic mode** (`mass=0.0` or `physics=False`): `resetJointState` with per-step interpolation — joints move at URDF `<limit velocity="...">` rates, falling back to `_KINEMATIC_JOINT_FALLBACK_VELOCITY` (2.0 rad/s) if unspecified. Mode selected once at init via `_compute_use_kinematic_joints()` and cached in `_use_kinematic_joints`.
+- **Kinematic joint cache** (`_kinematic_joint_positions`): Joint positions cached in a Python dict, initialized via batch `p.getJointStates()`, updated after each `resetJointState()`. `get_joint_state()` returns cached values for kinematic robots — zero PyBullet calls per step.
+
+**Key Joint Methods:**
+- `set_joint_target(index, position)`: Set single joint target (transparent mode switching)
+- `set_all_joints_targets(positions)`: Set all joint targets at once
+- `are_all_joints_at_targets(targets, tolerance)`: Check if all joints reached targets
+- `_update_kinematic_joints(dt)`: Internal per-step interpolation (called from `update()`)
+
 **Associated Params:**
 
 - `AgentSpawnParams` — Configuration for agent initialization: motion limits (`max_linear_vel`, `max_linear_accel`, `max_angular_vel`, `max_angular_accel`), motion mode (`"omnidirectional"` / `"differential"`), orientation, mass, collision toggle. Immutable after creation.
@@ -236,6 +247,17 @@ Wait for specified duration.
 
 **Key Parameters:**
 - `duration`: Wait time in seconds
+
+##### JointAction
+Move all joints to target positions.
+
+**Key Parameters:**
+- `target_joint_positions`: List of target angles (radians) for all controllable joints
+- `tolerance`: Completion threshold per joint (default: 0.01 rad)
+- `max_force`: Motor force for physics mode (default: 500.0 N·m)
+
+**Completion:** All joints within `tolerance` of their targets. Works transparently
+in both physics mode (motor control) and kinematic mode (interpolation).
 
 ---
 

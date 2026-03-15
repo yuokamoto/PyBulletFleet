@@ -6,6 +6,7 @@ Supports both Mesh and URDF loading.
 """
 
 import logging
+import math
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple, Union
 
@@ -159,6 +160,10 @@ class Agent(SimObject):
     Supports both mobile robots (use_fixed_base=False) and fixed robots (use_fixed_base=True).
     Supports both Mesh and URDF loading.
 
+    Class Constants:
+        _KINEMATIC_JOINT_FALLBACK_VELOCITY: Default max joint velocity (rad/s)
+            used when the URDF ``<limit velocity="...">`` is 0 or missing.
+
     Features:
     - Accepts Pose goals (compatible with ROS2 geometry_msgs/Pose)
     - Max velocity and acceleration constraints (for mobile robots)
@@ -176,6 +181,9 @@ class Agent(SimObject):
     so the API follows ROS message conventions.
     """
 
+    _KINEMATIC_JOINT_FALLBACK_VELOCITY: float = 2.0  # rad/s
+    _kinematic_joints_physics_off_logged: bool = False  # Log physics=False fallback only once
+
     def __init__(
         self,
         body_id: int,
@@ -190,6 +198,7 @@ class Agent(SimObject):
         sim_core=None,
         name: Optional[str] = None,
         user_data: Optional[Dict[str, Any]] = None,
+        mass: Optional[float] = None,
     ):
         """
         Initialize Agent.
@@ -213,7 +222,7 @@ class Agent(SimObject):
         """
         # Initialize SimObject base class (collision_mode is forwarded so
         # add_object receives the correct mode directly – no post-hoc transition)
-        super().__init__(body_id, sim_core=sim_core, collision_mode=collision_mode, name=name, user_data=user_data)
+        super().__init__(body_id, sim_core=sim_core, collision_mode=collision_mode, name=name, user_data=user_data, mass=mass)
 
         self.urdf_path = urdf_path
 
@@ -267,6 +276,24 @@ class Agent(SimObject):
         # Action queue system for high-level task execution
         self._action_queue: List[Action] = []
         self._current_action: Optional[Action] = None
+
+        # Kinematic joint control (mass=0 robots): targets for smooth interpolation
+        # Dict: {joint_index: target_position}
+        self._kinematic_joint_targets: Dict[int, float] = {}
+
+        # Cached flag: True when joints must use kinematic interpolation
+        # (mass=0 OR sim_core has physics disabled).  Computed once to avoid
+        # per-step property overhead.
+        self._use_kinematic_joints: bool = self._compute_use_kinematic_joints()
+
+        # Kinematic joint position cache — avoids per-step p.getJointState() calls.
+        # Only seeded when kinematic joints are actually used (skip for physics mode).
+        if self._use_kinematic_joints and self.joint_info:
+            indices = list(range(len(self.joint_info)))
+            states = p.getJointStates(body_id, indices, physicsClientId=self._pid)
+            self._kinematic_joint_positions: Dict[int, float] = {i: states[i][0] for i in indices}
+        else:
+            self._kinematic_joint_positions: Dict[int, float] = {}
 
         # Override pickable default for Agent (robots are not pickable by default)
         self.pickable = False
@@ -530,6 +557,7 @@ class Agent(SimObject):
             sim_core=sim_core,
             name=name,
             user_data=user_data,
+            mass=mass,
         )
 
         return agent
@@ -539,7 +567,7 @@ class Agent(SimObject):
         cls,
         urdf_path: str,
         pose: Pose = None,
-        mass: float = 1.0,
+        mass: Optional[float] = None,
         max_linear_vel: Union[float, List[float]] = 2.0,
         max_linear_accel: Union[float, List[float]] = 5.0,
         max_angular_vel: Union[float, List[float]] = 3.0,
@@ -557,7 +585,9 @@ class Agent(SimObject):
         Args:
             urdf_path: Path to robot URDF file
             pose: Initial Pose (position and orientation). Defaults to origin
-            mass: Mass override (default: 1.0 uses URDF values, 0.0 for kinematic control)
+            mass: Mass override.
+                - None (default): Use URDF file's mass values as-is
+                - 0.0: Override all links to mass=0 for kinematic control (no physics)
             max_linear_vel: Maximum velocity (m/s) - float or [vx, vy, vz]
             max_linear_accel: Maximum acceleration (m/s²) - float or [ax, ay, az]
             max_angular_vel: Maximum angular velocity (rad/s)
@@ -570,12 +600,12 @@ class Agent(SimObject):
             Agent instance
 
         Note:
-            - mass=1.0 (default): Uses URDF file's mass values for physics simulation
+            - mass=None (default): Uses URDF file's mass values for physics simulation
             - mass=0.0: Override all links to mass=0 for kinematic control (no physics)
 
         Example::
 
-            # Use URDF mass values (physics enabled)
+            # Use URDF mass values (physics enabled) — mass defaults to None
             robot = Agent.from_urdf(urdf_path="arm_robot.urdf")
 
             # Kinematic control (no physics)
@@ -591,7 +621,7 @@ class Agent(SimObject):
         body_id = p.loadURDF(urdf_path, position, orientation, useFixedBase=use_fixed_base, physicsClientId=_client)
 
         # Override mass if explicitly set to 0.0 (kinematic control)
-        # mass=1.0 (default) means use URDF's mass values
+        # mass=None (default) means use URDF's mass values as-is
         if mass == 0.0:
             # Kinematic control: set mass to 0 for all links
             # This prevents gravity and inertia from affecting the robot
@@ -599,6 +629,19 @@ class Agent(SimObject):
             num_joints = p.getNumJoints(body_id, physicsClientId=_client)
             for joint_idx in range(num_joints):
                 p.changeDynamics(body_id, joint_idx, mass=0.0, physicsClientId=_client)
+
+        # Resolve the mass value to pass to the constructor.
+        # When mass=None, compute total URDF mass (all links) so that
+        # is_kinematic is correctly False for physics robots, even when
+        # useFixedBase=True makes the base link mass 0.
+        if mass is None:
+            num_joints = p.getNumJoints(body_id, physicsClientId=_client)
+            total_mass = p.getDynamicsInfo(body_id, -1, physicsClientId=_client)[0]
+            for j in range(num_joints):
+                total_mass += p.getDynamicsInfo(body_id, j, physicsClientId=_client)[0]
+            resolved_mass = total_mass
+        else:
+            resolved_mass = mass
 
         # Create agent instance (SimObject.__init__ handles auto-registration)
         # collision_mode is passed through __init__ -> super().__init__() -> add_object
@@ -615,6 +658,7 @@ class Agent(SimObject):
             sim_core=sim_core,
             name=name,
             user_data=user_data,
+            mass=resolved_mass,
         )
 
         return agent
@@ -1446,6 +1490,69 @@ class Agent(SimObject):
             # Move to next action
             self._current_action = None
 
+    def _compute_use_kinematic_joints(self) -> bool:
+        """Compute whether joints need kinematic interpolation.
+
+        True when:
+        - The agent itself is kinematic (mass=0), OR
+        - The simulation has physics disabled (sim_core.physics=False),
+          meaning p.stepSimulation() is never called so motor control
+          (setJointMotorControl2) would have no effect.
+
+        Called once at init; result cached in ``_use_kinematic_joints``.
+        """
+        if self.is_kinematic:
+            return True
+        if self.sim_core is not None:
+            if not hasattr(self.sim_core, "_params"):
+                self._log.warning(
+                    "sim_core has no '_params' attribute; " "assuming physics=True (joints will use motor control)"
+                )
+                return False
+            if not self.sim_core._params.physics:
+                if not Agent._kinematic_joints_physics_off_logged:
+                    Agent._kinematic_joints_physics_off_logged = True
+                    self._log.info(
+                        "sim_core has physics=False; URDF joints will use kinematic "
+                        "interpolation instead of motor control (resetJointState "
+                        "instead of setJointMotorControl2)"
+                    )
+                return True
+        return False
+
+    def _update_kinematic_joints(self, dt: float) -> None:
+        """Interpolate joints toward targets for kinematic robots (mass=0).
+
+        Called from update() each step. Mirrors the role of stepSimulation()
+        for physics-mode motor control.
+
+        Each joint moves at most ``velocity_limit * dt`` per step, where
+        velocity_limit comes from the URDF ``<limit velocity="...">`` attribute.
+        Falls back to 2.0 rad/s if the URDF limit is 0 or missing.
+        """
+        if not self._kinematic_joint_targets:
+            return
+
+        reached: list = []
+        for joint_index, target in self._kinematic_joint_targets.items():
+            current_pos = self._kinematic_joint_positions.get(joint_index, 0.0)
+            # URDF velocity limit: joint_info[joint_index][11] is maxVelocity
+            max_vel = self.joint_info[joint_index][11]
+            if max_vel <= 0:
+                max_vel = self._KINEMATIC_JOINT_FALLBACK_VELOCITY
+            max_step = max_vel * dt
+            diff = target - current_pos
+            if abs(diff) <= max_step:
+                new_pos = target
+                reached.append(joint_index)
+            else:
+                new_pos = current_pos + math.copysign(max_step, diff)
+            p.resetJointState(self.body_id, joint_index, new_pos, physicsClientId=self._pid)
+            self._kinematic_joint_positions[joint_index] = new_pos
+
+        for idx in reached:
+            del self._kinematic_joint_targets[idx]
+
     def update(self, dt: float) -> bool:
         """
         Update robot position towards goal with velocity/acceleration constraints.
@@ -1466,6 +1573,11 @@ class Agent(SimObject):
         """
         # Process action queue first (actions may set goals/paths)
         self._update_actions(dt)
+
+        # Kinematic joint interpolation (mirrors stepSimulation role for mass=0 URDF robots
+        # or when physics is disabled in sim_core)
+        if self.is_urdf_robot() and self._use_kinematic_joints:
+            self._update_kinematic_joints(dt)
 
         if not self.use_fixed_base:
             if not self._is_moving or self._goal_pose is None:
@@ -1536,6 +1648,10 @@ class Agent(SimObject):
         """
         Get joint state (position and velocity).
 
+        For kinematic robots (mass=0), returns the cached position and
+        velocity=0.0, avoiding a PyBullet C call.  For physics robots
+        the value is read from ``p.getJointState()``.
+
         Args:
             joint_index: Joint index (0-based)
 
@@ -1549,6 +1665,9 @@ class Agent(SimObject):
         if not self.is_urdf_robot():
             self._log.warning("get_joint_state() only works for URDF robots")
             return (0.0, 0.0)
+
+        if self._use_kinematic_joints and joint_index in self._kinematic_joint_positions:
+            return (self._kinematic_joint_positions[joint_index], 0.0)
 
         joint_state = p.getJointState(self.body_id, joint_index, physicsClientId=self._pid)
         return (joint_state[0], joint_state[1])  # position, velocity
@@ -1623,14 +1742,20 @@ class Agent(SimObject):
             self._log.warning(f"joint_index {joint_index} out of range (max: {len(self.joint_info)-1})")
             return
 
-        p.setJointMotorControl2(
-            bodyUniqueId=self.body_id,
-            jointIndex=joint_index,
-            controlMode=p.POSITION_CONTROL,
-            targetPosition=target_position,
-            force=max_force,
-            physicsClientId=self._pid,
-        )
+        if self._use_kinematic_joints:
+            # Kinematic mode (mass=0 or physics=False): store target for smooth interpolation
+            # Actual movement happens in _update_kinematic_joints() called from update()
+            self._kinematic_joint_targets[joint_index] = target_position
+        else:
+            # Physics mode (mass>0 with stepSimulation): existing motor control
+            p.setJointMotorControl2(
+                bodyUniqueId=self.body_id,
+                jointIndex=joint_index,
+                controlMode=p.POSITION_CONTROL,
+                targetPosition=target_position,
+                force=max_force,
+                physicsClientId=self._pid,
+            )
 
     def set_joint_target_by_name(self, joint_name: str, target_position: float, max_force: float = 500.0):
         """
@@ -1796,7 +1921,9 @@ class Agent(SimObject):
             # Only update if attached to a link (not base) and no constraint (mass=0)
             if obj._attached_link_index >= 0 and getattr(obj, "_constraint_id", None) is None:
                 # Get parent link's world coordinates
-                link_state = p.getLinkState(self.body_id, obj._attached_link_index, physicsClientId=self._pid)
+                link_state = p.getLinkState(
+                    self.body_id, obj._attached_link_index, computeForwardKinematics=1, physicsClientId=self._pid
+                )
                 parent_pos, parent_orn = link_state[0], link_state[1]
                 # Apply relative offset
                 new_pos, new_orn = p.multiplyTransforms(

@@ -1,0 +1,100 @@
+{
+  "num_agents": 3,
+  "benchmark_type": "arm",
+  "duration_s": 1.0,
+  "scenario": "physics",
+  "num_reps": 1,
+  "gui": false,
+  "spawn_time_s": {
+    "median": 0.00883437400625553,
+    "mean": 0.00883437400625553,
+    "stdev": 0.0,
+    "min": 0.00883437400625553,
+    "max": 0.00883437400625553
+  },
+  "spawn_cpu_s": {
+    "median": 0.010000000000000009,
+    "mean": 0.010000000000000009,
+    "stdev": 0.0,
+    "min": 0.010000000000000009,
+    "max": 0.010000000000000009
+  },
+  "spawn_cpu_percent": {
+    "median": 113.19421153008817,
+    "mean": 113.19421153008817,
+    "stdev": 0.0,
+    "min": 113.19421153008817,
+    "max": 113.19421153008817
+  },
+  "simulation_wall_s": {
+    "median": 0.007301685007405467,
+    "mean": 0.007301685007405467,
+    "stdev": 0.0,
+    "min": 0.007301685007405467,
+    "max": 0.007301685007405467
+  },
+  "simulation_cpu_s": {
+    "median": 0.010000000000000009,
+    "mean": 0.010000000000000009,
+    "stdev": 0.0,
+    "min": 0.010000000000000009,
+    "max": 0.010000000000000009
+  },
+  "simulation_cpu_percent": {
+    "median": 136.9546890869419,
+    "mean": 136.9546890869419,
+    "stdev": 0.0,
+    "min": 136.9546890869419,
+    "max": 136.9546890869419
+  },
+  "real_time_factor": {
+    "median": 136.95468908694178,
+    "mean": 136.95468908694178,
+    "stdev": 0.0,
+    "min": 136.95468908694178,
+    "max": 136.95468908694178
+  },
+  "avg_step_time_ms": {
+    "median": 0.07301685007405467,
+    "mean": 0.07301685007405467,
+    "stdev": 0.0,
+    "min": 0.07301685007405467,
+    "max": 0.07301685007405467
+  },
+  "system_info": {
+    "platform": "Linux",
+    "platform_release": "5.15.0-139-generic",
+    "platform_version": "#149~20.04.1-Ubuntu SMP Wed Apr 16 08:29:56 UTC 2025",
+    "architecture": "x86_64",
+    "processor": "x86_64",
+    "python_version": "3.8.10",
+    "cpu_count": 4,
+    "cpu_count_logical": 8,
+    "total_memory_gb": 31.06,
+    "cpu_model": "11th Gen Intel(R) Core(TM) i7-1185G7 @ 3.00GHz",
+    "cpu_max_mhz": 4800.0
+  },
+  "mem_spawn_rss_mb": {
+    "median": 0.609375,
+    "mean": 0.609375,
+    "stdev": 0.0,
+    "min": 0.609375,
+    "max": 0.609375
+  },
+  "mem_total_rss_mb": {
+    "median": -26.8046875,
+    "mean": -26.8046875,
+    "stdev": 0.0,
+    "min": -26.8046875,
+    "max": -26.8046875
+  },
+  "mode": "physics",
+  "timestep": 0.01,
+  "total_joints": {
+    "median": 12,
+    "mean": 12,
+    "stdev": 0.0,
+    "min": 12,
+    "max": 12
+  }
+}

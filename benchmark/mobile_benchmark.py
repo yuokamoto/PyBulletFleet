@@ -1,131 +1,34 @@
 #!/usr/bin/env python3
 """
-performance_benchmark.py
-Simple benchmark worker that executes one simulation and outputs JSON results.
+mobile_benchmark.py
+Benchmark worker for mobile agent (simple cube) simulations.
 
 This is a clean worker process that:
-- Runs a single benchmark test
+- Runs a single benchmark test with N mobile agents
 - Outputs results as JSON to stdout
 - No self-recursion, no process management
 
 Usage (typically called by run_benchmark.py):
-    python benchmark/performance_benchmark.py --agents 1000 --duration 10
+    python benchmark/mobile_benchmark.py --agents 1000 --duration 10
 """
 import os
 import sys
 import time
-import gc
 import json
+import math
 import psutil
 import tracemalloc
 import argparse
-import platform
-import subprocess
-from typing import Dict, Optional, Any
-import yaml
+from typing import Optional
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import pybullet as p
+from benchmark.tools import get_system_info, get_memory_info, force_cleanup, cpu_time_s, ensure_disconnected, load_config
 from pybullet_fleet.core_simulation import MultiRobotSimulationCore, SimulationParams
 from pybullet_fleet.agent_manager import AgentManager, GridSpawnParams
 from pybullet_fleet.agent import AgentSpawnParams, MotionMode
 from pybullet_fleet.geometry import Pose
-
-
-def get_system_info() -> Dict[str, Any]:
-    """Collect system information (CPU, memory, OS)."""
-    info = {
-        "platform": platform.system(),
-        "platform_release": platform.release(),
-        "platform_version": platform.version(),
-        "architecture": platform.machine(),
-        "processor": platform.processor(),
-        "python_version": platform.python_version(),
-    }
-
-    # Memory info
-    mem = psutil.virtual_memory()
-    info["total_memory_gb"] = round(mem.total / (1024**3), 2)
-
-    # CPU info
-    info["cpu_count"] = psutil.cpu_count(logical=False)  # Physical cores
-    info["cpu_count_logical"] = psutil.cpu_count(logical=True)  # Logical cores
-
-    # Try to get more detailed CPU info on Linux
-    if platform.system() == "Linux":
-        try:
-            # Get CPU model name
-            result = subprocess.run(["lscpu"], capture_output=True, text=True, timeout=2)
-            for line in result.stdout.split("\n"):
-                if "Model name:" in line:
-                    info["cpu_model"] = line.split(":", 1)[1].strip()
-                elif "CPU max MHz:" in line:
-                    try:
-                        info["cpu_max_mhz"] = float(line.split(":", 1)[1].strip())
-                    except (ValueError, IndexError):
-                        pass
-        except (FileNotFoundError, IOError):
-            pass
-
-    return info
-
-
-def load_config(config_path: str, scenario: Optional[str] = None) -> Dict[str, Any]:
-    """Load benchmark configuration from YAML file."""
-    if not os.path.exists(config_path):
-        return {}
-
-    with open(config_path, "r") as f:
-        config = yaml.safe_load(f)
-
-    # Merge scenario config if specified
-    if scenario and "scenarios" in config and scenario in config["scenarios"]:
-        base_config = config.copy()
-        scenario_config = config["scenarios"][scenario]
-
-        for key, value in scenario_config.items():
-            if isinstance(value, dict) and key in base_config:
-                base_config[key].update(value)
-            else:
-                base_config[key] = value
-
-        return base_config
-
-    return config
-
-
-def get_memory_info():
-    """Get memory info (RSS + tracemalloc current)."""
-    process = psutil.Process()
-    mem = process.memory_info()
-
-    py_traced_mb = 0.0
-    if tracemalloc.is_tracing():
-        current, _peak = tracemalloc.get_traced_memory()
-        py_traced_mb = current / 1024 / 1024
-
-    rss_mb = mem.rss / 1024 / 1024
-    return {
-        "rss_mb": rss_mb,
-        "vms_mb": mem.vms / 1024 / 1024,
-        "py_traced_mb": py_traced_mb,
-        "rss_minus_tracemalloc_mb": rss_mb - py_traced_mb,
-    }
-
-
-def force_cleanup():
-    """Best-effort cleanup inside a process."""
-    gc.collect()
-    gc.collect()
-    gc.collect()
-    time.sleep(0.05)
-
-
-def cpu_time_s(process: psutil.Process) -> float:
-    """Return user+sys CPU time seconds."""
-    t = process.cpu_times()
-    return float(t.user + t.system)
 
 
 def run_benchmark(
@@ -147,9 +50,7 @@ def run_benchmark(
     proc = psutil.Process()
     tracemalloc.start()
     force_cleanup()
-
-    if p.isConnected():
-        p.disconnect()
+    ensure_disconnected()
 
     # Load config
     if config_path is None:
@@ -182,8 +83,6 @@ def run_benchmark(
     agent_manager = AgentManager(sim_core=sim_core)
 
     # Calculate grid size
-    import math
-
     grid_size = int(math.ceil(math.sqrt(num_agents)))
 
     grid_params = GridSpawnParams(
@@ -259,7 +158,8 @@ def run_benchmark(
     if p.isConnected():
         p.resetSimulation()
         p.disconnect()
-    tracemalloc.stop()
+    if tracemalloc.is_tracing():
+        tracemalloc.stop()
     del agents, agent_manager, sim_core
     force_cleanup()
 

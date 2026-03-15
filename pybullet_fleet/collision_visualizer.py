@@ -173,7 +173,7 @@ class CollisionVisualizer:
                 if link_index == -1:
                     link_pos, link_orn = p.getBasePositionAndOrientation(body_id)
                 else:
-                    link_state = p.getLinkState(body_id, link_index)
+                    link_state = p.getLinkState(body_id, link_index, computeForwardKinematics=1)
                     link_pos = link_state[0]
                     link_orn = link_state[1]
 

@@ -20,7 +20,10 @@ from pybullet_fleet.sim_object import Pose, SimObject, ShapeParams
 from pybullet_fleet.action import JointAction, PickAction, DropAction, WaitAction
 
 # Simulation setup
-params = SimulationParams(gui=True, timestep=0.01, physics=True)
+params = SimulationParams(
+    gui=True, timestep=0.1, physics=False, target_rtf=10, log_level="info"
+)  # for kinematics demo with faster execution (no physics means we can run faster than real-time)
+# params = SimulationParams(gui=True, timestep=0.01, physics=True) # for physics-based pick/drop with gravity and dynamics
 sim_core = MultiRobotSimulationCore(params)
 
 # Spawn robot arm (fixed base)

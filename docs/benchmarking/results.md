@@ -215,6 +215,64 @@ Use `physics=true` only when rigid-body dynamics are required.
 
 ---
 
+## Arm Joint Control Performance
+
+**Script:** `benchmark/profiling/arm_joint_update.py --test scaling`
+**Conditions:** arm_robot.urdf (4 revolute joints), fixed-base, JointAction cycling, 100 steps per count
+
+### Physics vs Kinematic Scaling
+
+| Arms | Joints | Physics (ms/step) | Kinematic (ms/step) | Ratio |
+|------|--------|--------------------|---------------------|-------|
+| 1    | 4      | 0.029              | 0.010               | 2.8×  |
+| 5    | 20     | 0.082              | 0.056               | 1.5×  |
+| 10   | 40     | 0.152              | 0.090               | 1.7×  |
+| 25   | 100    | 0.415              | 0.253               | 1.6×  |
+| 50   | 200    | 0.886              | 0.552               | 1.6×  |
+
+Kinematic mode is consistently faster than physics mode for joint control.
+The gap comes from skipping `stepSimulation()` — kinematic mode uses `resetJointState()`
+with per-step interpolation at URDF velocity limits.
+Exact ratios are environment-dependent; the trend (kinematic faster) is consistent.
+
+### Component Breakdown (10 arms)
+
+**Script:** `benchmark/profiling/arm_joint_update.py --test builtin --arms 10`
+
+| Component | Physics | Kinematic |
+|-----------|---------|----------|
+| agent_update | 27.0% (0.050 ms) | 96.7% (0.087 ms) |
+| step_simulation | 69.6% (0.129 ms) | 0.2% (0.000 ms) |
+| callbacks | 1.0% | 0.4% |
+| **total** | **0.186 ms** | **0.090 ms** |
+
+In physics mode, `stepSimulation()` dominates (70%). In kinematic mode, the physics engine
+is bypassed entirely — agent_update (joint interpolation + `resetJointState`) is the sole cost.
+
+### Kinematic Joint Cache Optimization
+
+**Problem:** cProfile showed `p.getJointState()` consuming ~36% of kinematic update time
+(called per-joint per-step to read current positions before interpolating).
+
+**Solution:** `_kinematic_joint_positions` cache — joint positions stored in a Python dict,
+initialized via batch `p.getJointStates()` at agent creation, updated after each `resetJointState()`.
+`get_joint_state()` returns cached values for kinematic robots (zero PyBullet calls).
+
+| Metric | Before cache | After cache | Improvement |
+|--------|-------------|-------------|-------------|
+| 50 arms step time | 0.826 ms | 0.552 ms | **1.5× faster** |
+| `p.getJointState` calls/step | 200 (50 arms × 4 joints) | 0 | **eliminated** |
+
+**→ Design decision:** Kinematic joint cache is always active for `mass=0.0` URDF robots.
+The cache is invisible to callers — `get_joint_state()` API is unchanged.
+
+*Data collected 2026-03-15. Absolute timings and ratios are environment-dependent
+(CPU, OS, PyBullet version). The qualitative trends — kinematic faster than physics,
+cache eliminating per-step PyBullet calls — are expected to hold across environments.
+Re-run `benchmark/profiling/arm_joint_update.py` to obtain numbers for your setup.*
+
+---
+
 ## See Also
 
 - [Benchmark Suite](benchmark-suite) — How to run benchmarks and reproduce these results

@@ -13,14 +13,15 @@ New simulation building blocks:
 
 New robot and infrastructure models:
 
-- **Kinematic Robot Arm** — Articulated arm controlled via inverse kinematics (kinematics mode)
 - **Physics Mobile Robot** — Wheeled robot driven by PyBullet physics (motor torques, friction, contact forces)
 - **Physics / Kinematic Mobile Manipulator** — Mobile base + arm composite; switchable between kinematics and physics modes
 - **Conveyor / Elevator / Mobile Rack** — Warehouse infrastructure entities for material handling scenarios
 
 ## Features
 
+- **Inverse Kinematics (IK) Action** — `IKAction` that accepts end-effector target position (XYZ) and uses PyBullet's `calculateInverseKinematics()` to solve joint angles automatically. Builds on kinematic arm joint control.
 - **Snapshot & Replay** — Full and delta snapshot serialization for logging, replay, and external synchronization ([USO](https://github.com/yuokamoto/Unified-Simulation-Orchestrator) integration)
+- **Behavior tree integration** - Create agent behavior from behavior tree.
 
 ## Interfaces
 

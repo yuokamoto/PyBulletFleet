@@ -23,13 +23,13 @@ from pybullet_fleet.action import JointAction, PickAction, DropAction, WaitActio
 # Simulation setup with memory profiling enabled
 params = SimulationParams(
     gui=True,
-    timestep=0.01,
+    timestep=0.1,
     target_rtf=0,
-    physics=True,
+    physics=False,
     ignore_static_collision=True,
     log_level="info",
-    enable_time_profiling=True,  # Time profiling
-    enable_memory_profiling=True,  # Memory profiling
+    enable_time_profiling=False,  # Time profiling
+    enable_memory_profiling=False,  # Memory profiling
     profiling_interval=500,  # Report every 500 steps
 )
 sim_core = MultiRobotSimulationCore(params)
@@ -77,7 +77,7 @@ grid_params = GridSpawnParams(
 agent_spawn_params = AgentSpawnParams(
     urdf_path=arm_urdf,
     use_fixed_base=True,
-    mass=1.0,  # Use URDF mass values for physics simulation (required for motor control)
+    mass=None,  # None = use URDF mass values (physics mode); 0.0 = kinematic
 )
 
 # Spawn all agents in grid using AgentManager
