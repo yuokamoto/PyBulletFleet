@@ -182,6 +182,7 @@ class Agent(SimObject):
     """
 
     _KINEMATIC_JOINT_FALLBACK_VELOCITY: float = 2.0  # rad/s
+    _kinematic_joints_physics_off_logged: bool = False  # Log physics=False fallback only once
 
     def __init__(
         self,
@@ -1509,11 +1510,13 @@ class Agent(SimObject):
                 )
                 return False
             if not self.sim_core._params.physics:
-                self._log.debug(
-                    "sim_core has physics=False; joints will use kinematic "
-                    "interpolation instead of motor control (resetJointState "
-                    "instead of setJointMotorControl2)"
-                )
+                if not Agent._kinematic_joints_physics_off_logged:
+                    Agent._kinematic_joints_physics_off_logged = True
+                    self._log.info(
+                        "sim_core has physics=False; URDF joints will use kinematic "
+                        "interpolation instead of motor control (resetJointState "
+                        "instead of setJointMotorControl2)"
+                    )
                 return True
         return False
 
