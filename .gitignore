@@ -43,3 +43,6 @@ docs_conversation/
 
 # Sphinx build output
 docs/_build/
+
+# Personal/WIP notes
+memo.txt

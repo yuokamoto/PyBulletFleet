@@ -210,7 +210,8 @@ def run_benchmark(
     return {
         "num_agents": num_agents,
         "total_joints": total_joints,
-        "mass": mass if mass is not None else "urdf",
+        "mass": mass,
+        "mass_source": "explicit" if mass is not None else "urdf",
         "mode": "kinematic" if mass == 0.0 else "physics",
         "physics_engine": physics,
         "timestep": timestep,

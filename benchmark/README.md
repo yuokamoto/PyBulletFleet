@@ -79,7 +79,7 @@ python benchmark/run_benchmark.py --sweep 100 500 1000 2000 5000
 python benchmark/run_benchmark.py --compare no_collision collision_10hz collision_3d_full --agents 1000
 
 # Arm: single benchmark (10 arms, physics mode)
-python benchmark/run_benchmark.py --type arm --agents 10 --duration 5 --mode physics
+python benchmark/run_benchmark.py --type arm --agents 10 --duration 5 --scenario physics
 
 # Arm: sweep arm counts (physics + kinematic)
 python benchmark/run_benchmark.py --type arm --sweep 1 10 50 100
@@ -229,7 +229,7 @@ benchmark/
 ### **Orchestrator** (`run_benchmark.py`)
 - Spawns worker processes, aggregates results
 - `--type mobile` (default): mobile agent benchmarks
-- `--type arm`: arm robot benchmarks (supports `--mode physics|kinematic|both`)
+- `--type arm`: arm robot benchmarks (supports `--scenario physics|kinematic`)
 - **Modes:** Single Test · Sweep (multiple counts) · Compare (multiple scenarios)
 - Computes statistics (median, mean, stdev) and generates comparison tables
 
@@ -246,14 +246,14 @@ python benchmark/run_benchmark.py --sweep 100 500 1000 2000
 python benchmark/run_benchmark.py --compare no_collision collision_2d_10hz --agents 1000
 
 # Arm: single test
-python benchmark/run_benchmark.py --type arm --agents 10 --mode physics
+python benchmark/run_benchmark.py --type arm --agents 10 --scenario physics
 
 # Arm: sweep (physics + kinematic)
 python benchmark/run_benchmark.py --type arm --sweep 1 10 50 100
 
 # Workers (direct, usually called by orchestrator)
 python benchmark/mobile_benchmark.py --agents 1000 --duration 10 --scenario no_collision
-python benchmark/arm_benchmark.py --arms 10 --duration 5 --mode physics
+python benchmark/arm_benchmark.py --agents 10 --duration 5 --scenario physics
 ```
 
 **Output Files:**

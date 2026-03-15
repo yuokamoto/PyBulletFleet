@@ -573,9 +573,14 @@ class PickAction(Action):
 
             # Get attachment position in world coordinates
             if self._attach_link_index == -1:
-                parent_pos, parent_orn = p.getBasePositionAndOrientation(agent.body_id)
+                parent_pos, parent_orn = p.getBasePositionAndOrientation(agent.body_id, physicsClientId=agent._pid)
             else:
-                link_state = p.getLinkState(agent.body_id, self._attach_link_index, computeForwardKinematics=1)
+                link_state = p.getLinkState(
+                    agent.body_id,
+                    self._attach_link_index,
+                    computeForwardKinematics=1,
+                    physicsClientId=agent._pid,
+                )
                 parent_pos, parent_orn = link_state[0], link_state[1]
 
             # Calculate world position for attached object

@@ -119,7 +119,7 @@ def run_worker(
         "--duration",
         str(duration),
     ]
-    if gui:
+    if gui and benchmark_type == "mobile":
         cmd.append("--gui")
 
     if config_path:

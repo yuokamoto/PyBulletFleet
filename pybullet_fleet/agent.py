@@ -280,19 +280,19 @@ class Agent(SimObject):
         # Dict: {joint_index: target_position}
         self._kinematic_joint_targets: Dict[int, float] = {}
 
+        # Cached flag: True when joints must use kinematic interpolation
+        # (mass=0 OR sim_core has physics disabled).  Computed once to avoid
+        # per-step property overhead.
+        self._use_kinematic_joints: bool = self._compute_use_kinematic_joints()
+
         # Kinematic joint position cache — avoids per-step p.getJointState() calls.
-        # Seeded from PyBullet once at init; kept in sync by _update_kinematic_joints.
-        if self.joint_info:
+        # Only seeded when kinematic joints are actually used (skip for physics mode).
+        if self._use_kinematic_joints and self.joint_info:
             indices = list(range(len(self.joint_info)))
             states = p.getJointStates(body_id, indices, physicsClientId=self._pid)
             self._kinematic_joint_positions: Dict[int, float] = {i: states[i][0] for i in indices}
         else:
             self._kinematic_joint_positions: Dict[int, float] = {}
-
-        # Cached flag: True when joints must use kinematic interpolation
-        # (mass=0 OR sim_core has physics disabled).  Computed once to avoid
-        # per-step property overhead.
-        self._use_kinematic_joints: bool = self._compute_use_kinematic_joints()
 
         # Override pickable default for Agent (robots are not pickable by default)
         self.pickable = False
@@ -1509,7 +1509,7 @@ class Agent(SimObject):
                 )
                 return False
             if not self.sim_core._params.physics:
-                self._log.warning(
+                self._log.debug(
                     "sim_core has physics=False; joints will use kinematic "
                     "interpolation instead of motor control (resetJointState "
                     "instead of setJointMotorControl2)"
