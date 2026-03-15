@@ -32,11 +32,11 @@
       "physics_engine": true,
       "timestep": 0.01,
       "duration_s": 5.0,
-      "spawn_time_s": 0.0059,
-      "sim_wall_s": 0.0129,
+      "spawn_time_s": 0.0034,
+      "sim_wall_s": 0.0104,
       "actual_steps": 500,
-      "real_time_factor": 387.99,
-      "avg_step_ms": 0.026,
+      "real_time_factor": 482.1,
+      "avg_step_ms": 0.021,
       "mem_delta_mb": -27.87
     },
     {
@@ -47,12 +47,12 @@
       "physics_engine": false,
       "timestep": 0.01,
       "duration_s": 5.0,
-      "spawn_time_s": 0.0063,
-      "sim_wall_s": 0.0087,
+      "spawn_time_s": 0.0031,
+      "sim_wall_s": 0.009,
       "actual_steps": 500,
-      "real_time_factor": 575.19,
-      "avg_step_ms": 0.017,
-      "mem_delta_mb": -28.5
+      "real_time_factor": 552.84,
+      "avg_step_ms": 0.018,
+      "mem_delta_mb": -28.52
     },
     {
       "num_arms": 10,
@@ -62,11 +62,11 @@
       "physics_engine": true,
       "timestep": 0.01,
       "duration_s": 5.0,
-      "spawn_time_s": 0.0282,
-      "sim_wall_s": 0.0652,
+      "spawn_time_s": 0.0306,
+      "sim_wall_s": 0.0799,
       "actual_steps": 500,
-      "real_time_factor": 76.7,
-      "avg_step_ms": 0.13,
+      "real_time_factor": 62.61,
+      "avg_step_ms": 0.16,
       "mem_delta_mb": 0.0
     },
     {
@@ -77,11 +77,11 @@
       "physics_engine": false,
       "timestep": 0.01,
       "duration_s": 5.0,
-      "spawn_time_s": 0.0261,
-      "sim_wall_s": 0.0171,
+      "spawn_time_s": 0.0299,
+      "sim_wall_s": 0.0698,
       "actual_steps": 500,
-      "real_time_factor": 292.46,
-      "avg_step_ms": 0.034,
+      "real_time_factor": 71.63,
+      "avg_step_ms": 0.14,
       "mem_delta_mb": 0.0
     },
     {
@@ -92,11 +92,11 @@
       "physics_engine": true,
       "timestep": 0.01,
       "duration_s": 5.0,
-      "spawn_time_s": 0.133,
-      "sim_wall_s": 0.3686,
+      "spawn_time_s": 0.1486,
+      "sim_wall_s": 0.4405,
       "actual_steps": 500,
-      "real_time_factor": 13.56,
-      "avg_step_ms": 0.737,
+      "real_time_factor": 11.35,
+      "avg_step_ms": 0.881,
       "mem_delta_mb": 0.0
     },
     {
@@ -107,11 +107,11 @@
       "physics_engine": false,
       "timestep": 0.01,
       "duration_s": 5.0,
-      "spawn_time_s": 0.1342,
-      "sim_wall_s": 0.0841,
+      "spawn_time_s": 0.1475,
+      "sim_wall_s": 0.3544,
       "actual_steps": 500,
-      "real_time_factor": 59.45,
-      "avg_step_ms": 0.168,
+      "real_time_factor": 14.11,
+      "avg_step_ms": 0.709,
       "mem_delta_mb": 0.0
     },
     {
@@ -122,11 +122,11 @@
       "physics_engine": true,
       "timestep": 0.01,
       "duration_s": 5.0,
-      "spawn_time_s": 0.2685,
-      "sim_wall_s": 0.8866,
+      "spawn_time_s": 0.2955,
+      "sim_wall_s": 1.0975,
       "actual_steps": 500,
-      "real_time_factor": 5.64,
-      "avg_step_ms": 1.773,
+      "real_time_factor": 4.56,
+      "avg_step_ms": 2.195,
       "mem_delta_mb": 0.0
     },
     {
@@ -137,11 +137,11 @@
       "physics_engine": false,
       "timestep": 0.01,
       "duration_s": 5.0,
-      "spawn_time_s": 0.2687,
-      "sim_wall_s": 0.1655,
+      "spawn_time_s": 0.2996,
+      "sim_wall_s": 0.7352,
       "actual_steps": 500,
-      "real_time_factor": 30.21,
-      "avg_step_ms": 0.331,
+      "real_time_factor": 6.8,
+      "avg_step_ms": 1.47,
       "mem_delta_mb": 0.0
     }
   ]

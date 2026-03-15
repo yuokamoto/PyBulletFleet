@@ -1,17 +1,19 @@
 #!/usr/bin/env python3
 """
 arm_benchmark.py
-Performance benchmark for robot arm joint control in physics and kinematic modes.
+Benchmark worker for robot arm joint control.
+
+Pure worker process — runs a single benchmark and outputs JSON to stdout.
+Sweep, repetitions, and comparison are handled by run_benchmark.py.
+
+Usage (typically called by run_benchmark.py --type arm):
+    python benchmark/arm_benchmark.py --agents 10 --duration 5
+    python benchmark/arm_benchmark.py --agents 10 --duration 5 --scenario kinematic
+    python benchmark/arm_benchmark.py --agents 10 --duration 5 --config benchmark/configs/arm.yaml
 
 Measures:
-- step_once() time with N arm robots executing JointAction sequences
-- Physics (mass=1.0, setJointMotorControl2) vs Kinematic (mass=0.0, resetJointState)
-- Scaling behaviour: 1, 10, 50, 100 arms
-
-Usage:
-    python benchmark/arm_benchmark.py
-    python benchmark/arm_benchmark.py --arms 50 --duration 5
-    python benchmark/arm_benchmark.py --arms 100 --mode kinematic
+    - step_once() time with N arm robots executing JointAction sequences
+    - Physics (mass=None, setJointMotorControl2) vs Kinematic (mass=0.0, resetJointState)
 """
 import os
 import sys
@@ -19,14 +21,23 @@ import time
 import math
 import json
 import argparse
-import platform
-from typing import Dict, Any, List
+import tracemalloc
+from typing import Dict, Any, List, Optional
+
+import psutil
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import pybullet as p
-import psutil
-
+from benchmark.tools import (
+    get_system_info,
+    get_memory_info,
+    force_cleanup,
+    cpu_time_s,
+    ensure_disconnected,
+    warmup_steps,
+    load_config,
+)
 from pybullet_fleet.core_simulation import MultiRobotSimulationCore, SimulationParams
 from pybullet_fleet.agent import Agent
 from pybullet_fleet.geometry import Pose
@@ -37,9 +48,6 @@ from pybullet_fleet.action import JointAction
 # Constants
 # ---------------------------------------------------------------------------
 
-ARM_URDF = os.path.join(os.path.dirname(__file__), "../robots/arm_robot.urdf")
-
-# Joint target sequences for cycling
 JOINT_TARGETS_A = [1.0, 1.0, 1.0, 0.5]
 JOINT_TARGETS_B = [-1.0, -0.5, 0.5, -0.3]
 JOINT_TARGETS_HOME = [0.0, 0.0, 0.0, 0.0]
@@ -50,47 +58,25 @@ JOINT_TARGETS_HOME = [0.0, 0.0, 0.0, 0.0]
 # ---------------------------------------------------------------------------
 
 
-def get_system_info() -> Dict[str, Any]:
-    """Collect system info for reproducibility."""
-    info = {
-        "platform": platform.system(),
-        "processor": platform.processor(),
-        "python_version": platform.python_version(),
-        "cpu_count": psutil.cpu_count(logical=False),
-        "cpu_count_logical": psutil.cpu_count(logical=True),
-        "total_memory_gb": round(psutil.virtual_memory().total / (1024**3), 2),
-    }
-    if platform.system() == "Linux":
-        try:
-            import subprocess
-
-            result = subprocess.run(["lscpu"], capture_output=True, text=True, timeout=2)
-            for line in result.stdout.split("\n"):
-                if "Model name:" in line:
-                    info["cpu_model"] = line.split(":", 1)[1].strip()
-        except (FileNotFoundError, IOError):
-            pass
-    return info
-
-
 def spawn_arms(
     sim_core: MultiRobotSimulationCore,
-    num_arms: int,
-    mass: float,
+    num_agents: int,
+    mass: Optional[float],
+    urdf_path: str,
+    spacing: float = 1.5,
 ) -> List[Agent]:
     """Spawn arm robots in a grid layout."""
     agents = []
-    grid_size = max(1, int(math.ceil(math.sqrt(num_arms))))
-    spacing = 1.5  # meters between arms (enough clearance)
+    grid_size = max(1, int(math.ceil(math.sqrt(num_agents))))
 
-    for i in range(num_arms):
+    for i in range(num_agents):
         row = i // grid_size
         col = i % grid_size
         x = col * spacing
         y = row * spacing
 
         agent = Agent.from_urdf(
-            urdf_path=ARM_URDF,
+            urdf_path=urdf_path,
             pose=Pose.from_xyz(x, y, 0.0),
             mass=mass,
             use_fixed_base=True,
@@ -118,42 +104,74 @@ def enqueue_joint_cycle(agents: List[Agent]):
 # ---------------------------------------------------------------------------
 
 
-def run_single_bench(
-    num_arms: int,
-    mass: float,
+def run_benchmark(
+    num_agents: int,
     duration: float,
-    timestep: float,
-    physics: bool,
+    config_path: Optional[str] = None,
+    scenario: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Run one benchmark configuration and return metrics."""
+    """Run a single arm benchmark and return metrics dict.
 
-    if p.isConnected():
-        p.disconnect()
+    All parameters (physics, mass, timestep, etc.) are loaded from config/scenario.
+    """
+    proc = psutil.Process()
+    tracemalloc.start()
+    force_cleanup()
+    ensure_disconnected()
 
+    # Load config
+    if config_path is None:
+        config_path = os.path.join(os.path.dirname(__file__), "configs", "arm.yaml")
+    config = load_config(config_path, scenario)
+
+    sim_config = config.get("simulation", {})
+    arm_config = config.get("arm", {})
+
+    # Resolve arm parameters
+    timestep = sim_config.get("timestep", 0.01)
+    physics = sim_config.get("physics", True)
+    mass_raw = arm_config.get("mass", None)
+    mass: Optional[float] = None if mass_raw is None else float(mass_raw)
+    urdf_path = arm_config.get("urdf_path", "../robots/arm_robot.urdf")
+    spacing = arm_config.get("spacing", 1.5)
+
+    # Resolve URDF path relative to benchmark/
+    if not os.path.isabs(urdf_path):
+        urdf_path = os.path.join(os.path.dirname(__file__), urdf_path)
+
+    # Build SimulationParams
     params = SimulationParams(
         gui=False,
         timestep=timestep,
         duration=duration,
-        target_rtf=0.0,  # max speed
+        target_rtf=sim_config.get("target_rtf", 0.0),
         physics=physics,
-        monitor=False,
-        enable_monitor_gui=False,
-        log_level="WARN",
-        collision_check_frequency=0,  # disable collision for pure joint perf
+        monitor=sim_config.get("monitor", False),
+        enable_monitor_gui=sim_config.get("enable_monitor_gui", False),
+        enable_time_profiling=sim_config.get("enable_time_profiling", False),
+        log_level=sim_config.get("log_level", "WARN"),
+        collision_check_frequency=sim_config.get("collision_check_frequency", 0),
+        ignore_static_collision=sim_config.get("ignore_static_collision", True),
     )
 
     sim_core = MultiRobotSimulationCore(params)
 
+    # Memory before spawning
+    mem_before = get_memory_info()
+
     # Spawn
-    t_spawn_start = time.perf_counter()
-    agents = spawn_arms(sim_core, num_arms, mass)
-    t_spawn = time.perf_counter() - t_spawn_start
+    cpu_spawn_start = cpu_time_s(proc)
+    wall_spawn_start = time.perf_counter()
+    agents = spawn_arms(sim_core, num_agents, mass, urdf_path, spacing)
+    wall_spawn_time = time.perf_counter() - wall_spawn_start
+    cpu_spawn_time = cpu_time_s(proc) - cpu_spawn_start
 
-    # Enqueue initial joint actions
+    # Memory after spawning
+    mem_after_spawn = get_memory_info()
+
+    # Enqueue initial joint actions + refill callback
     enqueue_joint_cycle(agents)
-
-    # Callback to re-enqueue actions when idle
-    _agents = agents  # bind for closure
+    _agents = agents
 
     def refill_callback(sim_core_ref, dt):
         for agent in _agents:
@@ -162,164 +180,87 @@ def run_single_bench(
 
     sim_core.register_callback(refill_callback, frequency=2.0)
 
-    # Warmup (10 steps)
-    for _ in range(10):
-        sim_core.step_once()
+    # Warmup
+    warmup_steps(sim_core, n=10)
 
     # Timed run
-    proc = psutil.Process()
-    mem_before = proc.memory_info().rss / 1024 / 1024
-
-    t_sim_start = time.perf_counter()
+    cpu_sim_start = cpu_time_s(proc)
+    wall_sim_start = time.perf_counter()
     sim_core.run_simulation(duration=duration)
-    t_sim = time.perf_counter() - t_sim_start
+    wall_sim_time = time.perf_counter() - wall_sim_start
+    cpu_sim_time = cpu_time_s(proc) - cpu_sim_start
 
-    mem_after = proc.memory_info().rss / 1024 / 1024
+    # Memory after simulation
+    mem_after_sim = get_memory_info()
 
     actual_steps = sim_core.step_count
-    rtf = duration / t_sim if t_sim > 0 else 0.0
-    avg_step_ms = (t_sim / actual_steps * 1000.0) if actual_steps > 0 else 0.0
-
-    # Count how many joints total
+    rtf = duration / wall_sim_time if wall_sim_time > 0 else 0.0
+    avg_step_ms = (wall_sim_time / actual_steps * 1000.0) if actual_steps > 0 else 0.0
     total_joints = sum(a.get_num_joints() for a in agents)
 
     # Cleanup
     if p.isConnected():
         p.resetSimulation()
         p.disconnect()
+    if tracemalloc.is_tracing():
+        tracemalloc.stop()
     del agents, sim_core
+    force_cleanup()
 
     return {
-        "num_arms": num_arms,
+        "num_agents": num_agents,
         "total_joints": total_joints,
-        "mass": mass,
+        "mass": mass if mass is not None else "urdf",
         "mode": "kinematic" if mass == 0.0 else "physics",
         "physics_engine": physics,
         "timestep": timestep,
         "duration_s": duration,
-        "spawn_time_s": round(t_spawn, 4),
-        "sim_wall_s": round(t_sim, 4),
+        "scenario": scenario,
+        "spawn_time_s": wall_spawn_time,
+        "spawn_cpu_s": cpu_spawn_time,
+        "spawn_cpu_percent": (cpu_spawn_time / wall_spawn_time * 100.0) if wall_spawn_time > 0 else 0.0,
+        "simulation_wall_s": wall_sim_time,
+        "simulation_cpu_s": cpu_sim_time,
+        "simulation_cpu_percent": (cpu_sim_time / wall_sim_time * 100.0) if wall_sim_time > 0 else 0.0,
         "actual_steps": actual_steps,
-        "real_time_factor": round(rtf, 2),
-        "avg_step_ms": round(avg_step_ms, 3),
-        "mem_delta_mb": round(mem_after - mem_before, 2),
-    }
-
-
-# ---------------------------------------------------------------------------
-# Main
-# ---------------------------------------------------------------------------
-
-
-def main():
-    parser = argparse.ArgumentParser(description="Robot Arm Performance Benchmark")
-    parser.add_argument("--arms", type=int, default=None, help="Number of arms (single run)")
-    parser.add_argument("--duration", type=float, default=5.0, help="Simulation duration (seconds)")
-    parser.add_argument("--timestep", type=float, default=0.01, help="Simulation timestep (seconds)")
-    parser.add_argument("--mode", choices=["physics", "kinematic", "both"], default="both", help="Joint control mode")
-    parser.add_argument("--sweep", nargs="+", type=int, default=None, help="Sweep multiple arm counts")
-    parser.add_argument("--json", action="store_true", help="Output raw JSON only")
-    args = parser.parse_args()
-
-    # Determine arm counts
-    if args.sweep:
-        arm_counts = args.sweep
-    elif args.arms:
-        arm_counts = [args.arms]
-    else:
-        arm_counts = [1, 10, 50, 100]
-
-    # Determine modes
-    if args.mode == "physics":
-        modes = [("physics", 1.0, True)]
-    elif args.mode == "kinematic":
-        modes = [("kinematic", 0.0, False)]
-    else:
-        modes = [("physics", 1.0, True), ("kinematic", 0.0, False)]
-
-    results = []
-
-    if not args.json:
-        print("=" * 80)
-        print("Robot Arm Performance Benchmark")
-        print("=" * 80)
-        system = get_system_info()
-        print(f"CPU: {system.get('cpu_model', system['processor'])}")
-        print(f"Cores: {system['cpu_count']}P / {system['cpu_count_logical']}L")
-        print(f"RAM: {system['total_memory_gb']} GB")
-        print(f"Duration: {args.duration}s, Timestep: {args.timestep}s")
-        print(f"Arm counts: {arm_counts}")
-        print(f"Modes: {[m[0] for m in modes]}")
-        print("-" * 80)
-        print(
-            f"{'Arms':>5} {'Joints':>7} {'Mode':>10} {'Steps':>7} " f"{'RTF':>7} {'ms/step':>8} {'Spawn(s)':>8} {'Sim(s)':>7}"
-        )
-        print("-" * 80)
-
-    for n_arms in arm_counts:
-        for mode_name, mass, physics in modes:
-            result = run_single_bench(
-                num_arms=n_arms,
-                mass=mass,
-                duration=args.duration,
-                timestep=args.timestep,
-                physics=physics,
-            )
-            results.append(result)
-
-            if not args.json:
-                print(
-                    f"{result['num_arms']:5d} "
-                    f"{result['total_joints']:7d} "
-                    f"{result['mode']:>10} "
-                    f"{result['actual_steps']:7d} "
-                    f"{result['real_time_factor']:7.1f}x "
-                    f"{result['avg_step_ms']:8.3f} "
-                    f"{result['spawn_time_s']:8.3f} "
-                    f"{result['sim_wall_s']:7.2f}"
-                )
-
-    if not args.json:
-        print("=" * 80)
-
-        # Summary comparison if both modes ran
-        if len(modes) == 2 and len(arm_counts) > 0:
-            print("\nPhysics vs Kinematic comparison:")
-            print(f"{'Arms':>5} {'Phys ms/step':>13} {'Kine ms/step':>13} {'Ratio':>7}")
-            print("-" * 42)
-            for n_arms in arm_counts:
-                phys = [r for r in results if r["num_arms"] == n_arms and r["mode"] == "physics"]
-                kine = [r for r in results if r["num_arms"] == n_arms and r["mode"] == "kinematic"]
-                if phys and kine:
-                    p_ms = phys[0]["avg_step_ms"]
-                    k_ms = kine[0]["avg_step_ms"]
-                    ratio = p_ms / k_ms if k_ms > 0 else float("inf")
-                    print(f"{n_arms:5d} {p_ms:13.3f} {k_ms:13.3f} {ratio:6.2f}x")
-
-    # Always save JSON
-    output = {
-        "benchmark": "arm_performance",
-        "system_info": get_system_info(),
-        "config": {
-            "duration": args.duration,
-            "timestep": args.timestep,
-            "arm_counts": arm_counts,
-            "modes": [m[0] for m in modes],
+        "real_time_factor": rtf,
+        "avg_step_time_ms": avg_step_ms,
+        "mem_spawn_mb": {
+            "rss_mb": mem_after_spawn["rss_mb"] - mem_before["rss_mb"],
+            "py_traced_mb": mem_after_spawn["py_traced_mb"] - mem_before["py_traced_mb"],
         },
-        "results": results,
+        "mem_total_mb": {
+            "rss_mb": mem_after_sim["rss_mb"] - mem_before["rss_mb"],
+            "py_traced_mb": mem_after_sim["py_traced_mb"] - mem_before["py_traced_mb"],
+        },
+        "system_info": get_system_info(),
     }
 
-    output_dir = os.path.join(os.path.dirname(__file__), "results")
-    os.makedirs(output_dir, exist_ok=True)
-    output_file = os.path.join(output_dir, "arm_benchmark.json")
-    with open(output_file, "w") as f:
-        json.dump(output, f, indent=2)
 
-    if args.json:
-        print(json.dumps(output, indent=2))
-    else:
-        print(f"\nResults saved to: {output_file}")
+# ---------------------------------------------------------------------------
+# Main (pure worker)
+# ---------------------------------------------------------------------------
+
+
+def parse_args():
+    """Parse command line arguments."""
+    parser = argparse.ArgumentParser(description="Robot Arm Benchmark Worker")
+    parser.add_argument("--agents", type=int, required=True, help="Number of arm robots")
+    parser.add_argument("--duration", type=float, required=True, help="Simulation duration in seconds")
+    parser.add_argument("--config", type=str, default=None, help="Path to benchmark config file")
+    parser.add_argument("--scenario", type=str, default=None, help="Scenario name from config (e.g., physics, kinematic)")
+    return parser.parse_args()
 
 
 if __name__ == "__main__":
-    main()
+    args = parse_args()
+
+    result = run_benchmark(
+        num_agents=args.agents,
+        duration=args.duration,
+        config_path=args.config,
+        scenario=args.scenario,
+    )
+
+    # Output JSON to stdout
+    print(json.dumps(result))

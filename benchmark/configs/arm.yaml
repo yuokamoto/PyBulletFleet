@@ -1,0 +1,49 @@
+# Arm Benchmark Configuration
+# Controls parameters for robot arm joint control benchmarks.
+
+# Simulation Parameters
+simulation:
+  timestep: 0.01        # 100 Hz (needed for stable joint control)
+  target_rtf: 0.0       # Maximum speed (no sleep)
+  physics: true          # Default: physics mode (motor control)
+  monitor: false         # No data monitor for benchmarking
+  enable_monitor_gui: false
+  enable_time_profiling: false
+  log_level: "WARN"
+  collision_check_frequency: 0  # Disable collision for pure joint perf
+
+# Arm Configuration
+arm:
+  urdf_path: "../robots/arm_robot.urdf"
+  mass: null             # null = use URDF mass values (physics); 0.0 = kinematic
+  use_fixed_base: true
+  spacing: 1.5           # meters between arms in grid
+
+# Benchmark Test Configuration
+benchmark:
+  repetitions: 3
+  output_dir: "results"
+
+# Scenarios
+scenarios:
+  # Physics mode: motor control via setJointMotorControl2
+  physics:
+    simulation:
+      physics: true
+    arm:
+      mass: null         # Use URDF mass values
+
+  # Kinematic mode: direct resetJointState (faster, no physics engine)
+  kinematic:
+    simulation:
+      physics: false
+    arm:
+      mass: 0.0          # Force kinematic
+
+  # No collision + kinematic (absolute baseline)
+  baseline:
+    simulation:
+      physics: false
+      collision_check_frequency: 0
+    arm:
+      mass: 0.0

@@ -15,6 +15,7 @@ All scripts live in `benchmark/profiling/`. For overall benchmark results and qu
 | `simulation_profiler.py` | Step-level component breakdown | Agent Update, Collision Check, PyBullet Step, etc. |
 | `collision_check.py` | Detailed collision detection analysis | Get AABBs, Spatial Hashing, AABB Filtering, Contact Points |
 | `agent_update.py` | Detailed `Agent.update()` analysis | 5 methods (cProfile, Manual, PyBullet API, Stationary, Motion Modes) |
+| `arm_joint_update.py` | Arm joint update profiling | Physics vs kinematic mode, scaling analysis |
 | `agent_manager_set_goal.py` | Goal setting profiling | `set_goal_pose()` overhead and trajectory calculation |
 | `wrapper_overhead.py` | Wrapper-layer overhead | Spawn time, update time, and memory: direct PyBullet vs SimObject vs Agent vs Manager |
 
