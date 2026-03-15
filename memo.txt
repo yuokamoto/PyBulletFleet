@@ -21,12 +21,19 @@ action  creation only
 core_simulation
 collision
 ----
+wip
+kinematic arm
+- test review
+- benchmark review
+- doc update
+next
+- IK
+- linear joint
+- kinematic mobile manipulator
+
+
 
 todo
-doc
-linear joint
-kinematic robot arm
-mobile manipulator
 physics mobile robot
 conveyor elevator
 ROS 2

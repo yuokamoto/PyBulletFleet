@@ -14,15 +14,17 @@
 
 ```
 T1 (getLinkState fix) ───────────────────────────────┐
-T2 (core impl: dict + set_joint_target + update) ────┤──► T4 (parametrize tests) ──► T5 (action integration tests) ──► T6 (verify all)
-T3 (PARALLEL: nothing depends on this)               │
+T2 (core impl: dict + set_joint_target + update) ────┤──► T4 (parametrize tests) ──► T5 (action integration tests) ──┐
+T3 (PARALLEL: roadmap update)                         │                                                               ├──► T7 (verify all)
+                                                      └──► T6 (benchmark & perf docs) ────────────────────────────────┘
 ```
 
 - **T1, T2**: PARALLEL (independent changes)
 - **T3**: PARALLEL (standalone — no code depends on it)
 - **T4**: SERIAL after T2 (tests need the implementation)
 - **T5**: SERIAL after T4 (builds on test infrastructure)
-- **T6**: SERIAL final verification
+- **T6**: PARALLEL with T4/T5 (documentation-only, no code dependencies)
+- **T7**: SERIAL final verification (after all tasks)
 
 ---
 
@@ -594,49 +596,109 @@ New test: kinematic_takes_multiple_steps verifies smooth interpolation."
 
 ---
 
-### Task 6: Final verification (SERIAL — last)
+### Task 6: Benchmark & Performance Documentation (PARALLEL with T4/T5)
+
+**Files:**
+- Modify: `docs/benchmarking/results.md`
+- Modify: `benchmark/README.md`
+- Modify: `benchmark/profiling/README.md`
+
+**Why:** Arm joint control performance data (physics vs kinematic scaling, component breakdown, kinematic joint cache optimization) needs to be documented. The benchmark CLI was also refactored (`--arms` → `--agents`, `--mode` → `--scenario`, shared `load_config()`).
+
+**Step 1: Add Arm Joint Control Performance section to `docs/benchmarking/results.md`**
+
+Append after the "Collision Config-Based Comparison" section (before "See Also"):
+
+```markdown
+---
+
+## Arm Joint Control Performance
+
+**Script:** `benchmark/profiling/arm_joint_update.py --test scaling`
+**Conditions:** arm_robot.urdf (4 revolute joints), fixed-base, JointAction cycling, 100 steps per count
+
+### Physics vs Kinematic Scaling
+
+| Arms | Joints | Physics (ms/step) | Kinematic (ms/step) | Ratio |
+|------|--------|--------------------|---------------------|-------|
+| 1    | 4      | 0.029              | 0.010               | 2.8×  |
+| 5    | 20     | 0.082              | 0.056               | 1.5×  |
+| 10   | 40     | 0.152              | 0.090               | 1.7×  |
+| 25   | 100    | 0.415              | 0.253               | 1.6×  |
+| 50   | 200    | 0.886              | 0.552               | 1.6×  |
+
+Kinematic mode is consistently 1.5–1.7× faster than physics mode.
+
+### Component Breakdown (10 arms)
+
+| Component | Physics | Kinematic |
+|-----------|---------|-----------|
+| agent_update | 27.0% (0.050 ms) | 96.7% (0.087 ms) |
+| step_simulation | 69.6% (0.129 ms) | 0.2% (0.000 ms) |
+| **total** | **0.186 ms** | **0.090 ms** |
+
+### Kinematic Joint Cache Optimization
+
+| Metric | Before cache | After cache | Improvement |
+|--------|-------------|-------------|-------------|
+| 50 arms step time | 0.826 ms | 0.552 ms | 1.5× faster |
+| p.getJointState calls/step | 200 | 0 | eliminated |
+```
+
+**Step 2: Update `benchmark/README.md` CLI examples**
+
+Replace outdated `--arms`/`--mode` examples with current `--agents`/`--scenario` pattern:
+
+```markdown
+# Arm: single benchmark (kinematic mode)
+python benchmark/run_benchmark.py --type arm --agents 10 --duration 5 --scenario kinematic
+
+# Arm: compare physics vs kinematic
+python benchmark/run_benchmark.py --type arm --compare physics kinematic
+
+# Workers (direct)
+python benchmark/arm_benchmark.py --agents 10 --duration 5 --scenario physics
+```
+
+**Step 3: Update `benchmark/profiling/README.md` arm_joint_update section**
+
+Document `suppress_stdout()` usage, scaling findings, and kinematic cache context.
+
+**Step 4: Commit**
+
+```bash
+git add docs/benchmarking/results.md benchmark/README.md benchmark/profiling/README.md
+git commit -m "docs: add arm joint control performance results and benchmark CLI updates"
+```
+
+---
+
+### Task 7: Final verification (SERIAL — last)
 
 **Step 1: Run full test suite**
 
 ```bash
 pytest tests/ -v --tb=short 2>&1 | tail -20
 ```
-Expected: All tests pass (original 555 + new parametrized variants). No failures, no errors.
+Expected: 584 tests pass, 3 skipped, 2 xfailed. No failures, no errors.
 
-**Step 2: Verify test count increased**
+**Step 2: Verify test count**
 
-The parametrized tests should roughly double the joint-related test count:
-- `TestAgentJointControl`: ~16 tests × 2 modes = ~32
-- `TestJointActionIntegration`: ~4 tests × 2 + 1 kinematic-specific = ~9
+- `TestAgentJointControl`: 17 tests × 2 modes (physics/kinematic) = 34
+- `TestJointActionIntegration`: parametrized for both modes
+- Total: 584 passed
 
-So total test count should be ~555 + 16 + 5 = ~576 (approximate).
-
-**Step 3: Run lint checks**
-
-```bash
-cd /home/rapyuta/rr_sim_evaluation/PyBulletFleet
-black --check pybullet_fleet/ tests/
-flake8 pybullet_fleet/ tests/
-pyright pybullet_fleet/
-```
-Expected: No lint/type errors.
-
-**Step 4: Verify demos work (manual — GUI required)**
+**Step 3: Verify demos work (manual — GUI required)**
 
 Test both arm demos with `mass=0.0` to confirm visual correctness:
 
 ```bash
-# Edit pick_drop_arm_demo.py: add mass=0.0 to Agent.from_urdf()
-# Then run:
 python examples/pick_drop_arm_demo.py
-
-# Edit pick_drop_arm_action_demo.py: add mass=0.0 to Agent.from_urdf()
-# Then run:
 python examples/pick_drop_arm_action_demo.py
 ```
 Expected: Arms move smoothly in both demos with `mass=0.0`.
 
-**Step 5: Build docs**
+**Step 4: Build docs**
 
 ```bash
 cd docs && sphinx-build -W -b html . _build/html 2>&1 | tail -3

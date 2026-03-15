@@ -1,0 +1,207 @@
+# Tutorial 4: Robot Arm — Joint Control & Pick/Drop
+
+**Source files:**
+- [`examples/pick_drop_arm_demo.py`](https://github.com/yuokamoto/PyBulletFleet/blob/main/examples/pick_drop_arm_demo.py) — low-level callback approach
+- [`examples/pick_drop_arm_action_demo.py`](https://github.com/yuokamoto/PyBulletFleet/blob/main/examples/pick_drop_arm_action_demo.py) — action-queue approach
+
+This tutorial demonstrates **fixed-base robot arm** simulation: controlling joints,
+picking up objects at the end-effector, and dropping them at target locations.
+
+**What you'll learn:**
+
+- Spawning a URDF arm with `use_fixed_base=True`
+- Controlling joints with `set_all_joints_targets()` and `JointAction`
+- Kinematic vs physics joint control (how `mass` / `physics` affect behaviour)
+- Link-level object attachment (`attach_link` parameter)
+- Building a pick/drop cycle with low-level callbacks **and** with the action queue
+
+If you haven't read [Tutorial 2 — Action System](action-system), do so first —
+this tutorial builds on the `PickAction` / `DropAction` concepts introduced there.
+
+---
+
+## 1. Fixed-Base Arm Setup
+
+```python
+arm_agent = Agent.from_urdf(
+    urdf_path="robots/arm_robot.urdf",
+    pose=Pose.from_xyz(0, 0, 0),
+    use_fixed_base=True,   # pin base to world
+    sim_core=sim_core,
+)
+```
+
+`use_fixed_base=True` prevents the arm from falling or sliding.
+The base link is pinned to the world frame at the given pose.
+
+---
+
+## 2. Kinematic vs Physics Joint Control
+
+How joints are driven depends on two factors: the agent's `mass` and the simulation's `physics` setting.
+
+| `mass` | `physics` | Joint control method | Behaviour |
+|--------|-----------|---------------------|-----------|
+| `> 0`  | `True`    | PyBullet motor control (`setJointMotorControl2`) | Physics-accurate; torque/velocity limits from motor |
+| `0.0`  | any       | Kinematic interpolation (`resetJointState`) | Smooth movement respecting URDF `<limit velocity="...">` |
+| `> 0`  | `False`   | Kinematic interpolation (auto-override) | Warning logged; kinematic used because `stepSimulation()` not called |
+
+**Kinematic mode** (`mass=0.0`) is recommended for arm demonstrations and fleet-scale
+scenarios where physics fidelity is not needed. Joints move smoothly at URDF-defined
+velocity limits without requiring `stepSimulation()`.
+
+> **Note:** When `physics=False`, even `mass > 0` agents use kinematic joint control
+> because motor commands have no effect without `stepSimulation()`. A warning is logged
+> when this override occurs.
+
+### Performance
+
+Kinematic mode is **significantly faster** than physics mode for joint control because
+`stepSimulation()` is skipped entirely. Joint positions are cached internally
+(`_kinematic_joint_positions`), eliminating per-step `p.getJointState()` calls.
+
+See [Benchmark Results — Arm Joint Control](../benchmarking/results) for scaling data
+from a representative test environment.
+
+---
+
+## 3. Joint Control API
+
+```python
+# Set all joints at once
+arm_agent.set_all_joints_targets([1.5, 1.5, 1.5, 0.0])
+
+# Set a single joint by index
+arm_agent.set_joint_target(joint_index=0, target_position=1.5)
+
+# Set by joint name
+arm_agent.set_joint_target_by_name("base_to_shoulder", 1.5)
+
+# Check arrival
+if arm_agent.are_all_joints_at_targets([1.5, 1.5, 1.5, 0.0], tolerance=0.05):
+    print("Arm is in position")
+```
+
+These methods work identically regardless of kinematic/physics mode — the underlying
+implementation switches transparently.
+
+---
+
+## 4. Link-Level Object Attachment
+
+For arm robots, objects are attached to a specific **link** (e.g., the end-effector)
+rather than the base:
+
+```python
+PICK_LINK_INDEX = p.getNumJoints(arm_agent.body_id) - 1  # last link
+
+arm_agent.attach_object(
+    box_sim,
+    parent_link_index=PICK_LINK_INDEX,
+    relative_pose=Pose.from_xyz(0, 0, 0.14),  # offset from link frame
+)
+```
+
+The attached object follows the link as joints move.
+Use `arm_agent.detach_object(box_sim)` to release.
+
+---
+
+## 5. Approach A — Low-Level Callback (`pick_drop_arm_demo.py`)
+
+The callback approach uses a state machine driven by `are_all_joints_at_targets()`:
+
+```python
+def pick_drop_callback(sim_core, dt):
+    if step_state == 0:
+        arm_agent.set_all_joints_targets(joint_init)
+        if arm_agent.are_all_joints_at_targets(joint_init, tolerance=0.05):
+            advance_state()
+    elif step_state == 1:
+        arm_agent.set_all_joints_targets(pick_joints)
+        if arm_agent.are_all_joints_at_targets(pick_joints, tolerance=0.05):
+            arm_agent.attach_object(box_sim, parent_link_index=PICK_LINK_INDEX, ...)
+            advance_state()
+    # ... more states for drop, reverse cycle
+```
+
+This gives full control but requires manual state management.
+
+---
+
+## 6. Approach B — Action Queue (`pick_drop_arm_action_demo.py`)
+
+The action-queue approach expresses the same cycle declaratively:
+
+```python
+from pybullet_fleet.action import JointAction, PickAction, DropAction, WaitAction
+
+actions = [
+    JointAction(target_joint_positions=joint_init, tolerance=0.05),
+    JointAction(target_joint_positions=pick_joints, tolerance=0.05),
+    PickAction(
+        target_object_id=box_sim.body_id,
+        use_approach=False,       # arm is already positioned by JointAction
+        attach_link=PICK_LINK_INDEX,
+        attach_relative_pose=Pose.from_xyz(0, 0, 0.14),
+    ),
+    JointAction(target_joint_positions=place_joints, tolerance=0.05),
+    DropAction(drop_pose=box_place_pose, use_approach=False),
+    JointAction(target_joint_positions=joint_init, tolerance=0.05),
+    WaitAction(duration=0.5, action_type="idle"),
+]
+arm_agent.add_action_sequence(actions)
+```
+
+**Key differences from mobile-robot actions:**
+
+| Parameter | Mobile robot | Arm robot |
+|-----------|-------------|-----------|
+| `use_approach` | `True` (navigate to approach waypoint) | `False` (arm is pre-positioned by `JointAction`) |
+| `attach_link` | `-1` (base link) | End-effector link index |
+| Movement before pick/drop | `MoveAction` (path following) | `JointAction` (joint targets) |
+
+---
+
+## 7. `JointAction` Reference
+
+`JointAction` moves all joints to target positions and completes when every joint
+is within `tolerance` of its target:
+
+```python
+JointAction(
+    target_joint_positions=[1.5, 1.5, 1.5, 0.0],
+    tolerance=0.05,       # radians; default 0.01
+    max_force=500.0,      # only used in physics mode
+)
+```
+
+---
+
+## 8. Running the Demos
+
+```bash
+# Low-level callback approach (1 arm)
+python examples/pick_drop_arm_demo.py
+
+# Action-queue approach (1 arm)
+python examples/pick_drop_arm_action_demo.py
+
+# 100 arms — AgentManager grid spawn + bulk action management
+python examples/pick_drop_arm_100robots_demo.py
+```
+
+Both single-arm demos use kinematic mode by default (`physics=False`). To switch to physics mode,
+change the `SimulationParams` line at the top of the file.
+
+The 100-arm demo combines `AgentManager` / `GridSpawnParams` (see
+[Tutorial 3](multi-robot-fleet)) with `JointAction` for fleet-scale arm control.
+
+---
+
+## See Also
+
+- [Tutorial 1 — Spawning Objects](spawning-objects): `from_urdf`, `set_all_joints_targets` basics
+- [Tutorial 2 — Action System](action-system): `PickAction`, `DropAction` for mobile robots
+- [Architecture Overview](../architecture/overview): kinematic joint interpolation internals
+- [Benchmark Results](../benchmarking/results): arm joint control performance data
