@@ -214,7 +214,7 @@ def run_multiple(
     }
 
     # Mobile-specific: expected_steps
-    if "expected_steps" in results[0]:
+    if results and "expected_steps" in results[0]:
         aggregated["expected_steps"] = results[0]["expected_steps"]
 
     # Arm-specific: total_joints, mode (from worker result)
