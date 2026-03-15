@@ -357,6 +357,16 @@ class TestMultiAgentBulkE2E:
 class TestArmPickDropE2E:
     """Robot arm JointAction → Pick → JointAction → Drop workflow."""
 
+    @pytest.fixture(
+        params=[
+            pytest.param(None, id="mass_none"),  # Use URDF mass values
+            pytest.param(0.0, id="mass_default"),  # AgentSpawnParams default (kinematic)
+        ]
+    )
+    def arm_mass(self, request):
+        """Mass to use for arm agent. None = URDF values; 0.0 = kinematic."""
+        return request.param
+
     @pytest.fixture
     def arm_sim(self):
         """Physics-enabled sim for arm robot (needs stepSimulation for joints)."""
@@ -377,7 +387,7 @@ class TestArmPickDropE2E:
         yield sc
         p.disconnect(sc.client)
 
-    def test_arm_joint_pick_joint_drop(self, arm_sim):
+    def test_arm_joint_pick_joint_drop(self, arm_sim, arm_mass):
         """Arm moves to pick pose, picks box, moves to place pose, drops box."""
         sc = arm_sim
 
@@ -385,7 +395,7 @@ class TestArmPickDropE2E:
             AgentSpawnParams(
                 urdf_path="robots/arm_robot.urdf",
                 initial_pose=Pose.from_xyz(0, 0, 0),
-                mass=1.0,  # Use URDF mass values (physics); 0.0 would make kinematic
+                mass=arm_mass,  # None = URDF values; 0.0 = kinematic
                 collision_mode=CollisionMode.DISABLED,
                 use_fixed_base=True,
             ),
@@ -445,7 +455,7 @@ class TestArmPickDropE2E:
         drop_pos = np.array([-0.3, 0, 0.1])
         assert np.linalg.norm(box_pos - drop_pos) < 0.3, f"Box should be near drop pose (-0.3, 0, 0.1), got {box_pos}"
 
-    def test_pick_drop_with_inline_joint_targets(self, arm_sim):
+    def test_pick_drop_with_inline_joint_targets(self, arm_sim, arm_mass):
         """PickAction/DropAction with joint_targets parameter (joints move inside action)."""
         sc = arm_sim
 
@@ -453,7 +463,7 @@ class TestArmPickDropE2E:
             AgentSpawnParams(
                 urdf_path="robots/arm_robot.urdf",
                 initial_pose=Pose.from_xyz(0, 0, 0),
-                mass=1.0,
+                mass=arm_mass,  # None = URDF values; 0.0 = kinematic
                 collision_mode=CollisionMode.DISABLED,
                 use_fixed_base=True,
             ),

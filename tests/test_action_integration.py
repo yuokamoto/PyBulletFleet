@@ -1008,18 +1008,58 @@ class PhysicsSimCore:
             self.sim_time += self._dt
 
 
-def create_arm_agent(sim_core):
-    """Create a fixed-base arm robot wired to *sim_core*."""
+class KinematicSimCore:
+    """Minimal sim_core for kinematic (mass=0) agents.
+
+    Does NOT call p.stepSimulation(). Joints move via agent.update() →
+    _update_kinematic_joints() using resetJointState().
+    """
+
+    def __init__(self, dt: float = 1.0 / 240.0):
+        self.sim_time = 0.0
+        self._dt = dt
+        self.sim_objects: list = []
+        self._kinematic_objects: set = set()
+        self._client = 0
+        self._params = type("Params", (), {"physics": False})()
+
+    @property
+    def client(self):
+        return self._client
+
+    def add_object(self, obj):
+        self.sim_objects.append(obj)
+
+    def remove_object(self, obj):
+        if obj in self.sim_objects:
+            self.sim_objects.remove(obj)
+
+    def _mark_object_moved(self, object_id):
+        pass
+
+    def tick(self, n: int = 1):
+        """Advance sim_time without physics stepping."""
+        for _ in range(n):
+            self.sim_time += self._dt
+
+
+def create_arm_agent(sim_core, mass=None):
+    """Create a fixed-base arm robot wired to *sim_core*.
+
+    Args:
+        mass: None (default) uses URDF mass values, 0.0 for kinematic.
+    """
     return Agent.from_urdf(
         urdf_path=ARM_URDF,
         pose=Pose.from_xyz(0, 0, 0),
+        mass=mass,
         use_fixed_base=True,
         sim_core=sim_core,
     )
 
 
 def run_arm_until_idle(agent, sim_core, *, max_steps: int = 5000) -> int:
-    """Run agent.update() with physics stepping until actions complete."""
+    """Run agent.update() with stepping until actions complete."""
     dt = sim_core._dt
     for step in range(max_steps):
         sim_core.tick()
@@ -1029,44 +1069,64 @@ def run_arm_until_idle(agent, sim_core, *, max_steps: int = 5000) -> int:
     raise AssertionError(f"Agent did not finish actions within {max_steps} steps")
 
 
-@pytest.fixture
-def physics_sim(pybullet_env):
-    """PhysicsSimCore wired to the PyBullet session."""
-    return PhysicsSimCore()
+@pytest.fixture(
+    params=[
+        pytest.param("physics", id="physics"),
+        pytest.param("kinematic", id="kinematic"),
+        pytest.param("physics_off", id="physics_off"),
+    ]
+)
+def arm_sim(request, pybullet_env):
+    """Parametrized fixture providing (sim_core, mass) for both modes.
+
+    - physics:     mass=None (URDF values) + stepSimulation (standard physics motor control)
+    - kinematic:   mass=0.0 + no stepSimulation (pure kinematic)
+    - physics_off: mass=None (URDF values) + no stepSimulation (physics disabled in sim_core)
+    """
+    if request.param == "physics":
+        return PhysicsSimCore(), None
+    elif request.param == "kinematic":
+        return KinematicSimCore(), 0.0
+    else:
+        # mass=None (URDF values) but physics=False: agent should auto-use kinematic interpolation
+        return KinematicSimCore(), None
 
 
 class TestJointActionIntegration:
-    """Test JointAction execution with a real arm robot + physics."""
+    """Test JointAction execution with a real arm robot in both modes."""
 
-    def test_reaches_target_positions(self, physics_sim):
+    def test_reaches_target_positions(self, arm_sim):
         """JointAction moves all joints to target and completes."""
-        agent = create_arm_agent(physics_sim)
+        sim_core, mass = arm_sim
+        agent = create_arm_agent(sim_core, mass)
         targets = [0.5, 0.3, -0.3, 0.2]
 
         action = JointAction(target_joint_positions=targets, tolerance=0.05)
         agent.add_action(action)
 
-        run_arm_until_idle(agent, physics_sim)
+        run_arm_until_idle(agent, sim_core)
 
         assert action.status is ActionStatus.COMPLETED
         assert agent.are_joints_at_targets(targets, tolerance=0.05)
 
-    def test_dict_targets_by_name(self, physics_sim):
+    def test_dict_targets_by_name(self, arm_sim):
         """JointAction accepts dict keyed by joint name."""
-        agent = create_arm_agent(physics_sim)
+        sim_core, mass = arm_sim
+        agent = create_arm_agent(sim_core, mass)
         targets = {"base_to_shoulder": 0.4, "elbow_to_wrist": -0.5}
 
         action = JointAction(target_joint_positions=targets, tolerance=0.05)
         agent.add_action(action)
 
-        run_arm_until_idle(agent, physics_sim)
+        run_arm_until_idle(agent, sim_core)
 
         assert action.status is ActionStatus.COMPLETED
         assert agent.are_joints_at_targets(targets, tolerance=0.05)
 
-    def test_sequential_joint_actions(self, physics_sim):
+    def test_sequential_joint_actions(self, arm_sim):
         """Two JointActions execute in sequence, both reach targets."""
-        agent = create_arm_agent(physics_sim)
+        sim_core, mass = arm_sim
+        agent = create_arm_agent(sim_core, mass)
         targets_1 = [0.5, 0.3, -0.3, 0.2]
         targets_2 = [-0.3, 0.5, 0.2, -0.1]
 
@@ -1074,21 +1134,44 @@ class TestJointActionIntegration:
         action2 = JointAction(target_joint_positions=targets_2, tolerance=0.05)
         agent.add_action_sequence([action1, action2])
 
-        run_arm_until_idle(agent, physics_sim)
+        run_arm_until_idle(agent, sim_core)
 
         assert action1.status is ActionStatus.COMPLETED
         assert action2.status is ActionStatus.COMPLETED
-        # Final state should match second action's targets
         assert agent.are_joints_at_targets(targets_2, tolerance=0.05)
 
-    def test_duration_recorded(self, physics_sim):
+    def test_duration_recorded(self, arm_sim):
         """JointAction records non-zero duration after completion."""
-        agent = create_arm_agent(physics_sim)
+        sim_core, mass = arm_sim
+        agent = create_arm_agent(sim_core, mass)
         action = JointAction(target_joint_positions=[0.3, 0.0, 0.0, 0.0], tolerance=0.05)
         agent.add_action(action)
 
-        run_arm_until_idle(agent, physics_sim)
+        run_arm_until_idle(agent, sim_core)
 
         assert action.status is ActionStatus.COMPLETED
         duration = action.get_duration()
         assert duration is not None and duration > 0, f"Duration should be positive, got {duration}"
+
+    def test_kinematic_takes_multiple_steps(self, arm_sim):
+        """Kinematic interpolation respects velocity limits, not teleporting.
+
+        With large target angles (1.0 rad), a single dt step cannot cover the
+        full distance at the URDF velocity limit.  If the joint reaches the
+        target in 1 step, it means resetJointState is teleporting instead of
+        interpolating — which would be a bug.
+        """
+        sim_core, mass = arm_sim
+        if mass != 0.0:
+            pytest.skip("multi-step convergence test is kinematic-specific")
+        agent = create_arm_agent(sim_core, mass)
+        targets = [1.0, 1.0, 1.0, 0.5]
+
+        action = JointAction(target_joint_positions=targets, tolerance=0.01)
+        agent.add_action(action)
+
+        # Single step should NOT complete
+        sim_core.tick()
+        agent.update(sim_core._dt)
+
+        assert action.status is ActionStatus.IN_PROGRESS, "Kinematic joint interpolation should take multiple steps"

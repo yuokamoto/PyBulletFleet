@@ -13,7 +13,6 @@ New simulation building blocks:
 
 New robot and infrastructure models:
 
-- **Kinematic Robot Arm** — Articulated arm controlled via inverse kinematics (kinematics mode)
 - **Physics Mobile Robot** — Wheeled robot driven by PyBullet physics (motor torques, friction, contact forces)
 - **Physics / Kinematic Mobile Manipulator** — Mobile base + arm composite; switchable between kinematics and physics modes
 - **Conveyor / Elevator / Mobile Rack** — Warehouse infrastructure entities for material handling scenarios
