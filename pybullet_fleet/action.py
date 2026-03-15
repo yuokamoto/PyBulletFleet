@@ -323,6 +323,107 @@ class JointAction(Action):
 
 
 @dataclass
+class PoseAction(Action):
+    """
+    End-effector pose control via inverse kinematics.
+
+    Solves IK for the given target position (and optional orientation),
+    then delegates to a ``JointAction`` for execution.
+
+    Args:
+        target_position: Target EE position [x, y, z] in world frame.
+        target_orientation: Target EE orientation as quaternion [qx, qy, qz, qw] (optional).
+        end_effector_link: Link index (int), name (str), or None for auto-detect.
+        max_force: Maximum force for motor control (default: 500.0).
+        tolerance: Euclidean distance tolerance in meters (default: 0.02).
+
+    Example::
+
+        action = PoseAction(target_position=[0.3, 0.0, 0.5])
+        agent.add_action(action)
+
+        action = PoseAction(
+            target_position=[0.3, 0.0, 0.5],
+            target_orientation=[0, 0, 0, 1],
+        )
+        agent.add_action(action)
+    """
+
+    target_position: List[float]
+    target_orientation: Optional[tuple] = None
+    end_effector_link: Union[int, str, None] = None
+    max_force: float = 500.0
+    tolerance: float = 0.02
+
+    # Internal state
+    _joint_action: Optional[JointAction] = field(default=None, init=False)
+    _ee_link_index: int = field(default=-1, init=False)
+    _retry_count: int = field(default=0, init=False)
+
+    def __post_init__(self):
+        super().__init__()
+
+    def execute(self, agent, dt: float) -> bool:
+        if self.status == ActionStatus.NOT_STARTED:
+            self.status = ActionStatus.IN_PROGRESS
+            self.start_time = agent.sim_core.sim_time if agent.sim_core else 0.0
+            self._log_start(agent)
+
+            # Solve IK and create JointAction
+            self._ee_link_index = agent._get_end_effector_link_index(self.end_effector_link)
+            joint_angles = agent._solve_ik(self.target_position, self.target_orientation, self.end_effector_link)
+            if not joint_angles:
+                self.status = ActionStatus.FAILED
+                self.error_message = "IK solver returned no solution"
+                self.end_time = agent.sim_core.sim_time if agent.sim_core else 0.0
+                self._log_failure(self.error_message, agent)
+                return True
+
+            self._joint_action = JointAction(
+                target_joint_positions=joint_angles,
+                max_force=self.max_force,
+            )
+
+        # Delegate to JointAction
+        if self._joint_action is not None and not self._joint_action.execute(agent, dt):
+            return False
+
+        # JointAction completed — verify EE position
+        if self._ee_link_index >= 0:
+            link_state = p.getLinkState(
+                agent.body_id,
+                self._ee_link_index,
+                computeForwardKinematics=1,
+                physicsClientId=agent._pid,
+            )
+            actual_pos = np.array(link_state[0])
+            target_pos = np.array(self.target_position)
+            distance = float(np.linalg.norm(actual_pos - target_pos))
+
+            if distance > self.tolerance and self._retry_count < 1:
+                # Re-solve IK once to refine
+                self._retry_count += 1
+                joint_angles = agent._solve_ik(self.target_position, self.target_orientation, self.end_effector_link)
+                if joint_angles:
+                    self._joint_action = JointAction(
+                        target_joint_positions=joint_angles,
+                        max_force=self.max_force,
+                    )
+                    return False
+
+        self.status = ActionStatus.COMPLETED
+        self.end_time = agent.sim_core.sim_time if agent.sim_core else 0.0
+        self._log_end()
+        return True
+
+    def reset(self):
+        super().reset()
+        self._joint_action = None
+        self._ee_link_index = -1
+        self._retry_count = 0
+
+
+@dataclass
 class WaitAction(Action):
     """
     Wait for a specified duration.
@@ -457,14 +558,21 @@ class PickAction(Action):
     _original_pose: Optional[Pose] = field(default=None, init=False)
     _pick_pose: Optional[Pose] = field(default=None, init=False)  # Pose where pick is executed
 
-    # Joint control (optional)
+    # Joint control (optional — mutually exclusive with ee_target_position)
     joint_targets: Optional[Union[list, dict]] = None  # List or dict {joint_name: position}
     joint_tolerance: Union[float, list, dict] = 0.01
     joint_max_force: float = 500.0
     _joint_action: Optional[JointAction] = field(default=None, init=False)  # Joint action for picking phase
 
+    # EE pose control via IK (alternative to joint_targets)
+    ee_target_position: Optional[List[float]] = None  # EE target [x,y,z] in world frame
+    ee_target_orientation: Optional[tuple] = None  # quaternion [qx,qy,qz,qw]
+    ee_end_effector_link: Union[int, str, None] = None  # For IK resolution
+
     def __post_init__(self):
         super().__init__()
+        if self.joint_targets is not None and self.ee_target_position is not None:
+            raise ValueError("Cannot specify both joint_targets and ee_target_position")
         # Resolve link name to index will be done during execution when agent is available
         self._attach_link_index = -1 if isinstance(self.attach_link, str) else self.attach_link
 
@@ -560,6 +668,14 @@ class PickAction(Action):
 
         # Phase 4: Pick object (with optional joint control)
         if self._phase == PickPhase.PICKING:
+            # Resolve EE pose to joint targets via IK (once)
+            if self.ee_target_position is not None and self.joint_targets is None:
+                self.joint_targets = agent._solve_ik(
+                    self.ee_target_position,
+                    self.ee_target_orientation,
+                    self.ee_end_effector_link,
+                )
+
             # If joint_targets specified, execute joint action first
             if self.joint_targets:
                 if self._joint_action is None:
@@ -774,14 +890,21 @@ class DropAction(Action):
     _original_pose: Optional[Pose] = field(default=None, init=False)
     _drop_pose: Optional[Pose] = field(default=None, init=False)  # Pose where drop is executed
 
-    # Joint control (optional)
+    # Joint control (optional — mutually exclusive with ee_target_position)
     joint_targets: Optional[Union[list, dict]] = None  # List or dict {joint_name: position}
     joint_tolerance: Union[float, list, dict] = 0.01
     joint_max_force: float = 500.0
     _joint_action: Optional[JointAction] = field(default=None, init=False)  # Joint action for dropping phase
 
+    # EE pose control via IK (alternative to joint_targets)
+    ee_target_position: Optional[List[float]] = None  # EE target [x,y,z] in world frame
+    ee_target_orientation: Optional[tuple] = None  # quaternion [qx,qy,qz,qw]
+    ee_end_effector_link: Union[int, str, None] = None  # For IK resolution
+
     def __post_init__(self):
         super().__init__()
+        if self.joint_targets is not None and self.ee_target_position is not None:
+            raise ValueError("Cannot specify both joint_targets and ee_target_position")
 
     def execute(self, agent, dt: float) -> bool:
         """Execute drop action."""
@@ -868,6 +991,14 @@ class DropAction(Action):
 
         # Phase 4: Drop object (with optional joint control)
         if self._phase == DropPhase.DROPPING:
+            # Resolve EE pose to joint targets via IK (once)
+            if self.ee_target_position is not None and self.joint_targets is None:
+                self.joint_targets = agent._solve_ik(
+                    self.ee_target_position,
+                    self.ee_target_orientation,
+                    self.ee_end_effector_link,
+                )
+
             # If joint_targets specified, execute joint action first
             if self.joint_targets:
                 if self._joint_action is None:

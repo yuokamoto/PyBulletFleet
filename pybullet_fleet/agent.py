@@ -20,7 +20,7 @@ from two_point_interpolation import TwoPointInterpolation
 from .action import Action
 from .types import MotionMode, DifferentialPhase, MovementDirection, ActionStatus, CollisionMode
 from .tools import normalize_vector_param
-from pybullet_fleet.tools import resolve_joint_index
+from pybullet_fleet.tools import resolve_joint_index, resolve_link_index
 from .logging_utils import get_lazy_logger
 
 # Create logger for this module
@@ -1911,6 +1911,112 @@ class Agent(SimObject):
             return self.are_joints_at_targets_by_name(targets, tolerance)
         else:
             return self.are_all_joints_at_targets(targets, tolerance)
+
+    # ========================================
+    # Inverse Kinematics (IK)
+    # ========================================
+
+    def _get_end_effector_link_index(
+        self,
+        end_effector_link: Union[int, str, None] = None,
+    ) -> int:
+        """Resolve end-effector link index.
+
+        Args:
+            end_effector_link: Link index (int), link name (str), or None.
+                If None, returns the last link index (last joint's child link).
+
+        Returns:
+            Link index (int). Returns -1 if robot has no joints.
+        """
+        if end_effector_link is not None:
+            return resolve_link_index(self.body_id, end_effector_link)
+        if not self.joint_info:
+            self._log.warning("_get_end_effector_link_index: robot has no joints")
+            return -1
+        return len(self.joint_info) - 1
+
+    def _solve_ik(
+        self,
+        target_position: List[float],
+        target_orientation: Optional[Tuple[float, float, float, float]] = None,
+        end_effector_link: Union[int, str, None] = None,
+    ) -> List[float]:
+        """Solve inverse kinematics for the given end-effector target.
+
+        Uses PyBullet's ``calculateInverseKinematics`` with URDF joint limits.
+
+        Args:
+            target_position: Target EE position [x, y, z] in world frame.
+            target_orientation: Target EE orientation as quaternion [qx, qy, qz, qw].
+                If None, only position is constrained.
+            end_effector_link: End-effector link (int index, str name, or None for last link).
+
+        Returns:
+            List of joint angles (one per joint).
+        """
+        if not self.is_urdf_robot() or not self.joint_info:
+            self._log.warning("_solve_ik: only works for URDF robots with joints")
+            return []
+
+        ee_index = self._get_end_effector_link_index(end_effector_link)
+        if ee_index < 0:
+            self._log.warning("_solve_ik: invalid end-effector link index")
+            return [0.0] * len(self.joint_info)
+
+        # Extract joint limits from joint_info
+        lower_limits = [info[8] for info in self.joint_info]
+        upper_limits = [info[9] for info in self.joint_info]
+        joint_ranges = [upper - lower for lower, upper in zip(lower_limits, upper_limits)]
+        rest_poses = [self.get_joint_state(i)[0] for i in range(len(self.joint_info))]
+
+        ik_kwargs = dict(
+            bodyUniqueId=self.body_id,
+            endEffectorLinkIndex=ee_index,
+            targetPosition=target_position,
+            lowerLimits=lower_limits,
+            upperLimits=upper_limits,
+            jointRanges=joint_ranges,
+            restPoses=rest_poses,
+            physicsClientId=self._pid,
+        )
+        if target_orientation is not None:
+            ik_kwargs["targetOrientation"] = target_orientation
+
+        joint_angles = p.calculateInverseKinematics(**ik_kwargs)
+        return list(joint_angles)
+
+    def move_end_effector(
+        self,
+        target_position: List[float],
+        target_orientation: Optional[Tuple[float, float, float, float]] = None,
+        end_effector_link: Union[int, str, None] = None,
+        max_force: float = 500.0,
+    ) -> None:
+        """Set end-effector target position via inverse kinematics.
+
+        Solves IK and calls ``set_all_joints_targets()`` internally.
+        Actual movement happens in ``update()`` (fire-and-forget, like
+        ``set_joint_target()``).
+
+        Args:
+            target_position: Target EE position [x, y, z] in world frame.
+            target_orientation: Target EE orientation as quaternion [qx, qy, qz, qw].
+            end_effector_link: End-effector link (int, str, or None for auto-detect).
+            max_force: Maximum force for motor control (physics mode).
+
+        Example::
+
+            arm.move_end_effector([0.3, 0.0, 0.5])
+            arm.move_end_effector([0.3, 0.0, 0.5], target_orientation=[0, 0, 0, 1])
+        """
+        if not self.is_urdf_robot():
+            self._log.warning("move_end_effector() only works for URDF robots")
+            return
+
+        joint_angles = self._solve_ik(target_position, target_orientation, end_effector_link)
+        if joint_angles:
+            self.set_all_joints_targets(joint_angles, max_force=max_force)
 
     def update_attached_objects_kinematics(self):
         """
