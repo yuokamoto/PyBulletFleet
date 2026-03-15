@@ -51,8 +51,8 @@ scenarios where physics fidelity is not needed. Joints move smoothly at URDF-def
 velocity limits without requiring `stepSimulation()`.
 
 > **Note:** When `physics=False`, even `mass > 0` agents use kinematic joint control
-> because motor commands have no effect without `stepSimulation()`. A warning is logged
-> when this override occurs.
+> because motor commands have no effect without `stepSimulation()`. This fallback is
+> logged at debug level.
 
 ### Performance
 

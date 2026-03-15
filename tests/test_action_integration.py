@@ -987,6 +987,7 @@ class PhysicsSimCore:
         self.sim_objects: list = []
         self._kinematic_objects: set = set()
         self._client = 0
+        self._params = type("Params", (), {"physics": True})()
 
     @property
     def client(self):

@@ -9,7 +9,7 @@ The existing arm joint control (`set_joint_target()`, `JointAction`) relies on P
 
 ## Decision
 
-Extend the existing joint control API to support kinematic robots (`mass=0` / `is_kinematic=True`) by using `resetJointState()` with per-step interpolation based on URDF velocity limits. The detection uses the existing `self.is_kinematic` flag (consistent with mobile robot pattern), not the global `physics` setting. No new public API or actions are added — the existing `set_joint_target()` / `JointAction` transparently work in both modes.
+Extend the existing joint control API to support kinematic robots (`mass=0` / `is_kinematic=True`) by using `resetJointState()` with per-step interpolation based on URDF velocity limits. The primary detection uses the existing `self.is_kinematic` flag (consistent with mobile robot pattern). Additionally, when `sim_core._params.physics` is `False`, joints fall back to kinematic interpolation regardless of mass (since `setJointMotorControl2` has no effect without `stepSimulation()`). No new public API or actions are added — the existing `set_joint_target()` / `JointAction` transparently work in both modes.
 
 ## Requirements
 
@@ -23,6 +23,7 @@ Extend the existing joint control API to support kinematic robots (`mass=0` / `i
 
 - No new public API (minimum scope — internal changes only)
 - Detection uses `self.is_kinematic` (= `mass == 0.0`), consistent with mobile robot kinematic pattern
+- Additionally, `_compute_use_kinematic_joints()` falls back to kinematic mode when `sim_core._params.physics` is `False` (motor control has no effect without `stepSimulation()`)
 - URDF velocity limits drive interpolation speed; fallback default if unspecified
 - `resetJointState()` resets joint velocity to 0 — acceptable for kinematic mode
 

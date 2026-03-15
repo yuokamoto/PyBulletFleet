@@ -179,6 +179,5 @@ def cleanup_simulation(sim_core=None, agents=None, extra_refs=None):
     if agents is not None:
         del agents[:]
     if extra_refs is not None:
-        for ref in extra_refs:
-            del ref
+        extra_refs.clear()
     force_cleanup()

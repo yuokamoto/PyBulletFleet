@@ -11,7 +11,7 @@
 ## Constraints
 
 - `resetJointState()` resets joint velocity to 0 — this is fine for kinematic mode
-- Detection uses `self.is_kinematic` (= `self.mass == 0.0`), set in `SimObject.__init__()`. Consistent with mobile robot kinematic pattern — no dependency on global `physics` flag
+- Detection uses `self.is_kinematic` (= `self.mass == 0.0`), set in `SimObject.__init__()`. Consistent with mobile robot kinematic pattern. Additionally, `_compute_use_kinematic_joints()` falls back to kinematic mode when `sim_core._params.physics` is `False` (motor control has no effect without `stepSimulation()`)
 - `update()` is already called for all agents every step (including fixed-base) by `core_simulation.py`
 
 ## Approach
@@ -20,7 +20,7 @@ Mirror the physics-mode pattern:
 
 | Step | mass>0 (physics) | mass=0 (kinematic, new) |
 |------|-----------|-------------------|
-| Action sets target | `setJointMotorControl2()` | Store in `_kinematic_joint_targets` dict |
+| Action sets target | `setJointMotorControl2()` | Store in `_kinematic_joint_targets` dict (`Dict[int, float]`) |
 | Engine moves joints | `stepSimulation()` | `_update_kinematic_joints(dt)` in `update()` |
 | Action checks completion | `are_joints_at_targets()` | Same (unchanged) |
 
