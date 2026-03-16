@@ -190,12 +190,73 @@ class TestSolveIK:
 
 
 # ============================================================
+# T1b: Agent._check_ik_reachability
+# ============================================================
+
+
+class TestCheckIKReachability:
+    """Tests for Agent._check_ik_reachability()."""
+
+    def test_reachable_target_returns_true(self, arm_agent):
+        """IK solution for reachable target → True."""
+        agent, _ = arm_agent
+        target = [0.0, 0.0, 0.75]
+        angles = agent._solve_ik(target)
+        ee_idx = agent._get_end_effector_link_index()
+        assert agent._check_ik_reachability(angles, target, ee_idx) is True
+
+    def test_unreachable_target_returns_false(self, arm_agent):
+        """IK solution for unreachable target → False."""
+        agent, _ = arm_agent
+        target = [100.0, 100.0, 100.0]
+        angles = agent._solve_ik(target)
+        ee_idx = agent._get_end_effector_link_index()
+        assert agent._check_ik_reachability(angles, target, ee_idx) is False
+
+    def test_restores_original_positions(self, arm_agent):
+        """Joint positions are restored after reachability check."""
+        agent, _ = arm_agent
+        # Set known positions
+        for i in range(agent.get_num_joints()):
+            p.resetJointState(agent.body_id, i, 0.0, physicsClientId=agent._pid)
+        saved = [agent.get_joint_state(i)[0] for i in range(agent.get_num_joints())]
+
+        target = [0.0, 0.0, 0.75]
+        angles = agent._solve_ik(target)
+        ee_idx = agent._get_end_effector_link_index()
+        agent._check_ik_reachability(angles, target, ee_idx)
+
+        after = [agent.get_joint_state(i)[0] for i in range(agent.get_num_joints())]
+        for s, a in zip(saved, after):
+            assert abs(s - a) < 1e-6, "Joint positions not restored after reachability check"
+
+    def test_negative_ee_returns_false(self, arm_agent):
+        """Negative ee_link_index → False."""
+        agent, _ = arm_agent
+        assert agent._check_ik_reachability([0.0] * 4, [0, 0, 0.75], -1) is False
+
+
+# ============================================================
 # T2: Agent.move_end_effector
 # ============================================================
 
 
 class TestMoveEndEffector:
     """Tests for Agent.move_end_effector()."""
+
+    def test_returns_true_for_reachable(self, arm_agent):
+        """move_end_effector returns True for reachable target."""
+        agent, _ = arm_agent
+        result = agent.move_end_effector([0.0, 0.0, 0.75])
+        assert result is True
+
+    def test_returns_false_for_unreachable(self, arm_agent):
+        """move_end_effector returns False for unreachable target."""
+        agent, _ = arm_agent
+        result = agent.move_end_effector([100.0, 100.0, 100.0])
+        assert result is False
+        # Targets still set (best-effort)
+        assert len(agent._kinematic_joint_targets) > 0
 
     def test_sets_joint_targets(self, arm_agent):
         """move_end_effector should set kinematic joint targets."""
@@ -223,13 +284,14 @@ class TestMoveEndEffector:
         assert distance < 0.05, f"EE at {actual_pos}, target {target}, distance {distance:.4f}"
 
     def test_with_orientation(self, arm_agent):
-        """move_end_effector with orientation sets targets."""
+        """move_end_effector with orientation returns bool."""
         agent, _ = arm_agent
-        agent.move_end_effector([0.0, 0.0, 0.75], target_orientation=[0, 0, 0, 1])
+        result = agent.move_end_effector([0.0, 0.0, 0.75], target_orientation=[0, 0, 0, 1])
+        assert isinstance(result, bool)
         assert len(agent._kinematic_joint_targets) > 0
 
-    def test_mesh_agent_no_crash(self, pybullet_env):
-        """Calling move_end_effector on mesh agent should not crash (just warn)."""
+    def test_mesh_agent_returns_false(self, pybullet_env):
+        """Calling move_end_effector on mesh agent returns False."""
         sim_core = MockSimCore(physics=False)
         sim_core._client = pybullet_env
         agent = Agent.from_mesh(
@@ -238,8 +300,8 @@ class TestMoveEndEffector:
             pose=Pose.from_xyz(0, 0, 0),
             sim_core=sim_core,
         )
-        # Should not raise, just warn
-        agent.move_end_effector([0.1, 0.0, 0.5])
+        result = agent.move_end_effector([0.1, 0.0, 0.5])
+        assert result is False
 
 
 # ============================================================

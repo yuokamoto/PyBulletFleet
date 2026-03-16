@@ -327,8 +327,9 @@ class PoseAction(Action):
     """
     End-effector pose control via inverse kinematics.
 
-    Solves IK for the given target position (and optional orientation),
-    then delegates to a ``JointAction`` for execution.
+    Calls ``agent.move_end_effector()`` on the first step, then checks
+    the EE position each subsequent step until it is within *tolerance*
+    or the joints have settled (best-effort).
 
     Args:
         target_position: Target EE position [x, y, z] in world frame.
@@ -356,9 +357,8 @@ class PoseAction(Action):
     tolerance: float = 0.02
 
     # Internal state
-    _joint_action: Optional[JointAction] = field(default=None, init=False)
     _ee_link_index: int = field(default=-1, init=False)
-    _retry_count: int = field(default=0, init=False)
+    _reachable: bool = field(default=False, init=False)
 
     def __post_init__(self):
         super().__init__()
@@ -369,26 +369,18 @@ class PoseAction(Action):
             self.start_time = agent.sim_core.sim_time if agent.sim_core else 0.0
             self._log_start(agent)
 
-            # Solve IK and create JointAction
             self._ee_link_index = agent._get_end_effector_link_index(self.end_effector_link)
-            joint_angles = agent._solve_ik(self.target_position, self.target_orientation, self.end_effector_link)
-            if not joint_angles:
-                self.status = ActionStatus.FAILED
-                self.error_message = "IK solver returned no solution"
-                self.end_time = agent.sim_core.sim_time if agent.sim_core else 0.0
-                self._log_failure(self.error_message, agent)
-                return True
-
-            self._joint_action = JointAction(
-                target_joint_positions=joint_angles,
-                max_force=self.max_force,
+            self._reachable = agent.move_end_effector(
+                self.target_position,
+                self.target_orientation,
+                self.end_effector_link,
+                self.max_force,
+                self.tolerance,
             )
+            if not self._reachable:
+                self._log.info("IK target may not be fully reachable (best-effort)")
 
-        # Delegate to JointAction
-        if self._joint_action is not None and not self._joint_action.execute(agent, dt):
-            return False
-
-        # JointAction completed — verify EE position
+        # Check EE distance to target
         if self._ee_link_index >= 0:
             link_state = p.getLinkState(
                 agent.body_id,
@@ -397,30 +389,26 @@ class PoseAction(Action):
                 physicsClientId=agent._pid,
             )
             actual_pos = np.array(link_state[0])
-            target_pos = np.array(self.target_position)
-            distance = float(np.linalg.norm(actual_pos - target_pos))
+            distance = float(np.linalg.norm(actual_pos - np.array(self.target_position)))
+            if distance <= self.tolerance:
+                self.status = ActionStatus.COMPLETED
+                self.end_time = agent.sim_core.sim_time if agent.sim_core else 0.0
+                self._log_end()
+                return True
 
-            if distance > self.tolerance and self._retry_count < 1:
-                # Re-solve IK once to refine
-                self._retry_count += 1
-                joint_angles = agent._solve_ik(self.target_position, self.target_orientation, self.end_effector_link)
-                if joint_angles:
-                    self._joint_action = JointAction(
-                        target_joint_positions=joint_angles,
-                        max_force=self.max_force,
-                    )
-                    return False
+        # Joints settled (kinematic mode: no pending targets)
+        if agent._use_kinematic_joints and not agent._kinematic_joint_targets:
+            self.status = ActionStatus.COMPLETED
+            self.end_time = agent.sim_core.sim_time if agent.sim_core else 0.0
+            self._log_end()
+            return True
 
-        self.status = ActionStatus.COMPLETED
-        self.end_time = agent.sim_core.sim_time if agent.sim_core else 0.0
-        self._log_end()
-        return True
+        return False
 
     def reset(self):
         super().reset()
-        self._joint_action = None
         self._ee_link_index = -1
-        self._retry_count = 0
+        self._reachable = False
 
 
 @dataclass

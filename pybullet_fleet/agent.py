@@ -1986,37 +1986,99 @@ class Agent(SimObject):
         joint_angles = p.calculateInverseKinematics(**ik_kwargs)
         return list(joint_angles)
 
+    def _check_ik_reachability(
+        self,
+        joint_angles: List[float],
+        target_position: List[float],
+        ee_link_index: int,
+        tolerance: float = 0.02,
+    ) -> bool:
+        """Check whether an IK solution actually reaches the target.
+
+        Temporarily applies ``joint_angles`` via ``resetJointState``,
+        reads the EE link position via forward kinematics, then restores
+        the original joint positions.
+
+        Args:
+            joint_angles: IK solution (one angle per joint).
+            target_position: Desired EE position [x, y, z].
+            ee_link_index: End-effector link index.
+            tolerance: Maximum Euclidean distance (m) to consider reachable.
+
+        Returns:
+            True if EE position is within *tolerance* of *target_position*.
+        """
+        if ee_link_index < 0:
+            return False
+
+        # Save current positions
+        num_joints = len(self.joint_info)
+        saved = [self.get_joint_state(i)[0] for i in range(num_joints)]
+
+        # Apply IK solution temporarily
+        for i, angle in enumerate(joint_angles):
+            p.resetJointState(self.body_id, i, angle, physicsClientId=self._pid)
+
+        # Forward kinematics check
+        link_state = p.getLinkState(self.body_id, ee_link_index, computeForwardKinematics=1, physicsClientId=self._pid)
+        actual_pos = np.array(link_state[0])
+        distance = float(np.linalg.norm(actual_pos - np.array(target_position)))
+
+        # Restore original positions
+        for i, pos in enumerate(saved):
+            p.resetJointState(self.body_id, i, pos, physicsClientId=self._pid)
+
+        return distance <= tolerance
+
     def move_end_effector(
         self,
         target_position: List[float],
         target_orientation: Optional[Tuple[float, float, float, float]] = None,
         end_effector_link: Union[int, str, None] = None,
         max_force: float = 500.0,
-    ) -> None:
+        tolerance: float = 0.02,
+    ) -> bool:
         """Set end-effector target position via inverse kinematics.
 
-        Solves IK and calls ``set_all_joints_targets()`` internally.
-        Actual movement happens in ``update()`` (fire-and-forget, like
-        ``set_joint_target()``).
+        Solves IK, checks reachability, and calls
+        ``set_all_joints_targets()`` internally.  Actual movement happens
+        in ``update()`` (fire-and-forget, like ``set_joint_target()``).
+
+        The joint targets are **always** set (best-effort), even when the
+        target is unreachable.  The return value tells the caller whether
+        the IK solution actually reaches the desired position.
 
         Args:
             target_position: Target EE position [x, y, z] in world frame.
             target_orientation: Target EE orientation as quaternion [qx, qy, qz, qw].
             end_effector_link: End-effector link (int, str, or None for auto-detect).
             max_force: Maximum force for motor control (physics mode).
+            tolerance: Euclidean distance (m) for reachability check.
+
+        Returns:
+            True if the IK solution places the EE within *tolerance* of
+            the target (reachable).  False otherwise (best-effort targets
+            are still set).
 
         Example::
 
-            arm.move_end_effector([0.3, 0.0, 0.5])
-            arm.move_end_effector([0.3, 0.0, 0.5], target_orientation=[0, 0, 0, 1])
+            reachable = arm.move_end_effector([0.3, 0.0, 0.5])
+            if not reachable:
+                print("Target may not be fully reachable")
         """
         if not self.is_urdf_robot():
             self._log.warning("move_end_effector() only works for URDF robots")
-            return
+            return False
 
         joint_angles = self._solve_ik(target_position, target_orientation, end_effector_link)
-        if joint_angles:
-            self.set_all_joints_targets(joint_angles, max_force=max_force)
+        if not joint_angles:
+            return False
+
+        ee_index = self._get_end_effector_link_index(end_effector_link)
+        reachable = self._check_ik_reachability(joint_angles, target_position, ee_index, tolerance)
+
+        self.set_all_joints_targets(joint_angles, max_force=max_force)
+        return reachable
 
     def update_attached_objects_kinematics(self):
         """
