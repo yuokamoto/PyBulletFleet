@@ -144,8 +144,9 @@ class TestSolveIK:
     def test_returns_joint_angles_list(self, arm_agent):
         """_solve_ik returns a list with one angle per joint."""
         agent, _ = arm_agent
+        ee_idx = agent._get_end_effector_link_index()
         # Target: EE home position (always reachable)
-        angles = agent._solve_ik([0.0, 0.0, 0.75])
+        angles = agent._solve_ik([0.0, 0.0, 0.75], ee_link_index=ee_idx)
         assert isinstance(angles, list)
         assert len(angles) == agent.get_num_joints()
 
@@ -153,7 +154,8 @@ class TestSolveIK:
         """Applying IK solution should place EE near the target position."""
         agent, _ = arm_agent
         target = [0.0, 0.0, 0.75]  # Home position — always reachable
-        angles = agent._solve_ik(target)
+        ee_idx = agent._get_end_effector_link_index()
+        angles = agent._solve_ik(target, ee_link_index=ee_idx)
 
         # Apply the solution directly
         for i, angle in enumerate(angles):
@@ -170,22 +172,24 @@ class TestSolveIK:
     def test_ik_with_orientation(self, arm_agent):
         """_solve_ik with target_orientation returns valid joint angles."""
         agent, _ = arm_agent
+        ee_idx = agent._get_end_effector_link_index()
         target_pos = [0.0, 0.0, 0.75]
         target_orn = [0.0, 0.0, 0.0, 1.0]  # identity quaternion
-        angles = agent._solve_ik(target_pos, target_orientation=target_orn)
+        angles = agent._solve_ik(target_pos, target_orientation=target_orn, ee_link_index=ee_idx)
         assert isinstance(angles, list)
         assert len(angles) == agent.get_num_joints()
 
-    def test_ik_with_explicit_ee_link(self, arm_agent):
-        """_solve_ik with explicit end_effector_link parameter."""
+    def test_ik_with_explicit_ee_index(self, arm_agent):
+        """_solve_ik with explicit ee_link_index parameter."""
         agent, _ = arm_agent
-        angles = agent._solve_ik([0.0, 0.0, 0.75], end_effector_link=3)
+        angles = agent._solve_ik([0.0, 0.0, 0.75], ee_link_index=3)
         assert len(angles) == agent.get_num_joints()
 
-    def test_ik_with_ee_link_name(self, arm_agent):
-        """_solve_ik with link name string."""
+    def test_ik_with_ee_link_name_via_resolve(self, arm_agent):
+        """_solve_ik with link name resolved to index first."""
         agent, _ = arm_agent
-        angles = agent._solve_ik([0.0, 0.0, 0.75], end_effector_link="end_effector")
+        ee_idx = agent._get_end_effector_link_index("end_effector")
+        angles = agent._solve_ik([0.0, 0.0, 0.75], ee_link_index=ee_idx)
         assert len(angles) == agent.get_num_joints()
 
 
@@ -200,17 +204,17 @@ class TestCheckIKReachability:
     def test_reachable_target_returns_true(self, arm_agent):
         """IK solution for reachable target → True."""
         agent, _ = arm_agent
-        target = [0.0, 0.0, 0.75]
-        angles = agent._solve_ik(target)
         ee_idx = agent._get_end_effector_link_index()
+        target = [0.0, 0.0, 0.75]
+        angles = agent._solve_ik(target, ee_link_index=ee_idx)
         assert agent._check_ik_reachability(angles, target, ee_idx) is True
 
     def test_unreachable_target_returns_false(self, arm_agent):
         """IK solution for unreachable target → False."""
         agent, _ = arm_agent
-        target = [100.0, 100.0, 100.0]
-        angles = agent._solve_ik(target)
         ee_idx = agent._get_end_effector_link_index()
+        target = [100.0, 100.0, 100.0]
+        angles = agent._solve_ik(target, ee_link_index=ee_idx)
         assert agent._check_ik_reachability(angles, target, ee_idx) is False
 
     def test_restores_original_positions(self, arm_agent):
@@ -221,9 +225,9 @@ class TestCheckIKReachability:
             p.resetJointState(agent.body_id, i, 0.0, physicsClientId=agent._pid)
         saved = [agent.get_joint_state(i)[0] for i in range(agent.get_num_joints())]
 
-        target = [0.0, 0.0, 0.75]
-        angles = agent._solve_ik(target)
         ee_idx = agent._get_end_effector_link_index()
+        target = [0.0, 0.0, 0.75]
+        angles = agent._solve_ik(target, ee_link_index=ee_idx)
         agent._check_ik_reachability(angles, target, ee_idx)
 
         after = [agent.get_joint_state(i)[0] for i in range(agent.get_num_joints())]

@@ -1940,17 +1940,21 @@ class Agent(SimObject):
         self,
         target_position: List[float],
         target_orientation: Optional[Tuple[float, float, float, float]] = None,
-        end_effector_link: Union[int, str, None] = None,
+        ee_link_index: Optional[int] = None,
     ) -> List[float]:
         """Solve inverse kinematics for the given end-effector target.
 
         Uses PyBullet's ``calculateInverseKinematics`` with URDF joint limits.
 
+        This is an internal method — callers must resolve the link index
+        via ``_get_end_effector_link_index()`` before calling.
+
         Args:
             target_position: Target EE position [x, y, z] in world frame.
             target_orientation: Target EE orientation as quaternion [qx, qy, qz, qw].
                 If None, only position is constrained.
-            end_effector_link: End-effector link (int index, str name, or None for last link).
+            ee_link_index: Resolved end-effector link index (int).
+                If None, auto-detects (last link).
 
         Returns:
             List of joint angles (one per joint).
@@ -1959,7 +1963,7 @@ class Agent(SimObject):
             self._log.warning("_solve_ik: only works for URDF robots with joints")
             return []
 
-        ee_index = self._get_end_effector_link_index(end_effector_link)
+        ee_index = ee_link_index if ee_link_index is not None else self._get_end_effector_link_index()
         if ee_index < 0:
             self._log.warning("_solve_ik: invalid end-effector link index")
             return [0.0] * len(self.joint_info)
@@ -2070,11 +2074,11 @@ class Agent(SimObject):
             self._log.warning("move_end_effector() only works for URDF robots")
             return False
 
-        joint_angles = self._solve_ik(target_position, target_orientation, end_effector_link)
+        ee_index = self._get_end_effector_link_index(end_effector_link)
+        joint_angles = self._solve_ik(target_position, target_orientation, ee_index)
         if not joint_angles:
             return False
 
-        ee_index = self._get_end_effector_link_index(end_effector_link)
         reachable = self._check_ik_reachability(joint_angles, target_position, ee_index, tolerance)
 
         self.set_all_joints_targets(joint_angles, max_force=max_force)

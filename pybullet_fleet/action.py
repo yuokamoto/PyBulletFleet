@@ -658,10 +658,11 @@ class PickAction(Action):
         if self._phase == PickPhase.PICKING:
             # Resolve EE pose to joint targets via IK (once)
             if self.ee_target_position is not None and self.joint_targets is None:
+                ee_idx = agent._get_end_effector_link_index(self.ee_end_effector_link)
                 self.joint_targets = agent._solve_ik(
                     self.ee_target_position,
                     self.ee_target_orientation,
-                    self.ee_end_effector_link,
+                    ee_idx,
                 )
 
             # If joint_targets specified, execute joint action first
@@ -981,10 +982,11 @@ class DropAction(Action):
         if self._phase == DropPhase.DROPPING:
             # Resolve EE pose to joint targets via IK (once)
             if self.ee_target_position is not None and self.joint_targets is None:
+                ee_idx = agent._get_end_effector_link_index(self.ee_end_effector_link)
                 self.joint_targets = agent._solve_ik(
                     self.ee_target_position,
                     self.ee_target_orientation,
-                    self.ee_end_effector_link,
+                    ee_idx,
                 )
 
             # If joint_targets specified, execute joint action first
