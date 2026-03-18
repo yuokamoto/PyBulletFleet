@@ -21,46 +21,9 @@ from pybullet_fleet.agent import Agent, AgentSpawnParams
 from pybullet_fleet.agent_manager import AgentManager, GridSpawnParams, SimObjectManager
 from pybullet_fleet.geometry import Pose
 from pybullet_fleet.sim_object import ShapeParams, SimObject, SimObjectSpawnParams
+from tests.conftest import MockSimCore
 
 MESH_PATH = os.path.join(os.path.dirname(__file__), "../mesh/cube.obj")
-
-
-# =====================================================================
-# MockSimCore
-# =====================================================================
-class MockSimCore:
-    """Minimal sim_core mock that assigns object_ids."""
-
-    def __init__(self, dt: float = 1.0 / 240.0):
-        self.sim_time = 0.0
-        self._dt = dt
-        self.sim_objects = []
-        self._next_object_id = 0
-        self._kinematic_objects = set()
-        self._client = 0
-
-    @property
-    def client(self):
-        return self._client
-
-    def add_object(self, obj):
-        self.sim_objects.append(obj)
-
-    def remove_object(self, obj):
-        if obj in self.sim_objects:
-            self.sim_objects.remove(obj)
-
-    def _mark_object_moved(self, object_id):
-        pass
-
-    def register_callback(self, callback, frequency=None):
-        """Record registered callbacks for verification."""
-        if not hasattr(self, "_registered_callbacks"):
-            self._registered_callbacks = []
-        self._registered_callbacks.append({"func": callback, "frequency": frequency})
-
-    def tick(self, n: int = 1):
-        self.sim_time += self._dt * n
 
 
 # =====================================================================

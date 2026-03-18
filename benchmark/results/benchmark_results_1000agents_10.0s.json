@@ -1,0 +1,92 @@
+{
+  "num_agents": 1000,
+  "benchmark_type": "mobile",
+  "duration_s": 10.0,
+  "scenario": null,
+  "num_reps": 3,
+  "gui": false,
+  "spawn_time_s": {
+    "median": 0.2761457800224889,
+    "mean": 0.27528787967942964,
+    "stdev": 0.003720794997401477,
+    "min": 0.2712130660074763,
+    "max": 0.27850479300832376
+  },
+  "spawn_cpu_s": {
+    "median": 0.2799999999999998,
+    "mean": 0.2766666666666666,
+    "stdev": 0.005773502691896199,
+    "min": 0.27,
+    "max": 0.28
+  },
+  "spawn_cpu_percent": {
+    "median": 100.53686939299158,
+    "mean": 100.49510484241219,
+    "stdev": 0.9222062983539776,
+    "min": 99.55272582352546,
+    "max": 101.39571931071951
+  },
+  "simulation_wall_s": {
+    "median": 3.6128705609880853,
+    "mean": 4.093564894321996,
+    "stdev": 0.9739705079076617,
+    "min": 3.453390471986495,
+    "max": 5.214433649991406
+  },
+  "simulation_cpu_s": {
+    "median": 3.5499999999999994,
+    "mean": 4.076666666666667,
+    "stdev": 1.0000666644445928,
+    "min": 3.4500000000000006,
+    "max": 5.23
+  },
+  "simulation_cpu_percent": {
+    "median": 99.90182193371999,
+    "mean": 99.48672105259395,
+    "stdev": 1.0808854874329716,
+    "min": 98.25981695367211,
+    "max": 100.29852427038975
+  },
+  "real_time_factor": {
+    "median": 2.767882167709074,
+    "mean": 2.527113653812152,
+    "stdev": 0.5315771179928743,
+    "min": 1.9177538101412952,
+    "max": 2.895704983586086
+  },
+  "avg_step_time_ms": {
+    "median": 36.12870560988085,
+    "mean": 40.93564894321995,
+    "stdev": 9.739705079076618,
+    "min": 34.53390471986495,
+    "max": 52.14433649991406
+  },
+  "system_info": {
+    "platform": "Linux",
+    "platform_release": "5.15.0-139-generic",
+    "platform_version": "#149~20.04.1-Ubuntu SMP Wed Apr 16 08:29:56 UTC 2025",
+    "architecture": "x86_64",
+    "processor": "x86_64",
+    "python_version": "3.8.10",
+    "cpu_count": 4,
+    "cpu_count_logical": 8,
+    "total_memory_gb": 31.06,
+    "cpu_model": "11th Gen Intel(R) Core(TM) i7-1185G7 @ 3.00GHz",
+    "cpu_max_mhz": 4800.0
+  },
+  "mem_spawn_rss_mb": {
+    "median": 22.07421875,
+    "mean": 22.053385416666668,
+    "stdev": 0.050227347713504976,
+    "min": 21.99609375,
+    "max": 22.08984375
+  },
+  "mem_total_rss_mb": {
+    "median": 3.0390625,
+    "mean": 3.0442708333333335,
+    "stdev": 0.03932205435036849,
+    "min": 3.0078125,
+    "max": 3.0859375
+  },
+  "expected_steps": 100
+}

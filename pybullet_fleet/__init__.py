@@ -16,7 +16,7 @@ from pybullet_fleet.types import (
 from pybullet_fleet.geometry import Path, Pose
 
 # Robot/Agent management
-from pybullet_fleet.agent import Agent, AgentSpawnParams
+from pybullet_fleet.agent import Agent, AgentSpawnParams, IKParams
 from pybullet_fleet.agent_manager import AgentManager, GridSpawnParams
 
 # Core simulation classes
@@ -48,6 +48,7 @@ __all__ = [
     # Agent management
     "Agent",
     "AgentSpawnParams",
+    "IKParams",
     "AgentManager",
     "GridSpawnParams",
     # Utilities

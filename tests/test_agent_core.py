@@ -27,42 +27,12 @@ from pybullet_fleet.agent import Agent, AgentSpawnParams
 from pybullet_fleet.geometry import Pose, Path
 from pybullet_fleet.sim_object import SimObject, ShapeParams
 from pybullet_fleet.types import CollisionMode, DifferentialPhase, MotionMode
+from tests.conftest import MockSimCore
 
 
 MESH_PATH = os.path.join(os.path.dirname(__file__), "../mesh/cube.obj")
 ARM_URDF = "robots/arm_robot.urdf"
 MOBILE_URDF = "robots/mobile_robot.urdf"
-
-
-class MockSimCore:
-    """Minimal sim_core mock with advancing sim_time for motion update tests."""
-
-    def __init__(self, dt: float = 1.0 / 240.0):
-        self.sim_time = 0.0
-        self._dt = dt
-        self.sim_objects = []
-        self._next_object_id = 0
-        self._kinematic_objects = set()
-        self._client = 0
-
-    @property
-    def client(self):
-        return self._client
-
-    def add_object(self, obj):
-        self.sim_objects.append(obj)
-
-    def remove_object(self, obj):
-        if obj in self.sim_objects:
-            self.sim_objects.remove(obj)
-
-    def _mark_object_moved(self, object_id):
-        """No-op: real sim_core updates spatial hash here."""
-        pass
-
-    def tick(self, n: int = 1):
-        """Advance sim_time by n time-steps."""
-        self.sim_time += self._dt * n
 
 
 @pytest.fixture

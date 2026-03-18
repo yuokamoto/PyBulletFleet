@@ -1,7 +1,13 @@
 #!/usr/bin/env python3
 """
 pick_drop_arm_demo.py
-Demo: Robot arm picks and drops a box at the end-effector (link).
+Demo: Robot arm picks and drops a box using joint target control (low-level, without Actions).
+
+Drives joints directly via set_all_joints_targets() in a callback state machine.
+
+Action version: pick_drop_arm_action_demo.py
+EE position variant (low-level): pick_drop_arm_ee_demo.py
+EE position variant (Action): pick_drop_arm_ee_action_demo.py
 """
 import os
 import sys
@@ -30,8 +36,8 @@ arm_agent = Agent.from_urdf(
 
 
 # Target joint angles
-pick_joints = [1.5, 1.5, 1.5, 0.0]  # Extend toward box
-place_joints = [-1.5, 1.5, 1.5, 0.0]  # Extend to opposite side
+PICK_JOINTS = [1.5, 1.5, 1.5, 0.0]  # Extend toward box
+PLACE_JOINTS = [-1.5, 1.5, 1.5, 0.0]  # Extend to opposite side
 
 # Spawn box to pick/drop
 box_sim = SimObject.from_mesh(
@@ -51,11 +57,11 @@ picked = False
 #       -> move_to_place2 -> pick2 -> move_to_pick2 -> drop2 -> move_to_init2 (loop)
 step_state = 0
 JOINT_TOL = 0.05  # tolerance for joint target check (radians)
-box_pick_pose = Pose.from_xyz(0.3, 0, 0.1)
-box_place_pose = Pose.from_xyz(-0.3, 0, 0.1)
-joint_init = [0.0, 0.0, 0.0, 0.0]
-box_offset = 0.14
-offset_pose = Pose.from_xyz(0, 0, box_offset)
+BOX_PICK_POSE = Pose.from_xyz(0.3, 0, 0.1)
+BOX_PLACE_POSE = Pose.from_xyz(-0.3, 0, 0.1)
+JOINT_INIT = [0.0, 0.0, 0.0, 0.0]
+BOX_OFFSET = 0.14
+OFFSET_POSE = Pose.from_xyz(0, 0, BOX_OFFSET)
 _targets_set = False  # Track whether targets were set for current state
 
 
@@ -79,60 +85,60 @@ def pick_drop_callback(sim_core, dt):
 
     if step_state == 0:
         # Move to initial pose, place box at pick position
-        _set_targets_once(joint_init)
-        box_sim.set_pose(box_pick_pose)
-        if arm_agent.are_all_joints_at_targets(joint_init, tolerance=JOINT_TOL):
+        _set_targets_once(JOINT_INIT)
+        box_sim.set_pose(BOX_PICK_POSE)
+        if arm_agent.are_all_joints_at_targets(JOINT_INIT, tolerance=JOINT_TOL):
             _advance(1, "At init -> moving to pick")
 
     elif step_state == 1:
         # Move arm to pick position
-        _set_targets_once(pick_joints)
-        if arm_agent.are_all_joints_at_targets(pick_joints, tolerance=JOINT_TOL):
-            arm_agent.attach_object(box_sim, parent_link_index=PICK_LINK_INDEX, relative_pose=offset_pose)
+        _set_targets_once(PICK_JOINTS)
+        if arm_agent.are_all_joints_at_targets(PICK_JOINTS, tolerance=JOINT_TOL):
+            arm_agent.attach_object(box_sim, parent_link_index=PICK_LINK_INDEX, relative_pose=OFFSET_POSE)
             picked = True
             _advance(2, "Picked box (attached)")
 
     elif step_state == 2:
         # Move arm to place position (box follows via attach)
-        _set_targets_once(place_joints)
-        if arm_agent.are_all_joints_at_targets(place_joints, tolerance=JOINT_TOL):
+        _set_targets_once(PLACE_JOINTS)
+        if arm_agent.are_all_joints_at_targets(PLACE_JOINTS, tolerance=JOINT_TOL):
             arm_agent.detach_object(box_sim)
             picked = False
             _advance(3, "Dropped box (detached)")
 
     elif step_state == 3:
         # Return to initial pose
-        _set_targets_once(joint_init)
-        if arm_agent.are_all_joints_at_targets(joint_init, tolerance=JOINT_TOL):
+        _set_targets_once(JOINT_INIT)
+        if arm_agent.are_all_joints_at_targets(JOINT_INIT, tolerance=JOINT_TOL):
             _advance(4, "At init -> starting reverse")
 
     elif step_state == 4:
         # Place box at place position, move to initial
-        _set_targets_once(joint_init)
-        box_sim.set_pose(box_place_pose)
-        if arm_agent.are_all_joints_at_targets(joint_init, tolerance=JOINT_TOL):
+        _set_targets_once(JOINT_INIT)
+        box_sim.set_pose(BOX_PLACE_POSE)
+        if arm_agent.are_all_joints_at_targets(JOINT_INIT, tolerance=JOINT_TOL):
             _advance(5, "Moving to place (reverse)")
 
     elif step_state == 5:
         # Move arm to place position to pick box
-        _set_targets_once(place_joints)
-        if arm_agent.are_all_joints_at_targets(place_joints, tolerance=JOINT_TOL):
-            arm_agent.attach_object(box_sim, parent_link_index=PICK_LINK_INDEX, relative_pose=offset_pose)
+        _set_targets_once(PLACE_JOINTS)
+        if arm_agent.are_all_joints_at_targets(PLACE_JOINTS, tolerance=JOINT_TOL):
+            arm_agent.attach_object(box_sim, parent_link_index=PICK_LINK_INDEX, relative_pose=OFFSET_POSE)
             picked = True
             _advance(6, "Picked box (attached, reverse)")
 
     elif step_state == 6:
         # Move arm to pick position (carrying box back)
-        _set_targets_once(pick_joints)
-        if arm_agent.are_all_joints_at_targets(pick_joints, tolerance=JOINT_TOL):
+        _set_targets_once(PICK_JOINTS)
+        if arm_agent.are_all_joints_at_targets(PICK_JOINTS, tolerance=JOINT_TOL):
             arm_agent.detach_object(box_sim)
             picked = False
             _advance(7, "Dropped box (detached, reverse)")
 
     elif step_state == 7:
         # Return to initial pose, then loop
-        _set_targets_once(joint_init)
-        if arm_agent.are_all_joints_at_targets(joint_init, tolerance=JOINT_TOL):
+        _set_targets_once(JOINT_INIT)
+        if arm_agent.are_all_joints_at_targets(JOINT_INIT, tolerance=JOINT_TOL):
             _advance(0, "At init (loop)")
 
 

@@ -20,6 +20,7 @@ from pybullet_fleet.action import (
     JointAction,
     MoveAction,
     PickAction,
+    PoseAction,
     WaitAction,
 )
 from pybullet_fleet.agent import Agent, AgentSpawnParams
@@ -359,20 +360,20 @@ class TestArmPickDropE2E:
 
     @pytest.fixture(
         params=[
-            pytest.param(None, id="mass_none"),  # Use URDF mass values
-            pytest.param(0.0, id="mass_default"),  # AgentSpawnParams default (kinematic)
+            pytest.param((True, None), id="physics"),
+            pytest.param((False, 0.0), id="kinematic"),
         ]
     )
-    def arm_mass(self, request):
-        """Mass to use for arm agent. None = URDF values; 0.0 = kinematic."""
-        return request.param
+    def arm_env(self, request):
+        """Parametrized fixture returning (sim_core, mass).
 
-    @pytest.fixture
-    def arm_sim(self):
-        """Physics-enabled sim for arm robot (needs stepSimulation for joints)."""
+        - physics:   stepSimulation enabled, URDF mass (motor control)
+        - kinematic: no stepSimulation, mass=0.0 (kinematic interpolation)
+        """
+        physics, mass = request.param
         params = SimulationParams(
             gui=False,
-            physics=True,
+            physics=physics,
             monitor=False,
             timestep=1.0 / 240.0,
             target_rtf=0,
@@ -384,18 +385,48 @@ class TestArmPickDropE2E:
         )
         sc = MultiRobotSimulationCore(params)
         sc.set_collision_spatial_hash_cell_size_mode()
-        yield sc
+        yield sc, mass
         p.disconnect(sc.client)
 
-    def test_arm_joint_pick_joint_drop(self, arm_sim, arm_mass):
-        """Arm moves to pick pose, picks box, moves to place pose, drops box."""
-        sc = arm_sim
+    # Helper: run until action queue is empty
+    JOINT_TOL = 0.1  # generous tolerance for E2E joint checks
+    EE_TOL = 0.15  # generous tolerance for E2E EE position checks
+    BOX_TOL = 0.3  # generous tolerance for box final position
+
+    @staticmethod
+    def _run_arm_until_done(sc, arm, max_steps=2_000):
+        for _ in range(max_steps):
+            sc.step_once()
+            if arm.is_action_queue_empty():
+                return
+        raise AssertionError(f"Arm did not finish actions within {max_steps} steps")
+
+    @staticmethod
+    def _get_ee_pos(arm, ee_link):
+        state = p.getLinkState(arm.body_id, ee_link, computeForwardKinematics=1, physicsClientId=arm._pid)
+        return np.array(state[0])
+
+    @staticmethod
+    def _assert_joints_near(arm, targets, tol, label=""):
+        joint_states = arm.get_all_joints_state()
+        for i, target in enumerate(targets):
+            pos = joint_states[i][0]
+            assert abs(pos - target) < tol, f"{label} Joint {i}: expected ~{target}, got {pos:.3f}"
+
+    def test_arm_joint_pick_joint_drop(self, arm_env):
+        """Arm moves to pick pose, picks box, moves to place pose, drops box.
+
+        Asserts intermediate state after each phase:
+        - After pick: box attached, joints at pick_joints
+        - After drop: box detached, joints at place_joints, box near drop pose
+        """
+        sc, arm_mass = arm_env
 
         arm = Agent.from_params(
             AgentSpawnParams(
                 urdf_path="robots/arm_robot.urdf",
                 initial_pose=Pose.from_xyz(0, 0, 0),
-                mass=arm_mass,  # None = URDF values; 0.0 = kinematic
+                mass=arm_mass,
                 collision_mode=CollisionMode.DISABLED,
                 use_fixed_base=True,
             ),
@@ -413,57 +444,63 @@ class TestArmPickDropE2E:
             sim_core=sc,
         )
 
-        end_effector_link = arm.get_num_joints() - 1
+        ee_link = arm.get_num_joints() - 1
         pick_joints = [1.5, 1.5, 1.5, 0.0]
         place_joints = [-1.5, 1.5, 1.5, 0.0]
         offset_pose = Pose.from_xyz(0, 0, 0.14)
 
+        # --- Phase 1: Move to pick + Pick ---
         arm.add_action_sequence(
             [
-                # Move to pick position
                 JointAction(target_joint_positions=pick_joints, tolerance=0.05),
-                # Pick object
                 PickAction(
                     target_object_id=box.body_id,
                     use_approach=False,
-                    attach_link=end_effector_link,
+                    attach_link=ee_link,
                     attach_relative_pose=offset_pose,
                 ),
-                # Move to place position (box attached)
+            ]
+        )
+        self._run_arm_until_done(sc, arm)
+
+        # Assert after pick
+        assert box.is_attached(), "Box should be attached after pick"
+        self._assert_joints_near(arm, pick_joints, self.JOINT_TOL, "After pick:")
+
+        # --- Phase 2: Move to place + Drop ---
+        arm.add_action_sequence(
+            [
                 JointAction(target_joint_positions=place_joints, tolerance=0.05),
-                # Drop object
                 DropAction(
                     drop_pose=Pose.from_xyz(-0.3, 0, 0.1),
                     use_approach=False,
                 ),
             ]
         )
+        self._run_arm_until_done(sc, arm)
 
-        # Run simulation
-        for _ in range(10000):
-            sc.step_once()
-            if arm.is_action_queue_empty():
-                break
-        else:
-            raise AssertionError("Arm did not finish actions within 10000 steps")
-
-        # Box should be detached
+        # Assert after drop
         assert not box.is_attached(), "Box should be detached after drop"
-
-        # Box should be near drop position
+        self._assert_joints_near(arm, place_joints, self.JOINT_TOL, "After drop:")
         box_pos = np.array(box.get_pose().position)
-        drop_pos = np.array([-0.3, 0, 0.1])
-        assert np.linalg.norm(box_pos - drop_pos) < 0.3, f"Box should be near drop pose (-0.3, 0, 0.1), got {box_pos}"
+        assert (
+            np.linalg.norm(box_pos - np.array([-0.3, 0, 0.1])) < self.BOX_TOL
+        ), f"Box should be near drop pose (-0.3, 0, 0.1), got {box_pos}"
 
-    def test_pick_drop_with_inline_joint_targets(self, arm_sim, arm_mass):
-        """PickAction/DropAction with joint_targets parameter (joints move inside action)."""
-        sc = arm_sim
+    def test_pick_drop_with_inline_joint_targets(self, arm_env):
+        """PickAction/DropAction with joint_targets parameter (joints move inside action).
+
+        Asserts intermediate state after each phase:
+        - After pick: box attached, joints at pick_joints
+        - After drop: box detached, joints at place_joints, box near drop pose
+        """
+        sc, arm_mass = arm_env
 
         arm = Agent.from_params(
             AgentSpawnParams(
                 urdf_path="robots/arm_robot.urdf",
                 initial_pose=Pose.from_xyz(0, 0, 0),
-                mass=arm_mass,  # None = URDF values; 0.0 = kinematic
+                mass=arm_mass,
                 collision_mode=CollisionMode.DISABLED,
                 use_fixed_base=True,
             ),
@@ -481,23 +518,33 @@ class TestArmPickDropE2E:
             sim_core=sc,
         )
 
-        end_effector_link = arm.get_num_joints() - 1
+        ee_link = arm.get_num_joints() - 1
         pick_joints = [1.5, 1.5, 1.5, 0.0]
         place_joints = [-1.5, 1.5, 1.5, 0.0]
         offset_pose = Pose.from_xyz(0, 0, 0.14)
 
+        # --- Phase 1: Pick with inline joint_targets ---
         arm.add_action_sequence(
             [
-                # Pick with joint_targets specified inline
                 PickAction(
                     target_object_id=box.body_id,
                     use_approach=False,
-                    attach_link=end_effector_link,
+                    attach_link=ee_link,
                     attach_relative_pose=offset_pose,
                     joint_targets=pick_joints,
                     joint_tolerance=0.05,
                 ),
-                # Drop with joint_targets specified inline
+            ]
+        )
+        self._run_arm_until_done(sc, arm)
+
+        # Assert after pick
+        assert box.is_attached(), "Box should be attached after pick"
+        self._assert_joints_near(arm, pick_joints, self.JOINT_TOL, "After pick:")
+
+        # --- Phase 2: Drop with inline joint_targets ---
+        arm.add_action_sequence(
+            [
                 DropAction(
                     drop_pose=Pose.from_xyz(-0.3, 0, 0.1),
                     use_approach=False,
@@ -506,25 +553,175 @@ class TestArmPickDropE2E:
                 ),
             ]
         )
+        self._run_arm_until_done(sc, arm)
 
-        # Run simulation
-        for _ in range(10000):
-            sc.step_once()
-            if arm.is_action_queue_empty():
-                break
-        else:
-            raise AssertionError("Arm did not finish actions within 10000 steps")
-
-        # Joints should have moved to place_joints (last joint action)
-        joint_states = arm.get_all_joints_state()
-        for i, target in enumerate(place_joints):
-            pos = joint_states[i][0]
-            assert abs(pos - target) < 0.1, f"Joint {i}: expected ~{target}, got {pos:.3f}"
-
-        # Box should be detached
+        # Assert after drop
         assert not box.is_attached(), "Box should be detached after drop"
-
-        # Box should be near drop position
+        self._assert_joints_near(arm, place_joints, self.JOINT_TOL, "After drop:")
         box_pos = np.array(box.get_pose().position)
-        drop_pos = np.array([-0.3, 0, 0.1])
-        assert np.linalg.norm(box_pos - drop_pos) < 0.3, f"Box should be near drop pose (-0.3, 0, 0.1), got {box_pos}"
+        assert (
+            np.linalg.norm(box_pos - np.array([-0.3, 0, 0.1])) < self.BOX_TOL
+        ), f"Box should be near drop pose (-0.3, 0, 0.1), got {box_pos}"
+
+    def test_arm_pose_pick_pose_drop(self, arm_env):
+        """Arm moves via PoseAction, picks box, moves via PoseAction, drops box.
+
+        Mirrors test_arm_joint_pick_joint_drop but uses PoseAction (IK-based EE
+        control) instead of JointAction.
+
+        Asserts intermediate state after each phase:
+        - After pick: box attached, EE near pick_pos
+        - After drop: box detached, EE near drop_pos, box near drop pose
+        """
+        sc, arm_mass = arm_env
+
+        arm = Agent.from_params(
+            AgentSpawnParams(
+                urdf_path="robots/arm_robot.urdf",
+                initial_pose=Pose.from_xyz(0, 0, 0),
+                mass=arm_mass,
+                collision_mode=CollisionMode.DISABLED,
+                use_fixed_base=True,
+            ),
+            sim_core=sc,
+        )
+
+        box = SimObject.from_params(
+            SimObjectSpawnParams(
+                visual_shape=ShapeParams(shape_type="box", half_extents=[0.05, 0.05, 0.05]),
+                collision_shape=ShapeParams(shape_type="box", half_extents=[0.05, 0.05, 0.05]),
+                initial_pose=Pose.from_xyz(0.0, -0.3, 0.1),
+                mass=0.0,
+                pickable=True,
+            ),
+            sim_core=sc,
+        )
+
+        ee_link = arm.get_num_joints() - 1
+        pick_pos = [0.0, -0.3, 0.3]
+        drop_pos = [0.0, 0.3, 0.3]
+        offset_pose = Pose.from_xyz(0, 0, 0.14)
+
+        # --- Phase 1: PoseAction to pick position + Pick ---
+        arm.add_action_sequence(
+            [
+                PoseAction(target_position=pick_pos, tolerance=0.02),
+                PickAction(
+                    target_object_id=box.body_id,
+                    use_approach=False,
+                    attach_link=ee_link,
+                    attach_relative_pose=offset_pose,
+                ),
+            ]
+        )
+        self._run_arm_until_done(sc, arm)
+
+        # Assert after pick
+        assert box.is_attached(), "Box should be attached after pick"
+        ee_actual = self._get_ee_pos(arm, ee_link)
+        assert (
+            np.linalg.norm(ee_actual - np.array(pick_pos)) < self.EE_TOL
+        ), f"After pick: EE should be near {pick_pos}, got {ee_actual}"
+
+        # --- Phase 2: PoseAction to drop position + Drop ---
+        arm.add_action_sequence(
+            [
+                PoseAction(target_position=drop_pos, tolerance=0.02),
+                DropAction(
+                    drop_pose=Pose.from_xyz(0.0, 0.3, 0.1),
+                    use_approach=False,
+                ),
+            ]
+        )
+        self._run_arm_until_done(sc, arm)
+
+        # Assert after drop
+        assert not box.is_attached(), "Box should be detached after drop"
+        ee_actual = self._get_ee_pos(arm, ee_link)
+        assert (
+            np.linalg.norm(ee_actual - np.array(drop_pos)) < self.EE_TOL
+        ), f"After drop: EE should be near {drop_pos}, got {ee_actual}"
+        box_pos = np.array(box.get_pose().position)
+        assert (
+            np.linalg.norm(box_pos - np.array([0.0, 0.3, 0.1])) < self.BOX_TOL
+        ), f"Box should be near drop pose (0, 0.3, 0.1), got {box_pos}"
+
+    def test_pick_drop_with_ee_target_position(self, arm_env):
+        """PickAction/DropAction with ee_target_position (IK-based EE control inside action).
+
+        Asserts intermediate state after each phase:
+        - After pick: box attached, EE near pick_pos
+        - After drop: box detached, EE near drop_pos, box near drop pose
+        """
+        sc, arm_mass = arm_env
+
+        arm = Agent.from_params(
+            AgentSpawnParams(
+                urdf_path="robots/arm_robot.urdf",
+                initial_pose=Pose.from_xyz(0, 0, 0),
+                mass=arm_mass,
+                collision_mode=CollisionMode.DISABLED,
+                use_fixed_base=True,
+            ),
+            sim_core=sc,
+        )
+
+        box = SimObject.from_params(
+            SimObjectSpawnParams(
+                visual_shape=ShapeParams(shape_type="box", half_extents=[0.05, 0.05, 0.05]),
+                collision_shape=ShapeParams(shape_type="box", half_extents=[0.05, 0.05, 0.05]),
+                initial_pose=Pose.from_xyz(0.0, -0.3, 0.1),
+                mass=0.0,
+                pickable=True,
+            ),
+            sim_core=sc,
+        )
+
+        ee_link = arm.get_num_joints() - 1
+        pick_pos = [0.0, -0.3, 0.3]
+        drop_pos = [0.0, 0.3, 0.3]
+        offset_pose = Pose.from_xyz(0, 0, 0.14)
+
+        # --- Phase 1: Pick with ee_target_position ---
+        arm.add_action_sequence(
+            [
+                PickAction(
+                    target_object_id=box.body_id,
+                    use_approach=False,
+                    ee_target_position=pick_pos,
+                    attach_link=ee_link,
+                    attach_relative_pose=offset_pose,
+                ),
+            ]
+        )
+        self._run_arm_until_done(sc, arm)
+
+        # Assert after pick
+        assert box.is_attached(), "Box should be attached after pick"
+        ee_actual = self._get_ee_pos(arm, ee_link)
+        assert (
+            np.linalg.norm(ee_actual - np.array(pick_pos)) < self.EE_TOL
+        ), f"After pick: EE should be near {pick_pos}, got {ee_actual}"
+
+        # --- Phase 2: Drop with ee_target_position ---
+        arm.add_action_sequence(
+            [
+                DropAction(
+                    drop_pose=Pose.from_xyz(0.0, 0.3, 0.1),
+                    use_approach=False,
+                    ee_target_position=drop_pos,
+                ),
+            ]
+        )
+        self._run_arm_until_done(sc, arm)
+
+        # Assert after drop
+        assert not box.is_attached(), "Box should be detached after drop"
+        ee_actual = self._get_ee_pos(arm, ee_link)
+        assert (
+            np.linalg.norm(ee_actual - np.array(drop_pos)) < self.EE_TOL
+        ), f"After drop: EE should be near {drop_pos}, got {ee_actual}"
+        box_pos = np.array(box.get_pose().position)
+        assert (
+            np.linalg.norm(box_pos - np.array([0.0, 0.3, 0.1])) < self.BOX_TOL
+        ), f"Box should be near drop pose (0, 0.3, 0.1), got {box_pos}"
