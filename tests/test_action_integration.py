@@ -989,12 +989,19 @@ def arm_sim(request, pybullet_env):
     - physics_off: mass=None (URDF values) + no stepSimulation (physics disabled in sim_core)
     """
     if request.param == "physics":
-        return MockSimCore(physics=True), None
+        sc = MockSimCore(physics=True)
     elif request.param == "kinematic":
-        return MockSimCore(physics=False), 0.0
+        sc = MockSimCore(physics=False)
     else:
         # mass=None (URDF values) but physics=False: agent should auto-use kinematic interpolation
-        return MockSimCore(physics=False), None
+        sc = MockSimCore(physics=False)
+    sc._client = pybullet_env
+    if request.param == "physics":
+        return sc, None
+    elif request.param == "kinematic":
+        return sc, 0.0
+    else:
+        return sc, None
 
 
 class TestJointActionIntegration:

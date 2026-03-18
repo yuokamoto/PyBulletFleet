@@ -108,10 +108,10 @@ arm_agent.add_action_sequence(actions)
 | `target_position` | `list[float]` | required | EE target `[x, y, z]` in world frame |
 | `target_orientation` | `list[float]` | `None` | Quaternion `[x, y, z, w]`; `None` = position only |
 | `end_effector_link` | `int \| str \| None` | `None` | EE link index/name; `None` = last link |
-| `tolerance` | `float` | `0.02` | Joint convergence tolerance (radians) |
+| `tolerance` | `float` | `0.02` | EE Cartesian distance tolerance (metres) |
 | `max_force` | `float` | `500.0` | Motor force for physics mode |
 
-**Completion:** All joints within `tolerance` of the IK solution.
+**Completion:** Joints within default joint tolerance of the IK solution **and** EE within `tolerance` of the target position.
 
 **Unreachable targets:** When the IK solver determines the target is unreachable,
 `PoseAction` does **not** fail immediately. Instead:

@@ -271,11 +271,12 @@ Move end-effector to a Cartesian target position via IK.
 - `target_position`: EE target `[x, y, z]` in world frame
 - `target_orientation`: Optional quaternion `[x, y, z, w]` for orientation control
 - `end_effector_link`: Link index, name, or `None` (auto-detect last link)
-- `tolerance`: Joint convergence threshold (default: 0.02 rad)
+- `tolerance`: EE Cartesian distance threshold in metres (default: 0.02 m)
 - `max_force`: Motor force for physics mode (default: 500.0 N·m)
 
-**Completion:** All joints within `tolerance` of the IK solution. Calls `move_end_effector()` on start,
-then monitors `are_joints_at_targets()` each step.
+**Completion:** Joints within default joint tolerance of the IK solution **and** EE within `tolerance`
+of the target position. Calls `move_end_effector()` on start,
+then monitors `are_joints_at_targets()` and `are_ee_at_target()` each step.
 
 **Unreachable targets:** If the IK solver determines the target is unreachable, the action does not
 fail immediately. Best-effort joint targets are set and joints move toward them. After settling,

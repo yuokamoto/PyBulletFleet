@@ -133,6 +133,19 @@ class TestCheckEePose:
         agent, _ = arm_agent
         assert agent._check_ee_pose(-1, [0.0, 0.0, 0.75]) is False
 
+    def test_non_unit_quaternion_does_not_false_pass(self, arm_agent):
+        """Non-unit quaternions should not cause false positive via |dot| > 1."""
+        agent, _ = arm_agent
+        ee_idx = agent._get_end_effector_link_index()
+        link_state = p.getLinkState(agent.body_id, ee_idx, computeForwardKinematics=1, physicsClientId=agent._pid)
+        current_pos = list(link_state[0])
+        # Scaled quaternion — NOT unit length. A very different orientation
+        # but with large magnitude could make un-clamped dot exceed 1.
+        non_unit_orn = [2.0, 0.0, 0.0, 2.0]  # magnitude ~2.83, direction ≠ actual
+        result = agent._check_ee_pose(ee_idx, current_pos, target_orientation=non_unit_orn, orientation_tolerance=0.15)
+        # Should not incorrectly pass — the orientation is wrong
+        assert result is False
+
 
 # ============================================================
 # T0b: Agent.are_ee_at_target

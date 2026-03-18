@@ -344,12 +344,17 @@ class PoseAction(Action):
     After settling, the action completes with ``COMPLETED`` if the
     target was reachable, or ``FAILED`` if it was not.
 
+    ``tolerance`` is used for both the IK reachability pre-check
+    (via ``move_end_effector()``) and the final EE Cartesian distance
+    verification (via ``are_ee_at_target()``).  Joint convergence
+    uses the default joint tolerance (not this value).
+
     Args:
         target_position: Target EE position [x, y, z] in world frame.
         target_orientation: Target EE orientation as quaternion [qx, qy, qz, qw] (optional).
         end_effector_link: Link index (int), name (str), or None for auto-detect.
         max_force: Maximum force for motor control (default: 500.0).
-        tolerance: Euclidean distance tolerance in meters (default: 0.02).
+        tolerance: EE Cartesian distance tolerance in metres (default: 0.02).
 
     Example::
 
@@ -391,8 +396,8 @@ class PoseAction(Action):
             if not self._reachable:
                 self._log.warning("IK target is not reachable (best-effort movement will proceed)")
 
-        # All joints reached their IK-solved targets
-        if agent.are_joints_at_targets(tolerance=self.tolerance):
+        # All joints reached their IK-solved targets (use default joint tolerance)
+        if agent.are_joints_at_targets():
             # Also check EE Cartesian position
             ee_at_target = agent.are_ee_at_target(
                 self.target_position,

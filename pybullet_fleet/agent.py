@@ -2172,8 +2172,12 @@ class Agent(SimObject):
 
         if target_orientation is not None:
             actual_orn = np.array(link_state[1])
-            target_orn = np.array(target_orientation)
-            dot = float(abs(np.dot(actual_orn, target_orn)))
+            target_orn = np.array(target_orientation, dtype=float)
+            # Normalize to handle non-unit quaternions from callers
+            norm = np.linalg.norm(target_orn)
+            if norm > 0:
+                target_orn = target_orn / norm
+            dot = float(min(abs(np.dot(actual_orn, target_orn)), 1.0))
             if (1.0 - dot) > orientation_tolerance:
                 return False
 
