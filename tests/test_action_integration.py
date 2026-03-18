@@ -21,6 +21,7 @@ import pytest
 from pybullet_fleet.action import (
     JointAction,
     MoveAction,
+    PoseAction,
     PickAction,
     DropAction,
     WaitAction,
@@ -29,6 +30,7 @@ from pybullet_fleet.agent import Agent
 from pybullet_fleet.geometry import Pose, Path
 from pybullet_fleet.sim_object import SimObject, ShapeParams
 from pybullet_fleet.types import ActionStatus, MotionMode, MovementDirection
+from tests.conftest import MockSimCore
 
 
 # ---------------------------------------------------------------------------
@@ -43,7 +45,7 @@ ARM_URDF = "robots/arm_robot.urdf"
 # Assertion tolerances
 # ---------------------------------------------------------------------------
 
-TIGHT_TOL = 0.01  # Final position accuracy (±5 cm)
+TIGHT_TOL = 0.01  # Final position accuracy (±1 cm)
 PROXIMITY_TOL = 0.01  # "Near target" checks
 COARSE_TOL = 0.01  # Box placement / waypoint proximity
 
@@ -51,34 +53,6 @@ COARSE_TOL = 0.01  # Box placement / waypoint proximity
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-
-class MockSimCore:
-    """Minimal sim_core with advancing time, object registry, and no-op helpers."""
-
-    def __init__(self, dt: float = 1.0 / 240.0):
-        self.sim_time = 0.0
-        self._dt = dt
-        self.sim_objects: list = []
-        self._kinematic_objects: set = set()
-        self._client = 0  # default PyBullet physics client ID
-
-    @property
-    def client(self):
-        return self._client
-
-    def add_object(self, obj):
-        self.sim_objects.append(obj)
-
-    def remove_object(self, obj):
-        if obj in self.sim_objects:
-            self.sim_objects.remove(obj)
-
-    def _mark_object_moved(self, object_id):
-        pass
-
-    def tick(self, n: int = 1):
-        self.sim_time += self._dt * n
 
 
 def run_until_idle(agent, sim_core, *, max_steps: int = 20_000) -> int:
@@ -974,76 +948,6 @@ class TestActionSequenceIntegration:
 # ---------------------------------------------------------------------------
 
 
-class PhysicsSimCore:
-    """Minimal sim_core that advances PyBullet physics each tick.
-
-    JointAction uses position motor control (p.setJointMotorControl2),
-    which only takes effect after p.stepSimulation().
-    """
-
-    def __init__(self, dt: float = 1.0 / 240.0):
-        self.sim_time = 0.0
-        self._dt = dt
-        self.sim_objects: list = []
-        self._kinematic_objects: set = set()
-        self._client = 0
-        self._params = type("Params", (), {"physics": True})()
-
-    @property
-    def client(self):
-        return self._client
-
-    def add_object(self, obj):
-        self.sim_objects.append(obj)
-
-    def remove_object(self, obj):
-        if obj in self.sim_objects:
-            self.sim_objects.remove(obj)
-
-    def _mark_object_moved(self, object_id):
-        pass
-
-    def tick(self, n: int = 1):
-        for _ in range(n):
-            p.stepSimulation()
-            self.sim_time += self._dt
-
-
-class KinematicSimCore:
-    """Minimal sim_core for kinematic (mass=0) agents.
-
-    Does NOT call p.stepSimulation(). Joints move via agent.update() →
-    _update_kinematic_joints() using resetJointState().
-    """
-
-    def __init__(self, dt: float = 1.0 / 240.0):
-        self.sim_time = 0.0
-        self._dt = dt
-        self.sim_objects: list = []
-        self._kinematic_objects: set = set()
-        self._client = 0
-        self._params = type("Params", (), {"physics": False})()
-
-    @property
-    def client(self):
-        return self._client
-
-    def add_object(self, obj):
-        self.sim_objects.append(obj)
-
-    def remove_object(self, obj):
-        if obj in self.sim_objects:
-            self.sim_objects.remove(obj)
-
-    def _mark_object_moved(self, object_id):
-        pass
-
-    def tick(self, n: int = 1):
-        """Advance sim_time without physics stepping."""
-        for _ in range(n):
-            self.sim_time += self._dt
-
-
 def create_arm_agent(sim_core, mass=None):
     """Create a fixed-base arm robot wired to *sim_core*.
 
@@ -1059,7 +963,7 @@ def create_arm_agent(sim_core, mass=None):
     )
 
 
-def run_arm_until_idle(agent, sim_core, *, max_steps: int = 5000) -> int:
+def run_arm_until_idle(agent, sim_core, *, max_steps: int = 2_000) -> int:
     """Run agent.update() with stepping until actions complete."""
     dt = sim_core._dt
     for step in range(max_steps):
@@ -1085,12 +989,12 @@ def arm_sim(request, pybullet_env):
     - physics_off: mass=None (URDF values) + no stepSimulation (physics disabled in sim_core)
     """
     if request.param == "physics":
-        return PhysicsSimCore(), None
+        return MockSimCore(physics=True), None
     elif request.param == "kinematic":
-        return KinematicSimCore(), 0.0
+        return MockSimCore(physics=False), 0.0
     else:
         # mass=None (URDF values) but physics=False: agent should auto-use kinematic interpolation
-        return KinematicSimCore(), None
+        return MockSimCore(physics=False), None
 
 
 class TestJointActionIntegration:
@@ -1176,3 +1080,158 @@ class TestJointActionIntegration:
         agent.update(sim_core._dt)
 
         assert action.status is ActionStatus.IN_PROGRESS, "Kinematic joint interpolation should take multiple steps"
+
+
+# ---------------------------------------------------------------------------
+# PoseAction (arm integration)
+# ---------------------------------------------------------------------------
+
+
+class TestPoseActionIntegration:
+    """Test PoseAction execution with a real arm robot."""
+
+    def test_ee_at_target(self, arm_sim):
+        """PoseAction completes and EE is near target position."""
+        sim_core, mass = arm_sim
+        agent = create_arm_agent(sim_core, mass)
+        target = [0.0, 0.0, 0.75]
+        action = PoseAction(target_position=target, tolerance=0.03)
+        agent.add_action(action)
+
+        run_arm_until_idle(agent, sim_core)
+
+        assert action.status == ActionStatus.COMPLETED
+        ee_idx = agent._get_end_effector_link_index()
+        link_state = p.getLinkState(agent.body_id, ee_idx, computeForwardKinematics=1, physicsClientId=agent._pid)
+        actual_pos = np.array(link_state[0])
+        distance = np.linalg.norm(actual_pos - np.array(target))
+        assert distance < 0.05
+
+    def test_with_orientation(self, arm_sim):
+        """PoseAction with orientation completes, EE position and orientation are near targets."""
+        sim_core, mass = arm_sim
+        agent = create_arm_agent(sim_core, mass)
+        target_pos = [0.0, 0.0, 0.75]
+        target_orn = [0.0, 0.0, 0.0, 1.0]
+        action = PoseAction(
+            target_position=target_pos,
+            target_orientation=target_orn,
+            tolerance=0.03,
+        )
+        agent.add_action(action)
+
+        run_arm_until_idle(agent, sim_core)
+
+        assert action.status == ActionStatus.COMPLETED
+        ee_idx = agent._get_end_effector_link_index()
+        link_state = p.getLinkState(agent.body_id, ee_idx, computeForwardKinematics=1, physicsClientId=agent._pid)
+        # Position check
+        actual_pos = np.array(link_state[0])
+        distance = np.linalg.norm(actual_pos - np.array(target_pos))
+        assert distance < 0.05, f"EE position mismatch: distance={distance:.3f}, actual={actual_pos}"
+        # Orientation check: quaternion dot product, |dot| close to 1 means match
+        actual_orn = np.array(link_state[1])
+        dot = abs(np.dot(actual_orn, np.array(target_orn)))
+        assert dot > 0.95, f"EE orientation mismatch: dot={dot:.3f}, actual={actual_orn}"
+
+    def test_explicit_ee_link(self, arm_sim):
+        """PoseAction with explicit end_effector_link."""
+        sim_core, mass = arm_sim
+        agent = create_arm_agent(sim_core, mass)
+        action = PoseAction(
+            target_position=[0.0, 0.0, 0.75],
+            end_effector_link="end_effector",
+        )
+        agent.add_action(action)
+
+        run_arm_until_idle(agent, sim_core)
+
+        assert action.status == ActionStatus.COMPLETED
+
+    def test_unreachable_target_fails(self, arm_sim):
+        """PoseAction with unreachable target should fail gracefully."""
+        sim_core, mass = arm_sim
+        agent = create_arm_agent(sim_core, mass)
+        # Target far beyond reachable workspace of the 4-joint arm
+        action = PoseAction(target_position=[10.0, 10.0, 10.0])
+        agent.add_action(action)
+
+        run_arm_until_idle(agent, sim_core)
+
+        assert action.status == ActionStatus.FAILED
+
+
+# ---------------------------------------------------------------------------
+# PickAction / DropAction with ee_target_position (arm integration)
+# ---------------------------------------------------------------------------
+
+
+class TestPickDropEEPoseIntegration:
+    """Test PickAction/DropAction with ee_target_position on arm robot."""
+
+    def test_pick_ee_pose_completes(self, arm_sim):
+        """PickAction with ee_target_position resolves IK and completes."""
+        sim_core, mass = arm_sim
+        agent = create_arm_agent(sim_core, mass)
+
+        # EE target at home position [0,0,0.75] to ensure trivial IK and
+        # reliable convergence under physics (arm URDF has no inertia data).
+        # Box is placed far from the arm to avoid collision interference.
+        box = SimObject.from_mesh(
+            visual_shape=ShapeParams(shape_type="box", half_extents=[0.03, 0.03, 0.03]),
+            collision_shape=ShapeParams(shape_type="box", half_extents=[0.03, 0.03, 0.03]),
+            pose=Pose.from_xyz(2.0, 0.0, 0.1),
+            mass=0.0,
+            sim_core=sim_core,
+        )
+        ee_link = agent.get_num_joints() - 1
+
+        action = PickAction(
+            target_object_id=box.body_id,
+            use_approach=False,
+            ee_target_position=[0.0, 0.0, 0.75],
+            attach_link=ee_link,
+            attach_relative_pose=Pose.from_xyz(0, 0, 0.06),
+            joint_tolerance=0.05,
+            joint_max_force=5000.0,
+        )
+        agent.add_action(action)
+
+        run_arm_until_idle(agent, sim_core)
+
+        assert action.status == ActionStatus.COMPLETED
+        assert box.is_attached()
+        assert action.joint_targets is not None
+        assert isinstance(action.joint_targets, list)
+
+    def test_drop_ee_pose_completes(self, arm_sim):
+        """DropAction with ee_target_position resolves IK and completes."""
+        sim_core, mass = arm_sim
+        agent = create_arm_agent(sim_core, mass)
+
+        box = SimObject.from_mesh(
+            visual_shape=ShapeParams(shape_type="box", half_extents=[0.03, 0.03, 0.03]),
+            collision_shape=ShapeParams(shape_type="box", half_extents=[0.03, 0.03, 0.03]),
+            pose=Pose.from_xyz(0.0, 0.0, 0.8),
+            mass=0.0,
+            sim_core=sim_core,
+        )
+        ee_link = agent.get_num_joints() - 1
+        agent.attach_object(box, parent_link_index=ee_link, relative_pose=Pose.from_xyz(0, 0, 0.06))
+
+        # Near-home EE target minimises joint displacement under gravity
+        action = DropAction(
+            drop_pose=Pose.from_xyz(0.0, 0.0, 0.5),
+            use_approach=False,
+            ee_target_position=[0.0, 0.0, 0.75],
+            joint_tolerance=0.05,
+            joint_max_force=5000.0,
+        )
+        agent.add_action(action)
+
+        run_arm_until_idle(agent, sim_core)
+
+        assert action.status == ActionStatus.COMPLETED
+        assert not box.is_attached()
+        assert action.joint_targets is not None
+        assert isinstance(action.joint_targets, list)

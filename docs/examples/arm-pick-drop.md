@@ -203,5 +203,6 @@ The 100-arm demo combines `AgentManager` / `GridSpawnParams` (see
 
 - [Tutorial 1 — Spawning Objects](spawning-objects): `from_urdf`, `set_all_joints_targets` basics
 - [Tutorial 2 — Action System](action-system): `PickAction`, `DropAction` for mobile robots
+- [Tutorial 5 — EE Control & IK](arm-ee-control): control the arm by EE position instead of joint angles
 - [Architecture Overview](../architecture/overview): kinematic joint interpolation internals
 - [Benchmark Results](../benchmarking/results): arm joint control performance data

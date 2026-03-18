@@ -152,6 +152,41 @@ class AgentSpawnParams(SimObjectSpawnParams):
         )
 
 
+@dataclass(frozen=True)
+class IKParams:
+    """Inverse kinematics solver configuration.
+
+    Controls the multi-seed iterative IK solver used by
+    :meth:`Agent._solve_ik` and :meth:`Agent.move_end_effector`.
+
+    Attributes:
+        max_outer_iterations: Maximum refinement iterations per seed.
+        convergence_threshold: EE-to-target distance (m) below which
+            the IK solution is accepted early.
+        max_inner_iterations: ``maxNumIterations`` passed to
+            ``pybullet.calculateInverseKinematics``.
+        residual_threshold: ``residualThreshold`` passed to
+            ``pybullet.calculateInverseKinematics``.
+        reachability_tolerance: Maximum EE distance (m) for
+            :meth:`Agent.move_end_effector` to report *reachable*.
+        seed_quartiles: Tuple of joint-range fractions (0–1) used to
+            build diversified rest-pose seeds.  Each value ``q`` produces
+            a seed at ``lower + q * range`` for every joint.
+
+    Example::
+
+        cfg = IKParams(max_outer_iterations=10, seed_quartiles=(0.1, 0.5, 0.9))
+        arm = Agent.from_urdf("arm.urdf", ik_params=cfg)
+    """
+
+    max_outer_iterations: int = 5
+    convergence_threshold: float = 0.01
+    max_inner_iterations: int = 200
+    residual_threshold: float = 1e-4
+    reachability_tolerance: float = 0.02
+    seed_quartiles: Tuple[float, ...] = (0.25, 0.75)
+
+
 class Agent(SimObject):
     """
     Agent class with goal-based position control.
@@ -163,6 +198,8 @@ class Agent(SimObject):
     Class Constants:
         _KINEMATIC_JOINT_FALLBACK_VELOCITY: Default max joint velocity (rad/s)
             used when the URDF ``<limit velocity="...">`` is 0 or missing.
+        _DEFAULT_JOINT_TOLERANCE: Default tolerance (rad / m) for joint
+            target comparison methods.
 
     Features:
     - Accepts Pose goals (compatible with ROS2 geometry_msgs/Pose)
@@ -182,6 +219,7 @@ class Agent(SimObject):
     """
 
     _KINEMATIC_JOINT_FALLBACK_VELOCITY: float = 2.0  # rad/s
+    _DEFAULT_JOINT_TOLERANCE: float = 0.01  # rad (or m for prismatic)
     _kinematic_joints_physics_off_logged: bool = False  # Log physics=False fallback only once
 
     def __init__(
@@ -199,6 +237,7 @@ class Agent(SimObject):
         name: Optional[str] = None,
         user_data: Optional[Dict[str, Any]] = None,
         mass: Optional[float] = None,
+        ik_params: Optional[IKParams] = None,
     ):
         """
         Initialize Agent.
@@ -214,6 +253,7 @@ class Agent(SimObject):
             use_fixed_base: If True, robot base is fixed and doesn't move
             collision_mode: Collision detection mode (default: NORMAL_3D)
             sim_core: Reference to simulation core (optional)
+            ik_params: IK solver configuration (default: ``IKParams()``).
 
         Note:
             For spawning robots from AgentSpawnParams, use Agent.from_params() instead.
@@ -235,6 +275,9 @@ class Agent(SimObject):
         self.max_angular_accel = normalize_vector_param(max_angular_accel, "max_angular_accel", 3)
 
         self.use_fixed_base = use_fixed_base
+
+        # IK solver configuration
+        self._ik_params: IKParams = ik_params if ik_params is not None else IKParams()
 
         # URDF-specific: joint information
         self.joint_info = []
@@ -277,9 +320,10 @@ class Agent(SimObject):
         self._action_queue: List[Action] = []
         self._current_action: Optional[Action] = None
 
-        # Kinematic joint control (mass=0 robots): targets for smooth interpolation
-        # Dict: {joint_index: target_position}
-        self._kinematic_joint_targets: Dict[int, float] = {}
+        # Last commanded joint targets — persists after arrival.
+        # Written by set_joint_target() in both kinematic and physics modes.
+        # Used by are_joints_at_targets(None) and _update_kinematic_joints().
+        self._last_joint_targets: Dict[int, float] = {}
 
         # Cached flag: True when joints must use kinematic interpolation
         # (mass=0 OR sim_core has physics disabled).  Computed once to avoid
@@ -578,6 +622,7 @@ class Agent(SimObject):
         sim_core=None,
         name: Optional[str] = None,
         user_data: Optional[Dict[str, Any]] = None,
+        ik_params: Optional[IKParams] = None,
     ) -> "Agent":
         """
         Create a URDF-based Agent (with joints).
@@ -595,6 +640,7 @@ class Agent(SimObject):
             motion_mode: MotionMode.OMNIDIRECTIONAL or MotionMode.DIFFERENTIAL
             use_fixed_base: If True, robot base is fixed in space
             sim_core: Reference to simulation core
+            ik_params: IK solver configuration (default: ``IKParams()``).
 
         Returns:
             Agent instance
@@ -659,6 +705,7 @@ class Agent(SimObject):
             name=name,
             user_data=user_data,
             mass=resolved_mass,
+            ik_params=ik_params,
         )
 
         return agent
@@ -1529,29 +1576,30 @@ class Agent(SimObject):
         Each joint moves at most ``velocity_limit * dt`` per step, where
         velocity_limit comes from the URDF ``<limit velocity="...">`` attribute.
         Falls back to 2.0 rad/s if the URDF limit is 0 or missing.
+
+        Iterates ``_last_joint_targets`` and skips joints that have already
+        reached their target (``abs(diff) < 1e-7``).  Entries are **never**
+        deleted so that ``are_joints_at_targets()`` can query them later.
         """
-        if not self._kinematic_joint_targets:
+        if not self._last_joint_targets:
             return
 
-        reached: list = []
-        for joint_index, target in self._kinematic_joint_targets.items():
+        for joint_index, target in self._last_joint_targets.items():
             current_pos = self._kinematic_joint_positions.get(joint_index, 0.0)
+            diff = target - current_pos
+            if abs(diff) < 1e-7:
+                continue  # Already at target — skip
             # URDF velocity limit: joint_info[joint_index][11] is maxVelocity
             max_vel = self.joint_info[joint_index][11]
             if max_vel <= 0:
                 max_vel = self._KINEMATIC_JOINT_FALLBACK_VELOCITY
             max_step = max_vel * dt
-            diff = target - current_pos
             if abs(diff) <= max_step:
                 new_pos = target
-                reached.append(joint_index)
             else:
                 new_pos = current_pos + math.copysign(max_step, diff)
             p.resetJointState(self.body_id, joint_index, new_pos, physicsClientId=self._pid)
             self._kinematic_joint_positions[joint_index] = new_pos
-
-        for idx in reached:
-            del self._kinematic_joint_targets[idx]
 
     def update(self, dt: float) -> bool:
         """
@@ -1742,12 +1790,11 @@ class Agent(SimObject):
             self._log.warning(f"joint_index {joint_index} out of range (max: {len(self.joint_info)-1})")
             return
 
-        if self._use_kinematic_joints:
-            # Kinematic mode (mass=0 or physics=False): store target for smooth interpolation
-            # Actual movement happens in _update_kinematic_joints() called from update()
-            self._kinematic_joint_targets[joint_index] = target_position
-        else:
-            # Physics mode (mass>0 with stepSimulation): existing motor control
+        # Always record for are_joints_at_targets() / PoseAction completion
+        self._last_joint_targets[joint_index] = target_position
+
+        if not self._use_kinematic_joints:
+            # Physics mode (mass>0 with stepSimulation): motor control
             p.setJointMotorControl2(
                 bodyUniqueId=self.body_id,
                 jointIndex=joint_index,
@@ -1822,7 +1869,7 @@ class Agent(SimObject):
         else:
             self.set_all_joints_targets(targets, max_force)
 
-    def is_joint_at_target(self, joint_index: int, target: float, tolerance: float = 0.01) -> bool:
+    def is_joint_at_target(self, joint_index: int, target: float, tolerance: float = _DEFAULT_JOINT_TOLERANCE) -> bool:
         """
         Check if a single joint (by index) is within tolerance of the target position.
         """
@@ -1835,7 +1882,7 @@ class Agent(SimObject):
         pos, _ = self.get_joint_state(joint_index)
         return abs(pos - target) <= tolerance
 
-    def is_joint_at_target_by_name(self, joint_name: str, target: float, tolerance: float = 0.01) -> bool:
+    def is_joint_at_target_by_name(self, joint_name: str, target: float, tolerance: float = _DEFAULT_JOINT_TOLERANCE) -> bool:
         """
         Check if a single joint (by name) is within tolerance of the target position.
         """
@@ -1844,28 +1891,54 @@ class Agent(SimObject):
             return False
         return self.is_joint_at_target(joint_index, target, tolerance)
 
-    def are_all_joints_at_targets(self, target_positions: list, tolerance: Union[float, list] = 0.01) -> bool:
-        """
-        target_positions: list of target positions for each joint
-        tolerance: float or list of tolerances for each joint
-        Returns True if all joints are within tolerance of their targets, False otherwise
+    @property
+    def last_joint_targets(self) -> Dict[int, float]:
+        """Read-only copy of last commanded joint targets."""
+        return dict(self._last_joint_targets)
+
+    def are_all_joints_at_targets(
+        self, target_positions: Optional[list] = None, tolerance: Union[float, list] = _DEFAULT_JOINT_TOLERANCE
+    ) -> bool:
+        """Check if joints are at target positions.
+
+        Args:
+            target_positions: List of target positions for each joint.
+                If None, uses ``_last_joint_targets`` (last commanded targets).
+            tolerance: float or list of tolerances for each joint.
+
+        Returns:
+            True if all joints are within tolerance of their targets.
         """
         if not self.is_urdf_robot():
             self._log.warning("are_all_joints_at_targets() only works for URDF robots")
             return False
-        if len(target_positions) == 0:
-            return True
+
+        if target_positions is None:
+            targets = self._last_joint_targets
+        else:
+            targets = {i: t for i, t in enumerate(target_positions)}
+
+        if not targets:
+            if target_positions is None:
+                self._log.warning("are_all_joints_at_targets() called but no targets have been set")
+            return True  # Nothing to check → vacuously true
+
         if isinstance(tolerance, (list, tuple)):
             tol_list = list(tolerance)
+            tol_map = {idx: tol_list[i] if i < len(tol_list) else tol_list[-1] for i, idx in enumerate(targets)}
+        elif isinstance(tolerance, (int, float)):
+            tol_map = {idx: tolerance for idx in targets}
         else:
-            tol_list = [tolerance] * len(target_positions)
-        for i, target in enumerate(target_positions):
-            tol = tol_list[i] if i < len(tol_list) else tol_list[-1]
-            if not self.is_joint_at_target(i, target, tol):
+            tol_map = {idx: self._DEFAULT_JOINT_TOLERANCE for idx in targets}
+
+        for idx, target in targets.items():
+            if not self.is_joint_at_target(idx, target, tol_map[idx]):
                 return False
         return True
 
-    def are_joints_at_targets_by_name(self, joint_targets: dict, tolerance: Union[float, list, dict] = 0.01) -> bool:
+    def are_joints_at_targets_by_name(
+        self, joint_targets: dict, tolerance: Union[float, list, dict] = _DEFAULT_JOINT_TOLERANCE
+    ) -> bool:
         """
         Check if all specified joints (by name) are within tolerance of their target positions.
         Args:
@@ -1881,23 +1954,32 @@ class Agent(SimObject):
         else:
             tol_map = {jn: tolerance for jn in joint_targets.keys()}
         for joint_name, target in joint_targets.items():
-            tol = tol_map.get(joint_name, 0.01)
+            tol = tol_map.get(joint_name, self._DEFAULT_JOINT_TOLERANCE)
             if not self.is_joint_at_target_by_name(joint_name, target, tol):
                 return False
         return True
 
-    def are_joints_at_targets(self, targets: Union[list, dict], tolerance: Union[float, list, dict] = 0.01) -> bool:
-        """
-        Check if joints are at target positions (accepts both list and dict).
+    def are_joints_at_targets(
+        self,
+        targets: Union[list, dict, None] = None,
+        tolerance: Union[float, list, dict] = _DEFAULT_JOINT_TOLERANCE,
+    ) -> bool:
+        """Check if joints are at target positions.
 
         Args:
-            targets: List of target positions for all joints, or dict {joint_name: position}
-            tolerance: Tolerance value(s) - float, list, or dict
+            targets: List of target positions for all joints,
+                dict ``{joint_name: position}``, or **None** to use the
+                last commanded targets (``_last_joint_targets``).
+            tolerance: Tolerance value(s) — float, list, or dict.
 
         Returns:
-            True if all joints are within tolerance, False otherwise
+            True if all joints are within tolerance, False otherwise.
 
         Example::
+
+            # No args — check last commanded targets
+            if robot.are_joints_at_targets():
+                print("All joints settled")
 
             # Using list
             if robot.are_joints_at_targets([0.0, 1.57, -1.57, 0.0], tolerance=0.01):
@@ -1907,10 +1989,11 @@ class Agent(SimObject):
             if robot.are_joints_at_targets({"joint1": 1.57, "joint2": -1.57}, tolerance=0.01):
                 print("Reached target")
         """
+        if targets is None:
+            return self.are_all_joints_at_targets(None, tolerance)
         if isinstance(targets, dict):
             return self.are_joints_at_targets_by_name(targets, tolerance)
-        else:
-            return self.are_all_joints_at_targets(targets, tolerance)
+        return self.are_all_joints_at_targets(targets, tolerance)
 
     # ========================================
     # Inverse Kinematics (IK)
@@ -1936,6 +2019,11 @@ class Agent(SimObject):
             return -1
         return len(self.joint_info) - 1
 
+    @property
+    def ik_params(self) -> IKParams:
+        """Read-only access to the IK solver configuration."""
+        return self._ik_params
+
     def _solve_ik(
         self,
         target_position: List[float],
@@ -1944,15 +2032,25 @@ class Agent(SimObject):
     ) -> List[float]:
         """Solve inverse kinematics for the given end-effector target.
 
-        Uses PyBullet's ``calculateInverseKinematics`` with URDF joint limits.
+        Uses a multi-seed iterative scheme on top of PyBullet's
+        ``calculateInverseKinematics``.  Three seed strategies are tried:
 
-        This is an internal method — callers must resolve the link index
-        via ``_get_end_effector_link_index()`` before calling.
+        1. **Current joint positions** — works well when the robot is
+           already close to the desired configuration.
+        2. **25 % of joint range** — escapes singularities and local
+           minima that trap the first seed.
+        3. **75 % of joint range** — covers the opposite side of the
+           joint space.
+
+        For each seed, up to ``ik_params.max_outer_iterations`` refinement
+        passes are performed (feeding the previous IK solution back as
+        ``restPoses``).  The loop returns early when the FK end-effector
+        position is within ``ik_params.convergence_threshold`` of the target.
 
         Args:
             target_position: Target EE position [x, y, z] in world frame.
-            target_orientation: Target EE orientation as quaternion [qx, qy, qz, qw].
-                If None, only position is constrained.
+            target_orientation: Target EE orientation as quaternion
+                [qx, qy, qz, qw].  If None, only position is constrained.
             ee_link_index: Resolved end-effector link index (int).
                 If None, auto-detects (last link).
 
@@ -1968,27 +2066,69 @@ class Agent(SimObject):
             self._log.warning("_solve_ik: invalid end-effector link index")
             return [0.0] * len(self.joint_info)
 
-        # Extract joint limits from joint_info
+        num_joints = len(self.joint_info)
         lower_limits = [info[8] for info in self.joint_info]
         upper_limits = [info[9] for info in self.joint_info]
         joint_ranges = [upper - lower for lower, upper in zip(lower_limits, upper_limits)]
-        rest_poses = [self.get_joint_state(i)[0] for i in range(len(self.joint_info))]
+        saved_positions = [self.get_joint_state(i)[0] for i in range(num_joints)]
 
-        ik_kwargs = dict(
-            bodyUniqueId=self.body_id,
-            endEffectorLinkIndex=ee_index,
-            targetPosition=target_position,
-            lowerLimits=lower_limits,
-            upperLimits=upper_limits,
-            jointRanges=joint_ranges,
-            restPoses=rest_poses,
-            physicsClientId=self._pid,
-        )
-        if target_orientation is not None:
-            ik_kwargs["targetOrientation"] = target_orientation
+        cfg = self._ik_params
+        seed_strategies: List[List[float]] = [list(saved_positions)]
+        for q in cfg.seed_quartiles:
+            seed_strategies.append([lo + q * r for lo, r in zip(lower_limits, joint_ranges)])
 
-        joint_angles = p.calculateInverseKinematics(**ik_kwargs)
-        return list(joint_angles)
+        target_arr = np.array(target_position)
+        best_angles: List[float] = []
+        best_distance = float("inf")
+
+        for seed in seed_strategies:
+            rest_poses = list(seed)
+            prev_angles: Optional[List[float]] = None
+            for _ in range(cfg.max_outer_iterations):
+                ik_kwargs = dict(
+                    bodyUniqueId=self.body_id,
+                    endEffectorLinkIndex=ee_index,
+                    targetPosition=target_position,
+                    lowerLimits=lower_limits,
+                    upperLimits=upper_limits,
+                    jointRanges=joint_ranges,
+                    restPoses=rest_poses,
+                    maxNumIterations=cfg.max_inner_iterations,
+                    residualThreshold=cfg.residual_threshold,
+                    physicsClientId=self._pid,
+                )
+                if target_orientation is not None:
+                    ik_kwargs["targetOrientation"] = target_orientation
+
+                joint_angles = list(p.calculateInverseKinematics(**ik_kwargs))
+
+                # Early exit: solution unchanged from previous iteration
+                if prev_angles is not None and joint_angles == prev_angles:
+                    break
+
+                for i, angle in enumerate(joint_angles):
+                    p.resetJointState(self.body_id, i, angle, physicsClientId=self._pid)
+                link_state = p.getLinkState(self.body_id, ee_index, computeForwardKinematics=1, physicsClientId=self._pid)
+                distance = float(np.linalg.norm(np.array(link_state[0]) - target_arr))
+
+                if distance < best_distance:
+                    best_distance = distance
+                    best_angles = joint_angles
+
+                if distance < cfg.convergence_threshold:
+                    break
+
+                prev_angles = joint_angles
+                rest_poses = joint_angles
+
+            if best_distance < cfg.convergence_threshold:
+                break
+
+        # Restore original joint positions
+        for i, pos in enumerate(saved_positions):
+            p.resetJointState(self.body_id, i, pos, physicsClientId=self._pid)
+
+        return best_angles
 
     def _check_ik_reachability(
         self,
@@ -2040,7 +2180,7 @@ class Agent(SimObject):
         target_orientation: Optional[Tuple[float, float, float, float]] = None,
         end_effector_link: Union[int, str, None] = None,
         max_force: float = 500.0,
-        tolerance: float = 0.02,
+        tolerance: Optional[float] = None,
     ) -> bool:
         """Set end-effector target position via inverse kinematics.
 
@@ -2058,6 +2198,7 @@ class Agent(SimObject):
             end_effector_link: End-effector link (int, str, or None for auto-detect).
             max_force: Maximum force for motor control (physics mode).
             tolerance: Euclidean distance (m) for reachability check.
+                If None, uses ``ik_params.reachability_tolerance``.
 
         Returns:
             True if the IK solution places the EE within *tolerance* of
@@ -2079,7 +2220,8 @@ class Agent(SimObject):
         if not joint_angles:
             return False
 
-        reachable = self._check_ik_reachability(joint_angles, target_position, ee_index, tolerance)
+        tol = tolerance if tolerance is not None else self._ik_params.reachability_tolerance
+        reachable = self._check_ik_reachability(joint_angles, target_position, ee_index, tol)
 
         self.set_all_joints_targets(joint_angles, max_force=max_force)
         return reachable

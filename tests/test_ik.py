@@ -4,8 +4,8 @@ Covers:
 - Agent._solve_ik() — IK solver wrapper
 - Agent._get_end_effector_link_index() — EE link auto-detection
 - Agent.move_end_effector() — direct EE position command
-- PoseAction — action-based EE control
-- PickAction / DropAction EE pose extensions
+- Agent._last_joint_targets / are_joints_at_targets() unification
+- IKParams dataclass
 """
 
 import numpy as np
@@ -14,42 +14,11 @@ import pybullet_data
 import pytest
 
 from pybullet_fleet.agent import Agent
-from pybullet_fleet.action import PoseAction, PickAction, DropAction
 from pybullet_fleet.geometry import Pose
-from pybullet_fleet.sim_object import SimObject, ShapeParams
-from pybullet_fleet.types import ActionStatus
+from pybullet_fleet.sim_object import ShapeParams
+from tests.conftest import MockSimCore
 
 ARM_URDF = "robots/arm_robot.urdf"
-
-
-class MockSimCore:
-    """Minimal sim_core mock for IK tests."""
-
-    def __init__(self, dt=1.0 / 240.0, physics=False):
-        self.sim_time = 0.0
-        self._dt = dt
-        self.sim_objects = []
-        self._next_object_id = 0
-        self._kinematic_objects = set()
-        self._client = 0
-        self._params = type("Params", (), {"physics": physics})()
-
-    @property
-    def client(self):
-        return self._client
-
-    def add_object(self, obj):
-        self.sim_objects.append(obj)
-
-    def remove_object(self, obj):
-        if obj in self.sim_objects:
-            self.sim_objects.remove(obj)
-
-    def _mark_object_moved(self, object_id):
-        pass
-
-    def tick(self, n=1):
-        self.sim_time += self._dt * n
 
 
 @pytest.fixture
@@ -78,21 +47,6 @@ def arm_agent(pybullet_env):
     return agent, sim_core
 
 
-@pytest.fixture
-def physics_arm_agent(pybullet_env):
-    """Physics arm agent (mass>0, physics=True)."""
-    sim_core = MockSimCore(physics=True)
-    sim_core._client = pybullet_env
-    agent = Agent.from_urdf(
-        urdf_path=ARM_URDF,
-        pose=Pose.from_xyz(0, 0, 0),
-        use_fixed_base=True,
-        mass=1.0,
-        sim_core=sim_core,
-    )
-    return agent, sim_core
-
-
 # ============================================================
 # T1: Agent._get_end_effector_link_index
 # ============================================================
@@ -109,8 +63,9 @@ class TestGetEndEffectorLinkIndex:
         assert ee_idx == 3  # arm_robot.urdf: 4 joints
 
     def test_explicit_int(self, arm_agent):
-        """Explicit int is returned as-is."""
+        """Explicit int is passed through as-is (resolve_link_index identity)."""
         agent, _ = arm_agent
+        # Int passthrough: callers with Union[int, str, None] can pass int directly
         assert agent._get_end_effector_link_index(2) == 2
 
     def test_explicit_str(self, arm_agent):
@@ -141,15 +96,6 @@ class TestGetEndEffectorLinkIndex:
 class TestSolveIK:
     """Tests for Agent._solve_ik()."""
 
-    def test_returns_joint_angles_list(self, arm_agent):
-        """_solve_ik returns a list with one angle per joint."""
-        agent, _ = arm_agent
-        ee_idx = agent._get_end_effector_link_index()
-        # Target: EE home position (always reachable)
-        angles = agent._solve_ik([0.0, 0.0, 0.75], ee_link_index=ee_idx)
-        assert isinstance(angles, list)
-        assert len(angles) == agent.get_num_joints()
-
     def test_ik_solution_reaches_target(self, arm_agent):
         """Applying IK solution should place EE near the target position."""
         agent, _ = arm_agent
@@ -170,7 +116,7 @@ class TestSolveIK:
         assert distance < 0.05, f"EE at {actual_pos}, target {target_pos}, distance {distance:.4f}"
 
     def test_ik_with_orientation(self, arm_agent):
-        """_solve_ik with target_orientation returns valid joint angles."""
+        """_solve_ik with target_orientation returns valid joint angles that achieve the orientation."""
         agent, _ = arm_agent
         ee_idx = agent._get_end_effector_link_index()
         target_pos = [0.0, 0.0, 0.75]
@@ -179,18 +125,34 @@ class TestSolveIK:
         assert isinstance(angles, list)
         assert len(angles) == agent.get_num_joints()
 
-    def test_ik_with_explicit_ee_index(self, arm_agent):
-        """_solve_ik with explicit ee_link_index parameter."""
-        agent, _ = arm_agent
-        angles = agent._solve_ik([0.0, 0.0, 0.75], ee_link_index=3)
-        assert len(angles) == agent.get_num_joints()
+        # Apply solution and verify position + orientation
+        for i, angle in enumerate(angles):
+            p.resetJointState(agent.body_id, i, angle, physicsClientId=agent._pid)
+        link_state = p.getLinkState(agent.body_id, ee_idx, computeForwardKinematics=1, physicsClientId=agent._pid)
+        actual_pos = np.array(link_state[0])
+        assert np.linalg.norm(actual_pos - np.array(target_pos)) < 0.05
+        actual_orn = np.array(link_state[1])
+        dot = abs(np.dot(actual_orn, np.array(target_orn)))
+        assert dot > 0.95, f"EE orientation mismatch: dot={dot:.3f}, actual={actual_orn}"
 
-    def test_ik_with_ee_link_name_via_resolve(self, arm_agent):
-        """_solve_ik with link name resolved to index first."""
+    @pytest.mark.parametrize(
+        "target",
+        [
+            [0.0, 0.3, 0.3],  # Y+ direction — requires J0 ~+90°
+            [0.0, -0.3, 0.3],  # Y- direction — requires J0 ~-90°
+            [0.3, 0.0, 0.3],  # X+ direction — another axis
+        ],
+        ids=["y_positive", "y_negative", "x_positive"],
+    )
+    def test_ik_converges_for_large_joint_displacement(self, arm_agent, target):
+        """_solve_ik should converge even when solution requires large displacement from rest."""
         agent, _ = arm_agent
-        ee_idx = agent._get_end_effector_link_index("end_effector")
-        angles = agent._solve_ik([0.0, 0.0, 0.75], ee_link_index=ee_idx)
+        ee_idx = agent._get_end_effector_link_index()
+        angles = agent._solve_ik(target, ee_link_index=ee_idx)
         assert len(angles) == agent.get_num_joints()
+        # Verify the EE actually reaches the target
+        reachable = agent._check_ik_reachability(angles, target, ee_idx, tolerance=0.02)
+        assert reachable, f"IK solution {angles} does not place EE within 0.02m of target {target}"
 
 
 # ============================================================
@@ -260,14 +222,20 @@ class TestMoveEndEffector:
         result = agent.move_end_effector([100.0, 100.0, 100.0])
         assert result is False
         # Targets still set (best-effort)
-        assert len(agent._kinematic_joint_targets) > 0
+        assert len(agent._last_joint_targets) > 0
+
+    def test_returns_true_for_y_positive_target(self, arm_agent):
+        """move_end_effector should reach Y+ target (requires large J0 rotation)."""
+        agent, _ = arm_agent
+        result = agent.move_end_effector([0.0, 0.3, 0.3])
+        assert result is True, "Y+ target should be reachable with iterative IK"
 
     def test_sets_joint_targets(self, arm_agent):
-        """move_end_effector should set kinematic joint targets."""
+        """move_end_effector should set joint targets."""
         agent, _ = arm_agent
         agent.move_end_effector([0.0, 0.0, 0.75])
-        # In kinematic mode, targets should be populated
-        assert len(agent._kinematic_joint_targets) > 0
+        # Targets should be populated
+        assert len(agent._last_joint_targets) > 0
 
     def test_ee_reaches_target_after_steps(self, arm_agent):
         """After enough update steps, EE should be near target."""
@@ -288,11 +256,26 @@ class TestMoveEndEffector:
         assert distance < 0.05, f"EE at {actual_pos}, target {target}, distance {distance:.4f}"
 
     def test_with_orientation(self, arm_agent):
-        """move_end_effector with orientation returns bool."""
-        agent, _ = arm_agent
-        result = agent.move_end_effector([0.0, 0.0, 0.75], target_orientation=[0, 0, 0, 1])
-        assert isinstance(result, bool)
-        assert len(agent._kinematic_joint_targets) > 0
+        """move_end_effector with orientation achieves target pose."""
+        agent, sim_core = arm_agent
+        target_pos = [0.0, 0.0, 0.75]
+        target_orn = [0.0, 0.0, 0.0, 1.0]
+        result = agent.move_end_effector(target_pos, target_orientation=target_orn)
+        assert result is True
+
+        # Step to let joints settle
+        for _ in range(2000):
+            sim_core.tick()
+            agent.update(sim_core._dt)
+
+        ee_idx = agent._get_end_effector_link_index()
+        link_state = p.getLinkState(agent.body_id, ee_idx, computeForwardKinematics=1, physicsClientId=agent._pid)
+        actual_pos = np.array(link_state[0])
+        assert np.linalg.norm(actual_pos - np.array(target_pos)) < 0.05
+
+        actual_orn = np.array(link_state[1])
+        dot = abs(np.dot(actual_orn, np.array(target_orn)))
+        assert dot > 0.95, f"Orientation mismatch: dot={dot:.3f}, actual={actual_orn}"
 
     def test_mesh_agent_returns_false(self, pybullet_env):
         """Calling move_end_effector on mesh agent returns False."""
@@ -309,161 +292,121 @@ class TestMoveEndEffector:
 
 
 # ============================================================
-# T3: PoseAction
+# T3: _last_joint_targets unification
 # ============================================================
 
 
-class TestPoseAction:
-    """Tests for PoseAction."""
+class TestLastJointTargets:
+    """Tests for _last_joint_targets and are_joints_at_targets(None)."""
 
-    def test_pose_action_completes(self, arm_agent):
-        """PoseAction should reach COMPLETED status."""
+    def test_are_joints_at_targets_no_args_returns_true_when_settled(self, arm_agent):
+        """are_joints_at_targets() returns True when settled; targets persist."""
         agent, sim_core = arm_agent
-        action = PoseAction(target_position=[0.0, 0.0, 0.75])
-        agent.add_action(action)
-
-        dt = sim_core._dt
-        for _ in range(3000):
+        agent.set_all_joints_targets([0.1, 0.2, -0.1, 0.05])
+        for _ in range(2000):
             sim_core.tick()
-            agent.update(dt)
-            if action.status == ActionStatus.COMPLETED:
-                break
+            agent.update(sim_core._dt)
+        assert agent.are_joints_at_targets(tolerance=0.05)
+        # Targets persist after arrival (not deleted)
+        assert 0 in agent._last_joint_targets
+        assert agent._last_joint_targets[0] == 0.1
 
-        assert action.status == ActionStatus.COMPLETED
-
-    def test_pose_action_ee_at_target(self, arm_agent):
-        """After PoseAction completes, EE should be near target."""
+    def test_are_joints_at_targets_no_args_returns_false_before_settled(self, arm_agent):
+        """are_joints_at_targets() returns False while joints are still moving."""
         agent, sim_core = arm_agent
-        target = [0.0, 0.0, 0.75]  # Home position
-        action = PoseAction(target_position=target, tolerance=0.03)
-        agent.add_action(action)
+        agent.set_all_joints_targets([1.0, 1.0, -1.0, 0.5])
+        # Only step once — joints should not have arrived yet
+        sim_core.tick()
+        agent.update(sim_core._dt)
+        assert agent.are_joints_at_targets(tolerance=0.01) is False
 
-        dt = sim_core._dt
-        for _ in range(3000):
-            sim_core.tick()
-            agent.update(dt)
-            if action.status == ActionStatus.COMPLETED:
-                break
+    def test_are_joints_at_targets_no_targets_set(self, arm_agent, caplog):
+        """are_joints_at_targets() returns True with warning when no targets ever set."""
+        agent, _ = arm_agent
+        import logging
 
-        ee_idx = agent._get_end_effector_link_index()
-        link_state = p.getLinkState(agent.body_id, ee_idx, computeForwardKinematics=1, physicsClientId=agent._pid)
-        actual_pos = np.array(link_state[0])
-        distance = np.linalg.norm(actual_pos - np.array(target))
-        assert distance < 0.05
+        with caplog.at_level(logging.WARNING):
+            result = agent.are_joints_at_targets()
+        assert result is True
+        assert any(
+            "no targets" in msg.lower() for msg in caplog.messages
+        ), f"Expected warning about no targets, got: {caplog.messages}"
 
-    def test_pose_action_with_orientation(self, arm_agent):
-        """PoseAction with orientation completes."""
-        agent, sim_core = arm_agent
-        action = PoseAction(
-            target_position=[0.0, 0.0, 0.75],
-            target_orientation=[0.0, 0.0, 0.0, 1.0],
-        )
-        agent.add_action(action)
-
-        dt = sim_core._dt
-        for _ in range(3000):
-            sim_core.tick()
-            agent.update(dt)
-            if action.status == ActionStatus.COMPLETED:
-                break
-
-        assert action.status == ActionStatus.COMPLETED
-
-    def test_pose_action_explicit_ee_link(self, arm_agent):
-        """PoseAction with explicit end_effector_link."""
-        agent, sim_core = arm_agent
-        action = PoseAction(
-            target_position=[0.0, 0.0, 0.75],
-            end_effector_link="end_effector",
-        )
-        agent.add_action(action)
-
-        dt = sim_core._dt
-        for _ in range(3000):
-            sim_core.tick()
-            agent.update(dt)
-            if action.status == ActionStatus.COMPLETED:
-                break
-
-        assert action.status == ActionStatus.COMPLETED
+    def test_last_joint_targets_property(self, arm_agent):
+        """last_joint_targets property returns a copy."""
+        agent, _ = arm_agent
+        agent.set_joint_target(1, 0.5)
+        prop = agent.last_joint_targets
+        assert prop == {1: 0.5}
+        prop[1] = 999.0  # mutate copy
+        assert agent.last_joint_targets == {1: 0.5}  # original unchanged
 
 
 # ============================================================
-# T4: PickAction / DropAction EE pose extensions
+# T4: IKParams dataclass
 # ============================================================
 
 
-class TestPickDropEEPose:
-    """Tests for ee_target_position on PickAction / DropAction."""
+class TestIKParams:
+    """Tests for IKParams dataclass and its integration with Agent."""
 
-    def test_pick_action_mutual_exclusion(self):
-        """ValueError when both joint_targets and ee_target_position are set."""
-        with pytest.raises(ValueError, match="Cannot specify both"):
-            PickAction(
-                target_object_id=999,
-                joint_targets=[0.0, 0.0, 0.0, 0.0],
-                ee_target_position=[0.1, 0.0, 0.5],
-            )
+    def test_default_values(self):
+        """IKParams() should have sensible defaults."""
+        from pybullet_fleet.agent import IKParams
 
-    def test_drop_action_mutual_exclusion(self):
-        """ValueError when both joint_targets and ee_target_position are set."""
-        with pytest.raises(ValueError, match="Cannot specify both"):
-            DropAction(
-                drop_pose=Pose.from_xyz(1, 0, 0),
-                joint_targets=[0.0, 0.0, 0.0, 0.0],
-                ee_target_position=[0.1, 0.0, 0.5],
-            )
+        cfg = IKParams()
+        assert cfg.max_outer_iterations == 5
+        assert cfg.convergence_threshold == 0.01
+        assert cfg.max_inner_iterations == 200
+        assert cfg.residual_threshold == 1e-4
+        assert cfg.reachability_tolerance == 0.02
+        assert cfg.seed_quartiles == (0.25, 0.75)
 
-    def test_pick_action_ee_pose_accepted(self):
-        """PickAction with only ee_target_position should not raise."""
-        action = PickAction(
-            target_object_id=999,
-            ee_target_position=[0.1, 0.0, 0.5],
+    def test_custom_values(self):
+        """IKParams accepts custom values."""
+        from pybullet_fleet.agent import IKParams
+
+        cfg = IKParams(
+            max_outer_iterations=10,
+            convergence_threshold=0.05,
+            max_inner_iterations=500,
+            residual_threshold=1e-6,
+            reachability_tolerance=0.1,
+            seed_quartiles=(0.1, 0.5, 0.9),
         )
-        assert action.ee_target_position == [0.1, 0.0, 0.5]
-        assert action.joint_targets is None
+        assert cfg.max_outer_iterations == 10
+        assert cfg.convergence_threshold == 0.05
+        assert cfg.max_inner_iterations == 500
+        assert cfg.residual_threshold == 1e-6
+        assert cfg.reachability_tolerance == 0.1
+        assert cfg.seed_quartiles == (0.1, 0.5, 0.9)
 
-    def test_drop_action_ee_pose_accepted(self):
-        """DropAction with only ee_target_position should not raise."""
-        action = DropAction(
-            drop_pose=Pose.from_xyz(1, 0, 0),
-            ee_target_position=[0.1, 0.0, 0.5],
-        )
-        assert action.ee_target_position == [0.1, 0.0, 0.5]
-        assert action.joint_targets is None
+    def test_agent_default_ik_params(self, arm_agent):
+        """Agent should have default IKParams when none provided."""
+        from pybullet_fleet.agent import IKParams
 
-    def test_pick_with_ee_pose_resolves_ik(self, arm_agent):
-        """PickAction with ee_target_position should resolve IK during PICKING phase."""
-        agent, sim_core = arm_agent
+        agent, _ = arm_agent
+        assert hasattr(agent, "_ik_params")
+        assert isinstance(agent._ik_params, IKParams)
+        assert agent._ik_params.max_outer_iterations == 5
 
-        # Create a pickable box near arm
-        box = SimObject.from_mesh(
-            visual_shape=ShapeParams(shape_type="box", half_extents=[0.03, 0.03, 0.03]),
-            collision_shape=ShapeParams(shape_type="box", half_extents=[0.03, 0.03, 0.03]),
-            pose=Pose.from_xyz(0.15, 0.0, 0.3),
+    def test_agent_custom_ik_params(self, pybullet_env):
+        """Agent.from_urdf should accept ik_params parameter."""
+        from pybullet_fleet.agent import IKParams
+
+        sim_core = MockSimCore(physics=False)
+        sim_core._client = pybullet_env
+        cfg = IKParams(max_outer_iterations=10, convergence_threshold=0.05)
+        agent = Agent.from_urdf(
+            urdf_path=ARM_URDF,
+            pose=Pose.from_xyz(0, 0, 0),
+            use_fixed_base=True,
             mass=0.0,
             sim_core=sim_core,
+            ik_params=cfg,
         )
-
-        action = PickAction(
-            target_object_id=box.body_id,
-            use_approach=False,
-            ee_target_position=[0.15, 0.0, 0.3],
-            attach_link=3,  # end effector
-            attach_relative_pose=Pose.from_xyz(0, 0, 0.06),
-        )
-        agent.add_action(action)
-
-        dt = sim_core._dt
-        for _ in range(3000):
-            sim_core.tick()
-            agent.update(dt)
-            if action.status in (ActionStatus.COMPLETED, ActionStatus.FAILED):
-                break
-
-        # The action should have resolved joint_targets from IK
-        assert action.joint_targets is not None
-        assert isinstance(action.joint_targets, list)
+        assert agent._ik_params is cfg
+        assert agent._ik_params.max_outer_iterations == 10
 
 
 if __name__ == "__main__":

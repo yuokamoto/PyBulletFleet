@@ -151,11 +151,16 @@ object attachment via `update_attached_objects_kinematics()`.
 - `set_joint_target(index, position)`: Set single joint target (transparent mode switching)
 - `set_all_joints_targets(positions)`: Set all joint targets at once
 - `are_all_joints_at_targets(targets, tolerance)`: Check if all joints reached targets
+- `are_joints_at_targets(targets, tolerance)`: Unified check — accepts list, dict, or `None` (uses `_last_joint_targets`)
 - `_update_kinematic_joints(dt)`: Internal per-step interpolation (called from `update()`)
+
+**Inverse Kinematics (IK):**
+- `move_end_effector(target_position, target_orientation, end_effector_link)`: High-level EE position command. Solves IK internally, checks reachability, sets joint targets. Returns `True` if reachable, `False` if not (best-effort targets still set).
 
 **Associated Params:**
 
 - `AgentSpawnParams` — Configuration for agent initialization: motion limits (`max_linear_vel`, `max_linear_accel`, `max_angular_vel`, `max_angular_accel`), motion mode (`"omnidirectional"` / `"differential"`), orientation, mass, collision toggle. Immutable after creation.
+- `IKParams` — IK solver configuration dataclass: `max_outer_iterations`, `convergence_threshold`, `max_inner_iterations`, `residual_threshold`, `reachability_tolerance`, `seed_quartiles`. Passed to `Agent.from_urdf(ik_params=...)`. Default: 5 outer iterations, 0.01 m threshold.
 
 ---
 
@@ -258,6 +263,29 @@ Move all joints to target positions.
 
 **Completion:** All joints within `tolerance` of their targets. Works transparently
 in both physics mode (motor control) and kinematic mode (interpolation).
+
+##### PoseAction
+Move end-effector to a Cartesian target position via IK.
+
+**Key Parameters:**
+- `target_position`: EE target `[x, y, z]` in world frame
+- `target_orientation`: Optional quaternion `[x, y, z, w]` for orientation control
+- `end_effector_link`: Link index, name, or `None` (auto-detect last link)
+- `tolerance`: Joint convergence threshold (default: 0.02 rad)
+- `max_force`: Motor force for physics mode (default: 500.0 N·m)
+
+**Completion:** All joints within `tolerance` of the IK solution. Calls `move_end_effector()` on start,
+then monitors `are_joints_at_targets()` each step.
+
+**Unreachable targets:** If the IK solver determines the target is unreachable, the action does not
+fail immediately. Best-effort joint targets are set and joints move toward them. After settling,
+the action completes with `ActionStatus.FAILED` (not `COMPLETED`). A warning is logged at start
+and the `error_message` attribute is set to `"IK target was not reachable"`.
+
+**IK integration in Pick/Drop:**
+`PickAction` and `DropAction` accept an optional `ee_target_position` parameter.
+When set, the action uses `move_end_effector()` to position the EE via IK before
+performing the pick/drop operation, as an alternative to `JointAction`-based positioning.
 
 ---
 

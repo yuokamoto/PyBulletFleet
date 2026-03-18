@@ -327,9 +327,10 @@ class PoseAction(Action):
     """
     End-effector pose control via inverse kinematics.
 
-    Calls ``agent.move_end_effector()`` on the first step, then checks
-    the EE position each subsequent step until it is within *tolerance*
-    or the joints have settled (best-effort).
+    Calls ``agent.move_end_effector()`` on the first step.  Joint
+    targets are always set and the action waits for joints to settle.
+    After settling, the action completes with ``COMPLETED`` if the
+    target was reachable, or ``FAILED`` if it was not.
 
     Args:
         target_position: Target EE position [x, y, z] in world frame.
@@ -357,7 +358,6 @@ class PoseAction(Action):
     tolerance: float = 0.02
 
     # Internal state
-    _ee_link_index: int = field(default=-1, init=False)
     _reachable: bool = field(default=False, init=False)
 
     def __post_init__(self):
@@ -369,7 +369,6 @@ class PoseAction(Action):
             self.start_time = agent.sim_core.sim_time if agent.sim_core else 0.0
             self._log_start(agent)
 
-            self._ee_link_index = agent._get_end_effector_link_index(self.end_effector_link)
             self._reachable = agent.move_end_effector(
                 self.target_position,
                 self.target_orientation,
@@ -378,36 +377,23 @@ class PoseAction(Action):
                 self.tolerance,
             )
             if not self._reachable:
-                self._log.info("IK target may not be fully reachable (best-effort)")
+                self._log.warning("IK target is not reachable (best-effort movement will proceed)")
 
-        # Check EE distance to target
-        if self._ee_link_index >= 0:
-            link_state = p.getLinkState(
-                agent.body_id,
-                self._ee_link_index,
-                computeForwardKinematics=1,
-                physicsClientId=agent._pid,
-            )
-            actual_pos = np.array(link_state[0])
-            distance = float(np.linalg.norm(actual_pos - np.array(self.target_position)))
-            if distance <= self.tolerance:
-                self.status = ActionStatus.COMPLETED
-                self.end_time = agent.sim_core.sim_time if agent.sim_core else 0.0
-                self._log_end()
-                return True
-
-        # Joints settled (kinematic mode: no pending targets)
-        if agent._use_kinematic_joints and not agent._kinematic_joint_targets:
-            self.status = ActionStatus.COMPLETED
+        # All joints reached their IK-solved targets
+        if agent.are_joints_at_targets(tolerance=self.tolerance):
             self.end_time = agent.sim_core.sim_time if agent.sim_core else 0.0
-            self._log_end()
+            if self._reachable:
+                self.status = ActionStatus.COMPLETED
+                self._log_end()
+            else:
+                self.status = ActionStatus.FAILED
+                self._log_failure("IK target was not reachable")
             return True
 
         return False
 
     def reset(self):
         super().reset()
-        self._ee_link_index = -1
         self._reachable = False
 
 

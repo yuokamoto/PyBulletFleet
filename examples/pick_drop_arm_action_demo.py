@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 """
 pick_drop_arm_action_demo.py
-Demo: Robot arm picks and drops a box using Action-based interface.
+Demo: Robot arm picks and drops a box using the Action system (joint control).
 
-Demonstrates:
-- JointAction: Move arm joints to target positions
-- PickAction: Pick object and attach to end-effector link
-- DropAction: Drop object at target position
-- Action sequence management
+Uses JointAction / PickAction / DropAction to declaratively define
+the pick-drop sequence. The Action system handles execution and transitions.
+
+Low-level version (without Actions): pick_drop_arm_demo.py
+EE position variant (Action): pick_drop_arm_ee_action_demo.py
+EE position variant (low-level): pick_drop_arm_ee_demo.py
 """
 import os
 import sys
@@ -45,20 +46,20 @@ box_sim = SimObject.from_mesh(
 )
 
 # Joint configurations
-joint_init = [0.0, 0.0, 0.0, 0.0]  # Initial/neutral position
-pick_joints = [1.5, 1.5, 1.5, 0.0]  # Extend toward box (right side)
-place_joints = [-1.5, 1.5, 1.5, 0.0]  # Extend to opposite side (left)
+JOINT_INIT = [0.0, 0.0, 0.0, 0.0]  # Initial/neutral position
+PICK_JOINTS = [1.5, 1.5, 1.5, 0.0]  # Extend toward box (right side)
+PLACE_JOINTS = [-1.5, 1.5, 1.5, 0.0]  # Extend to opposite side (left)
 
 # Pick/drop positions
-box_pick_pose = Pose.from_xyz(0.3, 0, 0.1)
-box_place_pose = Pose.from_xyz(-0.3, 0, 0.1)
+BOX_PICK_POSE = Pose.from_xyz(0.3, 0, 0.1)
+BOX_PLACE_POSE = Pose.from_xyz(-0.3, 0, 0.1)
 
 # End-effector link index
 PICK_LINK_INDEX = p.getNumJoints(arm_agent.body_id) - 1
 
 # Offset for attachment (box positioned above end-effector)
-box_offset = 0.14
-offset_pose = Pose.from_xyz(0, 0, box_offset)
+BOX_OFFSET = 0.14
+OFFSET_POSE = Pose.from_xyz(0, 0, BOX_OFFSET)
 
 # Create action sequence
 # Cycle 1: Pick from right, drop on left
@@ -71,51 +72,47 @@ def create_action_sequence():
 
     # Cycle 1: Pick from right, drop on left
     actions_cycle1 = [
-        # 1. Move to initial position and place box at pick location
-        JointAction(target_joint_positions=joint_init, tolerance=0.05),
-        # 2. Move arm to pick position
-        JointAction(target_joint_positions=pick_joints, tolerance=0.05),
-        # 3. Pick box from right side
+        # 1. Pick box from right side (move joints to pick position, then attach)
         PickAction(
             target_object_id=box_sim.body_id,
-            use_approach=False,  # No approach needed for arm (already positioned)
+            use_approach=False,
+            joint_targets=PICK_JOINTS,
+            joint_tolerance=0.05,
             attach_link=PICK_LINK_INDEX,
-            attach_relative_pose=offset_pose,
+            attach_relative_pose=OFFSET_POSE,
         ),
-        # 4. Move arm to place position (with box attached)
-        JointAction(target_joint_positions=place_joints, tolerance=0.05),
-        # 5. Drop box on left side
+        # 2. Drop box on left side (move joints to place position, then detach)
         DropAction(
-            drop_pose=box_place_pose,
-            use_approach=False,  # No approach needed for arm
+            drop_pose=BOX_PLACE_POSE,
+            use_approach=False,
+            joint_targets=PLACE_JOINTS,
+            joint_tolerance=0.05,
         ),
-        # 6. Return to initial position
-        JointAction(target_joint_positions=joint_init, tolerance=0.05),
-        # 7. Small wait between cycles
+        # 3. Return to initial position
+        JointAction(target_joint_positions=JOINT_INIT, tolerance=0.05),
         WaitAction(duration=0.5, action_type="idle"),
     ]
 
     # Cycle 2: Pick from left, drop on right
     actions_cycle2 = [
-        # 1. Move arm to place position (where box was dropped)
-        JointAction(target_joint_positions=place_joints, tolerance=0.05),
-        # 2. Pick box from left side
+        # 1. Pick box from left side (move joints to place position, then attach)
         PickAction(
             target_object_id=box_sim.body_id,
             use_approach=False,
+            joint_targets=PLACE_JOINTS,
+            joint_tolerance=0.05,
             attach_link=PICK_LINK_INDEX,
-            attach_relative_pose=offset_pose,
+            attach_relative_pose=OFFSET_POSE,
         ),
-        # 3. Move arm to pick position (with box attached)
-        JointAction(target_joint_positions=pick_joints, tolerance=0.05),
-        # 4. Drop box on right side
+        # 2. Drop box on right side (move joints to pick position, then detach)
         DropAction(
-            drop_pose=box_pick_pose,
+            drop_pose=BOX_PICK_POSE,
             use_approach=False,
+            joint_targets=PICK_JOINTS,
+            joint_tolerance=0.05,
         ),
-        # 5. Return to initial position
-        JointAction(target_joint_positions=joint_init, tolerance=0.05),
-        # 6. Small wait before repeating
+        # 3. Return to initial position
+        JointAction(target_joint_positions=JOINT_INIT, tolerance=0.05),
         WaitAction(duration=0.5, action_type="idle"),
     ]
 

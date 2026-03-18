@@ -19,7 +19,6 @@ New robot and infrastructure models:
 
 ## Features
 
-- **Inverse Kinematics (IK) Action** — `IKAction` that accepts end-effector target position (XYZ) and uses PyBullet's `calculateInverseKinematics()` to solve joint angles automatically. Builds on kinematic arm joint control.
 - **Snapshot & Replay** — Full and delta snapshot serialization for logging, replay, and external synchronization ([USO](https://github.com/yuokamoto/Unified-Simulation-Orchestrator) integration)
 - **Behavior tree integration** - Create agent behavior from behavior tree.
 
