@@ -17,13 +17,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - **`JointAction`** — Action that moves all joints to target positions. Completes when all joints are within `tolerance`. Works in both physics and kinematic modes.
 - **Arm demos** — `pick_drop_arm_demo.py` (low-level callback), `pick_drop_arm_action_demo.py` (action queue), `pick_drop_arm_100robots_demo.py` (100 arms fleet)
 - **Tutorial 4** — Arm Joint Control & Pick/Drop documentation (`docs/examples/arm-pick-drop.md`)
-- **Inverse Kinematics (IK)** — Multi-seed iterative IK solver with three strategies (current joints, quartile seeds, zero seed). Configurable via `IKParams` dataclass.
+- **Inverse Kinematics (IK)** — Multi-seed iterative IK solver with current-joint and quartile seed strategies. Configurable via `IKParams` dataclass.
   - `Agent.move_end_effector(target_position, target_orientation)` — high-level EE position command
-  - `Agent._solve_ik()` — low-level IK solver with reachability checking
+  - `Agent.are_ee_at_target()` — check whether EE has reached a Cartesian target
   - `Agent._get_end_effector_link_index()` — auto-detect or resolve EE link
   - `Agent.are_joints_at_targets()` — unified joint convergence check using `_last_joint_targets`
 - **`PoseAction`** — Action that moves the end-effector to a Cartesian target via IK. Supports position-only and position+orientation modes.
-- **`ee_target_position` parameter** for `PickAction` and `DropAction` — IK-based EE positioning as alternative to `JointAction` pre-positioning.
+- **`ee_target_position` parameter** for `PickAction` and `DropAction` — IK-based EE positioning via `PoseAction` sub-action, as alternative to `JointAction` pre-positioning. `continue_on_ik_failure` flag controls behaviour on unreachable targets.
 - **`IKParams` dataclass** — Tunable IK solver parameters: `max_outer_iterations`, `convergence_threshold`, `max_inner_iterations`, `residual_threshold`, `reachability_tolerance`, `seed_quartiles`. Passed to `Agent.from_urdf(ik_params=...)`.
 - **`_last_joint_targets` unification** — All joint-setting methods (`set_joint_target`, `set_all_joints_targets`, `move_end_effector`) record targets in `_last_joint_targets`. `are_joints_at_targets()` with no arguments checks these last-commanded targets.
 - **EE control demos** — `pick_drop_arm_ee_demo.py` (low-level callback) and `pick_drop_arm_ee_action_demo.py` (action queue)

@@ -59,7 +59,7 @@ class MockSimCore:
         """Advance sim_time by *n* time-steps, with physics stepping if enabled."""
         if self._params.physics:
             for _ in range(n):
-                p.stepSimulation()
+                p.stepSimulation(physicsClientId=self._client)
                 self.sim_time += self._dt
         else:
             self.sim_time += self._dt * n

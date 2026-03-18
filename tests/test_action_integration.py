@@ -1160,6 +1160,20 @@ class TestPoseActionIntegration:
 
         assert action.status == ActionStatus.FAILED
 
+    def test_checks_ee_position(self, arm_sim):
+        """PoseAction checks EE Cartesian distance, not just joint convergence."""
+        sim_core, mass = arm_sim
+        agent = create_arm_agent(sim_core, mass)
+        target = [0.0, 0.0, 0.75]
+        action = PoseAction(target_position=target, tolerance=0.03)
+        agent.add_action(action)
+
+        run_arm_until_idle(agent, sim_core)
+
+        assert action.status == ActionStatus.COMPLETED
+        # Verify are_ee_at_target is True
+        assert agent.are_ee_at_target(target, tolerance=0.05) is True
+
 
 # ---------------------------------------------------------------------------
 # PickAction / DropAction with ee_target_position (arm integration)
@@ -1201,8 +1215,6 @@ class TestPickDropEEPoseIntegration:
 
         assert action.status == ActionStatus.COMPLETED
         assert box.is_attached()
-        assert action.joint_targets is not None
-        assert isinstance(action.joint_targets, list)
 
     def test_drop_ee_pose_completes(self, arm_sim):
         """DropAction with ee_target_position resolves IK and completes."""
@@ -1233,5 +1245,62 @@ class TestPickDropEEPoseIntegration:
 
         assert action.status == ActionStatus.COMPLETED
         assert not box.is_attached()
-        assert action.joint_targets is not None
-        assert isinstance(action.joint_targets, list)
+
+    def test_pick_unreachable_with_continue_true(self, arm_sim):
+        """PickAction with unreachable ee_target and continue_on_ik_failure=True completes with warning."""
+        sim_core, mass = arm_sim
+        agent = create_arm_agent(sim_core, mass)
+
+        box = SimObject.from_mesh(
+            visual_shape=ShapeParams(shape_type="box", half_extents=[0.03, 0.03, 0.03]),
+            collision_shape=ShapeParams(shape_type="box", half_extents=[0.03, 0.03, 0.03]),
+            pose=Pose.from_xyz(2.0, 0.0, 0.1),
+            mass=0.0,
+            sim_core=sim_core,
+        )
+        ee_link = agent.get_num_joints() - 1
+
+        action = PickAction(
+            target_object_id=box.body_id,
+            use_approach=False,
+            ee_target_position=[10.0, 10.0, 10.0],  # unreachable
+            attach_link=ee_link,
+            attach_relative_pose=Pose.from_xyz(0, 0, 0.06),
+            continue_on_ik_failure=True,
+        )
+        agent.add_action(action)
+
+        run_arm_until_idle(agent, sim_core)
+
+        # Should still complete (continue despite IK failure)
+        assert action.status == ActionStatus.COMPLETED
+        assert box.is_attached()
+
+    def test_pick_unreachable_with_continue_false(self, arm_sim):
+        """PickAction with unreachable ee_target and continue_on_ik_failure=False fails."""
+        sim_core, mass = arm_sim
+        agent = create_arm_agent(sim_core, mass)
+
+        box = SimObject.from_mesh(
+            visual_shape=ShapeParams(shape_type="box", half_extents=[0.03, 0.03, 0.03]),
+            collision_shape=ShapeParams(shape_type="box", half_extents=[0.03, 0.03, 0.03]),
+            pose=Pose.from_xyz(2.0, 0.0, 0.1),
+            mass=0.0,
+            sim_core=sim_core,
+        )
+        ee_link = agent.get_num_joints() - 1
+
+        action = PickAction(
+            target_object_id=box.body_id,
+            use_approach=False,
+            ee_target_position=[10.0, 10.0, 10.0],  # unreachable
+            attach_link=ee_link,
+            attach_relative_pose=Pose.from_xyz(0, 0, 0.06),
+            continue_on_ik_failure=False,
+        )
+        agent.add_action(action)
+
+        run_arm_until_idle(agent, sim_core)
+
+        assert action.status == ActionStatus.FAILED
+        assert not box.is_attached()

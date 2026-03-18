@@ -32,6 +32,18 @@ logger = logging.getLogger(__name__)
 
 # Note: ActionStatus and MovementDirection have been moved to types.py
 
+# ---------------------------------------------------------------------------
+# Default constants shared across Action classes
+# ---------------------------------------------------------------------------
+DEFAULT_MAX_FORCE: float = 500.0
+"""Default maximum motor force (N) for joint/EE control."""
+
+DEFAULT_JOINT_TOLERANCE: float = 0.01
+"""Default joint-space tolerance (rad or m) for convergence checks."""
+
+DEFAULT_EE_TOLERANCE: float = 0.02
+"""Default Cartesian end-effector tolerance (m) for convergence checks."""
+
 
 class PickPhase(Enum):
     """Phases of pick action execution."""
@@ -295,8 +307,8 @@ class JointAction(Action):
     """
 
     target_joint_positions: Union[list, dict]
-    max_force: float = 500.0
-    tolerance: Union[float, list, dict] = 0.01
+    max_force: float = DEFAULT_MAX_FORCE
+    tolerance: Union[float, list, dict] = DEFAULT_JOINT_TOLERANCE
 
     def __post_init__(self):
         super().__init__()
@@ -354,8 +366,8 @@ class PoseAction(Action):
     target_position: List[float]
     target_orientation: Optional[tuple] = None
     end_effector_link: Union[int, str, None] = None
-    max_force: float = 500.0
-    tolerance: float = 0.02
+    max_force: float = DEFAULT_MAX_FORCE
+    tolerance: float = DEFAULT_EE_TOLERANCE
 
     # Internal state
     _reachable: bool = field(default=False, init=False)
@@ -381,8 +393,15 @@ class PoseAction(Action):
 
         # All joints reached their IK-solved targets
         if agent.are_joints_at_targets(tolerance=self.tolerance):
+            # Also check EE Cartesian position
+            ee_at_target = agent.are_ee_at_target(
+                self.target_position,
+                target_orientation=self.target_orientation,
+                end_effector_link=self.end_effector_link,
+                tolerance=self.tolerance,
+            )
             self.end_time = agent.sim_core.sim_time if agent.sim_core else 0.0
-            if self._reachable:
+            if self._reachable and ee_at_target:
                 self.status = ActionStatus.COMPLETED
                 self._log_end()
             else:
@@ -534,14 +553,19 @@ class PickAction(Action):
 
     # Joint control (optional — mutually exclusive with ee_target_position)
     joint_targets: Optional[Union[list, dict]] = None  # List or dict {joint_name: position}
-    joint_tolerance: Union[float, list, dict] = 0.01
-    joint_max_force: float = 500.0
+    joint_tolerance: Union[float, list, dict] = DEFAULT_JOINT_TOLERANCE
+    joint_max_force: float = DEFAULT_MAX_FORCE
     _joint_action: Optional[JointAction] = field(default=None, init=False)  # Joint action for picking phase
 
     # EE pose control via IK (alternative to joint_targets)
     ee_target_position: Optional[List[float]] = None  # EE target [x,y,z] in world frame
     ee_target_orientation: Optional[tuple] = None  # quaternion [qx,qy,qz,qw]
     ee_end_effector_link: Union[int, str, None] = None  # For IK resolution
+    ee_tolerance: float = DEFAULT_EE_TOLERANCE  # Cartesian EE tolerance (meters) for PoseAction
+    continue_on_ik_failure: bool = True  # Continue pick even if IK target unreachable
+
+    # Internal sub-action for EE pose control
+    _pose_action: Optional[PoseAction] = field(default=None, init=False)
 
     def __post_init__(self):
         super().__init__()
@@ -642,17 +666,31 @@ class PickAction(Action):
 
         # Phase 4: Pick object (with optional joint control)
         if self._phase == PickPhase.PICKING:
-            # Resolve EE pose to joint targets via IK (once)
-            if self.ee_target_position is not None and self.joint_targets is None:
-                ee_idx = agent._get_end_effector_link_index(self.ee_end_effector_link)
-                self.joint_targets = agent._solve_ik(
-                    self.ee_target_position,
-                    self.ee_target_orientation,
-                    ee_idx,
+            # EE pose control via PoseAction (once)
+            if self.ee_target_position is not None and self._pose_action is None and self._joint_action is None:
+                self._pose_action = PoseAction(
+                    target_position=self.ee_target_position,
+                    target_orientation=self.ee_target_orientation,
+                    end_effector_link=self.ee_end_effector_link,
+                    max_force=self.joint_max_force,
+                    tolerance=self.ee_tolerance,
                 )
 
+            # Execute PoseAction sub-action for EE control
+            if self._pose_action is not None:
+                if not self._pose_action.execute(agent, dt):
+                    return False
+                # PoseAction finished — check result
+                if self._pose_action.status == ActionStatus.FAILED:
+                    if not self.continue_on_ik_failure:
+                        self.status = ActionStatus.FAILED
+                        self.end_time = agent.sim_core.sim_time if agent.sim_core else 0.0
+                        self._log_failure("IK target was not reachable for pick", agent)
+                        return True
+                    self._log.warning("IK target unreachable but continuing pick (continue_on_ik_failure=True)")
+
             # If joint_targets specified, execute joint action first
-            if self.joint_targets:
+            elif self.joint_targets:
                 if self._joint_action is None:
                     self._joint_action = JointAction(
                         target_joint_positions=self.joint_targets,
@@ -801,6 +839,7 @@ class PickAction(Action):
         self._original_pose = None
         self._pick_pose = None
         self._joint_action = None
+        self._pose_action = None
 
 
 @dataclass
@@ -867,14 +906,19 @@ class DropAction(Action):
 
     # Joint control (optional — mutually exclusive with ee_target_position)
     joint_targets: Optional[Union[list, dict]] = None  # List or dict {joint_name: position}
-    joint_tolerance: Union[float, list, dict] = 0.01
-    joint_max_force: float = 500.0
+    joint_tolerance: Union[float, list, dict] = DEFAULT_JOINT_TOLERANCE
+    joint_max_force: float = DEFAULT_MAX_FORCE
     _joint_action: Optional[JointAction] = field(default=None, init=False)  # Joint action for dropping phase
 
     # EE pose control via IK (alternative to joint_targets)
     ee_target_position: Optional[List[float]] = None  # EE target [x,y,z] in world frame
     ee_target_orientation: Optional[tuple] = None  # quaternion [qx,qy,qz,qw]
     ee_end_effector_link: Union[int, str, None] = None  # For IK resolution
+    ee_tolerance: float = DEFAULT_EE_TOLERANCE  # Cartesian EE tolerance (meters) for PoseAction
+    continue_on_ik_failure: bool = True  # Continue drop even if IK target unreachable
+
+    # Internal sub-action for EE pose control
+    _pose_action: Optional[PoseAction] = field(default=None, init=False)
 
     def __post_init__(self):
         super().__init__()
@@ -966,17 +1010,31 @@ class DropAction(Action):
 
         # Phase 4: Drop object (with optional joint control)
         if self._phase == DropPhase.DROPPING:
-            # Resolve EE pose to joint targets via IK (once)
-            if self.ee_target_position is not None and self.joint_targets is None:
-                ee_idx = agent._get_end_effector_link_index(self.ee_end_effector_link)
-                self.joint_targets = agent._solve_ik(
-                    self.ee_target_position,
-                    self.ee_target_orientation,
-                    ee_idx,
+            # EE pose control via PoseAction (once)
+            if self.ee_target_position is not None and self._pose_action is None and self._joint_action is None:
+                self._pose_action = PoseAction(
+                    target_position=self.ee_target_position,
+                    target_orientation=self.ee_target_orientation,
+                    end_effector_link=self.ee_end_effector_link,
+                    max_force=self.joint_max_force,
+                    tolerance=self.ee_tolerance,
                 )
 
+            # Execute PoseAction sub-action for EE control
+            if self._pose_action is not None:
+                if not self._pose_action.execute(agent, dt):
+                    return False
+                # PoseAction finished — check result
+                if self._pose_action.status == ActionStatus.FAILED:
+                    if not self.continue_on_ik_failure:
+                        self.status = ActionStatus.FAILED
+                        self.end_time = agent.sim_core.sim_time if agent.sim_core else 0.0
+                        self._log_failure("IK target was not reachable for drop", agent)
+                        return True
+                    self._log.warning("IK target unreachable but continuing drop (continue_on_ik_failure=True)")
+
             # If joint_targets specified, execute joint action first
-            if self.joint_targets:
+            elif self.joint_targets:
                 if self._joint_action is None:
                     self._joint_action = JointAction(
                         target_joint_positions=self.joint_targets,
@@ -1096,3 +1154,4 @@ class DropAction(Action):
         self._original_pose = None
         self._drop_pose = None
         self._joint_action = None
+        self._pose_action = None

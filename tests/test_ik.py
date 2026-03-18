@@ -89,6 +89,111 @@ class TestGetEndEffectorLinkIndex:
 
 
 # ============================================================
+# T0a: Agent._check_ee_pose (shared FK + pose check core)
+# ============================================================
+
+
+class TestCheckEePose:
+    """Tests for Agent._check_ee_pose() — core FK position/orientation check."""
+
+    def test_position_within_tolerance(self, arm_agent):
+        """Returns True when EE position is within tolerance."""
+        agent, _ = arm_agent
+        ee_idx = agent._get_end_effector_link_index()
+        link_state = p.getLinkState(agent.body_id, ee_idx, computeForwardKinematics=1, physicsClientId=agent._pid)
+        current_pos = list(link_state[0])
+        assert agent._check_ee_pose(ee_idx, current_pos) is True
+
+    def test_position_outside_tolerance(self, arm_agent):
+        """Returns False when EE position is far from target."""
+        agent, _ = arm_agent
+        ee_idx = agent._get_end_effector_link_index()
+        assert agent._check_ee_pose(ee_idx, [10.0, 10.0, 10.0]) is False
+
+    def test_orientation_match(self, arm_agent):
+        """Returns True when both position and orientation match."""
+        agent, _ = arm_agent
+        ee_idx = agent._get_end_effector_link_index()
+        link_state = p.getLinkState(agent.body_id, ee_idx, computeForwardKinematics=1, physicsClientId=agent._pid)
+        current_pos = list(link_state[0])
+        current_orn = list(link_state[1])
+        assert agent._check_ee_pose(ee_idx, current_pos, target_orientation=current_orn) is True
+
+    def test_orientation_mismatch(self, arm_agent):
+        """Returns False when position matches but orientation doesn't."""
+        agent, _ = arm_agent
+        ee_idx = agent._get_end_effector_link_index()
+        link_state = p.getLinkState(agent.body_id, ee_idx, computeForwardKinematics=1, physicsClientId=agent._pid)
+        current_pos = list(link_state[0])
+        wrong_orn = [0.707, 0.0, 0.707, 0.0]
+        assert agent._check_ee_pose(ee_idx, current_pos, target_orientation=wrong_orn, orientation_tolerance=0.1) is False
+
+    def test_negative_ee_index_returns_false(self, arm_agent):
+        """Negative ee_link_index → False."""
+        agent, _ = arm_agent
+        assert agent._check_ee_pose(-1, [0.0, 0.0, 0.75]) is False
+
+
+# ============================================================
+# T0b: Agent.are_ee_at_target
+# ============================================================
+
+
+class TestAreEEAtTarget:
+    """Tests for Agent.are_ee_at_target()."""
+
+    def test_returns_true_when_ee_near_target(self, arm_agent):
+        """Returns True when EE is within tolerance of target position."""
+        agent, sim_core = arm_agent
+        # Home position — EE should already be here
+        ee_idx = agent._get_end_effector_link_index()
+        link_state = p.getLinkState(agent.body_id, ee_idx, computeForwardKinematics=1, physicsClientId=agent._pid)
+        current_pos = list(link_state[0])
+        assert agent.are_ee_at_target(current_pos) is True
+
+    def test_returns_false_when_ee_far_from_target(self, arm_agent):
+        """Returns False when EE is far from target position."""
+        agent, _ = arm_agent
+        assert agent.are_ee_at_target([10.0, 10.0, 10.0]) is False
+
+    def test_with_orientation_near(self, arm_agent):
+        """Returns True when both position and orientation match."""
+        agent, _ = arm_agent
+        ee_idx = agent._get_end_effector_link_index()
+        link_state = p.getLinkState(agent.body_id, ee_idx, computeForwardKinematics=1, physicsClientId=agent._pid)
+        current_pos = list(link_state[0])
+        current_orn = list(link_state[1])
+        assert agent.are_ee_at_target(current_pos, target_orientation=current_orn) is True
+
+    def test_with_orientation_mismatch(self, arm_agent):
+        """Returns False when position matches but orientation does not."""
+        agent, sim_core = arm_agent
+        # Move arm to a non-zero configuration first
+        agent.set_all_joints_targets([1.0, 0.5, -0.5, 0.3])
+        for _ in range(2000):
+            sim_core.tick()
+            agent.update(sim_core._dt)
+        ee_idx = agent._get_end_effector_link_index()
+        link_state = p.getLinkState(agent.body_id, ee_idx, computeForwardKinematics=1, physicsClientId=agent._pid)
+        current_pos = list(link_state[0])
+        # Use a very different orientation
+        wrong_orn = [0.707, 0.0, 0.707, 0.0]
+        assert agent.are_ee_at_target(current_pos, target_orientation=wrong_orn, orientation_tolerance=0.1) is False
+
+    def test_mesh_agent_returns_false(self, pybullet_env):
+        """Mesh agent returns False."""
+        sim_core = MockSimCore(physics=False)
+        sim_core._client = pybullet_env
+        agent = Agent.from_mesh(
+            visual_shape=ShapeParams(shape_type="box", half_extents=[0.1, 0.1, 0.1]),
+            collision_shape=ShapeParams(shape_type="box", half_extents=[0.1, 0.1, 0.1]),
+            pose=Pose.from_xyz(0, 0, 0),
+            sim_core=sim_core,
+        )
+        assert agent.are_ee_at_target([0.0, 0.0, 0.0]) is False
+
+
+# ============================================================
 # T1: Agent._solve_ik
 # ============================================================
 
@@ -134,6 +239,32 @@ class TestSolveIK:
         actual_orn = np.array(link_state[1])
         dot = abs(np.dot(actual_orn, np.array(target_orn)))
         assert dot > 0.95, f"EE orientation mismatch: dot={dot:.3f}, actual={actual_orn}"
+
+    def test_ee_index_negative_returns_empty_list(self, arm_agent):
+        """_solve_ik with ee_index < 0 returns empty list (not zeros)."""
+        agent, _ = arm_agent
+        result = agent._solve_ik([0.0, 0.0, 0.75], ee_link_index=-1)
+        assert result == [], f"Expected empty list for invalid ee_index, got {result}"
+
+    def test_solves_with_empty_quartiles(self, arm_agent):
+        """_solve_ik works even with no quartile seeds (only current-position seed)."""
+        agent, _ = arm_agent
+        from pybullet_fleet.agent import IKParams
+
+        sim_core = agent.sim_core
+        agent2 = Agent.from_urdf(
+            urdf_path=ARM_URDF,
+            pose=Pose.from_xyz(0, 0, 0),
+            use_fixed_base=True,
+            mass=0.0,
+            sim_core=sim_core,
+            ik_params=IKParams(seed_quartiles=()),  # no quartile seeds
+        )
+        # Should still work — current-position seed is always present
+        target = [0.0, 0.3, 0.3]
+        ee_idx = agent2._get_end_effector_link_index()
+        angles = agent2._solve_ik(target, ee_link_index=ee_idx)
+        assert len(angles) > 0
 
     @pytest.mark.parametrize(
         "target",
@@ -200,6 +331,33 @@ class TestCheckIKReachability:
         """Negative ee_link_index → False."""
         agent, _ = arm_agent
         assert agent._check_ik_reachability([0.0] * 4, [0, 0, 0.75], -1) is False
+
+    def test_orientation_check_pass(self, arm_agent):
+        """When target_orientation is provided and satisfied, returns True."""
+        agent, _ = arm_agent
+        ee_idx = agent._get_end_effector_link_index()
+        target_pos = [0.0, 0.0, 0.75]
+        target_orn = [0.0, 0.0, 0.0, 1.0]
+        angles = agent._solve_ik(target_pos, target_orientation=target_orn, ee_link_index=ee_idx)
+        result = agent._check_ik_reachability(angles, target_pos, ee_idx, target_orientation=target_orn)
+        assert result is True
+
+    def test_orientation_check_fail(self, arm_agent):
+        """When target_orientation doesn't match, returns False even if position matches."""
+        agent, _ = arm_agent
+        ee_idx = agent._get_end_effector_link_index()
+        target_pos = [0.0, 0.0, 0.75]
+        # Solve IK for identity orientation
+        angles = agent._solve_ik(target_pos, target_orientation=[0.0, 0.0, 0.0, 1.0], ee_link_index=ee_idx)
+        # But check reachability against a very different orientation
+        result = agent._check_ik_reachability(
+            angles,
+            target_pos,
+            ee_idx,
+            target_orientation=[0.707, 0.0, 0.707, 0.0],
+            orientation_tolerance=0.1,
+        )
+        assert result is False
 
 
 # ============================================================
@@ -306,7 +464,7 @@ class TestLastJointTargets:
         for _ in range(2000):
             sim_core.tick()
             agent.update(sim_core._dt)
-        assert agent.are_joints_at_targets(tolerance=0.05)
+        assert agent.are_joints_at_targets()
         # Targets persist after arrival (not deleted)
         assert 0 in agent._last_joint_targets
         assert agent._last_joint_targets[0] == 0.1
@@ -360,7 +518,7 @@ class TestIKParams:
         assert cfg.max_inner_iterations == 200
         assert cfg.residual_threshold == 1e-4
         assert cfg.reachability_tolerance == 0.02
-        assert cfg.seed_quartiles == (0.25, 0.75)
+        assert cfg.seed_quartiles == (0.25, 0.5, 0.75)
 
     def test_custom_values(self):
         """IKParams accepts custom values."""

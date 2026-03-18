@@ -192,12 +192,12 @@ by passing an `IKParams` dataclass to `Agent.from_urdf()`:
 from pybullet_fleet.agent import Agent, IKParams
 
 ik_cfg = IKParams(
-    max_outer_iterations=5,     # number of seed strategies (default: 5)
+    max_outer_iterations=5,     # refinement iterations per seed (default: 5)
     convergence_threshold=0.01, # position error threshold in metres (default: 0.01)
     max_inner_iterations=200,   # PyBullet IK iterations per attempt (default: 200)
     residual_threshold=1e-4,    # IK residual threshold (default: 1e-4)
     reachability_tolerance=0.02,# tolerance for reachability check in metres (default: 0.02)
-    seed_quartiles=(0.25, 0.75),# joint range quartiles for seed generation (default)
+    seed_quartiles=(0.25, 0.5, 0.75),# joint range quartiles for seed generation (default)
 )
 
 arm_agent = Agent.from_urdf(
@@ -209,10 +209,11 @@ arm_agent = Agent.from_urdf(
 )
 ```
 
-The solver uses three seed strategies per outer iteration:
+The solver tries the following seed strategies (each refined up to
+`max_outer_iterations` times):
 1. **Current joint positions** — works well when EE is near the target
-2. **Quartile seeds** — samples from joint range quartiles for exploration
-3. **Zero seed** — joint angles all at 0 (a known stable configuration)
+2. **Quartile seeds** — joint-range fractions in `seed_quartiles` (default
+   25 %, 50 %, 75 %) for diversified exploration across the joint space
 
 For most use cases, the defaults work well. Increase `max_outer_iterations` if
 the solver fails to converge for targets requiring large joint displacements.

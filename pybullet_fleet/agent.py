@@ -184,7 +184,7 @@ class IKParams:
     max_inner_iterations: int = 200
     residual_threshold: float = 1e-4
     reachability_tolerance: float = 0.02
-    seed_quartiles: Tuple[float, ...] = (0.25, 0.75)
+    seed_quartiles: Tuple[float, ...] = (0.25, 0.5, 0.75)
 
 
 class Agent(SimObject):
@@ -2033,14 +2033,14 @@ class Agent(SimObject):
         """Solve inverse kinematics for the given end-effector target.
 
         Uses a multi-seed iterative scheme on top of PyBullet's
-        ``calculateInverseKinematics``.  Three seed strategies are tried:
+        ``calculateInverseKinematics``.  The following seed strategies
+        are tried:
 
         1. **Current joint positions** — works well when the robot is
            already close to the desired configuration.
-        2. **25 % of joint range** — escapes singularities and local
-           minima that trap the first seed.
-        3. **75 % of joint range** — covers the opposite side of the
-           joint space.
+        2. **Quartile seeds** — joint-range fractions specified by
+           ``ik_params.seed_quartiles`` (default 25 %, 50 %, and 75 %),
+           covering diverse regions of the joint space.
 
         For each seed, up to ``ik_params.max_outer_iterations`` refinement
         passes are performed (feeding the previous IK solution back as
@@ -2055,7 +2055,8 @@ class Agent(SimObject):
                 If None, auto-detects (last link).
 
         Returns:
-            List of joint angles (one per joint).
+            List of joint angles (one per joint).  Empty list if IK
+            cannot be attempted (non-URDF robot, invalid EE link).
         """
         if not self.is_urdf_robot() or not self.joint_info:
             self._log.warning("_solve_ik: only works for URDF robots with joints")
@@ -2064,7 +2065,7 @@ class Agent(SimObject):
         ee_index = ee_link_index if ee_link_index is not None else self._get_end_effector_link_index()
         if ee_index < 0:
             self._log.warning("_solve_ik: invalid end-effector link index")
-            return [0.0] * len(self.joint_info)
+            return []
 
         num_joints = len(self.joint_info)
         lower_limits = [info[8] for info in self.joint_info]
@@ -2130,27 +2131,81 @@ class Agent(SimObject):
 
         return best_angles
 
+    def _check_ee_pose(
+        self,
+        ee_link_index: int,
+        target_position: List[float],
+        target_orientation: Optional[Tuple[float, float, float, float]] = None,
+        tolerance: float = 0.02,
+        orientation_tolerance: float = 0.15,
+    ) -> bool:
+        """Core FK check: compare current EE pose against a target.
+
+        Reads the EE link state via forward kinematics and checks whether
+        the position (and optionally orientation) is within tolerance.
+
+        This is the shared implementation used by both
+        :meth:`_check_ik_reachability` (with temporary joint states) and
+        :meth:`are_ee_at_target` (with current joint states).
+
+        Args:
+            ee_link_index: End-effector link index.  Returns False if < 0.
+            target_position: Desired EE position [x, y, z].
+            target_orientation: Desired EE orientation as quaternion
+                [qx, qy, qz, qw].  If None, only position is checked.
+            tolerance: Maximum Euclidean distance (m) to consider reached.
+            orientation_tolerance: Maximum ``1 - |dot|`` between actual and
+                target quaternions to consider orientation achieved (default 0.15).
+
+        Returns:
+            True if the EE is within *tolerance* of the target.
+        """
+        if ee_link_index < 0:
+            return False
+
+        link_state = p.getLinkState(self.body_id, ee_link_index, computeForwardKinematics=1, physicsClientId=self._pid)
+        actual_pos = np.array(link_state[0])
+        distance = float(np.linalg.norm(actual_pos - np.array(target_position)))
+
+        if distance > tolerance:
+            return False
+
+        if target_orientation is not None:
+            actual_orn = np.array(link_state[1])
+            target_orn = np.array(target_orientation)
+            dot = float(abs(np.dot(actual_orn, target_orn)))
+            if (1.0 - dot) > orientation_tolerance:
+                return False
+
+        return True
+
     def _check_ik_reachability(
         self,
         joint_angles: List[float],
         target_position: List[float],
         ee_link_index: int,
         tolerance: float = 0.02,
+        target_orientation: Optional[Tuple[float, float, float, float]] = None,
+        orientation_tolerance: float = 0.15,
     ) -> bool:
         """Check whether an IK solution actually reaches the target.
 
         Temporarily applies ``joint_angles`` via ``resetJointState``,
-        reads the EE link position via forward kinematics, then restores
-        the original joint positions.
+        delegates to :meth:`_check_ee_pose` for the FK comparison, then
+        restores the original joint positions.
 
         Args:
             joint_angles: IK solution (one angle per joint).
             target_position: Desired EE position [x, y, z].
             ee_link_index: End-effector link index.
             tolerance: Maximum Euclidean distance (m) to consider reachable.
+            target_orientation: Desired EE orientation as quaternion
+                [qx, qy, qz, qw].  If provided, orientation is also checked.
+            orientation_tolerance: Maximum ``1 - |dot|`` between actual and
+                target quaternions to consider orientation achieved (default 0.15).
 
         Returns:
-            True if EE position is within *tolerance* of *target_position*.
+            True if EE position (and optionally orientation) is within tolerance.
         """
         if ee_link_index < 0:
             return False
@@ -2163,16 +2218,13 @@ class Agent(SimObject):
         for i, angle in enumerate(joint_angles):
             p.resetJointState(self.body_id, i, angle, physicsClientId=self._pid)
 
-        # Forward kinematics check
-        link_state = p.getLinkState(self.body_id, ee_link_index, computeForwardKinematics=1, physicsClientId=self._pid)
-        actual_pos = np.array(link_state[0])
-        distance = float(np.linalg.norm(actual_pos - np.array(target_position)))
+        result = self._check_ee_pose(ee_link_index, target_position, target_orientation, tolerance, orientation_tolerance)
 
         # Restore original positions
         for i, pos in enumerate(saved):
             p.resetJointState(self.body_id, i, pos, physicsClientId=self._pid)
 
-        return distance <= tolerance
+        return result
 
     def move_end_effector(
         self,
@@ -2221,10 +2273,47 @@ class Agent(SimObject):
             return False
 
         tol = tolerance if tolerance is not None else self._ik_params.reachability_tolerance
-        reachable = self._check_ik_reachability(joint_angles, target_position, ee_index, tol)
+        reachable = self._check_ik_reachability(
+            joint_angles,
+            target_position,
+            ee_index,
+            tol,
+            target_orientation=target_orientation,
+        )
 
         self.set_all_joints_targets(joint_angles, max_force=max_force)
         return reachable
+
+    def are_ee_at_target(
+        self,
+        target_position: List[float],
+        target_orientation: Optional[Tuple[float, float, float, float]] = None,
+        end_effector_link: Union[int, str, None] = None,
+        tolerance: float = 0.02,
+        orientation_tolerance: float = 0.15,
+    ) -> bool:
+        """Check whether the end-effector is near the target pose.
+
+        Resolves the EE link and delegates to :meth:`_check_ee_pose`.
+
+        Args:
+            target_position: Target EE position [x, y, z] in world frame.
+            target_orientation: Target EE orientation as quaternion
+                [qx, qy, qz, qw].  If None, only position is checked.
+            end_effector_link: Link index, name, or None (auto-detect).
+            tolerance: Maximum Euclidean distance (m) to consider reached.
+            orientation_tolerance: Maximum ``1 - |dot|`` between actual and
+                target quaternions (default 0.15).
+
+        Returns:
+            True if the EE is within *tolerance* of the target.
+        """
+        if not self.is_urdf_robot():
+            self._log.warning("are_ee_at_target() only works for URDF robots")
+            return False
+
+        ee_index = self._get_end_effector_link_index(end_effector_link)
+        return self._check_ee_pose(ee_index, target_position, target_orientation, tolerance, orientation_tolerance)
 
     def update_attached_objects_kinematics(self):
         """

@@ -284,8 +284,10 @@ and the `error_message` attribute is set to `"IK target was not reachable"`.
 
 **IK integration in Pick/Drop:**
 `PickAction` and `DropAction` accept an optional `ee_target_position` parameter.
-When set, the action uses `move_end_effector()` to position the EE via IK before
+When set, the action delegates to a `PoseAction` sub-action to position the EE via IK before
 performing the pick/drop operation, as an alternative to `JointAction`-based positioning.
+A `continue_on_ik_failure` flag (default: `True`) controls whether the pick/drop
+proceeds even when the IK target is unreachable.
 
 ---
 

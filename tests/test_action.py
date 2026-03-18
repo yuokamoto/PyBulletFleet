@@ -19,9 +19,26 @@ from pybullet_fleet.action import (
     PoseAction,
     PickAction,
     DropAction,
+    DEFAULT_MAX_FORCE,
+    DEFAULT_JOINT_TOLERANCE,
+    DEFAULT_EE_TOLERANCE,
 )
 from pybullet_fleet.geometry import Pose, Path
 from pybullet_fleet.types import ActionStatus, MovementDirection
+
+
+# ---------------------------------------------------------------------------
+# Module-level constants
+# ---------------------------------------------------------------------------
+
+
+class TestActionConstants:
+    """Verify module-level default constants."""
+
+    def test_constant_values(self):
+        assert DEFAULT_MAX_FORCE == 500.0
+        assert DEFAULT_JOINT_TOLERANCE == 0.01
+        assert DEFAULT_EE_TOLERANCE == 0.02
 
 
 # ---------------------------------------------------------------------------
@@ -248,8 +265,8 @@ class TestJointAction:
     def test_creation_with_list(self):
         action = JointAction(target_joint_positions=[0.0, 1.0, 0.5])
         assert action.target_joint_positions == [0.0, 1.0, 0.5]
-        assert action.max_force == 500.0
-        assert action.tolerance == 0.01
+        assert action.max_force == DEFAULT_MAX_FORCE
+        assert action.tolerance == DEFAULT_JOINT_TOLERANCE
 
     def test_creation_with_dict(self):
         targets = {"joint_1": 0.5, "joint_2": 1.0}
@@ -279,8 +296,8 @@ class TestPoseAction:
         assert action.target_position == [0.3, 0.0, 0.5]
         assert action.target_orientation is None
         assert action.end_effector_link is None
-        assert action.max_force == 500.0
-        assert action.tolerance == 0.02
+        assert action.max_force == DEFAULT_MAX_FORCE
+        assert action.tolerance == DEFAULT_EE_TOLERANCE
         assert action.status is ActionStatus.NOT_STARTED
 
     def test_creation_with_orientation(self):
@@ -386,6 +403,41 @@ class TestPickAction:
                 ee_target_position=[0.1, 0.0, 0.5],
             )
 
+    def test_continue_on_ik_failure_default_true(self):
+        action = PickAction(target_object_id=999, ee_target_position=[0.1, 0.0, 0.5])
+        assert action.continue_on_ik_failure is True
+
+    def test_continue_on_ik_failure_explicit(self):
+        action = PickAction(
+            target_object_id=999,
+            ee_target_position=[0.1, 0.0, 0.5],
+            continue_on_ik_failure=False,
+        )
+        assert action.continue_on_ik_failure is False
+
+    def test_ee_tolerance_default(self):
+        action = PickAction(target_object_id=999, ee_target_position=[0.1, 0.0, 0.5])
+        assert action.ee_tolerance == DEFAULT_EE_TOLERANCE
+
+    def test_ee_tolerance_custom(self):
+        action = PickAction(
+            target_object_id=999,
+            ee_target_position=[0.1, 0.0, 0.5],
+            ee_tolerance=0.05,
+        )
+        assert action.ee_tolerance == 0.05
+
+    def test_ee_tolerance_independent_of_joint_tolerance(self):
+        """ee_tolerance must not be derived from joint_tolerance."""
+        action = PickAction(
+            target_object_id=999,
+            ee_target_position=[0.1, 0.0, 0.5],
+            joint_tolerance=0.1,
+            ee_tolerance=0.03,
+        )
+        assert action.ee_tolerance == 0.03
+        assert action.joint_tolerance == 0.1
+
 
 # ---------------------------------------------------------------------------
 # DropAction (creation only)
@@ -463,6 +515,41 @@ class TestDropAction:
                 joint_targets=[0.0, 0.0, 0.0, 0.0],
                 ee_target_position=[0.1, 0.0, 0.5],
             )
+
+    def test_continue_on_ik_failure_default_true(self):
+        action = DropAction(drop_pose=Pose.from_xyz(1, 0, 0), ee_target_position=[0.1, 0.0, 0.5])
+        assert action.continue_on_ik_failure is True
+
+    def test_continue_on_ik_failure_explicit(self):
+        action = DropAction(
+            drop_pose=Pose.from_xyz(1, 0, 0),
+            ee_target_position=[0.1, 0.0, 0.5],
+            continue_on_ik_failure=False,
+        )
+        assert action.continue_on_ik_failure is False
+
+    def test_ee_tolerance_default(self):
+        action = DropAction(drop_pose=Pose.from_xyz(1, 0, 0), ee_target_position=[0.1, 0.0, 0.5])
+        assert action.ee_tolerance == DEFAULT_EE_TOLERANCE
+
+    def test_ee_tolerance_custom(self):
+        action = DropAction(
+            drop_pose=Pose.from_xyz(1, 0, 0),
+            ee_target_position=[0.1, 0.0, 0.5],
+            ee_tolerance=0.05,
+        )
+        assert action.ee_tolerance == 0.05
+
+    def test_ee_tolerance_independent_of_joint_tolerance(self):
+        """ee_tolerance must not be derived from joint_tolerance."""
+        action = DropAction(
+            drop_pose=Pose.from_xyz(1, 0, 0),
+            ee_target_position=[0.1, 0.0, 0.5],
+            joint_tolerance=0.1,
+            ee_tolerance=0.03,
+        )
+        assert action.ee_tolerance == 0.03
+        assert action.joint_tolerance == 0.1
 
 
 # ---------------------------------------------------------------------------
