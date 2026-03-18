@@ -257,8 +257,8 @@ Wait for specified duration.
 Move all joints to target positions.
 
 **Key Parameters:**
-- `target_joint_positions`: List of target angles (radians) for all controllable joints
-- `tolerance`: Completion threshold per joint (default: 0.01 rad)
+- `target_joint_positions`: List of target positions for all controllable joints (radians for revolute, metres for prismatic)
+- `tolerance`: Completion threshold per joint (default: 0.01 rad or m)
 - `max_force`: Motor force for physics mode (default: 500.0 N·m)
 
 **Completion:** All joints within `tolerance` of their targets. Works transparently

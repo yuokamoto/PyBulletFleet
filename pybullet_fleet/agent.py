@@ -218,7 +218,8 @@ class Agent(SimObject):
     so the API follows ROS message conventions.
     """
 
-    _KINEMATIC_JOINT_FALLBACK_VELOCITY: float = 2.0  # rad/s
+    _KINEMATIC_JOINT_FALLBACK_VELOCITY: float = 2.0  # rad/s (revolute)
+    _KINEMATIC_PRISMATIC_FALLBACK_VELOCITY: float = 0.5  # m/s (prismatic)
     _DEFAULT_JOINT_TOLERANCE: float = 0.01  # rad (or m for prismatic)
     _kinematic_joints_physics_off_logged: bool = False  # Log physics=False fallback only once
 
@@ -1575,7 +1576,8 @@ class Agent(SimObject):
 
         Each joint moves at most ``velocity_limit * dt`` per step, where
         velocity_limit comes from the URDF ``<limit velocity="...">`` attribute.
-        Falls back to 2.0 rad/s if the URDF limit is 0 or missing.
+        Falls back to 2.0 rad/s for revolute or 0.5 m/s for prismatic
+        if the URDF limit is 0 or missing.
 
         Iterates ``_last_joint_targets`` and skips joints that have already
         reached their target (``abs(diff) < 1e-7``).  Entries are **never**
@@ -1592,7 +1594,11 @@ class Agent(SimObject):
             # URDF velocity limit: joint_info[joint_index][11] is maxVelocity
             max_vel = self.joint_info[joint_index][11]
             if max_vel <= 0:
-                max_vel = self._KINEMATIC_JOINT_FALLBACK_VELOCITY
+                joint_type = self.joint_info[joint_index][2]
+                if joint_type == p.JOINT_PRISMATIC:
+                    max_vel = self._KINEMATIC_PRISMATIC_FALLBACK_VELOCITY
+                else:
+                    max_vel = self._KINEMATIC_JOINT_FALLBACK_VELOCITY
             max_step = max_vel * dt
             if abs(diff) <= max_step:
                 new_pos = target

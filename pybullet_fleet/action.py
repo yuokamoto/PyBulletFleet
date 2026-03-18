@@ -295,7 +295,8 @@ class JointAction(Action):
     Joint positions control as an Action.
 
     Args:
-        target_joint_positions: List of target joint positions (radians)
+        target_joint_positions: List of target joint positions
+            (radians for revolute, metres for prismatic)
         max_force: Maximum force to apply (default: 500.0)
         tolerance: Position tolerance to consider as reached (default: 0.01)
         wait_time: Optional seconds to wait after reaching target (default: 0.0)

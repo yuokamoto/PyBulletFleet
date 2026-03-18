@@ -39,6 +39,7 @@ from tests.conftest import MockSimCore
 
 MESH_PATH = os.path.join(os.path.dirname(__file__), "../mesh/cube.obj")
 ARM_URDF = "robots/arm_robot.urdf"
+RAIL_ARM_URDF = "robots/rail_arm_robot.urdf"
 
 
 # ---------------------------------------------------------------------------
@@ -1311,3 +1312,151 @@ class TestPickDropEEPoseIntegration:
 
         assert action.status == ActionStatus.FAILED
         assert not box.is_attached()
+
+
+# ---------------------------------------------------------------------------
+# Rail Arm (prismatic + revolute) — JointAction
+# ---------------------------------------------------------------------------
+
+
+def create_rail_arm_agent(sim_core, mass=None):
+    """Create a fixed-base rail arm robot (1 prismatic + 4 revolute) wired to *sim_core*."""
+    return Agent.from_urdf(
+        urdf_path=RAIL_ARM_URDF,
+        pose=Pose.from_xyz(0, 0, 0),
+        mass=mass,
+        use_fixed_base=True,
+        sim_core=sim_core,
+    )
+
+
+@pytest.fixture(
+    params=[
+        pytest.param("physics", id="physics"),
+        pytest.param("kinematic", id="kinematic"),
+        pytest.param("physics_off", id="physics_off"),
+    ]
+)
+def rail_arm_sim(request, pybullet_env):
+    """Parametrized fixture providing (sim_core, mass) for rail arm tests."""
+    if request.param == "physics":
+        sc = MockSimCore(physics=True)
+    elif request.param == "kinematic":
+        sc = MockSimCore(physics=False)
+    else:
+        sc = MockSimCore(physics=False)
+    sc._client = pybullet_env
+    if request.param == "kinematic":
+        return sc, 0.0
+    return sc, None
+
+
+class TestRailArmJointActionIntegration:
+    """Test JointAction with prismatic + revolute joints (rail arm)."""
+
+    def test_prismatic_joint_reaches_target(self, rail_arm_sim):
+        """JointAction moves the prismatic rail joint to target and completes."""
+        sim_core, mass = rail_arm_sim
+        agent = create_rail_arm_agent(sim_core, mass)
+        # Only set the prismatic joint (index 0) to 0.5 m; leave revolute at 0
+        targets = [0.5, 0.0, 0.0, 0.0, 0.0]
+
+        action = JointAction(target_joint_positions=targets, tolerance=0.05)
+        agent.add_action(action)
+
+        run_arm_until_idle(agent, sim_core)
+
+        assert action.status is ActionStatus.COMPLETED
+        assert agent.are_joints_at_targets(targets, tolerance=0.05)
+
+    def test_mixed_prismatic_revolute_targets(self, rail_arm_sim):
+        """JointAction moves all 5 joints (1 prismatic + 4 revolute) to targets."""
+        sim_core, mass = rail_arm_sim
+        agent = create_rail_arm_agent(sim_core, mass)
+        # prismatic=0.7m, then 4 revolute angles
+        targets = [0.7, 0.5, 0.3, -0.3, 0.2]
+
+        action = JointAction(target_joint_positions=targets, tolerance=0.05)
+        agent.add_action(action)
+
+        run_arm_until_idle(agent, sim_core)
+
+        assert action.status is ActionStatus.COMPLETED
+        assert agent.are_joints_at_targets(targets, tolerance=0.05)
+
+    def test_prismatic_kinematic_multi_step(self, rail_arm_sim):
+        """Prismatic kinematic interpolation takes multiple steps (no teleport)."""
+        sim_core, mass = rail_arm_sim
+        if mass != 0.0:
+            pytest.skip("multi-step test is kinematic-specific")
+        agent = create_rail_arm_agent(sim_core, mass)
+        # 1.0 m target at 0.5 m/s velocity = 2 seconds = 480 steps at 240 Hz
+        targets = [1.0, 0.0, 0.0, 0.0, 0.0]
+
+        action = JointAction(target_joint_positions=targets, tolerance=0.01)
+        agent.add_action(action)
+
+        # Single step should NOT complete
+        sim_core.tick()
+        agent.update(sim_core._dt)
+
+        assert action.status is ActionStatus.IN_PROGRESS, "Prismatic kinematic interpolation should take multiple steps"
+
+    def test_prismatic_by_name(self, rail_arm_sim):
+        """JointAction accepts dict keyed by joint name for prismatic joint."""
+        sim_core, mass = rail_arm_sim
+        agent = create_rail_arm_agent(sim_core, mass)
+        targets = {"rail_joint": 0.4, "elbow_to_wrist": -0.5}
+
+        action = JointAction(target_joint_positions=targets, tolerance=0.05)
+        agent.add_action(action)
+
+        run_arm_until_idle(agent, sim_core)
+
+        assert action.status is ActionStatus.COMPLETED
+        assert agent.are_joints_at_targets(targets, tolerance=0.05)
+
+
+# ---------------------------------------------------------------------------
+# Rail Arm — PoseAction (IK with prismatic joint)
+# ---------------------------------------------------------------------------
+
+
+class TestRailArmPoseActionIntegration:
+    """Test PoseAction / IK with a prismatic joint in the chain."""
+
+    def test_ee_at_target_with_rail(self, rail_arm_sim):
+        """PoseAction completes and EE reaches target with rail arm."""
+        sim_core, mass = rail_arm_sim
+        agent = create_rail_arm_agent(sim_core, mass)
+        # Target above base — IK should use a combination of rail + arm joints
+        target = [0.0, 0.0, 1.2]
+        action = PoseAction(target_position=target, tolerance=0.05)
+        agent.add_action(action)
+
+        run_arm_until_idle(agent, sim_core)
+
+        assert action.status == ActionStatus.COMPLETED
+        ee_idx = agent._get_end_effector_link_index()
+        link_state = p.getLinkState(agent.body_id, ee_idx, computeForwardKinematics=1, physicsClientId=agent._pid)
+        actual_pos = np.array(link_state[0])
+        distance = np.linalg.norm(actual_pos - np.array(target))
+        assert distance < 0.1, f"EE too far from target: {distance:.3f}m, actual={actual_pos}"
+
+    def test_ee_at_different_rail_heights(self, rail_arm_sim):
+        """Two sequential PoseActions at different heights both complete."""
+        sim_core, mass = rail_arm_sim
+        agent = create_rail_arm_agent(sim_core, mass)
+
+        # First target: arm home height (rail stays near 0)
+        target_low = [0.0, 0.0, 0.75]
+        action1 = PoseAction(target_position=target_low, tolerance=0.05)
+        # Second target: higher, requiring rail + arm IK
+        target_high = [0.0, 0.0, 1.4]
+        action2 = PoseAction(target_position=target_high, tolerance=0.05)
+        agent.add_action_sequence([action1, action2])
+
+        run_arm_until_idle(agent, sim_core, max_steps=5_000)
+
+        assert action1.status == ActionStatus.COMPLETED
+        assert action2.status == ActionStatus.COMPLETED
