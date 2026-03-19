@@ -15,7 +15,6 @@ import os
 
 import numpy as np
 import pybullet as p
-import pybullet_data
 import pytest
 
 from pybullet_fleet.action import (
@@ -39,6 +38,7 @@ from tests.conftest import MockSimCore
 
 MESH_PATH = os.path.join(os.path.dirname(__file__), "../mesh/cube.obj")
 ARM_URDF = "robots/arm_robot.urdf"
+RAIL_ARM_URDF = "robots/rail_arm_robot.urdf"
 
 
 # ---------------------------------------------------------------------------
@@ -103,17 +103,6 @@ def create_pickable_box(sim_core, *, pos=(2, 0, 0)):
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
-
-
-@pytest.fixture
-def pybullet_env():
-    """Headless PyBullet session with ground plane."""
-    client = p.connect(p.DIRECT)
-    p.setAdditionalSearchPath(pybullet_data.getDataPath())
-    p.setGravity(0, 0, -10)
-    p.loadURDF("plane.urdf")
-    yield client
-    p.disconnect()
 
 
 @pytest.fixture
@@ -974,36 +963,6 @@ def run_arm_until_idle(agent, sim_core, *, max_steps: int = 2_000) -> int:
     raise AssertionError(f"Agent did not finish actions within {max_steps} steps")
 
 
-@pytest.fixture(
-    params=[
-        pytest.param("physics", id="physics"),
-        pytest.param("kinematic", id="kinematic"),
-        pytest.param("physics_off", id="physics_off"),
-    ]
-)
-def arm_sim(request, pybullet_env):
-    """Parametrized fixture providing (sim_core, mass) for both modes.
-
-    - physics:     mass=None (URDF values) + stepSimulation (standard physics motor control)
-    - kinematic:   mass=0.0 + no stepSimulation (pure kinematic)
-    - physics_off: mass=None (URDF values) + no stepSimulation (physics disabled in sim_core)
-    """
-    if request.param == "physics":
-        sc = MockSimCore(physics=True)
-    elif request.param == "kinematic":
-        sc = MockSimCore(physics=False)
-    else:
-        # mass=None (URDF values) but physics=False: agent should auto-use kinematic interpolation
-        sc = MockSimCore(physics=False)
-    sc._client = pybullet_env
-    if request.param == "physics":
-        return sc, None
-    elif request.param == "kinematic":
-        return sc, 0.0
-    else:
-        return sc, None
-
-
 class TestJointActionIntegration:
     """Test JointAction execution with a real arm robot in both modes."""
 
@@ -1311,3 +1270,227 @@ class TestPickDropEEPoseIntegration:
 
         assert action.status == ActionStatus.FAILED
         assert not box.is_attached()
+
+
+# ---------------------------------------------------------------------------
+# Rail Arm (prismatic + revolute) — JointAction
+# ---------------------------------------------------------------------------
+
+
+def create_rail_arm_agent(sim_core, mass=None):
+    """Create a fixed-base rail arm robot (1 prismatic + 4 revolute) wired to *sim_core*."""
+    return Agent.from_urdf(
+        urdf_path=RAIL_ARM_URDF,
+        pose=Pose.from_xyz(0, 0, 0),
+        mass=mass,
+        use_fixed_base=True,
+        sim_core=sim_core,
+    )
+
+
+class TestPrismaticJointActionIntegration:
+    """Test JointAction with prismatic + revolute joints."""
+
+    def test_prismatic_joint_reaches_target(self, arm_sim):
+        """JointAction moves the prismatic rail joint to target and completes."""
+        sim_core, mass = arm_sim
+        agent = create_rail_arm_agent(sim_core, mass)
+        # Only set the prismatic joint (index 0) to 0.5 m; leave revolute at 0
+        targets = [0.5, 0.0, 0.0, 0.0, 0.0]
+
+        action = JointAction(target_joint_positions=targets, tolerance=0.05)
+        agent.add_action(action)
+
+        run_arm_until_idle(agent, sim_core)
+
+        assert action.status is ActionStatus.COMPLETED
+        assert agent.are_joints_at_targets(targets, tolerance=0.05)
+
+    def test_mixed_prismatic_revolute_targets(self, arm_sim):
+        """JointAction moves all 5 joints (1 prismatic + 4 revolute) to targets."""
+        sim_core, mass = arm_sim
+        agent = create_rail_arm_agent(sim_core, mass)
+        # prismatic=0.7m, then 4 revolute angles
+        targets = [0.7, 0.5, 0.3, -0.3, 0.2]
+
+        action = JointAction(target_joint_positions=targets, tolerance=0.05)
+        agent.add_action(action)
+
+        run_arm_until_idle(agent, sim_core)
+
+        assert action.status is ActionStatus.COMPLETED
+        assert agent.are_joints_at_targets(targets, tolerance=0.05)
+
+    def test_prismatic_kinematic_multi_step(self, arm_sim):
+        """Prismatic kinematic interpolation takes multiple steps (no teleport)."""
+        sim_core, mass = arm_sim
+        if mass != 0.0:
+            pytest.skip("multi-step test is kinematic-specific")
+        agent = create_rail_arm_agent(sim_core, mass)
+        # 1.0 m target at 0.5 m/s velocity = 2 seconds = 480 steps at 240 Hz
+        targets = [1.0, 0.0, 0.0, 0.0, 0.0]
+
+        action = JointAction(target_joint_positions=targets, tolerance=0.01)
+        agent.add_action(action)
+
+        # Single step should NOT complete
+        sim_core.tick()
+        agent.update(sim_core._dt)
+
+        assert action.status is ActionStatus.IN_PROGRESS, "Prismatic kinematic interpolation should take multiple steps"
+
+    def test_prismatic_by_name(self, arm_sim):
+        """JointAction accepts dict keyed by joint name for prismatic joint."""
+        sim_core, mass = arm_sim
+        agent = create_rail_arm_agent(sim_core, mass)
+        targets = {"rail_joint": 0.4, "elbow_to_wrist": -0.5}
+
+        action = JointAction(target_joint_positions=targets, tolerance=0.05)
+        agent.add_action(action)
+
+        run_arm_until_idle(agent, sim_core)
+
+        assert action.status is ActionStatus.COMPLETED
+        assert agent.are_joints_at_targets(targets, tolerance=0.05)
+
+    def test_per_joint_tolerance(self, arm_sim):
+        """Tolerance can be specified per-joint for mixed prismatic/revolute.
+
+        Prismatic joints measure in metres, revolute in radians.  A scalar
+        tolerance of e.g. 0.05 means 5 cm for prismatic but only ~3° for
+        revolute.  Per-joint tolerance lets users tighten prismatic accuracy
+        without over-constraining revolute joints.
+        """
+        sim_core, mass = arm_sim
+        agent = create_rail_arm_agent(sim_core, mass)
+        targets = {"rail_joint": 0.5, "base_to_shoulder": 0.3, "elbow_to_wrist": -0.3}
+        # Tight for prismatic (±5 mm), looser for revolute (±0.05 rad ≈ 3°)
+        tolerance = {"rail_joint": 0.005, "base_to_shoulder": 0.05, "elbow_to_wrist": 0.05}
+
+        action = JointAction(target_joint_positions=targets, tolerance=tolerance)
+        agent.add_action(action)
+
+        run_arm_until_idle(agent, sim_core)
+
+        assert action.status is ActionStatus.COMPLETED
+        assert agent.are_joints_at_targets(targets, tolerance=tolerance)
+
+
+# ---------------------------------------------------------------------------
+# Agent-level joint_tolerance (not prismatic-specific)
+# ---------------------------------------------------------------------------
+
+
+class TestAgentJointToleranceIntegration:
+    """Test Agent.joint_tolerance fallback chain with real PyBullet agent.
+
+    These tests exercise the tolerance resolution logic (Action > Agent > default)
+    and are not specific to prismatic joints.  The rail arm URDF is used because
+    its mixed joint types make dict tolerance meaningful.
+    """
+
+    def test_agent_level_tolerance_fallback(self, arm_sim):
+        """JointAction with tolerance=None falls back to agent.joint_tolerance.
+
+        Fallback chain: Action.tolerance > Agent.joint_tolerance > class default (0.01).
+        Tolerance is resolved on the first tick (no need to run to completion).
+        """
+        sim_core, mass = arm_sim
+
+        # --- Case 1: Agent has custom joint_tolerance ---
+        agent_tol = {"rail_joint": 0.005, "base_to_shoulder": 0.05, "elbow_to_wrist": 0.05}
+        agent = Agent.from_urdf(
+            urdf_path=RAIL_ARM_URDF,
+            pose=Pose.from_xyz(0, 0, 0),
+            mass=mass,
+            use_fixed_base=True,
+            sim_core=sim_core,
+            joint_tolerance=agent_tol,
+        )
+        assert agent.joint_tolerance == agent_tol
+
+        action_no_tol = JointAction(target_joint_positions=[0.3, 0.2, 0.0, 0.0, 0.0])
+        assert action_no_tol.tolerance is None
+        agent.add_action(action_no_tol)
+        sim_core.tick()
+        agent.update(sim_core._dt)
+        # Tolerance resolved from agent on first tick
+        assert action_no_tol.tolerance == agent_tol
+
+        # --- Case 2: Action-level tolerance overrides agent-level ---
+        agent.clear_actions()
+        action_override = JointAction(target_joint_positions=[0.0] * 5, tolerance=0.1)
+        agent.add_action(action_override)
+        sim_core.tick()
+        agent.update(sim_core._dt)
+        assert action_override.tolerance == 0.1  # NOT overwritten by agent dict
+
+        # --- Case 3: Agent without custom tolerance → class default 0.01 ---
+        agent_default = create_rail_arm_agent(sim_core, mass)
+        assert agent_default.joint_tolerance == 0.01
+
+    def test_agent_tolerance_setter(self, arm_sim):
+        """Agent.joint_tolerance can be updated after construction."""
+        sim_core, mass = arm_sim
+        agent = create_rail_arm_agent(sim_core, mass)
+
+        # Default
+        assert agent.joint_tolerance == 0.01
+
+        # Set via property
+        agent.joint_tolerance = 0.05
+        assert agent.joint_tolerance == 0.05
+
+        # Set dict
+        agent.joint_tolerance = {"rail_joint": 0.002}
+        assert agent.joint_tolerance == {"rail_joint": 0.002}
+
+        # Reset to None → falls back to class default
+        agent.joint_tolerance = None
+        assert agent.joint_tolerance == 0.01
+
+
+# ---------------------------------------------------------------------------
+# Rail Arm — PoseAction (IK with prismatic joint)
+# ---------------------------------------------------------------------------
+
+
+class TestPrismaticPoseActionIntegration:
+    """Test PoseAction / IK with a prismatic joint in the chain."""
+
+    def test_ee_at_target_with_rail(self, arm_sim):
+        """PoseAction completes and EE reaches target with rail arm."""
+        sim_core, mass = arm_sim
+        agent = create_rail_arm_agent(sim_core, mass)
+        # Target above base — IK should use a combination of rail + arm joints
+        target = [0.1, 0.0, 1.2]
+        action = PoseAction(target_position=target, tolerance=0.05)
+        agent.add_action(action)
+
+        run_arm_until_idle(agent, sim_core)
+
+        assert action.status == ActionStatus.COMPLETED
+        ee_idx = agent._get_end_effector_link_index()
+        link_state = p.getLinkState(agent.body_id, ee_idx, computeForwardKinematics=1, physicsClientId=agent._pid)
+        actual_pos = np.array(link_state[0])
+        distance = np.linalg.norm(actual_pos - np.array(target))
+        assert distance < 0.1, f"EE too far from target: {distance:.3f}m, actual={actual_pos}"
+
+    def test_ee_at_elevated_rail_height(self, arm_sim):
+        """PoseAction reaches elevated target requiring rail displacement."""
+        sim_core, mass = arm_sim
+        agent = create_rail_arm_agent(sim_core, mass)
+
+        # Target above arm-only reach — IK must use rail (prismatic) + arm joints
+        target = [0.1, 0.0, 1.4]
+        action = PoseAction(target_position=target, tolerance=0.05)
+        agent.add_action(action)
+
+        run_arm_until_idle(agent, sim_core, max_steps=5_000)
+
+        assert action.status == ActionStatus.COMPLETED
+        ee_idx = agent._get_end_effector_link_index()
+        link_state = p.getLinkState(agent.body_id, ee_idx, computeForwardKinematics=1, physicsClientId=agent._pid)
+        actual_pos = np.array(link_state[0])
+        distance = np.linalg.norm(actual_pos - np.array(target))
+        assert distance < 0.1, f"EE too far from target: {distance:.3f}m, " f"actual={actual_pos}, target={target}"

@@ -171,10 +171,69 @@ is within `tolerance` of its target:
 ```python
 JointAction(
     target_joint_positions=[1.5, 1.5, 1.5, 0.0],
-    tolerance=0.05,       # radians; default 0.01
+    tolerance=0.05,       # radians for revolute, metres for prismatic; default 0.01
     max_force=500.0,      # only used in physics mode
 )
 ```
+
+**Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `target_joint_positions` | `list` or `dict` | required | Target positions — list by index or dict by joint name. Units: radians (revolute), metres (prismatic). |
+| `tolerance` | `float`, `dict`, or `None` | `None` | Completion threshold per joint. See [Tolerance](#tolerance) below. |
+| `max_force` | `float` | `500.0` | Motor force (N·m) — only used in physics mode |
+
+### Tolerance
+
+`tolerance` controls how close each joint must be to its target before the action
+completes. It accepts several forms:
+
+| Form | Example | Behaviour |
+|------|---------|----------|
+| **Scalar** (`float`) | `0.05` | Same threshold for every joint |
+| **List** (`list`) | `[0.005, 0.05, 0.01, 0.01, 0.01]` | Per-joint by absolute joint index; out-of-range indices fall back to the class default (0.01) |
+| **Dict** (`{name: float}`) | `{"rail_joint": 0.005, "base_to_shoulder": 0.05}` | Per-joint by name; joints not listed use the class default (0.01) |
+| **`None`** (default) | — | Resolved from `agent.joint_tolerance` on the first tick (see below) |
+
+#### Agent-level fallback
+
+When `tolerance` is `None`, the action resolves it from the agent's `joint_tolerance`
+property on the first `execute()` call and **writes the resolved value back** to
+`action.tolerance` — making it inspectable after the action starts:
+
+```python
+# Set agent-level tolerance at construction
+agent = Agent.from_urdf(
+    urdf_path="robots/rail_arm_robot.urdf",
+    ...,
+    joint_tolerance={"rail_joint": 0.005, "base_to_shoulder": 0.05},
+)
+
+# Action with no explicit tolerance → inherits from agent
+action = JointAction(target_joint_positions=[0.3, 0.2, 0.0, 0.0, 0.0])
+assert action.tolerance is None  # before execute
+
+agent.add_action(action)
+# ... after first tick ...
+assert action.tolerance == {"rail_joint": 0.005, "base_to_shoulder": 0.05}
+```
+
+The full fallback chain is:
+
+1. **Action-level** — `JointAction(tolerance=0.05)` takes priority
+2. **Agent-level** — `agent.joint_tolerance` (set at construction or via property)
+3. **Class default** — `0.01` (applied when both are `None`)
+
+This is especially useful for **mixed prismatic + revolute** arms where prismatic joints
+measure in metres and revolute joints in radians. A dict tolerance lets you tighten
+prismatic accuracy (e.g., ±5 mm) without over-constraining revolute joints.
+
+### Prismatic (linear) joints
+
+`JointAction` works transparently with prismatic joints — target values are in
+**metres** instead of radians. See [`examples/rail_arm_demo.py`](https://github.com/yuokamoto/PyBulletFleet/blob/main/examples/rail_arm_demo.py)
+for a complete example using a rail arm with 1 prismatic + 4 revolute joints.
 
 ---
 
@@ -189,6 +248,9 @@ python examples/pick_drop_arm_action_demo.py
 
 # 100 arms — AgentManager grid spawn + bulk action management
 python examples/pick_drop_arm_100robots_demo.py
+
+# Rail arm (prismatic + revolute) with EE control and per-joint tolerance
+python examples/rail_arm_demo.py
 ```
 
 Both single-arm demos use kinematic mode by default (`physics=False`). To switch to physics mode,
@@ -204,5 +266,6 @@ The 100-arm demo combines `AgentManager` / `GridSpawnParams` (see
 - [Tutorial 1 — Spawning Objects](spawning-objects): `from_urdf`, `set_all_joints_targets` basics
 - [Tutorial 2 — Action System](action-system): `PickAction`, `DropAction` for mobile robots
 - [Tutorial 5 — EE Control & IK](arm-ee-control): control the arm by EE position instead of joint angles
+- [Rail Arm Demo](https://github.com/yuokamoto/PyBulletFleet/blob/main/examples/rail_arm_demo.py): prismatic + revolute joint control with per-joint tolerance
 - [Architecture Overview](../architecture/overview): kinematic joint interpolation internals
 - [Benchmark Results](../benchmarking/results): arm joint control performance data

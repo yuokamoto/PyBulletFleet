@@ -10,7 +10,6 @@ Covers:
 
 import numpy as np
 import pybullet as p
-import pybullet_data
 import pytest
 
 from pybullet_fleet.agent import Agent
@@ -19,17 +18,15 @@ from pybullet_fleet.sim_object import ShapeParams
 from tests.conftest import MockSimCore
 
 ARM_URDF = "robots/arm_robot.urdf"
+RAIL_ARM_URDF = "robots/rail_arm_robot.urdf"
 
+# ---------------------------------------------------------------------------
+# Assertion tolerances
+# ---------------------------------------------------------------------------
 
-@pytest.fixture
-def pybullet_env():
-    """PyBullet DIRECT environment with plane."""
-    client = p.connect(p.DIRECT)
-    p.setAdditionalSearchPath(pybullet_data.getDataPath())
-    p.setGravity(0, 0, -10, physicsClientId=client)
-    p.loadURDF("plane.urdf", physicsClientId=client)
-    yield client
-    p.disconnect(client)
+EE_POS_TOL = 0.05  # EE position accuracy after IK or kinematic steps (m)
+IK_REACH_TOL = 0.02  # IK reachability check — tighter for pure revolute arm
+IK_REACH_TOL_RAIL = 0.05  # IK reachability check — looser for prismatic chain
 
 
 @pytest.fixture
@@ -231,7 +228,7 @@ class TestSolveIK:
         actual_pos = np.array(link_state[0])
         target_pos = np.array(target)
         distance = np.linalg.norm(actual_pos - target_pos)
-        assert distance < 0.05, f"EE at {actual_pos}, target {target_pos}, distance {distance:.4f}"
+        assert distance < EE_POS_TOL, f"EE at {actual_pos}, target {target_pos}, distance {distance:.4f}"
 
     def test_ik_with_orientation(self, arm_agent):
         """_solve_ik with target_orientation returns valid joint angles that achieve the orientation."""
@@ -248,7 +245,7 @@ class TestSolveIK:
             p.resetJointState(agent.body_id, i, angle, physicsClientId=agent._pid)
         link_state = p.getLinkState(agent.body_id, ee_idx, computeForwardKinematics=1, physicsClientId=agent._pid)
         actual_pos = np.array(link_state[0])
-        assert np.linalg.norm(actual_pos - np.array(target_pos)) < 0.05
+        assert np.linalg.norm(actual_pos - np.array(target_pos)) < EE_POS_TOL
         actual_orn = np.array(link_state[1])
         dot = abs(np.dot(actual_orn, np.array(target_orn)))
         assert dot > 0.95, f"EE orientation mismatch: dot={dot:.3f}, actual={actual_orn}"
@@ -295,8 +292,8 @@ class TestSolveIK:
         angles = agent._solve_ik(target, ee_link_index=ee_idx)
         assert len(angles) == agent.get_num_joints()
         # Verify the EE actually reaches the target
-        reachable = agent._check_ik_reachability(angles, target, ee_idx, tolerance=0.02)
-        assert reachable, f"IK solution {angles} does not place EE within 0.02m of target {target}"
+        reachable = agent._check_ik_reachability(angles, target, ee_idx, tolerance=IK_REACH_TOL)
+        assert reachable, f"IK solution {angles} does not place EE within {IK_REACH_TOL}m of target {target}"
 
 
 # ============================================================
@@ -424,7 +421,7 @@ class TestMoveEndEffector:
         link_state = p.getLinkState(agent.body_id, ee_idx, computeForwardKinematics=1, physicsClientId=agent._pid)
         actual_pos = np.array(link_state[0])
         distance = np.linalg.norm(actual_pos - np.array(target))
-        assert distance < 0.05, f"EE at {actual_pos}, target {target}, distance {distance:.4f}"
+        assert distance < EE_POS_TOL, f"EE at {actual_pos}, target {target}, distance {distance:.4f}"
 
     def test_with_orientation(self, arm_agent):
         """move_end_effector with orientation achieves target pose."""
@@ -442,7 +439,7 @@ class TestMoveEndEffector:
         ee_idx = agent._get_end_effector_link_index()
         link_state = p.getLinkState(agent.body_id, ee_idx, computeForwardKinematics=1, physicsClientId=agent._pid)
         actual_pos = np.array(link_state[0])
-        assert np.linalg.norm(actual_pos - np.array(target_pos)) < 0.05
+        assert np.linalg.norm(actual_pos - np.array(target_pos)) < EE_POS_TOL
 
         actual_orn = np.array(link_state[1])
         dot = abs(np.dot(actual_orn, np.array(target_orn)))
@@ -578,6 +575,105 @@ class TestIKParams:
         )
         assert agent._ik_params is cfg
         assert agent._ik_params.max_outer_iterations == 10
+
+
+# ============================================================
+# Rail arm IK (prismatic + revolute)
+# ============================================================
+
+
+@pytest.fixture
+def rail_arm_agent(pybullet_env):
+    """Kinematic rail arm agent (1 prismatic + 4 revolute, mass=0)."""
+    sim_core = MockSimCore(physics=False)
+    sim_core._client = pybullet_env
+    agent = Agent.from_urdf(
+        urdf_path=RAIL_ARM_URDF,
+        pose=Pose.from_xyz(0, 0, 0),
+        use_fixed_base=True,
+        mass=0.0,
+        sim_core=sim_core,
+    )
+    return agent, sim_core
+
+
+class TestRailArmIK:
+    """IK unit tests with prismatic + revolute chain (rail_arm_robot.urdf).
+
+    The rail arm has 5 joints: 1 prismatic (Z, 0-1m) + 4 revolute.
+    IK must utilise the prismatic joint to reach heights beyond the
+    pure revolute arm's workspace.
+    """
+
+    def test_solve_ik_reaches_target(self, rail_arm_agent):
+        """_solve_ik produces a solution that places EE near the target."""
+        agent, _ = rail_arm_agent
+        target = [0.1, 0.0, 1.2]  # requires rail extension
+        ee_idx = agent._get_end_effector_link_index()
+        angles = agent._solve_ik(target, ee_link_index=ee_idx)
+
+        assert len(angles) == agent.get_num_joints()
+        reachable = agent._check_ik_reachability(angles, target, ee_idx, tolerance=IK_REACH_TOL_RAIL)
+        assert reachable, f"IK solution does not reach target {target}"
+
+    def test_solve_ik_uses_prismatic_for_high_target(self, rail_arm_agent):
+        """IK for a high target should extend the prismatic joint and reach the target."""
+        agent, _ = rail_arm_agent
+        target = [0.1, 0.0, 1.5]  # well above pure arm reach
+        ee_idx = agent._get_end_effector_link_index()
+        angles = agent._solve_ik(target, ee_link_index=ee_idx)
+
+        # Prismatic joint (index 0) should be significantly > 0
+        assert angles[0] > 0.2, f"Prismatic joint should extend for high target, got {angles[0]:.3f}m"
+        # EE must actually reach the target
+        reachable = agent._check_ik_reachability(angles, target, ee_idx, tolerance=IK_REACH_TOL_RAIL)
+        assert reachable, f"IK solution does not reach target {target}"
+
+    def test_solve_ik_low_target_keeps_rail_near_zero(self, rail_arm_agent):
+        """IK for a target within arm-only reach keeps rail near zero and reaches target."""
+        agent, _ = rail_arm_agent
+        target = [0.1, 0.0, 0.5]  # within pure arm reach
+        ee_idx = agent._get_end_effector_link_index()
+        angles = agent._solve_ik(target, ee_link_index=ee_idx)
+
+        # Prismatic joint should stay near 0
+        assert abs(angles[0]) < 0.3, f"Prismatic joint should stay near zero for low target, got {angles[0]:.3f}m"
+        # EE must actually reach the target
+        reachable = agent._check_ik_reachability(angles, target, ee_idx, tolerance=IK_REACH_TOL_RAIL)
+        assert reachable, f"IK solution does not reach target {target}"
+
+    def test_move_end_effector_returns_true(self, rail_arm_agent):
+        """move_end_effector returns True for reachable rail arm target."""
+        agent, _ = rail_arm_agent
+        result = agent.move_end_effector([0.1, 0.0, 1.2])
+        assert result is True
+
+    def test_move_end_effector_unreachable(self, rail_arm_agent):
+        """move_end_effector returns False for unreachable target."""
+        agent, _ = rail_arm_agent
+        result = agent.move_end_effector([10.0, 10.0, 10.0])
+        assert result is False
+
+    def test_ee_reaches_after_kinematic_steps(self, rail_arm_agent):
+        """After kinematic interpolation steps, EE should be near target."""
+        agent, sim_core = rail_arm_agent
+        target = [0.1, 0.0, 1.2]
+        agent.move_end_effector(target)
+
+        dt = sim_core._dt
+        # Upper bound: max displacement / min velocity + buffer.
+        # Prismatic range 1m @ 0.5 m/s = 2s; revolute ~3 rad @ 2.0 rad/s = 1.5s
+        # Worst case ~2s; at 240 Hz = 480 steps. Use 2x buffer.
+        max_steps = int(2.0 / dt * 2)
+        for _ in range(max_steps):
+            sim_core.tick()
+            agent.update(dt)
+
+        ee_idx = agent._get_end_effector_link_index()
+        link_state = p.getLinkState(agent.body_id, ee_idx, computeForwardKinematics=1, physicsClientId=agent._pid)
+        actual_pos = np.array(link_state[0])
+        distance = np.linalg.norm(actual_pos - np.array(target))
+        assert distance < EE_POS_TOL, f"EE at {actual_pos}, target {target}, distance {distance:.4f}"
 
 
 if __name__ == "__main__":

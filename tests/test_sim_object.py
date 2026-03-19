@@ -14,8 +14,6 @@ import os
 from typing import Any
 
 import pybullet as p
-import pybullet_data
-import pytest
 
 from pybullet_fleet.sim_object import SimObject, SimObjectSpawnParams, ShapeParams
 from pybullet_fleet.geometry import Pose
@@ -23,18 +21,6 @@ from pybullet_fleet.types import CollisionMode
 
 
 MESH_PATH = os.path.join(os.path.dirname(__file__), "../mesh/cube.obj")
-
-
-@pytest.fixture
-def pybullet_env():
-    """Setup and teardown PyBullet environment for each test"""
-    physics_client = p.connect(p.DIRECT)
-    p.setAdditionalSearchPath(pybullet_data.getDataPath())
-    p.setGravity(0, 0, -10)
-
-    yield physics_client
-
-    p.disconnect()
 
 
 _SKIP = object()  # Sentinel to indicate "skip this check"

@@ -28,6 +28,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - **`_last_joint_targets` unification** — All joint-setting methods (`set_joint_target`, `set_all_joints_targets`, `move_end_effector`) record targets in `_last_joint_targets`. `are_joints_at_targets()` with no arguments checks these last-commanded targets.
 - **EE control demos** — `pick_drop_arm_ee_demo.py` (low-level callback) and `pick_drop_arm_ee_action_demo.py` (action queue)
 - **Tutorial 5** — End-Effector Control & IK documentation (`docs/examples/arm-ee-control.md`)
+- **Linear joint (prismatic) support** — Rail arm URDF (`robots/rail_arm_robot.urdf`) with 1 prismatic (Z, 0–1 m) + 4 revolute joints = 5 DOF. `JointAction`, `PoseAction`, and IK work transparently with mixed revolute+prismatic chains.
+  - Per-joint-type kinematic fallback velocity: 2.0 rad/s (revolute), 0.5 m/s (prismatic)
+  - `Agent.joint_tolerance` — agent-level tolerance property with fallback chain (Action → Agent → class default 0.01)
+  - `JointAction` tolerance write-back: resolved once at first `execute()` and written to `action.tolerance`
+  - Per-joint tolerance via dict keyed by joint name (e.g., `{"rail_joint": 0.005, "base_to_shoulder": 0.05}`)
+  - `_resolve_joint_tolerance()` — handles `None`/scalar/dict/list forms with consistent default fallback
+  - `examples/rail_arm_demo.py` — rail arm pick/drop demo with EE control and per-joint tolerance
+  - Tutorial 4 & 5 updated with tolerance reference and prismatic joint documentation
 
 ### Changed
 

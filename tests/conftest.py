@@ -3,6 +3,7 @@
 from types import SimpleNamespace
 
 import pybullet as p
+import pybullet_data
 import pytest
 
 from pybullet_fleet.data_monitor import DataMonitor
@@ -87,3 +88,51 @@ def _disable_monitor_gui(monkeypatch):
     never appear during headless test runs.
     """
     monkeypatch.setattr(DataMonitor, "start", lambda self: None)
+
+
+# ---------------------------------------------------------------------------
+# Shared PyBullet fixtures
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def pybullet_env():
+    """Headless PyBullet DIRECT session with ground plane.
+
+    Provides a physics client ID usable by any test that needs a real
+    PyBullet environment.  The session is torn down after each test.
+    """
+    client = p.connect(p.DIRECT)
+    p.setAdditionalSearchPath(pybullet_data.getDataPath(), physicsClientId=client)
+    p.setGravity(0, 0, -10, physicsClientId=client)
+    p.loadURDF("plane.urdf", physicsClientId=client)
+    yield client
+    p.disconnect(client)
+
+
+@pytest.fixture(
+    params=[
+        pytest.param("physics", id="physics"),
+        pytest.param("kinematic", id="kinematic"),
+        pytest.param("physics_off", id="physics_off"),
+    ]
+)
+def arm_sim(request, pybullet_env):
+    """Parametrized (sim_core, mass) for arm robot tests.
+
+    Provides three simulation modes — tests pair this with any URDF via
+    their own ``create_*_agent()`` helper:
+
+    - **physics**: ``mass=None`` (URDF values) + ``stepSimulation`` each tick.
+    - **kinematic**: ``mass=0.0`` + no ``stepSimulation`` (pure kinematic).
+    - **physics_off**: ``mass=None`` + no ``stepSimulation``
+      (agent auto-detects kinematic interpolation).
+    """
+    if request.param == "physics":
+        sc = MockSimCore(physics=True)
+    else:
+        sc = MockSimCore(physics=False)
+    sc._client = pybullet_env
+    if request.param == "kinematic":
+        return sc, 0.0
+    return sc, None

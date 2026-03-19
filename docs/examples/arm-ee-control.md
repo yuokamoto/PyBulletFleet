@@ -275,9 +275,62 @@ python examples/pick_drop_arm_ee_action_demo.py
 
 # Low-level callback approach
 python examples/pick_drop_arm_ee_demo.py
+
+# Rail arm — prismatic (linear) + revolute joints with EE control
+python examples/rail_arm_demo.py
 ```
 
-Both use kinematic mode for fast execution.
+Both single-arm EE demos use kinematic mode for fast execution.
+
+---
+
+## 8. Prismatic Joints & Rail Arms
+
+The IK solver works with **prismatic (linear) joints** out of the box. A prismatic
+joint in the kinematic chain lets the IK solver adjust both the linear position
+(e.g., rail height) and revolute angles to reach the target.
+
+[`examples/rail_arm_demo.py`](https://github.com/yuokamoto/PyBulletFleet/blob/main/examples/rail_arm_demo.py)
+demonstrates a **rail arm** (1 prismatic Z-axis + 4 revolute = 5 DOF) picking a box
+from a high shelf and placing it at a low position:
+
+```python
+agent = Agent.from_urdf(
+    urdf_path="robots/rail_arm_robot.urdf",
+    pose=Pose.from_xyz(0, 0, 0),
+    use_fixed_base=True,
+    sim_core=sim_core,
+)
+
+# EE control — IK decides optimal rail height + arm configuration
+actions = [
+    PickAction(
+        target_object_id=box.body_id,
+        use_approach=False,
+        ee_target_position=[0.1, -0.3, 1.0],  # high shelf
+        attach_link=EE_LINK,
+        attach_relative_pose=Pose.from_xyz(0, 0, 0.14),
+    ),
+    DropAction(
+        drop_pose=Pose.from_xyz(0.1, 0.3, 0.3),  # low position
+        use_approach=False,
+        ee_target_position=[0.1, 0.3, 0.3],
+    ),
+]
+```
+
+The demo also shows **per-joint tolerance** via dict — tightening prismatic accuracy
+(±5 mm) while keeping revolute joints looser (±0.05 rad):
+
+```python
+JointAction(
+    target_joint_positions={"rail_joint": 0.0, "base_to_shoulder": 0.0, ...},
+    tolerance={"rail_joint": 0.005, "base_to_shoulder": 0.05, ...},
+)
+```
+
+See [Tutorial 4 — JointAction Tolerance](arm-pick-drop) for the full tolerance
+reference (scalar, dict, agent-level fallback).
 
 ---
 
@@ -297,6 +350,7 @@ Both use kinematic mode for fast execution.
 
 ## See Also
 
-- [Tutorial 4 — Arm Joint Control](arm-pick-drop): `JointAction`, joint-level pick/drop
+- [Tutorial 4 — Arm Joint Control](arm-pick-drop): `JointAction`, joint-level pick/drop, tolerance reference
 - [Tutorial 2 — Action System](action-system): mobile robot pick/drop with `MoveAction`
+- [Rail Arm Demo](https://github.com/yuokamoto/PyBulletFleet/blob/main/examples/rail_arm_demo.py): prismatic + revolute EE control
 - [Architecture Overview](../architecture/overview): IK internals, joint control modes
