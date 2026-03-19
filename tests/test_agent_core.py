@@ -1532,11 +1532,15 @@ class TestResolveJointTolerance:
     NUM_JOINTS = 4
 
     def _create(self, pybullet_env):
+        client, _ = pybullet_env
+        sim_core = MockSimCore()
+        sim_core._client = client
         return Agent.from_urdf(
             urdf_path=ARM_URDF,
             pose=Pose.from_xyz(0, 0, 0),
             mass=0.0,
             use_fixed_base=True,
+            sim_core=sim_core,
         )
 
     def test_none_falls_back_to_agent_default(self, pybullet_env):
