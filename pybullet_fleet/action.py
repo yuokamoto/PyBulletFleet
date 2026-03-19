@@ -322,8 +322,8 @@ class JointAction(Action):
 
         # Per-joint tolerance for mixed prismatic/revolute
         action = JointAction(
-            target_joint_positions={"rail_joint": 0.5, "elbow": -0.3},
-            tolerance={"rail_joint": 0.005, "elbow": 0.05},  # 5 mm / 0.05 rad
+            target_joint_positions={"rail_joint": 0.5, "elbow_to_wrist": -0.3},
+            tolerance={"rail_joint": 0.005, "elbow_to_wrist": 0.05},  # 5 mm / 0.05 rad
         )
     """
 

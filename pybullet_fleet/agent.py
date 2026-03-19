@@ -385,7 +385,7 @@ class Agent(SimObject):
 
             agent = Agent.from_urdf(
                 ...,
-                joint_tolerance={"rail_joint": 0.005, "elbow": 0.05},
+                joint_tolerance={"rail_joint": 0.005, "elbow_to_wrist": 0.05},
             )
         """
         if self._joint_tolerance is not None:
@@ -2085,7 +2085,7 @@ class Agent(SimObject):
 
                     agent.are_joints_at_targets(
                         targets,
-                        tolerance={"rail_joint": 0.005, "elbow": 0.05},
+                        tolerance={"rail_joint": 0.005, "elbow_to_wrist": 0.05},
                     )
 
         Returns:

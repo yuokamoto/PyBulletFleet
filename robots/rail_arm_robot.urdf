@@ -51,7 +51,7 @@
   </joint>
 
   <!-- ================================================================== -->
-  <!-- Arm links (identical to arm_robot.urdf)                            -->
+  <!-- Arm links (based on arm_robot.urdf, with modified offsets)         -->
   <!-- ================================================================== -->
 
   <!-- Shoulder link (first arm segment) -->
