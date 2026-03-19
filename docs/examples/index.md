@@ -37,11 +37,13 @@ arm-ee-control
 | `sim_core.register_callback()` | Tutorials 1–3 |
 | `MoveAction` / `PickAction` / `DropAction` / `WaitAction` | Tutorials 2, 4 |
 | `JointAction` | Tutorial 4 |
+| `JointAction` tolerance (scalar, dict, agent-level) | Tutorial 4 |
 | `PoseAction` | Tutorial 5 |
 | `agent.move_end_effector()` | Tutorial 5 |
 | `IKParams` | Tutorial 5 |
 | `PickAction(ee_target_position=...)` / `DropAction(ee_target_position=...)` | Tutorial 5 |
 | `agent.add_action_sequence()` | Tutorials 2, 4, 5 |
+| `Agent.joint_tolerance` / per-joint tolerance | Tutorial 4 |
 | `set_all_joints_targets` / `set_joint_target` | Tutorials 1, 4 |
 | `attach_object` with `parent_link_index` | Tutorial 4 |
 | `AgentManager` / `GridSpawnParams` | Tutorial 3 |

@@ -1515,6 +1515,89 @@ class TestAgentJointControl:
 
 
 # ============================================================================
+# _resolve_joint_tolerance helper
+# ============================================================================
+
+
+class TestResolveJointTolerance:
+    """Unit tests for Agent._resolve_joint_tolerance().
+
+    arm_robot.urdf joints (all revolute):
+        0: base_to_shoulder
+        1: shoulder_to_elbow
+        2: elbow_to_wrist
+        3: wrist_to_end
+    """
+
+    NUM_JOINTS = 4
+
+    def _create(self, pybullet_env):
+        return Agent.from_urdf(
+            urdf_path=ARM_URDF,
+            pose=Pose.from_xyz(0, 0, 0),
+            mass=0.0,
+            use_fixed_base=True,
+        )
+
+    def test_none_falls_back_to_agent_default(self, pybullet_env):
+        """tolerance=None → self.joint_tolerance → class default 0.01 for all joints."""
+        agent = self._create(pybullet_env)
+        for i in range(self.NUM_JOINTS):
+            assert agent._resolve_joint_tolerance(None, i) == 0.01
+
+    def test_none_falls_back_to_custom_agent_tolerance(self, pybullet_env):
+        """tolerance=None with agent.joint_tolerance set → uses agent value for all joints."""
+        agent = self._create(pybullet_env)
+        agent.joint_tolerance = 0.05
+        for i in range(self.NUM_JOINTS):
+            assert agent._resolve_joint_tolerance(None, i) == 0.05
+
+    def test_scalar_returns_as_is(self, pybullet_env):
+        """Scalar float tolerance is returned directly for all joints."""
+        agent = self._create(pybullet_env)
+        for i in range(self.NUM_JOINTS):
+            assert agent._resolve_joint_tolerance(0.1, i) == 0.1
+
+    def test_dict_resolves_by_joint_name(self, pybullet_env):
+        """Dict tolerance: present keys → custom value, missing keys → default."""
+        agent = self._create(pybullet_env)
+        tol = {"base_to_shoulder": 0.001, "elbow_to_wrist": 0.05}
+        # Present keys
+        assert agent._resolve_joint_tolerance(tol, 0) == 0.001  # base_to_shoulder
+        assert agent._resolve_joint_tolerance(tol, 2) == 0.05  # elbow_to_wrist
+        # Missing keys → _DEFAULT_JOINT_TOLERANCE
+        assert agent._resolve_joint_tolerance(tol, 1) == agent._DEFAULT_JOINT_TOLERANCE  # shoulder_to_elbow
+        assert agent._resolve_joint_tolerance(tol, 3) == agent._DEFAULT_JOINT_TOLERANCE  # wrist_to_end
+
+    def test_list_resolves_by_index(self, pybullet_env):
+        """List tolerance indexes by joint_index."""
+        agent = self._create(pybullet_env)
+        tol = [0.01, 0.02, 0.03, 0.04]
+        for i in range(self.NUM_JOINTS):
+            assert agent._resolve_joint_tolerance(tol, i) == tol[i]
+
+    def test_list_short_falls_back_to_default(self, pybullet_env):
+        """List shorter than joint count → out-of-range indices get _DEFAULT_JOINT_TOLERANCE."""
+        agent = self._create(pybullet_env)
+        tol = [0.01, 0.02]  # only 2 elements, 4 joints
+        assert agent._resolve_joint_tolerance(tol, 0) == 0.01
+        assert agent._resolve_joint_tolerance(tol, 1) == 0.02
+        # Out of range → default, not clamp-to-last
+        assert agent._resolve_joint_tolerance(tol, 2) == agent._DEFAULT_JOINT_TOLERANCE
+        assert agent._resolve_joint_tolerance(tol, 3) == agent._DEFAULT_JOINT_TOLERANCE
+
+    def test_none_with_dict_agent_tolerance(self, pybullet_env):
+        """tolerance=None + agent.joint_tolerance is a dict → resolves per joint."""
+        agent = self._create(pybullet_env)
+        agent.joint_tolerance = {"base_to_shoulder": 0.001, "elbow_to_wrist": 0.05}
+        assert agent._resolve_joint_tolerance(None, 0) == 0.001
+        assert agent._resolve_joint_tolerance(None, 2) == 0.05
+        # Missing keys → default
+        assert agent._resolve_joint_tolerance(None, 1) == agent._DEFAULT_JOINT_TOLERANCE
+        assert agent._resolve_joint_tolerance(None, 3) == agent._DEFAULT_JOINT_TOLERANCE
+
+
+# ============================================================================
 # URDF link attach / detach tests
 # ============================================================================
 

@@ -1,28 +1,29 @@
 #!/usr/bin/env python3
 """
 rail_arm_demo.py
-Demo: Rail arm robot (prismatic + revolute joints) controlled via JointAction and PoseAction.
+Demo: Rail arm (prismatic + revolute) picks a box from a high shelf and drops
+it at a low position, then reverses — showcasing how the prismatic rail
+extends the arm's vertical workspace.
 
-Shows:
-1. JointAction — raise the rail, move arm joints
-2. PoseAction  — IK-based end-effector positioning at different rail heights
-3. JointAction — return to home position
+Uses EE position control (PoseAction / PickAction / DropAction with
+ee_target_position) so that the IK solver decides the optimal rail height
+and arm joint configuration automatically.
 """
 import os
 import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-
-from pybullet_fleet.action import JointAction, PoseAction
+import pybullet as p
+from pybullet_fleet.action import JointAction, PoseAction, PickAction, DropAction, WaitAction
 from pybullet_fleet.agent import Agent
 from pybullet_fleet.core_simulation import MultiRobotSimulationCore, SimulationParams
-from pybullet_fleet.sim_object import Pose
+from pybullet_fleet.sim_object import Pose, SimObject, ShapeParams
 
 # ---------------------------------------------------------------------------
 # Simulation setup
 # ---------------------------------------------------------------------------
 
-params = SimulationParams(gui=True, timestep=0.1, physics=False, target_rtf=10)
+params = SimulationParams(gui=True, timestep=0.1, physics=False, target_rtf=1, log_level="info")
 sim_core = MultiRobotSimulationCore(params)
 
 # Spawn rail arm (fixed base)
@@ -34,103 +35,127 @@ agent = Agent.from_urdf(
     sim_core=sim_core,
 )
 
+# Spawn box on the "high shelf"
+HIGH_POS = [0.1, -0.3, 1.0]  # High pick position (rail must rise)
+LOW_POS = [0.1, 0.3, 0.3]  # Low drop position (rail stays low)
 
-# ---------------------------------------------------------------------------
-# Helper
-# ---------------------------------------------------------------------------
+box = SimObject.from_mesh(
+    visual_shape=ShapeParams(shape_type="box", half_extents=[0.05, 0.05, 0.05], rgba_color=[1, 0, 0, 1]),
+    collision_shape=ShapeParams(shape_type="box", half_extents=[0.05, 0.05, 0.05]),
+    pose=Pose.from_xyz(*HIGH_POS),
+    mass=0.0,
+    sim_core=sim_core,
+)
 
+# End-effector link = last joint
+EE_LINK = p.getNumJoints(agent.body_id) - 1
 
-def print_joint_states(agent, label: str) -> None:
-    """Print current joint positions with a label."""
-    n = agent.get_num_joints()
-    positions = [agent.get_joint_state(i)[0] for i in range(n)]
-    names = [agent.joint_info[i][1].decode() for i in range(n)]
-    print(f"\n--- {label} ---")
-    for name, pos in zip(names, positions):
-        print(f"  {name}: {pos:.4f}")
+# Attachment offset (box above EE)
+OFFSET_POSE = Pose.from_xyz(0, 0, 0.14)
+
+# Home: arm extended on +X side (away from rail column at X=0)
+HOME_POS = [0.3, 0.0, 0.75]
+
+# Drop/pick poses for DropAction placement
+BOX_HIGH_POSE = Pose.from_xyz(*HIGH_POS)
+BOX_LOW_POSE = Pose.from_xyz(*LOW_POS)
 
 
 # ---------------------------------------------------------------------------
 # Action sequence
 # ---------------------------------------------------------------------------
 
-print_joint_states(agent, "Initial state")
 
-# Step 1: Raise rail to 0.5 m via JointAction
-print("\n=== Step 1: Raise rail to 0.5 m ===")
-agent.add_action(
-    JointAction(
-        target_joint_positions={"rail_joint": 0.5},
-        tolerance=0.02,
-    )
-)
+def create_action_sequence():
+    """One complete cycle: high→low, then low→high."""
 
-# Step 2: Move arm to a pose via JointAction (all 5 joints)
-print("=== Step 2: Move arm joints ===")
-agent.add_action(
-    JointAction(
-        target_joint_positions=[0.5, 0.8, 0.5, -0.3, 0.0],
-        tolerance=0.02,
-    )
-)
+    # Cycle 1: Pick from high shelf, drop at low position
+    cycle1 = [
+        PickAction(
+            target_object_id=box.body_id,
+            use_approach=False,
+            ee_target_position=HIGH_POS,
+            attach_link=EE_LINK,
+            attach_relative_pose=OFFSET_POSE,
+        ),
+        DropAction(
+            drop_pose=BOX_LOW_POSE,
+            use_approach=False,
+            ee_target_position=LOW_POS,
+        ),
+        # Return home via explicit joint targets with per-joint tolerance.
+        # Prismatic rail (metres) gets a tighter tolerance than revolute
+        # joints (radians) since 0.05 rad ≈ 3° is fine, but 0.05 m = 5 cm
+        # would be too coarse for precise rail positioning.
+        JointAction(
+            target_joint_positions={
+                "rail_joint": 0.0,  # rail back to bottom (metres)
+                "base_to_shoulder": 0.0,  # revolute home (radians)
+                "shoulder_to_elbow": 0.0,
+                "elbow_to_wrist": 0.0,
+                "wrist_to_end": 0.0,
+            },
+            tolerance={
+                "rail_joint": 0.005,  # ±5 mm for prismatic
+                "base_to_shoulder": 0.05,  # ±0.05 rad for revolute
+                "shoulder_to_elbow": 0.05,
+                "elbow_to_wrist": 0.05,
+                "wrist_to_end": 0.05,
+            },
+        ),
+        WaitAction(duration=0.5, action_type="idle"),
+    ]
 
-# Step 3: PoseAction — IK-based EE positioning (high target)
-print("=== Step 3: PoseAction to [0.0, 0.0, 1.2] ===")
-agent.add_action(
-    PoseAction(
-        target_position=[0.0, 0.0, 1.2],
-        tolerance=0.03,
-    )
-)
+    # Cycle 2: Pick from low position, return to high shelf
+    cycle2 = [
+        PickAction(
+            target_object_id=box.body_id,
+            use_approach=False,
+            ee_target_position=LOW_POS,
+            attach_link=EE_LINK,
+            attach_relative_pose=OFFSET_POSE,
+        ),
+        DropAction(
+            drop_pose=BOX_HIGH_POSE,
+            use_approach=False,
+            ee_target_position=HIGH_POS,
+        ),
+        # Return home via EE position (IK decides joint values)
+        PoseAction(target_position=HOME_POS, tolerance=0.03),
+        WaitAction(duration=0.5, action_type="idle"),
+    ]
 
-# Step 4: PoseAction — different height (requires rail adjustment via IK)
-print("=== Step 4: PoseAction to [0.2, 0.0, 0.6] ===")
-agent.add_action(
-    PoseAction(
-        target_position=[0.2, 0.0, 0.6],
-        tolerance=0.03,
-    )
-)
+    return cycle1 + cycle2
 
-# Step 5: Return to home via JointAction
-print("=== Step 5: Return home ===")
-agent.add_action(
-    JointAction(
-        target_joint_positions=[0.0, 0.0, 0.0, 0.0, 0.0],
-        tolerance=0.02,
-    )
-)
+
+def repeat_callback(sim_core, dt):
+    """Repeat action sequence when queue is empty."""
+    if agent.is_action_queue_empty():
+        agent.add_action_sequence(create_action_sequence())
 
 
 # ---------------------------------------------------------------------------
-# Callbacks for status reporting
+# Setup & Run
 # ---------------------------------------------------------------------------
 
-_last_queue_size = -1
+print("\n=== Rail Arm Pick/Drop Demo ===")
+print("Prismatic rail + 4-DOF arm (5 joints total)")
+print(f"Cycle 1: Pick from high {HIGH_POS} -> Drop at low {LOW_POS}")
+print(f"Cycle 2: Pick from low {LOW_POS} -> Drop at high {HIGH_POS}")
+print("=" * 50 + "\n")
 
+agent.add_action_sequence(create_action_sequence())
+sim_core.register_callback(repeat_callback, frequency=10)
 
-def report_progress(sim_core) -> None:
-    """Print status when the action queue changes."""
-    global _last_queue_size
-    current = agent.get_action_queue_size()
-    if current != _last_queue_size:
-        _last_queue_size = current
-        if current == 0:
-            print_joint_states(agent, "All actions completed")
-        else:
-            print(f"  Actions remaining: {current}")
+sim_core.setup_camera(
+    camera_config={
+        "camera_mode": "manual",
+        "camera_distance": 2.5,
+        "camera_yaw": 45,
+        "camera_pitch": -30,
+        "camera_target": [0, 0, 0.5],
+    }
+)
 
-
-sim_core.register_callback(report_progress, frequency=10)
-
-# ---------------------------------------------------------------------------
-# Run
-# ---------------------------------------------------------------------------
-
-print("\nStarting simulation (press Ctrl+C to stop)...")
-try:
-    sim_core.run_simulation(duration=60.0)
-except KeyboardInterrupt:
-    pass
-
-print("\nDone.")
+print("Starting simulation... Press Ctrl+C to stop.\n")
+sim_core.run_simulation()

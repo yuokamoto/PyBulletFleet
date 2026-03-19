@@ -1,7 +1,7 @@
 # Linear Joint (Prismatic) Support
 
 **Date:** 2026-03-19
-**Status:** Draft
+**Status:** Implemented
 
 ## Context
 

@@ -144,7 +144,7 @@ object attachment via `update_attached_objects_kinematics()`.
 
 **Joint Control Modes:**
 - **Physics mode** (`mass > 0`, `physics=True`): `setJointMotorControl2` — PyBullet motor control with torque limits
-- **Kinematic mode** (`mass=0.0` or `physics=False`): `resetJointState` with per-step interpolation — joints move at URDF `<limit velocity="...">` rates, falling back to `_KINEMATIC_JOINT_FALLBACK_VELOCITY` (2.0 rad/s) if unspecified. Mode selected once at init via `_compute_use_kinematic_joints()` and cached in `_use_kinematic_joints`.
+- **Kinematic mode** (`mass=0.0` or `physics=False`): `resetJointState` with per-step interpolation — joints move at URDF `<limit velocity="...">` rates, falling back to per-joint-type defaults when unspecified: `_KINEMATIC_REVOLUTE_FALLBACK_VELOCITY` (2.0 rad/s) for revolute joints and `_KINEMATIC_PRISMATIC_FALLBACK_VELOCITY` (0.5 m/s) for prismatic joints. Mode selected once at init via `_compute_use_kinematic_joints()` and cached in `_use_kinematic_joints`.
 - **Kinematic joint cache** (`_kinematic_joint_positions`): Joint positions cached in a Python dict, initialized via batch `p.getJointStates()`, updated after each `resetJointState()`. `get_joint_state()` returns cached values for kinematic robots — zero PyBullet calls per step.
 
 **Key Joint Methods:**
@@ -161,6 +161,9 @@ object attachment via `update_attached_objects_kinematics()`.
 
 - `AgentSpawnParams` — Configuration for agent initialization: motion limits (`max_linear_vel`, `max_linear_accel`, `max_angular_vel`, `max_angular_accel`), motion mode (`"omnidirectional"` / `"differential"`), orientation, mass, collision toggle. Immutable after creation.
 - `IKParams` — IK solver configuration dataclass: `max_outer_iterations`, `convergence_threshold`, `max_inner_iterations`, `residual_threshold`, `reachability_tolerance`, `seed_quartiles`. Passed to `Agent.from_urdf(ik_params=...)`. Default: 5 outer iterations, 0.01 m threshold.
+
+**Agent-Level Tolerance:**
+- `Agent.joint_tolerance` — property (float, dict, or None) that provides a default tolerance for `JointAction` when `tolerance=None`. Supports dict keyed by joint name for per-joint thresholds (useful for mixed prismatic/revolute arms). Fallback: instance value → class default (0.01). Can be set at construction via `Agent.from_urdf(joint_tolerance=...)` or updated via the property setter.
 
 ---
 
@@ -257,9 +260,11 @@ Wait for specified duration.
 Move all joints to target positions.
 
 **Key Parameters:**
-- `target_joint_positions`: List of target positions for all controllable joints (radians for revolute, metres for prismatic)
-- `tolerance`: Completion threshold per joint (default: 0.01 rad or m)
+- `target_joint_positions`: List of target positions for all controllable joints (radians for revolute, metres for prismatic), or dict keyed by joint name
+- `tolerance`: Completion threshold per joint — scalar `float`, `dict` keyed by joint name, or `None` (resolved from `agent.joint_tolerance` on first tick; default: 0.01)
 - `max_force`: Motor force for physics mode (default: 500.0 N·m)
+
+**Tolerance resolution:** When `tolerance` is `None`, it is resolved once from `agent.joint_tolerance` at the first `execute()` call and written back to `action.tolerance`. Fallback chain: Action → Agent → class default (0.01). Dict tolerance enables per-joint thresholds for mixed prismatic/revolute arms.
 
 **Completion:** All joints within `tolerance` of their targets. Works transparently
 in both physics mode (motor control) and kinematic mode (interpolation).

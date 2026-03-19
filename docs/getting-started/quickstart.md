@@ -105,7 +105,10 @@ All example scripts live in the `examples/` directory.
 | `action_system_demo.py` | High-level action system (MoveTo, Pick, Drop, Wait) |
 | `pick_drop_arm_demo.py` | Single arm robot performing pick-and-drop operations |
 | `pick_drop_arm_action_demo.py` | Arm robot using the action system for pick-and-drop |
+| `pick_drop_arm_ee_demo.py` | Arm end-effector control via IK (low-level callback) |
+| `pick_drop_arm_ee_action_demo.py` | Arm EE control using PoseAction (action queue) |
 | `pick_drop_arm_100robots_demo.py` | 100 arm robots with synchronised pick-and-drop |
+| `rail_arm_demo.py` | Rail arm (prismatic + revolute) pick-and-drop with EE control |
 | `pick_drop_mobile_100robots_demo.py` | 100 mobile robots picking and dropping objects |
 | `mobile_manipulator_demo.py` | Combined mobile base and arm control |
 | `collision_features_demo.py` | Spatial-hash collision detection features and visualisation |

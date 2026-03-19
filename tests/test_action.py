@@ -266,7 +266,7 @@ class TestJointAction:
         action = JointAction(target_joint_positions=[0.0, 1.0, 0.5])
         assert action.target_joint_positions == [0.0, 1.0, 0.5]
         assert action.max_force == DEFAULT_MAX_FORCE
-        assert action.tolerance == DEFAULT_JOINT_TOLERANCE
+        assert action.tolerance is None  # Falls back to agent.joint_tolerance at execute time
 
     def test_creation_with_dict(self):
         targets = {"joint_1": 0.5, "joint_2": 1.0}

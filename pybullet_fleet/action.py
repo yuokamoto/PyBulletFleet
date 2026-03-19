@@ -298,18 +298,38 @@ class JointAction(Action):
         target_joint_positions: List of target joint positions
             (radians for revolute, metres for prismatic)
         max_force: Maximum force to apply (default: 500.0)
-        tolerance: Position tolerance to consider as reached (default: 0.01)
+        tolerance: Position tolerance to consider as reached.
+            Accepts a single float (applied to all joints), a list (one per
+            joint), or a dict ``{joint_name: tol}``.
+            When ``None`` (the default), the tolerance is resolved from
+            ``agent.joint_tolerance`` at the first ``execute()`` call and
+            written back to this attribute so the resolved value is
+            inspectable after the action starts.
+
+            .. note::
+
+                A scalar tolerance applies the **same value** to every joint
+                regardless of type.  For mixed prismatic / revolute chains,
+                consider specifying per-joint tolerances so that prismatic
+                joints (metres) can be tighter than revolute joints (radians).
         wait_time: Optional seconds to wait after reaching target (default: 0.0)
 
     Example::
 
+        # Scalar tolerance (same for all joints)
         action = JointAction(target_joint_positions=[0.0, 1.0, 0.0, 0.0])
         agent.add_action(action)
+
+        # Per-joint tolerance for mixed prismatic/revolute
+        action = JointAction(
+            target_joint_positions={"rail_joint": 0.5, "elbow": -0.3},
+            tolerance={"rail_joint": 0.005, "elbow": 0.05},  # 5 mm / 0.05 rad
+        )
     """
 
     target_joint_positions: Union[list, dict]
     max_force: float = DEFAULT_MAX_FORCE
-    tolerance: Union[float, list, dict] = DEFAULT_JOINT_TOLERANCE
+    tolerance: Optional[Union[float, list, dict]] = None
 
     def __post_init__(self):
         super().__init__()
@@ -320,6 +340,10 @@ class JointAction(Action):
             self.start_time = agent.sim_core.sim_time if agent.sim_core else 0.0
 
             self._log_start(agent)
+
+            # Resolve tolerance once: Action explicit > agent.joint_tolerance
+            if self.tolerance is None:
+                self.tolerance = agent.joint_tolerance
 
             agent.set_joints_targets(self.target_joint_positions, max_force=self.max_force)
 
@@ -559,7 +583,7 @@ class PickAction(Action):
 
     # Joint control (optional — mutually exclusive with ee_target_position)
     joint_targets: Optional[Union[list, dict]] = None  # List or dict {joint_name: position}
-    joint_tolerance: Union[float, list, dict] = DEFAULT_JOINT_TOLERANCE
+    joint_tolerance: Optional[Union[float, list, dict]] = None
     joint_max_force: float = DEFAULT_MAX_FORCE
     _joint_action: Optional[JointAction] = field(default=None, init=False)  # Joint action for picking phase
 
@@ -912,7 +936,7 @@ class DropAction(Action):
 
     # Joint control (optional — mutually exclusive with ee_target_position)
     joint_targets: Optional[Union[list, dict]] = None  # List or dict {joint_name: position}
-    joint_tolerance: Union[float, list, dict] = DEFAULT_JOINT_TOLERANCE
+    joint_tolerance: Optional[Union[float, list, dict]] = None
     joint_max_force: float = DEFAULT_MAX_FORCE
     _joint_action: Optional[JointAction] = field(default=None, init=False)  # Joint action for dropping phase
 
