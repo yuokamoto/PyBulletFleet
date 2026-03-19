@@ -144,7 +144,7 @@ object attachment via `update_attached_objects_kinematics()`.
 
 **Joint Control Modes:**
 - **Physics mode** (`mass > 0`, `physics=True`): `setJointMotorControl2` — PyBullet motor control with torque limits
-- **Kinematic mode** (`mass=0.0` or `physics=False`): `resetJointState` with per-step interpolation — joints move at URDF `<limit velocity="...">` rates, falling back to per-joint-type defaults when unspecified: `_KINEMATIC_REVOLUTE_FALLBACK_VELOCITY` (2.0 rad/s) for revolute joints and `_KINEMATIC_PRISMATIC_FALLBACK_VELOCITY` (0.5 m/s) for prismatic joints. Mode selected once at init via `_compute_use_kinematic_joints()` and cached in `_use_kinematic_joints`.
+- **Kinematic mode** (`mass=0.0` or `physics=False`): `resetJointState` with per-step interpolation — joints move at URDF `<limit velocity="...">` rates, falling back to per-joint-type defaults when unspecified: `_KINEMATIC_JOINT_FALLBACK_VELOCITY` (2.0 rad/s) for revolute joints and `_KINEMATIC_PRISMATIC_FALLBACK_VELOCITY` (0.5 m/s) for prismatic joints. Mode selected once at init via `_compute_use_kinematic_joints()` and cached in `_use_kinematic_joints`.
 - **Kinematic joint cache** (`_kinematic_joint_positions`): Joint positions cached in a Python dict, initialized via batch `p.getJointStates()`, updated after each `resetJointState()`. `get_joint_state()` returns cached values for kinematic robots — zero PyBullet calls per step.
 
 **Key Joint Methods:**

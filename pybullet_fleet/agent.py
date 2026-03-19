@@ -1945,17 +1945,18 @@ class Agent(SimObject):
         else:
             self.set_all_joints_targets(targets, max_force)
 
-    def is_joint_at_target(self, joint_index: int, target: float, tolerance: Optional[float] = None) -> bool:
+    def is_joint_at_target(
+        self, joint_index: int, target: float, tolerance: Optional[Union[float, list, dict]] = None
+    ) -> bool:
         """
         Check if a single joint (by index) is within tolerance of the target position.
 
         Args:
             joint_index: Joint index (0-based).
             target: Target position (radians for revolute, metres for prismatic).
-            tolerance: Position tolerance.  If None, uses ``self.joint_tolerance``.
-                Note that the same scalar applies regardless of joint type;
-                for mixed prismatic/revolute chains consider passing an
-                explicit value.
+            tolerance: Position tolerance — ``float``, ``list``, ``dict``,
+                or ``None`` (→ ``self.joint_tolerance``).  Resolved via
+                ``_resolve_joint_tolerance(tolerance, joint_index)``.
         """
         if not self.is_urdf_robot():
             self._log.warning("is_joint_at_target() only works for URDF robots")
@@ -1967,14 +1968,18 @@ class Agent(SimObject):
         pos, _ = self.get_joint_state(joint_index)
         return abs(pos - target) <= tol
 
-    def is_joint_at_target_by_name(self, joint_name: str, target: float, tolerance: Optional[float] = None) -> bool:
+    def is_joint_at_target_by_name(
+        self, joint_name: str, target: float, tolerance: Optional[Union[float, list, dict]] = None
+    ) -> bool:
         """
         Check if a single joint (by name) is within tolerance of the target position.
 
         Args:
             joint_name: Joint name string.
             target: Target position (radians for revolute, metres for prismatic).
-            tolerance: Position tolerance.  If None, uses ``self.joint_tolerance``.
+            tolerance: Position tolerance — ``float``, ``list``, ``dict``,
+                or ``None`` (→ ``self.joint_tolerance``).  Resolved via
+                ``_resolve_joint_tolerance()`` using the joint's index.
         """
         joint_index = resolve_joint_index(self.body_id, joint_name)
         if joint_index == -1:
@@ -1987,21 +1992,23 @@ class Agent(SimObject):
         return dict(self._last_joint_targets)
 
     def are_all_joints_at_targets(
-        self, target_positions: Optional[list] = None, tolerance: Optional[Union[float, list]] = None
+        self, target_positions: Optional[list] = None, tolerance: Optional[Union[float, list, dict]] = None
     ) -> bool:
         """Check if joints are at target positions.
 
         Args:
             target_positions: List of target positions for each joint.
                 If None, uses ``_last_joint_targets`` (last commanded targets).
-            tolerance: ``float`` or ``list`` of tolerances for each joint.
+            tolerance: ``float``, ``list``, ``dict``, or ``None``.
                 If None, uses ``self.joint_tolerance``.
+                Passed through to ``_resolve_joint_tolerance()`` per joint.
 
                 .. note::
 
                     A scalar tolerance applies the same value to all joints.
                     For mixed prismatic (metres) / revolute (radians) robots,
-                    consider a list or set ``self.joint_tolerance`` to a dict.
+                    consider a ``dict`` keyed by joint name or set
+                    ``self.joint_tolerance`` to a dict.
 
         Returns:
             True if all joints are within tolerance of their targets.
@@ -2031,8 +2038,13 @@ class Agent(SimObject):
 
         Args:
             joint_targets: ``{joint_name: target}``
-            tolerance: ``float`` (all), ``list`` (joint_targets order),
-                ``dict`` (``{joint_name: tol}``), or ``None`` (→ ``self.joint_tolerance``).
+            tolerance: ``float`` (all), ``dict`` (``{joint_name: tol}``),
+                or ``None`` (→ ``self.joint_tolerance``).
+
+                A ``list`` is also accepted but is resolved by **absolute
+                joint index** (not by iteration order of *joint_targets*).
+                For named-joint subsets, prefer a ``dict`` to avoid
+                unexpected index-based fallback.
 
                 For mixed prismatic / revolute chains, use a ``dict`` so
                 prismatic joints (metres) can have a tighter tolerance
@@ -2045,7 +2057,7 @@ class Agent(SimObject):
             joint_index = resolve_joint_index(self.body_id, joint_name)
             if joint_index == -1:
                 return False
-            if not self.is_joint_at_target_by_name(joint_name, target, tolerance):
+            if not self.is_joint_at_target(joint_index, target, tolerance):
                 return False
         return True
 

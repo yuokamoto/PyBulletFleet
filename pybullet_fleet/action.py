@@ -343,7 +343,11 @@ class JointAction(Action):
 
             # Resolve tolerance once: Action explicit > agent.joint_tolerance
             if self.tolerance is None:
-                self.tolerance = agent.joint_tolerance
+                tol = agent.joint_tolerance
+                # Copy mutable containers to avoid aliasing the agent's value
+                if isinstance(tol, (dict, list)):
+                    tol = tol.copy()
+                self.tolerance = tol
 
             agent.set_joints_targets(self.target_joint_positions, max_force=self.max_force)
 

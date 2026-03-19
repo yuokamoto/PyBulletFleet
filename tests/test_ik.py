@@ -661,7 +661,11 @@ class TestRailArmIK:
         agent.move_end_effector(target)
 
         dt = sim_core._dt
-        for _ in range(3000):
+        # Upper bound: max displacement / min velocity + buffer.
+        # Prismatic range 1m @ 0.5 m/s = 2s; revolute ~3 rad @ 2.0 rad/s = 1.5s
+        # Worst case ~2s; at 240 Hz = 480 steps. Use 2x buffer.
+        max_steps = int(2.0 / dt * 2)
+        for _ in range(max_steps):
             sim_core.tick()
             agent.update(dt)
 
