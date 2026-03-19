@@ -163,7 +163,7 @@ object attachment via `update_attached_objects_kinematics()`.
 - `IKParams` — IK solver configuration dataclass: `max_outer_iterations`, `convergence_threshold`, `max_inner_iterations`, `residual_threshold`, `reachability_tolerance`, `seed_quartiles`. Passed to `Agent.from_urdf(ik_params=...)`. Default: 5 outer iterations, 0.01 m threshold.
 
 **Agent-Level Tolerance:**
-- `Agent.joint_tolerance` — property (float, dict, or None) that provides a default tolerance for `JointAction` when `tolerance=None`. Supports dict keyed by joint name for per-joint thresholds (useful for mixed prismatic/revolute arms). Fallback: instance value → class default (0.01). Can be set at construction via `Agent.from_urdf(joint_tolerance=...)` or updated via the property setter.
+- `Agent.joint_tolerance` — property (float, list, dict, or None) that provides a default tolerance for `JointAction` when `tolerance=None`. Supports dict keyed by joint name or list indexed by absolute joint index for per-joint thresholds (useful for mixed prismatic/revolute arms). Out-of-range list indices fall back to the class default (0.01). Fallback: instance value → class default (0.01). Can be set at construction via `Agent.from_urdf(joint_tolerance=...)` or updated via the property setter.
 
 ---
 
@@ -261,7 +261,7 @@ Move all joints to target positions.
 
 **Key Parameters:**
 - `target_joint_positions`: List of target positions for all controllable joints (radians for revolute, metres for prismatic), or dict keyed by joint name
-- `tolerance`: Completion threshold per joint — scalar `float`, `dict` keyed by joint name, or `None` (resolved from `agent.joint_tolerance` on first tick; default: 0.01)
+- `tolerance`: Completion threshold per joint — scalar `float`, `list` indexed by absolute joint index, `dict` keyed by joint name, or `None` (resolved from `agent.joint_tolerance` on first tick; default: 0.01). Out-of-range list indices fall back to the class default (0.01)
 - `max_force`: Motor force for physics mode (default: 500.0 N·m)
 
 **Tolerance resolution:** When `tolerance` is `None`, it is resolved once from `agent.joint_tolerance` at the first `execute()` call and written back to `action.tolerance`. Fallback chain: Action → Agent → class default (0.01). Dict tolerance enables per-joint thresholds for mixed prismatic/revolute arms.

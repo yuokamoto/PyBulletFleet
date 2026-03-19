@@ -103,7 +103,7 @@ def pybullet_env():
     PyBullet environment.  The session is torn down after each test.
     """
     client = p.connect(p.DIRECT)
-    p.setAdditionalSearchPath(pybullet_data.getDataPath())
+    p.setAdditionalSearchPath(pybullet_data.getDataPath(), physicsClientId=client)
     p.setGravity(0, 0, -10, physicsClientId=client)
     p.loadURDF("plane.urdf", physicsClientId=client)
     yield client

@@ -196,8 +196,12 @@ class Agent(SimObject):
     Supports both Mesh and URDF loading.
 
     Class Constants:
-        _KINEMATIC_JOINT_FALLBACK_VELOCITY: Default max joint velocity (rad/s)
-            used when the URDF ``<limit velocity="...">`` is 0 or missing.
+        _KINEMATIC_JOINT_FALLBACK_VELOCITY: Default max joint velocity for
+            revolute joints (rad/s) used when the URDF
+            ``<limit velocity="...">`` is 0 or missing.
+        _KINEMATIC_PRISMATIC_FALLBACK_VELOCITY: Default max joint velocity
+            for prismatic joints (m/s) used when the URDF limit is 0 or
+            missing.
         _DEFAULT_JOINT_TOLERANCE: Default tolerance (rad / m) for joint
             target comparison methods.
 

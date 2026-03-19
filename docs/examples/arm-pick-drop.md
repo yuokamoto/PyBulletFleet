@@ -192,6 +192,7 @@ completes. It accepts several forms:
 | Form | Example | Behaviour |
 |------|---------|----------|
 | **Scalar** (`float`) | `0.05` | Same threshold for every joint |
+| **List** (`list`) | `[0.005, 0.05, 0.01, 0.01, 0.01]` | Per-joint by absolute joint index; out-of-range indices fall back to the class default (0.01) |
 | **Dict** (`{name: float}`) | `{"rail_joint": 0.005, "base_to_shoulder": 0.05}` | Per-joint by name; joints not listed use the class default (0.01) |
 | **`None`** (default) | — | Resolved from `agent.joint_tolerance` on the first tick (see below) |
 
