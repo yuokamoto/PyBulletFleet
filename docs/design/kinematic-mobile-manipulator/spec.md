@@ -21,7 +21,7 @@ Modify the URDF and demo to produce a working kinematic mobile manipulator demon
 
 ## Constraints
 
-- No core library changes (agent.py, action.py, sim_object.py)
+- Minimal core library changes (agent.py, action.py — bug fixes only)
 - Kinematic base movement via `resetBasePositionAndOrientation` (existing mechanism)
 - Kinematic joint interpolation via `_update_kinematic_joints` (existing mechanism)
 - If core bugs are discovered during testing, fix minimally

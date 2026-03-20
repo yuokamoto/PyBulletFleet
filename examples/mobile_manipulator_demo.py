@@ -234,7 +234,7 @@ actions = [
     WaitAction(duration=0.3),
     # 6. Drop box (arm extends forward, box placed at EE position)
     DropAction(
-        drop_pose=BOX_DROP,  # used only if drop_relative_pose is None
+        drop_pose=BOX_DROP,  # base navigation target (also used if drop_relative_pose is None)
         place_gently=True,
         use_approach=False,
         drop_offset=0.0,
@@ -311,7 +311,7 @@ ik_actions = [
     WaitAction(duration=0.3),
     # 13. Drop box 2 via IK
     DropAction(
-        drop_pose=Pose.from_xyz(*IK_DROP_TARGET),  # fallback
+        drop_pose=Pose.from_xyz(*IK_DROP_TARGET),  # base navigation target near drop area
         place_gently=True,
         use_approach=False,
         drop_offset=0.0,

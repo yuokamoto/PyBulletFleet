@@ -243,10 +243,10 @@ from pybullet_fleet.agent import Agent, IKParams
 
 ik_cfg = IKParams(
     ik_joint_names=(
-        "base_to_shoulder",
-        "shoulder_to_upper_arm",
-        "upper_arm_to_forearm",
-        "forearm_to_hand",
+        "mount_to_shoulder",
+        "shoulder_to_elbow",
+        "elbow_to_wrist",
+        "wrist_to_end",
     ),
 )
 
@@ -276,14 +276,14 @@ from pybullet_fleet.action import DropAction
 
 # Drop the object exactly where the EE currently is (no offset)
 drop = DropAction(
-    drop_pose=Pose.from_xyz(0, 0, 0),  # required but unused when drop_relative_pose is set
+    drop_pose=Pose.from_xyz(0, 0, 0),  # base navigation target (still used for approach/move-to-drop)
     drop_relative_pose=Pose.from_xyz(0, 0, 0),  # (0,0,0) = release in place
     use_approach=False,
 )
 
 # Drop with a small forward offset from EE
 drop = DropAction(
-    drop_pose=Pose.from_xyz(0, 0, 0),
+    drop_pose=Pose.from_xyz(0, 0, 0),  # base navigation target
     drop_relative_pose=Pose.from_xyz(0.1, 0, 0),  # 10cm forward
     use_approach=False,
 )

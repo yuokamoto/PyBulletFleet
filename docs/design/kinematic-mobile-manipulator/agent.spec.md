@@ -15,7 +15,7 @@
 
 ## Approach
 
-Two files changed (URDF + demo). No new files created. Test after each change.
+Initial plan was to change only two files (URDF + demo) with no new files created, testing after each change. During implementation, additional core, test, and documentation updates were made to fix kinematic-mode bugs while keeping all existing tests passing.
 
 ## Design
 

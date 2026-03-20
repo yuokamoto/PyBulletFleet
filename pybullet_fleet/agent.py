@@ -134,6 +134,11 @@ class AgentSpawnParams(SimObjectSpawnParams):
         # Get base fields from parent
         base = SimObjectSpawnParams.from_dict(config)
 
+        # Parse ik_params from nested dict if provided
+        ik_params_value = config.get("ik_params")
+        if isinstance(ik_params_value, dict):
+            ik_params_value = IKParams(**ik_params_value)
+
         return cls(
             visual_shape=base.visual_shape,
             collision_shape=base.collision_shape,
@@ -150,6 +155,7 @@ class AgentSpawnParams(SimObjectSpawnParams):
             max_angular_accel=config.get("max_angular_accel", 10.0),
             motion_mode=motion_mode_value,
             use_fixed_base=config.get("use_fixed_base", False),
+            ik_params=ik_params_value,
         )
 
 
@@ -1718,7 +1724,8 @@ class Agent(SimObject):
             dt: Time step (seconds)
 
         Returns:
-            True if the robot moved (position or orientation changed), False otherwise
+            True if the robot moved (position, orientation, or joint state changed),
+            False otherwise
         """
         # Process action queue first (actions may set goals/paths)
         self._update_actions(dt)
@@ -1887,6 +1894,10 @@ class Agent(SimObject):
 
         if joint_index >= len(self.joint_info):
             self._log.warning(f"joint_index {joint_index} out of range (max: {len(self.joint_info)-1})")
+            return
+
+        # Skip fixed joints — they cannot be driven
+        if self.joint_info[joint_index][2] == p.JOINT_FIXED:
             return
 
         # Always record for are_joints_at_targets() / PoseAction completion
