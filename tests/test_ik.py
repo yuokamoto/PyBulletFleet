@@ -19,6 +19,7 @@ from tests.conftest import MockSimCore
 
 ARM_URDF = "robots/arm_robot.urdf"
 RAIL_ARM_URDF = "robots/rail_arm_robot.urdf"
+MOBILE_MANIP_URDF = "robots/mobile_manipulator.urdf"
 
 # ---------------------------------------------------------------------------
 # Assertion tolerances
@@ -529,6 +530,7 @@ class TestIKParams:
         assert cfg.residual_threshold == 1e-4
         assert cfg.reachability_tolerance == 0.02
         assert cfg.seed_quartiles == (0.25, 0.5, 0.75)
+        assert cfg.ik_joint_names is None
 
     def test_custom_values(self):
         """IKParams accepts custom values."""
@@ -674,6 +676,217 @@ class TestRailArmIK:
         actual_pos = np.array(link_state[0])
         distance = np.linalg.norm(actual_pos - np.array(target))
         assert distance < EE_POS_TOL, f"EE at {actual_pos}, target {target}, distance {distance:.4f}"
+
+
+# ============================================================
+# Mobile Manipulator IK (fixed joint + continuous wheels)
+# ============================================================
+
+MOBILE_MANIP_EE_LINK = 6  # end_effector link index
+
+
+@pytest.fixture
+def mobile_manip_agent(pybullet_env):
+    """Kinematic mobile manipulator (2 wheels + 1 fixed + 4 revolute, mass=0)."""
+    sim_core = MockSimCore(physics=False)
+    sim_core._client = pybullet_env
+    agent = Agent.from_urdf(
+        urdf_path=MOBILE_MANIP_URDF,
+        pose=Pose.from_xyz(0, 0, 0.3),
+        use_fixed_base=False,
+        mass=0.0,
+        sim_core=sim_core,
+    )
+    return agent, sim_core
+
+
+class TestMobileManipulatorIK:
+    """IK for mobile_manipulator.urdf — exercises the fixed-joint mapping.
+
+    mobile_manipulator has 7 joints:
+      0: base_to_left_wheel  (continuous, movable)
+      1: base_to_right_wheel (continuous, movable)
+      2: base_to_mount       (FIXED)
+      3: mount_to_shoulder   (revolute)
+      4: shoulder_to_elbow   (revolute)
+      5: elbow_to_wrist      (revolute)
+      6: wrist_to_end        (revolute)
+
+    IK must correctly handle:
+    - Fixed joint skipped by calculateInverseKinematics
+    - Continuous wheel joints (lower >= upper)
+    - Returned list length matching joint_info length
+    """
+
+    def test_solve_ik_returns_correct_length(self, mobile_manip_agent):
+        """_solve_ik must return len(joint_info) values, not just movable count."""
+        agent, _ = mobile_manip_agent
+        assert len(agent.joint_info) == 7  # 6 movable + 1 fixed
+        target = [0.5, 0.0, 0.6]
+        angles = agent._solve_ik(target, ee_link_index=MOBILE_MANIP_EE_LINK)
+        assert len(angles) == len(agent.joint_info), f"Expected {len(agent.joint_info)} angles, got {len(angles)}"
+
+    def test_solve_ik_reaches_target(self, mobile_manip_agent):
+        """IK solution should place EE near the target position."""
+        agent, _ = mobile_manip_agent
+        # Target in front of robot, within arm reach
+        target = [0.5, 0.0, 0.6]
+        angles = agent._solve_ik(target, ee_link_index=MOBILE_MANIP_EE_LINK)
+        assert len(angles) == 7
+
+        # Apply and check FK
+        for i, angle in enumerate(angles):
+            p.resetJointState(agent.body_id, i, angle, physicsClientId=agent._pid)
+        link_state = p.getLinkState(
+            agent.body_id,
+            MOBILE_MANIP_EE_LINK,
+            computeForwardKinematics=1,
+            physicsClientId=agent._pid,
+        )
+        distance = np.linalg.norm(np.array(link_state[0]) - np.array(target))
+        assert distance < EE_POS_TOL, f"EE distance {distance:.4f} > {EE_POS_TOL}"
+
+    def test_solve_ik_preserves_fixed_joint(self, mobile_manip_agent):
+        """Fixed joint (index 2) should keep its original value (0.0)."""
+        agent, _ = mobile_manip_agent
+        target = [0.5, 0.0, 0.6]
+        angles = agent._solve_ik(target, ee_link_index=MOBILE_MANIP_EE_LINK)
+        # Joint 2 is fixed → its angle must remain 0.0
+        assert angles[2] == 0.0, f"Fixed joint angle should be 0.0, got {angles[2]}"
+
+    def test_solve_ik_locks_wheels_at_nonzero_position(self, mobile_manip_agent):
+        """Continuous wheel joints stay at current (non-zero) position after IK.
+
+        Setting wheels to a non-zero value before IK ensures the lock
+        mechanism (_LOCK_EPS) is actually preserving the saved position,
+        not just coincidentally returning zero.
+        """
+        agent, _ = mobile_manip_agent
+        # Move wheels to a non-zero position (sync both PyBullet and kinematic cache)
+        wheel_pos = 1.5
+        for idx in (0, 1):
+            agent._kinematic_joint_positions[idx] = wheel_pos
+            p.resetJointState(agent.body_id, idx, wheel_pos, physicsClientId=agent._pid)
+
+        target = [0.5, 0.0, 0.6]
+        angles = agent._solve_ik(target, ee_link_index=MOBILE_MANIP_EE_LINK)
+        # Wheels should stay at saved position (1.5), not reset to 0
+        assert abs(angles[0] - wheel_pos) < 1e-3, f"Left wheel should stay at {wheel_pos}, got {angles[0]}"
+        assert abs(angles[1] - wheel_pos) < 1e-3, f"Right wheel should stay at {wheel_pos}, got {angles[1]}"
+
+    def test_move_end_effector_reachable(self, mobile_manip_agent):
+        """move_end_effector returns True for reachable target."""
+        agent, _ = mobile_manip_agent
+        target = [0.5, 0.0, 0.6]
+        result = agent.move_end_effector(
+            target,
+            end_effector_link=MOBILE_MANIP_EE_LINK,
+        )
+        assert result is True
+
+    def test_ee_reaches_after_kinematic_steps(self, mobile_manip_agent):
+        """After kinematic interpolation steps, EE should be near target."""
+        agent, sim_core = mobile_manip_agent
+        target = [0.5, 0.0, 0.6]
+        agent.move_end_effector(
+            target,
+            end_effector_link=MOBILE_MANIP_EE_LINK,
+        )
+
+        dt = sim_core._dt
+        max_steps = int(3.0 / dt)
+        for _ in range(max_steps):
+            sim_core.tick()
+            agent.update(dt)
+
+        link_state = p.getLinkState(
+            agent.body_id,
+            MOBILE_MANIP_EE_LINK,
+            computeForwardKinematics=1,
+            physicsClientId=agent._pid,
+        )
+        actual_pos = np.array(link_state[0])
+        distance = np.linalg.norm(actual_pos - np.array(target))
+        assert distance < EE_POS_TOL, f"EE at {actual_pos}, target {target}, distance {distance:.4f}"
+
+
+# ============================================================
+# IKParams.ik_joint_names — explicit IK joint selection
+# ============================================================
+
+MOBILE_MANIP_ARM_JOINTS = (
+    "mount_to_shoulder",
+    "shoulder_to_elbow",
+    "elbow_to_wrist",
+    "wrist_to_end",
+)
+
+
+@pytest.fixture
+def mobile_manip_agent_explicit(pybullet_env):
+    """Mobile manipulator with explicit ik_joint_names (arm joints only)."""
+    from pybullet_fleet.agent import IKParams
+
+    sim_core = MockSimCore(physics=False)
+    sim_core._client = pybullet_env
+    cfg = IKParams(ik_joint_names=MOBILE_MANIP_ARM_JOINTS)
+    agent = Agent.from_urdf(
+        urdf_path=MOBILE_MANIP_URDF,
+        pose=Pose.from_xyz(0, 0, 0.3),
+        use_fixed_base=False,
+        mass=0.0,
+        sim_core=sim_core,
+        ik_params=cfg,
+    )
+    return agent, sim_core
+
+
+class TestIKJointNames:
+    """Tests for IKParams.ik_joint_names explicit joint selection.
+
+    Only tests behaviour unique to explicit ik_joint_names mode.
+    Common IK behaviour (length, reachability, fixed-joint mapping) is
+    already covered by TestMobileManipulatorIK with auto mode.
+    """
+
+    def test_ik_joint_names_stored_on_params(self):
+        """ik_joint_names is stored as a tuple on IKParams."""
+        from pybullet_fleet.agent import IKParams
+
+        cfg = IKParams(ik_joint_names=("joint_a", "joint_b"))
+        assert cfg.ik_joint_names == ("joint_a", "joint_b")
+
+    def test_wheels_locked_at_nonzero_with_explicit_names(self, mobile_manip_agent_explicit):
+        """Wheels not in ik_joint_names stay at non-zero saved position.
+
+        Verifies the explicit-names lock path (as opposed to auto
+        continuous-lock tested in TestMobileManipulatorIK).
+        """
+        agent, _ = mobile_manip_agent_explicit
+        wheel_pos = 1.5
+        for idx in (0, 1):
+            agent._kinematic_joint_positions[idx] = wheel_pos
+            p.resetJointState(agent.body_id, idx, wheel_pos, physicsClientId=agent._pid)
+
+        target = [0.5, 0.0, 0.6]
+        angles = agent._solve_ik(target, ee_link_index=MOBILE_MANIP_EE_LINK)
+        assert abs(angles[0] - wheel_pos) < 1e-3, f"Left wheel should stay at {wheel_pos}, got {angles[0]}"
+        assert abs(angles[1] - wheel_pos) < 1e-3, f"Right wheel should stay at {wheel_pos}, got {angles[1]}"
+
+    def test_arm_robot_defaults_work_unchanged(self, arm_agent):
+        """arm_robot with ik_joint_names=None still converges (no regression)."""
+        agent, _ = arm_agent
+        target = [0.0, 0.3, 0.3]
+        angles = agent._solve_ik(target)
+        reachable = agent._check_ik_reachability(angles, target, agent._get_end_effector_link_index(), IK_REACH_TOL)
+        assert reachable
+
+    def test_move_end_effector_with_explicit_names(self, mobile_manip_agent_explicit):
+        """move_end_effector uses ik_joint_names and returns reachable."""
+        agent, _ = mobile_manip_agent_explicit
+        target = [0.5, 0.0, 0.6]
+        result = agent.move_end_effector(target, end_effector_link=MOBILE_MANIP_EE_LINK)
+        assert result is True
 
 
 if __name__ == "__main__":

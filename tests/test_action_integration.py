@@ -843,6 +843,121 @@ class TestDropActionIntegration:
         dist_to_approach = np.linalg.norm(final_pos - np.array([4, 1]))
         assert dist_to_approach < 0.3, f"Agent should retreat to approach_pose (4,1), but ended at {final_pos}"
 
+    def test_drop_relative_pose_in_place(self, sim):
+        """drop_relative_pose=Pose(0,0,0) drops object at its current EE position.
+
+        When drop_relative_pose is set, the object should stay where it was
+        at detach time (at the attachment point) instead of being teleported
+        to drop_pose.  The robot still moves to drop_pose first.
+        """
+        agent = create_agent(sim, pose=Pose.from_xyz(1.9, 0, 0))
+        box = create_pickable_box(sim)
+        self._pick_box(agent, box, sim)
+
+        drop_target = [3, 0, 0]
+        action = DropAction(
+            drop_pose=Pose(position=drop_target),
+            use_approach=False,
+            drop_offset=0.0,
+            place_gently=True,
+            drop_relative_pose=Pose.from_xyz(0, 0, 0),  # drop in place
+        )
+        agent.add_action(action)
+        run_until_idle(agent, sim)
+
+        assert action.status is ActionStatus.COMPLETED
+        assert not box.is_attached()
+
+        # Agent should have moved to drop_pose
+        agent_pos = np.array(agent.get_pose().position[:2])
+        dist_to_drop = np.linalg.norm(agent_pos - np.array(drop_target[:2]))
+        assert dist_to_drop < 0.3, (
+            f"Agent should move to drop_pose {drop_target[:2]}, " f"but ended at {list(agent_pos)} (dist={dist_to_drop:.3f})"
+        )
+
+        # drop_relative_pose=(0,0,0) → box stays at its pre-detach world position.
+        # Since pick_offset=0 the attachment offset ≈ 0, so box ≈ agent position.
+        box_pos = np.array(box.get_pose().position)
+        dist_box_agent = np.linalg.norm(box_pos[:2] - agent_pos)
+        assert dist_box_agent < COARSE_TOL, (
+            f"drop_relative_pose=(0,0,0) with zero attachment offset means "
+            f"box should be at agent position, but dist={dist_box_agent:.3f} "
+            f"(box={list(box_pos[:2])}, agent={list(agent_pos)})"
+        )
+
+    def test_drop_relative_pose_with_offset(self, sim):
+        """drop_relative_pose with Z offset places object below detach position."""
+        agent = create_agent(sim, pose=Pose.from_xyz(1.9, 0, 0))
+        box = create_pickable_box(sim)
+        self._pick_box(agent, box, sim)
+
+        drop_target = [3, 0, 0]
+        z_offset = -0.15
+        action = DropAction(
+            drop_pose=Pose(position=drop_target),
+            use_approach=False,
+            drop_offset=0.0,
+            place_gently=True,
+            drop_relative_pose=Pose.from_xyz(0, 0, z_offset),
+        )
+        agent.add_action(action)
+        run_until_idle(agent, sim)
+
+        assert action.status is ActionStatus.COMPLETED
+
+        # Agent should have moved to drop_pose
+        agent_pos = np.array(agent.get_pose().position)
+        dist_to_drop = np.linalg.norm(agent_pos[:2] - np.array(drop_target[:2]))
+        assert dist_to_drop < 0.3, f"Agent should move to drop_pose, but ended at {list(agent_pos)}"
+
+        # Box should be at agent's position + z_offset (relative placement)
+        box_pos = np.array(box.get_pose().position)
+        assert abs(box_pos[2] - (agent_pos[2] + z_offset)) < COARSE_TOL, (
+            f"Box Z should be agent_z({agent_pos[2]:.3f}) + offset({z_offset}) = "
+            f"{agent_pos[2] + z_offset:.3f}, got {box_pos[2]:.3f}"
+        )
+
+    def test_drop_relative_pose_mobile_moves_to_drop_pose(self, sim):
+        """Mobile robot with drop_relative_pose still drives to drop_pose.
+
+        drop_relative_pose only controls how the object is placed (relative
+        offset from its current EE position). The base should still move to
+        drop_pose in the MOVING_TO_DROP phase.
+        """
+        agent = create_agent(sim, pose=Pose.from_xyz(0, 0, 0))
+        box = create_pickable_box(sim, pos=(0.5, 0, 0))
+        self._pick_box(agent, box, sim)
+
+        drop_target = [3, 0, 0]
+        action = DropAction(
+            drop_pose=Pose(position=drop_target),
+            use_approach=False,
+            drop_offset=0.0,
+            place_gently=True,
+            drop_relative_pose=Pose.from_xyz(0, 0, 0),
+        )
+        agent.add_action(action)
+        run_until_idle(agent, sim)
+
+        assert action.status is ActionStatus.COMPLETED
+
+        # Agent should have moved near drop_pose
+        agent_pos = np.array(agent.get_pose().position[:2])
+        dist = np.linalg.norm(agent_pos - np.array(drop_target[:2]))
+        assert dist < COARSE_TOL, (
+            f"Agent should move to drop_pose {drop_target[:2]} even with "
+            f"drop_relative_pose, but ended at {list(agent_pos)} (dist={dist:.3f})"
+        )
+
+        # drop_relative_pose=(0,0,0) + attachment offset ≈ 0 → box ≈ agent position
+        assert not box.is_attached()
+        box_pos = np.array(box.get_pose().position[:2])
+        dist_box_agent = np.linalg.norm(box_pos - agent_pos)
+        assert dist_box_agent < COARSE_TOL, (
+            f"drop_relative_pose=(0,0,0) means box should be at agent position, "
+            f"but dist={dist_box_agent:.3f} (box={list(box_pos)}, agent={list(agent_pos)})"
+        )
+
 
 # ---------------------------------------------------------------------------
 # Full sequence: Move → Pick → Move → Drop

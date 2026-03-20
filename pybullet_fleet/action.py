@@ -929,6 +929,12 @@ class DropAction(Action):
     # Target object (None = drop first attached object)
     target_object_id: Optional[int] = None
 
+    # Relative drop pose: if set, the object is placed at its current
+    # (pre-detach) pose transformed by this offset instead of being
+    # teleported to ``drop_pose``.  Useful for EE-attached objects
+    # where the absolute world position is hard to predict.
+    drop_relative_pose: Optional[Pose] = None
+
     # Internal state
     _phase: DropPhase = field(default=DropPhase.INIT, init=False)
     _target_object: Optional["SimObject"] = field(default=None, init=False)
@@ -1089,15 +1095,29 @@ class DropAction(Action):
                 return True
 
             # Calculate final drop position
-            drop_pos = self.drop_pose.position
-            if self.place_gently:
-                final_position = drop_pos
+            if self.drop_relative_pose is not None:
+                # Relative mode: offset from current (pre-detach) object pose
+                cur_pos, cur_orn = self._target_object.get_pose().as_position_orientation()
+                final_position, final_orientation = p.multiplyTransforms(
+                    cur_pos,
+                    cur_orn,
+                    self.drop_relative_pose.position,
+                    self.drop_relative_pose.orientation,
+                )
+                final_position = list(final_position)
+                final_orientation = list(final_orientation)
             else:
-                # Drop from height
-                final_position = [drop_pos[0], drop_pos[1], drop_pos[2] + self.drop_height]
+                # Absolute mode: teleport to drop_pose
+                drop_pos = self.drop_pose.position
+                final_orientation = self.drop_pose.orientation
+                if self.place_gently:
+                    final_position = drop_pos
+                else:
+                    # Drop from height
+                    final_position = [drop_pos[0], drop_pos[1], drop_pos[2] + self.drop_height]
 
             # Teleport object to drop position
-            self._target_object.set_pose_raw(final_position, self.drop_pose.orientation)
+            self._target_object.set_pose_raw(final_position, final_orientation)
 
             # If not placing gently, give object a small downward velocity
             if not self.place_gently:
