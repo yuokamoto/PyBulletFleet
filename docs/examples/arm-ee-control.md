@@ -352,6 +352,9 @@ python examples/pick_drop_arm_ee_demo.py
 
 # Rail arm — prismatic (linear) + revolute joints with EE control
 python examples/rail_arm_demo.py
+
+# Mobile manipulator (base + arm) — kinematic IK pick/drop
+python examples/mobile_manipulator_demo.py
 ```
 
 Both single-arm EE demos use kinematic mode for fast execution.

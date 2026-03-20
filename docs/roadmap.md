@@ -3,18 +3,12 @@
 Planned additions and improvements for PyBulletFleet.
 Items are grouped by category; ordering within a group does not imply priority.
 
-## Components
-
-New simulation building blocks:
-
-- ~~**Linear Joint**~~ ✅ Implemented in v0.1.0+ — `rail_arm_robot.urdf`, `JointAction` with per-joint tolerance, prismatic kinematic fallback
 
 ## Assets
 
 New robot and infrastructure models:
 
 - **Physics Mobile Robot** — Wheeled robot driven by PyBullet physics (motor torques, friction, contact forces)
-- ~~**Kinematic Mobile Manipulator**~~ ✅ Implemented — `mobile_manipulator.urdf` works in kinematic mode (`mass=0.0`), IK auto-detects and locks wheel joints, `ik_joint_names` for explicit control
 - **Physics Mobile Manipulator** — Physics-mode mobile manipulator with motor-driven base and arm
 - **Conveyor / Elevator / Mobile Rack** — Warehouse infrastructure entities for material handling scenarios
 

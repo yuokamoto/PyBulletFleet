@@ -242,6 +242,8 @@ Pick up an object and attach it to agent.
 - `search_radius`: Search radius when using `target_position` (default: 0.5m)
 - `attach_link`: Link index or name to attach to (default: -1 for base)
 - `attach_relative_pose`: Offset in link's frame as Pose
+- `use_approach`: Whether to execute the approach/retreat phases (default: `True`). When `True`, the agent navigates to an approach pose → moves forward to the pick position → picks → retreats. When `False`, the pick is executed immediately at the agent's current position — useful for arm robots and mobile manipulators where the EE is already positioned via IK.
+- `approach_offset`: Distance from target for auto-calculated approach pose (default: 1.0 m)
 
 ##### Drop
 Drop an attached object at a specified location.
@@ -251,6 +253,9 @@ Drop an attached object at a specified location.
 - `drop_relative_pose`: Optional `Pose` offset — when set, the object is placed at its current (pre-detach) position transformed by this offset instead of being teleported to `drop_pose`. Useful for EE-attached objects on mobile manipulators where the absolute world drop position is hard to predict.
 - `target_object_id`: Specific object to drop (None = first attached)
 - `place_gently`: Place at exact position vs drop from height (default: True)
+- `use_approach`: Whether to execute the approach/retreat phases (default: `True`). When `True`, the agent navigates to an approach pose near `drop_pose` → moves forward → drops → retreats. When `False`, the drop is executed immediately — useful for arm robots and mobile manipulators where the EE is already positioned.
+- `approach_offset`: Distance from drop pose for auto-calculated approach pose (default: 1.0 m)
+- `drop_offset`: Distance from `drop_pose` where the actual drop occurs (default: 0.0 = at `drop_pose`)
 
 ##### Wait
 Wait for specified duration.
