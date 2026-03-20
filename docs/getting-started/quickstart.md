@@ -110,7 +110,7 @@ All example scripts live in the `examples/` directory.
 | `pick_drop_arm_100robots_demo.py` | 100 arm robots with synchronised pick-and-drop |
 | `rail_arm_demo.py` | Rail arm (prismatic + revolute) pick-and-drop with EE control |
 | `pick_drop_mobile_100robots_demo.py` | 100 mobile robots picking and dropping objects |
-| `mobile_manipulator_demo.py` | Combined mobile base and arm control |
+| `mobile_manipulator_demo.py` | Kinematic mobile manipulator — IK-based pick/drop with arm + base movement |
 | `collision_features_demo.py` | Spatial-hash collision detection features and visualisation |
 | `memory_profiling_demo.py` | Memory usage tracking and profiling utilities |
 | `robot_demo.py` | Basic robot creation with `Agent.from_mesh()` / `Agent.from_urdf()` |

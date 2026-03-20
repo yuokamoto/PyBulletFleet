@@ -36,6 +36,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   - `_resolve_joint_tolerance()` — handles `None`/scalar/dict/list forms with consistent default fallback
   - `examples/rail_arm_demo.py` — rail arm pick/drop demo with EE control and per-joint tolerance
   - Tutorial 4 & 5 updated with tolerance reference and prismatic joint documentation
+- **Kinematic mobile manipulator** — `mobile_manipulator.urdf` now works in kinematic mode (`mass=0.0`). Mobile base teleports via `MoveAction`; arm joints interpolate kinematically. Demo rewritten as full action-queue pick/drop showcase.
+  - `examples/mobile_manipulator_demo.py` — Part 1 (joint-target) and Part 2 (IK-based) pick/drop cycles
+  - Attached objects follow the EE link during both arm motion and base movement
+- **IK auto-detection of movable joints** — `_solve_ik()` automatically skips `JOINT_FIXED` joints and locks continuous joints (wheels) at their current positions, so IK works correctly on composite robots (mobile base + arm) without manual configuration.
+- **`IKParams.ik_joint_names`** — Optional tuple of joint names the IK solver is allowed to move; all other movable joints are locked at their current positions. Provides explicit control when auto-detection is insufficient.
+- **`DropAction.drop_relative_pose`** — Optional `Pose` offset applied to the object's current (pre-detach) position instead of teleporting to `drop_pose`. Useful for EE-attached objects on mobile manipulators where the absolute world drop position is hard to predict.
 
 ### Changed
 

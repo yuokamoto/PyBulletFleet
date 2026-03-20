@@ -183,6 +183,12 @@ The `drop_pose` defines where the object is placed in the world after release �
 not the agent's final position. The `orientation` in `drop_pose` sets the object's
 orientation when placed, which is why we pass the same `pallet_quat` used at spawn time.
 
+```{tip}
+For EE-attached objects (arm robots, mobile manipulators), `drop_relative_pose`
+lets you drop relative to the object's current position instead of an absolute
+world coordinate.  See [Tutorial 5 §6 — drop_relative_pose](arm-ee-control) for details.
+```
+
 ---
 
 ## 7. WaitAction — Pause for a Fixed Duration

@@ -13,6 +13,7 @@ run it, and follow along in the docs at the same time.
 | Simulate 100 robots at once with a manager and per-robot paths | [Tutorial 3 — Managing a Fleet](multi-robot-fleet) |
 | Simulate a robot arm picking and dropping objects | [Tutorial 4 — Arm Pick & Drop](arm-pick-drop) |
 | Control an arm by end-effector position (IK) | [Tutorial 5 — EE Control & IK](arm-ee-control) |
+| Use IK on a mobile manipulator (base + arm) | [Tutorial 5 §6 — Mobile Manipulator IK](arm-ee-control) |
 
 ```{toctree}
 :maxdepth: 1
@@ -41,6 +42,8 @@ arm-ee-control
 | `PoseAction` | Tutorial 5 |
 | `agent.move_end_effector()` | Tutorial 5 |
 | `IKParams` | Tutorial 5 |
+| `IKParams(ik_joint_names=...)` | Tutorial 5 |
+| `DropAction(drop_relative_pose=...)` | Tutorials 2, 5 |
 | `PickAction(ee_target_position=...)` / `DropAction(ee_target_position=...)` | Tutorial 5 |
 | `agent.add_action_sequence()` | Tutorials 2, 4, 5 |
 | `Agent.joint_tolerance` / per-joint tolerance | Tutorial 4 |
