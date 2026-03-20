@@ -25,7 +25,7 @@ Create both artifacts in a single deliverable:
 
 - `copilot-instructions.md` must stay under ~200 lines — AI tools have context budgets; verbose instructions get truncated or ignored
 - Makefile targets must match CI exactly — `make verify` = what CI runs, no surprises
-- No new dependencies — only wraps existing tools (`black`, `pyright`, `pytest`, `pre-commit`, `sphinx-build`)
+- No new runtime dependencies — only dev tooling deps added (`pyright` for `make typecheck`)
 - Benchmark targets must work without GPU — `make bench-smoke` uses `p.DIRECT` mode
 
 ## Design

@@ -38,8 +38,8 @@ MultiRobotSimulationCore  (core_simulation.py)
 - **Type checking:** pyright in basic mode. Relaxed for PyBullet's dynamic API.
 - **Linting:** flake8 (line-length 127).
 - **Pre-commit:** black + pyright + flake8 + general hooks. Run `make lint`.
-- **Logging:** Always `get_lazy_logger(__name__)` from `pybullet_fleet.logging_utils`. Never `logging.getLogger()` or `print()`.
-- **Factory methods:** Always use `from_params()`, `from_yaml()`, `from_dict()`, `from_urdf()`, `from_mesh()`. Never call `__init__()` directly on Agent, SimObject, or SimulationParams.
+- **Logging:** Prefer `get_lazy_logger(__name__)` from `pybullet_fleet.logging_utils` for hot-path logging. `logging.getLogger(__name__)` is acceptable for module-level loggers. Never use `print()` for operational output.
+- **Factory methods:** When constructing from YAML or dicts, use `from_params()`, `from_yaml()`, `from_dict()`, `from_urdf()`, `from_mesh()`. Direct `__init__()` is fine for dataclasses like `SimulationParams` in tests.
 - **Shared shape cache:** `SimObject._shared_shapes` caches PyBullet mesh shape IDs. Must clear between tests (autouse fixture handles this).
 - **Import guards:** Use `if TYPE_CHECKING:` for imports that cause circular dependencies (common between action.py ↔ agent.py).
 
@@ -63,8 +63,8 @@ MultiRobotSimulationCore  (core_simulation.py)
 3. **Never mutate `_agents` or `_sim_objects` lists directly** — use `add_object()` / `remove_object()`.
 4. **Never skip `_shared_shapes` cleanup** — stale shape IDs crash after `p.disconnect()`.
 5. **Never import without `TYPE_CHECKING` guard** when it would cause circular deps.
-6. **Never use `logging.getLogger()`** — use `get_lazy_logger(__name__)`.
-7. **Never call `__init__()` directly** on Agent, SimObject, SimulationParams — use factory methods.
+6. **Prefer `get_lazy_logger(__name__)`** for new code — avoids expensive f-string evaluation when log level is disabled.
+7. **Never call `__init__()` directly** on Agent or SimObject — use factory methods. `SimulationParams(...)` is fine.
 8. **Always run `make verify` before claiming work is done.**
 
 ## Common Patterns
