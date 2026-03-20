@@ -76,40 +76,25 @@ cd docs && sphinx-build -b html . _build/html
 
 ## Development Setup
 
-### Run tests
+A root `Makefile` provides all common dev commands. Run `make help` to list targets.
 
 ```bash
-pytest
+make verify        # Lint + test (CI subset, excludes docs/security)
+make test          # Tests with coverage (75% threshold)
+make test-fast     # Quick test (stop on first failure)
+make lint          # All pre-commit hooks (black, pyright, flake8)
+make format        # Auto-format with black
+make typecheck     # Pyright type check
+make bench-smoke   # Quick benchmark (~10s)
+make docs          # Sphinx docs (warnings = errors)
+make clean         # Remove caches and build artifacts
 ```
 
 ### Pre-commit hooks
 
-Install pre-commit hooks for automatic code formatting and linting:
+Install pre-commit hooks for automatic formatting and linting on commit:
 
 ```bash
 pip install pre-commit
 pre-commit install
-```
-
-Run manually on all files:
-
-```bash
-pre-commit run --all-files
-```
-
-### Code quality tools
-
-**Format code:**
-```bash
-black pybullet_fleet examples
-```
-
-**Lint code:**
-```bash
-flake8 pybullet_fleet
-```
-
-**Type check:**
-```bash
-pyright pybullet_fleet
 ```
