@@ -9,7 +9,7 @@ The existing `mobile_manipulator_demo.py` does not function correctly even in ph
 
 ## Decision
 
-Modify the URDF and demo to produce a working kinematic mobile manipulator demonstration. No core library changes are expected — the existing kinematic joint interpolation and link-attachment tracking should work as-is.
+Modify the URDF and demo to produce a working kinematic mobile manipulator demonstration. Minimal core bug fixes were needed — the existing kinematic joint interpolation and link-attachment tracking required small fixes to propagate attached objects correctly.
 
 ## Requirements
 
@@ -44,4 +44,4 @@ Modify the URDF and demo to produce a working kinematic mobile manipulator demon
 - [ ] Box attaches to EE and follows arm motion correctly
 - [ ] Box follows base movement while attached
 - [ ] Box is placed at drop position correctly
-- [ ] No core library changes required (or minimal if bug found)
+- [ ] No core library changes required (or minimal bug fixes if needed)

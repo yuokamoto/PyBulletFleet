@@ -876,7 +876,7 @@ class TestDropActionIntegration:
         )
 
         # drop_relative_pose=(0,0,0) → box stays at its pre-detach world position.
-        # Since pick_offset=0 the attachment offset ≈ 0, so box ≈ agent position.
+        # Default attach_link=-1 and attach_relative_pose=(0,0,0), so box ≈ agent position.
         box_pos = np.array(box.get_pose().position)
         dist_box_agent = np.linalg.norm(box_pos[:2] - agent_pos)
         assert dist_box_agent < COARSE_TOL, (
