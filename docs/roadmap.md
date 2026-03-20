@@ -3,18 +3,13 @@
 Planned additions and improvements for PyBulletFleet.
 Items are grouped by category; ordering within a group does not imply priority.
 
-## Components
-
-New simulation building blocks:
-
-- **Linear Joint** — Prismatic (sliding) joint entity for gates, sliding doors, and linear actuators
 
 ## Assets
 
 New robot and infrastructure models:
 
 - **Physics Mobile Robot** — Wheeled robot driven by PyBullet physics (motor torques, friction, contact forces)
-- **Physics / Kinematic Mobile Manipulator** — Mobile base + arm composite; switchable between kinematics and physics modes
+- **Physics Mobile Manipulator** — Physics-mode mobile manipulator with motor-driven base and arm
 - **Conveyor / Elevator / Mobile Rack** — Warehouse infrastructure entities for material handling scenarios
 
 ## Features

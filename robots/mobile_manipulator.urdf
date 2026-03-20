@@ -112,11 +112,11 @@
     </collision>
   </link>
 
-  <!-- Mount joint (fixed to top of base) -->
+  <!-- Mount joint (fixed to front-top of base) -->
   <joint name="base_to_mount" type="fixed">
     <parent link="base_link"/>
     <child link="arm_mount"/>
-    <origin xyz="-0.1 0.0 0.15" rpy="0 0 0"/>
+    <origin xyz="0.25 0.0 0.15" rpy="0 0 0"/>
   </joint>
 
   <!-- ========================================

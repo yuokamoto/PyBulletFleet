@@ -15,6 +15,8 @@ to joint angles automatically.
 - Using `ee_target_position` in `PickAction` / `DropAction`
 - Tuning IK behaviour with `IKParams`
 - Orientation control with `target_orientation`
+- **Mobile manipulator IK** — auto-detection, wheel locking, `ik_joint_names`
+- **`drop_relative_pose`** — dropping objects relative to the EE position
 
 **Prerequisites:** [Tutorial 4 — Arm Joint Control](arm-pick-drop) (joint targets, `use_fixed_base`, link attachment).
 
@@ -220,7 +222,79 @@ the solver fails to converge for targets requiring large joint displacements.
 
 ---
 
-## 6. Low-Level Callback Approach
+## 6. Mobile Manipulator IK
+
+On composite robots (mobile base + arm), the IK solver must ignore the base joints
+and only solve for arm joints. PyBulletFleet handles this automatically:
+
+- **FIXED joints** are skipped (PyBullet excludes them from IK)
+- **Continuous joints** (lower limit ≥ upper limit, e.g. drive wheels) are **locked** at their current positions
+
+This means `move_end_effector()` works on a mobile manipulator without extra
+configuration — the wheels stay put while the arm moves to reach the target.
+
+### Explicit control with `ik_joint_names`
+
+For cases where auto-detection isn't enough, use `ik_joint_names` to explicitly
+list the joints the IK solver is allowed to move:
+
+```python
+from pybullet_fleet.agent import Agent, IKParams
+
+ik_cfg = IKParams(
+    ik_joint_names=(
+        "mount_to_shoulder",
+        "shoulder_to_elbow",
+        "elbow_to_wrist",
+        "wrist_to_end",
+    ),
+)
+
+agent = Agent.from_urdf(
+    urdf_path="robots/mobile_manipulator.urdf",
+    pose=Pose.from_xyz(0, 0, 0),
+    sim_core=sim_core,
+    ik_params=ik_cfg,
+    mass=0.0,  # kinematic mode
+)
+```
+
+All movable joints **not** in `ik_joint_names` are locked at their current positions.
+When `ik_joint_names` is `None` (default), auto-detection is used.
+
+See [`examples/mobile_manipulator_demo.py`](https://github.com/yuokamoto/PyBulletFleet/blob/main/examples/mobile_manipulator_demo.py)
+for a full mobile manipulator demo with IK-based pick/drop.
+
+### `drop_relative_pose` — Relative Drop Positioning
+
+When an object is attached to the EE of a mobile manipulator, you often don't know
+the exact world position where it should be dropped (since the base can be anywhere).
+Use `drop_relative_pose` to specify an offset from the object's current position:
+
+```python
+from pybullet_fleet.action import DropAction
+
+# Drop the object exactly where the EE currently is (no offset)
+drop = DropAction(
+    drop_pose=Pose.from_xyz(0, 0, 0),  # base navigation target (still used for approach/move-to-drop)
+    drop_relative_pose=Pose.from_xyz(0, 0, 0),  # (0,0,0) = release in place
+    use_approach=False,
+)
+
+# Drop with a small forward offset from EE
+drop = DropAction(
+    drop_pose=Pose.from_xyz(0, 0, 0),  # base navigation target
+    drop_relative_pose=Pose.from_xyz(0.1, 0, 0),  # 10cm forward
+    use_approach=False,
+)
+```
+
+When `drop_relative_pose` is set, the object's final position is computed as:
+*current_object_pose* × *drop_relative_pose* — instead of teleporting to `drop_pose`.
+
+---
+
+## 7. Low-Level Callback Approach
 
 For full control, use `move_end_effector()` in a state-machine callback
 (see `pick_drop_arm_ee_demo.py`):
@@ -267,7 +341,7 @@ sim_core.register_callback(pick_drop_callback, frequency=10)
 
 ---
 
-## 7. Running the Demos
+## 8. Running the Demos
 
 ```bash
 # Action-queue approach (recommended)
@@ -278,13 +352,16 @@ python examples/pick_drop_arm_ee_demo.py
 
 # Rail arm — prismatic (linear) + revolute joints with EE control
 python examples/rail_arm_demo.py
+
+# Mobile manipulator (base + arm) — kinematic IK pick/drop
+python examples/mobile_manipulator_demo.py
 ```
 
 Both single-arm EE demos use kinematic mode for fast execution.
 
 ---
 
-## 8. Prismatic Joints & Rail Arms
+## 9. Prismatic Joints & Rail Arms
 
 The IK solver works with **prismatic (linear) joints** out of the box. A prismatic
 joint in the kinematic chain lets the IK solver adjust both the linear position
@@ -345,6 +422,8 @@ reference (scalar, dict, agent-level fallback).
 | `PickAction(ee_target_position=...)` | IK-based pick positioning |
 | `DropAction(ee_target_position=...)` | IK-based drop positioning |
 | `IKParams(...)` | IK solver tuning parameters |
+| `IKParams(ik_joint_names=(...))` | Restrict IK to specific joints |
+| `DropAction(drop_relative_pose=...)` | Drop relative to current EE position |
 
 ---
 
@@ -353,4 +432,5 @@ reference (scalar, dict, agent-level fallback).
 - [Tutorial 4 — Arm Joint Control](arm-pick-drop): `JointAction`, joint-level pick/drop, tolerance reference
 - [Tutorial 2 — Action System](action-system): mobile robot pick/drop with `MoveAction`
 - [Rail Arm Demo](https://github.com/yuokamoto/PyBulletFleet/blob/main/examples/rail_arm_demo.py): prismatic + revolute EE control
+- [Mobile Manipulator Demo](https://github.com/yuokamoto/PyBulletFleet/blob/main/examples/mobile_manipulator_demo.py): kinematic mobile manipulator with IK pick/drop
 - [Architecture Overview](../architecture/overview): IK internals, joint control modes

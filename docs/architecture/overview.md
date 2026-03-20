@@ -160,7 +160,8 @@ object attachment via `update_attached_objects_kinematics()`.
 **Associated Params:**
 
 - `AgentSpawnParams` — Configuration for agent initialization: motion limits (`max_linear_vel`, `max_linear_accel`, `max_angular_vel`, `max_angular_accel`), motion mode (`"omnidirectional"` / `"differential"`), orientation, mass, collision toggle. Immutable after creation.
-- `IKParams` — IK solver configuration dataclass: `max_outer_iterations`, `convergence_threshold`, `max_inner_iterations`, `residual_threshold`, `reachability_tolerance`, `seed_quartiles`. Passed to `Agent.from_urdf(ik_params=...)`. Default: 5 outer iterations, 0.01 m threshold.
+- `IKParams` — IK solver configuration dataclass: `max_outer_iterations`, `convergence_threshold`, `max_inner_iterations`, `residual_threshold`, `reachability_tolerance`, `seed_quartiles`, `ik_joint_names`. Passed to `Agent.from_urdf(ik_params=...)`. Default: 5 outer iterations, 0.01 m threshold.
+  - `ik_joint_names` (optional `tuple[str, ...]`) — When set, only the named joints participate in IK; all other movable joints are locked at their current positions. When `None` (default), the solver auto-detects: `JOINT_FIXED` joints are skipped, and continuous joints (lower limit ≥ upper limit, e.g. wheels) are locked automatically. This makes IK work correctly on composite robots like mobile manipulators without manual configuration.
 
 **Agent-Level Tolerance:**
 - `Agent.joint_tolerance` — property (float, list, dict, or None) that provides a default tolerance for `JointAction` when `tolerance=None`. Supports dict keyed by joint name or list indexed by absolute joint index for per-joint thresholds (useful for mixed prismatic/revolute arms). Out-of-range list indices fall back to the class default (0.01). Fallback: instance value → class default (0.01). Can be set at construction via `Agent.from_urdf(joint_tolerance=...)` or updated via the property setter.
@@ -241,14 +242,20 @@ Pick up an object and attach it to agent.
 - `search_radius`: Search radius when using `target_position` (default: 0.5m)
 - `attach_link`: Link index or name to attach to (default: -1 for base)
 - `attach_relative_pose`: Offset in link's frame as Pose
+- `use_approach`: Whether to execute the approach/retreat phases (default: `True`). When `True`, the agent navigates to an approach pose → moves forward to the pick position → picks → retreats. When `False`, the pick is executed immediately at the agent's current position — useful for arm robots and mobile manipulators where the EE is already positioned via IK.
+- `approach_offset`: Distance from target for auto-calculated approach pose (default: 1.0 m)
 
 ##### Drop
 Drop an attached object at a specified location.
 
 **Key Parameters:**
 - `drop_pose`: Where to drop the object (position and orientation)
+- `drop_relative_pose`: Optional `Pose` offset — when set, the object is placed at its current (pre-detach) position transformed by this offset instead of being teleported to `drop_pose`. Useful for EE-attached objects on mobile manipulators where the absolute world drop position is hard to predict.
 - `target_object_id`: Specific object to drop (None = first attached)
 - `place_gently`: Place at exact position vs drop from height (default: True)
+- `use_approach`: Whether to execute the approach/retreat phases (default: `True`). When `True`, the agent navigates to an approach pose near `drop_pose` → moves forward → drops → retreats. When `False`, the drop is executed immediately — useful for arm robots and mobile manipulators where the EE is already positioned.
+- `approach_offset`: Distance from drop pose for auto-calculated approach pose (default: 1.0 m)
+- `drop_offset`: Distance from `drop_pose` where the actual drop occurs (default: 0.0 = at `drop_pose`)
 
 ##### Wait
 Wait for specified duration.

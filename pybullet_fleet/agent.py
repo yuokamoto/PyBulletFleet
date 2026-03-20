@@ -66,6 +66,7 @@ class AgentSpawnParams(SimObjectSpawnParams):
     max_angular_accel: Union[float, List[float]] = 10.0
     motion_mode: Union[MotionMode, str] = MotionMode.OMNIDIRECTIONAL
     use_fixed_base: bool = False
+    ik_params: Optional["IKParams"] = None
 
     def __post_init__(self):
         """Validate agent spawn parameters."""
@@ -133,6 +134,11 @@ class AgentSpawnParams(SimObjectSpawnParams):
         # Get base fields from parent
         base = SimObjectSpawnParams.from_dict(config)
 
+        # Parse ik_params from nested dict if provided
+        ik_params_value = config.get("ik_params")
+        if isinstance(ik_params_value, dict):
+            ik_params_value = IKParams(**ik_params_value)
+
         return cls(
             visual_shape=base.visual_shape,
             collision_shape=base.collision_shape,
@@ -149,6 +155,7 @@ class AgentSpawnParams(SimObjectSpawnParams):
             max_angular_accel=config.get("max_angular_accel", 10.0),
             motion_mode=motion_mode_value,
             use_fixed_base=config.get("use_fixed_base", False),
+            ik_params=ik_params_value,
         )
 
 
@@ -172,11 +179,23 @@ class IKParams:
         seed_quartiles: Tuple of joint-range fractions (0–1) used to
             build diversified rest-pose seeds.  Each value ``q`` produces
             a seed at ``lower + q * range`` for every joint.
+        ik_joint_names: Explicit tuple of joint **names** that the IK
+            solver is allowed to move.  All other movable joints are
+            locked at their current position.  When ``None`` (default),
+            the solver falls back to the automatic heuristic (continuous
+            joints are locked, everything else is free).
 
     Example::
 
         cfg = IKParams(max_outer_iterations=10, seed_quartiles=(0.1, 0.5, 0.9))
         arm = Agent.from_urdf("arm.urdf", ik_params=cfg)
+
+        # Mobile manipulator — solve only for arm joints
+        cfg = IKParams(ik_joint_names=(
+            "mount_to_shoulder", "shoulder_to_elbow",
+            "elbow_to_wrist", "wrist_to_end",
+        ))
+        robot = Agent.from_urdf("mobile_manipulator.urdf", ik_params=cfg)
     """
 
     max_outer_iterations: int = 5
@@ -185,6 +204,7 @@ class IKParams:
     residual_threshold: float = 1e-4
     reachability_tolerance: float = 0.02
     seed_quartiles: Tuple[float, ...] = (0.25, 0.5, 0.75)
+    ik_joint_names: Optional[Tuple[str, ...]] = None
 
 
 class Agent(SimObject):
@@ -560,6 +580,7 @@ class Agent(SimObject):
                 sim_core=sim_core,
                 name=spawn_params.name,
                 user_data=spawn_params.user_data,
+                ik_params=spawn_params.ik_params,
             )
         else:
             # Mesh robot
@@ -1642,7 +1663,7 @@ class Agent(SimObject):
                 return True
         return False
 
-    def _update_kinematic_joints(self, dt: float) -> None:
+    def _update_kinematic_joints(self, dt: float) -> bool:
         """Interpolate joints toward targets for kinematic robots (mass=0).
 
         Called from update() each step. Mirrors the role of stepSimulation()
@@ -1656,10 +1677,14 @@ class Agent(SimObject):
         Iterates ``_last_joint_targets`` and skips joints that have already
         reached their target (``abs(diff) < 1e-7``).  Entries are **never**
         deleted so that ``are_joints_at_targets()`` can query them later.
+
+        Returns:
+            True if any joint position changed this step, False otherwise.
         """
         if not self._last_joint_targets:
-            return
+            return False
 
+        any_moved = False
         for joint_index, target in self._last_joint_targets.items():
             current_pos = self._kinematic_joint_positions.get(joint_index, 0.0)
             diff = target - current_pos
@@ -1680,6 +1705,8 @@ class Agent(SimObject):
                 new_pos = current_pos + math.copysign(max_step, diff)
             p.resetJointState(self.body_id, joint_index, new_pos, physicsClientId=self._pid)
             self._kinematic_joint_positions[joint_index] = new_pos
+            any_moved = True
+        return any_moved
 
     def update(self, dt: float) -> bool:
         """
@@ -1697,44 +1724,43 @@ class Agent(SimObject):
             dt: Time step (seconds)
 
         Returns:
-            True if the robot moved (position or orientation changed), False otherwise
+            True if the robot moved (position, orientation, or joint state changed),
+            False otherwise
         """
         # Process action queue first (actions may set goals/paths)
         self._update_actions(dt)
 
         # Kinematic joint interpolation (mirrors stepSimulation role for mass=0 URDF robots
         # or when physics is disabled in sim_core)
+        joints_moved = False
         if self.is_urdf_robot() and self._use_kinematic_joints:
-            self._update_kinematic_joints(dt)
+            joints_moved = self._update_kinematic_joints(dt)
 
+        moved = False
         if not self.use_fixed_base:
-            if not self._is_moving or self._goal_pose is None:
-                # # Ensure robot is completely stopped when not following a path
-                # # Reset velocity to zero every frame to counteract physics (gravity, etc.)
-                # p.resetBaseVelocity(self.body_id, linearVelocity=[0, 0, 0], angularVelocity=[0, 0, 0])
-                # # Also fix position to prevent any drift from physics simulation
-                # current_pos, current_orn = p.getBasePositionAndOrientation(self.body_id)
-                # p.resetBasePositionAndOrientation(self.body_id, current_pos, current_orn)
-                return False  # No movement if not moving
+            if self._is_moving and self._goal_pose is not None:
+                # Dispatch to appropriate motion controller
+                if self._is_final_orientation_aligning:
+                    # Final orientation alignment: always use differential rotation
+                    # (even for omnidirectional robots, we rotate in place)
+                    self._update_differential(dt)
+                elif self._motion_mode == MotionMode.OMNIDIRECTIONAL:
+                    self._update_omnidirectional(dt)
+                elif self._motion_mode == MotionMode.DIFFERENTIAL:
+                    self._update_differential(dt)
+                else:
+                    self._log.warning(f"Unknown motion mode: {self._motion_mode}")
+                moved = True
 
-            # Dispatch to appropriate motion controller
-            if self._is_final_orientation_aligning:
-                # Final orientation alignment: always use differential rotation
-                # (even for omnidirectional robots, we rotate in place)
-                self._update_differential(dt)
-            elif self._motion_mode == MotionMode.OMNIDIRECTIONAL:
-                self._update_omnidirectional(dt)
-            elif self._motion_mode == MotionMode.DIFFERENTIAL:
-                self._update_differential(dt)
-            else:
-                self._log.warning(f"Unknown motion mode: {self._motion_mode}")
-
-        if self.is_urdf_robot():
+        # Always update attached objects for URDF robots AFTER base motion
+        # so that objects attached to links track correctly both when
+        # the base moves and when only arm joints move.
+        if self.is_urdf_robot() and self.attached_objects:
             self.update_attached_objects_kinematics()
 
-        # Movement detection is handled by set_pose() in _update_omnidirectional() and _update_differential()
-        # Return True to indicate update was called (actual movement is tracked by sim_core)
-        return True
+        # Return True if any geometry changed (base moved OR joints moved)
+        # so that sim_core adds this agent to _moved_this_step for collision checks.
+        return moved or joints_moved
 
     def get_velocity(self) -> np.ndarray:
         """
@@ -1868,6 +1894,10 @@ class Agent(SimObject):
 
         if joint_index >= len(self.joint_info):
             self._log.warning(f"joint_index {joint_index} out of range (max: {len(self.joint_info)-1})")
+            return
+
+        # Skip fixed joints — they cannot be driven
+        if self.joint_info[joint_index][2] == p.JOINT_FIXED:
             return
 
         # Always record for are_joints_at_targets() / PoseAction completion
@@ -2184,13 +2214,53 @@ class Agent(SimObject):
             return []
 
         num_joints = len(self.joint_info)
-        lower_limits = [info[8] for info in self.joint_info]
-        upper_limits = [info[9] for info in self.joint_info]
-        joint_ranges = [upper - lower for lower, upper in zip(lower_limits, upper_limits)]
         saved_positions = [self.get_joint_state(i)[0] for i in range(num_joints)]
-
         cfg = self._ik_params
-        seed_strategies: List[List[float]] = [list(saved_positions)]
+
+        # Build movable-joint mapping.  PyBullet's calculateInverseKinematics
+        # returns values only for movable joints (skips JOINT_FIXED).
+        movable_indices = [i for i, info in enumerate(self.joint_info) if info[2] != p.JOINT_FIXED]
+
+        # Build limit arrays for movable joints only.
+        # Joints NOT in the IK "free set" are locked at their current
+        # position via a tiny range around the saved value.
+        _LOCK_EPS = 1e-4  # tiny range to effectively freeze the joint
+
+        # Determine which movable joints the IK solver is allowed to move.
+        ik_names = cfg.ik_joint_names
+        if ik_names is not None:
+            # Resolve names to a set of joint indices for O(1) lookup.
+            ik_free_indices: Optional[set] = set()
+            for name in ik_names:
+                idx = resolve_joint_index(self.body_id, name)
+                if idx >= 0:
+                    ik_free_indices.add(idx)
+                else:
+                    self._log.warning("_solve_ik: ik_joint_names entry '%s' not found", name)
+        else:
+            ik_free_indices = None  # auto-detect mode
+
+        lower_limits: List[float] = []
+        upper_limits: List[float] = []
+        joint_ranges: List[float] = []
+        for idx in movable_indices:
+            lo, hi = self.joint_info[idx][8], self.joint_info[idx][9]
+            if ik_free_indices is not None:
+                # Explicit mode: lock if not in the free set
+                should_lock = idx not in ik_free_indices
+            else:
+                # Auto mode: lock continuous joints (lower >= upper)
+                should_lock = lo >= hi
+            if should_lock:
+                cur = saved_positions[idx]
+                lo, hi = cur - _LOCK_EPS, cur + _LOCK_EPS
+            lower_limits.append(lo)
+            upper_limits.append(hi)
+            joint_ranges.append(hi - lo)
+
+        # Seeds in movable-joint space
+        movable_saved = [saved_positions[i] for i in movable_indices]
+        seed_strategies: List[List[float]] = [list(movable_saved)]
         for q in cfg.seed_quartiles:
             seed_strategies.append([lo + q * r for lo, r in zip(lower_limits, joint_ranges)])
 
@@ -2223,8 +2293,9 @@ class Agent(SimObject):
                 if prev_angles is not None and joint_angles == prev_angles:
                     break
 
-                for i, angle in enumerate(joint_angles):
-                    p.resetJointState(self.body_id, i, angle, physicsClientId=self._pid)
+                # Map movable-joint IK output to actual joint indices
+                for k, angle in enumerate(joint_angles):
+                    p.resetJointState(self.body_id, movable_indices[k], angle, physicsClientId=self._pid)
                 link_state = p.getLinkState(self.body_id, ee_index, computeForwardKinematics=1, physicsClientId=self._pid)
                 distance = float(np.linalg.norm(np.array(link_state[0]) - target_arr))
 
@@ -2245,7 +2316,11 @@ class Agent(SimObject):
         for i, pos in enumerate(saved_positions):
             p.resetJointState(self.body_id, i, pos, physicsClientId=self._pid)
 
-        return best_angles
+        # Map movable-joint result back to full joint list
+        full_angles = list(saved_positions)
+        for k, angle in enumerate(best_angles):
+            full_angles[movable_indices[k]] = angle
+        return full_angles
 
     def _check_ee_pose(
         self,

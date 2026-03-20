@@ -33,6 +33,7 @@ from tests.conftest import MockSimCore
 MESH_PATH = os.path.join(os.path.dirname(__file__), "../mesh/cube.obj")
 ARM_URDF = "robots/arm_robot.urdf"
 MOBILE_URDF = "robots/mobile_robot.urdf"
+MOBILE_MANIPULATOR_URDF = "robots/mobile_manipulator.urdf"
 
 
 @pytest.fixture
@@ -1893,64 +1894,171 @@ class TestAgentURDFLinkAttach:
             f"box_b orientation {list(new_b_orn)} should match " f"expected = {list(expected_b_orn)}"
         )
 
-    @pytest.mark.xfail(
-        reason="Kinematic (mass=0) URDF does not support set_joint_target yet (TODO)",
-        strict=True,
-    )
-    def test_non_fixed_base_set_pose_and_joint(self, pybullet_env):
-        """Non-fixed-base URDF: set_pose + set_joint_target, attached object follows.
+    def test_update_propagates_attachment_when_base_stationary(self, pybullet_env):
+        """update() must update attached objects even when base is not moving.
 
-        With use_fixed_base=False, the agent can be repositioned via set_pose.
-        After set_pose and joint movement via set_joint_target, the attached
-        object should track the end effector at the new base position.
+        Regression test: Agent.update() had an early return when the base was
+        stationary (_is_moving=False), which skipped
+        update_attached_objects_kinematics(). This caused attached objects to
+        stay in place when only the arm joints moved (e.g. JointAction after
+        PickAction).
 
-        Currently expected to fail because kinematic (mass=0) agents do not
-        support set_joint_target (POSITION_CONTROL requires physics steps
-        with non-zero mass).  This test will pass once kinematic joint
-        control is implemented.
+        Uses mobile_manipulator.urdf (the real scenario: mobile base + arm)
+        with joints:
+          0: base_to_left_wheel  (continuous)
+          1: base_to_right_wheel (continuous)
+          2: base_to_mount       (FIXED)
+          3: mount_to_shoulder   (revolute)
+          4: shoulder_to_elbow   (revolute)
+          5: elbow_to_wrist      (revolute)
+          6: wrist_to_end        (revolute)  → child: end_effector (link 6)
         """
+        client_id = pybullet_env[0]
+        sim_core = MockSimCore(physics=False)
+        sim_core._client = client_id
+        ee_link_index = 6  # end_effector link
+        arm_joint_index = 4  # shoulder_to_elbow (revolute, moves EE significantly)
+        arm_joint_target = 1.0
         agent = Agent.from_urdf(
-            urdf_path=ARM_URDF,
+            urdf_path=MOBILE_MANIPULATOR_URDF,
             pose=Pose.from_xyz(0, 0, 0.5),
             mass=0.0,
             use_fixed_base=False,
+            sim_core=sim_core,
         )
         box = self._create_pickable_box()
         rel_pos = [0, 0, 0.06]
         rel_orn = [0, 0, 0, 1]
         agent.attach_object(
             box,
-            parent_link_index="end_effector",
+            parent_link_index=ee_link_index,
             relative_pose=Pose(position=rel_pos, orientation=rel_orn),
         )
 
-        # Step 1: move base to a new position
-        new_base_pose = Pose.from_euler(2, 3, 0.5, yaw=0.7)
-        agent.set_pose(new_base_pose)
-
-        # Verify base actually moved
-        base_pos, base_orn = p.getBasePositionAndOrientation(agent.body_id)
-        assert np.allclose(base_pos, new_base_pose.position, atol=1e-4)
-
-        # Step 2: move joint via set_joint_target (kinematic — currently unsupported)
-        target_angle = 0.8
-        agent.set_joint_target(1, target_angle)
-        for _ in range(500):
-            p.stepSimulation()
-
-        pos1, _ = agent.get_joint_state(1)
-        assert abs(pos1 - target_angle) < 0.1, f"Joint 1 should be near {target_angle}, got {pos1}"
-
-        # Step 3: update kinematics and verify box position
+        # Record initial box position (at home pose)
         agent.update_attached_objects_kinematics()
-        box_pos = np.array(box.get_pose().position)
-        box_orn = np.array(box.get_pose().orientation)
+        initial_pos = np.array(box.get_pose().position)
 
-        # Ground truth: PyBullet link state at the moved base + joint configuration
-        link_state = p.getLinkState(agent.body_id, 3)
+        # Set arm joint target — base remains stationary
+        agent.set_joint_target(arm_joint_index, arm_joint_target)
+
+        # Run update loop (NOT calling update_attached_objects_kinematics directly)
+        dt = sim_core._dt
+        for _ in range(500):
+            sim_core.tick()
+            agent.update(dt)
+
+        # Joint should have moved via kinematic interpolation
+        pos_j, _ = agent.get_joint_state(arm_joint_index)
+        assert abs(pos_j - arm_joint_target) < 0.05, f"Joint {arm_joint_index} should be near {arm_joint_target}, got {pos_j}"
+
+        # Box MUST have followed the end effector
+        new_pos = np.array(box.get_pose().position)
+        assert not np.allclose(initial_pos, new_pos, atol=0.01), (
+            f"Attached box must move when arm joints move via update(): " f"initial={list(initial_pos)}, after={list(new_pos)}"
+        )
+
+        # Verify exact position matches expected link state + offset
+        link_state = p.getLinkState(agent.body_id, ee_link_index, computeForwardKinematics=1, physicsClientId=client_id)
         expected_pos, expected_orn = p.multiplyTransforms(link_state[0], link_state[1], rel_pos, rel_orn)
-        assert np.allclose(box_pos, expected_pos, atol=1e-4), (
-            f"Box position {list(box_pos)} should match " f"link3 (at new base) + offset = {list(expected_pos)}"
+        assert np.allclose(new_pos, expected_pos, atol=1e-4), (
+            f"Box position {list(new_pos)} should match " f"link{ee_link_index} + offset = {list(expected_pos)}"
+        )
+
+    def test_update_propagates_attachment_after_base_move_then_joint_move(self, pybullet_env):
+        """update() must propagate attachments during both base movement and joint movement.
+
+        Complements test_update_propagates_attachment_when_base_stationary:
+        that test covers joint-only movement; this test covers the full
+        mobile manipulator workflow:
+          Phase 1: Base moves to a new position (arm at home pose)
+                   → attached object must follow EE throughout
+          Phase 2: Base stops, arm joint moves
+                   → attached object must follow EE at the new base position
+
+        Uses mobile_manipulator.urdf with joints:
+          0: base_to_left_wheel  (continuous)
+          1: base_to_right_wheel (continuous)
+          2: base_to_mount       (FIXED)
+          3: mount_to_shoulder   (revolute)
+          4: shoulder_to_elbow   (revolute)
+          5: elbow_to_wrist      (revolute)
+          6: wrist_to_end        (revolute)  → child: end_effector (link 6)
+        """
+        client_id = pybullet_env[0]
+        sim_core = MockSimCore(physics=False)
+        sim_core._client = client_id
+        ee_link_index = 6
+        arm_joint_index = 4  # shoulder_to_elbow
+        arm_joint_target = 1.0
+        dt = sim_core._dt
+
+        agent = Agent.from_urdf(
+            urdf_path=MOBILE_MANIPULATOR_URDF,
+            pose=Pose.from_xyz(0, 0, 0),
+            mass=0.0,
+            use_fixed_base=False,
+            sim_core=sim_core,
+        )
+        box = self._create_pickable_box()
+        rel_pos = [0, 0, 0.06]
+        rel_orn = [0, 0, 0, 1]
+        agent.attach_object(
+            box,
+            parent_link_index=ee_link_index,
+            relative_pose=Pose(position=rel_pos, orientation=rel_orn),
+        )
+
+        # Record initial box position
+        agent.update_attached_objects_kinematics()
+        initial_pos = np.array(box.get_pose().position)
+
+        # --- Phase 1: Move base to (3, 0, 0) ---
+        goal_pos = [3, 0, 0]
+        agent.set_goal_pose(Pose.from_xyz(*goal_pos))
+        for _ in range(5000):
+            sim_core.tick()
+            agent.update(dt)
+            if not agent.is_moving:
+                break
+
+        assert not agent.is_moving, "Base should have reached goal"
+        base_pos = np.array(agent.get_pose().position)
+        assert np.allclose(base_pos[:2], goal_pos[:2], atol=0.1), f"Base should be near {goal_pos}, got {list(base_pos)}"
+
+        # Box must have moved from initial position (it followed the base)
+        after_base_move_pos = np.array(box.get_pose().position)
+        assert not np.allclose(initial_pos, after_base_move_pos, atol=0.01), (
+            f"Box must move during base movement: " f"initial={list(initial_pos)}, after={list(after_base_move_pos)}"
+        )
+
+        # Verify box is at correct FK position after base move
+        link_state = p.getLinkState(agent.body_id, ee_link_index, computeForwardKinematics=1, physicsClientId=client_id)
+        expected_pos, _ = p.multiplyTransforms(link_state[0], link_state[1], rel_pos, rel_orn)
+        assert np.allclose(after_base_move_pos, expected_pos, atol=1e-4), (
+            f"After base move: box {list(after_base_move_pos)} != " f"expected {list(expected_pos)}"
+        )
+
+        # --- Phase 2: Move arm joint (base stationary) ---
+        agent.set_joint_target(arm_joint_index, arm_joint_target)
+        for _ in range(500):
+            sim_core.tick()
+            agent.update(dt)
+
+        pos_j, _ = agent.get_joint_state(arm_joint_index)
+        assert abs(pos_j - arm_joint_target) < 0.05, f"Joint {arm_joint_index} should be near {arm_joint_target}, got {pos_j}"
+
+        # Box must have moved again (arm moved at new base position)
+        final_pos = np.array(box.get_pose().position)
+        assert not np.allclose(after_base_move_pos, final_pos, atol=0.01), (
+            f"Box must move during joint movement: " f"after_base={list(after_base_move_pos)}, after_joint={list(final_pos)}"
+        )
+
+        # Verify final box position matches FK at new base + new joint config
+        link_state = p.getLinkState(agent.body_id, ee_link_index, computeForwardKinematics=1, physicsClientId=client_id)
+        expected_pos, expected_orn = p.multiplyTransforms(link_state[0], link_state[1], rel_pos, rel_orn)
+        assert np.allclose(final_pos, expected_pos, atol=1e-4), (
+            f"Final box position {list(final_pos)} should match " f"link{ee_link_index} + offset = {list(expected_pos)}"
         )
 
 

@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
 """
 mobile_manipulator_demo.py
-Demo: Single mobile manipulator robot (mobile base + arm)
+Demo: Single mobile manipulator robot (mobile base + arm) in kinematic mode.
 
 Demonstrates:
-- Mobile manipulator URDF (combined mobile base + arm)
-- Hybrid motion: mobile base movement + arm manipulation
-- Pick and drop using both mobility and manipulation
+- Mobile manipulator URDF (combined mobile base + 4-DOF arm)
+- Kinematic mode (mass=0) — base teleportation + joint interpolation
+- Sequential action chain: navigate → pick → carry → navigate → drop
+- Attached object following EE link during arm motion and base movement
+- IK-based pick/drop using ee_target_position (Part 2)
+- Explicit ik_joint_names to restrict IK to arm joints only
 """
 import os
 import sys
@@ -15,12 +18,18 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import logging
 import pybullet as p
-import numpy as np
+import math
 
-from pybullet_fleet.agent import Agent, AgentSpawnParams, MotionMode
+from pybullet_fleet.agent import Agent, AgentSpawnParams, IKParams, MotionMode
 from pybullet_fleet.core_simulation import MultiRobotSimulationCore, SimulationParams
-from pybullet_fleet.sim_object import Pose, SimObject, ShapeParams, SimObjectSpawnParams
-from pybullet_fleet.action import MoveAction, PickAction, DropAction, WaitAction, JointAction
+from pybullet_fleet.sim_object import Pose, SimObject, ShapeParams
+from pybullet_fleet.action import (
+    MoveAction,
+    PickAction,
+    DropAction,
+    WaitAction,
+    JointAction,
+)
 from pybullet_fleet.geometry import Path
 
 # Configure logging
@@ -30,21 +39,30 @@ logging.basicConfig(
 )
 
 print("\n" + "=" * 80)
-print("MOBILE MANIPULATOR DEMO - Single Robot")
+print("MOBILE MANIPULATOR DEMO — Kinematic Mode")
 print("=" * 80)
-print("\nDemonstrates:")
-print("- Mobile manipulator (mobile base + 4-DOF arm)")
-print("- Navigation to target position")
-print("- Arm manipulation for pick and drop")
-print("- Combined mobility and manipulation\n")
+print("\nPart 1 — Joint-target pick/drop:")
+print("  Arm poses defined as joint angle dicts")
+print("Part 2 — IK pick/drop:")
+print("  ee_target_position solved by inverse kinematics\n")
 
-# Simulation setup
-params = SimulationParams(gui=True, timestep=0.1, ignore_static_collision=True)
+# ---------------------------------------------------------------------------
+# Simulation
+# ---------------------------------------------------------------------------
+params = SimulationParams(gui=True, timestep=0.1, physics=False, target_rtf=3)
 sim_core = MultiRobotSimulationCore(params)
 
-# Spawn mobile manipulator
-print("=== Spawning Mobile Manipulator ===")
+# ---------------------------------------------------------------------------
+# Robot  (ik_joint_names tells IK to only solve arm joints, not wheels)
+# ---------------------------------------------------------------------------
 mobile_manipulator_urdf = os.path.join(os.path.dirname(__file__), "../robots/mobile_manipulator.urdf")
+
+ARM_JOINT_NAMES = (
+    "mount_to_shoulder",
+    "shoulder_to_elbow",
+    "elbow_to_wrist",
+    "wrist_to_end",
+)
 
 spawn_params = AgentSpawnParams(
     urdf_path=mobile_manipulator_urdf,
@@ -54,184 +72,278 @@ spawn_params = AgentSpawnParams(
     max_linear_accel=3.0,
     max_angular_vel=1.5,
     max_angular_accel=3.0,
-    mass=1.0,  # Use URDF mass values for physics simulation (required for arm joint control)
+    mass=0.0,  # kinematic mode
     use_fixed_base=False,
+    ik_params=IKParams(ik_joint_names=ARM_JOINT_NAMES),
 )
 
 robot = Agent.from_params(spawn_params, sim_core=sim_core)
-print(f"✓ Spawned mobile manipulator at {robot.get_pose().position}")
+print(f"Spawned mobile manipulator at {robot.get_pose().position}")
 
-# Print joint information
+# Print joint layout
 num_joints = p.getNumJoints(robot.body_id)
-print("\n=== Robot Joint Information ===")
-print(f"Total joints: {num_joints}")
+print(f"\nJoints ({num_joints} total):")
 for i in range(num_joints):
-    joint_info = p.getJointInfo(robot.body_id, i)
-    joint_name = joint_info[1].decode("utf-8")
-    joint_type = joint_info[2]  # 0=REVOLUTE, 1=PRISMATIC, 4=FIXED
-    type_str = {0: "REVOLUTE", 1: "PRISMATIC", 4: "FIXED"}.get(joint_type, "OTHER")
-    print(f"  Joint {i}: {joint_name} ({type_str})")
+    info = p.getJointInfo(robot.body_id, i)
+    name = info[1].decode("utf-8")
+    jtype = {0: "REV", 1: "PRIS", 4: "FIXED"}.get(info[2], "?")
+    print(f"  {i}: {name} ({jtype}) -> {info[12].decode('utf-8')}")
 
-# Identify arm joints (excluding wheels and fixed joints)
-arm_joint_names = ["mount_to_shoulder", "shoulder_to_elbow", "elbow_to_wrist", "wrist_to_end"]
-arm_joint_indices = []
-for name in arm_joint_names:
-    for i in range(num_joints):
-        joint_info = p.getJointInfo(robot.body_id, i)
-        if joint_info[1].decode("utf-8") == name:
-            arm_joint_indices.append(i)
-            break
-
-print(f"\nArm joint indices: {arm_joint_indices}")
-
-# Find end effector link index
+# End-effector link index
 end_effector_link_index = -1
 for i in range(num_joints):
-    joint_info = p.getJointInfo(robot.body_id, i)
-    link_name = joint_info[12].decode("utf-8")  # Child link name
-    if link_name == "end_effector":
+    if p.getJointInfo(robot.body_id, i)[12].decode("utf-8") == "end_effector":
         end_effector_link_index = i
         break
+print(f"End-effector link index: {end_effector_link_index}")
 
-print(f"End effector link index: {end_effector_link_index}")
+# ---------------------------------------------------------------------------
+# Target box (small, graspable by EE)
+# ---------------------------------------------------------------------------
+BOX_START = [1.5, 0.0, 0.8]
 
-# Store in robot user_data
-robot.user_data["arm_joint_indices"] = arm_joint_indices
-robot.user_data["end_effector_link_index"] = end_effector_link_index
-
-# Spawn pallet
-print("\n=== Spawning Pallet ===")
-mesh_dir = os.path.join(os.path.dirname(__file__), "../mesh")
-pallet_mesh_path = os.path.join(mesh_dir, "11pallet.obj")
-pallet_orientation_quat = p.getQuaternionFromEuler([np.pi / 2, 0, 0])
-
-pallet_position = [2.0, 0.0, 0.1]  # Pallet at (2, 0, 0.1)
-
-pallet_params = SimObjectSpawnParams(
+box = SimObject.from_mesh(
     visual_shape=ShapeParams(
-        shape_type="mesh", mesh_path=pallet_mesh_path, mesh_scale=[0.5, 0.5, 0.5], rgba_color=[0.8, 0.6, 0.4, 1.0]
+        shape_type="box",
+        half_extents=[0.05, 0.05, 0.05],
+        rgba_color=[0.9, 0.2, 0.2, 1.0],
     ),
-    collision_shape=ShapeParams(shape_type="box", half_extents=[0.5, 0.4, 0.1]),
-    initial_pose=Pose.from_pybullet(pallet_position, pallet_orientation_quat),
+    collision_shape=ShapeParams(
+        shape_type="box",
+        half_extents=[0.05, 0.05, 0.05],
+    ),
+    pose=Pose.from_xyz(*BOX_START),
     mass=0.0,
+    sim_core=sim_core,
     pickable=True,
 )
+print(f"Spawned box 1 (red) at {BOX_START}")
 
-pallet = SimObject.from_params(pallet_params, sim_core=sim_core)
-print(f"✓ Spawned pallet at {pallet_position}")
+# Box 2 for the IK section
+BOX2_START = [0.5, -1.5, 0.6]
 
-# Define arm poses using joint name dictionary (to avoid specifying all 7 joints)
-# Home pose (arm retracted)
-arm_home_pose = {
-    "mount_to_shoulder": np.pi / 2,
-    "shoulder_to_elbow": np.pi / 2,
-    "elbow_to_wrist": np.pi / 2,
-    "wrist_to_end": 0.0,
-}
-
-# Pick pose (arm extended forward)
-arm_pick_pose = {
-    "mount_to_shoulder": np.pi / 2,
-    "shoulder_to_elbow": np.pi / 4,
-    "elbow_to_wrist": np.pi / 4,
-    "wrist_to_end": 0.0,
-}
-
-# Carry pose (arm lifted)
-arm_carry_pose = {
-    "mount_to_shoulder": 0.0,
-    "shoulder_to_elbow": -0.8,
-    "elbow_to_wrist": 1.2,
-    "wrist_to_end": 0.0,
-}
-
-print("\n=== Creating Action Sequence ===")
-print("1. Move arm to home position")
-print("2. Navigate to pallet position")
-print("3. Pick pallet (arm extends automatically)")
-print("4. Retract arm to carry pose")
-print("5. Navigate to drop position")
-print("6. Drop pallet (arm extends automatically)")
-print("7. Retract arm to home pose")
-print("8. Return to start position\n")
-
-# Action sequence
-actions = [
-    # 1. Move arm to home position
-    JointAction(
-        target_joint_positions=arm_home_pose,
-        max_force=100.0,
-        tolerance=0.05,
+box2 = SimObject.from_mesh(
+    visual_shape=ShapeParams(
+        shape_type="box",
+        half_extents=[0.05, 0.05, 0.05],
+        rgba_color=[0.2, 0.5, 0.9, 1.0],
     ),
-    WaitAction(duration=0.5, action_type="arm_home"),
-    # 2. Navigate to pallet position (1.5m in front of pallet)
+    collision_shape=ShapeParams(
+        shape_type="box",
+        half_extents=[0.05, 0.05, 0.05],
+    ),
+    pose=Pose.from_xyz(*BOX2_START),
+    mass=0.0,
+    sim_core=sim_core,
+    pickable=True,
+)
+print(f"Spawned box 2 (blue) at {BOX2_START}")
+
+# ---------------------------------------------------------------------------
+# Arm poses (dict targets — only arm joints, wheels untouched)
+#
+# Joint axes:
+#   mount_to_shoulder  — Z (yaw)       pi/2 = face +X (forward)
+#   shoulder_to_elbow  — X (pitch)     positive = tilt forward
+#   elbow_to_wrist     — X (pitch)     positive = tilt forward
+#   wrist_to_end       — Z (roll)
+#
+# With robot at (0.9, 0, 0.3) and box at (1.5, 0, 0.8):
+#   pick  se=1.2 ew=1.0  ->  EE ~ (1.50, 0, 0.80)
+# ---------------------------------------------------------------------------
+ARM_HOME = {
+    "mount_to_shoulder": math.pi / 2,  # face forward
+    "shoulder_to_elbow": math.pi / 4,
+    "elbow_to_wrist": math.pi / 4,
+    "wrist_to_end": 0.0,
+}
+
+ARM_PICK = {
+    "mount_to_shoulder": math.pi / 2,
+    "shoulder_to_elbow": 1.2,
+    "elbow_to_wrist": 1.0,
+    "wrist_to_end": 0.0,
+}
+
+ARM_CARRY = {
+    "mount_to_shoulder": math.pi / 2,
+    "shoulder_to_elbow": -0.3,
+    "elbow_to_wrist": 0.8,
+    "wrist_to_end": 0.0,
+}
+
+# ARM_DROP: shoulder=0 extends arm along body forward direction.
+# At MOVE_NEAR_DROP the body faces ~135° (toward drop area), so
+# shoulder=0 reaches forward from the base toward the drop point.
+ARM_DROP = {
+    "mount_to_shoulder": 0.0,
+    "shoulder_to_elbow": 1.2,
+    "elbow_to_wrist": 1.0,
+    "wrist_to_end": 0.0,
+}
+
+# ---------------------------------------------------------------------------
+# Action sequence
+# ---------------------------------------------------------------------------
+MOVE_NEAR_BOX = [0.9, 0.0, 0.3]  # base position near box
+MOVE_NEAR_DROP = [0.0, 0.9, 0.3]  # base position near drop point
+
+print("\n--- Part 1: Joint-target pick/drop ---")
+print("  1. Arm -> home (face forward, straight up)")
+print("  2. Navigate near box")
+print("  3. Pick box (arm extends to pick pose)")
+print("  4. Arm -> carry (retract with box)")
+print("  5. Navigate near drop position")
+print("  6. Drop box (arm extends)")
+print("  7. Arm -> home")
+print("  8. Return to start\n")
+
+BOX_OFFSET = Pose.from_xyz(0, 0, 0.07)  # small offset above EE center
+BOX_DROP = Pose.from_xyz(0.07, 1.33, 0.8)  # base navigation target for drop
+
+actions = [
+    # 1. Arm to home
+    JointAction(target_joint_positions=ARM_HOME, tolerance=0.05),
+    WaitAction(duration=0.3),
+    # 2. Navigate near box
     MoveAction(
-        path=Path.from_positions([[1.3, 0.0, 0.3]]),
+        path=Path.from_positions([MOVE_NEAR_BOX]),
         final_orientation_align=False,
     ),
-    WaitAction(duration=0.5, action_type="prepare_pick"),
-    # 3. Pick pallet (with arm extension integrated)
+    WaitAction(duration=0.3),
+    # 3. Pick box
     PickAction(
-        target_object_id=pallet.body_id,
+        target_object_id=box.body_id,
         use_approach=False,
-        pick_offset=0.7,  # Pick at end effector
+        pick_offset=0.5,
         attach_link=end_effector_link_index,
-        attach_relative_pose=Pose.from_euler(0.0, 0.0, 0.0, roll=np.pi / 2, pitch=0, yaw=0),
-        joint_targets=arm_pick_pose,  # Extend arm to pick pose
+        attach_relative_pose=BOX_OFFSET,
+        joint_targets=ARM_PICK,
         joint_tolerance=0.05,
         joint_max_force=100.0,
     ),
-    # 4. Retract arm to carry pose
-    JointAction(
-        target_joint_positions=arm_carry_pose,
-        max_force=100.0,
-        tolerance=0.05,
-    ),
-    WaitAction(duration=0.5, action_type="arm_carry"),
-    # 5. Navigate to drop position
+    WaitAction(duration=0.3),
+    # 4. Arm to carry (box follows EE)
+    JointAction(target_joint_positions=ARM_CARRY, tolerance=0.05),
+    WaitAction(duration=0.3),
+    # 5. Navigate to drop area (box follows base)
     MoveAction(
-        path=Path.from_positions([[0.0, 2.0, 0.3]]),
+        path=Path.from_positions([MOVE_NEAR_DROP]),
         final_orientation_align=False,
     ),
-    WaitAction(duration=0.5, action_type="prepare_drop"),
-    # 6. Drop pallet (with arm extension integrated)
+    WaitAction(duration=0.3),
+    # 6. Drop box (arm extends forward, box placed at EE position)
     DropAction(
-        drop_pose=Pose(position=[1.5, 2.0, 0.1], orientation=list(pallet_orientation_quat)),
+        drop_pose=BOX_DROP,  # base navigation target
         place_gently=True,
         use_approach=False,
         drop_offset=0.0,
-        joint_targets=arm_pick_pose,  # Extend arm to drop pose
+        joint_targets=ARM_DROP,
         joint_tolerance=0.05,
         joint_max_force=100.0,
+        drop_relative_pose=Pose.from_xyz(0, 0, 0),  # drop at current EE position
     ),
-    # 7. Retract arm to home pose
-    JointAction(
-        target_joint_positions=arm_home_pose,
-        max_force=100.0,
-        tolerance=0.05,
-    ),
-    WaitAction(duration=0.5, action_type="arm_retract"),
-    # 8. Return to start position
+    WaitAction(duration=0.3),
+    # 7. Arm to home
+    JointAction(target_joint_positions=ARM_HOME, tolerance=0.05),
+    WaitAction(duration=0.3),
+    # 8. Return to start
     MoveAction(
         path=Path.from_positions([[0.0, 0.0, 0.3]]),
         final_orientation_align=True,
     ),
-    WaitAction(duration=1.0, action_type="complete"),
+    WaitAction(duration=1.0),
 ]
 
-# Add actions to robot
 for action in actions:
     robot.add_action(action)
+print(f"Part 1: Added {len(actions)} actions")
 
-print(f"✓ Added {len(actions)} actions to robot")
+# ---------------------------------------------------------------------------
+# Part 2: IK-based pick/drop (ee_target_position)
+# ---------------------------------------------------------------------------
+print("\n--- Part 2: IK pick/drop ---")
+print("  9.  Navigate near box 2")
+print("  10. Pick box 2 (IK solves arm joints)")
+print("  11. Arm -> carry")
+print("  12. Navigate to drop area")
+print("  13. Drop box 2 (IK solves arm joints)")
+print("  14. Arm -> home")
+print("  15. Return to start\n")
 
-# Run simulation
-print("\n=== Starting Simulation ===")
-print("Simulation running... Close GUI window to exit\n")
+MOVE_NEAR_BOX2 = [0.0, -1.0, 0.3]  # base position near box 2
+MOVE_IK_DROP = [-1.0, 0.0, 0.3]  # base position for IK drop
+
+# IK targets — world-frame position where EE should reach
+# box2 is at (0.5, -1.5, 0.6), robot will be at (0.0, -1.0, 0.3)
+# → EE needs to reach (0.5, -1.5, 0.6) in world frame
+IK_PICK_TARGET = BOX2_START  # [0.5, -1.5, 0.6]
+# For drop: robot at (-1.0, 0, 0.3), arm forward → EE ~(-1.0+0.65, 0, 0.6)
+IK_DROP_TARGET = [-0.35, 0.0, 0.6]
+
+ik_actions = [
+    # 9. Navigate near box 2
+    MoveAction(
+        path=Path.from_positions([MOVE_NEAR_BOX2]),
+        final_orientation_align=False,
+    ),
+    WaitAction(duration=0.3),
+    # 10. Pick box 2 via IK
+    PickAction(
+        target_object_id=box2.body_id,
+        use_approach=False,
+        pick_offset=0.5,
+        attach_link=end_effector_link_index,
+        attach_relative_pose=BOX_OFFSET,
+        ee_target_position=IK_PICK_TARGET,
+        ee_end_effector_link=end_effector_link_index,
+        ee_tolerance=0.05,
+    ),
+    WaitAction(duration=0.3),
+    # 11. Arm to carry (box follows EE)
+    JointAction(target_joint_positions=ARM_CARRY, tolerance=0.05),
+    WaitAction(duration=0.3),
+    # 12. Navigate to IK drop area
+    MoveAction(
+        path=Path.from_positions([MOVE_IK_DROP]),
+        final_orientation_align=False,
+    ),
+    WaitAction(duration=0.3),
+    # 13. Drop box 2 via IK
+    DropAction(
+        drop_pose=Pose.from_xyz(*IK_DROP_TARGET),  # base navigation target
+        place_gently=True,
+        use_approach=False,
+        drop_offset=0.0,
+        ee_target_position=IK_DROP_TARGET,
+        ee_end_effector_link=end_effector_link_index,
+        ee_tolerance=0.05,
+        drop_relative_pose=Pose.from_xyz(0, 0, 0),  # drop at current EE position
+    ),
+    WaitAction(duration=0.3),
+    # 14. Arm to home
+    JointAction(target_joint_positions=ARM_HOME, tolerance=0.05),
+    WaitAction(duration=0.3),
+    # 15. Return to start
+    MoveAction(
+        path=Path.from_positions([[0.0, 0.0, 0.3]]),
+        final_orientation_align=True,
+    ),
+    WaitAction(duration=1.0),
+]
+
+for action in ik_actions:
+    robot.add_action(action)
+print(f"Part 2: Added {len(ik_actions)} actions")
+
+# ---------------------------------------------------------------------------
+# Run
+# ---------------------------------------------------------------------------
+print("\nSimulation running ... close GUI window to exit.\n")
 
 try:
     sim_core.run_simulation()
 except KeyboardInterrupt:
-    print("\nSimulation interrupted by user")
+    print("\nInterrupted")
 
-print("\n=== Simulation Complete ===\n")
+print("\nDone.\n")

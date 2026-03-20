@@ -23,7 +23,7 @@ from pybullet_fleet.action import (
     PoseAction,
     WaitAction,
 )
-from pybullet_fleet.agent import Agent, AgentSpawnParams
+from pybullet_fleet.agent import Agent, AgentSpawnParams, IKParams
 from pybullet_fleet.core_simulation import MultiRobotSimulationCore, SimulationParams
 from pybullet_fleet.geometry import Path, Pose
 from pybullet_fleet.sim_object import ShapeParams, SimObject, SimObjectSpawnParams
@@ -97,6 +97,51 @@ def run_until_done(sim, agents, *, max_steps=5000):
         if all(a.is_action_queue_empty() and not a.is_moving for a in agents):
             return step + 1
     raise AssertionError(f"Agents did not finish within {max_steps} steps")
+
+
+# ---------------------------------------------------------------------------
+# Shared assertion helpers (usable by all test classes)
+# ---------------------------------------------------------------------------
+
+
+def get_ee_pos(agent, ee_link):
+    """Get end-effector world position via forward kinematics."""
+    state = p.getLinkState(
+        agent.body_id,
+        ee_link,
+        computeForwardKinematics=1,
+        physicsClientId=agent._pid,
+    )
+    return np.array(state[0])
+
+
+def assert_joints_near(agent, targets, tol, label=""):
+    """Assert all joints are near target values (list-based, by index)."""
+    joint_states = agent.get_all_joints_state()
+    for i, target in enumerate(targets):
+        pos = joint_states[i][0]
+        assert abs(pos - target) < tol, f"{label} Joint {i}: expected ~{target}, got {pos:.3f}"
+
+
+def assert_joints_near_dict(agent, targets_dict, tol, label=""):
+    """Assert named joints are near their target values (dict-based, by name)."""
+    for name, target in targets_dict.items():
+        pos = agent.get_joint_state_by_name(name)[0]
+        assert abs(pos - target) < tol, f"{label} Joint '{name}': expected ~{target:.3f}, got {pos:.3f}"
+
+
+def assert_base_near(agent, expected_xy, tol, label=""):
+    """Assert agent base XY is near expected position."""
+    base_pos = np.array(agent.get_pose().position[:2])
+    dist = np.linalg.norm(base_pos - np.array(expected_xy))
+    assert dist < tol, f"{label} Base should be near {expected_xy}, got {base_pos} (dist={dist:.3f})"
+
+
+def assert_ee_pos_near(agent, ee_link, expected_pos, tol, label=""):
+    """Assert end-effector position is near expected 3D position."""
+    ee_pos = get_ee_pos(agent, ee_link)
+    dist = np.linalg.norm(ee_pos - np.array(expected_pos))
+    assert dist < tol, f"{label} EE should be near {expected_pos}, got {ee_pos} (dist={dist:.3f})"
 
 
 # ============================================================================
@@ -192,8 +237,7 @@ class TestPickMoveDropE2E:
 
         steps = run_until_done(sim, [agent])
 
-        pos = np.array(agent.get_pose().position)
-        assert np.linalg.norm(pos[:2] - np.array(goal[:2])) < TOL
+        assert_base_near(agent, goal[:2], TOL, "After move+wait:")
         # Move + Wait(0.5s) with timestep=0.1s → at least 5 steps for wait alone
         min_wait_steps = int(0.5 / sim.params.timestep)
         assert steps >= min_wait_steps, f"Expected ≥{min_wait_steps} steps (wait portion), got {steps}"
@@ -219,8 +263,7 @@ class TestPathFollowingE2E:
 
         run_until_done(sim, [agent])
 
-        pos = np.array(agent.get_pose().position)
-        assert np.linalg.norm(pos[:2]) < TOL, f"Agent should return to origin, got {pos}"
+        assert_base_near(agent, [0, 0], TOL, "After square path:")
 
     def test_multi_agent_paths(self, sim):
         agents = [make_mobile_agent(sim, position=(i * 3, 0, 0)) for i in range(3)]
@@ -236,9 +279,7 @@ class TestPathFollowingE2E:
         run_until_done(sim, agents)
 
         for i, agent in enumerate(agents):
-            pos = np.array(agent.get_pose().position)
-            expected = np.array([i * 3, 5, 0])
-            assert np.linalg.norm(pos[:2] - expected[:2]) < TOL
+            assert_base_near(agent, [i * 3, 5], TOL, f"Agent {i}:")
 
 
 # ============================================================================
@@ -401,18 +442,6 @@ class TestArmPickDropE2E:
                 return
         raise AssertionError(f"Arm did not finish actions within {max_steps} steps")
 
-    @staticmethod
-    def _get_ee_pos(arm, ee_link):
-        state = p.getLinkState(arm.body_id, ee_link, computeForwardKinematics=1, physicsClientId=arm._pid)
-        return np.array(state[0])
-
-    @staticmethod
-    def _assert_joints_near(arm, targets, tol, label=""):
-        joint_states = arm.get_all_joints_state()
-        for i, target in enumerate(targets):
-            pos = joint_states[i][0]
-            assert abs(pos - target) < tol, f"{label} Joint {i}: expected ~{target}, got {pos:.3f}"
-
     def test_arm_joint_pick_joint_drop(self, arm_env):
         """Arm moves to pick pose, picks box, moves to place pose, drops box.
 
@@ -465,7 +494,7 @@ class TestArmPickDropE2E:
 
         # Assert after pick
         assert box.is_attached(), "Box should be attached after pick"
-        self._assert_joints_near(arm, pick_joints, self.JOINT_TOL, "After pick:")
+        assert_joints_near(arm, pick_joints, self.JOINT_TOL, "After pick:")
 
         # --- Phase 2: Move to place + Drop ---
         arm.add_action_sequence(
@@ -481,7 +510,7 @@ class TestArmPickDropE2E:
 
         # Assert after drop
         assert not box.is_attached(), "Box should be detached after drop"
-        self._assert_joints_near(arm, place_joints, self.JOINT_TOL, "After drop:")
+        assert_joints_near(arm, place_joints, self.JOINT_TOL, "After drop:")
         box_pos = np.array(box.get_pose().position)
         assert (
             np.linalg.norm(box_pos - np.array([-0.3, 0, 0.1])) < self.BOX_TOL
@@ -540,7 +569,7 @@ class TestArmPickDropE2E:
 
         # Assert after pick
         assert box.is_attached(), "Box should be attached after pick"
-        self._assert_joints_near(arm, pick_joints, self.JOINT_TOL, "After pick:")
+        assert_joints_near(arm, pick_joints, self.JOINT_TOL, "After pick:")
 
         # --- Phase 2: Drop with inline joint_targets ---
         arm.add_action_sequence(
@@ -557,7 +586,7 @@ class TestArmPickDropE2E:
 
         # Assert after drop
         assert not box.is_attached(), "Box should be detached after drop"
-        self._assert_joints_near(arm, place_joints, self.JOINT_TOL, "After drop:")
+        assert_joints_near(arm, place_joints, self.JOINT_TOL, "After drop:")
         box_pos = np.array(box.get_pose().position)
         assert (
             np.linalg.norm(box_pos - np.array([-0.3, 0, 0.1])) < self.BOX_TOL
@@ -618,10 +647,7 @@ class TestArmPickDropE2E:
 
         # Assert after pick
         assert box.is_attached(), "Box should be attached after pick"
-        ee_actual = self._get_ee_pos(arm, ee_link)
-        assert (
-            np.linalg.norm(ee_actual - np.array(pick_pos)) < self.EE_TOL
-        ), f"After pick: EE should be near {pick_pos}, got {ee_actual}"
+        assert_ee_pos_near(arm, ee_link, pick_pos, self.EE_TOL, "After pick:")
 
         # --- Phase 2: PoseAction to drop position + Drop ---
         arm.add_action_sequence(
@@ -637,10 +663,7 @@ class TestArmPickDropE2E:
 
         # Assert after drop
         assert not box.is_attached(), "Box should be detached after drop"
-        ee_actual = self._get_ee_pos(arm, ee_link)
-        assert (
-            np.linalg.norm(ee_actual - np.array(drop_pos)) < self.EE_TOL
-        ), f"After drop: EE should be near {drop_pos}, got {ee_actual}"
+        assert_ee_pos_near(arm, ee_link, drop_pos, self.EE_TOL, "After drop:")
         box_pos = np.array(box.get_pose().position)
         assert (
             np.linalg.norm(box_pos - np.array([0.0, 0.3, 0.1])) < self.BOX_TOL
@@ -698,10 +721,7 @@ class TestArmPickDropE2E:
 
         # Assert after pick
         assert box.is_attached(), "Box should be attached after pick"
-        ee_actual = self._get_ee_pos(arm, ee_link)
-        assert (
-            np.linalg.norm(ee_actual - np.array(pick_pos)) < self.EE_TOL
-        ), f"After pick: EE should be near {pick_pos}, got {ee_actual}"
+        assert_ee_pos_near(arm, ee_link, pick_pos, self.EE_TOL, "After pick:")
 
         # --- Phase 2: Drop with ee_target_position ---
         arm.add_action_sequence(
@@ -717,11 +737,300 @@ class TestArmPickDropE2E:
 
         # Assert after drop
         assert not box.is_attached(), "Box should be detached after drop"
-        ee_actual = self._get_ee_pos(arm, ee_link)
-        assert (
-            np.linalg.norm(ee_actual - np.array(drop_pos)) < self.EE_TOL
-        ), f"After drop: EE should be near {drop_pos}, got {ee_actual}"
+        assert_ee_pos_near(arm, ee_link, drop_pos, self.EE_TOL, "After drop:")
         box_pos = np.array(box.get_pose().position)
         assert (
             np.linalg.norm(box_pos - np.array([0.0, 0.3, 0.1])) < self.BOX_TOL
         ), f"Box should be near drop pose (0, 0.3, 0.1), got {box_pos}"
+
+
+# ============================================================================
+# E2E: Mobile Manipulator Pick/Drop (based on mobile_manipulator_demo.py)
+# ============================================================================
+
+MOBILE_MANIPULATOR_URDF = "robots/mobile_manipulator.urdf"
+
+_ARM_JOINT_NAMES = (
+    "mount_to_shoulder",
+    "shoulder_to_elbow",
+    "elbow_to_wrist",
+    "wrist_to_end",
+)
+
+
+class TestMobileManipulatorE2E:
+    """Mobile manipulator: Navigate → Pick → Navigate → Drop workflows.
+
+    Covers two scenarios mirroring mobile_manipulator_demo.py:
+    - test_joint_target_pick_drop: Joint-target arm control (Part 1)
+    - test_ik_pick_drop: IK-based ee_target_position control (Part 2)
+
+    Both verify:
+    - Base navigation moves agent near target
+    - Pick attaches box to EE link
+    - Attached box follows agent during navigation
+    - Drop releases box near the drop area
+    """
+
+    BASE_TOL = 0.2  # generous tolerance for base position
+    EE_TOL = 0.15  # EE Cartesian tolerance
+    BOX_TOL = 0.3  # box final position tolerance
+
+    @pytest.fixture
+    def sim(self):
+        """Headless kinematic sim for mobile manipulator tests."""
+        params = SimulationParams(
+            gui=False,
+            physics=False,
+            monitor=False,
+            timestep=0.1,
+            target_rtf=0,
+            collision_detection_method=CollisionDetectionMethod.CLOSEST_POINTS,
+            spatial_hash_cell_size_mode=SpatialHashCellSizeMode.CONSTANT,
+            spatial_hash_cell_size=2.0,
+            ignore_static_collision=True,
+            log_level="warning",
+        )
+        sc = MultiRobotSimulationCore(params)
+        sc.set_collision_spatial_hash_cell_size_mode()
+        yield sc
+        p.disconnect(sc.client)
+
+    @staticmethod
+    def _run_until_done(sc, agent, max_steps=3_000):
+        for _ in range(max_steps):
+            sc.step_once()
+            if agent.is_action_queue_empty():
+                return
+        raise AssertionError(f"Agent did not finish actions within {max_steps} steps")
+
+    def _make_robot(self, sc, ik_joint_names=None):
+        """Spawn mobile manipulator with optional ik_joint_names."""
+        ik_params = IKParams(ik_joint_names=ik_joint_names) if ik_joint_names else None
+        return Agent.from_params(
+            AgentSpawnParams(
+                urdf_path=MOBILE_MANIPULATOR_URDF,
+                initial_pose=Pose.from_xyz(0, 0, 0.3),
+                motion_mode=MotionMode.OMNIDIRECTIONAL,
+                max_linear_vel=2.0,
+                max_angular_vel=1.5,
+                mass=0.0,
+                use_fixed_base=False,
+                collision_mode=CollisionMode.DISABLED,
+                ik_params=ik_params,
+            ),
+            sim_core=sc,
+        )
+
+    def _make_box(self, sc, position):
+        """Spawn pickable box."""
+        return SimObject.from_params(
+            SimObjectSpawnParams(
+                visual_shape=ShapeParams(
+                    shape_type="box",
+                    half_extents=[0.05, 0.05, 0.05],
+                ),
+                collision_shape=ShapeParams(
+                    shape_type="box",
+                    half_extents=[0.05, 0.05, 0.05],
+                ),
+                initial_pose=Pose.from_xyz(*position),
+                mass=0.0,
+                pickable=True,
+            ),
+            sim_core=sc,
+        )
+
+    @staticmethod
+    def _find_ee_link(agent):
+        """Find end_effector link index."""
+        for i in range(p.getNumJoints(agent.body_id)):
+            info = p.getJointInfo(agent.body_id, i)
+            if info[12].decode("utf-8") == "end_effector":
+                return i
+        raise ValueError("end_effector link not found")
+
+    def test_joint_target_pick_drop(self, sim):
+        """Navigate → JointAction pick → Navigate → JointAction drop.
+
+        Scenario (simplified Part 1 of mobile_manipulator_demo.py):
+        1. Navigate near box
+        2. Arm to pick pose via JointAction → Pick box at EE
+        3. Arm to carry pose → Navigate to drop area
+        4. Arm to drop pose → Drop box (drop_relative_pose)
+        Verify: box attached after pick, box detached after drop, box near drop area.
+        """
+        robot = self._make_robot(sim)
+        box = self._make_box(sim, [1.5, 0, 0.8])
+        ee_link = self._find_ee_link(robot)
+
+        import math
+
+        arm_pick = {
+            "mount_to_shoulder": math.pi / 2,
+            "shoulder_to_elbow": 1.2,
+            "elbow_to_wrist": 1.0,
+            "wrist_to_end": 0.0,
+        }
+        arm_carry = {
+            "mount_to_shoulder": math.pi / 2,
+            "shoulder_to_elbow": -0.3,
+            "elbow_to_wrist": 0.8,
+            "wrist_to_end": 0.0,
+        }
+
+        # Phase 1: Navigate near box + pick
+        robot.add_action_sequence(
+            [
+                MoveAction(
+                    path=Path.from_positions([[0.9, 0.0, 0.3]]),
+                    final_orientation_align=False,
+                ),
+                PickAction(
+                    target_object_id=box.body_id,
+                    use_approach=False,
+                    attach_link=ee_link,
+                    attach_relative_pose=Pose.from_xyz(0, 0, 0.07),
+                    joint_targets=arm_pick,
+                    joint_tolerance=0.05,
+                ),
+            ]
+        )
+        self._run_until_done(sim, robot)
+
+        # Assert after pick: box attached, base near box, joints at arm_pick
+        assert box.is_attached(), "Box should be attached after pick"
+        assert_base_near(robot, [1.5, 0.0], self.BASE_TOL, "After pick:")
+        assert_joints_near_dict(robot, arm_pick, 0.1, "After pick:")
+
+        # Phase 2: Carry + navigate + drop
+        robot.add_action_sequence(
+            [
+                JointAction(target_joint_positions=arm_carry, tolerance=0.05),
+                MoveAction(
+                    path=Path.from_positions([[0.0, 0.9, 0.3]]),
+                    final_orientation_align=False,
+                ),
+                DropAction(
+                    drop_pose=Pose.from_xyz(0, 0.9, 0.8),
+                    place_gently=True,
+                    use_approach=False,
+                    joint_targets={
+                        "mount_to_shoulder": 0.0,
+                        "shoulder_to_elbow": 1.2,
+                        "elbow_to_wrist": 1.0,
+                        "wrist_to_end": 0.0,
+                    },
+                    joint_tolerance=0.05,
+                    drop_relative_pose=Pose.from_xyz(0, 0, 0),
+                ),
+            ]
+        )
+        self._run_until_done(sim, robot)
+
+        arm_drop = {
+            "mount_to_shoulder": 0.0,
+            "shoulder_to_elbow": 1.2,
+            "elbow_to_wrist": 1.0,
+            "wrist_to_end": 0.0,
+        }
+
+        # Assert after drop: box detached, joints at arm_drop, base near drop area, box near EE
+        assert not box.is_attached(), "Box should be detached after drop"
+        assert_joints_near_dict(robot, arm_drop, 0.1, "After drop:")
+        assert_base_near(robot, [0.0, 0.9], self.BASE_TOL, "After drop:")
+        box_pos = np.array(box.get_pose().position)
+        ee_pos = get_ee_pos(robot, ee_link)
+        dist_box_ee = np.linalg.norm(box_pos - ee_pos)
+        assert dist_box_ee < self.BOX_TOL, (
+            f"Box should be near EE after drop_relative_pose=(0,0,0), " f"box={box_pos}, ee={ee_pos}, dist={dist_box_ee:.3f}"
+        )
+
+    def test_ik_pick_drop(self, sim):
+        """Navigate → IK pick (ee_target_position) → Navigate → IK drop.
+
+        Scenario (simplified Part 2 of mobile_manipulator_demo.py):
+        1. Navigate near box
+        2. Pick box via ee_target_position (IK auto-locks wheels)
+        3. Navigate to drop area
+        4. Drop box via ee_target_position + drop_relative_pose
+        Verify: IK works on mobile manipulator, box follows during nav, box released.
+        """
+        robot = self._make_robot(sim, ik_joint_names=_ARM_JOINT_NAMES)
+        box = self._make_box(sim, [0.5, -1.5, 0.6])
+        ee_link = self._find_ee_link(robot)
+
+        import math
+
+        arm_carry = {
+            "mount_to_shoulder": math.pi / 2,
+            "shoulder_to_elbow": -0.3,
+            "elbow_to_wrist": 0.8,
+            "wrist_to_end": 0.0,
+        }
+
+        # Phase 1: Navigate near box + IK pick
+        robot.add_action_sequence(
+            [
+                MoveAction(
+                    path=Path.from_positions([[0.0, -1.0, 0.3]]),
+                    final_orientation_align=False,
+                ),
+                PickAction(
+                    target_object_id=box.body_id,
+                    use_approach=False,
+                    attach_link=ee_link,
+                    attach_relative_pose=Pose.from_xyz(0, 0, 0.07),
+                    ee_target_position=[0.5, -1.5, 0.6],
+                    ee_end_effector_link=ee_link,
+                    ee_tolerance=0.05,
+                ),
+            ]
+        )
+        self._run_until_done(sim, robot)
+
+        # Assert after IK pick: box attached, base near box, EE near pick target
+        assert box.is_attached(), "Box should be attached after IK pick"
+        assert_base_near(robot, [0.5, -1.5], self.BASE_TOL, "After IK pick:")
+        assert_ee_pos_near(robot, ee_link, [0.5, -1.5, 0.6], self.EE_TOL, "After IK pick:")
+        # Wheels should still be near 0 (IK locked them)
+        for wheel_name in ("base_to_left_wheel", "base_to_right_wheel"):
+            wheel_pos = robot.get_joint_state_by_name(wheel_name)[0]
+            assert abs(wheel_pos) < 0.1, f"Wheel '{wheel_name}' should be near 0 (IK locked), got {wheel_pos:.3f}"
+
+        # Phase 2: Carry + navigate + IK drop
+        robot.add_action_sequence(
+            [
+                JointAction(target_joint_positions=arm_carry, tolerance=0.05),
+                MoveAction(
+                    path=Path.from_positions([[-1.0, 0.0, 0.3]]),
+                    final_orientation_align=False,
+                ),
+                DropAction(
+                    drop_pose=Pose.from_xyz(-0.35, 0.0, 0.6),
+                    place_gently=True,
+                    use_approach=False,
+                    ee_target_position=[-0.35, 0.0, 0.6],
+                    ee_end_effector_link=ee_link,
+                    ee_tolerance=0.05,
+                    drop_relative_pose=Pose.from_xyz(0, 0, 0),
+                ),
+            ]
+        )
+        self._run_until_done(sim, robot)
+
+        # Assert after IK drop: box detached, EE near target, base near drop area, box near EE
+        assert not box.is_attached(), "Box should be detached after IK drop"
+        assert_ee_pos_near(robot, ee_link, [-0.35, 0.0, 0.6], self.EE_TOL, "After IK drop:")
+        assert_base_near(robot, [-0.35, 0.0], self.BASE_TOL, "After IK drop:")
+        # drop_relative_pose=(0,0,0) → box should be near EE
+        ee_pos = get_ee_pos(robot, ee_link)
+        box_pos = np.array(box.get_pose().position)
+        dist_box_ee = np.linalg.norm(box_pos - ee_pos)
+        assert dist_box_ee < self.BOX_TOL, (
+            f"Box should be near EE after drop, box={box_pos}, ee={ee_pos}, " f"dist={dist_box_ee:.3f}"
+        )
+        # Wheels should still be near 0 (IK locked them)
+        for wheel_name in ("base_to_left_wheel", "base_to_right_wheel"):
+            wheel_pos = robot.get_joint_state_by_name(wheel_name)[0]
+            assert abs(wheel_pos) < 0.1, f"Wheel '{wheel_name}' should be near 0 (IK locked), got {wheel_pos:.3f}"
