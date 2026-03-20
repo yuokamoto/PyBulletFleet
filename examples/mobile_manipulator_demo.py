@@ -199,7 +199,7 @@ print("  7. Arm -> home")
 print("  8. Return to start\n")
 
 BOX_OFFSET = Pose.from_xyz(0, 0, 0.07)  # small offset above EE center
-BOX_DROP = Pose.from_xyz(0.07, 1.33, 0.8)  # fallback (unused with drop_relative_pose)
+BOX_DROP = Pose.from_xyz(0.07, 1.33, 0.8)  # base navigation target for drop
 
 actions = [
     # 1. Arm to home
@@ -234,7 +234,7 @@ actions = [
     WaitAction(duration=0.3),
     # 6. Drop box (arm extends forward, box placed at EE position)
     DropAction(
-        drop_pose=BOX_DROP,  # base navigation target (also used if drop_relative_pose is None)
+        drop_pose=BOX_DROP,  # base navigation target
         place_gently=True,
         use_approach=False,
         drop_offset=0.0,
@@ -311,7 +311,7 @@ ik_actions = [
     WaitAction(duration=0.3),
     # 13. Drop box 2 via IK
     DropAction(
-        drop_pose=Pose.from_xyz(*IK_DROP_TARGET),  # base navigation target near drop area
+        drop_pose=Pose.from_xyz(*IK_DROP_TARGET),  # base navigation target
         place_gently=True,
         use_approach=False,
         drop_offset=0.0,
