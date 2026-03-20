@@ -5,7 +5,7 @@ All tests run headless (`p.DIRECT`) and require no GUI.
 ## Running Tests
 
 ```bash
-# Full CI-equivalent (lint + test)
+# Lint + test (CI subset)
 make verify
 
 # Tests with coverage (75% threshold)

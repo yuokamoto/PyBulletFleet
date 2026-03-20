@@ -79,7 +79,7 @@ cd docs && sphinx-build -b html . _build/html
 A root `Makefile` provides all common dev commands. Run `make help` to list targets.
 
 ```bash
-make verify        # Full CI-equivalent check (lint + test)
+make verify        # Lint + test (CI subset, excludes docs/security)
 make test          # Tests with coverage (75% threshold)
 make test-fast     # Quick test (stop on first failure)
 make lint          # All pre-commit hooks (black, pyright, flake8)

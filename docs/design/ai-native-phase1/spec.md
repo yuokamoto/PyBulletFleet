@@ -54,7 +54,7 @@ Guard rails extracted from Common Pitfalls table + lessons from PR #4-#7.
 | `make typecheck` | `pyright` | Part of `lint` job |
 | `make test` | `pytest tests/ -v --tb=short --cov=pybullet_fleet --cov-report=term-missing --cov-fail-under=75` | `test` job |
 | `make test-fast` | `pytest tests/ -x -q` | Quick local feedback |
-| `make verify` | `make lint && make test` | Full CI equivalent |
+| `make verify` | `make lint && make test` | CI lint+test subset |
 | `make docs` | `cd docs && make html SPHINXOPTS=-W` | `docs` job |
 | `make bench-smoke` | `python benchmark/run_benchmark.py --duration 10` | N/A (new) |
 | `make bench-full` | `python benchmark/run_benchmark.py --sweep` | N/A (new) |
@@ -68,7 +68,7 @@ These are the "DO NOT" rules that prevent common AI mistakes:
 
 1. **Never call `p.stepSimulation()` when `physics: false`** — kinematic mode teleports objects; physics stepping breaks everything
 2. **Never use `p.GUI` in tests** — always `p.DIRECT` for headless CI
-3. **Never mutate `_agents` or `_objects` lists directly** — use `add_object()` / `remove_object()`
+3. **Never mutate `_agents` or `_sim_objects` lists directly** — use `add_object()` / `remove_object()`
 4. **Never skip `SimObject._shared_shapes` cleanup** — stale IDs crash after `p.disconnect()`
 5. **Never import without `TYPE_CHECKING` guard for circular deps** — common in action.py ↔ agent.py
 6. **Always use `get_lazy_logger(__name__)`** — never `logging.getLogger()` or `print()`

@@ -60,7 +60,7 @@ MultiRobotSimulationCore  (core_simulation.py)
 
 1. **Never call `p.stepSimulation()` when `physics: false`** — kinematic mode teleports objects; physics stepping breaks positions.
 2. **Never use `p.GUI` in tests** — always `p.DIRECT`.
-3. **Never mutate `_agents` or `_objects` lists directly** — use `add_object()` / `remove_object()`.
+3. **Never mutate `_agents` or `_sim_objects` lists directly** — use `add_object()` / `remove_object()`.
 4. **Never skip `_shared_shapes` cleanup** — stale shape IDs crash after `p.disconnect()`.
 5. **Never import without `TYPE_CHECKING` guard** when it would cause circular deps.
 6. **Never use `logging.getLogger()`** — use `get_lazy_logger(__name__)`.
@@ -119,7 +119,7 @@ agent.set_ee_target((0.3, 0.0, 0.4))  # IK solves joint angles
 
 | Command | Purpose |
 |---------|---------|
-| `make verify` | **Full CI-equivalent check** (lint + test) |
+| `make verify` | **Lint + test** (CI subset, excludes docs/security) |
 | `make test` | Tests with coverage (75% threshold) |
 | `make test-fast` | Quick test (stop on first failure) |
 | `make lint` | All pre-commit hooks |
