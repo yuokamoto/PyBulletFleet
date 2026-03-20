@@ -103,7 +103,7 @@ test:  ## Run tests with coverage (CI equivalent)
 	pytest tests/ -v --tb=short --cov=pybullet_fleet --cov-report=term-missing --cov-fail-under=75
 
 test-fast:  ## Quick test run (stop on first failure)
-	pytest tests/ -x -q
+	pytest tests/ -x -q --no-cov
 
 verify: lint test  ## Full verification (lint + test, CI subset)
 

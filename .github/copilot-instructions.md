@@ -97,11 +97,10 @@ sim.run_simulation()
 from pybullet_fleet.action import MoveAction
 from pybullet_fleet.geometry import Path
 
-action = MoveAction(path=Path.from_points([[5, 5, 0]]))
+action = MoveAction(path=Path.from_positions([[5, 5, 0]]))
 agent.add_action(action)
 # Status: NOT_STARTED → IN_PROGRESS → COMPLETED / FAILED / CANCELLED
-while agent.update(dt):
-    pass
+# agent.update(dt) is called each sim step; actions complete automatically
 ```
 
 ### IK-controlled arm
@@ -112,7 +111,7 @@ params = AgentSpawnParams(
     ik_params=IKParams(ee_link_name="end_effector"),
 )
 agent = Agent.from_params(params, sim)
-agent.set_ee_target((0.3, 0.0, 0.4))  # IK solves joint angles
+agent.move_end_effector([0.3, 0.0, 0.4])  # IK solves joint angles
 ```
 
 ## Entry Points
