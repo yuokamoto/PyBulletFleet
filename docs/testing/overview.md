@@ -5,17 +5,20 @@ All tests run headless (`p.DIRECT`) and require no GUI.
 ## Running Tests
 
 ```bash
-# Run all tests
-pytest tests/
+# Full CI-equivalent (lint + test)
+make verify
+
+# Tests with coverage (75% threshold)
+make test
+
+# Quick test (stop on first failure)
+make test-fast
 
 # Run a specific file
 pytest tests/test_core_simulation.py
 
 # Verbose output
 pytest tests/ -v
-
-# Stop on first failure
-pytest tests/ -x
 ```
 
 ## Shared Fixtures
