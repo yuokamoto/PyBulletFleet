@@ -28,8 +28,30 @@ from pybullet_fleet.core_simulation import (
 # Base classes
 from pybullet_fleet.sim_object import SimObject
 
+# Controller system (Plugin Architecture Phase 2)
+from pybullet_fleet.controller import (
+    Controller,
+    VelocityController,
+    DifferentialVelocityController,
+    OmniVelocityController,
+    create_controller,
+    register_controller,
+)
+
 # Utilities
-from pybullet_fleet.tools import grid_to_world, world_to_grid, normalize_vector_param
+from pybullet_fleet.tools import (
+    body_to_world_velocity_2d,
+    body_to_world_velocity_3d,
+    grid_to_world,
+    world_to_grid,
+    normalize_vector_param,
+)
+
+# Config utilities
+from pybullet_fleet.config_utils import load_yaml_config
+
+# Entity registry
+from pybullet_fleet.entity_registry import register_entity_class
 
 __all__ = [
     # Type definitions
@@ -51,8 +73,21 @@ __all__ = [
     "IKParams",
     "AgentManager",
     "GridSpawnParams",
+    # Controller system
+    "Controller",
+    "VelocityController",
+    "OmniVelocityController",
+    "DifferentialVelocityController",
+    "create_controller",
+    "register_controller",
     # Utilities
+    "body_to_world_velocity_2d",
+    "body_to_world_velocity_3d",
     "grid_to_world",
     "world_to_grid",
     "normalize_vector_param",
+    # Config utilities
+    "load_yaml_config",
+    # Entity registry
+    "register_entity_class",
 ]

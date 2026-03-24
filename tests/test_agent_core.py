@@ -541,6 +541,63 @@ class TestAgentSpawnParams:
         )
 
 
+class TestAgentSpawnParamsFromDict:
+    """AgentSpawnParams.from_dict() creates params from YAML-style dicts."""
+
+    def test_minimal_urdf(self):
+        """Minimal dict with name + urdf_path produces correct params."""
+        result = AgentSpawnParams.from_dict({"name": "r0", "urdf_path": "robots/mobile_robot.urdf"})
+        assert result.name == "r0"
+        assert result.urdf_path == "robots/mobile_robot.urdf"
+        assert result.max_linear_vel == 2.0
+
+    def test_pose_and_yaw(self):
+        """pose list + yaw are converted to Pose."""
+        result = AgentSpawnParams.from_dict(
+            {"name": "r0", "urdf_path": "robots/mobile_robot.urdf", "pose": [1.0, 2.0, 0.05], "yaw": 1.57}
+        )
+        assert result.initial_pose.x == pytest.approx(1.0)
+        assert result.initial_pose.y == pytest.approx(2.0)
+        assert result.initial_pose.z == pytest.approx(0.05)
+        assert result.initial_pose.yaw == pytest.approx(1.57, abs=0.01)
+
+    def test_controller_config_string_shortcut(self):
+        """controller_config string is converted to dict."""
+        result = AgentSpawnParams.from_dict(
+            {"name": "r0", "urdf_path": "robots/mobile_robot.urdf", "controller_config": "differential_velocity"}
+        )
+        assert result.controller_config == {"type": "differential_velocity"}
+
+    def test_controller_config_dict(self):
+        """controller_config dict is passed through."""
+        result = AgentSpawnParams.from_dict(
+            {"name": "r0", "urdf_path": "robots/mobile_robot.urdf", "controller_config": {"type": "omni_velocity"}}
+        )
+        assert result.controller_config == {"type": "omni_velocity"}
+
+    def test_missing_name_raises(self):
+        """Missing name raises ValueError (inherited from SimObjectSpawnParams)."""
+        with pytest.raises(ValueError, match="missing required 'name'"):
+            AgentSpawnParams.from_dict({"urdf_path": "robots/mobile_robot.urdf"})
+
+
+class TestAgentFromDict:
+    """Agent.from_dict creates instance directly from config dict."""
+
+    def test_subclass_returns_subclass(self, pybullet_env):
+        """Subclass.from_dict returns an instance of the subclass."""
+
+        class ForkliftAgent(Agent):
+            pass
+
+        config = {
+            "name": "fl0",
+            "urdf_path": "robots/mobile_robot.urdf",
+        }
+        agent = ForkliftAgent.from_dict(config)
+        assert isinstance(agent, ForkliftAgent)
+
+
 class TestAgentGoalSetting:
     """Test agent goal and path setting"""
 

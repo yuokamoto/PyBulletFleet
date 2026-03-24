@@ -13,6 +13,7 @@ import statistics
 import time
 import tracemalloc  # Memory profiling (imported once at module level)
 from collections import deque
+from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union, cast
 
@@ -79,6 +80,7 @@ class SimulationParams:
         1.5  # Dimensionless multiplier of cell_size; objects larger than cell_size × this value span multiple cells (>= 1.0)
     )
     camera_config: Optional[Dict[str, Any]] = None  # Camera configuration from config file
+    model_paths: Optional[List[str]] = None  # Additional directories to scan for URDF/mesh models
 
     def __post_init__(self) -> None:
         # Auto-select collision detection method based on physics mode if not explicitly set
@@ -91,6 +93,9 @@ class SimulationParams:
         # Ensure camera_config is always a dict (avoid mutable default)
         if self.camera_config is None:
             self.camera_config = {}
+        # Ensure model_paths is always a list (avoid mutable default)
+        if self.model_paths is None:
+            self.model_paths = []
 
     @classmethod
     def from_config(cls, config_path: str = "config.yaml") -> "SimulationParams":
@@ -142,6 +147,7 @@ class SimulationParams:
             collision_margin=config.get("collision_margin", 0.02),  # Safety clearance (meters)
             multi_cell_threshold=config.get("multi_cell_threshold", 1.5),  # Multi-cell registration threshold
             camera_config=config.get("camera", {}),  # Camera configuration
+            model_paths=config.get("model_paths", []),  # Additional model directories
         )
 
 
@@ -207,6 +213,7 @@ class MultiRobotSimulationCore:
         self._params: SimulationParams = params
         self._collision_color: List[float] = collision_color if collision_color is not None else [0, 0, 1, 1]
         self._rendering_enabled: bool = False  # Track rendering state
+        self._batch_spawning: bool = False  # True inside batch_spawn() context
         self._collision_visualizer: CollisionVisualizer = CollisionVisualizer()  # Collision shape visualizer
 
         self._keyboard_events_registered: bool = False  # Track if keyboard events are registered
@@ -423,6 +430,32 @@ class MultiRobotSimulationCore:
             p.configureDebugVisualizer(p.COV_ENABLE_RENDERING, 1, physicsClientId=self._client)
             self._rendering_enabled = True
             logger.info("Rendering enabled for simulation")
+
+    @contextmanager
+    def batch_spawn(self):
+        """Context manager for optimised batch spawning.
+
+        Disables rendering and defers spatial-grid rebuild until
+        the context exits.  Use when spawning many objects at once.
+
+        Example::
+
+            with sim_core.batch_spawn():
+                for params in params_list:
+                    Agent.from_params(params, sim_core)
+            # rendering re-enabled, spatial grid rebuilt once
+        """
+        was_adaptive = self._params.spatial_hash_cell_size_mode == SpatialHashCellSizeMode.AUTO_ADAPTIVE
+        self._batch_spawning = True
+        self.disable_rendering()
+        try:
+            yield
+        finally:
+            self._batch_spawning = False
+            if was_adaptive:
+                self.set_collision_spatial_hash_cell_size_mode()
+            self._rebuild_spatial_grid()
+            self.enable_rendering()
 
     def _calculate_cell_size_from_aabbs(
         self, aabbs: Optional[List[Tuple[Tuple[float, float, float], Tuple[float, float, float]]]] = None
@@ -1034,9 +1067,10 @@ class MultiRobotSimulationCore:
             # STATIC / NORMAL_3D / NORMAL_2D: classification + AABB/grid
             self._add_object_to_collision_system(obj.object_id)
 
-        # Trigger cell_size recalculation in auto_adaptive mode
+        # Trigger cell_size recalculation in auto_adaptive mode (deferred during batch spawn)
         if self._params.spatial_hash_cell_size_mode == SpatialHashCellSizeMode.AUTO_ADAPTIVE:
-            self.set_collision_spatial_hash_cell_size_mode()
+            if not self._batch_spawning:
+                self.set_collision_spatial_hash_cell_size_mode()
 
         # Save original color once when object is added (for collision visualization)
         if obj.body_id not in self._robot_original_colors:
@@ -1948,6 +1982,63 @@ class MultiRobotSimulationCore:
             logger.info("Memory profiling started using tracemalloc (10 frames)")
 
         logger.info(f"Simulation initialized: {len(self._sim_objects)} objects, timestep={self._params.timestep}s")
+
+    def reset(self) -> None:
+        """Reset simulation to a clean state (no objects, fresh PyBullet world).
+
+        Removes all objects from the simulation, resets PyBullet, reloads the
+        ground plane, and re-initialises counters via :meth:`initialize_simulation`.
+
+        After calling ``reset()`` the simulation is ready for new objects to be
+        spawned.  Callbacks registered via :meth:`register_callback` are **preserved**
+        (their ``last_exec`` is zeroed by ``initialize_simulation``).
+
+        Example::
+
+            sim.reset()
+            # All objects removed, PyBullet world cleared
+            agent = Agent.from_params(params, sim)
+            sim.step_once()
+        """
+        # 1. Clear all Python-side object tracking
+        self._sim_objects.clear()
+        self._sim_objects_dict.clear()
+        self._agents.clear()
+
+        # Movement / collision caches
+        self._moved_this_step.clear()
+        self._physics_objects.clear()
+        self._kinematic_objects.clear()
+        self._static_collision_objects.clear()
+        self._disabled_collision_objects.clear()
+        self._dynamic_collision_objects.clear()
+        self._cached_collision_modes.clear()
+        self._cached_aabbs_dict.clear()
+        self._cached_spatial_grid.clear()
+        self._cached_object_to_cell.clear()
+        self._cached_cell_size = None
+        self._aabb_cache_valid = False
+        self._active_collision_pairs.clear()
+        self._robot_original_colors.clear()
+        self._original_visual_colors.clear()
+
+        # 2. Reset PyBullet world (removes all bodies including ground plane)
+        p.resetSimulation(physicsClientId=self._client)
+
+        # 3. Re-configure PyBullet (gravity, timestep, ground plane)
+        p.setAdditionalSearchPath(pybullet_data.getDataPath())
+        p.setGravity(0, 0, -9.81 if self._params.physics else 0, physicsClientId=self._client)
+        p.setTimeStep(self._params.timestep, physicsClientId=self._client)
+        p.setRealTimeSimulation(0, physicsClientId=self._client)
+        p.loadURDF("plane.urdf", physicsClientId=self._client)
+
+        # 4. Reset object ID counter so IDs start fresh
+        self._next_object_id = 0
+
+        # 5. Re-initialise counters, profiling, and rendering
+        self.initialize_simulation()
+
+        logger.info("Simulation reset: all objects removed, world reloaded")
 
     def run_simulation(self, duration: Optional[float] = None) -> None:
         """

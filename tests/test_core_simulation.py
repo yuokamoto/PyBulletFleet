@@ -973,6 +973,135 @@ class TestSetupCamera:
 
 
 # ============================================================================
+# reset
+# ============================================================================
+
+
+class TestReset:
+    """Test MultiRobotSimulationCore.reset() clears all state and reloads world."""
+
+    def test_clears_all_objects(self, sim_core):
+        """Objects and agents are removed from all tracking structures."""
+        make_box(sim_core, [0, 0, 0.5])
+        make_box(sim_core, [2, 0, 0.5])
+        assert len(sim_core.sim_objects) == 2
+
+        sim_core.reset()
+
+        assert len(sim_core.sim_objects) == 0
+        assert len(sim_core.agents) == 0
+        assert len(sim_core._sim_objects_dict) == 0
+
+    def test_clears_agents(self, sim_core):
+        """Agents list is cleared after reset."""
+        agent = Agent.from_params(
+            AgentSpawnParams(
+                urdf_path="robots/mobile_robot.urdf",
+                initial_pose=Pose.from_xyz(0, 0, 0),
+            ),
+            sim_core,
+        )
+        assert len(sim_core.agents) == 1
+
+        sim_core.reset()
+        assert len(sim_core.agents) == 0
+
+    def test_resets_object_id_counter(self, sim_core):
+        """_next_object_id resets to 0 so new objects get fresh IDs."""
+        make_box(sim_core, [0, 0, 0.5])
+        make_box(sim_core, [1, 0, 0.5])
+        assert sim_core._next_object_id >= 2
+
+        sim_core.reset()
+        assert sim_core._next_object_id == 0
+
+    def test_allows_respawn_after_reset(self, sim_core):
+        """New objects can be created after reset."""
+        make_box(sim_core, [0, 0, 0.5])
+        sim_core.reset()
+
+        obj = make_box(sim_core, [5, 5, 0.5])
+        assert len(sim_core.sim_objects) == 1
+        assert obj.object_id == 0  # IDs restart from 0
+
+    def test_resets_counters(self, sim_core):
+        """Step count, collision count, and sim_time are zeroed."""
+        sim_core._step_count = 100
+        sim_core._collision_count = 50
+        sim_core.sim_time = 99.9
+
+        sim_core.reset()
+
+        assert sim_core._step_count == 0
+        assert sim_core._collision_count == 0
+        assert sim_core.sim_time == 0.0
+
+    def test_clears_collision_caches(self, sim_core):
+        """All collision-related caches are emptied."""
+        sim_core._cached_collision_modes[42] = CollisionMode.NORMAL_3D
+        sim_core._cached_aabbs_dict[42] = ((0, 0, 0), (1, 1, 1))
+        sim_core._active_collision_pairs.add((1, 2))
+
+        sim_core.reset()
+
+        assert len(sim_core._cached_collision_modes) == 0
+        assert len(sim_core._cached_aabbs_dict) == 0
+        assert len(sim_core._active_collision_pairs) == 0
+
+    def test_clears_movement_caches(self, sim_core):
+        """Movement tracking sets are emptied."""
+        sim_core._moved_this_step.add(1)
+        sim_core._physics_objects.add(2)
+        sim_core._kinematic_objects.add(3)
+
+        sim_core.reset()
+
+        assert len(sim_core._moved_this_step) == 0
+        assert len(sim_core._physics_objects) == 0
+        assert len(sim_core._kinematic_objects) == 0
+
+    def test_ground_plane_reloaded(self, sim_core):
+        """Ground plane is present after reset (body count >= 1)."""
+        sim_core.reset()
+        # PyBullet should have at least one body (the ground plane)
+        num_bodies = p.getNumBodies(physicsClientId=sim_core.client)
+        assert num_bodies >= 1
+
+    def test_preserves_callbacks(self, sim_core):
+        """Registered callbacks survive reset (only last_exec is zeroed)."""
+        calls = []
+
+        def cb(sc, dt):
+            calls.append(dt)
+
+        sim_core.register_callback(cb, frequency=10.0)
+        # Fake a stale last_exec
+        sim_core._callbacks[0]["last_exec"] = 999.0
+
+        sim_core.reset()
+
+        assert len(sim_core._callbacks) == 1
+        assert sim_core._callbacks[0]["last_exec"] == 0.0
+
+    def test_step_works_after_reset(self, sim_core):
+        """step_once() runs cleanly on a fresh world after reset."""
+        make_box(sim_core, [0, 0, 0.5])
+        sim_core.reset()
+
+        # Should not raise
+        sim_core.step_once()
+        assert sim_core._step_count == 1
+
+    def test_double_reset(self, sim_core):
+        """Calling reset() twice in a row does not crash."""
+        make_box(sim_core, [0, 0, 0.5])
+        sim_core.reset()
+        sim_core.reset()
+        assert len(sim_core.sim_objects) == 0
+        assert sim_core._next_object_id == 0
+
+
+# ============================================================================
 # initialize_simulation
 # ============================================================================
 
@@ -2057,3 +2186,85 @@ class TestCustomProfilingFields:
         assert sim_core._profiling_stats["work"] == []
         # Field registration persists across initialize_simulation
         assert "work" in sim_core._profiling_stats
+
+
+# ---------------------------------------------------------------------------
+# batch_spawn context manager
+# ---------------------------------------------------------------------------
+
+
+class TestBatchSpawn:
+    """Tests for MultiRobotSimulationCore.batch_spawn() context manager."""
+
+    def test_sets_and_clears_flag(self, sim_core):
+        """_batch_spawning is True inside context, False after."""
+        assert sim_core._batch_spawning is False
+        with sim_core.batch_spawn():
+            assert sim_core._batch_spawning is True
+        assert sim_core._batch_spawning is False
+
+    def test_disables_rendering_during_context(self, sim_core, monkeypatch):
+        """Rendering disabled on enter, re-enabled on exit."""
+        import pybullet as pb
+
+        monkeypatch.setattr(pb, "configureDebugVisualizer", lambda *a, **kw: None)
+        sim_core._params.gui = True
+        sim_core._rendering_enabled = True
+
+        with sim_core.batch_spawn():
+            assert sim_core._rendering_enabled is False
+        assert sim_core._rendering_enabled is True
+
+    def test_defers_spatial_grid_rebuild(self, sim_core, monkeypatch):
+        """In AUTO_ADAPTIVE mode, set_collision_spatial_hash_cell_size_mode is not
+        called per add_object inside batch_spawn, but is called once on exit."""
+        import pybullet as pb
+
+        monkeypatch.setattr(pb, "configureDebugVisualizer", lambda *a, **kw: None)
+        sim_core._params.gui = True
+        sim_core._rendering_enabled = True
+
+        sim_core._params.spatial_hash_cell_size_mode = SpatialHashCellSizeMode.AUTO_ADAPTIVE
+
+        rebuild_calls = []
+        original_set = sim_core.set_collision_spatial_hash_cell_size_mode
+
+        def spy_set(*args, **kwargs):
+            rebuild_calls.append(1)
+            return original_set(*args, **kwargs)
+
+        monkeypatch.setattr(sim_core, "set_collision_spatial_hash_cell_size_mode", spy_set)
+
+        with sim_core.batch_spawn():
+            # Add 3 objects inside context
+            make_box(sim_core, [0, 0, 0.5])
+            make_box(sim_core, [2, 0, 0.5])
+            make_box(sim_core, [4, 0, 0.5])
+            # No rebuilds during batch
+            assert len(rebuild_calls) == 0
+
+        # One rebuild on exit
+        assert len(rebuild_calls) == 1
+
+    def test_reenables_on_exception(self, sim_core, monkeypatch):
+        """Rendering re-enabled and flag cleared even if exception occurs."""
+        import pybullet as pb
+
+        monkeypatch.setattr(pb, "configureDebugVisualizer", lambda *a, **kw: None)
+        sim_core._params.gui = True
+        sim_core._rendering_enabled = True
+
+        with pytest.raises(RuntimeError):
+            with sim_core.batch_spawn():
+                raise RuntimeError("boom")
+
+        assert sim_core._batch_spawning is False
+        assert sim_core._rendering_enabled is True
+
+    def test_noop_in_headless(self, sim_core):
+        """batch_spawn works fine in headless mode (no gui)."""
+        sim_core._params.gui = False
+        with sim_core.batch_spawn():
+            make_box(sim_core, [0, 0, 0.5])
+        # Should not crash; object created successfully
+        assert len(sim_core.sim_objects) >= 1

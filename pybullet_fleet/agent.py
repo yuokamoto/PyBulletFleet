@@ -67,6 +67,7 @@ class AgentSpawnParams(SimObjectSpawnParams):
     motion_mode: Union[MotionMode, str] = MotionMode.OMNIDIRECTIONAL
     use_fixed_base: bool = False
     ik_params: Optional["IKParams"] = None
+    controller_config: Optional[Dict[str, Any]] = None
 
     def __post_init__(self):
         """Validate agent spawn parameters."""
@@ -139,6 +140,11 @@ class AgentSpawnParams(SimObjectSpawnParams):
         if isinstance(ik_params_value, dict):
             ik_params_value = IKParams(**ik_params_value)
 
+        # Parse controller_config: string shortcut → {"type": string}
+        controller_config_value = config.get("controller_config")
+        if isinstance(controller_config_value, str):
+            controller_config_value = {"type": controller_config_value}
+
         return cls(
             visual_shape=base.visual_shape,
             collision_shape=base.collision_shape,
@@ -156,6 +162,7 @@ class AgentSpawnParams(SimObjectSpawnParams):
             motion_mode=motion_mode_value,
             use_fixed_base=config.get("use_fixed_base", False),
             ik_params=ik_params_value,
+            controller_config=controller_config_value,
         )
 
 
@@ -326,6 +333,11 @@ class Agent(SimObject):
         self._current_velocity = np.array([0.0, 0.0, 0.0])
         self._current_angular_velocity = 0.0  # rad/s (for differential drive)
         self._is_moving = False  # Private: use property for read-only access
+
+        # Controller (Plugin Architecture Phase 2) — Strategy pattern
+        # When set, update() delegates to controller.compute() instead of legacy TPI.
+        # None = legacy goal-based mode (backward compatible).
+        self._controller: Optional[Any] = None
 
         # Path following - Private internal state
         self._path: List[Pose] = []  # Empty list when no path (simpler than None)
@@ -601,7 +613,33 @@ class Agent(SimObject):
                 user_data=spawn_params.user_data,
             )
 
+        # Auto-create controller from config if specified
+        if spawn_params.controller_config:
+            from pybullet_fleet.controller import create_controller
+
+            ctrl_config = spawn_params.controller_config
+            ctrl = create_controller(ctrl_config["type"], ctrl_config)
+            agent.set_controller(ctrl)
+
         return agent
+
+    @classmethod
+    def from_dict(cls, config: Dict[str, Any], sim_core=None) -> "Agent":
+        """Create an Agent from a raw config dict.
+
+        Combines :meth:`AgentSpawnParams.from_dict` and :meth:`from_params`
+        in a single call.  Subclasses can override to use a custom
+        ``SpawnParams`` class.
+
+        Args:
+            config: Entity definition dict (as parsed from YAML).
+            sim_core: Reference to simulation core (optional).
+
+        Returns:
+            ``cls`` instance.
+        """
+        params = AgentSpawnParams.from_dict(config)
+        return cls.from_params(params, sim_core)
 
     @classmethod
     def from_mesh(
@@ -1738,8 +1776,12 @@ class Agent(SimObject):
 
         moved = False
         if not self.use_fixed_base:
-            if self._is_moving and self._goal_pose is not None:
-                # Dispatch to appropriate motion controller
+            if self._controller is not None:
+                # Controller mode (Plugin Architecture Phase 2):
+                # delegate movement entirely to the attached controller.
+                moved = self._controller.compute(self, dt)
+            elif self._is_moving and self._goal_pose is not None:
+                # Legacy goal-based mode (TPI trajectories)
                 if self._is_final_orientation_aligning:
                     # Final orientation alignment: always use differential rotation
                     # (even for omnidirectional robots, we rotate in place)
@@ -1771,6 +1813,19 @@ class Agent(SimObject):
         """
         return self._current_velocity.copy()
 
+    def set_controller(self, controller: Optional[Any] = None) -> None:
+        """Set or clear the movement controller (Strategy pattern).
+
+        When a controller is set, :meth:`update` delegates movement to
+        ``controller.compute(agent, dt)`` instead of the legacy TPI logic.
+        Set to ``None`` to revert to legacy goal-based mode.
+
+        Args:
+            controller: A :class:`~pybullet_fleet.controller.Controller`
+                instance, or ``None`` to revert to legacy mode.
+        """
+        self._controller = controller
+
     def stop(self):
         """Stop robot movement and clear goal and path."""
         self._goal_pose = None
@@ -1785,6 +1840,9 @@ class Agent(SimObject):
         self._is_final_orientation_aligning = False
         self._movement_direction = MovementDirection.FORWARD
         self._clear_path_visualization()  # Clear visualization when stopping
+        # Notify controller (if any) so it can reset internal state
+        if self._controller is not None:
+            self._controller.on_stop(self)
 
     # ========================================
     # URDF-specific methods (joint control)

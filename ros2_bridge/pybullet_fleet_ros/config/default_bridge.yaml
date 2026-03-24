@@ -1,0 +1,11 @@
+# ros2_bridge/pybullet_fleet_ros/config/default_bridge.yaml
+pybullet_fleet_bridge:
+  ros__parameters:
+    config_yaml: ""
+    num_robots: 1
+    robot_urdf: "robots/mobile_robot.urdf"
+    publish_rate: 50.0
+    gui: false
+    physics: false
+    target_rtf: 1.0
+    enable_sim_services: true
