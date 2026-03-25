@@ -8,17 +8,21 @@ Body-frame → world-frame rotation (``twist_to_world_velocity``) delegates to
 from typing import List, Optional, Tuple
 
 from builtin_interfaces.msg import Time as TimeMsg
+from diagnostic_msgs.msg import DiagnosticArray, DiagnosticStatus, KeyValue
 from geometry_msgs.msg import (
     Point,
     Pose as PoseMsg,
+    PoseStamped,
     Quaternion,
     TransformStamped,
     Twist,
     Vector3,
 )
 from nav_msgs.msg import Odometry
+from nav_msgs.msg import Path as PathMsg
 from sensor_msgs.msg import JointState
 from std_msgs.msg import Header
+from trajectory_msgs.msg import JointTrajectory
 
 from pybullet_fleet.geometry import Pose
 
@@ -150,3 +154,94 @@ def sim_time_to_ros_time(sim_time: float) -> TimeMsg:
     sec = int(sim_time)
     nanosec = int((sim_time - sec) * 1e9)
     return TimeMsg(sec=sec, nanosec=nanosec)
+
+
+# ---------------------------------------------------------------------------
+# Nav / Arm / Diagnostic conversion helpers
+# ---------------------------------------------------------------------------
+
+
+def pbf_pose_to_pose_stamped(
+    pbf_pose: Pose,
+    frame_id: str = "odom",
+    stamp: Optional[TimeMsg] = None,
+) -> PoseStamped:
+    """Convert PyBulletFleet Pose → geometry_msgs/PoseStamped."""
+    msg = PoseStamped()
+    msg.header = Header(frame_id=frame_id)
+    if stamp:
+        msg.header.stamp = stamp
+    msg.pose = pbf_pose_to_ros(pbf_pose)
+    return msg
+
+
+def ros_pose_stamped_to_pbf(msg: PoseStamped) -> Pose:
+    """Convert geometry_msgs/PoseStamped → PyBulletFleet Pose."""
+    return ros_pose_to_pbf(msg.pose)
+
+
+def pbf_path_to_ros(
+    waypoints: List[Pose],
+    frame_id: str = "odom",
+    stamp: Optional[TimeMsg] = None,
+) -> PathMsg:
+    """Convert list of PyBulletFleet Pose → nav_msgs/Path."""
+    msg = PathMsg()
+    msg.header = Header(frame_id=frame_id)
+    if stamp:
+        msg.header.stamp = stamp
+    for wp in waypoints:
+        msg.poses.append(pbf_pose_to_pose_stamped(wp, frame_id=frame_id, stamp=stamp))
+    return msg
+
+
+def ros_path_to_pbf(msg: PathMsg) -> List[Pose]:
+    """Convert nav_msgs/Path → list of PyBulletFleet Pose."""
+    return [ros_pose_stamped_to_pbf(ps) for ps in msg.poses]
+
+
+def joint_trajectory_to_targets(msg: JointTrajectory) -> dict:
+    """Extract final waypoint from JointTrajectory as {name: position} dict.
+
+    Takes the last trajectory point's positions and maps them to joint names.
+    """
+    if not msg.points:
+        return {}
+    last_point = msg.points[-1]
+    targets: dict = {}
+    for i, name in enumerate(msg.joint_names):
+        if i < len(last_point.positions):
+            targets[name] = last_point.positions[i]
+    return targets
+
+
+def make_diagnostic_msg(
+    robot_name: str,
+    is_moving: bool,
+    action_type: str = "",
+    action_status: str = "",
+    distance_to_goal: float = 0.0,
+    linear_speed: float = 0.0,
+    action_queue: str = "",
+    action_queue_size: int = 0,
+    stamp: Optional[TimeMsg] = None,
+) -> DiagnosticArray:
+    """Create diagnostic_msgs/DiagnosticArray with robot status."""
+    status = DiagnosticStatus()
+    status.name = robot_name
+    status.level = DiagnosticStatus.OK
+    status.message = f"{action_type} {action_status}" if action_type else ("moving" if is_moving else "idle")
+    status.values = [
+        KeyValue(key="is_moving", value=str(is_moving).lower()),
+        KeyValue(key="action_type", value=action_type),
+        KeyValue(key="action_status", value=action_status),
+        KeyValue(key="distance_to_goal", value=f"{distance_to_goal:.3f}"),
+        KeyValue(key="linear_speed", value=f"{linear_speed:.3f}"),
+        KeyValue(key="action_queue", value=action_queue),
+        KeyValue(key="action_queue_size", value=str(action_queue_size)),
+    ]
+    msg = DiagnosticArray()
+    if stamp:
+        msg.header.stamp = stamp
+    msg.status = [status]
+    return msg

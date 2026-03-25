@@ -15,6 +15,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ros-jazzy-tf2-ros \
     ros-jazzy-tf2-geometry-msgs \
     ros-jazzy-teleop-twist-keyboard \
+    ros-jazzy-trajectory-msgs \
+    ros-jazzy-diagnostic-msgs \
+    ros-jazzy-rviz2 \
+    ros-jazzy-robot-state-publisher \
+    ros-jazzy-joint-state-publisher \
     # OpenGL / Mesa for PyBullet GUI inside Docker
     libgl1-mesa-dri \
     libglx-mesa0 \

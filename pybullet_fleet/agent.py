@@ -1004,6 +1004,7 @@ class Agent(SimObject):
         self._current_waypoint_index = 0
         self._goal_pose = final_path[0]
         self._is_moving = True
+        self._is_final_orientation_aligning = False  # Reset stale final-orientation state
         self._movement_direction = direction  # Store movement direction
 
         # Clear previous path visualization and visualize new path
@@ -1069,6 +1070,14 @@ class Agent(SimObject):
                         self.body_id, linearVelocity=[0, 0, 0], angularVelocity=[0, 0, 0], physicsClientId=self._pid
                     )
                     self._log.info("Path complete")
+        else:
+            # Path is empty — this happens after final orientation alignment completes.
+            # Clean up final-orientation state so subsequent goals use the correct
+            # motion mode (omnidirectional TPI) instead of differential rotation.
+            self._is_final_orientation_aligning = False
+            self._goal_pose = None
+            p.resetBaseVelocity(self.body_id, linearVelocity=[0, 0, 0], angularVelocity=[0, 0, 0], physicsClientId=self._pid)
+            self._log.info("Final orientation alignment complete")
 
     def _start_final_orientation_alignment(self):
         """Start rotation to align with final target orientation after reaching last position."""
@@ -1098,7 +1107,11 @@ class Agent(SimObject):
         """
         Initialize two-point interpolation trajectory for omnidirectional motion (X, Y, Z axes).
         Reuses existing TPI instances created by set_motion_mode().
-        Uses per-axis max_linear_vel and max_linear_accel if configured.
+
+        **Straight-line motion**: Per-axis velocity and acceleration limits are
+        scaled proportionally to each axis's share of the total displacement
+        so that all axes complete at the same time, producing a straight-line
+        path from start to goal (rather than each axis moving independently).
 
         Args:
             goal: Target pose
@@ -1118,18 +1131,31 @@ class Agent(SimObject):
                 self._log.error("_tpi_pos is still empty after set_motion_mode. Skipping trajectory init.")
                 return
 
-        # 3D: X, Y, Z with per-axis limits
+        # Compute per-axis displacement ratios for straight-line scaling.
+        # Each axis's vmax and acc are scaled by |delta_axis| / total_distance
+        # so that all axes finish simultaneously → straight-line trajectory.
+        displacement = goal_pos - current_pos
+        total_dist = np.linalg.norm(displacement)
+        if total_dist > 1e-9:
+            axis_ratios = np.abs(displacement) / total_dist
+        else:
+            axis_ratios = np.ones(3)  # At goal already; ratios don't matter
+
+        # 3D: X, Y, Z with straight-line scaled limits
         for axis in range(3):
+            ratio = max(axis_ratios[axis], 1e-12)  # avoid zero for stationary axes
+            scaled_vmax = self.max_linear_vel[axis] * ratio
+            scaled_acc = self.max_linear_accel[axis] * ratio
             try:
                 self._tpi_pos[axis].init(
                     p0=current_pos[axis],
                     pe=goal_pos[axis],
-                    acc_max=self.max_linear_accel[axis],  # Per-axis acceleration
-                    vmax=self.max_linear_vel[axis],  # Per-axis velocity
+                    acc_max=scaled_acc,
+                    vmax=scaled_vmax,
                     t0=t0,
                     v0=self._current_velocity[axis],
                     ve=0.0,  # Stop at goal
-                    dec_max=self.max_linear_accel[axis],  # Per-axis deceleration
+                    dec_max=scaled_acc,
                 )
                 self._tpi_pos[axis].calc_trajectory()  # Calculate trajectory
             except ValueError as e:
@@ -1143,12 +1169,12 @@ class Agent(SimObject):
                     self._tpi_pos[axis].init(
                         p0=current_pos[axis],
                         pe=goal_pos[axis],  # Still aim for the goal
-                        acc_max=self.max_linear_accel[axis],
-                        vmax=self.max_linear_vel[axis],
+                        acc_max=scaled_acc,
+                        vmax=scaled_vmax,
                         t0=t0,
                         v0=0.0,  # Reset velocity to avoid dp=0,dv!=0 error
                         ve=0.0,
-                        dec_max=self.max_linear_accel[axis],
+                        dec_max=scaled_acc,
                     )
                     self._tpi_pos[axis].calc_trajectory()
                 except ValueError:

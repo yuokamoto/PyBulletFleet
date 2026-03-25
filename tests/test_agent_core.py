@@ -887,6 +887,123 @@ class TestAgentMotionUpdate:
         assert np.allclose(pos, goal_pos, atol=0.05), f"Final position {pos} not close to goal"
         assert np.allclose(agent.velocity, [0, 0, 0], atol=1e-4), f"Velocity should be ~0 after goal, got {agent.velocity}"
 
+    def test_omni_second_goal_no_teleport(self, pybullet_env):
+        """After completing a first goal, a second goal must produce gradual motion.
+
+        Regression test: _is_final_orientation_aligning was not reset after the
+        first goal completed with final-orientation alignment.  On the second
+        goal, update() dispatched to _update_differential (rotation) instead of
+        _update_omnidirectional (TPI), causing an immediate teleport to the goal.
+
+        Verifies:
+        - First goal is reached normally
+        - After setting a second goal, distance does NOT jump to zero in one step
+        - The agent eventually reaches the second goal with monotonic progress
+        """
+        agent, sim_core = self._create_agent_with_simcore(Pose.from_xyz(0, 0, 0))
+        dt = sim_core._dt
+
+        # ----- Goal 1: (0,0,0) → (1,0,0) with default final_orientation_align=True -----
+        goal1 = np.array([1.0, 0.0, 0.0])
+        agent.set_goal_pose(Pose.from_xyz(*goal1))
+        for _ in range(5000):
+            sim_core.tick()
+            agent.update(dt)
+            if not agent.is_moving:
+                break
+        assert not agent.is_moving, "Goal 1 should be reached"
+        # After goal 1, _is_final_orientation_aligning must be cleared
+        assert not agent._is_final_orientation_aligning, "_is_final_orientation_aligning should be reset after goal completion"
+
+        # ----- Goal 2: (1,0,0) → (0,1,0) -----
+        pos_before = np.array(agent.get_pose().position)
+        goal2 = np.array([0.0, 1.0, 0.0])
+        agent.set_goal_pose(Pose.from_xyz(*goal2))
+
+        # After a few steps, robot should have moved GRADUALLY, not teleported
+        for _ in range(10):
+            sim_core.tick()
+            agent.update(dt)
+        pos_after_10 = np.array(agent.get_pose().position)
+        dist_moved = np.linalg.norm(pos_after_10 - pos_before)
+        dist_to_goal = np.linalg.norm(pos_after_10[:2] - goal2[:2])
+
+        # In 10 steps at dt=1/240, max distance ≈ 0.5*5.0*(10/240)^2 ≈ 0.004m (accel phase)
+        # It should NOT have teleported the full ~1.4m
+        assert dist_to_goal > 0.5, (
+            f"Robot teleported to goal! pos={list(pos_after_10)}, dist_to_goal={dist_to_goal:.4f}. "
+            f"Expected gradual motion, not instant arrival."
+        )
+
+        # Run until goal 2 reached
+        for _ in range(5000):
+            sim_core.tick()
+            agent.update(dt)
+            if not agent.is_moving:
+                break
+        assert not agent.is_moving, "Goal 2 should be reached"
+        pos_final = np.array(agent.get_pose().position)
+        assert np.allclose(pos_final[:2], goal2[:2], atol=0.05), f"Final position {pos_final} not close to goal2 {goal2}"
+
+    def test_omni_straight_line_motion(self, pybullet_env):
+        """Omnidirectional agent must move in a straight line toward the goal.
+
+        When moving to a diagonal goal (e.g. (3, 4, 0)), the robot should
+        follow a straight-line path, NOT move along each axis independently.
+        Independent per-axis TPI causes the shorter axis to arrive first,
+        producing an L-shaped or curved trajectory instead of a straight line.
+
+        Verifies:
+        - Every intermediate position lies on (or very near) the line from
+          start to goal (cross-track error < threshold)
+        - The agent actually reaches the goal
+        """
+        agent, sim_core = self._create_agent_with_simcore(Pose.from_xyz(0, 0, 0))
+        dt = sim_core._dt
+
+        start = np.array([0.0, 0.0, 0.0])
+        goal = np.array([3.0, 4.0, 0.0])
+        direction = goal - start
+        total_dist = np.linalg.norm(direction)
+        unit_dir = direction / total_dist
+
+        agent.set_path([Pose.from_xyz(*goal)], auto_approach=False, final_orientation_align=False)
+
+        max_cross_track = 0.0
+        reached = False
+        warmup_steps = 10  # allow a few steps for TPI to kick in
+
+        for step in range(5000):
+            sim_core.tick()
+            agent.update(dt)
+
+            if not agent.is_moving:
+                reached = True
+                break
+
+            if step < warmup_steps:
+                continue
+
+            pos = np.array(agent.get_pose().position)
+            # Cross-track error: perpendicular distance from pos to line (start → goal)
+            to_pos = pos - start
+            projection = np.dot(to_pos, unit_dir) * unit_dir
+            cross_track = np.linalg.norm(to_pos - projection)
+
+            if cross_track > max_cross_track:
+                max_cross_track = cross_track
+
+            # Allow 5cm tolerance for numerical drift
+            assert cross_track < 0.05, (
+                f"Step {step}: cross-track error {cross_track:.4f}m exceeds 0.05m. "
+                f"pos={list(pos)}, expected on line from {list(start)} to {list(goal)}. "
+                f"Robot is NOT moving in a straight line."
+            )
+
+        assert reached, "Agent should reach the diagonal goal"
+        pos = np.array(agent.get_pose().position)
+        assert np.allclose(pos[:2], goal[:2], atol=0.05), f"Final pos {pos} not close to goal {goal}"
+
     def test_omni_update_toward_goal_3d(self, pybullet_env):
         """Omnidirectional agent with non-identity initial orientation reaches 3D goal.
 

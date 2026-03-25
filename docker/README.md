@@ -8,61 +8,90 @@ a single colcon workspace.
 
 ```bash
 cd docker
-
-# Build all services
-docker compose build
-
-# Build bridge only
 docker compose build bridge
 ```
 
 ## Quick Start
 
+All demos use **two terminals**: Terminal 1 runs the bridge in foreground,
+Terminal 2 sends commands via `docker exec`.
+
+### Navigation Demo (Differential Drive + RViz)
+
+**Terminal 1** — launch the bridge with PyBullet GUI + RViz:
+
 ```bash
 cd docker
-
-# Headless (3 robots, no GUI)
-docker compose up bridge
-
-# With PyBullet GUI
 xhost +local:docker   # first time only
-GUI=true docker compose up bridge
 
-# Custom parameters
-NUM_ROBOTS=5 GUI=true PUBLISH_RATE=50.0 docker compose up bridge
+GUI=true docker compose run --rm --name pbf_bridge bridge \
+  ros2 launch pybullet_fleet_ros nav_demo.launch.py gui:=true
 ```
 
-### Config-Driven Launch (Mixed Robot Types)
+**Terminal 2** — send a navigation goal:
 
-Use `config_yaml` to spawn heterogeneous robots (e.g. mobile robots + 6-DoF cubes):
+```bash
+docker exec pbf_bridge bash -c 'source /opt/bridge_ws/install/setup.bash && \
+  ros2 topic pub --once /robot0/goal_pose geometry_msgs/PoseStamped \
+    "{header: {frame_id: odom}, pose: {position: {x: 3.0, y: 2.0, z: 0.05}, orientation: {w: 1.0}}}"'
+```
+
+The robot rotates toward the goal and drives forward. Both PyBullet GUI and
+RViz (Odometry arrow, Path, Current Goal, RobotModel) update in real time.
+
+Stop with **Ctrl+C** in Terminal 1.
+
+### Arm Demo (Fixed-Base Arm + RViz)
+
+**Terminal 1**:
 
 ```bash
 cd docker
+xhost +local:docker
 
-# Omni demo: 2 mobile robots + 1 floating cube (6-DoF)
-docker compose run --rm bridge ros2 run pybullet_fleet_ros bridge_node \
-  --ros-args \
-  -p config_yaml:=/opt/bridge_ws/src/pybullet_fleet_ros/config/bridge_omni_demo.yaml \
-  -p gui:=true
+GUI=true docker compose run --rm --name pbf_bridge bridge \
+  ros2 launch pybullet_fleet_ros arm_demo.launch.py gui:=true
 ```
 
-The cube responds to full 6-DoF `cmd_vel` (including `angular.x` / `angular.y` for roll/pitch):
+**Terminal 2** — send a joint trajectory via action (with feedback):
 
 ```bash
-# Move cube up + rotate in all axes
-docker compose exec bridge bash -c "source /ros_entrypoint.sh && \
-  ros2 topic pub -r 10 /cube0/cmd_vel geometry_msgs/msg/Twist \
-    '{linear: {x: 0, y: 0, z: 0.5}, angular: {x: 0.3, y: 0.2, z: 0.1}}'"
+docker exec pbf_bridge bash -c 'source /opt/bridge_ws/install/setup.bash && \
+  python3 /opt/pybullet_fleet/scripts/send_joint_goal.py --robot arm0 --positions 0.5 1.0 -0.5 0.0'
 ```
 
-See [`ros2_bridge/pybullet_fleet_ros/config/bridge_omni_demo.yaml`](../ros2_bridge/pybullet_fleet_ros/config/bridge_omni_demo.yaml) for the config format.
-When `config_yaml` is not set, the bridge falls back to `num_robots` + `robot_urdf`.
+RViz shows the arm model updating as joints move to target positions.
 
-### Environment Variables
+### Headless (No GUI, No RViz)
+
+```bash
+cd docker
+docker compose up bridge                                        # 3 robots, headless
+NUM_ROBOTS=5 PUBLISH_RATE=50.0 docker compose up bridge         # custom
+```
+
+### Launch Arguments
+
+Both `nav_demo.launch.py` and `arm_demo.launch.py` accept:
+
+| Argument | Default | Description |
+|----------|---------|-------------|
+| `gui` | `false` | Enable PyBullet GUI |
+| `rviz` | `true` | Launch RViz + robot_state_publisher |
+| `target_rtf` | `1.0` | Real-time factor |
+| `publish_rate` | `50.0` | odom / joint_states publish rate (Hz) |
+
+```bash
+# GUI only, no RViz
+GUI=true docker compose run --rm --name pbf_bridge bridge \
+  ros2 launch pybullet_fleet_ros nav_demo.launch.py gui:=true rviz:=false
+```
+
+### Environment Variables (docker compose)
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `NUM_ROBOTS` | 3 | Number of robots to spawn |
+| `NUM_ROBOTS` | 3 | Number of robots (headless mode) |
 | `GUI` | false | Enable PyBullet GUI window |
 | `PUBLISH_RATE` | 10.0 | odom / joint_states publish rate (Hz) |
 | `PHYSICS` | false | Enable physics simulation |
@@ -71,218 +100,239 @@ When `config_yaml` is not set, the bridge falls back to `num_robots` + `robot_ur
 
 > **Note:** Source code is volume-mounted, so local Python edits take effect on container restart.
 
-## Automated Test (Headless)
+## ROS Interface Reference
+
+### Topics (per robot, e.g. `/robot0/...`)
+
+| Topic | Type | Direction | Description |
+|-------|------|-----------|-------------|
+| `cmd_vel` | Twist | Sub | Velocity command (body frame) |
+| `goal_pose` | PoseStamped | Sub | Goal pose → robot navigates |
+| `path` | Path | Sub | Waypoint path → robot follows |
+| `joint_trajectory` | JointTrajectory | Sub | Joint targets (topic) |
+| `joint_commands` | Float64MultiArray | Sub | Raw joint positions |
+| `odom` | Odometry | Pub | Odometry |
+| `joint_states` | JointState | Pub | Joint positions/velocities |
+| `plan` | Path | Pub | Remaining path being followed |
+| `current_goal` | PoseStamped | Pub | Current goal (arrow points toward target) |
+| `diagnostics` | DiagnosticArray | Pub | Robot status (is_moving, action_queue, etc.) |
+
+### Action Servers (per robot)
+
+| Action | Type | Description |
+|--------|------|-------------|
+| `navigate_to_pose` | NavigateToPose | Nav2-compatible navigation |
+| `follow_path` | FollowPath | Nav2-compatible path following |
+| `follow_joint_trajectory` | FollowJointTrajectory | MoveIt-compatible joint control |
+
+### Simulation Services
+
+| Service | Description |
+|---------|-------------|
+| `/sim/get_entities` | List all entities |
+| `/sim/get_entity_state` | Get entity pose |
+| `/sim/spawn_entity` | Spawn a robot |
+| `/sim/delete_entity` | Delete an entity |
+| `/sim/step_simulation` | Step N simulation ticks |
+| `/sim/set_simulation_state` | Pause / resume |
+| `/sim/get_simulator_features` | Query supported features |
+
+## Operations Guide
+
+While the bridge is running in Terminal 1, use Terminal 2 for interaction.
+
+> Helper scripts in `ros2_bridge/scripts/` are volume-mounted at `/opt/pybullet_fleet/scripts/`.
+
+### Introspection
 
 ```bash
-cd docker
-docker compose run --rm test
+# List topics / services / actions
+docker exec pbf_bridge bash -c "source /opt/bridge_ws/install/setup.bash && ros2 topic list"
+docker exec pbf_bridge bash -c "source /opt/bridge_ws/install/setup.bash && ros2 action list"
+
+# Check odometry
+docker exec pbf_bridge bash -c 'source /opt/bridge_ws/install/setup.bash && \
+  ros2 topic echo /robot0/odom --once'
+
+# Check diagnostics
+docker exec pbf_bridge bash -c 'source /opt/bridge_ws/install/setup.bash && \
+  ros2 topic echo /robot0/diagnostics --once'
+
+# List entities
+docker exec pbf_bridge bash -c 'source /opt/bridge_ws/install/setup.bash && \
+  python3 /opt/pybullet_fleet/scripts/query_entities.py'
 ```
 
-Runs topic checks, service existence checks, `/clock` / odom publishing verification,
-and GetEntities / GetSimulatorFeatures service calls automatically.
-
-### colcon test (launch_testing)
-
-For proper ROS 2 integration tests using `launch_testing`:
+### Navigation (goal_pose / path / action)
 
 ```bash
+# Send goal pose (topic)
+docker exec pbf_bridge bash -c 'source /opt/bridge_ws/install/setup.bash && \
+  ros2 topic pub --once /robot0/goal_pose geometry_msgs/PoseStamped \
+    "{header: {frame_id: odom}, pose: {position: {x: 3.0, y: 2.0, z: 0.05}, orientation: {w: 1.0}}}"'
+
+# Send square path (script)
+docker exec pbf_bridge bash -c 'source /opt/bridge_ws/install/setup.bash && \
+  python3 /opt/pybullet_fleet/scripts/send_path.py --robot robot0 --size 3.0'
+
+# NavigateToPose action (with distance_remaining feedback)
+docker exec pbf_bridge bash -c 'source /opt/bridge_ws/install/setup.bash && \
+  python3 /opt/pybullet_fleet/scripts/send_nav_goal.py --robot robot0 --x 5.0 --y 3.0'
+
+# Check remaining path
+docker exec pbf_bridge bash -c 'source /opt/bridge_ws/install/setup.bash && \
+  ros2 topic echo /robot0/plan --once'
+```
+
+> **RViz tip:** Use the "2D Goal Pose" toolbar button to click-publish goals directly.
+
+### Arm Control (joint_trajectory / action)
+
+```bash
+# FollowJointTrajectory action (with actual/desired/error feedback — recommended)
+docker exec pbf_bridge bash -c 'source /opt/bridge_ws/install/setup.bash && \
+  python3 /opt/pybullet_fleet/scripts/send_joint_goal.py --robot arm0 --positions 0.5 1.0 -0.5 0.0'
+
+# Joint trajectory topic (fire-and-forget)
+docker exec pbf_bridge bash -c 'source /opt/bridge_ws/install/setup.bash && \
+  python3 /opt/pybullet_fleet/scripts/send_joint_trajectory.py --robot arm0 --positions 0.8 -0.3 0.5 0.2'
+
+# Check joint states
+docker exec pbf_bridge bash -c 'source /opt/bridge_ws/install/setup.bash && \
+  ros2 topic echo /arm0/joint_states --once'
+```
+
+### Velocity Control
+
+```bash
+# Script — move for 5 seconds
+docker exec pbf_bridge bash -c 'source /opt/bridge_ws/install/setup.bash && \
+  python3 /opt/pybullet_fleet/scripts/teleop_cmd_vel.py --robot robot0 --vx 1.0 --wz 0.2 --duration 5.0'
+
+# Raw topic pub (single)
+docker exec pbf_bridge bash -c 'source /opt/bridge_ws/install/setup.bash && \
+  ros2 topic pub --once /robot0/cmd_vel geometry_msgs/msg/Twist \
+    "{linear: {x: 2.0}, angular: {z: 0.5}}"'
+
+# Keyboard teleop
+docker exec -it pbf_bridge bash -c 'source /opt/bridge_ws/install/setup.bash && \
+  ros2 run teleop_twist_keyboard teleop_twist_keyboard \
+    --ros-args -r /cmd_vel:=/robot0/cmd_vel'
+```
+
+### Spawn / Delete Entities
+
+```bash
+# Spawn
+docker exec pbf_bridge bash -c 'source /opt/bridge_ws/install/setup.bash && \
+  python3 /opt/pybullet_fleet/scripts/spawn_robots.py --name new_robot --urdf robots/arm_robot.urdf --x 5.0 --y 3.0'
+
+# Delete
+docker exec pbf_bridge bash -c 'source /opt/bridge_ws/install/setup.bash && \
+  ros2 service call /sim/delete_entity simulation_interfaces/srv/DeleteEntity "{entity: new_robot}"'
+```
+
+### Simulation Control
+
+```bash
+# Step 100 ticks
+docker exec pbf_bridge bash -c 'source /opt/bridge_ws/install/setup.bash && \
+  python3 /opt/pybullet_fleet/scripts/step_simulation.py --steps 100'
+
+# Pause / Resume / Status
+docker exec pbf_bridge bash -c 'source /opt/bridge_ws/install/setup.bash && \
+  python3 /opt/pybullet_fleet/scripts/step_simulation.py --pause'
+docker exec pbf_bridge bash -c 'source /opt/bridge_ws/install/setup.bash && \
+  python3 /opt/pybullet_fleet/scripts/step_simulation.py --resume'
+```
+
+## Config-Driven Launch
+
+Use `config_yaml` to spawn heterogeneous robots:
+
+```bash
+# Omni demo: 2 mobile robots + 1 floating cube (6-DoF)
+GUI=true docker compose run --rm --name pbf_bridge bridge \
+  ros2 run pybullet_fleet_ros bridge_node \
+    --ros-args \
+    -p config_yaml:=/opt/bridge_ws/src/pybullet_fleet_ros/config/bridge_omni_demo.yaml \
+    -p gui:=true
+```
+
+The cube responds to full 6-DoF `cmd_vel` (including `angular.x` / `angular.y` for roll/pitch):
+
+```bash
+docker exec pbf_bridge bash -c 'source /opt/bridge_ws/install/setup.bash && \
+  ros2 topic pub -r 10 /cube0/cmd_vel geometry_msgs/msg/Twist \
+    "{linear: {z: 0.5}, angular: {x: 0.3, y: 0.2, z: 0.1}}"'
+```
+
+### Provided Config Files
+
+| File | Description |
+|------|-------------|
+| `config/bridge_nav.yaml` | Differential drive navigation (used by `nav_demo.launch.py`) |
+| `config/bridge_arm.yaml` | Arm robot joint control (used by `arm_demo.launch.py`) |
+| `config/bridge_omni_demo.yaml` | Omni + 6-DoF cube demo |
+
+When `config_yaml` is not set, the bridge falls back to `num_robots` + `robot_urdf` parameters.
+
+## All ROS Parameters
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `num_robots` | int | 1 | Number of robots to spawn |
+| `robot_urdf` | str | `robots/mobile_robot.urdf` | Default URDF path |
+| `gui` | bool | false | Enable PyBullet GUI |
+| `physics` | bool | false | Enable physics simulation |
+| `publish_rate` | float | 50.0 | odom / joint_states publish rate (Hz) |
+| `target_rtf` | float | 1.0 | Real-time factor |
+| `enable_sim_services` | bool | true | Enable simulation_interfaces services |
+| `config_yaml` | str | `""` | YAML config (overrides `num_robots` / `robot_urdf`) |
+
+## Automated Tests
+
+```bash
+# Integration smoke test (headless)
+docker compose run --rm test
+
+# colcon launch_testing
 docker compose run --rm bridge bash -c "\
   source /ros_entrypoint.sh && \
   cd /opt/bridge_ws && \
   colcon test --packages-select pybullet_fleet_ros --event-handlers console_direct+"
 ```
 
-This launches the bridge node as a managed process and verifies topics, services,
-and message publishing via the rclpy API.
+## Smoke Test (Manual)
 
-## Operations Guide
-
-While `docker compose up bridge` is running, use another terminal to interact.
-Each operation shows a **script** (simpler) and a **raw command** (no extra deps).
-
-> Helper scripts in `ros2_bridge/scripts/` are volume-mounted at `/opt/pybullet_fleet/scripts/`.
-
-Shorthand used below:
+**Terminal 1**:
 
 ```bash
-# All commands are prefixed with:
-docker compose exec bridge bash -c "source /ros_entrypoint.sh && ..."
+cd docker
+xhost +local:docker
+docker compose build bridge
+
+GUI=true docker compose run --rm --name pbf_bridge bridge \
+  ros2 launch pybullet_fleet_ros nav_demo.launch.py gui:=true
 ```
 
-### Introspection
-
-#### List all topics / services
+**Terminal 2**:
 
 ```bash
-docker compose exec bridge bash -c "source /ros_entrypoint.sh && ros2 topic list"
-docker compose exec bridge bash -c "source /ros_entrypoint.sh && ros2 service list"
-```
+# Verify topics and actions
+docker exec pbf_bridge bash -c "source /opt/bridge_ws/install/setup.bash && ros2 topic list"
+docker exec pbf_bridge bash -c "source /opt/bridge_ws/install/setup.bash && ros2 action list"
 
-#### List entities
+# Send goal and check diagnostics
+docker exec pbf_bridge bash -c 'source /opt/bridge_ws/install/setup.bash && \
+  ros2 topic pub --once /robot0/goal_pose geometry_msgs/PoseStamped \
+    "{header: {frame_id: odom}, pose: {position: {x: 3.0, y: 2.0, z: 0.05}, orientation: {w: 1.0}}}"'
+sleep 2
+docker exec pbf_bridge bash -c 'source /opt/bridge_ws/install/setup.bash && \
+  ros2 topic echo /robot0/diagnostics --once'
+# Expected: is_moving=true
 
-```bash
-# Script
-docker compose exec bridge bash -c "source /ros_entrypoint.sh && \
-  python3 scripts/query_entities.py"
-
-# Raw
-docker compose exec bridge bash -c "source /ros_entrypoint.sh && \
-  ros2 service call /sim/get_entities simulation_interfaces/srv/GetEntities '{}'"
-```
-
-#### Get entity state (pose)
-
-```bash
-# Script
-docker compose exec bridge bash -c "source /ros_entrypoint.sh && \
-  python3 scripts/query_entities.py --name robot0"
-
-# Raw
-docker compose exec bridge bash -c "source /ros_entrypoint.sh && \
-  ros2 service call /sim/get_entity_state simulation_interfaces/srv/GetEntityState '{entity: robot0}'"
-```
-
-#### Get simulator features
-
-```bash
-docker compose exec bridge bash -c "source /ros_entrypoint.sh && \
-  ros2 service call /sim/get_simulator_features simulation_interfaces/srv/GetSimulatorFeatures '{}'"
-```
-
-#### Check odometry
-
-```bash
-docker compose exec bridge bash -c "source /ros_entrypoint.sh && \
-  timeout 2 ros2 topic echo /robot0/odom --once"
-```
-
-### Spawning & Deleting Entities
-
-#### Spawn a robot
-
-```bash
-# Script
-docker compose exec bridge bash -c "source /ros_entrypoint.sh && \
-  python3 scripts/spawn_robots.py --name new_robot --urdf robots/arm_robot.urdf --x 5.0 --y 3.0"
-
-# Raw
-docker compose exec bridge bash -c "source /ros_entrypoint.sh && \
-  ros2 service call /sim/spawn_entity simulation_interfaces/srv/SpawnEntity \
-    '{name: new_robot, entity_resource: {uri: robots/arm_robot.urdf, resource_string: \"\"}, \
-      allow_renaming: false, entity_namespace: \"\", \
-      initial_pose: {header: {frame_id: \"\"}, \
-        pose: {position: {x: 5.0, y: 3.0, z: 0.05}, \
-               orientation: {x: 0.0, y: 0.0, z: 0.0, w: 1.0}}}}'"
-```
-
-#### Delete a robot
-
-```bash
-docker compose exec bridge bash -c "source /ros_entrypoint.sh && \
-  ros2 service call /sim/delete_entity simulation_interfaces/srv/DeleteEntity '{entity: new_robot}'"
-```
-
-### Velocity Control
-
-#### Send cmd_vel (script — recommended)
-
-```bash
-# Move for 5 seconds
-docker compose exec bridge bash -c "source /ros_entrypoint.sh && \
-  python3 scripts/teleop_cmd_vel.py --robot robot0 --vx 1.0 --wz 0.2 --duration 5.0"
-
-# Continuous until Ctrl+C
-docker compose exec bridge bash -c "source /ros_entrypoint.sh && \
-  python3 scripts/teleop_cmd_vel.py --robot robot0 --vx 0.5"
-```
-
-#### Send cmd_vel (raw topic pub)
-
-```bash
-# Single publish
-docker compose exec bridge bash -c "source /ros_entrypoint.sh && \
-  ros2 topic pub --once /robot0/cmd_vel geometry_msgs/msg/Twist \
-    '{linear: {x: 2.0, y: 0.0, z: 0.0}, angular: {x: 0.0, y: 0.0, z: 0.5}}'"
-
-# Continuous (10 Hz)
-docker compose exec bridge bash -c "source /ros_entrypoint.sh && \
-  ros2 topic pub -r 10 /robot0/cmd_vel geometry_msgs/msg/Twist \
-    '{linear: {x: 1.0, y: 0.5, z: 0.0}, angular: {x: 0.0, y: 0.0, z: 0.3}}'"
-```
-
-#### Keyboard teleop
-
-```bash
-docker compose exec -it bridge bash -c "source /ros_entrypoint.sh && \
-  ros2 run teleop_twist_keyboard teleop_twist_keyboard \
-    --ros-args -r /cmd_vel:=/robot0/cmd_vel"
-```
-
-### Simulation Control
-
-#### Step simulation
-
-```bash
-# Script
-docker compose exec bridge bash -c "source /ros_entrypoint.sh && \
-  python3 scripts/step_simulation.py --steps 100"
-
-# Raw
-docker compose exec bridge bash -c "source /ros_entrypoint.sh && \
-  ros2 service call /sim/step_simulation simulation_interfaces/srv/StepSimulation '{steps: 100}'"
-```
-
-#### Pause / Resume
-
-```bash
-# Script
-docker compose exec bridge bash -c "source /ros_entrypoint.sh && \
-  python3 scripts/step_simulation.py --pause"
-docker compose exec bridge bash -c "source /ros_entrypoint.sh && \
-  python3 scripts/step_simulation.py --resume"
-docker compose exec bridge bash -c "source /ros_entrypoint.sh && \
-  python3 scripts/step_simulation.py --status"
-
-# Raw
-docker compose exec bridge bash -c "source /ros_entrypoint.sh && \
-  ros2 service call /sim/set_simulation_state simulation_interfaces/srv/SetSimulationState \
-    '{state: {state: 2}}'"   # Pause
-docker compose exec bridge bash -c "source /ros_entrypoint.sh && \
-  ros2 service call /sim/set_simulation_state simulation_interfaces/srv/SetSimulationState \
-    '{state: {state: 1}}'"   # Resume
-```
-
-### Stop
-
-```bash
-docker compose down
-```
-
-## All ROS Parameters
-
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `num_robots` | int | 1 | Number of robots to spawn at startup |
-| `robot_urdf` | str | `robots/mobile_robot.urdf` | Default URDF path |
-| `gui` | bool | false | Enable PyBullet GUI |
-| `physics` | bool | false | Enable physics simulation |
-| `publish_rate` | float | 50.0 | odom/joint_states publish rate (Hz) |
-| `target_rtf` | float | 1.0 | Real-time factor |
-| `enable_sim_services` | bool | true | Enable simulation_interfaces services |
-| `config_yaml` | str | `""` | Bridge YAML config file (overrides `num_robots`/`robot_urdf` with a `robots` list) |
-
-When `config_yaml` is set, its `robots` list takes precedence over `num_robots` / `robot_urdf`.
-
-To pass parameters not exposed as environment variables, override the command:
-
-```bash
-docker compose run --rm bridge \
-  bash -c "ros2 run pybullet_fleet_ros bridge_node --ros-args \
-    -p num_robots:=2 -p gui:=false"
-
-# Or with config_yaml:
-docker compose run --rm bridge ros2 run pybullet_fleet_ros bridge_node \
-  --ros-args -p config_yaml:=/opt/bridge_ws/src/pybullet_fleet_ros/config/bridge_omni_demo.yaml -p gui:=true
+# Stop with Ctrl+C in Terminal 1
 ```
 
 ## Troubleshooting
@@ -291,11 +341,18 @@ docker compose run --rm bridge ros2 run pybullet_fleet_ros bridge_node \
 
 If PyBullet GUI fails to open inside Docker:
 
-1. Ensure `xhost +local:docker` has been run
+1. Run `xhost +local:docker` on the host
 2. Ensure `/dev/dri` is mounted (included in compose by default)
 3. Ensure Mesa/libglvnd packages are installed in the Dockerfile
 
 ### Service Calls Timeout
 
 DDS discovery issues can occur when calling from a separate container.
-Use `docker compose exec bridge` to run commands inside the same container.
+Use `docker exec pbf_bridge` to run commands inside the same container.
+
+### URDF Meshes in RViz
+
+The default URDFs use primitive shapes (box, cylinder). To use custom meshes
+(`.stl` / `.dae`), reference them via `<mesh filename="..."/>` in the URDF and
+place mesh files in the `robots/` directory. `robot_state_publisher` will
+publish them to RViz automatically.

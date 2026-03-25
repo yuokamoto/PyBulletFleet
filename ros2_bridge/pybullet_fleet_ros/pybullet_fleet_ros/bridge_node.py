@@ -112,10 +112,10 @@ class BridgeNode(Node):
                 AgentSpawnParams(
                     urdf_path=robot_urdf,
                     initial_pose=Pose.from_xyz(i * 2.0, 0.0, 0.05),
-                    motion_mode=MotionMode.OMNIDIRECTIONAL,
+                    motion_mode=MotionMode.DIFFERENTIAL,
                     max_linear_vel=2.0,
+                    max_angular_vel=3.0,
                     name=f"robot{i}",
-                    controller_config={"type": "omni_velocity"},
                 )
                 for i in range(num_robots)
             ]
@@ -157,16 +157,21 @@ class BridgeNode(Node):
     def _register_handler(self, agent: Agent) -> None:
         """Create a RobotHandler for *agent* and register it.
 
-        If the agent has no controller (e.g. spawned dynamically without
-        ``controller_config``), an :class:`OmniVelocityController` is
-        attached as a default.
+        If the agent already has a VelocityController (e.g. from
+        ``controller_config``), it is passed to RobotHandler so that
+        ``cmd_vel`` messages drive the controller.
+
+        If no controller is present, an :class:`OmniVelocityController`
+        is attached **only for omnidirectional agents**. Differential-drive
+        agents use TPI-based navigation directly and do not need a controller
+        for ``cmd_vel`` (they use ``goal_pose`` / ``path`` topics instead).
 
         This is the **post-hook** that adds ROS interfaces after
         ``spawn_from_config`` / ``Agent.from_params`` creates the
         simulation-layer agent.
         """
         vel_ctrl = agent._controller
-        if vel_ctrl is None:
+        if vel_ctrl is None and agent._motion_mode == MotionMode.OMNIDIRECTIONAL:
             vel_ctrl = OmniVelocityController()
             agent.set_controller(vel_ctrl)
         handler = RobotHandler(
@@ -223,8 +228,15 @@ class BridgeNode(Node):
 def main(args=None):
     rclpy.init(args=args)
     node = BridgeNode()
+    # MultiThreadedExecutor allows action server execute callbacks
+    # (which use time.sleep polling) to run on separate threads without
+    # blocking the simulation step timer.
+    from rclpy.executors import MultiThreadedExecutor
+
+    executor = MultiThreadedExecutor()
+    executor.add_node(node)
     try:
-        rclpy.spin(node)
+        executor.spin()
     except KeyboardInterrupt:
         pass
     finally:
