@@ -438,14 +438,20 @@ class MultiRobotSimulationCore:
         Disables rendering and defers spatial-grid rebuild until
         the context exits.  Use when spawning many objects at once.
 
+        Rendering state is saved on entry and restored on exit.
+        If rendering was already disabled (e.g. during the initial
+        setup phase before ``run_simulation()``), it stays disabled
+        after ``batch_spawn()`` exits.
+
         Example::
 
             with sim_core.batch_spawn():
                 for params in params_list:
                     Agent.from_params(params, sim_core)
-            # rendering re-enabled, spatial grid rebuilt once
+            # rendering restored to previous state, spatial grid rebuilt once
         """
         was_adaptive = self._params.spatial_hash_cell_size_mode == SpatialHashCellSizeMode.AUTO_ADAPTIVE
+        was_rendering = self._rendering_enabled
         self._batch_spawning = True
         self.disable_rendering()
         try:
@@ -455,7 +461,8 @@ class MultiRobotSimulationCore:
             if was_adaptive:
                 self.set_collision_spatial_hash_cell_size_mode()
             self._rebuild_spatial_grid()
-            self.enable_rendering()
+            if was_rendering:
+                self.enable_rendering()
 
     def _calculate_cell_size_from_aabbs(
         self, aabbs: Optional[List[Tuple[Tuple[float, float, float], Tuple[float, float, float]]]] = None
