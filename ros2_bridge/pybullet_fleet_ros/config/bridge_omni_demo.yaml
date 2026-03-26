@@ -1,6 +1,6 @@
 # Bridge config: mobile robot + 3D omni cube demo
 #
-# Demonstrates OmniVelocityController 6-DoF by mixing a ground mobile robot
+# Demonstrates OmniController 6-DoF by mixing a ground mobile robot
 # with a floating cube that can be controlled in all 6 DoF via cmd_vel.
 #
 # Usage (Docker):
@@ -26,7 +26,7 @@ robots:
     urdf_path: "robots/simple_cube.urdf"
     pose: [2.0, 0.0, 0.5]
     yaw: 0.0
-    controller_config: "omni_velocity"
+    controller_config: "omni"
 
   - name: robot1
     urdf_path: "robots/mobile_robot.urdf"

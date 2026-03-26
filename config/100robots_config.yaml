@@ -13,7 +13,7 @@
 # ========================================
 
 # Override base config settings for 100robots demo
-target_rtf: 100   # 100x real-time
+target_rtf: 3   # 100x real-time
 gui: true         # Show GUI
 timestep: 0.1     # 100ms timestep (10 Hz) for smooth movement
 physics: false    # Kinematic control

@@ -329,8 +329,8 @@ def test_with_without_goal(num_agents: int = 1000):
     # Test 3: After reaching goal (should stop)
     # Move agents to goal
     for agent in agents:
-        if agent._goal_pose:
-            agent.set_pose(agent._goal_pose)
+        if agent.goal_pose:
+            agent.set_pose(agent.goal_pose)
 
     times = []
     for _ in range(3):

@@ -64,7 +64,7 @@ def assert_agent_properties(
     is_kinematic=True,  # mass=0 → kinematic
     collision_mode=CollisionMode.NORMAL_3D,
     # Agent-specific properties (defaults match Agent.__init__ defaults)
-    motion_mode=MotionMode.OMNIDIRECTIONAL,
+    motion_mode=MotionMode.DIFFERENTIAL,
     max_linear_vel=(2.0, 2.0, 2.0),
     max_linear_accel=(5.0, 5.0, 5.0),
     max_angular_vel=(3.0, 3.0, 3.0),
@@ -97,7 +97,7 @@ def assert_agent_properties(
         orientation: Expected (x, y, z, w) quaternion (default (0,0,0,1))
         is_kinematic: Expected is_kinematic flag (default True — mass=0)
         collision_mode: Expected CollisionMode (default NORMAL_3D)
-        motion_mode: Expected MotionMode (default OMNIDIRECTIONAL)
+        motion_mode: Expected MotionMode (default DIFFERENTIAL)
         max_linear_vel: Expected [vx, vy, vz] (default [2,2,2])
         max_linear_accel: Expected [ax, ay, az] (default [5,5,5])
         max_angular_vel: Expected [wx, wy, wz] (default [3,3,3])
@@ -173,7 +173,7 @@ def create_mesh_agent(
     max_linear_accel=5.0,
     max_angular_vel=3.0,
     max_angular_accel=10.0,
-    motion_mode=MotionMode.OMNIDIRECTIONAL,
+    motion_mode=MotionMode.DIFFERENTIAL,
     use_fixed_base=False,
     collision_mode=CollisionMode.NORMAL_3D,
     name=None,
@@ -435,6 +435,7 @@ class TestAgentCreationFromURDF:
             is_urdf=True,
             max_linear_vel=[1.5, 1.5, 1.5],
             max_linear_accel=[3.0, 3.0, 3.0],
+            motion_mode=MotionMode.OMNIDIRECTIONAL,
         )
 
     def test_from_urdf_kinematic(self, pybullet_env):
@@ -470,7 +471,7 @@ class TestAgentSpawnParams:
         assert params.max_linear_accel == 5.0
         assert params.max_angular_vel == 3.0
         assert params.max_angular_accel == 10.0
-        assert params.motion_mode == MotionMode.OMNIDIRECTIONAL
+        assert params.motion_mode == MotionMode.DIFFERENTIAL
         assert params.use_fixed_base is False
         assert params.urdf_path is None
         assert params.collision_mode == CollisionMode.NORMAL_3D
@@ -538,6 +539,7 @@ class TestAgentSpawnParams:
             position=(1, 1, 0.5),
             is_urdf=True,
             max_linear_vel=[1.5, 1.5, 1.5],
+            motion_mode=MotionMode.OMNIDIRECTIONAL,
         )
 
 
@@ -564,9 +566,9 @@ class TestAgentSpawnParamsFromDict:
     def test_controller_config_string_shortcut(self):
         """controller_config string is converted to dict."""
         result = AgentSpawnParams.from_dict(
-            {"name": "r0", "urdf_path": "robots/mobile_robot.urdf", "controller_config": "differential_velocity"}
+            {"name": "r0", "urdf_path": "robots/mobile_robot.urdf", "controller_config": "differential"}
         )
-        assert result.controller_config == {"type": "differential_velocity"}
+        assert result.controller_config == {"type": "differential"}
 
     def test_controller_config_dict(self):
         """controller_config dict is passed through."""
@@ -827,7 +829,7 @@ class TestAgentMotionUpdate:
             cur_dist = np.linalg.norm(cur_pos - goal_pos)
 
             # Detect transition into final-rotation phase
-            if final_quat is not None and agent._is_final_orientation_aligning and not in_final_rotation:
+            if final_quat is not None and agent._controller._is_final_orientation_aligning and not in_final_rotation:
                 in_final_rotation = True
                 final_rot_pos = cur_pos.copy()
                 prev_angle_error = self._quat_angle_error(pose.orientation, final_quat)
@@ -913,7 +915,9 @@ class TestAgentMotionUpdate:
                 break
         assert not agent.is_moving, "Goal 1 should be reached"
         # After goal 1, _is_final_orientation_aligning must be cleared
-        assert not agent._is_final_orientation_aligning, "_is_final_orientation_aligning should be reset after goal completion"
+        assert (
+            not agent._controller._is_final_orientation_aligning
+        ), "_is_final_orientation_aligning should be reset after goal completion"
 
         # ----- Goal 2: (1,0,0) → (0,1,0) -----
         pos_before = np.array(agent.get_pose().position)
@@ -1116,7 +1120,7 @@ class TestAgentMotionUpdate:
         initial_quat = list(agent.get_pose().orientation)
         agent.set_goal_pose(goal)
 
-        assert agent._align_final_orientation is True
+        assert agent._controller._align_final_orientation is True
 
         result = self._run_omni_motion_loop(agent, sim_core, goal_pos, initial_quat, final_quat=goal_quat)
 
@@ -1182,7 +1186,7 @@ class TestAgentMotionUpdate:
                 reached = True
                 break
 
-            phase = agent._differential_phase
+            phase = agent._controller._differential_phase
             pose = agent.get_pose()
             cur_pos = np.array(pose.position)
 
@@ -1190,7 +1194,8 @@ class TestAgentMotionUpdate:
             if phase != prev_phase:
                 if phase == DifferentialPhase.ROTATE:
                     rotate_cycles += 1
-                    target_quat = agent._rotation_target_quat.copy()
+                    ctrl_tgt = agent._controller._rotation_target_quat
+                    target_quat = ctrl_tgt.copy()
                     prev_angle_error = self._quat_angle_error(pose.orientation, target_quat)
                     rotate_start_pos = cur_pos.copy()
                     rotate_steps_in_cycle = 0
@@ -1340,7 +1345,7 @@ class TestAgentMotionUpdate:
         agent.set_goal_pose(goal)
 
         # final_orientation_align should be enabled (set_goal_pose → set_path default)
-        assert agent._align_final_orientation is True
+        assert agent._controller._align_final_orientation is True
 
         result = self._run_differential_phase_loop(agent, sim_core, goal_pos)
 

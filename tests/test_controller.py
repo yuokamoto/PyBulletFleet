@@ -1,7 +1,7 @@
-"""Tests for Controller hierarchy, VelocityController, and Agent.set_controller().
+"""Tests for Controller hierarchy, KinematicController, and Agent.set_controller().
 
 TDD tests for the Controller system (Plugin Architecture Phase 2).
-OmniVelocityController is a kinematic omnidirectional 6-DoF velocity controller:
+OmniController is a kinematic omnidirectional 6-DoF velocity controller:
 body-frame (vx, vy, vz, wx, wy, wz) → quaternion-based world-frame integration.
 """
 
@@ -13,10 +13,10 @@ import pytest
 from pybullet_fleet import Agent, AgentSpawnParams, Pose
 from pybullet_fleet.controller import (
     Controller,
-    VelocityController,
+    KinematicController,
     CONTROLLER_REGISTRY,
-    OmniVelocityController,
-    DifferentialVelocityController,
+    OmniController,
+    DifferentialController,
     create_controller,
     register_controller,
 )
@@ -46,27 +46,27 @@ def mobile_agent(sim_core):
 
 @pytest.fixture
 def omni_agent(mobile_agent):
-    """mobile_agent with OmniVelocityController pre-attached."""
-    ctrl = OmniVelocityController()
+    """mobile_agent with OmniController pre-attached."""
+    ctrl = OmniController()
     mobile_agent.set_controller(ctrl)
     return mobile_agent
 
 
 @pytest.fixture
 def diff_agent(mobile_agent):
-    """mobile_agent with DifferentialVelocityController pre-attached."""
-    ctrl = DifferentialVelocityController()
+    """mobile_agent with DifferentialController pre-attached."""
+    ctrl = DifferentialController()
     mobile_agent.set_controller(ctrl)
     return mobile_agent
 
 
 # -----------------------------------------------------------------------
-# OmniVelocityController (unified: basic + body-frame + 6-DoF)
+# OmniController (unified: basic + body-frame + 6-DoF)
 # -----------------------------------------------------------------------
 
 
-class TestOmniVelocityController:
-    """OmniVelocityController: kinematic omnidirectional 6-DoF velocity controller.
+class TestOmniController:
+    """OmniController: kinematic omnidirectional 6-DoF velocity controller.
 
     Body-frame (vx, vy, vz, wx, wy, wz) → quaternion-based world-frame integration.
     All assertions verify exact target positions, not just "moved from initial."
@@ -251,7 +251,7 @@ class TestOmniVelocityController:
 
     def test_linear_speed_clamped(self, mobile_agent):
         """Linear velocity magnitude clamped to max_linear_vel, direction preserved."""
-        ctrl = OmniVelocityController(max_linear_vel=1.0)
+        ctrl = OmniController(max_linear_vel=1.0)
         mobile_agent.set_controller(ctrl)
 
         ctrl.set_velocity(vx=3.0, vy=4.0)  # magnitude=5.0, clamped to 1.0
@@ -260,7 +260,7 @@ class TestOmniVelocityController:
 
     def test_angular_speed_clamped(self, mobile_agent):
         """Angular velocity magnitude clamped to max_angular_vel, direction preserved."""
-        ctrl = OmniVelocityController(max_angular_vel=1.0)
+        ctrl = OmniController(max_angular_vel=1.0)
         mobile_agent.set_controller(ctrl)
 
         ctrl.set_velocity(wx=0.0, wy=0.0, wz=2.0)  # magnitude=2.0, clamped to 1.0
@@ -268,7 +268,7 @@ class TestOmniVelocityController:
 
     def test_below_limit_not_clamped(self, mobile_agent):
         """Velocity below limit passes through unchanged."""
-        ctrl = OmniVelocityController(max_linear_vel=10.0, max_angular_vel=5.0)
+        ctrl = OmniController(max_linear_vel=10.0, max_angular_vel=5.0)
         mobile_agent.set_controller(ctrl)
 
         ctrl.set_velocity(vx=1.0, vy=2.0, wz=1.5)
@@ -283,7 +283,7 @@ class TestOmniVelocityController:
 
     def test_from_config_with_limits(self):
         """from_config parses max_linear_vel / max_angular_vel."""
-        ctrl = OmniVelocityController.from_config({"max_linear_vel": 2.0, "max_angular_vel": 1.0})
+        ctrl = OmniController.from_config({"max_linear_vel": 2.0, "max_angular_vel": 1.0})
         assert ctrl._max_linear_vel == pytest.approx(2.0)  # type: ignore[reportAttributeAccessIssue]
         assert ctrl._max_angular_vel == pytest.approx(1.0)  # type: ignore[reportAttributeAccessIssue]
 
@@ -298,25 +298,19 @@ class TestSetController:
 
     def test_set_controller_stores_reference(self, mobile_agent):
         """set_controller(ctrl) stores the controller on the agent."""
-        ctrl = OmniVelocityController()
+        ctrl = OmniController()
         mobile_agent.set_controller(ctrl)
         assert mobile_agent._controller is ctrl
 
-    def test_set_controller_none_restores_legacy(self, mobile_agent):
-        """set_controller(None) reverts to legacy mode."""
-        ctrl = OmniVelocityController()
+    def test_set_controller_none_disables_movement(self, mobile_agent):
+        """set_controller(None) disables all movement."""
+        ctrl = OmniController()
         mobile_agent.set_controller(ctrl)
         mobile_agent.set_controller(None)
         assert mobile_agent._controller is None
 
-    def test_goal_based_still_works_without_controller(self, mobile_agent, sim_core):
-        """Legacy goal-based mode works when no controller is set.
-
-        TEMPORARY: Once TPIController is extracted (future), this test moves
-        to the TPIController test class.  The TestSetController assertions will
-        also need updating when TPI becomes the default controller — at that
-        point controller_none_by_default will no longer hold.
-        """
+    def test_goal_based_works_via_controller(self, mobile_agent, sim_core):
+        """Goal-based movement works through the auto-assigned controller."""
         mobile_agent.set_goal_pose(Pose.from_xyz(5, 0, 0.05))
         initial_x = mobile_agent.get_pose().x
 
@@ -326,7 +320,7 @@ class TestSetController:
             sim_core.tick()
             mobile_agent.update(dt)
 
-        # Should move toward goal via legacy TPI
+        # Should move toward goal via controller's TPI
         assert mobile_agent.get_pose().x > initial_x
 
     def test_controller_takes_priority_over_goal(self, mobile_agent):
@@ -334,7 +328,7 @@ class TestSetController:
         # Set a goal pointing in +X
         mobile_agent.set_goal_pose(Pose.from_xyz(10, 0, 0.05))
         # But controller commands -X velocity
-        ctrl = OmniVelocityController()
+        ctrl = OmniController()
         mobile_agent.set_controller(ctrl)
         ctrl.set_velocity(vx=-1.0, vy=0.0)
 
@@ -359,9 +353,9 @@ class TestControllerABC:
             Controller()  # type: ignore[reportAbstractUsage]
 
     def test_velocity_controller_cannot_instantiate(self):
-        """VelocityController is abstract (has abstract template hooks)."""
+        """KinematicController is abstract (has abstract template hooks)."""
         with pytest.raises(TypeError):
-            VelocityController()  # type: ignore[reportAbstractUsage]
+            KinematicController()  # type: ignore[reportAbstractUsage]
 
 
 # -----------------------------------------------------------------------
@@ -374,23 +368,23 @@ class TestControllerRegistry:
 
     def test_builtins_registered(self):
         """Built-in controllers are auto-registered."""
-        assert "omni_velocity" in CONTROLLER_REGISTRY
-        assert "differential_velocity" in CONTROLLER_REGISTRY
+        assert "omni" in CONTROLLER_REGISTRY
+        assert "differential" in CONTROLLER_REGISTRY
 
     def test_create_velocity(self):
-        """create_controller('omni_velocity') returns OmniVelocityController."""
-        ctrl = create_controller("omni_velocity")
-        assert isinstance(ctrl, OmniVelocityController)
+        """create_controller('omni_velocity') returns OmniController."""
+        ctrl = create_controller("omni")
+        assert isinstance(ctrl, OmniController)
 
     def test_create_differential(self):
-        """create_controller('differential_velocity') returns DifferentialVelocityController."""
-        ctrl = create_controller("differential_velocity")
-        assert isinstance(ctrl, DifferentialVelocityController)
+        """create_controller('differential_velocity') returns DifferentialController."""
+        ctrl = create_controller("differential")
+        assert isinstance(ctrl, DifferentialController)
 
     def test_create_with_config(self):
         """create_controller passes config to from_config()."""
-        ctrl = create_controller("differential_velocity", {"max_linear_vel": 3.0, "max_angular_vel": 2.0})
-        assert isinstance(ctrl, DifferentialVelocityController)
+        ctrl = create_controller("differential", {"max_linear_vel": 3.0, "max_angular_vel": 2.0})
+        assert isinstance(ctrl, DifferentialController)
         assert ctrl._max_linear_vel == pytest.approx(3.0)
         assert ctrl._max_angular_vel == pytest.approx(2.0)
 
@@ -416,12 +410,12 @@ class TestControllerRegistry:
 
 
 # -----------------------------------------------------------------------
-# DifferentialVelocityController
+# DifferentialController
 # -----------------------------------------------------------------------
 
 
-class TestDifferentialVelocityController:
-    """DifferentialVelocityController uses unicycle kinematics."""
+class TestDifferentialController:
+    """DifferentialController uses unicycle kinematics."""
 
     def test_forward_only(self, diff_agent):
         """vx=1 at yaw=0 moves agent in +X only."""
@@ -507,7 +501,7 @@ class TestDifferentialVelocityController:
 
         Robots go backward, so limits are [-max, max], not [0, max].
         """
-        ctrl = DifferentialVelocityController(max_linear_vel=1.0, max_angular_vel=0.5)
+        ctrl = DifferentialController(max_linear_vel=1.0, max_angular_vel=0.5)
         mobile_agent.set_controller(ctrl)
 
         # Positive overshoot
@@ -552,16 +546,14 @@ class TestDifferentialVelocityController:
 
     def test_from_config(self):
         """from_config parses params correctly."""
-        ctrl = DifferentialVelocityController.from_config(
-            {"max_linear_vel": 5.0, "max_angular_vel": 3.0, "wheel_separation": 0.4}
-        )
+        ctrl = DifferentialController.from_config({"max_linear_vel": 5.0, "max_angular_vel": 3.0, "wheel_separation": 0.4})
         assert ctrl._max_linear_vel == pytest.approx(5.0)  # type: ignore[reportAttributeAccessIssue]
         assert ctrl._max_angular_vel == pytest.approx(3.0)  # type: ignore[reportAttributeAccessIssue]
         assert ctrl._wheel_separation == pytest.approx(0.4)  # type: ignore[reportAttributeAccessIssue]
 
     def test_from_config_defaults(self):
         """from_config with empty dict uses defaults."""
-        ctrl = DifferentialVelocityController.from_config({})
+        ctrl = DifferentialController.from_config({})
         assert ctrl._max_linear_vel == pytest.approx(2.0)  # type: ignore[reportAttributeAccessIssue]
         assert ctrl._max_angular_vel == pytest.approx(1.5)  # type: ignore[reportAttributeAccessIssue]
 
@@ -574,32 +566,32 @@ class TestDifferentialVelocityController:
 class TestSpawnParamsControllerConfig:
     """AgentSpawnParams.controller_config auto-creates controller."""
 
-    def test_no_config_no_controller(self, sim_core):
-        """Default: no controller_config → agent has no controller."""
+    def test_no_config_default_controller(self, sim_core):
+        """Default: no controller_config → DifferentialController auto-assigned."""
         params = AgentSpawnParams(
             urdf_path="robots/mobile_robot.urdf",
             initial_pose=Pose.from_xyz(0, 0, 0.05),
         )
         agent = Agent.from_params(params, sim_core)
-        assert agent._controller is None
+        assert isinstance(agent._controller, DifferentialController)
 
     def test_velocity_config(self, sim_core):
-        """controller_config with type=omni_velocity creates OmniVelocityController."""
+        """controller_config with type=omni_velocity creates OmniController."""
         params = AgentSpawnParams(
             urdf_path="robots/mobile_robot.urdf",
             initial_pose=Pose.from_xyz(0, 0, 0.05),
-            controller_config={"type": "omni_velocity"},
+            controller_config={"type": "omni"},
         )
         agent = Agent.from_params(params, sim_core)
-        assert isinstance(agent._controller, OmniVelocityController)
+        assert isinstance(agent._controller, OmniController)
 
     def test_differential_config(self, sim_core):
-        """controller_config with type=differential_velocity creates DifferentialVelocityController."""
+        """controller_config with type=differential_velocity creates DifferentialController."""
         params = AgentSpawnParams(
             urdf_path="robots/mobile_robot.urdf",
             initial_pose=Pose.from_xyz(0, 0, 0.05),
-            controller_config={"type": "differential_velocity", "max_linear_vel": 1.5},
+            controller_config={"type": "differential", "max_linear_vel": 1.5},
         )
         agent = Agent.from_params(params, sim_core)
-        assert isinstance(agent._controller, DifferentialVelocityController)
+        assert isinstance(agent._controller, DifferentialController)
         assert agent._controller._max_linear_vel == pytest.approx(1.5)

@@ -6,6 +6,7 @@ General-purpose PyBullet simulation library for multi-robot fleets
 # Type definitions
 from pybullet_fleet.types import (
     ActionStatus,
+    ControllerMode,
     DifferentialPhase,
     MotionMode,
     MovementDirection,
@@ -28,12 +29,12 @@ from pybullet_fleet.core_simulation import (
 # Base classes
 from pybullet_fleet.sim_object import SimObject
 
-# Controller system (Plugin Architecture Phase 2)
+# Controller system
 from pybullet_fleet.controller import (
     Controller,
-    VelocityController,
-    DifferentialVelocityController,
-    OmniVelocityController,
+    KinematicController,
+    DifferentialController,
+    OmniController,
     create_controller,
     register_controller,
 )
@@ -75,9 +76,10 @@ __all__ = [
     "GridSpawnParams",
     # Controller system
     "Controller",
-    "VelocityController",
-    "OmniVelocityController",
-    "DifferentialVelocityController",
+    "ControllerMode",
+    "KinematicController",
+    "OmniController",
+    "DifferentialController",
     "create_controller",
     "register_controller",
     # Utilities

@@ -278,20 +278,20 @@ class TestSpawnFromConfig:
 
     def test_controller_auto_created(self, manager):
         """Controller specified in config is auto-created on agent."""
-        from pybullet_fleet.controller import OmniVelocityController
+        from pybullet_fleet.controller import OmniController
 
         robots_yaml = [
             {
                 "name": "robot0",
                 "urdf_path": "robots/mobile_robot.urdf",
                 "pose": [0, 0, 0.05],
-                "controller_config": "omni_velocity",
+                "controller_config": "omni",
             },
         ]
         agents = manager.spawn_from_config(robots_yaml)
 
         assert agents[0]._controller is not None
-        assert isinstance(agents[0]._controller, OmniVelocityController)
+        assert isinstance(agents[0]._controller, OmniController)
 
     def test_poses_match_config(self, manager):
         """Spawned agents are at the positions specified in config."""

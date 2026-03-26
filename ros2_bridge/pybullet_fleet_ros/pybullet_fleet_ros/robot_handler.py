@@ -1,7 +1,7 @@
 """Per-robot ROS interface handler.
 
 Creates publishers, subscribers, and action servers for a single Agent.
-Passes body-frame cmd_vel directly to the VelocityController's set_velocity().
+Passes body-frame cmd_vel directly to the KinematicController's set_velocity().
 The controller handles kinematics (body→world rotation) internally.
 
 Layers:
@@ -40,7 +40,7 @@ from .conversions import (
 
 if TYPE_CHECKING:
     from pybullet_fleet.agent import Agent
-    from pybullet_fleet.controller import VelocityController
+    from pybullet_fleet.controller import KinematicController
     from rclpy.node import Node
     from tf2_ros import TransformBroadcaster
 
@@ -51,7 +51,7 @@ class RobotHandler:
     """Manages all ROS 2 interfaces for a single simulated Agent.
 
     Creates:
-    - ``/{name}/cmd_vel`` subscriber (Twist) → VelocityController.set_velocity()
+    - ``/{name}/cmd_vel`` subscriber (Twist) → KinematicController.set_velocity()
     - ``/{name}/goal_pose`` subscriber (PoseStamped) → Agent.set_goal_pose()
     - ``/{name}/path`` subscriber (Path) → Agent.set_path()
     - ``/{name}/joint_trajectory`` subscriber (JointTrajectory) → Agent.set_joints_targets_by_name()
@@ -71,7 +71,7 @@ class RobotHandler:
         self,
         node: "Node",
         agent: "Agent",
-        vel_controller: Optional["VelocityController"] = None,
+        vel_controller: Optional["KinematicController"] = None,
         tf_broadcaster: Optional["TransformBroadcaster"] = None,
     ):
         self._node = node
@@ -214,7 +214,7 @@ class RobotHandler:
         self.agent.set_all_joints_targets(positions)
 
     def apply_cmd_vel(self) -> None:
-        """Apply stored cmd_vel as a velocity command via VelocityController.
+        """Apply stored cmd_vel as a velocity command via KinematicController.
 
         Called once per sim step by BridgeNode._step_callback().
         Passes body-frame Twist directly to the controller's set_velocity().
@@ -321,8 +321,8 @@ class RobotHandler:
             dist = 0.0
 
         # Current path — publish remaining waypoints
-        waypoints = getattr(self.agent, "_path", [])
-        current_idx = getattr(self.agent, "_current_waypoint_index", 0)
+        waypoints = getattr(self.agent, "path", [])
+        current_idx = getattr(self.agent, "current_waypoint_index", 0)
         if waypoints and current_idx < len(waypoints):
             remaining = waypoints[current_idx:]
             plan_msg = pbf_path_to_ros(remaining, stamp=stamp)

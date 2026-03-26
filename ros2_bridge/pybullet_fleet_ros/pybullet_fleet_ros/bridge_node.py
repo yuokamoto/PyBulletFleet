@@ -25,7 +25,7 @@ from pybullet_fleet import (
     SimulationParams,
 )
 from pybullet_fleet.config_utils import load_yaml_config
-from pybullet_fleet.controller import OmniVelocityController
+from pybullet_fleet.controller import OmniController
 from pybullet_fleet.types import MotionMode
 
 from .conversions import sim_time_to_ros_time
@@ -157,11 +157,11 @@ class BridgeNode(Node):
     def _register_handler(self, agent: Agent) -> None:
         """Create a RobotHandler for *agent* and register it.
 
-        If the agent already has a VelocityController (e.g. from
+        If the agent already has a KinematicController (e.g. from
         ``controller_config``), it is passed to RobotHandler so that
         ``cmd_vel`` messages drive the controller.
 
-        If no controller is present, an :class:`OmniVelocityController`
+        If no controller is present, an :class:`OmniController`
         is attached **only for omnidirectional agents**. Differential-drive
         agents use TPI-based navigation directly and do not need a controller
         for ``cmd_vel`` (they use ``goal_pose`` / ``path`` topics instead).
@@ -172,7 +172,7 @@ class BridgeNode(Node):
         """
         vel_ctrl = agent._controller
         if vel_ctrl is None and agent._motion_mode == MotionMode.OMNIDIRECTIONAL:
-            vel_ctrl = OmniVelocityController()
+            vel_ctrl = OmniController()
             agent.set_controller(vel_ctrl)
         handler = RobotHandler(
             self,

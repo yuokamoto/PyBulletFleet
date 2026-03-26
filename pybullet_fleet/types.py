@@ -89,6 +89,20 @@ class SpatialHashCellSizeMode(Enum):
     AUTO_INITIAL = "auto_initial"
 
 
+class ControllerMode(str, Enum):
+    """Internal mode for KinematicController state machine.
+
+    Attributes:
+        IDLE: No active command — zero velocity, no pose target.
+        VELOCITY: Processing cmd_vel input (body-frame velocity).
+        POSE: Processing goal_pose / path via TPI trajectory.
+    """
+
+    IDLE = "idle"
+    VELOCITY = "velocity"
+    POSE = "pose"
+
+
 class CollisionMode(Enum):
     """
     Collision detection mode for individual objects.

@@ -275,7 +275,7 @@ class MoveAction(Action):
 
         # Check if agent has completed the path
         # Path is complete when agent is not moving and path queue is empty
-        if not agent.is_moving and not agent._path:
+        if not agent.is_moving and not agent.path:
             self.status = ActionStatus.COMPLETED
             self.end_time = agent.sim_core.sim_time if agent.sim_core else 0.0
 
