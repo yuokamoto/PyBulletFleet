@@ -7,9 +7,9 @@ General-purpose PyBullet simulation library for multi-robot fleets
 from pybullet_fleet.types import (
     ActionStatus,
     ControllerMode,
-    DifferentialPhase,
     MotionMode,
     MovementDirection,
+    PosePhase,
     SpatialHashCellSizeMode,
 )
 
@@ -57,9 +57,9 @@ from pybullet_fleet.entity_registry import register_entity_class
 __all__ = [
     # Type definitions
     "ActionStatus",
-    "DifferentialPhase",
     "MotionMode",
     "MovementDirection",
+    "PosePhase",
     # Geometry
     "Pose",
     "Path",

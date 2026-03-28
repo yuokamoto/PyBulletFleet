@@ -26,7 +26,7 @@ from scipy.spatial.transform import Rotation as R
 from pybullet_fleet.agent import Agent, AgentSpawnParams
 from pybullet_fleet.geometry import Pose, Path
 from pybullet_fleet.sim_object import SimObject, ShapeParams
-from pybullet_fleet.types import CollisionMode, DifferentialPhase, MotionMode
+from pybullet_fleet.types import CollisionMode, MotionMode, PosePhase
 from tests.conftest import MockSimCore
 
 
@@ -1133,7 +1133,7 @@ class TestAgentMotionUpdate:
 
     # -- Differential ----------------------------------------------------
 
-    def _run_differential_phase_loop(
+    def _run_pose_phase_loop(
         self,
         agent,
         sim_core,
@@ -1186,13 +1186,13 @@ class TestAgentMotionUpdate:
                 reached = True
                 break
 
-            phase = agent._controller._differential_phase
+            phase = agent._controller._pose_phase
             pose = agent.get_pose()
             cur_pos = np.array(pose.position)
 
             # Detect phase transition → reset per-cycle state
             if phase != prev_phase:
-                if phase == DifferentialPhase.ROTATE:
+                if phase == PosePhase.ROTATE:
                     rotate_cycles += 1
                     ctrl_tgt = agent._controller._rotation_target_quat
                     target_quat = ctrl_tgt.copy()
@@ -1201,14 +1201,14 @@ class TestAgentMotionUpdate:
                     rotate_steps_in_cycle = 0
                     if np.allclose(cur_pos, goal_pos, atol=0.1):
                         final_rotate_at_goal = True
-                elif phase == DifferentialPhase.FORWARD:
+                elif phase == PosePhase.FORWARD:
                     forward_orientation = list(pose.orientation)
                     prev_forward_dist = np.linalg.norm(cur_pos - goal_pos)
                     forward_steps_in_cycle = 0
                 prev_phase = phase
                 continue  # skip checks on the transition step
 
-            if phase == DifferentialPhase.ROTATE:
+            if phase == PosePhase.ROTATE:
                 rotate_steps_in_cycle += 1
 
                 # Position must stay fixed during rotation
@@ -1230,7 +1230,7 @@ class TestAgentMotionUpdate:
                         f"Step {step} ROTATE: angular_velocity should be non-zero, " f"got {agent.angular_velocity}"
                     )
 
-            elif phase == DifferentialPhase.FORWARD:
+            elif phase == PosePhase.FORWARD:
                 forward_steps_in_cycle += 1
                 cur_dist = np.linalg.norm(cur_pos - goal_pos)
 
@@ -1261,7 +1261,7 @@ class TestAgentMotionUpdate:
     def test_diff_update_toward_goal_forward(self, pybullet_env):
         """Differential agent reaching a goal straight ahead (no rotation needed).
 
-        Uses _differential_phase to verify phase-specific invariants:
+        Uses _pose_phase to verify phase-specific invariants:
         - ROTATE phase should be skipped or very short (goal on X-axis)
         - FORWARD phase: distance decreases monotonically, orientation stays fixed,
           velocity is non-zero while far from goal
@@ -1275,7 +1275,7 @@ class TestAgentMotionUpdate:
         goal_pos = np.array([2, 0, 0])
         agent.set_goal_pose(Pose.from_xyz(*goal_pos))
 
-        result = self._run_differential_phase_loop(agent, sim_core, goal_pos)
+        result = self._run_pose_phase_loop(agent, sim_core, goal_pos)
 
         # Straight-ahead goal: ROTATE phase should be very short or skipped
         assert result["rotate_cycles"] <= 1, (
@@ -1289,7 +1289,7 @@ class TestAgentMotionUpdate:
     def test_diff_update_toward_goal_lateral(self, pybullet_env):
         """Differential agent reaching a goal at 90° (rotation then forward).
 
-        Uses _differential_phase to verify strict per-phase invariants.
+        Uses _pose_phase to verify strict per-phase invariants.
         The agent may go through multiple ROTATE→FORWARD cycles (e.g. initial
         rotation, forward motion, then final orientation alignment).
 
@@ -1313,7 +1313,7 @@ class TestAgentMotionUpdate:
         goal_pos = np.array([0, 2, 0])
         agent.set_goal_pose(Pose.from_xyz(*goal_pos))
 
-        result = self._run_differential_phase_loop(agent, sim_core, goal_pos)
+        result = self._run_pose_phase_loop(agent, sim_core, goal_pos)
 
         assert result["rotate_cycles"] >= 1, "ROTATE phase should be observed for 90° lateral goal"
         assert result["reached"], "Differential agent should reach the lateral goal"
@@ -1347,7 +1347,7 @@ class TestAgentMotionUpdate:
         # final_orientation_align should be enabled (set_goal_pose → set_path default)
         assert agent._controller._align_final_orientation is True
 
-        result = self._run_differential_phase_loop(agent, sim_core, goal_pos)
+        result = self._run_pose_phase_loop(agent, sim_core, goal_pos)
 
         assert result["final_rotate_at_goal"], "Final orientation alignment ROTATE phase should occur at goal position"
         assert result["reached"], "Differential agent should complete motion including final alignment"

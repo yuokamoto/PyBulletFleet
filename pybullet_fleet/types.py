@@ -22,13 +22,13 @@ class MotionMode(str, Enum):
     DIFFERENTIAL = "differential"
 
 
-class DifferentialPhase(str, Enum):
+class PosePhase(str, Enum):
     """
-    Phase for differential drive motion control.
+    Phase for TPI pose control (shared by all kinematic controllers).
 
     Attributes:
-        ROTATE: Robot is rotating to face the target direction
-        FORWARD: Robot is moving forward towards the target
+        ROTATE: Robot is rotating in place (slerp TPI)
+        FORWARD: Robot is moving forward in a straight line (distance TPI)
     """
 
     ROTATE = "rotate"
