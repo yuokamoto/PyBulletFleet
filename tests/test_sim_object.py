@@ -359,6 +359,16 @@ class TestSimObjectSpawnParamsFromDict:
         )
         assert result.initial_pose.x == pytest.approx(1.0)
 
+    def test_pose_too_short_raises(self):
+        """pose list with fewer than 3 elements raises ValueError."""
+        with pytest.raises(ValueError, match="[Pp]ose"):
+            SimObjectSpawnParams.from_dict({"name": "bad", "pose": [1.0, 2.0]})
+
+    def test_pose_wrong_type_raises(self):
+        """pose as a non-sequence (e.g. scalar) raises ValueError."""
+        with pytest.raises((ValueError, TypeError)):
+            SimObjectSpawnParams.from_dict({"name": "bad", "pose": 42})
+
 
 class TestSimObjectFromDict:
     """SimObject.from_dict creates instance directly from config dict."""

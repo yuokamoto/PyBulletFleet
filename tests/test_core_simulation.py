@@ -2320,3 +2320,39 @@ class TestBatchSpawn:
             make_box(sim_core, [0, 0, 0.5])
         # Should not crash; object created successfully
         assert len(sim_core.sim_objects) >= 1
+
+
+# ============================================================================
+# Model Paths Wiring
+# ============================================================================
+
+
+class TestModelPathsWiring:
+    """SimulationParams.model_paths registers search paths on setup."""
+
+    def test_model_paths_registered_on_setup(self, tmp_path):
+        """model_paths from SimulationParams are added as robot_models search paths."""
+        from pybullet_fleet.robot_models import get_search_paths, remove_search_path
+
+        model_dir = tmp_path / "my_models"
+        model_dir.mkdir()
+        params = SimulationParams(gui=False, monitor=False, model_paths=[str(model_dir)])
+        sc = MultiRobotSimulationCore(params)
+        try:
+            assert str(model_dir) in get_search_paths()
+        finally:
+            remove_search_path(str(model_dir))
+            p.disconnect(sc.client)
+
+    def test_model_paths_empty_by_default(self):
+        """No extra search paths added if model_paths is empty."""
+        from pybullet_fleet.robot_models import get_search_paths
+
+        before = get_search_paths()
+        params = SimulationParams(gui=False, monitor=False)
+        sc = MultiRobotSimulationCore(params)
+        try:
+            after = get_search_paths()
+            assert after == before
+        finally:
+            p.disconnect(sc.client)

@@ -191,6 +191,8 @@ class SimObjectSpawnParams:
         initial_pose = config.get("initial_pose")
         if initial_pose is None:
             pose = config.get("pose", [0.0, 0.0, 0.0])
+            if not isinstance(pose, (list, tuple)) or len(pose) < 3:
+                raise ValueError(f"'pose' must be a list/tuple of at least 3 elements [x, y, z], got: {pose!r}")
             yaw = config.get("yaw", 0.0)
             initial_pose = Pose.from_yaw(pose[0], pose[1], pose[2], yaw)
 

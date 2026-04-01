@@ -19,10 +19,11 @@ Add a unified `entities:` section to YAML config where each entry has an explici
 entities:
   - type: agent
     name: robot0
-    urdf: "robots/mobile_robot.urdf"
+    urdf_path: "robots/mobile_robot.urdf"
     pose: [0.0, 0.0, 0.05]
     yaw: 0.0
-    controller: "omni_velocity"
+    controller_config:
+      type: "omni_velocity"
 
   - type: sim_object
     name: pallet_0
@@ -67,7 +68,7 @@ register_entity_class("forklift", ForkliftAgent)
 entities:
   - type: forklift
     name: forklift0
-    urdf: robots/forklift.urdf
+    urdf_path: robots/forklift.urdf
 ```
 
 - Built-in types auto-registered: `"agent"` → `Agent`, `"sim_object"` → `SimObject`

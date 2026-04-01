@@ -401,6 +401,14 @@ class MultiRobotSimulationCore:
         self._apply_physics_engine_params()
         if self._params.enable_floor:
             p.loadURDF("plane.urdf", physicsClientId=self._client)
+
+        # Register user-supplied model search paths
+        if self._params.model_paths:
+            from pybullet_fleet.robot_models import add_search_path
+
+            for path in self._params.model_paths:
+                add_search_path(path)
+
         # Disable rendering during setup for better performance
         if self._params.gui:
             self.disable_rendering()
@@ -2007,7 +2015,8 @@ class MultiRobotSimulationCore:
         """Reset simulation to a clean state (no objects, fresh PyBullet world).
 
         Removes all objects from the simulation, resets PyBullet, reloads the
-        ground plane, and re-initialises counters via :meth:`initialize_simulation`.
+        ground plane (if ``enable_floor`` is *True*), and re-initialises counters
+        via :meth:`initialize_simulation`.
 
         After calling ``reset()`` the simulation is ready for new objects to be
         spawned.  Callbacks registered via :meth:`register_callback` are **preserved**

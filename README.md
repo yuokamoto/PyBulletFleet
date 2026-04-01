@@ -70,7 +70,7 @@ Kinematics mode (physics OFF), headless. See [Benchmark Results](benchmark/READM
 PyBulletFleet includes a model resolution system that loads robots **by name** from multiple sources:
 
 ```python
-from pybullet_fleet import Agent, resolve_urdf
+from pybullet_fleet import Agent, Pose, resolve_urdf
 
 # Resolve by name — searches local robots/, pybullet_data, robot_descriptions
 urdf = resolve_urdf("panda")
