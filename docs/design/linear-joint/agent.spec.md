@@ -7,7 +7,7 @@
 - `_solve_ik()` and `move_end_effector()` must work with prismatic joints in the chain (validated by tests, no code change expected)
 - Docstrings referencing "radians" must acknowledge prismatic ("radians for revolute, metres for prismatic")
 - Integration tests for `JointAction` and `PoseAction` with the rail arm in all 3 modes (physics, kinematic, physics_off)
-- Demo script: `examples/rail_arm_demo.py`
+- Demo script: `examples/arm/rail_arm_demo.py`
 
 ## Constraints
 
@@ -112,7 +112,7 @@ def create_rail_arm_agent(sim_core, mass=None):
 
 (Optional) Add a test verifying `_solve_ik` with the rail arm URDF produces valid joint angles including a non-zero prismatic value.
 
-### 5. Demo: `examples/rail_arm_demo.py`
+### 5. Demo: `examples/arm/rail_arm_demo.py`
 
 Pattern: follow `pick_drop_arm_demo.py` structure.
 
@@ -139,7 +139,7 @@ Files the plan agent MUST read before planning:
 - `pybullet_fleet/action.py:293-340` — `JointAction` class
 - `tests/test_action_integration.py:940-1010` — `arm_sim` fixture and `TestJointActionIntegration` (pattern to follow)
 - `tests/test_action_integration.py:1015-1090` — `TestPoseActionIntegration` (pattern to follow)
-- `examples/pick_drop_arm_demo.py` — demo script pattern to follow
+- `examples/arm/pick_drop_arm_demo.py` — demo script pattern to follow
 - `docs/architecture/overview.md:260-280` — JointAction/PoseAction parameter docs
 
 ## Success Criteria
@@ -150,5 +150,5 @@ Files the plan agent MUST read before planning:
 - [ ] Kinematic interpolation: prismatic joint takes multiple steps (uses velocity limit, not teleport)
 - [ ] Kinematic fallback velocity: prismatic uses `0.5 m/s`, revolute uses `2.0 rad/s`
 - [ ] All existing tests pass unchanged
-- [ ] `examples/rail_arm_demo.py` runs without errors
+- [ ] `examples/arm/rail_arm_demo.py` runs without errors
 - [ ] Pre-commit passes (black, pyright, flake8)

@@ -76,7 +76,7 @@ This prints per-step breakdown: agent_update, callbacks, step_simulation, collis
 enable_memory_profiling: true
 ```
 
-Or use `examples/memory_profiling_demo.py` for detailed tracemalloc output.
+Or use `examples/basics/memory_profiling_demo.py` for detailed tracemalloc output.
 
 **What to look for:**
 - Which phase dominates step time? (collision? agent update? callbacks?)

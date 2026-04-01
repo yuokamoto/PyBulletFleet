@@ -9,6 +9,30 @@ from typing import Any, Dict, List, Union
 import yaml
 
 
+def load_yaml_config(config_path: str) -> Dict[str, Any]:
+    """Load a YAML config file and return parsed contents.
+
+    General-purpose YAML loader.  Works for any YAML config file
+    (simulation, bridge, spawn definitions, etc.).
+
+    Args:
+        config_path: Path to YAML config file.
+
+    Returns:
+        Parsed config dict.
+
+    Raises:
+        FileNotFoundError: If *config_path* does not exist.
+    """
+    if not os.path.exists(config_path):
+        raise FileNotFoundError(f"Config file not found: {config_path}")
+
+    with open(config_path, "r") as f:
+        config = yaml.safe_load(f) or {}
+
+    return config
+
+
 def merge_configs(base_config: Dict[str, Any], override_config: Dict[str, Any]) -> Dict[str, Any]:
     """
     Recursively merge two configuration dictionaries.
@@ -40,6 +64,7 @@ def load_config(config_paths: Union[str, List[str]]) -> Dict[str, Any]:
     Load and merge configuration from one or more YAML files.
 
     If multiple paths are provided, later configs override earlier ones.
+    Delegates to :func:`load_yaml_config` for each file.
 
     Args:
         config_paths: Single path string or list of paths to configuration files.
@@ -63,23 +88,10 @@ def load_config(config_paths: Union[str, List[str]]) -> Dict[str, Any]:
     if not config_paths:
         raise ValueError("At least one config path must be provided")
 
-    # Load first config as base
-    base_path = config_paths[0]
-    if not os.path.exists(base_path):
-        raise FileNotFoundError(f"Config file not found: {base_path}")
+    merged_config = load_yaml_config(config_paths[0])
 
-    with open(base_path, "r") as f:
-        merged_config = yaml.safe_load(f)
-
-    # Merge additional configs
     for config_path in config_paths[1:]:
-        if not os.path.exists(config_path):
-            raise FileNotFoundError(f"Config file not found: {config_path}")
-
-        with open(config_path, "r") as f:
-            additional_config = yaml.safe_load(f)
-
-        # Merge (later config overrides earlier)
+        additional_config = load_yaml_config(config_path)
         merged_config = merge_configs(merged_config, additional_config)
 
     return merged_config

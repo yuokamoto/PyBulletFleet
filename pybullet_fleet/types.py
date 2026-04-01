@@ -22,13 +22,13 @@ class MotionMode(str, Enum):
     DIFFERENTIAL = "differential"
 
 
-class DifferentialPhase(str, Enum):
+class PosePhase(str, Enum):
     """
-    Phase for differential drive motion control.
+    Phase for TPI pose control (shared by all kinematic controllers).
 
     Attributes:
-        ROTATE: Robot is rotating to face the target direction
-        FORWARD: Robot is moving forward towards the target
+        ROTATE: Robot is rotating in place (slerp TPI)
+        FORWARD: Robot is moving forward in a straight line (distance TPI)
     """
 
     ROTATE = "rotate"
@@ -87,6 +87,20 @@ class SpatialHashCellSizeMode(Enum):
     CONSTANT = "constant"
     AUTO_ADAPTIVE = "auto_adaptive"
     AUTO_INITIAL = "auto_initial"
+
+
+class ControllerMode(str, Enum):
+    """Internal mode for KinematicController state machine.
+
+    Attributes:
+        IDLE: No active command — zero velocity, no pose target.
+        VELOCITY: Processing cmd_vel input (body-frame velocity).
+        POSE: Processing goal_pose / path via TPI trajectory.
+    """
+
+    IDLE = "idle"
+    VELOCITY = "velocity"
+    POSE = "pose"
 
 
 class CollisionMode(Enum):

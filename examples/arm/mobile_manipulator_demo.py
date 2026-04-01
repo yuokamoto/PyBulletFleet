@@ -14,7 +14,7 @@ Demonstrates:
 import os
 import sys
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 import logging
 import pybullet as p
@@ -55,7 +55,7 @@ sim_core = MultiRobotSimulationCore(params)
 # ---------------------------------------------------------------------------
 # Robot  (ik_joint_names tells IK to only solve arm joints, not wheels)
 # ---------------------------------------------------------------------------
-mobile_manipulator_urdf = os.path.join(os.path.dirname(__file__), "../robots/mobile_manipulator.urdf")
+mobile_manipulator_urdf = os.path.join(os.path.dirname(__file__), "../../robots/mobile_manipulator.urdf")
 
 ARM_JOINT_NAMES = (
     "mount_to_shoulder",

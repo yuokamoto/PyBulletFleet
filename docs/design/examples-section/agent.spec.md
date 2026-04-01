@@ -25,10 +25,10 @@
 
 ## Source Files to Read Before Writing
 
-- `examples/robot_demo.py` — Tutorial 1 source
-- `examples/action_system_demo.py` — Tutorial 2 source
-- `examples/100robots_cube_patrol_demo.py` — Tutorial 3 source
-- `examples/path_following_demo.py` — Reference for set_path with waypoints
+- `examples/basics/robot_demo.py` — Tutorial 1 source
+- `examples/basics/action_system_demo.py` — Tutorial 2 source
+- `examples/scale/100robots_cube_patrol_demo.py` — Tutorial 3 source
+- `examples/mobile/path_following_demo.py` — Reference for set_path with waypoints
 - `pybullet_fleet/agent.py` — Agent class for accurate method signatures
 - `pybullet_fleet/sim_object.py` — SimObject class for accurate method signatures
 - `pybullet_fleet/agent_manager.py` — AgentManager for accurate method signatures
@@ -145,7 +145,7 @@ sim_core.run_simulation()
 Explain: blocks until window closed or Ctrl+C. Keyboard shortcuts (SPACE, v, c, t) recap.
 
 **10. See Also**
-- `examples/path_following_demo.py` — `set_path()` with multiple waypoints
+- `examples/mobile/path_following_demo.py` — `set_path()` with multiple waypoints
 - Tutorial 2: Action System — for sequenced, high-level tasks
 - `docs/api/` — full Agent and SimObject API reference
 

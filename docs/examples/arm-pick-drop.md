@@ -1,8 +1,8 @@
 # Tutorial 4: Robot Arm — Joint Control & Pick/Drop
 
 **Source files:**
-- [`examples/pick_drop_arm_demo.py`](https://github.com/yuokamoto/PyBulletFleet/blob/main/examples/pick_drop_arm_demo.py) — low-level callback approach
-- [`examples/pick_drop_arm_action_demo.py`](https://github.com/yuokamoto/PyBulletFleet/blob/main/examples/pick_drop_arm_action_demo.py) — action-queue approach
+- [`examples/arm/pick_drop_arm_demo.py`](https://github.com/yuokamoto/PyBulletFleet/blob/main/examples/arm/pick_drop_arm_demo.py) — low-level callback approach
+- [`examples/arm/pick_drop_arm_action_demo.py`](https://github.com/yuokamoto/PyBulletFleet/blob/main/examples/arm/pick_drop_arm_action_demo.py) — action-queue approach
 
 This tutorial demonstrates **fixed-base robot arm** simulation: controlling joints,
 picking up objects at the end-effector, and dropping them at target locations.
@@ -232,7 +232,7 @@ prismatic accuracy (e.g., ±5 mm) without over-constraining revolute joints.
 ### Prismatic (linear) joints
 
 `JointAction` works transparently with prismatic joints — target values are in
-**metres** instead of radians. See [`examples/rail_arm_demo.py`](https://github.com/yuokamoto/PyBulletFleet/blob/main/examples/rail_arm_demo.py)
+**metres** instead of radians. See [`examples/arm/rail_arm_demo.py`](https://github.com/yuokamoto/PyBulletFleet/blob/main/examples/arm/rail_arm_demo.py)
 for a complete example using a rail arm with 1 prismatic + 4 revolute joints.
 
 ---
@@ -241,19 +241,19 @@ for a complete example using a rail arm with 1 prismatic + 4 revolute joints.
 
 ```bash
 # Low-level callback approach (1 arm)
-python examples/pick_drop_arm_demo.py
+python examples/arm/pick_drop_arm_demo.py
 
 # Action-queue approach (1 arm)
-python examples/pick_drop_arm_action_demo.py
+python examples/arm/pick_drop_arm_action_demo.py
 
 # 100 arms — AgentManager grid spawn + bulk action management
-python examples/pick_drop_arm_100robots_demo.py
+python examples/scale/pick_drop_arm_100robots_demo.py
 
 # Rail arm (prismatic + revolute) with EE control and per-joint tolerance
-python examples/rail_arm_demo.py
+python examples/arm/rail_arm_demo.py
 
 # Mobile manipulator (base + arm) — kinematic IK pick/drop
-python examples/mobile_manipulator_demo.py
+python examples/arm/mobile_manipulator_demo.py
 ```
 
 Both single-arm demos use kinematic mode by default (`physics=False`). To switch to physics mode,
@@ -269,7 +269,7 @@ The 100-arm demo combines `AgentManager` / `GridSpawnParams` (see
 - [Tutorial 1 — Spawning Objects](spawning-objects): `from_urdf`, `set_all_joints_targets` basics
 - [Tutorial 2 — Action System](action-system): `PickAction`, `DropAction` for mobile robots
 - [Tutorial 5 — EE Control & IK](arm-ee-control): control the arm by EE position instead of joint angles
-- [Mobile Manipulator Demo](https://github.com/yuokamoto/PyBulletFleet/blob/main/examples/mobile_manipulator_demo.py): kinematic mobile base + arm with IK pick/drop
-- [Rail Arm Demo](https://github.com/yuokamoto/PyBulletFleet/blob/main/examples/rail_arm_demo.py): prismatic + revolute joint control with per-joint tolerance
+- [Mobile Manipulator Demo](https://github.com/yuokamoto/PyBulletFleet/blob/main/examples/arm/mobile_manipulator_demo.py): kinematic mobile base + arm with IK pick/drop
+- [Rail Arm Demo](https://github.com/yuokamoto/PyBulletFleet/blob/main/examples/arm/rail_arm_demo.py): prismatic + revolute joint control with per-joint tolerance
 - [Architecture Overview](../architecture/overview): kinematic joint interpolation internals
 - [Benchmark Results](../benchmarking/results): arm joint control performance data

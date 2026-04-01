@@ -22,7 +22,7 @@ This is **not** a new entity class — the rail arm is a standard `Agent.from_ur
 - IK pipeline: verify `_solve_ik()` and `PoseAction` work with a prismatic joint in the chain (no code change expected — PyBullet IK handles prismatic natively)
 - Docstring/docs: update "radians" references to "radians for revolute, metres for prismatic"
 - Tests: `JointAction` and `PoseAction` integration tests with the rail arm (physics, kinematic, physics_off)
-- Demo: `examples/rail_arm_demo.py`
+- Demo: `examples/arm/rail_arm_demo.py`
 
 ## Constraints
 

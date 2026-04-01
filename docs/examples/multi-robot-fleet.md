@@ -1,6 +1,6 @@
 # Tutorial 3: Managing a 100-Robot Fleet
 
-**Source file:** [`examples/100robots_cube_patrol_demo.py`](https://github.com/yuokamoto/PyBulletFleet/blob/main/examples/100robots_cube_patrol_demo.py)
+**Source file:** [`examples/scale/100robots_cube_patrol_demo.py`](https://github.com/yuokamoto/PyBulletFleet/blob/main/examples/scale/100robots_cube_patrol_demo.py)
 
 This tutorial scales up from a single agent to a fleet of 100 robots.
 You will learn how to:
@@ -177,7 +177,7 @@ manager.spawn_agents_grid(
 ```
 
 > `spawn_agents_grid` is used in
-> `examples/pick_drop_mobile_100robots_demo.py`, which also demonstrates
+> `examples/scale/pick_drop_mobile_100robots_demo.py`, which also demonstrates
 > `SimObjectManager` for batch-spawning pickable objects alongside agents.
 
 ---
@@ -362,7 +362,7 @@ At 100 agents with `physics=False`, you should see ~40× RTF (≈ 2.4 ms per ste
 See [Benchmark Results](../benchmarking/results) for the full throughput table.
 
 ```bash
-python examples/100robots_cube_patrol_demo.py
+python examples/scale/100robots_cube_patrol_demo.py
 ```
 
 ---

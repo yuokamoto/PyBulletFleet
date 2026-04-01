@@ -454,5 +454,87 @@ class TestEdgeCases:
         assert abs(recovered[2] - pos[2]) < 0.01
 
 
+# =====================================================================
+# body_to_world_velocity_2d
+# =====================================================================
+class TestBodyToWorldVelocity2D:
+    """body_to_world_velocity_2d rotates (vx, vy) by yaw."""
+
+    def test_zero_yaw(self):
+        """At yaw=0, body and world frames are aligned."""
+        from pybullet_fleet.tools import body_to_world_velocity_2d
+
+        vx, vy = body_to_world_velocity_2d(1.0, 0.5, yaw=0.0)
+        assert vx == pytest.approx(1.0)
+        assert vy == pytest.approx(0.5)
+
+    def test_90_degrees(self):
+        """At yaw=pi/2, forward (+x body) maps to +y world."""
+        import math
+        from pybullet_fleet.tools import body_to_world_velocity_2d
+
+        vx, vy = body_to_world_velocity_2d(1.0, 0.0, yaw=math.pi / 2)
+        assert vx == pytest.approx(0.0, abs=1e-9)
+        assert vy == pytest.approx(1.0, abs=1e-9)
+
+    def test_lateral(self):
+        """Lateral +y body at yaw=pi/2 maps to -x world."""
+        import math
+        from pybullet_fleet.tools import body_to_world_velocity_2d
+
+        vx, vy = body_to_world_velocity_2d(0.0, 1.0, yaw=math.pi / 2)
+        assert vx == pytest.approx(-1.0, abs=1e-9)
+        assert vy == pytest.approx(0.0, abs=1e-9)
+
+
+# =====================================================================
+# body_to_world_velocity_3d
+# =====================================================================
+class TestBodyToWorldVelocity3D:
+    """body_to_world_velocity_3d rotates (vx, vy, vz) by quaternion."""
+
+    def test_identity_quaternion(self):
+        """Identity quaternion passes through unchanged."""
+        from pybullet_fleet.tools import body_to_world_velocity_3d
+
+        vx, vy, vz = body_to_world_velocity_3d(1.0, 2.0, 3.0, (0.0, 0.0, 0.0, 1.0))
+        assert vx == pytest.approx(1.0)
+        assert vy == pytest.approx(2.0)
+        assert vz == pytest.approx(3.0)
+
+    def test_yaw_90(self):
+        """90-degree yaw rotation matches 2D result."""
+        from scipy.spatial.transform import Rotation
+        from pybullet_fleet.tools import body_to_world_velocity_3d
+
+        q = Rotation.from_euler("z", 90, degrees=True).as_quat()  # xyzw
+        vx, vy, vz = body_to_world_velocity_3d(1.0, 0.0, 0.0, tuple(q))
+        assert vx == pytest.approx(0.0, abs=1e-9)
+        assert vy == pytest.approx(1.0, abs=1e-9)
+        assert vz == pytest.approx(0.0, abs=1e-9)
+
+    def test_pitch_90(self):
+        """90-degree pitch: forward (+x body) maps to -z world."""
+        from scipy.spatial.transform import Rotation
+        from pybullet_fleet.tools import body_to_world_velocity_3d
+
+        q = Rotation.from_euler("y", 90, degrees=True).as_quat()
+        vx, vy, vz = body_to_world_velocity_3d(1.0, 0.0, 0.0, tuple(q))
+        assert vx == pytest.approx(0.0, abs=1e-9)
+        assert vy == pytest.approx(0.0, abs=1e-9)
+        assert vz == pytest.approx(-1.0, abs=1e-9)
+
+    def test_roll_90(self):
+        """90-degree roll: +y body maps to +z world."""
+        from scipy.spatial.transform import Rotation
+        from pybullet_fleet.tools import body_to_world_velocity_3d
+
+        q = Rotation.from_euler("x", 90, degrees=True).as_quat()
+        vx, vy, vz = body_to_world_velocity_3d(0.0, 1.0, 0.0, tuple(q))
+        assert vx == pytest.approx(0.0, abs=1e-9)
+        assert vy == pytest.approx(0.0, abs=1e-9)
+        assert vz == pytest.approx(1.0, abs=1e-9)
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

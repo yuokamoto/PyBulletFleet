@@ -9,16 +9,50 @@ Demonstrates:
 - Bulk action management via AgentManager callback
 - JointAction, PickAction, DropAction coordination
 """
+import argparse
 import os
 import sys
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 import pybullet as p
 from pybullet_fleet.agent import AgentSpawnParams
 from pybullet_fleet.agent_manager import AgentManager, GridSpawnParams
 from pybullet_fleet.core_simulation import MultiRobotSimulationCore, SimulationParams
 from pybullet_fleet.sim_object import Pose, SimObject, ShapeParams
 from pybullet_fleet.action import JointAction, PickAction, DropAction, WaitAction
+from pybullet_fleet.robot_models import resolve_urdf
+
+parser = argparse.ArgumentParser(description="100 robot arms pick & drop demo")
+parser.add_argument("--robot", default="panda", help="Robot name (e.g. panda, kuka_iiwa, arm_robot) or URDF path")
+args = parser.parse_args()
+
+# ── Per-robot joint presets (pick / place / init targets + box positions) ──
+JOINT_PRESETS = {
+    "arm_robot": {
+        "pick": [1.5, 1.5, 1.5, 0.0],
+        "place": [-1.5, 1.5, 1.5, 0.0],
+        "init": [0.0, 0.0, 0.0, 0.0],
+        "box_pick": [0.3, 0.0, 0.1],
+        "box_place": [-0.3, 0.0, 0.1],
+    },
+    "panda": {
+        "pick": [0.0, 0.4, 0.0, -1.5, 0.0, 1.9, 0.8, 0.0, 0.0, 0.04, 0.04, 0.0],
+        "place": [3.14, 0.4, 0.0, -1.5, 0.0, 1.9, 0.8, 0.0, 0.0, 0.04, 0.04, 0.0],
+        "init": [0.0, -0.8, 0.0, -2.3, 0.0, 1.6, 0.8, 0.0, 0.0, 0.04, 0.04, 0.0],
+        "box_pick": [0.65, 0.0, 0.25],
+        "box_place": [-0.65, 0.0, 0.25],
+    },
+    "kuka_iiwa": {
+        "pick": [0.0, 0.5, 0.0, -1.4, 0.0, 1.2, 0.0],
+        "place": [3.14, 0.5, 0.0, -1.4, 0.0, 1.2, 0.0],
+        "init": [0.0, -0.5, 0.0, -1.5, 0.0, 0.7, 0.0],
+        "box_pick": [0.65, 0.0, 0.25],
+        "box_place": [-0.65, 0.0, 0.25],
+    },
+}
+if args.robot not in JOINT_PRESETS:
+    raise SystemExit(f"No preset for '{args.robot}'. Available: {', '.join(JOINT_PRESETS)}")
+_P = JOINT_PRESETS[args.robot]
 
 # Simulation setup with memory profiling enabled
 params = SimulationParams(
@@ -42,18 +76,18 @@ NUM_ROBOTS = 100
 GRID_SIZE = 10  # 10x10 = 100 robots
 SPACING = 1.0  # Distance between robots (meters)
 
-# Joint configurations (same as single robot demo)
-joint_init = [0.0, 0.0, 0.0, 0.0]  # Initial/neutral position
-pick_joints = [1.5, 1.5, 1.5, 0.0]  # Extend toward box (right side)
-place_joints = [-1.5, 1.5, 1.5, 0.0]  # Extend to opposite side (left)
+# Joint configurations from preset
+joint_init = _P["init"]
+pick_joints = _P["pick"]
+place_joints = _P["place"]
 
 # Offset for attachment (box positioned above end-effector)
 box_offset = 0.14
 offset_pose = Pose.from_xyz(0, 0, box_offset)
 
-# Pick/drop offset relative to robot position
-pick_offset = [0.3, 0, 0.1]  # Right side offset
-place_offset = [-0.3, 0, 0.1]  # Left side offset
+# Pick/drop offset relative to robot position (from preset box positions)
+pick_offset = list(_P["box_pick"])
+place_offset = list(_P["box_place"])
 
 # Storage for boxes (one per robot)
 box_objects = []
@@ -61,7 +95,7 @@ box_objects = []
 print("\n=== Spawning 100 Robot Arms using AgentManager ===")
 
 # Setup grid spawn parameters
-arm_urdf = os.path.join(os.path.dirname(__file__), "../robots/arm_robot.urdf")
+arm_urdf = resolve_urdf(args.robot)
 grid_params = GridSpawnParams(
     x_min=0,
     x_max=GRID_SIZE - 1,

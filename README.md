@@ -48,7 +48,7 @@ pip install -e ".[dev]"
 
 ```bash
 # If installed from source:
-python examples/100robots_grid_demo.py
+python examples/scale/100robots_grid_demo.py
 ```
 
 ## Performance
@@ -65,6 +65,29 @@ python examples/100robots_grid_demo.py
 
 Kinematics mode (physics OFF), headless. See [Benchmark Results](benchmark/README.md#benchmark-results) for full data, component breakdown, and methodology.
 
+## Robot Models
+
+PyBulletFleet includes a model resolution system that loads robots **by name** from multiple sources:
+
+```python
+from pybullet_fleet import Agent, resolve_urdf
+
+# Resolve by name — searches local robots/, pybullet_data, robot_descriptions
+urdf = resolve_urdf("panda")
+
+# Agent.from_urdf() calls resolve_urdf() internally
+agent = Agent.from_urdf(urdf_path="panda", pose=Pose.from_xyz(0, 0, 0), sim_core=sim)
+```
+
+| Tier | Source | Example models |
+|------|--------|---------------|
+| 0 — local | `robots/` directory | arm_robot, mobile_robot, mobile_manipulator |
+| 1 — pybullet_data | PyBullet bundled | panda, kuka_iiwa, r2d2 |
+| 2 — ROS | ROS install paths | (future) |
+| 3 — robot_descriptions | pip package | tiago, pr2 (`pip install robot_descriptions`) |
+
+Run `python examples/models/resolve_urdf_demo.py --list` to see all registered models and their availability.
+
 ## Documentation
 
 📖 **Full documentation:** [Read the Docs](https://pybulletfleet.readthedocs.io)
@@ -73,6 +96,22 @@ For local builds:
 ```bash
 cd docs && sphinx-build -b html . _build/html
 ```
+
+## ROS 2 Bridge
+
+A ROS 2 Jazzy bridge is available in [`ros2_bridge/`](ros2_bridge/) with a Docker environment in [`docker/`](docker/).
+
+> **Note:** The bridge is currently co-located in this repository for development convenience. It will be extracted into a separate repository/package in a future release.
+
+```bash
+cd docker
+docker compose build
+docker compose up bridge                       # headless, 3 robots
+GUI=true docker compose up bridge              # with PyBullet GUI
+docker compose run --rm test                   # integration smoke test
+```
+
+See [`docker/README.md`](docker/README.md) for full usage, parameters, and interactive testing commands.
 
 ## Development Setup
 

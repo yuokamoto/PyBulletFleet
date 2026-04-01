@@ -155,8 +155,8 @@ Files the plan agent MUST read before planning:
 - `pybullet_fleet/core_simulation.py:2220-2240` - `step_once()` physics branching
 - `tests/test_agent_core.py:1291-1500` - `TestAgentJointControl` class (parametrize target)
 - `tests/test_action_integration.py` - existing action integration tests
-- `examples/pick_drop_arm_demo.py` — callback-based arm demo (uses `set_all_joints_targets` directly)
-- `examples/pick_drop_arm_action_demo.py` — action-based arm demo (uses JointAction/PickAction/DropAction)
+- `examples/arm/pick_drop_arm_demo.py` — callback-based arm demo (uses `set_all_joints_targets` directly)
+- `examples/arm/pick_drop_arm_action_demo.py` — action-based arm demo (uses JointAction/PickAction/DropAction)
 - `robots/arm_robot.urdf` - URDF with velocity limits
 
 ## Success Criteria

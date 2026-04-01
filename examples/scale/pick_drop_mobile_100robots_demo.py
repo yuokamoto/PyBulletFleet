@@ -10,10 +10,11 @@ Demonstrates:
 - MoveAction, PickAction, DropAction coordination
 - Two-area shuttle system: All robots move from Area A to Area B, then back
 """
+import argparse
 import os
 import sys
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 import pybullet as p
 import numpy as np
@@ -24,6 +25,11 @@ from pybullet_fleet.core_simulation import MultiRobotSimulationCore, SimulationP
 from pybullet_fleet.sim_object import Pose, SimObject, ShapeParams, SimObjectSpawnParams
 from pybullet_fleet.action import MoveAction, PickAction, DropAction, WaitAction
 from pybullet_fleet.geometry import Path
+from pybullet_fleet.robot_models import resolve_urdf
+
+parser = argparse.ArgumentParser(description="100 mobile robots pick & drop shuttle demo")
+parser.add_argument("--robot", default="husky", help="Robot name (e.g. husky, mobile_robot, racecar) or URDF path")
+args = parser.parse_args()
 
 # Simulation setup
 params = SimulationParams(gui=True, timestep=0.1, ignore_static_collision=True, target_rtf=10, physics=False)
@@ -77,7 +83,7 @@ grid_params_A = GridSpawnParams(
 )
 
 # Setup agent spawn parameters
-mobile_urdf = os.path.join(os.path.dirname(__file__), "../robots/mobile_robot.urdf")
+mobile_urdf = resolve_urdf(args.robot)
 agent_spawn_params = AgentSpawnParams(
     urdf_path=mobile_urdf,
     motion_mode=MotionMode.DIFFERENTIAL,
@@ -100,7 +106,7 @@ print(f"  Area B center: {AREA_B_CENTER}\n")
 
 # Spawn pallets for each robot using SimObjectManager
 print("=== Spawning Pallets for Each Robot ===")
-mesh_dir = os.path.join(os.path.dirname(__file__), "../mesh")
+mesh_dir = os.path.join(os.path.dirname(__file__), "../../mesh")
 pallet_mesh_path = os.path.join(mesh_dir, "11pallet.obj")
 
 pallet_orientation_quat = p.getQuaternionFromEuler([np.pi / 2, 0, 0])  # Horizontal orientation

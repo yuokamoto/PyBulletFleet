@@ -16,11 +16,12 @@ Five robots demonstrate:
 All robots use realistic velocity and acceleration constraints.
 """
 
+import argparse
 import os
 import sys
 
 # Add parent directory to path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 import numpy as np
 import pybullet as p
@@ -28,8 +29,13 @@ import pybullet as p
 from pybullet_fleet.agent import Agent, AgentSpawnParams
 from pybullet_fleet.core_simulation import MultiRobotSimulationCore, SimulationParams
 from pybullet_fleet.geometry import Path, Pose
+from pybullet_fleet.robot_models import resolve_urdf
 from pybullet_fleet.sim_object import ShapeParams
 from pybullet_fleet.types import MotionMode
+
+_parser = argparse.ArgumentParser(description="Path Following Demo")
+_parser.add_argument("--robot", default="husky", help="Robot name (e.g. husky, racecar) or URDF path for differential robots")
+_args = _parser.parse_args()
 
 
 def main():
@@ -39,8 +45,9 @@ def main():
 
     # Get absolute paths
     current_dir = os.path.dirname(os.path.abspath(__file__))
-    mesh_path = os.path.join(current_dir, "..", "mesh", "cube.obj")
-    urdf_path = os.path.join(current_dir, "..", "robots", "mobile_robot.urdf")
+    mesh_path = os.path.join(current_dir, "..", "..", "mesh", "cube.obj")
+    urdf_path = resolve_urdf(_args.robot)
+    print(f"Using robot: {_args.robot} -> {urdf_path}")
 
     # Create robots with different motion modes
     print("Spawning robots...")

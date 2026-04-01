@@ -26,7 +26,7 @@ from scipy.spatial.transform import Rotation as R
 from pybullet_fleet.agent import Agent, AgentSpawnParams
 from pybullet_fleet.geometry import Pose, Path
 from pybullet_fleet.sim_object import SimObject, ShapeParams
-from pybullet_fleet.types import CollisionMode, DifferentialPhase, MotionMode
+from pybullet_fleet.types import CollisionMode, MotionMode, PosePhase
 from tests.conftest import MockSimCore
 
 
@@ -64,7 +64,7 @@ def assert_agent_properties(
     is_kinematic=True,  # mass=0 → kinematic
     collision_mode=CollisionMode.NORMAL_3D,
     # Agent-specific properties (defaults match Agent.__init__ defaults)
-    motion_mode=MotionMode.OMNIDIRECTIONAL,
+    motion_mode=MotionMode.DIFFERENTIAL,
     max_linear_vel=(2.0, 2.0, 2.0),
     max_linear_accel=(5.0, 5.0, 5.0),
     max_angular_vel=(3.0, 3.0, 3.0),
@@ -97,7 +97,7 @@ def assert_agent_properties(
         orientation: Expected (x, y, z, w) quaternion (default (0,0,0,1))
         is_kinematic: Expected is_kinematic flag (default True — mass=0)
         collision_mode: Expected CollisionMode (default NORMAL_3D)
-        motion_mode: Expected MotionMode (default OMNIDIRECTIONAL)
+        motion_mode: Expected MotionMode (default DIFFERENTIAL)
         max_linear_vel: Expected [vx, vy, vz] (default [2,2,2])
         max_linear_accel: Expected [ax, ay, az] (default [5,5,5])
         max_angular_vel: Expected [wx, wy, wz] (default [3,3,3])
@@ -173,7 +173,7 @@ def create_mesh_agent(
     max_linear_accel=5.0,
     max_angular_vel=3.0,
     max_angular_accel=10.0,
-    motion_mode=MotionMode.OMNIDIRECTIONAL,
+    motion_mode=MotionMode.DIFFERENTIAL,
     use_fixed_base=False,
     collision_mode=CollisionMode.NORMAL_3D,
     name=None,
@@ -435,6 +435,7 @@ class TestAgentCreationFromURDF:
             is_urdf=True,
             max_linear_vel=[1.5, 1.5, 1.5],
             max_linear_accel=[3.0, 3.0, 3.0],
+            motion_mode=MotionMode.OMNIDIRECTIONAL,
         )
 
     def test_from_urdf_kinematic(self, pybullet_env):
@@ -453,6 +454,18 @@ class TestAgentCreationFromURDF:
             position=(0, 0, 0.5),
         )
 
+    def test_from_urdf_resolves_model_name(self, pybullet_env):
+        """from_urdf should accept a model name (e.g. 'arm_robot') and resolve it."""
+        agent = Agent.from_urdf(urdf_path="arm_robot", pose=Pose.from_xyz(0, 0, 0))
+        assert agent.body_id >= 0
+        assert agent.get_num_joints() > 0
+
+    def test_from_urdf_resolves_pybullet_data_name(self, pybullet_env):
+        """from_urdf should resolve tier-1 pybullet_data names like 'panda'."""
+        agent = Agent.from_urdf(urdf_path="panda", pose=Pose.from_xyz(0, 0, 0), use_fixed_base=True)
+        assert agent.body_id >= 0
+        assert agent.get_num_joints() >= 7  # Panda has 7 DOF + fingers
+
 
 class TestAgentSpawnParams:
     """Test AgentSpawnParams dataclass"""
@@ -470,7 +483,7 @@ class TestAgentSpawnParams:
         assert params.max_linear_accel == 5.0
         assert params.max_angular_vel == 3.0
         assert params.max_angular_accel == 10.0
-        assert params.motion_mode == MotionMode.OMNIDIRECTIONAL
+        assert params.motion_mode == MotionMode.DIFFERENTIAL
         assert params.use_fixed_base is False
         assert params.urdf_path is None
         assert params.collision_mode == CollisionMode.NORMAL_3D
@@ -538,7 +551,65 @@ class TestAgentSpawnParams:
             position=(1, 1, 0.5),
             is_urdf=True,
             max_linear_vel=[1.5, 1.5, 1.5],
+            motion_mode=MotionMode.OMNIDIRECTIONAL,
         )
+
+
+class TestAgentSpawnParamsFromDict:
+    """AgentSpawnParams.from_dict() creates params from YAML-style dicts."""
+
+    def test_minimal_urdf(self):
+        """Minimal dict with name + urdf_path produces correct params."""
+        result = AgentSpawnParams.from_dict({"name": "r0", "urdf_path": "robots/mobile_robot.urdf"})
+        assert result.name == "r0"
+        assert result.urdf_path == "robots/mobile_robot.urdf"
+        assert result.max_linear_vel == 2.0
+
+    def test_pose_and_yaw(self):
+        """pose list + yaw are converted to Pose."""
+        result = AgentSpawnParams.from_dict(
+            {"name": "r0", "urdf_path": "robots/mobile_robot.urdf", "pose": [1.0, 2.0, 0.05], "yaw": 1.57}
+        )
+        assert result.initial_pose.x == pytest.approx(1.0)
+        assert result.initial_pose.y == pytest.approx(2.0)
+        assert result.initial_pose.z == pytest.approx(0.05)
+        assert result.initial_pose.yaw == pytest.approx(1.57, abs=0.01)
+
+    def test_controller_config_string_shortcut(self):
+        """controller_config string is converted to dict."""
+        result = AgentSpawnParams.from_dict(
+            {"name": "r0", "urdf_path": "robots/mobile_robot.urdf", "controller_config": "differential"}
+        )
+        assert result.controller_config == {"type": "differential"}
+
+    def test_controller_config_dict(self):
+        """controller_config dict is passed through."""
+        result = AgentSpawnParams.from_dict(
+            {"name": "r0", "urdf_path": "robots/mobile_robot.urdf", "controller_config": {"type": "omni_velocity"}}
+        )
+        assert result.controller_config == {"type": "omni_velocity"}
+
+    def test_missing_name_raises(self):
+        """Missing name raises ValueError (inherited from SimObjectSpawnParams)."""
+        with pytest.raises(ValueError, match="missing required 'name'"):
+            AgentSpawnParams.from_dict({"urdf_path": "robots/mobile_robot.urdf"})
+
+
+class TestAgentFromDict:
+    """Agent.from_dict creates instance directly from config dict."""
+
+    def test_subclass_returns_subclass(self, pybullet_env):
+        """Subclass.from_dict returns an instance of the subclass."""
+
+        class ForkliftAgent(Agent):
+            pass
+
+        config = {
+            "name": "fl0",
+            "urdf_path": "robots/mobile_robot.urdf",
+        }
+        agent = ForkliftAgent.from_dict(config)
+        assert isinstance(agent, ForkliftAgent)
 
 
 class TestAgentGoalSetting:
@@ -770,7 +841,7 @@ class TestAgentMotionUpdate:
             cur_dist = np.linalg.norm(cur_pos - goal_pos)
 
             # Detect transition into final-rotation phase
-            if final_quat is not None and agent._is_final_orientation_aligning and not in_final_rotation:
+            if final_quat is not None and agent._controller._is_final_orientation_aligning and not in_final_rotation:
                 in_final_rotation = True
                 final_rot_pos = cur_pos.copy()
                 prev_angle_error = self._quat_angle_error(pose.orientation, final_quat)
@@ -829,6 +900,125 @@ class TestAgentMotionUpdate:
         pos = np.array(agent.get_pose().position)
         assert np.allclose(pos, goal_pos, atol=0.05), f"Final position {pos} not close to goal"
         assert np.allclose(agent.velocity, [0, 0, 0], atol=1e-4), f"Velocity should be ~0 after goal, got {agent.velocity}"
+
+    def test_omni_second_goal_no_teleport(self, pybullet_env):
+        """After completing a first goal, a second goal must produce gradual motion.
+
+        Regression test: _is_final_orientation_aligning was not reset after the
+        first goal completed with final-orientation alignment.  On the second
+        goal, update() dispatched to _update_differential (rotation) instead of
+        _update_omnidirectional (TPI), causing an immediate teleport to the goal.
+
+        Verifies:
+        - First goal is reached normally
+        - After setting a second goal, distance does NOT jump to zero in one step
+        - The agent eventually reaches the second goal with monotonic progress
+        """
+        agent, sim_core = self._create_agent_with_simcore(Pose.from_xyz(0, 0, 0))
+        dt = sim_core._dt
+
+        # ----- Goal 1: (0,0,0) → (1,0,0) with default final_orientation_align=True -----
+        goal1 = np.array([1.0, 0.0, 0.0])
+        agent.set_goal_pose(Pose.from_xyz(*goal1))
+        for _ in range(5000):
+            sim_core.tick()
+            agent.update(dt)
+            if not agent.is_moving:
+                break
+        assert not agent.is_moving, "Goal 1 should be reached"
+        # After goal 1, _is_final_orientation_aligning must be cleared
+        assert (
+            not agent._controller._is_final_orientation_aligning
+        ), "_is_final_orientation_aligning should be reset after goal completion"
+
+        # ----- Goal 2: (1,0,0) → (0,1,0) -----
+        pos_before = np.array(agent.get_pose().position)
+        goal2 = np.array([0.0, 1.0, 0.0])
+        agent.set_goal_pose(Pose.from_xyz(*goal2))
+
+        # After a few steps, robot should have moved GRADUALLY, not teleported
+        for _ in range(10):
+            sim_core.tick()
+            agent.update(dt)
+        pos_after_10 = np.array(agent.get_pose().position)
+        dist_moved = np.linalg.norm(pos_after_10 - pos_before)
+        dist_to_goal = np.linalg.norm(pos_after_10[:2] - goal2[:2])
+
+        # In 10 steps at dt=1/240, max distance ≈ 0.5*5.0*(10/240)^2 ≈ 0.004m (accel phase)
+        # It should NOT have teleported the full ~1.4m
+        assert dist_to_goal > 0.5, (
+            f"Robot teleported to goal! pos={list(pos_after_10)}, dist_to_goal={dist_to_goal:.4f}. "
+            f"Expected gradual motion, not instant arrival."
+        )
+
+        # Run until goal 2 reached
+        for _ in range(5000):
+            sim_core.tick()
+            agent.update(dt)
+            if not agent.is_moving:
+                break
+        assert not agent.is_moving, "Goal 2 should be reached"
+        pos_final = np.array(agent.get_pose().position)
+        assert np.allclose(pos_final[:2], goal2[:2], atol=0.05), f"Final position {pos_final} not close to goal2 {goal2}"
+
+    def test_omni_straight_line_motion(self, pybullet_env):
+        """Omnidirectional agent must move in a straight line toward the goal.
+
+        When moving to a diagonal goal (e.g. (3, 4, 0)), the robot should
+        follow a straight-line path, NOT move along each axis independently.
+        Independent per-axis TPI causes the shorter axis to arrive first,
+        producing an L-shaped or curved trajectory instead of a straight line.
+
+        Verifies:
+        - Every intermediate position lies on (or very near) the line from
+          start to goal (cross-track error < threshold)
+        - The agent actually reaches the goal
+        """
+        agent, sim_core = self._create_agent_with_simcore(Pose.from_xyz(0, 0, 0))
+        dt = sim_core._dt
+
+        start = np.array([0.0, 0.0, 0.0])
+        goal = np.array([3.0, 4.0, 0.0])
+        direction = goal - start
+        total_dist = np.linalg.norm(direction)
+        unit_dir = direction / total_dist
+
+        agent.set_path([Pose.from_xyz(*goal)], auto_approach=False, final_orientation_align=False)
+
+        max_cross_track = 0.0
+        reached = False
+        warmup_steps = 10  # allow a few steps for TPI to kick in
+
+        for step in range(5000):
+            sim_core.tick()
+            agent.update(dt)
+
+            if not agent.is_moving:
+                reached = True
+                break
+
+            if step < warmup_steps:
+                continue
+
+            pos = np.array(agent.get_pose().position)
+            # Cross-track error: perpendicular distance from pos to line (start → goal)
+            to_pos = pos - start
+            projection = np.dot(to_pos, unit_dir) * unit_dir
+            cross_track = np.linalg.norm(to_pos - projection)
+
+            if cross_track > max_cross_track:
+                max_cross_track = cross_track
+
+            # Allow 5cm tolerance for numerical drift
+            assert cross_track < 0.05, (
+                f"Step {step}: cross-track error {cross_track:.4f}m exceeds 0.05m. "
+                f"pos={list(pos)}, expected on line from {list(start)} to {list(goal)}. "
+                f"Robot is NOT moving in a straight line."
+            )
+
+        assert reached, "Agent should reach the diagonal goal"
+        pos = np.array(agent.get_pose().position)
+        assert np.allclose(pos[:2], goal[:2], atol=0.05), f"Final pos {pos} not close to goal {goal}"
 
     def test_omni_update_toward_goal_3d(self, pybullet_env):
         """Omnidirectional agent with non-identity initial orientation reaches 3D goal.
@@ -942,7 +1132,7 @@ class TestAgentMotionUpdate:
         initial_quat = list(agent.get_pose().orientation)
         agent.set_goal_pose(goal)
 
-        assert agent._align_final_orientation is True
+        assert agent._controller._align_final_orientation is True
 
         result = self._run_omni_motion_loop(agent, sim_core, goal_pos, initial_quat, final_quat=goal_quat)
 
@@ -955,7 +1145,7 @@ class TestAgentMotionUpdate:
 
     # -- Differential ----------------------------------------------------
 
-    def _run_differential_phase_loop(
+    def _run_pose_phase_loop(
         self,
         agent,
         sim_core,
@@ -1008,28 +1198,29 @@ class TestAgentMotionUpdate:
                 reached = True
                 break
 
-            phase = agent._differential_phase
+            phase = agent._controller._pose_phase
             pose = agent.get_pose()
             cur_pos = np.array(pose.position)
 
             # Detect phase transition → reset per-cycle state
             if phase != prev_phase:
-                if phase == DifferentialPhase.ROTATE:
+                if phase == PosePhase.ROTATE:
                     rotate_cycles += 1
-                    target_quat = agent._rotation_target_quat.copy()
+                    ctrl_tgt = agent._controller._rotation_target_quat
+                    target_quat = ctrl_tgt.copy()
                     prev_angle_error = self._quat_angle_error(pose.orientation, target_quat)
                     rotate_start_pos = cur_pos.copy()
                     rotate_steps_in_cycle = 0
                     if np.allclose(cur_pos, goal_pos, atol=0.1):
                         final_rotate_at_goal = True
-                elif phase == DifferentialPhase.FORWARD:
+                elif phase == PosePhase.FORWARD:
                     forward_orientation = list(pose.orientation)
                     prev_forward_dist = np.linalg.norm(cur_pos - goal_pos)
                     forward_steps_in_cycle = 0
                 prev_phase = phase
                 continue  # skip checks on the transition step
 
-            if phase == DifferentialPhase.ROTATE:
+            if phase == PosePhase.ROTATE:
                 rotate_steps_in_cycle += 1
 
                 # Position must stay fixed during rotation
@@ -1051,7 +1242,7 @@ class TestAgentMotionUpdate:
                         f"Step {step} ROTATE: angular_velocity should be non-zero, " f"got {agent.angular_velocity}"
                     )
 
-            elif phase == DifferentialPhase.FORWARD:
+            elif phase == PosePhase.FORWARD:
                 forward_steps_in_cycle += 1
                 cur_dist = np.linalg.norm(cur_pos - goal_pos)
 
@@ -1082,7 +1273,7 @@ class TestAgentMotionUpdate:
     def test_diff_update_toward_goal_forward(self, pybullet_env):
         """Differential agent reaching a goal straight ahead (no rotation needed).
 
-        Uses _differential_phase to verify phase-specific invariants:
+        Uses _pose_phase to verify phase-specific invariants:
         - ROTATE phase should be skipped or very short (goal on X-axis)
         - FORWARD phase: distance decreases monotonically, orientation stays fixed,
           velocity is non-zero while far from goal
@@ -1096,7 +1287,7 @@ class TestAgentMotionUpdate:
         goal_pos = np.array([2, 0, 0])
         agent.set_goal_pose(Pose.from_xyz(*goal_pos))
 
-        result = self._run_differential_phase_loop(agent, sim_core, goal_pos)
+        result = self._run_pose_phase_loop(agent, sim_core, goal_pos)
 
         # Straight-ahead goal: ROTATE phase should be very short or skipped
         assert result["rotate_cycles"] <= 1, (
@@ -1110,7 +1301,7 @@ class TestAgentMotionUpdate:
     def test_diff_update_toward_goal_lateral(self, pybullet_env):
         """Differential agent reaching a goal at 90° (rotation then forward).
 
-        Uses _differential_phase to verify strict per-phase invariants.
+        Uses _pose_phase to verify strict per-phase invariants.
         The agent may go through multiple ROTATE→FORWARD cycles (e.g. initial
         rotation, forward motion, then final orientation alignment).
 
@@ -1134,7 +1325,7 @@ class TestAgentMotionUpdate:
         goal_pos = np.array([0, 2, 0])
         agent.set_goal_pose(Pose.from_xyz(*goal_pos))
 
-        result = self._run_differential_phase_loop(agent, sim_core, goal_pos)
+        result = self._run_pose_phase_loop(agent, sim_core, goal_pos)
 
         assert result["rotate_cycles"] >= 1, "ROTATE phase should be observed for 90° lateral goal"
         assert result["reached"], "Differential agent should reach the lateral goal"
@@ -1166,9 +1357,9 @@ class TestAgentMotionUpdate:
         agent.set_goal_pose(goal)
 
         # final_orientation_align should be enabled (set_goal_pose → set_path default)
-        assert agent._align_final_orientation is True
+        assert agent._controller._align_final_orientation is True
 
-        result = self._run_differential_phase_loop(agent, sim_core, goal_pos)
+        result = self._run_pose_phase_loop(agent, sim_core, goal_pos)
 
         assert result["final_rotate_at_goal"], "Final orientation alignment ROTATE phase should occur at goal position"
         assert result["reached"], "Differential agent should complete motion including final alignment"
@@ -2248,6 +2439,25 @@ class TestAgentVelocityCapping:
 
         # Per-axis cap: each axis capped at 10, so norm ≤ 10 for single-axis motion
         assert max_observed <= max_vel + 0.1, f"Velocity norm {max_observed:.4f} exceeded max_linear_vel={max_vel}"
+
+
+class TestMovableJointIndicesCache:
+    """Agent caches movable joint indices to avoid per-solve recomputation."""
+
+    def test_cached_movable_indices_matches_computed(self, pybullet_env):
+        """_cached_movable_indices matches the list comprehension in _solve_ik."""
+        agent = Agent.from_urdf(
+            urdf_path="robots/arm_robot.urdf",
+            use_fixed_base=True,
+        )
+        expected = [i for i, info in enumerate(agent.joint_info) if info[2] != p.JOINT_FIXED]
+        assert hasattr(agent, "_cached_movable_indices"), "Agent should have _cached_movable_indices attribute"
+        assert agent._cached_movable_indices == expected
+
+    def test_mesh_agent_has_empty_cached_movable_indices(self, pybullet_env):
+        """Non-URDF (mesh) agents should have empty cached movable indices."""
+        agent = create_mesh_agent()
+        assert agent._cached_movable_indices == []
 
 
 if __name__ == "__main__":

@@ -40,7 +40,7 @@ the source editable.
 Launch the 100-robot grid demo:
 
 ```bash
-python examples/100robots_grid_demo.py
+python examples/scale/100robots_grid_demo.py
 ```
 
 You should see a PyBullet GUI window open with 100 robots spawned in a grid
@@ -64,6 +64,7 @@ Key settings you will want to tweak:
 | `collision_safety_margin` | float | `0.02` | Safety buffer in metres for near-miss detection |
 | `monitor` | bool | `true` | Enable the real-time data monitor |
 | `enable_time_profiling` | bool | `true` | Print step-timing reports |
+| `enable_floor` | bool | `true` | Load the default ground plane (`plane.urdf`). Set `false` for custom floor handling |
 
 Example — run headless at 10× real-time with physics enabled:
 
@@ -95,30 +96,55 @@ For scenes with hundreds of objects this can be slow — prefer setting
 
 ## Examples
 
-All example scripts live in the `examples/` directory.
+All example scripts live in the `examples/` directory, organised by category:
+
+### Basics (`examples/basics/`)
+
+| Script | Description |
+|--------|-------------|
+| `robot_demo.py` | Basic robot creation with `Agent.from_mesh()` / `Agent.from_urdf()` |
+| `action_system_demo.py` | High-level action system (MoveTo, Pick, Drop, Wait) |
+| `collision_features_demo.py` | Spatial-hash collision detection features and visualisation |
+| `memory_profiling_demo.py` | Memory usage tracking and profiling utilities |
+
+### Arm (`examples/arm/`)
+
+| Script | Description |
+|--------|-------------|
+| `pick_drop_arm_demo.py` | Single arm robot performing pick-and-drop operations |
+| `pick_drop_arm_action_demo.py` | Arm robot using the action system for pick-and-drop |
+| `pick_drop_arm_ee_demo.py` | Arm end-effector control via IK (low-level callback) |
+| `pick_drop_arm_ee_action_demo.py` | Arm EE control using PoseAction (action queue) |
+| `rail_arm_demo.py` | Rail arm (prismatic + revolute) pick-and-drop with EE control |
+| `mobile_manipulator_demo.py` | Kinematic mobile manipulator — IK-based pick/drop with arm + base movement |
+
+### Mobile (`examples/mobile/`)
+
+| Script | Description |
+|--------|-------------|
+| `path_following_demo.py` | Compares omnidirectional and differential-drive motion modes |
+
+### Scale (`examples/scale/`)
 
 | Script | Description |
 |--------|-------------|
 | `100robots_grid_demo.py` | Grid-based multi-agent demo — best starting point |
 | `100robots_cube_patrol_demo.py` | 100 agents patrolling between cubes |
-| `path_following_demo.py` | Compares omnidirectional and differential-drive motion modes |
-| `action_system_demo.py` | High-level action system (MoveTo, Pick, Drop, Wait) |
-| `pick_drop_arm_demo.py` | Single arm robot performing pick-and-drop operations |
-| `pick_drop_arm_action_demo.py` | Arm robot using the action system for pick-and-drop |
-| `pick_drop_arm_ee_demo.py` | Arm end-effector control via IK (low-level callback) |
-| `pick_drop_arm_ee_action_demo.py` | Arm EE control using PoseAction (action queue) |
 | `pick_drop_arm_100robots_demo.py` | 100 arm robots with synchronised pick-and-drop |
-| `rail_arm_demo.py` | Rail arm (prismatic + revolute) pick-and-drop with EE control |
 | `pick_drop_mobile_100robots_demo.py` | 100 mobile robots picking and dropping objects |
-| `mobile_manipulator_demo.py` | Kinematic mobile manipulator — IK-based pick/drop with arm + base movement |
-| `collision_features_demo.py` | Spatial-hash collision detection features and visualisation |
-| `memory_profiling_demo.py` | Memory usage tracking and profiling utilities |
-| `robot_demo.py` | Basic robot creation with `Agent.from_mesh()` / `Agent.from_urdf()` |
+
+### Models (`examples/models/`)
+
+| Script | Description |
+|--------|-------------|
+| `resolve_urdf_demo.py` | URDF resolution patterns — by name, by path, and listing all models |
+| `model_catalog_demo.py` | Visual grid catalog of all registered models from `KNOWN_MODELS` |
+| `robot_descriptions_demo.py` | Using Tier 3 models from the `robot_descriptions` pip package |
 
 Run any example with:
 
 ```bash
-python examples/<script_name>.py
+python examples/<category>/<script_name>.py
 ```
 
 ## Next Steps

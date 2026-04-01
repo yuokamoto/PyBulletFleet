@@ -52,7 +52,7 @@ python tests/test_robot_movement.py
 **特徴**:
 - `MultiRobotSimulationCore`を使わずに直接`p.connect(p.GUI)`
 - 1台のロボットが正方形パスを辿る
-- `examples/path_following_demo.py`で代替可能
+- `examples/mobile/path_following_demo.py`で代替可能
 - デバッグや比較用に保存
 
 **実行方法**:
@@ -79,7 +79,7 @@ python tests/test_path_simple.py
 **特徴**:
 - `MultiRobotSimulationCore`と`sim.run_simulation()`の使用例
 - コールバックを使った更新ロジック
-- `examples/path_following_demo.py`のベースとなった実験ファイル
+- `examples/mobile/path_following_demo.py`のベースとなった実験ファイル
 - デバッグ出力が豊富
 
 **実行方法**:
@@ -116,12 +116,12 @@ python tests/test_path_with_simcore.py
 
 1. **開発時の動作確認**: `test_agent_movement.py`を実行
 2. **視覚的なデバッグ**: `test_robot_movement.py`または`test_path_following.py`
-3. **本格的なデモ**: `examples/path_following_demo.py`を使用
+3. **本格的なデモ**: `examples/mobile/path_following_demo.py`を使用
 
 ---
 
 ## 参考
 
 - メインのデモは`examples/`ディレクトリにあります
-- `examples/path_following_demo.py`: Omnidirectional vs Differential driveの比較デモ
-- `examples/100robots_grid_demo.py`: 100台のロボットのグリッドデモ
+- `examples/mobile/path_following_demo.py`: Omnidirectional vs Differential driveの比較デモ
+- `examples/scale/100robots_grid_demo.py`: 100台のロボットのグリッドデモ
