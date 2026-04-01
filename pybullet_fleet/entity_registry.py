@@ -38,7 +38,12 @@ def register_entity_class(name: str, cls: Type[SimObject]) -> None:
     Args:
         name: Registry key (used as ``type`` value in YAML config).
         cls: A :class:`SimObject` subclass with ``from_params(spawn_params, sim_core)``.
+
+    Raises:
+        TypeError: If *cls* is not a :class:`SimObject` subclass.
     """
+    if not (isinstance(cls, type) and issubclass(cls, SimObject)):
+        raise TypeError(f"Entity class must be a SimObject subclass, got {cls!r}")
     ENTITY_REGISTRY[name] = cls
 
 

@@ -535,6 +535,23 @@ class TestBodyToWorldVelocity3D:
         assert vy == pytest.approx(0.0, abs=1e-9)
         assert vz == pytest.approx(1.0, abs=1e-9)
 
+    def test_no_scipy_import(self):
+        """Implementation must not import scipy (performance)."""
+        import inspect
+        from pybullet_fleet.tools import body_to_world_velocity_3d
+
+        source = inspect.getsource(body_to_world_velocity_3d)
+        # Ignore docstring lines — only check executable code
+        in_docstring = False
+        for line in source.splitlines():
+            stripped = line.strip()
+            if '"""' in stripped or "'''" in stripped:
+                in_docstring = not in_docstring
+                continue
+            if in_docstring:
+                continue
+            assert "scipy" not in stripped, f"scipy found in executable code: {stripped}"
+
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

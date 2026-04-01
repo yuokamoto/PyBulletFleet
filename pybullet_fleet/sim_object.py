@@ -205,8 +205,12 @@ class SimObjectSpawnParams:
         vs = config.get("visual_shape")
         cs = config.get("collision_shape")
         if vs is not None and not isinstance(vs, ShapeParams):
+            if not isinstance(vs, dict):
+                raise TypeError(f"'visual_shape' must be a dict or ShapeParams, got {type(vs).__name__}: {vs!r}")
             vs = ShapeParams.from_dict(vs)
         if cs is not None and not isinstance(cs, ShapeParams):
+            if not isinstance(cs, dict):
+                raise TypeError(f"'collision_shape' must be a dict or ShapeParams, got {type(cs).__name__}: {cs!r}")
             cs = ShapeParams.from_dict(cs)
 
         return cls(

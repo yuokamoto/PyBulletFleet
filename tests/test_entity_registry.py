@@ -1,5 +1,7 @@
 """Tests for entity_registry module — register_entity_class / ENTITY_REGISTRY."""
 
+import pytest
+
 
 class TestEntityRegistry:
     """Entity class registry: register_entity_class / ENTITY_REGISTRY."""
@@ -36,3 +38,13 @@ class TestEntityRegistry:
         from pybullet_fleet.entity_registry import ENTITY_REGISTRY
 
         assert "nonexistent_type" not in ENTITY_REGISTRY
+
+    def test_non_simobject_subclass_raises(self):
+        """Registering a class not derived from SimObject raises TypeError."""
+        from pybullet_fleet.entity_registry import register_entity_class
+
+        class NotASimObject:
+            pass
+
+        with pytest.raises(TypeError, match="SimObject"):
+            register_entity_class("bad", NotASimObject)

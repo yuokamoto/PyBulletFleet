@@ -369,6 +369,16 @@ class TestSimObjectSpawnParamsFromDict:
         with pytest.raises((ValueError, TypeError)):
             SimObjectSpawnParams.from_dict({"name": "bad", "pose": 42})
 
+    def test_visual_shape_bad_type_raises(self):
+        """visual_shape as a string raises TypeError."""
+        with pytest.raises(TypeError, match="visual_shape"):
+            SimObjectSpawnParams.from_dict({"name": "bad", "visual_shape": "box"})
+
+    def test_collision_shape_bad_type_raises(self):
+        """collision_shape as a string raises TypeError."""
+        with pytest.raises(TypeError, match="collision_shape"):
+            SimObjectSpawnParams.from_dict({"name": "bad", "collision_shape": 123})
+
 
 class TestSimObjectFromDict:
     """SimObject.from_dict creates instance directly from config dict."""
