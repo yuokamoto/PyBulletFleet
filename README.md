@@ -97,22 +97,6 @@ For local builds:
 cd docs && sphinx-build -b html . _build/html
 ```
 
-## ROS 2 Bridge
-
-A ROS 2 Jazzy bridge is available in [`ros2_bridge/`](ros2_bridge/) with a Docker environment in [`docker/`](docker/).
-
-> **Note:** The bridge is currently co-located in this repository for development convenience. It will be extracted into a separate repository/package in a future release.
-
-```bash
-cd docker
-docker compose build
-docker compose up bridge                       # headless, 3 robots
-GUI=true docker compose up bridge              # with PyBullet GUI
-docker compose run --rm test                   # integration smoke test
-```
-
-See [`docker/README.md`](docker/README.md) for full usage, parameters, and interactive testing commands.
-
 ## Development Setup
 
 A root `Makefile` provides all common dev commands. Run `make help` to list targets.
