@@ -54,6 +54,22 @@ from pybullet_fleet.config_utils import load_yaml_config
 # Entity registry
 from pybullet_fleet.entity_registry import register_entity_class
 
+# Robot model resolution
+from pybullet_fleet.robot_models import (
+    ModelEntry,
+    RobotProfile,
+    add_search_path,
+    auto_detect_profile,
+    detect_robot_type,
+    discover_models,
+    get_search_paths,
+    list_all_models,
+    register_model,
+    remove_search_path,
+    resolve_urdf,
+    unregister_model,
+)
+
 __all__ = [
     # Type definitions
     "ActionStatus",
@@ -92,4 +108,17 @@ __all__ = [
     "load_yaml_config",
     # Entity registry
     "register_entity_class",
+    # Robot models
+    "resolve_urdf",
+    "list_all_models",
+    "ModelEntry",
+    "RobotProfile",
+    "auto_detect_profile",
+    "detect_robot_type",
+    "register_model",
+    "unregister_model",
+    "discover_models",
+    "add_search_path",
+    "remove_search_path",
+    "get_search_paths",
 ]

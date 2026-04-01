@@ -1,6 +1,6 @@
 # Tutorial 1: Spawning Objects and Controlling Agents
 
-**Source file:** [`examples/robot_demo.py`](https://github.com/yuokamoto/PyBulletFleet/blob/main/examples/robot_demo.py)
+**Source file:** [`examples/basics/robot_demo.py`](https://github.com/yuokamoto/PyBulletFleet/blob/main/examples/basics/robot_demo.py)
 
 This tutorial walks through the fundamental building blocks of every PyBulletFleet simulation:
 
@@ -35,11 +35,14 @@ sim_core = MultiRobotSimulationCore(params)
 |-----------|-----------------|----------------|
 | `gui` | Open the PyBullet GUI window | `True` for dev, `False` for headless/benchmark |
 | `timestep` | Seconds of simulation time per step | `0.1` (fast, kinematic); `0.01` (fine-grained, physics) |
+| `target_rtf` | Target Real-Time Factor — how many times faster than real time | `0` (max speed, benchmarks); `1.0` (real time); `3.0` (easy to watch in GUI) |
 | `physics` | Enable full PyBullet rigid-body dynamics | `True` for joints/contacts; `False` for pure kinematics |
+| `enable_floor` | Load the default ground plane (`plane.urdf`) | `True` (default); `False` to skip and handle floor manually |
 
-> **Why `physics=True` here?** This demo includes an articulated arm robot that needs joint
-> dynamics. For simulations with only mobile robots the default `physics=False` gives
-> 5–10× better throughput — see the [Optimization Guide](../benchmarking/optimization-guide).
+> **`target_rtf` — the speed dial.**  PyBulletFleet is designed for N× real-time simulation.
+> `target_rtf=0` removes the speed cap and runs as fast as the CPU allows — ideal for
+> benchmarks and headless batch runs.  Set it to `1.0` for real-time pacing (useful with
+> ROS 2 bridges) or `3.0`–`10.0` for a GUI session that's fast but still watchable.
 
 ---
 
@@ -208,13 +211,27 @@ do **not** need to know which mode is active — the API is the same.
 ## 5. Spawn an Agent from a URDF
 
 Use `Agent.from_urdf` for articulated robots (arms, mobile manipulators) whose joint
-structure is defined in a URDF file:
+structure is defined in a URDF file.
+
+`from_urdf` accepts a **model name** (e.g., `"panda"`) or a **direct path**.
+Model names are resolved via `resolve_urdf()` — first from the curated `KNOWN_MODELS`
+registry, then by auto-scanning `pybullet_data` and `robot_descriptions` as a fallback.
+See [Tutorial 6 — Robot Models](robot-models) for details.
 
 ```python
+# By model name (resolved automatically)
 arm_agent = Agent.from_urdf(
-    urdf_path=os.path.join(os.path.dirname(__file__), "../robots/arm_robot.urdf"),
+    urdf_path="arm_robot",
     pose=Pose.from_xyz(3, 0, 0),
-    use_fixed_base=True,   # mount the base to the world
+    use_fixed_base=True,
+    sim_core=sim_core,
+)
+
+# By direct file path (also works)
+arm_agent = Agent.from_urdf(
+    urdf_path="robots/arm_robot.urdf",
+    pose=Pose.from_xyz(3, 0, 0),
+    use_fixed_base=True,
     sim_core=sim_core,
 )
 ```
@@ -359,11 +376,11 @@ All registered callbacks fire automatically each step.
 
 ## Full Example
 
-The complete script is at `examples/robot_demo.py`.
+The complete script is at `examples/basics/robot_demo.py`.
 Run it from the project root:
 
 ```bash
-python examples/robot_demo.py
+python examples/basics/robot_demo.py
 ```
 
 ---
@@ -372,5 +389,5 @@ python examples/robot_demo.py
 
 - [Tutorial 2 — Action System](action-system): sequence Pick, Drop, Move, and Wait tasks
 - [Tutorial 3 — Managing a Fleet](multi-robot-fleet): `AgentManager`, grid spawn, `set_path`
-- [`examples/path_following_demo.py`](https://github.com/yuokamoto/PyBulletFleet/blob/main/examples/path_following_demo.py): detailed `set_path` demo with 2D and 3D waypoints
+- [`examples/mobile/path_following_demo.py`](https://github.com/yuokamoto/PyBulletFleet/blob/main/examples/mobile/path_following_demo.py): detailed `set_path` demo with 2D and 3D waypoints
 - [API Reference](../api/index): full Agent, SimObject, and related class documentation

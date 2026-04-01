@@ -58,8 +58,9 @@ The central orchestrator for PyBullet simulations.
 
 **Associated Params:**
 - **`SimulationParams`** — Configuration dataclass holding all parameters for `MultiRobotSimulationCore`. Passed to the constructor to configure the simulation engine.
-  - Attributes: `gui`, `timestep`, `target_rtf`, `duration` (core settings), `physics`, `monitor` (feature toggles), `camera_*` (camera config), `enable_*` (visualization), `spatial_hash_*` (collision detection)
+  - Attributes: `gui`, `timestep`, `target_rtf`, `duration` (core settings), `physics`, `monitor` (feature toggles), `enable_floor` (plane.urdf loading, default `True`), `camera_*` (camera config), `enable_*` (visualization), `spatial_hash_*` (collision detection)
   - Creation: `SimulationParams(gui=False, target_rtf=0, ...)`, `SimulationParams.from_dict(config)`, `SimulationParams.from_config("config/config.yaml")`
+  - `enable_floor=False` skips loading `plane.urdf` in both `setup_pybullet()` and `reset()`, allowing custom floor handling (e.g., transparent floors, environment SDF meshes)
 
 ##### SimObject
 Base class for all simulation objects (single rigid body, no joints or links).
@@ -124,8 +125,10 @@ object attachment via `update_attached_objects_kinematics()`.
 - Object manipulation (supports link-level attachment for URDF robots)
 - Collision handling
 - URDF model loading with joint/link support
+- Model name resolution — `from_urdf()` calls `resolve_urdf()` internally, accepting both model names (e.g., `"panda"`) and direct file paths
 
 **Key Methods:**
+- `from_urdf(urdf_path, ...)`: Factory method — accepts a model name (resolved via `resolve_urdf()`) or a direct URDF path
 - `set_goal(pose)`: Set target destination
 - `update(dt)`: Update agent state per timestep
 - `execute_action(action)`: Execute high-level action
@@ -319,6 +322,61 @@ proceeds even when the IK target is unreachable.
 ### 7. data_monitor.py
 
 **Purpose**: Optional real-time GUI monitor (`DataMonitor`) displaying FPS and step-time metrics in a tkinter window. Enabled via `monitor: true` in config.
+
+---
+
+### 8. robot_models.py
+
+**Purpose**: Robot model resolution and introspection. Provides a tiered registry (`KNOWN_MODELS`) that maps model names to URDF paths across multiple sources, plus auto-detection of robot capabilities.
+
+#### Key Functions:
+
+##### resolve_urdf(name_or_path)
+Resolves a model name to an absolute URDF file path by searching through tiers in order:
+
+| Tier | Source | Example |
+|------|--------|---------|
+| 0 — `local` | `robots/` directory in the project | `arm_robot`, `mobile_robot` |
+| 1 — `pybullet_data` | PyBullet's bundled data directory | `panda`, `kuka_iiwa`, `r2d2` |
+| 2 — `ros` | ROS install paths (`$AMENT_PREFIX_PATH`) | `ur5e`, `turtlebot3_burger` |
+| 3 — `robot_descriptions` | `robot_descriptions` pip package | `tiago`, `pr2` |
+
+Direct file paths (containing `/` or ending in `.urdf`/`.sdf`) pass through unchanged.
+Called internally by `Agent.from_urdf()`, so users can pass model names directly.
+`KNOWN_MODELS` is a curated subset — not every model from each tier is pre-registered.
+Unlisted models are resolved automatically via fallback scanning of `pybullet_data` and `robot_descriptions`.
+
+For name-based lookup, user search paths (registered via `add_search_path()`) are checked **before** the `KNOWN_MODELS` tiers.
+
+##### register_model(name, path_or_entry) / unregister_model(name)
+Add or remove entries from `KNOWN_MODELS` at runtime. `path_or_entry` accepts an absolute path string (tier defaults to `"user"`) or a `ModelEntry` for full tier metadata. Prevents accidental overwrites by default (`force=True` to override).
+
+##### discover_models(tier)
+Scan an entire tier (`"pybullet_data"` or `"robot_descriptions"`) and return all discoverable models as `{name: path}`. Unlike `KNOWN_MODELS`, this returns every model found in the installed package. Also used internally by `resolve_urdf()` as a fallback for unlisted models.
+
+##### add_search_path(directory) / remove_search_path(directory) / get_search_paths()
+Register custom directories for name-based URDF lookup. User search paths take priority over `KNOWN_MODELS`, enabling users to shadow built-in models with custom versions. `add_search_path()` validates the directory exists and is idempotent.
+
+##### auto_detect_profile(body_id_or_path, client)
+Inspects a loaded PyBullet body (or loads a URDF temporarily) and returns a `RobotProfile` dataclass:
+- `robot_type` — `"arm"`, `"mobile"`, `"mobile_manipulator"`, or `"static"`
+- `num_joints`, `movable_joint_names`, `movable_joint_indices`
+- `ee_link_name`, `ee_link_index` — end-effector detection
+- `joint_lower_limits`, `joint_upper_limits`, `joint_max_velocities`
+
+Accepts `Union[str, int]` — when given an `int` (body_id), skips load/removeBody overhead.
+
+##### list_all_models()
+Returns a dict of all registered models with tier, availability, and resolved path or error message.
+
+##### detect_robot_type(body_id, client)
+Lightweight type detection (arm/mobile/mobile_manipulator/static) without full profile analysis.
+
+#### Key Data:
+
+- **`KNOWN_MODELS`** — `dict[str, ModelEntry]` mapping model names to their tier and path resolver
+- **`RobotProfile`** — Frozen dataclass with all introspection results
+- **`ModelEntry`** — Named tuple: `(tier, path_func)` for each model
 
 ---
 
