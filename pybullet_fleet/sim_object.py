@@ -199,13 +199,17 @@ class SimObjectSpawnParams:
         if isinstance(collision_mode_value, str):
             collision_mode_value = CollisionMode(collision_mode_value)
 
-        # Resolve shape params from raw dicts
+        # Resolve shape params from raw dicts or pass through ShapeParams instances
         vs = config.get("visual_shape")
         cs = config.get("collision_shape")
+        if vs is not None and not isinstance(vs, ShapeParams):
+            vs = ShapeParams.from_dict(vs)
+        if cs is not None and not isinstance(cs, ShapeParams):
+            cs = ShapeParams.from_dict(cs)
 
         return cls(
-            visual_shape=ShapeParams.from_dict(vs) if vs else None,
-            collision_shape=ShapeParams.from_dict(cs) if cs else None,
+            visual_shape=vs,
+            collision_shape=cs,
             initial_pose=initial_pose,
             mass=config.get("mass", 0.0),
             pickable=config.get("pickable", True),

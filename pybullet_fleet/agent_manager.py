@@ -248,7 +248,7 @@ class SimObjectManager(Generic[T]):
         current_y = y_min
         current_z = z_min
 
-        ctx = self.sim_core.batch_spawn() if self.sim_core else _nullctx()
+        ctx = self.sim_core.batch_spawn() if self.sim_core and hasattr(self.sim_core, "batch_spawn") else _nullctx()
         with ctx:
             for i in range(num_objects):
                 # Calculate grid position
@@ -370,7 +370,7 @@ class SimObjectManager(Generic[T]):
         # Remaining grid cells are simply left empty.
         cls = self._object_class
         spawned_objects: List[T] = []
-        ctx = self.sim_core.batch_spawn() if self.sim_core else _nullctx()
+        ctx = self.sim_core.batch_spawn() if self.sim_core and hasattr(self.sim_core, "batch_spawn") else _nullctx()
         with ctx:
             for params, coord in zip(flat_params, grid_coords):
                 spawn_pos = grid_to_world(coord, grid_params.spacing, grid_params.offset)
@@ -404,7 +404,7 @@ class SimObjectManager(Generic[T]):
         """
         start = time.perf_counter() if self.enable_profiling else None
         objects = []
-        ctx = self.sim_core.batch_spawn() if self.sim_core else _nullctx()
+        ctx = self.sim_core.batch_spawn() if self.sim_core and hasattr(self.sim_core, "batch_spawn") else _nullctx()
         with ctx:
             for params in params_list:
                 obj = self._object_class.from_params(params, sim_core=self.sim_core)
@@ -445,7 +445,7 @@ class SimObjectManager(Generic[T]):
         enriched = [{**d, "type": d.get("type", "agent")} for d in entities_yaml]
 
         result: List[T] = []
-        ctx = self.sim_core.batch_spawn() if self.sim_core else _nullctx()
+        ctx = self.sim_core.batch_spawn() if self.sim_core and hasattr(self.sim_core, "batch_spawn") else _nullctx()
         with ctx:
             for entity_def in enriched:
                 entity_type = entity_def["type"]

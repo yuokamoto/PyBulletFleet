@@ -398,6 +398,19 @@ class MultiRobotSimulationCore:
         p.setRealTimeSimulation(0, physicsClientId=self._client)
 
         # Physics engine parameter tuning
+        self._apply_physics_engine_params()
+        if self._params.enable_floor:
+            p.loadURDF("plane.urdf", physicsClientId=self._client)
+        # Disable rendering during setup for better performance
+        if self._params.gui:
+            self.disable_rendering()
+
+    def _apply_physics_engine_params(self) -> None:
+        """Apply physics engine parameter tuning.
+
+        Shared by ``setup_pybullet()`` and ``reset()`` to ensure
+        consistent engine configuration after ``p.resetSimulation()``.
+        """
         p.setPhysicsEngineParameter(enableFileCaching=True, physicsClientId=self._client)
         if self._params.physics:
             # Physics ON: deterministic broadphase + CCD for reproducibility and tunneling prevention
@@ -414,11 +427,6 @@ class MultiRobotSimulationCore:
                 enableConeFriction=False,
                 physicsClientId=self._client,
             )
-        if self._params.enable_floor:
-            p.loadURDF("plane.urdf", physicsClientId=self._client)
-        # Disable rendering during setup for better performance
-        if self._params.gui:
-            self.disable_rendering()
 
     def disable_rendering(self) -> None:
         """Disable rendering during object spawning for better performance."""
@@ -462,8 +470,10 @@ class MultiRobotSimulationCore:
         finally:
             self._batch_spawning = False
             if was_adaptive:
+                # set_collision_spatial_hash_cell_size_mode() already calls _rebuild_spatial_grid()
                 self.set_collision_spatial_hash_cell_size_mode()
-            self._rebuild_spatial_grid()
+            else:
+                self._rebuild_spatial_grid()
             if was_rendering:
                 self.enable_rendering()
 
@@ -2035,11 +2045,12 @@ class MultiRobotSimulationCore:
         # 2. Reset PyBullet world (removes all bodies including ground plane)
         p.resetSimulation(physicsClientId=self._client)
 
-        # 3. Re-configure PyBullet (gravity, timestep, ground plane)
+        # 3. Re-configure PyBullet (gravity, timestep, physics params, ground plane)
         p.setAdditionalSearchPath(pybullet_data.getDataPath())
         p.setGravity(0, 0, -9.81 if self._params.physics else 0, physicsClientId=self._client)
         p.setTimeStep(self._params.timestep, physicsClientId=self._client)
         p.setRealTimeSimulation(0, physicsClientId=self._client)
+        self._apply_physics_engine_params()
         if self._params.enable_floor:
             p.loadURDF("plane.urdf", physicsClientId=self._client)
 
