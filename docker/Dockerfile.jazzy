@@ -20,6 +20,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ros-jazzy-rviz2 \
     ros-jazzy-robot-state-publisher \
     ros-jazzy-joint-state-publisher \
+    # Tier 2 robot descriptions (OSS models)
+    ros-jazzy-ur-description \
+    ros-jazzy-turtlebot3-description \
     # OpenGL / Mesa for PyBullet GUI inside Docker
     libgl1-mesa-dri \
     libglx-mesa0 \

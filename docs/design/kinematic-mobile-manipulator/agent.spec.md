@@ -3,7 +3,7 @@
 ## Requirements
 
 - Modify `robots/mobile_manipulator.urdf` arm mount position
-- Rewrite `examples/mobile_manipulator_demo.py` for kinematic mode
+- Rewrite `examples/arm/mobile_manipulator_demo.py` for kinematic mode
 - Verify link-attachment tracking works in kinematic mode
 - No changes to core library files unless a bug is discovered
 
@@ -33,7 +33,7 @@ Move the `base_to_mount` fixed joint origin from rear to front of base:
 
 This positions the arm mount 25cm forward of base center (base is 0.8m long, so front edge is +0.4). Combined with arm reach ≈ 0.7m, the EE can reach ≈ 0.95m ahead of base center.
 
-### 2. Demo Rewrite: `examples/mobile_manipulator_demo.py`
+### 2. Demo Rewrite: `examples/arm/mobile_manipulator_demo.py`
 
 #### Key changes from current demo:
 
@@ -154,17 +154,17 @@ Since `box.mass == 0`, no constraint is created. The box is tracked purely by st
 ## File References
 
 - `robots/mobile_manipulator.urdf` — URDF to modify (mount joint at line 119)
-- `examples/mobile_manipulator_demo.py` — demo to rewrite
+- `examples/arm/mobile_manipulator_demo.py` — demo to rewrite
 - `pybullet_fleet/agent.py:1684-1743` — update() call order
 - `pybullet_fleet/agent.py:1645-1685` — _update_kinematic_joints
 - `pybullet_fleet/agent.py:2438-2458` — update_attached_objects_kinematics
 - `pybullet_fleet/sim_object.py:890-989` — attach_object
 - `pybullet_fleet/action.py:511-878` — PickAction
-- `examples/pick_drop_arm_demo.py` — reference for box spawning pattern
+- `examples/arm/pick_drop_arm_demo.py` — reference for box spawning pattern
 
 ## Success Criteria
 
-- [ ] `python examples/mobile_manipulator_demo.py` completes full sequence
+- [ ] `python examples/arm/mobile_manipulator_demo.py` completes full sequence
 - [ ] Box follows EE during JointAction (arm motion after pick)
 - [ ] Box follows base during MoveAction (base motion while attached)
 - [ ] Box placed at correct drop position

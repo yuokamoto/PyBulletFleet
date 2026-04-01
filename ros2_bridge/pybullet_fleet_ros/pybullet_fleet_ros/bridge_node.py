@@ -26,6 +26,7 @@ from pybullet_fleet import (
 )
 from pybullet_fleet.config_utils import load_yaml_config
 from pybullet_fleet.controller import OmniController
+from pybullet_fleet.robot_models import resolve_urdf
 from pybullet_fleet.types import MotionMode
 
 from .conversions import sim_time_to_ros_time
@@ -51,25 +52,29 @@ class BridgeNode(Node):
     def __init__(self) -> None:
         super().__init__("pybullet_fleet_bridge")
 
-        # Declare parameters
+        # Declare parameters — use dynamic_typing so LaunchConfiguration
+        # string overrides don't conflict with the default type.
+        from rcl_interfaces.msg import ParameterDescriptor
+
+        _dyn = ParameterDescriptor(dynamic_typing=True)
         self.declare_parameter("config_yaml", "")
         self.declare_parameter("num_robots", 1)
         self.declare_parameter("robot_urdf", "robots/mobile_robot.urdf")
-        self.declare_parameter("publish_rate", 50.0)
-        self.declare_parameter("gui", False)
-        self.declare_parameter("physics", False)
-        self.declare_parameter("target_rtf", 1.0)
-        self.declare_parameter("enable_sim_services", True)
+        self.declare_parameter("publish_rate", 50.0, _dyn)
+        self.declare_parameter("gui", False, _dyn)
+        self.declare_parameter("physics", False, _dyn)
+        self.declare_parameter("target_rtf", 1.0, _dyn)
+        self.declare_parameter("enable_sim_services", True, _dyn)
 
-        # Read parameters
+        # Read parameters (handle string overrides from launch files)
         config_yaml = self.get_parameter("config_yaml").get_parameter_value().string_value
         num_robots = self.get_parameter("num_robots").get_parameter_value().integer_value
         robot_urdf = self.get_parameter("robot_urdf").get_parameter_value().string_value
-        publish_rate = self.get_parameter("publish_rate").get_parameter_value().double_value
-        gui = self.get_parameter("gui").get_parameter_value().bool_value
-        physics = self.get_parameter("physics").get_parameter_value().bool_value
-        target_rtf = self.get_parameter("target_rtf").get_parameter_value().double_value
-        enable_sim_services = self.get_parameter("enable_sim_services").get_parameter_value().bool_value
+        publish_rate = self._get_float("publish_rate", 50.0)
+        gui = self._get_bool("gui", False)
+        physics = self._get_bool("physics", False)
+        target_rtf = self._get_float("target_rtf", 1.0)
+        enable_sim_services = self._get_bool("enable_sim_services", True)
 
         # Create simulation core
         if config_yaml:
@@ -106,8 +111,20 @@ class BridgeNode(Node):
         # Spawn robots: prefer config_yaml robots list, fallback to num_robots
         robots_config = bridge_config.get("robots", [])
         if robots_config:
+            # Resolve model names (e.g. "ur5e") to absolute URDF paths
+            for d in robots_config:
+                if "urdf_path" in d:
+                    try:
+                        d["urdf_path"] = resolve_urdf(d["urdf_path"])
+                    except FileNotFoundError as e:
+                        logger.warning("Could not resolve '%s': %s", d["urdf_path"], e)
             robots_params = [AgentSpawnParams.from_dict(d) for d in robots_config]
         else:
+            # Resolve model name for the default robot_urdf parameter
+            try:
+                robot_urdf = resolve_urdf(robot_urdf)
+            except FileNotFoundError:
+                pass  # Keep as-is (relative path for pybullet)
             robots_params = [
                 AgentSpawnParams(
                     urdf_path=robot_urdf,
@@ -154,13 +171,37 @@ class BridgeNode(Node):
             f"rtf={target_rtf}, publish_rate={publish_rate}Hz, gui={gui}, physics={physics}"
         )
 
+    # ------------------------------------------------------------------
+    # Parameter helpers — handle string overrides from launch files
+    # ------------------------------------------------------------------
+
+    def _get_float(self, name: str, default: float) -> float:
+        """Read a parameter as float, coercing from string if needed."""
+        val = self.get_parameter(name).value
+        if isinstance(val, (int, float)):
+            return float(val)
+        if isinstance(val, str):
+            try:
+                return float(val)
+            except ValueError:
+                pass
+        return default
+
+    def _get_bool(self, name: str, default: bool) -> bool:
+        """Read a parameter as bool, coercing from string if needed."""
+        val = self.get_parameter(name).value
+        if isinstance(val, bool):
+            return val
+        if isinstance(val, str):
+            return val.lower() in ("true", "1", "yes")
+        return default
+
     def _register_handler(self, agent: Agent) -> None:
         """Create a RobotHandler for *agent* and register it.
 
         If the agent already has a KinematicController (e.g. from
         ``controller_config``), it is passed to RobotHandler so that
         ``cmd_vel`` messages drive the controller.
-
         If no controller is present, an :class:`OmniController`
         is attached **only for omnidirectional agents**. Differential-drive
         agents use TPI-based navigation directly and do not need a controller

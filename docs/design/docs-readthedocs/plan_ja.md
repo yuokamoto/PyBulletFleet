@@ -257,7 +257,7 @@ git commit -m "docs: archive session logs and planning docs"
 
 `README.md` から Quick Start、インストール、初回シミュレーション、基本的な使い方を抽出する。内容：
 - インストール（`pip install -e .`）
-- 最初のサンプル実行（`python examples/robot_demo.py`）
+- 最初のサンプル実行（`python examples/basics/robot_demo.py`）
 - YAML 設定の基本
 - 詳細は設定リファレンスへのリンク
 

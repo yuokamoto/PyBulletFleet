@@ -19,6 +19,7 @@ from .types import MotionMode, MovementDirection, ActionStatus, CollisionMode
 from .tools import normalize_vector_param
 from pybullet_fleet.tools import resolve_joint_index, resolve_link_index
 from .logging_utils import get_lazy_logger
+from .robot_models import resolve_urdf
 
 # Create logger for this module
 logger = logging.getLogger(__name__)
@@ -324,6 +325,11 @@ class Agent(SimObject):
         if urdf_path is not None:
             num_joints = p.getNumJoints(body_id, physicsClientId=self._pid)
             self.joint_info = [p.getJointInfo(body_id, j, physicsClientId=self._pid) for j in range(num_joints)]
+
+        # Cached movable (non-fixed) joint indices — avoids recomputing in
+        # _solve_ik on every call.  Built once at construction time since
+        # joint topology does not change after loading.
+        self._cached_movable_indices: list = [i for i, info in enumerate(self.joint_info) if info[2] != p.JOINT_FIXED]
 
         # Goal tracking (only used for non-static robots) - Private internal state
         self._current_velocity = np.array([0.0, 0.0, 0.0])
@@ -756,7 +762,8 @@ class Agent(SimObject):
         Create a URDF-based Agent (with joints).
 
         Args:
-            urdf_path: Path to robot URDF file
+            urdf_path: Robot model name (e.g. ``"panda"``) or path to URDF file.
+                Names are resolved via :func:`~pybullet_fleet.robot_models.resolve_urdf`
             pose: Initial Pose (position and orientation). Defaults to origin
             mass: Mass override.
                 - None (default): Use URDF file's mass values as-is
@@ -784,9 +791,14 @@ class Agent(SimObject):
             # Use URDF mass values (physics enabled) — mass defaults to None
             robot = Agent.from_urdf(urdf_path="arm_robot.urdf")
 
+            # Resolve by model name
+            robot = Agent.from_urdf(urdf_path="panda", use_fixed_base=True)
+
             # Kinematic control (no physics)
             robot = Agent.from_urdf(urdf_path="arm_robot.urdf", mass=0.0)
         """
+        urdf_path = resolve_urdf(urdf_path)
+
         if pose is None:
             pose = Pose.from_xyz(0.0, 0.0, 0.0)
 
@@ -794,7 +806,14 @@ class Agent(SimObject):
         position, orientation = pose.as_position_orientation()
 
         _client = sim_core._client if sim_core is not None else 0
-        body_id = p.loadURDF(urdf_path, position, orientation, useFixedBase=use_fixed_base, physicsClientId=_client)
+        body_id = p.loadURDF(
+            urdf_path,
+            position,
+            orientation,
+            useFixedBase=use_fixed_base,
+            flags=p.URDF_ENABLE_CACHED_GRAPHICS_SHAPES,
+            physicsClientId=_client,
+        )
 
         # Override mass if explicitly set to 0.0 (kinematic control)
         # mass=None (default) means use URDF's mass values as-is
@@ -1711,7 +1730,7 @@ class Agent(SimObject):
 
         # Build movable-joint mapping.  PyBullet's calculateInverseKinematics
         # returns values only for movable joints (skips JOINT_FIXED).
-        movable_indices = [i for i, info in enumerate(self.joint_info) if info[2] != p.JOINT_FIXED]
+        movable_indices = self._cached_movable_indices
 
         # Build limit arrays for movable joints only.
         # Joints NOT in the IK "free set" are locked at their current
@@ -1955,18 +1974,32 @@ class Agent(SimObject):
             return False
 
         ee_index = self._get_end_effector_link_index(end_effector_link)
-        joint_angles = self._solve_ik(target_position, target_orientation, ee_index)
-        if not joint_angles:
-            return False
 
-        tol = tolerance if tolerance is not None else self._ik_params.reachability_tolerance
-        reachable = self._check_ik_reachability(
-            joint_angles,
-            target_position,
-            ee_index,
-            tol,
-            target_orientation=target_orientation,
-        )
+        # Disable rendering during IK solve + reachability check to prevent
+        # visual flicker from temporary resetJointState calls.
+        try:
+            p.configureDebugVisualizer(p.COV_ENABLE_RENDERING, 0, physicsClientId=self._pid)
+        except Exception:
+            pass  # DIRECT mode or already disabled
+
+        try:
+            joint_angles = self._solve_ik(target_position, target_orientation, ee_index)
+            if not joint_angles:
+                return False
+
+            tol = tolerance if tolerance is not None else self._ik_params.reachability_tolerance
+            reachable = self._check_ik_reachability(
+                joint_angles,
+                target_position,
+                ee_index,
+                tol,
+                target_orientation=target_orientation,
+            )
+        finally:
+            try:
+                p.configureDebugVisualizer(p.COV_ENABLE_RENDERING, 1, physicsClientId=self._pid)
+            except Exception:
+                pass
 
         self.set_all_joints_targets(joint_angles, max_force=max_force)
         return reachable

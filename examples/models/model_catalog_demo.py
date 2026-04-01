@@ -139,6 +139,7 @@ sim = MultiRobotSimulationCore(
         physics=False,
         monitor=False,
         enable_shadows=False,
+        enable_floor=False,  # We handle floor ourselves below
     )
 )
 client = sim.client

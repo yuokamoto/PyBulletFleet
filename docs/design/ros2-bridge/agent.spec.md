@@ -445,8 +445,8 @@ Files the plan agent MUST read before planning:
 - `pybullet_fleet/types.py` — `MotionMode`, `ActionStatus` enums
 - `pybullet_fleet/sim_object.py` — `SimObject` base class
 - `docs/design/plugin-architecture/agent.spec.md` — Controller ABC and OmniOmniVelocityController interface
-- `examples/action_system_demo.py` — Example of action dispatch pattern
-- `examples/pick_drop_arm_action_demo.py` — Arm action example
+- `examples/basics/action_system_demo.py` — Example of action dispatch pattern
+- `examples/arm/pick_drop_arm_action_demo.py` — Arm action example
 - `config/config.yaml` — Default config structure
 - `robots/mobile_robot.urdf` — Mobile robot URDF
 - `robots/arm_robot.urdf` — Arm robot URDF

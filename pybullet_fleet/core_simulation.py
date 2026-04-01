@@ -79,6 +79,7 @@ class SimulationParams:
     multi_cell_threshold: float = (
         1.5  # Dimensionless multiplier of cell_size; objects larger than cell_size × this value span multiple cells (>= 1.0)
     )
+    enable_floor: bool = True  # Load ground plane (plane.urdf). False to skip.
     camera_config: Optional[Dict[str, Any]] = None  # Camera configuration from config file
     model_paths: Optional[List[str]] = None  # Additional directories to scan for URDF/mesh models
 
@@ -146,6 +147,7 @@ class SimulationParams:
             ),
             collision_margin=config.get("collision_margin", 0.02),  # Safety clearance (meters)
             multi_cell_threshold=config.get("multi_cell_threshold", 1.5),  # Multi-cell registration threshold
+            enable_floor=config.get("enable_floor", True),  # Ground plane on/off
             camera_config=config.get("camera", {}),  # Camera configuration
             model_paths=config.get("model_paths", []),  # Additional model directories
         )
@@ -412,7 +414,8 @@ class MultiRobotSimulationCore:
                 enableConeFriction=False,
                 physicsClientId=self._client,
             )
-        p.loadURDF("plane.urdf", physicsClientId=self._client)
+        if self._params.enable_floor:
+            p.loadURDF("plane.urdf", physicsClientId=self._client)
         # Disable rendering during setup for better performance
         if self._params.gui:
             self.disable_rendering()
@@ -2037,7 +2040,8 @@ class MultiRobotSimulationCore:
         p.setGravity(0, 0, -9.81 if self._params.physics else 0, physicsClientId=self._client)
         p.setTimeStep(self._params.timestep, physicsClientId=self._client)
         p.setRealTimeSimulation(0, physicsClientId=self._client)
-        p.loadURDF("plane.urdf", physicsClientId=self._client)
+        if self._params.enable_floor:
+            p.loadURDF("plane.urdf", physicsClientId=self._client)
 
         # 4. Reset object ID counter so IDs start fresh
         self._next_object_id = 0

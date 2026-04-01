@@ -454,6 +454,18 @@ class TestAgentCreationFromURDF:
             position=(0, 0, 0.5),
         )
 
+    def test_from_urdf_resolves_model_name(self, pybullet_env):
+        """from_urdf should accept a model name (e.g. 'arm_robot') and resolve it."""
+        agent = Agent.from_urdf(urdf_path="arm_robot", pose=Pose.from_xyz(0, 0, 0))
+        assert agent.body_id >= 0
+        assert agent.get_num_joints() > 0
+
+    def test_from_urdf_resolves_pybullet_data_name(self, pybullet_env):
+        """from_urdf should resolve tier-1 pybullet_data names like 'panda'."""
+        agent = Agent.from_urdf(urdf_path="panda", pose=Pose.from_xyz(0, 0, 0), use_fixed_base=True)
+        assert agent.body_id >= 0
+        assert agent.get_num_joints() >= 7  # Panda has 7 DOF + fingers
+
 
 class TestAgentSpawnParams:
     """Test AgentSpawnParams dataclass"""
@@ -2427,6 +2439,25 @@ class TestAgentVelocityCapping:
 
         # Per-axis cap: each axis capped at 10, so norm ≤ 10 for single-axis motion
         assert max_observed <= max_vel + 0.1, f"Velocity norm {max_observed:.4f} exceeded max_linear_vel={max_vel}"
+
+
+class TestMovableJointIndicesCache:
+    """Agent caches movable joint indices to avoid per-solve recomputation."""
+
+    def test_cached_movable_indices_matches_computed(self, pybullet_env):
+        """_cached_movable_indices matches the list comprehension in _solve_ik."""
+        agent = Agent.from_urdf(
+            urdf_path="robots/arm_robot.urdf",
+            use_fixed_base=True,
+        )
+        expected = [i for i, info in enumerate(agent.joint_info) if info[2] != p.JOINT_FIXED]
+        assert hasattr(agent, "_cached_movable_indices"), "Agent should have _cached_movable_indices attribute"
+        assert agent._cached_movable_indices == expected
+
+    def test_mesh_agent_has_empty_cached_movable_indices(self, pybullet_env):
+        """Non-URDF (mesh) agents should have empty cached movable indices."""
+        agent = create_mesh_agent()
+        assert agent._cached_movable_indices == []
 
 
 if __name__ == "__main__":

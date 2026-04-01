@@ -693,8 +693,8 @@ Expected: 584 tests pass, 3 skipped, 2 xfailed. No failures, no errors.
 Test both arm demos with `mass=0.0` to confirm visual correctness:
 
 ```bash
-python examples/pick_drop_arm_demo.py
-python examples/pick_drop_arm_action_demo.py
+python examples/arm/pick_drop_arm_demo.py
+python examples/arm/pick_drop_arm_action_demo.py
 ```
 Expected: Arms move smoothly in both demos with `mass=0.0`.
 

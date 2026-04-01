@@ -38,6 +38,7 @@ services:
       - ../robots:/opt/pybullet_fleet/robots:ro
       - ../config:/opt/pybullet_fleet/config:ro
       - ../ros2_bridge/scripts:/opt/pybullet_fleet/scripts:ro
+      - ../examples:/opt/pybullet_fleet/examples:ro
       # Overlay install/share so launch files & configs reflect local edits
       - ../ros2_bridge/pybullet_fleet_ros/launch:/opt/bridge_ws/install/pybullet_fleet_ros/share/pybullet_fleet_ros/launch:ro
       - ../ros2_bridge/pybullet_fleet_ros/config:/opt/bridge_ws/install/pybullet_fleet_ros/share/pybullet_fleet_ros/config:ro

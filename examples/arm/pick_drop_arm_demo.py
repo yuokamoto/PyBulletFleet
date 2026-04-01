@@ -9,47 +9,84 @@ Action version: pick_drop_arm_action_demo.py
 EE position variant (low-level): pick_drop_arm_ee_demo.py
 EE position variant (Action): pick_drop_arm_ee_action_demo.py
 """
+import argparse
 import os
 import sys
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-import pybullet as p
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 from pybullet_fleet.agent import Agent
 from pybullet_fleet.core_simulation import MultiRobotSimulationCore, SimulationParams
 from pybullet_fleet.sim_object import Pose, SimObject, ShapeParams
+from pybullet_fleet.robot_models import resolve_urdf, auto_detect_profile
+
+parser = argparse.ArgumentParser(description="Robot arm pick & drop demo (joint control)")
+parser.add_argument("--robot", default="panda", help="Robot name (e.g. panda, kuka_iiwa, arm_robot) or URDF path")
+args = parser.parse_args()
+
+# ── Per-robot joint presets (pick / place / init targets + box positions) ──
+JOINT_PRESETS = {
+    "arm_robot": {
+        "pick": [1.5, 1.5, 1.5, 0.0],
+        "place": [-1.5, 1.5, 1.5, 0.0],
+        "init": [0.0, 0.0, 0.0, 0.0],
+        "box_pick": [0.3, 0.0, 0.1],
+        "box_place": [-0.3, 0.0, 0.1],
+    },
+    "panda": {
+        "pick": [0.0, 0.4, 0.0, -1.5, 0.0, 1.9, 0.8, 0.0, 0.0, 0.04, 0.04, 0.0],
+        "place": [3.14, 0.4, 0.0, -1.5, 0.0, 1.9, 0.8, 0.0, 0.0, 0.04, 0.04, 0.0],
+        "init": [0.0, -0.8, 0.0, -2.3, 0.0, 1.6, 0.8, 0.0, 0.0, 0.04, 0.04, 0.0],
+        "box_pick": [0.65, 0.0, 0.25],
+        "box_place": [-0.65, 0.0, 0.25],
+    },
+    "kuka_iiwa": {
+        "pick": [0.0, 0.5, 0.0, -1.4, 0.0, 1.2, 0.0],
+        "place": [3.14, 0.5, 0.0, -1.4, 0.0, 1.2, 0.0],
+        "init": [0.0, -0.5, 0.0, -1.5, 0.0, 0.7, 0.0],
+        "box_pick": [0.65, 0.0, 0.25],
+        "box_place": [-0.65, 0.0, 0.25],
+    },
+}
+if args.robot not in JOINT_PRESETS:
+    raise SystemExit(f"No preset for '{args.robot}'. Available: {', '.join(JOINT_PRESETS)}")
+_P = JOINT_PRESETS[args.robot]
+PICK_JOINTS = _P["pick"]
+PLACE_JOINTS = _P["place"]
+JOINT_INIT = _P["init"]
+BOX_PICK_POSE = Pose.from_xyz(*_P["box_pick"])
+BOX_PLACE_POSE = Pose.from_xyz(*_P["box_place"])
 
 # Simulation setup
 params = SimulationParams(
-    gui=True, timestep=0.1, physics=False, target_rtf=10
+    gui=True, timestep=0.1, physics=False, target_rtf=1
 )  # for kinematics demo with faster execution (no physics means we can run faster than real-time)
 # params = SimulationParams(gui=True, timestep=0.01, physics=True) # for physics-based pick/drop with gravity and dynamics
 sim_core = MultiRobotSimulationCore(params)
 
 # Spawn robot arm (fixed base)
-arm_urdf = os.path.join(os.path.dirname(__file__), "../robots/arm_robot.urdf")
+arm_urdf = resolve_urdf(args.robot)
 arm_agent = Agent.from_urdf(
     urdf_path=arm_urdf,
     pose=Pose.from_xyz(0, 0, 0),
     use_fixed_base=True,
     sim_core=sim_core,
 )
-
-
-# Target joint angles
-PICK_JOINTS = [1.5, 1.5, 1.5, 0.0]  # Extend toward box
-PLACE_JOINTS = [-1.5, 1.5, 1.5, 0.0]  # Extend to opposite side
+profile = auto_detect_profile(arm_urdf, sim_core.client)
+print(f"Using {args.robot}: EE={profile.ee_link_name}, joints={len(profile.movable_joint_names)}")
+print(f"  PICK={[round(x,2) for x in PICK_JOINTS]}  PLACE={[round(x,2) for x in PLACE_JOINTS]}")
 
 # Spawn box to pick/drop
 box_sim = SimObject.from_mesh(
     visual_shape=ShapeParams(shape_type="box", half_extents=[0.05, 0.05, 0.05], rgba_color=[1, 0, 0, 1]),
     collision_shape=ShapeParams(shape_type="box", half_extents=[0.05, 0.05, 0.05]),
-    pose=Pose.from_xyz(0.3, 0, 0.1),
+    pose=BOX_PICK_POSE,
     mass=0.0,
     sim_core=sim_core,
 )
 
-# Pick/drop logic
-PICK_LINK_INDEX = p.getNumJoints(arm_agent.body_id) - 1  # End-effector link
+# Resolve EE link index
+PICK_LINK_INDEX = profile.ee_link_index if profile.ee_link_index >= 0 else arm_agent.get_num_joints() - 1
+print(f"  EE link index: {PICK_LINK_INDEX} ({profile.ee_link_name})")
 
 
 picked = False
@@ -57,9 +94,6 @@ picked = False
 #       -> move_to_place2 -> pick2 -> move_to_pick2 -> drop2 -> move_to_init2 (loop)
 step_state = 0
 JOINT_TOL = 0.05  # tolerance for joint target check (radians)
-BOX_PICK_POSE = Pose.from_xyz(0.3, 0, 0.1)
-BOX_PLACE_POSE = Pose.from_xyz(-0.3, 0, 0.1)
-JOINT_INIT = [0.0, 0.0, 0.0, 0.0]
 BOX_OFFSET = 0.14
 OFFSET_POSE = Pose.from_xyz(0, 0, BOX_OFFSET)
 _targets_set = False  # Track whether targets were set for current state

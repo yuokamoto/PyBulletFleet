@@ -15,7 +15,8 @@ New robot and infrastructure models:
 ## Features
 
 - **Snapshot & Replay** — Full and delta snapshot serialization for logging, replay, and external synchronization ([USO](https://github.com/yuokamoto/Unified-Simulation-Orchestrator) integration)
-- **Behavior tree integration** - Create agent behavior from behavior tree.
+- **Behavior tree integration** — Create agent behavior from behavior trees
+- **`SimObject.from_sdf()` → `List[SimObject]`** — Factory method that loads an SDF file via `p.loadSDF()` and wraps each returned body_id in a `SimObject`. Collision detection and lifecycle management via `add_object()` are applied automatically. Required for Open-RMF SDF environment loading and official support for pybullet_data SDF models (kiva_shelf, wsg50_gripper, etc.). Currently the catalog demo calls raw `p.loadSDF()` directly.
 
 ## Interfaces
 
@@ -28,24 +29,35 @@ External communication layers:
 
 - **Remove scipy dependency** — Currently only `scipy.spatial.transform.Rotation` is used (9 call sites for quat↔euler, quat↔matrix, relative rotation). Replace with PyBullet utilities + lightweight helpers in `geometry.py` to eliminate the ~150 MB transitive dependency. Low priority: no runtime performance impact, only install size.
 
-- **Manual quaternion helpers in `geometry.py`** — `SlerpPrecomp` / `quat_slerp` で確立したパターン（scipy を避け、scalar math で手書き）を拡張し、以下のヘルパーを `geometry.py` に追加する。ホットパスでの scipy `Rotation` オブジェクト生成オーバーヘッドを排除するのが目的。
+- **Manual quaternion helpers in `geometry.py`** — Extend the pattern established by `SlerpPrecomp` / `quat_slerp` (avoiding scipy, hand-written scalar math) by adding the following helpers to `geometry.py`. The goal is to eliminate scipy `Rotation` object creation overhead on hot paths.
 
-  必要なヘルパー関数:
-  - `quat_rotate_vector(q, v)` — クォータニオン `q` でベクトル `v` を回転（body→world 変換）。`Rotation.from_quat(q).apply(v)` の置換
-  - `quat_multiply(q1, q2)` — クォータニオン積。`(Rotation.from_quat(q1) * Rotation.from_quat(q2)).as_quat()` の置換
-  - `quat_from_rotvec(rotvec)` — 回転ベクトルからクォータニオン生成。`Rotation.from_rotvec(rotvec).as_quat()` の置換（角速度→姿勢更新で使用）
+  Required helper functions:
+  - `quat_rotate_vector(q, v)` — Rotate vector `v` by quaternion `q` (body→world transform). Replaces `Rotation.from_quat(q).apply(v)`
+  - `quat_multiply(q1, q2)` — Quaternion product. Replaces `(Rotation.from_quat(q1) * Rotation.from_quat(q2)).as_quat()`
+  - `quat_from_rotvec(rotvec)` — Quaternion from rotation vector. Replaces `Rotation.from_rotvec(rotvec).as_quat()` (used in angular velocity → orientation update)
 
-  主な適用箇所:
-  - `OmniVelocityController._apply_velocity()` — body→world 速度変換 + 角速度によるクォータニオン更新
-  - `tools.body_to_world_velocity_3d()` — 同上
-  - `Path._calculate_orientation_for_plane()` — 回転行列→クォータニオン変換
-  - `Path.visualize_waypoints()` — クォータニオン→回転行列変換
+  Primary application sites:
+  - `OmniVelocityController._apply_velocity()` — body→world velocity transform + quaternion update from angular velocity
+  - `tools.body_to_world_velocity_3d()` — same as above
+  - `Path._calculate_orientation_for_plane()` — rotation matrix → quaternion conversion
+  - `Path.visualize_waypoints()` — quaternion → rotation matrix conversion
 
-  設計方針:
-  - pure Python scalar math (`math.sin`/`math.cos`) or small numpy array ops
-  - `SlerpPrecomp` と同じファイル・同じスタイルで実装
-  - プロファイリングでボトルネック確認後に段階的に適用（YAGNI）
-  - scipy 完全除去は全 call site 置換後に別 PR で実施
+  Design policy:
+  - Pure Python scalar math (`math.sin`/`math.cos`) or small numpy array ops
+  - Same file and style as `SlerpPrecomp`
+  - Apply incrementally after profiling confirms bottleneck (YAGNI)
+  - Full scipy removal in a separate PR after all call sites are replaced
+
+## Environments
+
+Simulation environment assets (warehouse floors, factory layouts, etc.):
+
+- **`pybullet-fleet-environments` package** — Manage environment assets in a separate repository, installable via `pip install pybullet-fleet-environments` for on-demand retrieval. Keep PyBulletFleet core lightweight by not bundling meshes.
+  - AWS RoboMaker Small Warehouse (MIT-0): DAE→OBJ converted meshes + URDF wrappers
+  - Open-RMF rmf_demos maps (office, hotel, clinic, airport, campus): OBJ mesh export
+  - pybullet_data bundled environments (kiva_shelf, samurai, stadium) wrappers
+  - Original license clearly noted per environment
+- **`resolve_environment()` API** — Name resolution similar to `resolve_urdf()` for loading environments. Shows install hints when not installed.
 
 ## CI / DevOps
 

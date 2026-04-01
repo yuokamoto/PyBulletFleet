@@ -4,12 +4,14 @@
 Usage::
 
     python3 scripts/send_nav_goal.py --robot robot0 --x 5.0 --y 3.0
+    python3 scripts/send_nav_goal.py --robot tb3_0 --x 2.0 --y 1.0 --yaw 1.57
 
 Uses the ``NavigateToPose`` action server at ``/{robot}/navigate_to_pose``.
 Prints feedback (distance_remaining) until the goal succeeds.
 """
 
 import argparse
+import math
 
 import rclpy
 from geometry_msgs.msg import PoseStamped
@@ -24,6 +26,7 @@ def main():
     parser.add_argument("--x", type=float, default=5.0)
     parser.add_argument("--y", type=float, default=3.0)
     parser.add_argument("--z", type=float, default=0.05)
+    parser.add_argument("--yaw", type=float, default=None, help="Goal yaw in radians (default: face toward goal)")
     args = parser.parse_args()
 
     rclpy.init()
@@ -39,9 +42,16 @@ def main():
     goal.pose.pose.position.x = args.x
     goal.pose.pose.position.y = args.y
     goal.pose.pose.position.z = args.z
-    goal.pose.pose.orientation.w = 1.0
 
-    node.get_logger().info(f"Sending NavigateToPose goal: ({args.x}, {args.y}, {args.z})")
+    if args.yaw is not None:
+        half = args.yaw * 0.5
+        goal.pose.pose.orientation.z = math.sin(half)
+        goal.pose.pose.orientation.w = math.cos(half)
+    else:
+        goal.pose.pose.orientation.w = 1.0
+
+    yaw_str = f", yaw={args.yaw:.2f}" if args.yaw is not None else ""
+    node.get_logger().info(f"Sending NavigateToPose goal: ({args.x}, {args.y}, {args.z}{yaw_str})")
 
     def feedback_cb(feedback_msg):
         fb = feedback_msg.feedback

@@ -159,14 +159,10 @@ class RobotHandler:
     def _cmd_vel_cb(self, msg: Twist) -> None:
         """Store latest cmd_vel for application in next step.
 
-        If a goal-based navigation was active, reattach the velocity controller
-        so that controller-mode velocity commands take effect.
+        The controller switches to VELOCITY mode automatically when
+        :meth:`set_velocity` is called — no reattach needed.
         """
         self._latest_twist = msg
-        # Reattach velocity controller (goal-based nav detaches it)
-        if self._vel_controller is not None and self.agent._controller is None:
-            self.agent.stop()  # cancel any TPI navigation in progress
-            self.agent.set_controller(self._vel_controller)
 
     # ------------------------------------------------------------------
     # Navigation / Arm topic callbacks
@@ -175,11 +171,9 @@ class RobotHandler:
     def _goal_pose_cb(self, msg: PoseStamped) -> None:
         """Receive goal pose → agent navigates to it.
 
-        Detaches the velocity controller so the legacy TPI trajectory code
-        drives the robot toward the goal.  The controller is reattached when
-        a ``cmd_vel`` message arrives.
+        The controller switches to POSE mode automatically when
+        ``set_goal_pose()`` is called.
         """
-        self.agent.set_controller(None)  # switch to TPI mode
         pose = ros_pose_stamped_to_pbf(msg)
         self.agent.set_goal_pose(pose)
         logger.info("'%s': goal_pose received → navigating to (%.2f, %.2f)", self._ns, pose.x, pose.y)
@@ -187,13 +181,13 @@ class RobotHandler:
     def _path_cb(self, msg: PathMsg) -> None:
         """Receive nav path → agent follows it.
 
-        Detaches the velocity controller so TPI trajectory code runs.
+        The controller switches to POSE mode automatically when
+        ``set_path()`` is called.
         """
         waypoints = ros_path_to_pbf(msg)
         if not waypoints:
             logger.warning("'%s': empty path received, ignoring", self._ns)
             return
-        self.agent.set_controller(None)  # switch to TPI mode
         self.agent.set_path(waypoints)
         logger.info("'%s': path received (%d waypoints)", self._ns, len(waypoints))
 
@@ -300,21 +294,21 @@ class RobotHandler:
         # arrow (Pose display) points from robot toward the goal position.
         goal = self.agent.goal_pose
         if goal is not None:
-            dx = goal.position[0] - pose.position[0]
-            dy = goal.position[1] - pose.position[1]
-            dist = math.sqrt(dx * dx + dy * dy)
-            if dist > 0.01:
-                # Compute yaw from current position toward goal
-                yaw = math.atan2(dy, dx)
-                half = yaw * 0.5
-                bearing_orientation = [0.0, 0.0, math.sin(half), math.cos(half)]
-                from pybullet_fleet.geometry import Pose as PbfPose
+            # dx = goal.position[0] - pose.position[0]
+            # dy = goal.position[1] - pose.position[1]
+            # dist = math.sqrt(dx * dx + dy * dy)
+            # if dist > 0.01:
+            #     # Compute yaw from current position toward goal
+            #     yaw = math.atan2(dy, dx)
+            #     half = yaw * 0.5
+            #     bearing_orientation = [0.0, 0.0, math.sin(half), math.cos(half)]
+            #     from pybullet_fleet.geometry import Pose as PbfPose
 
-                goal_for_viz = PbfPose(position=goal.position, orientation=bearing_orientation)
-                goal_msg = pbf_pose_to_pose_stamped(goal_for_viz, stamp=stamp)
-            else:
-                # Very close — use the goal's own orientation
-                goal_msg = pbf_pose_to_pose_stamped(goal, stamp=stamp)
+            #     goal_for_viz = PbfPose(position=goal.position, orientation=bearing_orientation)
+            #     goal_msg = pbf_pose_to_pose_stamped(goal_for_viz, stamp=stamp)
+            # else:
+            # Very close — use the goal's own orientation
+            goal_msg = pbf_pose_to_pose_stamped(goal, stamp=stamp)
             self._goal_pub.publish(goal_msg)
             dist = float(np.linalg.norm(np.array(pose.position) - np.array(goal.position)))
         else:
@@ -365,7 +359,6 @@ class RobotHandler:
         from nav2_msgs.action import NavigateToPose
 
         goal_pose = ros_pose_to_pbf(goal_handle.request.pose.pose)
-        self.agent.set_controller(None)  # switch to TPI mode for goal-based nav
         self.agent.set_goal_pose(goal_pose)
         logger.info("'%s': NavigateToPose started → (%.2f, %.2f)", self._ns, goal_pose.x, goal_pose.y)
 
@@ -402,7 +395,6 @@ class RobotHandler:
             goal_handle.abort()
             return FollowPath.Result()
 
-        self.agent.set_controller(None)  # switch to TPI mode for path following
         self.agent.set_path(waypoints)
         logger.info("'%s': FollowPath started (%d waypoints)", self._ns, len(waypoints))
 

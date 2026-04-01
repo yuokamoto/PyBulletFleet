@@ -518,6 +518,58 @@ class TestSimulationParams:
         assert params.timestep == 0.05
         assert params.target_rtf == 2.0
 
+    def test_enable_floor_default_true(self):
+        """Default enable_floor should be True for backward compatibility."""
+        params = SimulationParams(gui=False, monitor=False)
+        assert params.enable_floor is True
+
+    def test_enable_floor_false(self):
+        """enable_floor=False should be accepted."""
+        params = SimulationParams(gui=False, monitor=False, enable_floor=False)
+        assert params.enable_floor is False
+
+    def test_enable_floor_from_dict(self):
+        """enable_floor should round-trip through from_dict."""
+        params = SimulationParams.from_dict({"gui": False, "monitor": False, "enable_floor": False})
+        assert params.enable_floor is False
+
+
+class TestFloorLoading:
+    """Test that floor param controls ground-plane loading."""
+
+    def test_enable_floor_loads_body(self):
+        """Default enable_floor=True loads plane.urdf (body_id 0)."""
+        params = SimulationParams(gui=False, monitor=False, enable_floor=True)
+        sc = MultiRobotSimulationCore(params)
+        try:
+            # plane.urdf is body 0 — getBodyInfo should succeed
+            info = p.getBodyInfo(0, physicsClientId=sc.client)
+            assert info is not None
+        finally:
+            p.disconnect(sc.client)
+
+    def test_disable_floor_skips_plane(self):
+        """enable_floor=False should NOT load any ground plane body."""
+        params = SimulationParams(gui=False, monitor=False, enable_floor=False)
+        sc = MultiRobotSimulationCore(params)
+        try:
+            # No bodies should exist
+            num = p.getNumBodies(physicsClientId=sc.client)
+            assert num == 0, f"Expected 0 bodies with enable_floor=False, got {num}"
+        finally:
+            p.disconnect(sc.client)
+
+    def test_reset_respects_disable_floor(self):
+        """After reset(), enable_floor=False should still not load plane."""
+        params = SimulationParams(gui=False, monitor=False, enable_floor=False)
+        sc = MultiRobotSimulationCore(params)
+        try:
+            sc.reset()
+            num = p.getNumBodies(physicsClientId=sc.client)
+            assert num == 0, f"Expected 0 bodies after reset with enable_floor=False, got {num}"
+        finally:
+            p.disconnect(sc.client)
+
 
 # ============================================================================
 # Initialization

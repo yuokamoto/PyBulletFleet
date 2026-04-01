@@ -257,7 +257,7 @@ git commit -m "docs: archive session logs and planning docs"
 
 Extract Quick Start, installation, first simulation, and basic usage from `README.md`. Content should cover:
 - Installation (`pip install -e .`)
-- Running first example (`python examples/robot_demo.py`)
+- Running first example (`python examples/basics/robot_demo.py`)
 - YAML config basics
 - Link to configuration reference for details
 
