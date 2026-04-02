@@ -114,6 +114,9 @@ __all__ = [
     "world_to_grid",
     "normalize_vector_param",
     "quat_to_rot_matrix",
+    "quat_angle_between",
+    "quat_from_rotvec",
+    "quat_multiply",
     "rotate_vector",
     # Config utilities
     "load_yaml_config",
