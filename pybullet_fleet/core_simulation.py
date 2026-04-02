@@ -402,7 +402,9 @@ class MultiRobotSimulationCore:
         if self._params.enable_floor:
             p.loadURDF("plane.urdf", physicsClientId=self._client)
 
-        # Register user-supplied model search paths
+        # Register user-supplied model search paths.
+        # NOTE: add_search_path() mutates the global _user_search_paths registry
+        # in robot_models, so paths registered here persist across sim instances.
         if self._params.model_paths:
             from pybullet_fleet.robot_models import add_search_path
 

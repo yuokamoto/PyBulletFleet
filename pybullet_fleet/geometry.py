@@ -735,7 +735,7 @@ class Path:
 
 
 # ============================================================================
-# Lightweight quaternion rotation (no SciPy dependency)
+# Lightweight quaternion rotation (no SciPy Rotation object on hot paths)
 # ============================================================================
 
 
