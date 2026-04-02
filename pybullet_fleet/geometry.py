@@ -4,6 +4,11 @@ import math
 from dataclasses import dataclass, field
 from typing import Iterable, List, NamedTuple, Optional, Tuple
 
+#: Quaternion in ``(x, y, z, w)`` convention — same as PyBullet.
+Quat = Tuple[float, float, float, float]
+#: 3-D vector ``(x, y, z)``.
+Vec3 = Tuple[float, float, float]
+
 import numpy as np
 import pybullet as p
 from scipy.spatial.transform import Rotation as R
@@ -727,6 +732,157 @@ class Path:
                 debug_ids.append(debug_id)
 
         return debug_ids
+
+
+# ============================================================================
+# Lightweight quaternion rotation (no SciPy dependency)
+# ============================================================================
+
+
+def _normalize_quat(quat: Quat) -> Quat:
+    """Normalize a quaternion to unit length.
+
+    Args:
+        quat: Quaternion ``(x, y, z, w)``.
+
+    Returns:
+        Unit quaternion ``(x, y, z, w)``.
+
+    Raises:
+        ValueError: If the quaternion has zero norm.
+    """
+    qx, qy, qz, qw = quat
+    norm_sq = qx * qx + qy * qy + qz * qz + qw * qw
+    if norm_sq == 0.0:
+        raise ValueError("zero-norm quaternion is not allowed")
+    inv_norm = 1.0 / math.sqrt(norm_sq)
+    return (qx * inv_norm, qy * inv_norm, qz * inv_norm, qw * inv_norm)
+
+
+def quat_to_rot_matrix(
+    quat: Quat,
+) -> Tuple[float, float, float, float, float, float, float, float, float]:
+    """Convert a quaternion ``(x, y, z, w)`` to a 3×3 rotation matrix.
+
+    Returns the matrix as a flat 9-element tuple in **row-major** order::
+
+        (r00, r01, r02,  r10, r11, r12,  r20, r21, r22)
+
+    This is allocation-free and suitable for hot-path use.
+
+    Args:
+        quat: Quaternion ``(x, y, z, w)`` — same convention as PyBullet.
+              Automatically normalized if not already unit-length.
+
+    Returns:
+        9-element tuple representing the 3×3 rotation matrix (row-major).
+
+    Raises:
+        ValueError: If the quaternion has zero norm.
+    """
+    qx, qy, qz, qw = _normalize_quat(quat)
+    return (
+        1.0 - 2.0 * (qy * qy + qz * qz),
+        2.0 * (qx * qy - qz * qw),
+        2.0 * (qx * qz + qy * qw),
+        2.0 * (qx * qy + qz * qw),
+        1.0 - 2.0 * (qx * qx + qz * qz),
+        2.0 * (qy * qz - qx * qw),
+        2.0 * (qx * qz - qy * qw),
+        2.0 * (qy * qz + qx * qw),
+        1.0 - 2.0 * (qx * qx + qy * qy),
+    )
+
+
+def rotate_vector(vec: Vec3, quat: Quat) -> Vec3:
+    """Rotate a 3-D vector by a quaternion.
+
+    Equivalent to ``scipy.spatial.transform.Rotation.from_quat(quat).apply(vec)``
+    but avoids SciPy object allocation, making it suitable for per-tick hot paths.
+
+    Args:
+        vec: 3-D vector ``(x, y, z)``.
+        quat: Quaternion ``(x, y, z, w)`` — same convention as PyBullet.
+
+    Returns:
+        Rotated vector ``(x, y, z)``.
+    """
+    r00, r01, r02, r10, r11, r12, r20, r21, r22 = quat_to_rot_matrix(quat)
+    vx, vy, vz = vec
+    return (
+        r00 * vx + r01 * vy + r02 * vz,
+        r10 * vx + r11 * vy + r12 * vz,
+        r20 * vx + r21 * vy + r22 * vz,
+    )
+
+
+def quat_from_rotvec(rotvec: Vec3) -> Quat:
+    """Convert a rotation vector (axis × angle) to a quaternion ``(x, y, z, w)``.
+
+    Equivalent to ``scipy.spatial.transform.Rotation.from_rotvec(rotvec).as_quat()``.
+
+    Args:
+        rotvec: 3-D rotation vector whose direction is the rotation axis
+                and magnitude is the rotation angle in radians.
+
+    Returns:
+        Quaternion ``(x, y, z, w)`` — same convention as PyBullet.
+    """
+    rx, ry, rz = rotvec
+    angle = math.sqrt(rx * rx + ry * ry + rz * rz)
+    if angle < 1e-12:
+        return (0.0, 0.0, 0.0, 1.0)
+    half = 0.5 * angle
+    s = math.sin(half) / angle
+    return (rx * s, ry * s, rz * s, math.cos(half))
+
+
+def quat_multiply(q1: Quat, q2: Quat) -> Quat:
+    """Hamilton product of two quaternions in ``(x, y, z, w)`` convention.
+
+    Equivalent to ``(Rotation.from_quat(q1) * Rotation.from_quat(q2)).as_quat()``.
+    For active rotations this corresponds to applying *q2* first, then *q1*.
+
+    Args:
+        q1: Left quaternion ``(x, y, z, w)``.
+        q2: Right quaternion ``(x, y, z, w)``.
+
+    Returns:
+        Product quaternion ``(x, y, z, w)``.
+    """
+    x1, y1, z1, w1 = q1
+    x2, y2, z2, w2 = q2
+    return (
+        w1 * x2 + x1 * w2 + y1 * z2 - z1 * y2,
+        w1 * y2 - x1 * z2 + y1 * w2 + z1 * x2,
+        w1 * z2 + x1 * y2 - y1 * x2 + z1 * w2,
+        w1 * w2 - x1 * x2 - y1 * y2 - z1 * z2,
+    )
+
+
+def quat_angle_between(q0: Quat, q1: Quat) -> float:
+    """Compute the rotation angle (radians) between two quaternions.
+
+    Equivalent to ``(Rotation.from_quat(q1) * Rotation.from_quat(q0).inv()).magnitude()``.
+    Handles the double-cover: ``q`` and ``-q`` represent the same rotation.
+    Inputs are normalized internally, so non-unit quaternions are accepted.
+
+    Args:
+        q0: First quaternion ``(x, y, z, w)``.
+        q1: Second quaternion ``(x, y, z, w)``.
+
+    Returns:
+        Rotation angle in ``[0, π]`` radians.
+
+    Raises:
+        ValueError: If either quaternion has zero norm.
+    """
+    x0, y0, z0, w0 = _normalize_quat(q0)
+    x1, y1, z1, w1 = _normalize_quat(q1)
+    dot = x0 * x1 + y0 * y1 + z0 * z1 + w0 * w1
+    # Clamp |dot| to [0, 1] for acos safety; abs handles double-cover
+    dot_abs = min(abs(dot), 1.0)
+    return 2.0 * math.acos(dot_abs)
 
 
 # ============================================================================

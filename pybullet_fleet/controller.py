@@ -40,10 +40,17 @@ from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Dict, List, Optional, Type
 
 import numpy as np
-from scipy.spatial.transform import Rotation
-from scipy.spatial.transform import Rotation as R
+from scipy.spatial.transform import Rotation as R  # used only in DifferentialController init
 
-from pybullet_fleet.geometry import Pose, quat_slerp, quat_slerp_precompute
+from pybullet_fleet.geometry import (
+    Pose,
+    quat_angle_between,
+    quat_from_rotvec,
+    quat_multiply,
+    quat_slerp,
+    quat_slerp_precompute,
+    rotate_vector,
+)
 from pybullet_fleet.logging_utils import get_lazy_logger
 from pybullet_fleet.types import ControllerMode, MovementDirection, PosePhase
 
@@ -411,9 +418,7 @@ class KinematicController(Controller):
             False if the angle was negligible (< 1e-6 rad) or TPI creation
             failed — rotation state is reset via ``_reset_rotation_state()``.
         """
-        r_current = Rotation.from_quat(start_quat)
-        r_target = Rotation.from_quat(target_quat)
-        rotation_angle = (r_target * r_current.inv()).magnitude()
+        rotation_angle = quat_angle_between(tuple(start_quat), tuple(target_quat))
 
         if rotation_angle <= 1e-6:
             self._reset_rotation_state()
@@ -712,10 +717,9 @@ class OmniController(KinematicController):
         pose = agent.get_pose()
 
         qx, qy, qz, qw = pose.orientation
-        current_rot = Rotation.from_quat([qx, qy, qz, qw])
 
-        # Body → world rotation for linear velocity
-        world_vel = current_rot.apply(self._linear_velocity)
+        # Body → world rotation for linear velocity (SciPy-free hot path)
+        world_vel = rotate_vector(tuple(self._linear_velocity), (qx, qy, qz, qw))
 
         new_pos = [
             pose.x + world_vel[0] * dt,
@@ -723,18 +727,16 @@ class OmniController(KinematicController):
             pose.z + world_vel[2] * dt,
         ]
 
-        # Angular velocity integration via quaternion multiplication
+        # Angular velocity integration via quaternion multiplication (SciPy-free)
         ang_zero = np.allclose(self._angular_velocity, 0.0)
         if ang_zero:
             new_quat = [qx, qy, qz, qw]
         else:
             omega = self._angular_velocity
-            angle = np.linalg.norm(omega) * dt
-            axis = omega / np.linalg.norm(omega)
-            delta_rot = Rotation.from_rotvec(axis * angle)
-            new_rot = current_rot * delta_rot  # body-frame rotation
-            new_quat_xyzw = new_rot.as_quat()
-            new_quat = list(new_quat_xyzw)
+            rotvec = (omega[0] * dt, omega[1] * dt, omega[2] * dt)
+            delta_q = quat_from_rotvec(rotvec)
+            new_q = quat_multiply((qx, qy, qz, qw), delta_q)  # body-frame
+            new_quat = list(new_q)
 
         new_pose = Pose(position=new_pos, orientation=new_quat)
         agent.set_pose(new_pose)

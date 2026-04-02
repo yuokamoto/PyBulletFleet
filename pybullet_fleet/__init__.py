@@ -39,6 +39,15 @@ from pybullet_fleet.controller import (
     register_controller,
 )
 
+# Geometry (quaternion utilities)
+from pybullet_fleet.geometry import (  # noqa: F401,F811
+    quat_angle_between,
+    quat_from_rotvec,
+    quat_multiply,
+    quat_to_rot_matrix,
+    rotate_vector,
+)
+
 # Utilities
 from pybullet_fleet.tools import (
     body_to_world_velocity_2d,
@@ -104,6 +113,8 @@ __all__ = [
     "grid_to_world",
     "world_to_grid",
     "normalize_vector_param",
+    "quat_to_rot_matrix",
+    "rotate_vector",
     # Config utilities
     "load_yaml_config",
     # Entity registry

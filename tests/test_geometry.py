@@ -646,3 +646,255 @@ class TestQuatSlerp:
         result = quat_slerp(q0, q1, 0.5, precomp)
         assert isinstance(result, np.ndarray)
         assert len(result.tolist()) == 4
+
+
+# ============================================================================
+# Quaternion rotation utilities (quat_to_rot_matrix, rotate_vector)
+# ============================================================================
+
+from pybullet_fleet.geometry import quat_to_rot_matrix, rotate_vector
+
+
+class TestQuatRotateVector:
+    """quat_to_rot_matrix / rotate_vector standalone quaternion utilities."""
+
+    def test_quat_to_rot_matrix_identity(self):
+        """Identity quaternion produces identity matrix."""
+        m = quat_to_rot_matrix((0.0, 0.0, 0.0, 1.0))
+        assert len(m) == 9
+        expected = [1, 0, 0, 0, 1, 0, 0, 0, 1]
+        for i in range(9):
+            assert m[i] == pytest.approx(expected[i], abs=1e-12)
+
+    def test_quat_to_rot_matrix_matches_scipy(self):
+        """Rotation matrix matches scipy for random quaternions."""
+        import random
+
+        random.seed(99)
+        for _ in range(10):
+            q = [random.gauss(0, 1) for _ in range(4)]
+            norm = sum(x * x for x in q) ** 0.5
+            q = [x / norm for x in q]
+
+            expected = R.from_quat(q).as_matrix().flatten()
+            actual = quat_to_rot_matrix(tuple(q))
+            for i in range(9):
+                assert actual[i] == pytest.approx(expected[i], abs=1e-12)
+
+    def test_rotate_vector_identity(self):
+        """Identity quaternion passes through vector."""
+        result = rotate_vector((1.0, 2.0, 3.0), (0.0, 0.0, 0.0, 1.0))
+        assert result == pytest.approx((1.0, 2.0, 3.0))
+
+    def test_rotate_vector_yaw_90(self):
+        """90-degree yaw rotates X to Y."""
+        q = tuple(R.from_euler("z", 90, degrees=True).as_quat())
+        result = rotate_vector((1.0, 0.0, 0.0), q)
+        assert result[0] == pytest.approx(0.0, abs=1e-9)
+        assert result[1] == pytest.approx(1.0, abs=1e-9)
+        assert result[2] == pytest.approx(0.0, abs=1e-9)
+
+    def test_rotate_vector_matches_scipy(self):
+        """rotate_vector matches scipy for random inputs."""
+        import random
+
+        random.seed(77)
+        for _ in range(20):
+            q = [random.gauss(0, 1) for _ in range(4)]
+            norm = sum(x * x for x in q) ** 0.5
+            q = [x / norm for x in q]
+            v = [random.uniform(-10, 10) for _ in range(3)]
+
+            expected = R.from_quat(q).apply(v)
+            actual = rotate_vector(tuple(v), tuple(q))
+            for i in range(3):
+                assert actual[i] == pytest.approx(expected[i], abs=1e-9)
+
+    def test_unnormalized_quat_matches_scipy(self):
+        """Non-unit quaternion is normalized internally, matching scipy."""
+        q_raw = (2.0, 0.0, 0.0, 2.0)
+        expected_mat = R.from_quat(q_raw).as_matrix().flatten()
+        actual_mat = quat_to_rot_matrix(q_raw)
+        for i in range(9):
+            assert actual_mat[i] == pytest.approx(expected_mat[i], abs=1e-12)
+
+        v = (1.0, 2.0, 3.0)
+        expected_vec = R.from_quat(q_raw).apply(v)
+        actual_vec = rotate_vector(v, q_raw)
+        for i in range(3):
+            assert actual_vec[i] == pytest.approx(expected_vec[i], abs=1e-9)
+
+
+# ============================================================================
+# Quaternion math utilities (quat_from_rotvec, quat_multiply, quat_angle_between)
+# ============================================================================
+
+from pybullet_fleet.geometry import quat_from_rotvec, quat_multiply, quat_angle_between
+
+
+class TestNormalizeQuat:
+    """_normalize_quat helper rejects zero-norm and normalizes correctly."""
+
+    def test_zero_norm_raises(self):
+        """Zero quaternion should raise ValueError."""
+        from pybullet_fleet.geometry import _normalize_quat
+
+        with pytest.raises(ValueError, match="zero-norm"):
+            _normalize_quat((0.0, 0.0, 0.0, 0.0))
+
+    def test_unit_passthrough(self):
+        """Already-unit quaternion is returned unchanged (within tolerance)."""
+        from pybullet_fleet.geometry import _normalize_quat
+
+        q = (0.0, 0.0, 0.3827, 0.9239)
+        result = _normalize_quat(q)
+        for i in range(4):
+            assert result[i] == pytest.approx(q[i], abs=1e-4)
+
+    def test_scales_to_unit(self):
+        """Non-unit quaternion is scaled to norm 1."""
+        import math as _math
+
+        from pybullet_fleet.geometry import _normalize_quat
+
+        q = (2.0, 0.0, 0.0, 2.0)
+        result = _normalize_quat(q)
+        norm = _math.sqrt(sum(x * x for x in result))
+        assert norm == pytest.approx(1.0, abs=1e-12)
+
+
+class TestQuatToRotMatrixZero:
+    """quat_to_rot_matrix rejects zero-norm quaternion."""
+
+    def test_zero_quat_raises(self):
+        """quat_to_rot_matrix((0,0,0,0)) should raise ValueError."""
+        from pybullet_fleet.geometry import quat_to_rot_matrix
+
+        with pytest.raises(ValueError, match="zero-norm"):
+            quat_to_rot_matrix((0.0, 0.0, 0.0, 0.0))
+
+
+class TestQuatAngleBetweenNormalize:
+    """quat_angle_between normalizes inputs before computing dot product."""
+
+    def test_unnormalized_inputs(self):
+        """Scaled quaternions should give same angle as unit quaternions."""
+        import math as _math
+
+        q0 = (0.0, 0.0, 0.0, 2.0)  # 2× identity
+        q1_unit = tuple(R.from_euler("z", 90, degrees=True).as_quat())
+        q1 = tuple(x * 3.0 for x in q1_unit)  # 3× scaled
+        result = quat_angle_between(q0, q1)
+        assert result == pytest.approx(_math.pi / 2, abs=1e-9)
+
+
+class TestQuatFromRotvec:
+    """quat_from_rotvec converts axis*angle to (x, y, z, w) quaternion."""
+
+    def test_zero_vector(self):
+        """Zero rotation vector → identity quaternion."""
+        q = quat_from_rotvec((0.0, 0.0, 0.0))
+        assert q == pytest.approx((0.0, 0.0, 0.0, 1.0), abs=1e-12)
+
+    def test_matches_scipy(self):
+        """Random rotation vectors match scipy Rotation.from_rotvec."""
+        import random
+
+        random.seed(88)
+        for _ in range(20):
+            rv = [random.uniform(-3, 3) for _ in range(3)]
+            expected = R.from_rotvec(rv).as_quat()  # xyzw
+            actual = quat_from_rotvec(tuple(rv))
+            # q and -q are equivalent
+            if sum(a * b for a, b in zip(actual, expected)) < 0:
+                actual = tuple(-x for x in actual)
+            for i in range(4):
+                assert actual[i] == pytest.approx(expected[i], abs=1e-12)
+
+    def test_90_deg_z(self):
+        """90° around Z matches scipy."""
+        import math
+
+        rv = (0.0, 0.0, math.pi / 2)
+        expected = R.from_rotvec(rv).as_quat()
+        actual = quat_from_rotvec(rv)
+        for i in range(4):
+            assert actual[i] == pytest.approx(expected[i], abs=1e-12)
+
+
+class TestQuatMultiply:
+    """quat_multiply computes Hamilton product of two (x,y,z,w) quaternions."""
+
+    def test_identity_left(self):
+        """Identity * q = q."""
+        identity = (0.0, 0.0, 0.0, 1.0)
+        q = (0.1, 0.2, 0.3, 0.9)
+        result = quat_multiply(identity, q)
+        assert result == pytest.approx(q, abs=1e-12)
+
+    def test_identity_right(self):
+        """q * identity = q."""
+        identity = (0.0, 0.0, 0.0, 1.0)
+        q = (0.1, 0.2, 0.3, 0.9)
+        result = quat_multiply(q, identity)
+        assert result == pytest.approx(q, abs=1e-12)
+
+    def test_matches_scipy(self):
+        """Random products match scipy (R1 * R2).as_quat()."""
+        import random
+
+        random.seed(55)
+        for _ in range(20):
+            q1 = [random.gauss(0, 1) for _ in range(4)]
+            n1 = sum(x * x for x in q1) ** 0.5
+            q1 = [x / n1 for x in q1]
+            q2 = [random.gauss(0, 1) for _ in range(4)]
+            n2 = sum(x * x for x in q2) ** 0.5
+            q2 = [x / n2 for x in q2]
+
+            expected = (R.from_quat(q1) * R.from_quat(q2)).as_quat()
+            actual = quat_multiply(tuple(q1), tuple(q2))
+            if sum(a * b for a, b in zip(actual, expected)) < 0:
+                actual = tuple(-x for x in actual)
+            for i in range(4):
+                assert actual[i] == pytest.approx(expected[i], abs=1e-12)
+
+
+class TestQuatAngleBetween:
+    """quat_angle_between returns the rotation angle between two quaternions."""
+
+    def test_same_quat(self):
+        """Angle between identical quaternions is 0."""
+        q = tuple(R.from_euler("z", 45, degrees=True).as_quat())
+        assert quat_angle_between(q, q) == pytest.approx(0.0, abs=1e-9)
+
+    def test_antipodal_quat(self):
+        """q and -q represent the same rotation → angle = 0."""
+        q = tuple(R.from_euler("z", 45, degrees=True).as_quat())
+        q_neg = tuple(-x for x in q)
+        assert quat_angle_between(q, q_neg) == pytest.approx(0.0, abs=1e-9)
+
+    def test_90_degrees(self):
+        """90° rotation between identity and 90° yaw."""
+        import math
+
+        q0 = (0.0, 0.0, 0.0, 1.0)
+        q1 = tuple(R.from_euler("z", 90, degrees=True).as_quat())
+        assert quat_angle_between(q0, q1) == pytest.approx(math.pi / 2, abs=1e-9)
+
+    def test_matches_scipy(self):
+        """Random pairs match scipy (r_target * r_current.inv()).magnitude()."""
+        import random
+
+        random.seed(66)
+        for _ in range(20):
+            q0 = [random.gauss(0, 1) for _ in range(4)]
+            n0 = sum(x * x for x in q0) ** 0.5
+            q0 = [x / n0 for x in q0]
+            q1 = [random.gauss(0, 1) for _ in range(4)]
+            n1 = sum(x * x for x in q1) ** 0.5
+            q1 = [x / n1 for x in q1]
+
+            expected = (R.from_quat(q1) * R.from_quat(q0).inv()).magnitude()
+            actual = quat_angle_between(tuple(q0), tuple(q1))
+            assert actual == pytest.approx(expected, abs=1e-9)

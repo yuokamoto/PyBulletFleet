@@ -12,6 +12,9 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+from pybullet_fleet.geometry import rotate_vector  # used by body_to_world_velocity_3d
+
+
 def body_to_world_velocity_2d(
     vx_body: float,
     vy_body: float,
@@ -65,24 +68,7 @@ def body_to_world_velocity_3d(
         >>> body_to_world_velocity_3d(1.0, 0.0, 0.0, tuple(q))
         (0.0, 1.0, 0.0)
     """
-    # Use lightweight quaternion rotation via rotation matrix to avoid
-    # SciPy Rotation object allocation on every call (hot-path friendly).
-    qx, qy, qz, qw = orientation
-    # Rotation matrix from quaternion (row-major, same convention as PyBullet)
-    r00 = 1.0 - 2.0 * (qy * qy + qz * qz)
-    r01 = 2.0 * (qx * qy - qz * qw)
-    r02 = 2.0 * (qx * qz + qy * qw)
-    r10 = 2.0 * (qx * qy + qz * qw)
-    r11 = 1.0 - 2.0 * (qx * qx + qz * qz)
-    r12 = 2.0 * (qy * qz - qx * qw)
-    r20 = 2.0 * (qx * qz - qy * qw)
-    r21 = 2.0 * (qy * qz + qx * qw)
-    r22 = 1.0 - 2.0 * (qx * qx + qy * qy)
-
-    wx = r00 * vx_body + r01 * vy_body + r02 * vz_body
-    wy = r10 * vx_body + r11 * vy_body + r12 * vz_body
-    wz = r20 * vx_body + r21 * vy_body + r22 * vz_body
-    return wx, wy, wz
+    return rotate_vector((vx_body, vy_body, vz_body), orientation)
 
 
 def normalize_vector_param(value: Union[float, List[float]], param_name: str, dim: int = 3) -> np.ndarray:

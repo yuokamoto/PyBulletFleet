@@ -535,22 +535,27 @@ class TestBodyToWorldVelocity3D:
         assert vy == pytest.approx(0.0, abs=1e-9)
         assert vz == pytest.approx(1.0, abs=1e-9)
 
-    def test_no_scipy_import(self):
-        """Implementation must not import scipy (performance)."""
-        import inspect
+    def test_matches_scipy_random(self):
+        """Results match scipy Rotation.apply for random quaternions."""
+        from scipy.spatial.transform import Rotation
         from pybullet_fleet.tools import body_to_world_velocity_3d
 
-        source = inspect.getsource(body_to_world_velocity_3d)
-        # Ignore docstring lines — only check executable code
-        in_docstring = False
-        for line in source.splitlines():
-            stripped = line.strip()
-            if '"""' in stripped or "'''" in stripped:
-                in_docstring = not in_docstring
-                continue
-            if in_docstring:
-                continue
-            assert "scipy" not in stripped, f"scipy found in executable code: {stripped}"
+        import random
+
+        random.seed(42)
+        for _ in range(20):
+            # Random unit quaternion
+            q = [random.gauss(0, 1) for _ in range(4)]
+            norm = sum(x * x for x in q) ** 0.5
+            q = [x / norm for x in q]
+            v = [random.uniform(-10, 10) for _ in range(3)]
+
+            expected = Rotation.from_quat(q).apply(v)
+            actual = body_to_world_velocity_3d(v[0], v[1], v[2], tuple(q))
+
+            assert actual[0] == pytest.approx(expected[0], abs=1e-9)
+            assert actual[1] == pytest.approx(expected[1], abs=1e-9)
+            assert actual[2] == pytest.approx(expected[2], abs=1e-9)
 
 
 if __name__ == "__main__":
