@@ -10,6 +10,43 @@ Jump directly to the topic you need — each tutorial lists its prerequisites
 at the top so you can backtrack only when necessary.
 ```
 
+## Switching Robot Models with `--robot`
+
+Most demo scripts accept a `--robot` argument to swap the robot model at runtime.
+Pass a model name (resolved via `resolve_urdf()`) or a direct URDF path.
+The model should be compatible with the demo category — arm models for arm demos,
+mobile models for mobile demos:
+
+```bash
+# Arm demos — pass arm models (default: panda)
+python examples/arm/pick_drop_arm_demo.py --robot kuka_iiwa
+
+# Mobile demos — pass mobile models (default: husky)
+python examples/mobile/path_following_demo.py --robot racecar
+
+# Scale demos
+python examples/scale/100robots_cube_patrol_demo.py --robot mobile_robot
+python examples/scale/pick_drop_arm_100robots_demo.py --robot kuka_iiwa
+
+# Grid demo — has both --robot (mobile) and --arm-robot (arm)
+python examples/scale/100robots_grid_demo.py --robot racecar --arm-robot kuka_iiwa
+```
+
+| Category | Scripts | Argument | Default | Alternatives |
+|----------|---------|----------|---------|-------------|
+| Arm demos | `examples/arm/pick_drop_arm_*.py`, `rail_arm_demo.py` | `--robot` | `panda` | `kuka_iiwa`, `arm_robot` |
+| Mobile demos | `examples/mobile/path_following_demo.py` | `--robot` | `husky` | `racecar`, `mobile_robot` |
+| Scale (mobile) | `100robots_cube_patrol_demo.py`, `pick_drop_mobile_100robots_demo.py` | `--robot` | `husky` | `racecar`, `mobile_robot` |
+| Scale (arm) | `pick_drop_arm_100robots_demo.py` | `--robot` | `panda` | `kuka_iiwa`, `arm_robot` |
+| Grid demo | `100robots_grid_demo.py` | `--robot` | `husky` | `racecar`, `mobile_robot` |
+| Grid demo | `100robots_grid_demo.py` | `--arm-robot` | `panda` | `kuka_iiwa`, `arm_robot` |
+| Model demos | `resolve_urdf_demo.py` | `--robot` | `panda` | any registered model |
+| Model demos | `robot_descriptions_demo.py` | `--robot` | `tiago` | any `robot_descriptions` model |
+
+Model names are resolved by `resolve_urdf()` — see [Tutorial 6 — Robot Models](robot-models)
+for the full resolution system and `python examples/models/resolve_urdf_demo.py --list`
+for all available names.
+
 ## Which tutorial should I read?
 
 | I want to… | Start here |
@@ -21,6 +58,7 @@ at the top so you can backtrack only when necessary.
 | Control an arm by end-effector position (IK) | [Tutorial 5 — EE Control & IK](arm-ee-control) |
 | Use IK on a mobile manipulator (base + arm) | [Tutorial 5 §6 — Mobile Manipulator IK](arm-ee-control) |
 | Load a robot by name from multiple sources | [Tutorial 6 — Robot Models](robot-models) |
+| Switch robot models in demos with `--robot` | [Tutorial 6 §6 — The `--robot` Argument](robot-models) |
 
 ```{toctree}
 :maxdepth: 1

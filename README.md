@@ -51,6 +51,27 @@ pip install -e ".[dev]"
 python examples/scale/100robots_grid_demo.py
 ```
 
+Most demo scripts accept a `--robot` argument to swap the robot model.
+Pass a model name (resolved via `resolve_urdf()`) or a direct URDF path:
+
+```bash
+python examples/scale/100robots_grid_demo.py --robot racecar
+python examples/arm/pick_drop_arm_demo.py --robot kuka_iiwa
+python examples/models/resolve_urdf_demo.py --list
+```
+
+| Category | Scripts | `--robot` default | Alternatives |
+|----------|---------|-------------------|-------------|
+| Arm demos | `examples/arm/pick_drop_arm_*.py`, `rail_arm_demo.py` | `panda` | `kuka_iiwa`, `arm_robot` |
+| Mobile demos | `examples/mobile/path_following_demo.py` | `husky` | `racecar`, `mobile_robot` |
+| Scale demos (mobile) | `100robots_cube_patrol_demo.py`, `pick_drop_mobile_100robots_demo.py` | `husky` | `racecar`, `mobile_robot` |
+| Scale demos (arm) | `pick_drop_arm_100robots_demo.py` | `panda` | `kuka_iiwa`, `arm_robot` |
+| Model demos | `resolve_urdf_demo.py`, `robot_descriptions_demo.py` | `panda` / `tiago` | any registered model |
+
+`100robots_grid_demo.py` has two arguments: `--robot` for the mobile robot (default: `husky`) and `--arm-robot` for the arm (default: `panda`).
+
+See [Tutorial 6 — Robot Models](https://pybulletfleet.readthedocs.io/en/latest/examples/robot-models.html) for the full model resolution system.
+
 ## Performance
 
 <!-- sync with docs/benchmarking/results.md -->

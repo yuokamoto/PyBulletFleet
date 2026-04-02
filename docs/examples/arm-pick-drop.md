@@ -259,6 +259,22 @@ python examples/arm/mobile_manipulator_demo.py
 Both single-arm demos use kinematic mode by default (`physics=False`). To switch to physics mode,
 change the `SimulationParams` line at the top of the file.
 
+### Switching Robot Models
+
+All arm demos accept a `--robot` argument to swap the arm model.
+Pass an arm model name or a direct URDF path:
+
+```bash
+python examples/arm/pick_drop_arm_demo.py --robot kuka_iiwa
+python examples/arm/pick_drop_arm_action_demo.py --robot arm_robot
+```
+
+| `--robot` default | Alternatives |
+|-------------------|-------------|
+| `panda` | `kuka_iiwa`, `arm_robot` |
+
+See [Tutorial 6 — Robot Models](robot-models) for the full model resolution system.
+
 The 100-arm demo combines `AgentManager` / `GridSpawnParams` (see
 [Tutorial 3](multi-robot-fleet)) with `JointAction` for fleet-scale arm control.
 

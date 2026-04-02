@@ -261,6 +261,42 @@ python examples/models/resolve_urdf_demo.py --list
 python examples/models/model_catalog_demo.py
 ```
 
+### The `--robot` Argument
+
+Most example scripts across the project accept a `--robot` argument to swap the
+robot model at runtime.  The value is passed to `resolve_urdf()`, so you can use
+a registered model name or a direct URDF path — as long as the model is compatible
+with the demo (e.g., arm models for arm demos, mobile models for mobile demos):
+
+```bash
+# Arm demos — pass arm models (default: panda)
+python examples/arm/pick_drop_arm_demo.py --robot kuka_iiwa
+
+# Mobile demos — pass mobile models (default: husky)
+python examples/mobile/path_following_demo.py --robot racecar
+
+# Scale demos
+python examples/scale/100robots_cube_patrol_demo.py --robot mobile_robot
+python examples/scale/pick_drop_arm_100robots_demo.py --robot kuka_iiwa
+
+# Grid demo has both --robot (mobile) and --arm-robot (arm)
+python examples/scale/100robots_grid_demo.py --robot racecar --arm-robot kuka_iiwa
+
+# Model demos — accepts any registered model
+python examples/models/robot_descriptions_demo.py --robot pr2
+```
+
+| Category | Argument | Default | Alternatives |
+|----------|----------|---------|-------------|
+| Arm demos (`examples/arm/`) | `--robot` | `panda` | `kuka_iiwa`, `arm_robot` |
+| Mobile demos (`examples/mobile/`) | `--robot` | `husky` | `racecar`, `mobile_robot` |
+| Scale demos — mobile | `--robot` | `husky` | `racecar`, `mobile_robot` |
+| Scale demos — arm | `--robot` | `panda` | `kuka_iiwa`, `arm_robot` |
+| `100robots_grid_demo.py` | `--robot` (mobile) | `husky` | `racecar`, `mobile_robot` |
+| `100robots_grid_demo.py` | `--arm-robot` (arm) | `panda` | `kuka_iiwa`, `arm_robot` |
+| `resolve_urdf_demo.py` | `--robot` | `panda` | any registered model |
+| `robot_descriptions_demo.py` | `--robot` | `tiago` | any `robot_descriptions` model |
+
 ---
 
 (custom-search-paths)=

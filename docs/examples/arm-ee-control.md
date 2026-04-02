@@ -359,6 +359,22 @@ python examples/arm/mobile_manipulator_demo.py
 
 Both single-arm EE demos use kinematic mode for fast execution.
 
+### Switching Robot Models
+
+All EE demos accept a `--robot` argument to swap the arm model.
+Pass an arm model name or a direct URDF path:
+
+```bash
+python examples/arm/pick_drop_arm_ee_action_demo.py --robot kuka_iiwa
+python examples/arm/pick_drop_arm_ee_demo.py --robot arm_robot
+```
+
+| `--robot` default | Alternatives |
+|-------------------|-------------|
+| `panda` | `kuka_iiwa`, `arm_robot` |
+
+See [Tutorial 6 — Robot Models](robot-models) for the full model resolution system.
+
 ---
 
 ## 9. Prismatic Joints & Rail Arms
