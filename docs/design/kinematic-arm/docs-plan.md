@@ -24,8 +24,8 @@ Write a new tutorial page covering both arm demos. Structure:
 # Tutorial 4: Robot Arm — Joint Control & Pick/Drop
 
 **Source files:**
-- [`examples/pick_drop_arm_demo.py`](https://github.com/yuokamoto/PyBulletFleet/blob/main/examples/pick_drop_arm_demo.py) — low-level callback approach
-- [`examples/pick_drop_arm_action_demo.py`](https://github.com/yuokamoto/PyBulletFleet/blob/main/examples/pick_drop_arm_action_demo.py) — action-queue approach
+- [`examples/arm/pick_drop_arm_demo.py`](https://github.com/yuokamoto/PyBulletFleet/blob/main/examples/arm/pick_drop_arm_demo.py) — low-level callback approach
+- [`examples/arm/pick_drop_arm_action_demo.py`](https://github.com/yuokamoto/PyBulletFleet/blob/main/examples/arm/pick_drop_arm_action_demo.py) — action-queue approach
 
 This tutorial demonstrates **fixed-base robot arm** simulation: controlling joints,
 picking up objects at the end-effector, and dropping them at target locations.
@@ -193,10 +193,10 @@ JointAction(
 
 ```bash
 # Low-level callback approach
-python examples/pick_drop_arm_demo.py
+python examples/arm/pick_drop_arm_demo.py
 
 # Action-queue approach
-python examples/pick_drop_arm_action_demo.py
+python examples/arm/pick_drop_arm_action_demo.py
 ```
 
 Both demos support switching between kinematic and physics mode by changing the

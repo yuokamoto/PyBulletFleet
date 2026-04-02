@@ -48,8 +48,29 @@ pip install -e ".[dev]"
 
 ```bash
 # If installed from source:
-python examples/100robots_grid_demo.py
+python examples/scale/100robots_grid_demo.py
 ```
+
+Most demo scripts accept a `--robot` argument to swap the robot model.
+Pass a model name (resolved via `resolve_urdf()`) or a direct URDF path:
+
+```bash
+python examples/scale/100robots_grid_demo.py --robot racecar
+python examples/arm/pick_drop_arm_demo.py --robot kuka_iiwa
+python examples/models/resolve_urdf_demo.py --list
+```
+
+| Category | Scripts | `--robot` default | Alternatives |
+|----------|---------|-------------------|-------------|
+| Arm demos | `examples/arm/pick_drop_arm_*.py`, `rail_arm_demo.py` | `panda` | `kuka_iiwa`, `arm_robot` |
+| Mobile demos | `examples/mobile/path_following_demo.py` | `husky` | `racecar`, `mobile_robot` |
+| Scale demos (mobile) | `100robots_cube_patrol_demo.py`, `pick_drop_mobile_100robots_demo.py` | `husky` | `racecar`, `mobile_robot` |
+| Scale demos (arm) | `pick_drop_arm_100robots_demo.py` | `panda` | `kuka_iiwa`, `arm_robot` |
+| Model demos | `resolve_urdf_demo.py`, `robot_descriptions_demo.py` | `panda` / `tiago` | any registered model |
+
+`100robots_grid_demo.py` has two arguments: `--robot` for the mobile robot (default: `husky`) and `--arm-robot` for the arm (default: `panda`).
+
+See [Tutorial 6 — Robot Models](https://pybulletfleet.readthedocs.io/en/latest/examples/robot-models.html) for the full model resolution system.
 
 ## Performance
 
@@ -64,6 +85,31 @@ python examples/100robots_grid_demo.py
 | 2000   | 1.1×| 94.8 ms |
 
 Kinematics mode (physics OFF), headless. See [Benchmark Results](benchmark/README.md#benchmark-results) for full data, component breakdown, and methodology.
+
+## Robot Models
+
+PyBulletFleet includes a model resolution system that loads robots **by name** from multiple sources:
+
+```python
+from pybullet_fleet import MultiRobotSimulationCore, Agent, Pose, resolve_urdf
+
+sim = MultiRobotSimulationCore()
+
+# Resolve by name — searches local robots/, pybullet_data, robot_descriptions
+urdf = resolve_urdf("panda")
+
+# Agent.from_urdf() calls resolve_urdf() internally
+agent = Agent.from_urdf(urdf_path="panda", pose=Pose.from_xyz(0, 0, 0), sim_core=sim)
+```
+
+| Tier | Source | Example models |
+|------|--------|---------------|
+| 0 — local | `robots/` directory | arm_robot, mobile_robot, mobile_manipulator |
+| 1 — pybullet_data | PyBullet bundled | panda, kuka_iiwa, r2d2 |
+| 2 — ROS | ROS install paths | (future) |
+| 3 — robot_descriptions | pip package | tiago, pr2 (`pip install robot_descriptions`) |
+
+Run `python examples/models/resolve_urdf_demo.py --list` to see all registered models and their availability.
 
 ## Documentation
 

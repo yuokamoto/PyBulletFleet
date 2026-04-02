@@ -1,5 +1,6 @@
 """Shared fixtures for all test modules."""
 
+from contextlib import contextmanager
 from types import SimpleNamespace
 
 import pybullet as p
@@ -49,6 +50,11 @@ class MockSimCore:
 
     def _mark_object_moved(self, object_id):
         pass
+
+    @contextmanager
+    def batch_spawn(self):
+        """No-op batch_spawn context for tests (mirrors MultiRobotSimulationCore)."""
+        yield
 
     def register_callback(self, callback, frequency=None):
         """Record registered callbacks (used by AgentManager tests)."""

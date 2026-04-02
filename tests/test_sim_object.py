@@ -14,6 +14,7 @@ import os
 from typing import Any
 
 import pybullet as p
+import pytest
 
 from pybullet_fleet.sim_object import SimObject, SimObjectSpawnParams, ShapeParams
 from pybullet_fleet.geometry import Pose
@@ -269,6 +270,132 @@ class TestSimObjectCreationFromParams:
         """Test rgba_color attribute on visual shape (no PyBullet needed)"""
         shape = ShapeParams(shape_type="sphere", radius=0.5, rgba_color=[1, 0, 0, 1])
         assert shape.rgba_color == [1, 0, 0, 1]
+
+    def test_from_dict_full(self):
+        """from_dict creates ShapeParams from a complete dict."""
+        d = {
+            "shape_type": "box",
+            "half_extents": [0.3, 0.3, 0.1],
+            "rgba_color": [1.0, 0.0, 0.0, 1.0],
+        }
+        shape = ShapeParams.from_dict(d)
+        assert shape.shape_type == "box"
+        assert shape.half_extents == [0.3, 0.3, 0.1]
+        assert shape.rgba_color == [1.0, 0.0, 0.0, 1.0]
+
+    def test_from_dict_defaults(self):
+        """from_dict fills defaults for missing keys."""
+        shape = ShapeParams.from_dict({"shape_type": "sphere"})
+        assert shape.radius == 0.5
+        assert shape.mesh_scale == [1.0, 1.0, 1.0]
+        assert shape.rgba_color == [0.8, 0.8, 0.8, 1.0]
+
+    def test_from_dict_mesh(self):
+        """from_dict handles mesh shape with path and scale."""
+        d = {"shape_type": "mesh", "mesh_path": "obj/tote.obj", "mesh_scale": [2, 2, 2]}
+        shape = ShapeParams.from_dict(d)
+        assert shape.mesh_path == "obj/tote.obj"
+        assert shape.mesh_scale == [2, 2, 2]
+
+
+class TestSimObjectSpawnParamsFromDict:
+    """SimObjectSpawnParams.from_dict() creates params from raw YAML dicts."""
+
+    def test_minimal_defaults(self):
+        """Minimal dict with only name produces correct defaults."""
+        result = SimObjectSpawnParams.from_dict({"name": "box0"})
+        assert result.name == "box0"
+        assert result.mass == 0.0
+        assert result.pickable is True
+        assert result.visual_shape is None
+        assert result.collision_shape is None
+        assert result.initial_pose.x == pytest.approx(0.0)
+
+    def test_pose_and_yaw(self):
+        """pose list + yaw are converted to Pose."""
+        result = SimObjectSpawnParams.from_dict({"name": "b", "pose": [3.0, 1.0, 0.15], "yaw": 1.57})
+        assert result.initial_pose.x == pytest.approx(3.0)
+        assert result.initial_pose.y == pytest.approx(1.0)
+        assert result.initial_pose.z == pytest.approx(0.15)
+        assert result.initial_pose.yaw == pytest.approx(1.57)
+
+    def test_shape_dicts_parsed(self):
+        """visual_shape / collision_shape raw dicts become ShapeParams."""
+        d = {
+            "name": "crate",
+            "visual_shape": {"shape_type": "box", "half_extents": [0.5, 0.3, 0.2]},
+            "collision_shape": {"shape_type": "sphere", "radius": 0.3},
+        }
+        result = SimObjectSpawnParams.from_dict(d)
+        assert isinstance(result.visual_shape, ShapeParams)
+        assert result.visual_shape.shape_type == "box"
+        assert isinstance(result.collision_shape, ShapeParams)
+        assert result.collision_shape.radius == pytest.approx(0.3)
+
+    def test_missing_name_raises(self):
+        """Missing name raises ValueError."""
+        with pytest.raises(ValueError, match="missing required 'name'"):
+            SimObjectSpawnParams.from_dict({"mass": 1.0})
+
+    def test_all_collision_modes(self):
+        """All collision mode strings correctly converted to enum."""
+        for mode_str, expected in [
+            ("normal_3d", CollisionMode.NORMAL_3D),
+            ("normal_2d", CollisionMode.NORMAL_2D),
+            ("static", CollisionMode.STATIC),
+            ("disabled", CollisionMode.DISABLED),
+        ]:
+            result = SimObjectSpawnParams.from_dict({"name": "obj", "collision_mode": mode_str})
+            assert result.collision_mode == expected
+
+    def test_initial_pose_takes_precedence(self):
+        """initial_pose Pose object takes precedence over pose list."""
+        result = SimObjectSpawnParams.from_dict(
+            {
+                "name": "obj",
+                "pose": [99, 99, 99],
+                "initial_pose": Pose.from_xyz(1.0, 2.0, 3.0),
+            }
+        )
+        assert result.initial_pose.x == pytest.approx(1.0)
+
+    def test_pose_too_short_raises(self):
+        """pose list with fewer than 3 elements raises ValueError."""
+        with pytest.raises(ValueError, match="[Pp]ose"):
+            SimObjectSpawnParams.from_dict({"name": "bad", "pose": [1.0, 2.0]})
+
+    def test_pose_wrong_type_raises(self):
+        """pose as a non-sequence (e.g. scalar) raises ValueError."""
+        with pytest.raises((ValueError, TypeError)):
+            SimObjectSpawnParams.from_dict({"name": "bad", "pose": 42})
+
+    def test_visual_shape_bad_type_raises(self):
+        """visual_shape as a string raises TypeError."""
+        with pytest.raises(TypeError, match="visual_shape"):
+            SimObjectSpawnParams.from_dict({"name": "bad", "visual_shape": "box"})
+
+    def test_collision_shape_bad_type_raises(self):
+        """collision_shape as a string raises TypeError."""
+        with pytest.raises(TypeError, match="collision_shape"):
+            SimObjectSpawnParams.from_dict({"name": "bad", "collision_shape": 123})
+
+
+class TestSimObjectFromDict:
+    """SimObject.from_dict creates instance directly from config dict."""
+
+    def test_subclass_returns_subclass(self, pybullet_env):
+        """Subclass.from_dict returns an instance of the subclass."""
+
+        class CustomObject(SimObject):
+            pass
+
+        config = {
+            "name": "custom0",
+            "visual_shape": {"shape_type": "box", "half_extents": [0.1, 0.1, 0.1]},
+            "collision_shape": {"shape_type": "box", "half_extents": [0.1, 0.1, 0.1]},
+        }
+        obj = CustomObject.from_dict(config)
+        assert isinstance(obj, CustomObject)
 
 
 class TestSimObjectPose:

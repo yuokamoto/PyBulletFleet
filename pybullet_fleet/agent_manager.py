@@ -8,6 +8,7 @@ Management classes for simulation objects and agents.
 import logging
 import random
 import time
+from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from typing import Any, Callable, Dict, Generic, List, Optional, Tuple, TypeVar, Union
 
@@ -16,6 +17,13 @@ from .sim_object import SimObject, SimObjectSpawnParams
 from .tools import grid_to_world
 
 logger = logging.getLogger(__name__)
+
+
+@contextmanager
+def _nullctx():
+    """Trivial context manager (no-op) for fallback when sim_core has no batch_spawn."""
+    yield
+
 
 # Type variable for generic SimObjectManager
 T = TypeVar("T", bound=SimObject)
@@ -50,6 +58,35 @@ class GridSpawnParams:
     offset: List[float]  # [offset_x, offset_y, offset_z]
     z_min: int = 0
     z_max: int = 0
+
+    @classmethod
+    def from_dict(cls, config: Dict[str, Any]) -> "GridSpawnParams":
+        """Create GridSpawnParams from a configuration dictionary.
+
+        Required keys: ``x_min``, ``x_max``, ``y_min``, ``y_max``,
+        ``spacing``, ``offset``.
+
+        Optional keys: ``z_min`` (default 0), ``z_max`` (default 0).
+
+        Args:
+            config: Configuration dictionary.
+
+        Returns:
+            GridSpawnParams instance.
+
+        Raises:
+            KeyError: If a required key is missing.
+        """
+        return cls(
+            x_min=config["x_min"],
+            x_max=config["x_max"],
+            y_min=config["y_min"],
+            y_max=config["y_max"],
+            spacing=config["spacing"],
+            offset=config["offset"],
+            z_min=config.get("z_min", 0),
+            z_max=config.get("z_max", 0),
+        )
 
 
 class SimObjectManager(Generic[T]):
@@ -211,53 +248,55 @@ class SimObjectManager(Generic[T]):
         current_y = y_min
         current_z = z_min
 
-        for i in range(num_objects):
-            # Calculate grid position
-            spawn_grid = [current_x, current_y, current_z]
-            spawn_pos = grid_to_world(spawn_grid, spacing, offset)
+        ctx = self.sim_core.batch_spawn() if self.sim_core and hasattr(self.sim_core, "batch_spawn") else _nullctx()
+        with ctx:
+            for i in range(num_objects):
+                # Calculate grid position
+                spawn_grid = [current_x, current_y, current_z]
+                spawn_pos = grid_to_world(spawn_grid, spacing, offset)
 
-            # Randomly select spawn params based on probabilities
-            rand = random.random()
-            cumulative_prob = 0.0
-            selected_params = None
+                # Randomly select spawn params based on probabilities
+                rand = random.random()
+                cumulative_prob = 0.0
+                selected_params = None
 
-            for spawn_params, prob in spawn_params_list:
-                cumulative_prob += prob
-                if rand < cumulative_prob:
-                    selected_params = spawn_params
-                    break
-
-            # If selected, spawn object
-            if selected_params is not None:
-                spawn_pose = self._make_spawn_pose(selected_params, spawn_pos)
-
-                # Create a copy of spawn_params with the calculated pose
-                grid_spawn_params = replace(selected_params, initial_pose=spawn_pose)
-
-                # Spawn object using from_params()
-                obj = cls.from_params(spawn_params=grid_spawn_params, sim_core=self.sim_core)
-
-                # Track object
-                self.add_object(obj)
-                spawned_objects.append(obj)
-
-            # Increment grid position: X → Y → Z
-            current_x += 1
-            if current_x > x_max:
-                current_x = x_min
-                current_y += 1
-                if current_y > y_max:
-                    current_y = y_min
-                    current_z += 1
-                    if current_z > z_max:
-                        # Grid exhausted
-                        if i < num_objects - 1:
-                            logger.warning(
-                                "Grid exhausted after %d iterations (requested %d)",
-                                i + 1,
-                                num_objects,
-                            )
+                for spawn_params, prob in spawn_params_list:
+                    cumulative_prob += prob
+                    if rand < cumulative_prob:
+                        selected_params = spawn_params
                         break
+
+                # If selected, spawn object
+                if selected_params is not None:
+                    spawn_pose = self._make_spawn_pose(selected_params, spawn_pos)
+
+                    # Create a copy of spawn_params with the calculated pose
+                    grid_spawn_params = replace(selected_params, initial_pose=spawn_pose)
+
+                    # Spawn object using from_params()
+                    obj = cls.from_params(spawn_params=grid_spawn_params, sim_core=self.sim_core)
+
+                    # Track object
+                    self.add_object(obj)
+                    spawned_objects.append(obj)
+
+                # Increment grid position: X → Y → Z
+                current_x += 1
+                if current_x > x_max:
+                    current_x = x_min
+                    current_y += 1
+                    if current_y > y_max:
+                        current_y = y_min
+                        current_z += 1
+                        if current_z > z_max:
+                            # Grid exhausted
+                            if i < num_objects - 1:
+                                logger.warning(
+                                    "Grid exhausted after %d iterations (requested %d)",
+                                    i + 1,
+                                    num_objects,
+                                )
+                            break
 
         if start is not None:
             elapsed = time.perf_counter() - start
@@ -331,13 +370,15 @@ class SimObjectManager(Generic[T]):
         # Remaining grid cells are simply left empty.
         cls = self._object_class
         spawned_objects: List[T] = []
-        for params, coord in zip(flat_params, grid_coords):
-            spawn_pos = grid_to_world(coord, grid_params.spacing, grid_params.offset)
-            spawn_pose = self._make_spawn_pose(params, spawn_pos)
-            grid_spawn_params = replace(params, initial_pose=spawn_pose)
-            obj = cls.from_params(spawn_params=grid_spawn_params, sim_core=self.sim_core)
-            self.add_object(obj)
-            spawned_objects.append(obj)
+        ctx = self.sim_core.batch_spawn() if self.sim_core and hasattr(self.sim_core, "batch_spawn") else _nullctx()
+        with ctx:
+            for params, coord in zip(flat_params, grid_coords):
+                spawn_pos = grid_to_world(coord, grid_params.spacing, grid_params.offset)
+                spawn_pose = self._make_spawn_pose(params, spawn_pos)
+                grid_spawn_params = replace(params, initial_pose=spawn_pose)
+                obj = cls.from_params(spawn_params=grid_spawn_params, sim_core=self.sim_core)
+                self.add_object(obj)
+                spawned_objects.append(obj)
 
         if start is not None:
             elapsed = time.perf_counter() - start
@@ -351,19 +392,95 @@ class SimObjectManager(Generic[T]):
     def spawn_objects_batch(self, params_list: List[SimObjectSpawnParams]) -> List[T]:
         """
         Batch API to spawn multiple object instances at once.
-        params_list: List of spawn params for each object
-        Returns: List of created object instances
+
+        When *sim_core* provides :meth:`batch_spawn`, rendering is disabled
+        and the spatial grid rebuild is deferred until all objects are created.
+
+        Args:
+            params_list: List of spawn params for each object.
+
+        Returns:
+            List of created object instances.
         """
         start = time.perf_counter() if self.enable_profiling else None
         objects = []
-        for params in params_list:
-            obj = self._object_class.from_params(params, sim_core=self.sim_core)
-            self.add_object(obj)
-            objects.append(obj)
+        ctx = self.sim_core.batch_spawn() if self.sim_core and hasattr(self.sim_core, "batch_spawn") else _nullctx()
+        with ctx:
+            for params in params_list:
+                obj = self._object_class.from_params(params, sim_core=self.sim_core)
+                self.add_object(obj)
+                objects.append(obj)
         if start is not None:
             elapsed = time.perf_counter() - start
             logger.info("spawn_objects_batch: %d objects in %.3f sec", len(params_list), elapsed)
         return objects
+
+    # ------------------------------------------------------------------
+    # Config-driven spawning
+    # ------------------------------------------------------------------
+    def spawn_from_config(self, entities_yaml: List[Dict[str, Any]]) -> List[T]:
+        """Spawn entities from a list of config dicts.
+
+        Dispatches to :meth:`entity_cls.from_dict` for each entity, which
+        internally calls the appropriate ``SpawnParams.from_dict`` and
+        ``from_params``.  Custom entity classes can override ``from_dict``
+        to use their own ``SpawnParams``.
+
+        If a dict has no ``type`` field, ``"agent"`` is assumed for backward
+        compatibility.  Supported types: ``"agent"``, ``"sim_object"``, or any
+        custom type registered via :func:`register_entity_class`.
+
+        Args:
+            entities_yaml: List of entity definition dicts (from YAML).
+                Each dict may omit ``type`` (defaults to ``"agent"``).
+
+        Returns:
+            Flat list of all spawned objects in definition order.
+
+        Raises:
+            KeyError: If ``type`` is not registered in the entity registry.
+        """
+        from .entity_registry import ENTITY_REGISTRY
+
+        enriched = [{**d, "type": d.get("type", "agent")} for d in entities_yaml]
+
+        result: List[T] = []
+        ctx = self.sim_core.batch_spawn() if self.sim_core and hasattr(self.sim_core, "batch_spawn") else _nullctx()
+        with ctx:
+            for entity_def in enriched:
+                entity_type = entity_def["type"]
+                if entity_type not in ENTITY_REGISTRY:
+                    raise KeyError(f"Unknown entity type: {entity_type!r}. " f"Available: {list(ENTITY_REGISTRY)}")
+                entity_cls = ENTITY_REGISTRY[entity_type]
+
+                obj = entity_cls.from_dict(entity_def, sim_core=self.sim_core)
+                self.add_object(obj)
+                result.append(obj)  # type: ignore[arg-type]
+
+        return result
+
+    def spawn_from_yaml(self, yaml_path: str, key: str = "robots") -> List[T]:
+        """Load a YAML file and spawn entities from the specified section.
+
+        Reads *yaml_path*, extracts the *key* section (default ``"robots"``),
+        and delegates to :meth:`spawn_from_config`.
+
+        Args:
+            yaml_path: Path to YAML config file.
+            key: Top-level YAML key containing the entity list.
+                 Default ``"robots"``.
+
+        Returns:
+            List of spawned objects (empty if *key* is missing).
+
+        Raises:
+            FileNotFoundError: If *yaml_path* does not exist.
+        """
+        from .config_utils import load_yaml_config
+
+        config = load_yaml_config(yaml_path)
+        section = config.get(key, [])
+        return self.spawn_from_config(section)
 
     def get_pose(self, object_index: int) -> Optional[Pose]:
         """

@@ -1,8 +1,51 @@
 # Examples
 
-Three step-by-step tutorials that walk through the core PyBulletFleet APIs.
+Six tutorials that walk through the core PyBulletFleet APIs.
 Each tutorial is based on a runnable script in `examples/` — you can open the file,
 run it, and follow along in the docs at the same time.
+
+```{tip}
+Tutorials are numbered for reference, **not as a required reading order**.
+Jump directly to the topic you need — each tutorial lists its prerequisites
+at the top so you can backtrack only when necessary.
+```
+
+## Switching Robot Models with `--robot`
+
+Most demo scripts accept a `--robot` argument to swap the robot model at runtime.
+Pass a model name (resolved via `resolve_urdf()`) or a direct URDF path.
+The model should be compatible with the demo category — arm models for arm demos,
+mobile models for mobile demos:
+
+```bash
+# Arm demos — pass arm models (default: panda)
+python examples/arm/pick_drop_arm_demo.py --robot kuka_iiwa
+
+# Mobile demos — pass mobile models (default: husky)
+python examples/mobile/path_following_demo.py --robot racecar
+
+# Scale demos
+python examples/scale/100robots_cube_patrol_demo.py --robot mobile_robot
+python examples/scale/pick_drop_arm_100robots_demo.py --robot kuka_iiwa
+
+# Grid demo — has both --robot (mobile) and --arm-robot (arm)
+python examples/scale/100robots_grid_demo.py --robot racecar --arm-robot kuka_iiwa
+```
+
+| Category | Scripts | Argument | Default | Alternatives |
+|----------|---------|----------|---------|-------------|
+| Arm demos | `examples/arm/pick_drop_arm_*.py`, `rail_arm_demo.py` | `--robot` | `panda` | `kuka_iiwa`, `arm_robot` |
+| Mobile demos | `examples/mobile/path_following_demo.py` | `--robot` | `husky` | `racecar`, `mobile_robot` |
+| Scale (mobile) | `100robots_cube_patrol_demo.py`, `pick_drop_mobile_100robots_demo.py` | `--robot` | `husky` | `racecar`, `mobile_robot` |
+| Scale (arm) | `pick_drop_arm_100robots_demo.py` | `--robot` | `panda` | `kuka_iiwa`, `arm_robot` |
+| Grid demo | `100robots_grid_demo.py` | `--robot` | `husky` | `racecar`, `mobile_robot` |
+| Grid demo | `100robots_grid_demo.py` | `--arm-robot` | `panda` | `kuka_iiwa`, `arm_robot` |
+| Model demos | `resolve_urdf_demo.py` | `--robot` | `panda` | any registered model |
+| Model demos | `robot_descriptions_demo.py` | `--robot` | `tiago` | any `robot_descriptions` model |
+
+Model names are resolved by `resolve_urdf()` — see [Tutorial 6 — Robot Models](robot-models)
+for the full resolution system and `python examples/models/resolve_urdf_demo.py --list`
+for all available names.
 
 ## Which tutorial should I read?
 
@@ -14,15 +57,19 @@ run it, and follow along in the docs at the same time.
 | Simulate a robot arm picking and dropping objects | [Tutorial 4 — Arm Pick & Drop](arm-pick-drop) |
 | Control an arm by end-effector position (IK) | [Tutorial 5 — EE Control & IK](arm-ee-control) |
 | Use IK on a mobile manipulator (base + arm) | [Tutorial 5 §6 — Mobile Manipulator IK](arm-ee-control) |
+| Load a robot by name from multiple sources | [Tutorial 6 — Robot Models](robot-models) |
+| Switch robot models in demos with `--robot` | [Tutorial 6 §6 — The `--robot` Argument](robot-models) |
 
 ```{toctree}
 :maxdepth: 1
+:hidden:
 
 spawning-objects
 action-system
 multi-robot-fleet
 arm-pick-drop
 arm-ee-control
+robot-models
 ```
 
 ## API Quick-Reference
@@ -30,7 +77,9 @@ arm-ee-control
 | API | Covered in |
 |-----|-----------|
 | `SimObject.from_mesh` / `from_params` | Tutorial 1 |
-| `Agent.from_mesh` / `from_urdf` / `from_params` | Tutorials 1, 4 |
+| `Agent.from_mesh` / `from_urdf` / `from_params` | Tutorials 1, 4, 6 |
+| `resolve_urdf` / `list_all_models` / `discover_models` / `auto_detect_profile` | Tutorial 6 |
+| `register_model` / `unregister_model` / `add_search_path` | Tutorial 6 |
 | `Pose.from_xyz` / `from_euler` | Tutorials 1–4 |
 | `agent.get_pose()` / `set_pose()` | Tutorial 1 |
 | `agent.set_goal_pose()` | Tutorial 1 |
@@ -51,3 +100,4 @@ arm-ee-control
 | `attach_object` with `parent_link_index` | Tutorial 4 |
 | `AgentManager` / `GridSpawnParams` | Tutorial 3 |
 | `manager.spawn_agents_grid_mixed()` | Tutorial 3 |
+| `SimulationParams.enable_floor` | Tutorial 1 |

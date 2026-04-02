@@ -20,9 +20,9 @@ each built around an existing runnable example script. Tutorial style: explain
 
 | Page | Source script | Key APIs covered |
 |------|--------------|-----------------|
-| `spawning-objects.md` | `examples/robot_demo.py` | SimObject, Agent spawn variants, Pose, get/set_pose, set_goal_pose, register_callback |
-| `action-system.md` | `examples/action_system_demo.py` | MoveAction, PickAction, DropAction, WaitAction, add_action_sequence, get_current_action |
-| `multi-robot-fleet.md` | `examples/100robots_cube_patrol_demo.py` | AgentManager, GridSpawnParams, spawn_agents_grid_mixed, set_path, Path, velocity monitoring callback |
+| `spawning-objects.md` | `examples/basics/robot_demo.py` | SimObject, Agent spawn variants, Pose, get/set_pose, set_goal_pose, register_callback |
+| `action-system.md` | `examples/basics/action_system_demo.py` | MoveAction, PickAction, DropAction, WaitAction, add_action_sequence, get_current_action |
+| `multi-robot-fleet.md` | `examples/scale/100robots_cube_patrol_demo.py` | AgentManager, GridSpawnParams, spawn_agents_grid_mixed, set_path, Path, velocity monitoring callback |
 
 ## Requirements
 

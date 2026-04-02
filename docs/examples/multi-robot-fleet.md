@@ -1,6 +1,6 @@
 # Tutorial 3: Managing a 100-Robot Fleet
 
-**Source file:** [`examples/100robots_cube_patrol_demo.py`](https://github.com/yuokamoto/PyBulletFleet/blob/main/examples/100robots_cube_patrol_demo.py)
+**Source file:** [`examples/scale/100robots_cube_patrol_demo.py`](https://github.com/yuokamoto/PyBulletFleet/blob/main/examples/scale/100robots_cube_patrol_demo.py)
 
 This tutorial scales up from a single agent to a fleet of 100 robots.
 You will learn how to:
@@ -177,7 +177,7 @@ manager.spawn_agents_grid(
 ```
 
 > `spawn_agents_grid` is used in
-> `examples/pick_drop_mobile_100robots_demo.py`, which also demonstrates
+> `examples/scale/pick_drop_mobile_100robots_demo.py`, which also demonstrates
 > `SimObjectManager` for batch-spawning pickable objects alongside agents.
 
 ---
@@ -361,9 +361,51 @@ sim.run_simulation()
 At 100 agents with `physics=False`, you should see ~40× RTF (≈ 2.4 ms per step).
 See [Benchmark Results](../benchmarking/results) for the full throughput table.
 
+### Scale Demos
+
+All four scale demo scripts live in `examples/scale/`:
+
+| Script | What it demonstrates |
+|--------|---------------------|
+| [`100robots_cube_patrol_demo.py`](https://github.com/yuokamoto/PyBulletFleet/blob/main/examples/scale/100robots_cube_patrol_demo.py) | 100 mobile robots patrolling cube paths (this tutorial) |
+| [`100robots_grid_demo.py`](https://github.com/yuokamoto/PyBulletFleet/blob/main/examples/scale/100robots_grid_demo.py) | Mixed fleet (mobile + arm) in a grid with `--mode mixed\|single` |
+| [`pick_drop_mobile_100robots_demo.py`](https://github.com/yuokamoto/PyBulletFleet/blob/main/examples/scale/pick_drop_mobile_100robots_demo.py) | 100 mobile robots with pick/drop action sequences and `SimObjectManager` |
+| [`pick_drop_arm_100robots_demo.py`](https://github.com/yuokamoto/PyBulletFleet/blob/main/examples/scale/pick_drop_arm_100robots_demo.py) | 100 fixed-base arms with `JointAction` pick/drop cycles |
+
 ```bash
-python examples/100robots_cube_patrol_demo.py
+python examples/scale/100robots_cube_patrol_demo.py
+python examples/scale/100robots_grid_demo.py
+python examples/scale/pick_drop_mobile_100robots_demo.py
+python examples/scale/pick_drop_arm_100robots_demo.py
 ```
+
+### Switching Robot Models
+
+All scale demos accept a `--robot` argument to swap the robot model at runtime.
+Pass a model name resolved by `resolve_urdf()` or a direct URDF path:
+
+```bash
+# Mobile demos — use mobile models
+python examples/scale/100robots_cube_patrol_demo.py --robot racecar
+python examples/scale/pick_drop_mobile_100robots_demo.py --robot mobile_robot
+
+# Arm demo — use arm models
+python examples/scale/pick_drop_arm_100robots_demo.py --robot kuka_iiwa
+
+# Grid demo — has both mobile and arm robots
+python examples/scale/100robots_grid_demo.py --robot racecar --arm-robot kuka_iiwa
+```
+
+| Script | Argument | Default | Alternatives |
+|--------|----------|---------|-------------|
+| `100robots_grid_demo.py` | `--robot` (mobile) | `husky` | `racecar`, `mobile_robot` |
+| `100robots_grid_demo.py` | `--arm-robot` (arm) | `panda` | `kuka_iiwa`, `arm_robot` |
+| `100robots_cube_patrol_demo.py` | `--robot` (mobile) | `husky` | `racecar`, `mobile_robot` |
+| `pick_drop_mobile_100robots_demo.py` | `--robot` (mobile) | `husky` | `racecar`, `mobile_robot` |
+| `pick_drop_arm_100robots_demo.py` | `--robot` (arm) | `panda` | `kuka_iiwa`, `arm_robot` |
+
+See [Tutorial 6 — Robot Models](robot-models) for the full model resolution system
+and `python examples/models/resolve_urdf_demo.py --list` for all available names.
 
 ---
 

@@ -154,11 +154,11 @@ Place in `examples/`. Follow existing demo pattern:
 
 ```bash
 # Reference demos:
-# examples/robot_demo.py                  — basic agent demo
-# examples/action_system_demo.py          — action queue demo
-# examples/pick_drop_arm_demo.py          — arm pick/drop
-# examples/path_following_demo.py         — path following
-# examples/100robots_grid_demo.py         — large-scale spawn
+# examples/basics/robot_demo.py            — basic agent demo
+# examples/basics/action_system_demo.py    — action queue demo
+# examples/arm/pick_drop_arm_demo.py       — arm pick/drop
+# examples/mobile/path_following_demo.py   — path following
+# examples/scale/100robots_grid_demo.py    — large-scale spawn
 ```
 
 Standard demo structure:

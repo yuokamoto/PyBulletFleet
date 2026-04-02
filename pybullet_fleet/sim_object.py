@@ -73,6 +73,30 @@ class ShapeParams:
     rgba_color: List[float] = field(default_factory=lambda: [0.8, 0.8, 0.8, 1.0])
     frame_pose: Optional[Pose] = None
 
+    @classmethod
+    def from_dict(cls, d: Dict[str, Any]) -> "ShapeParams":
+        """Create ShapeParams from a configuration dictionary.
+
+        Recognised keys match the dataclass fields: ``shape_type``,
+        ``mesh_path``, ``mesh_scale``, ``half_extents``, ``radius``,
+        ``height``, ``rgba_color``.  Missing keys use dataclass defaults.
+
+        Args:
+            d: Configuration dictionary.
+
+        Returns:
+            ShapeParams instance.
+        """
+        return cls(
+            shape_type=d.get("shape_type"),
+            mesh_path=d.get("mesh_path"),
+            mesh_scale=d.get("mesh_scale", [1.0, 1.0, 1.0]),
+            half_extents=d.get("half_extents", [0.5, 0.5, 0.5]),
+            radius=d.get("radius", 0.5),
+            height=d.get("height", 1.0),
+            rgba_color=d.get("rgba_color", [0.8, 0.8, 0.8, 1.0]),
+        )
+
 
 @dataclass
 class SimObjectSpawnParams:
@@ -133,35 +157,66 @@ class SimObjectSpawnParams:
 
     @classmethod
     def from_dict(cls, config: Dict[str, Any]) -> "SimObjectSpawnParams":
-        """
-        Create SimObjectSpawnParams from configuration dictionary.
+        """Create SimObjectSpawnParams from a configuration dictionary.
+
+        Accepts both programmatic dicts (with ``ShapeParams`` / ``Pose``
+        objects) and raw YAML dicts (with ``pose`` list, ``yaw``, and
+        shape sub-dicts).
+
+        YAML-style keys:
+            name (str, required): Object name.
+            visual_shape (dict | ShapeParams, optional): Visual shape definition.
+            collision_shape (dict | ShapeParams, optional): Collision shape.
+            pose (list): ``[x, y, z]`` position.  Alternative to ``initial_pose``.
+            yaw (float): Yaw angle in radians (used with ``pose``).
+            initial_pose (Pose): Pose object (takes precedence over ``pose``).
+            mass (float): Default ``0.0`` (static).
+            pickable (bool): Default ``True``.
+            collision_mode (str | CollisionMode): Default ``"normal_3d"``.
+            user_data (dict): Default ``{}``.
 
         Args:
-            config: Dictionary with object parameters.
+            config: Configuration dictionary.
 
         Returns:
-            SimObjectSpawnParams instance
+            SimObjectSpawnParams instance.
 
-        Example::
-
-            config = {
-                'visual_shape': ShapeParams(shape_type='box', half_extents=[0.5, 0.3, 0.2]),
-                'collision_shape': ShapeParams(shape_type='sphere', radius=0.3),
-                'initial_pose': Pose.from_xyz(1.0, 2.0, 0.0),
-                'mass': 1.0,
-                'name': 'Pallet_A',
-            }
-            params = SimObjectSpawnParams.from_dict(config)
+        Raises:
+            ValueError: If ``name`` is missing.
         """
-        # Convert collision_mode string to enum if needed
+        if "name" not in config:
+            raise ValueError(f"SimObject definition missing required 'name' field: {config}")
+
+        # Resolve pose: prefer initial_pose object, fall back to pose+yaw
+        initial_pose = config.get("initial_pose")
+        if initial_pose is None:
+            pose = config.get("pose", [0.0, 0.0, 0.0])
+            if not isinstance(pose, (list, tuple)) or len(pose) < 3:
+                raise ValueError(f"'pose' must be a list/tuple of at least 3 elements [x, y, z], got: {pose!r}")
+            yaw = config.get("yaw", 0.0)
+            initial_pose = Pose.from_yaw(pose[0], pose[1], pose[2], yaw)
+
+        # Resolve collision_mode
         collision_mode_value = config.get("collision_mode", CollisionMode.NORMAL_3D)
         if isinstance(collision_mode_value, str):
             collision_mode_value = CollisionMode(collision_mode_value)
 
+        # Resolve shape params from raw dicts or pass through ShapeParams instances
+        vs = config.get("visual_shape")
+        cs = config.get("collision_shape")
+        if vs is not None and not isinstance(vs, ShapeParams):
+            if not isinstance(vs, dict):
+                raise TypeError(f"'visual_shape' must be a dict or ShapeParams, got {type(vs).__name__}: {vs!r}")
+            vs = ShapeParams.from_dict(vs)
+        if cs is not None and not isinstance(cs, ShapeParams):
+            if not isinstance(cs, dict):
+                raise TypeError(f"'collision_shape' must be a dict or ShapeParams, got {type(cs).__name__}: {cs!r}")
+            cs = ShapeParams.from_dict(cs)
+
         return cls(
-            visual_shape=config.get("visual_shape"),
-            collision_shape=config.get("collision_shape"),
-            initial_pose=config.get("initial_pose", Pose.from_xyz(0.0, 0.0, 0.0)),
+            visual_shape=vs,
+            collision_shape=cs,
+            initial_pose=initial_pose,
             mass=config.get("mass", 0.0),
             pickable=config.get("pickable", True),
             name=config.get("name"),
@@ -648,6 +703,24 @@ class SimObject:
         )
 
         return obj
+
+    @classmethod
+    def from_dict(cls, config: Dict[str, Any], sim_core=None) -> "SimObject":
+        """Create a SimObject from a raw config dict.
+
+        Combines :meth:`SimObjectSpawnParams.from_dict` and :meth:`from_params`
+        in a single call.  Subclasses can override to use a custom
+        ``SpawnParams`` class.
+
+        Args:
+            config: Entity definition dict (as parsed from YAML).
+            sim_core: Reference to simulation core (optional).
+
+        Returns:
+            ``cls`` instance.
+        """
+        params = SimObjectSpawnParams.from_dict(config)
+        return cls.from_params(params, sim_core)
 
     @property
     def is_static(self) -> bool:

@@ -17,11 +17,12 @@ Features:
 - All robots move in parallel, creating synchronized swarm behavior
 """
 
+import argparse
 import os
 import sys
 
 # Add parent directory to path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 import numpy as np
 import pybullet as p
@@ -31,6 +32,11 @@ from pybullet_fleet.agent import AgentSpawnParams, MotionMode, MovementDirection
 from pybullet_fleet.agent_manager import AgentManager, GridSpawnParams
 from pybullet_fleet.core_simulation import MultiRobotSimulationCore, SimulationParams
 from pybullet_fleet.geometry import Path, Pose
+from pybullet_fleet.robot_models import resolve_urdf
+
+parser = argparse.ArgumentParser(description="100 Robots Cube Patrol Demo")
+parser.add_argument("--robot", default="husky", help="Robot name (e.g. husky, racecar) or URDF path")
+_args = parser.parse_args()
 
 
 def create_cube_patrol_path(
@@ -86,13 +92,13 @@ def main():
     np.random.seed(42)
 
     # Create simulation with config file
-    config_path = os.path.join(os.path.dirname(__file__), "..", "config", "100robots_config.yaml")
+    config_path = os.path.join(os.path.dirname(__file__), "..", "..", "config", "100robots_config.yaml")
     params = SimulationParams.from_config(config_path)
     sim = MultiRobotSimulationCore(params)
 
     # Get absolute path to URDF
-    current_dir = os.path.dirname(os.path.abspath(__file__))
-    urdf_path = os.path.join(current_dir, "..", "robots", "mobile_robot.urdf")
+    urdf_path = resolve_urdf(_args.robot)
+    print(f"Using robot: {_args.robot} -> {urdf_path}")
 
     print("=" * 70)
     print("100 Robots Cube Patrol Demo")

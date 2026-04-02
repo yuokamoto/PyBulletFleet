@@ -7,6 +7,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Highlights
+
+- **Robot model resolution** — `resolve_urdf("panda")` finds URDFs by name across local, pybullet_data, and robot_descriptions sources with auto-discovery fallback
+- **Auto-detect robot profiles** — `auto_detect_profile()` introspects any URDF to determine robot type, joint layout, EE link, and arm reach
+- **Controller refactor** — Extracted `Controller` class from `Agent`, reducing agent.py by ~500 lines
+- **Entity registry** — `register_entity_class()` for custom spawn types via YAML config
+- **Examples reorganization** — Demos organized into arm/, basics/, mobile/, scale/, models/ subdirectories
+
+### Features
+
+- `robot_models.py` — `resolve_urdf()` with 5-step resolution (user search paths → KNOWN_MODELS → pybullet_data scan → robot_descriptions scan → error)
+- `auto_detect_profile()` — introspects URDF via PyBullet to produce `RobotProfile` (robot_type, joints, EE, arm_reach)
+- `register_model()` / `unregister_model()` — runtime model registry management
+- `add_search_path()` / `remove_search_path()` — custom URDF search directories
+- `discover_models()` — enumerate all available models in pybullet_data or robot_descriptions
+- `controller.py` — extracted `Controller` with `OmnidirectionalController`, `DifferentialController`
+- `entity_registry.py` — `register_entity_class()` for extensible YAML-driven spawning
+- `SimulationParams.enable_floor` — option to skip ground plane loading
+- `config_utils.py` — improved YAML merge and validation
+- `sim_object.py` / `tools.py` — enhanced pose utilities and mesh support
+- `[models]` extra in pyproject.toml for `pip install pybullet-fleet[models]`
+
+### New Examples
+
+- `examples/models/` — `resolve_urdf_demo.py`, `model_catalog_demo.py`, `robot_descriptions_demo.py`
+- All existing demos reorganized into `arm/`, `basics/`, `mobile/`, `scale/` subdirectories
+- Updated camera setup and robot profile integration in arm demos
+
+### Documentation
+
+- Tutorial 6: Robot Models — resolution, auto-detect, search paths, auto-discovery
+- Updated quickstart, architecture overview, spawning-objects docs
+- Research report: OSS robot models survey (pybullet_data, robot_descriptions)
+- Design specs: robot-models, controller-refactor, plugin-architecture, unified-spawn
+
+### Testing
+
+- 960 tests (up from 740), coverage 82%
+- `test_robot_models.py` — 40+ tests covering resolution, auto-detect, search paths, register/unregister, auto-discovery
+- `test_controller.py` — controller extraction tests
+- `test_config_spawn.py` — YAML config and entity registry tests
+- `test_entity_registry.py`, `test_sim_object.py`, `test_tools.py` — new test modules
+
+### Performance
+
+- No regressions from controller refactor
+
 ## v0.2.0 (2026-03-20)
 
 ### Highlights

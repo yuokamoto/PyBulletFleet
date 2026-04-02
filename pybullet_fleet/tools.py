@@ -1,14 +1,73 @@
-from typing import Callable, Dict, List, Optional, Union, TYPE_CHECKING
+from typing import Callable, Dict, List, Optional, Tuple, Union, TYPE_CHECKING
 import logging
+import math
 
 import numpy as np
 import pybullet as p
+
+from pybullet_fleet.geometry import rotate_vector  # used by body_to_world_velocity_3d
 
 if TYPE_CHECKING:
     from pybullet_fleet.geometry import Pose
 
 # Create logger for this module
 logger = logging.getLogger(__name__)
+
+
+def body_to_world_velocity_2d(
+    vx_body: float,
+    vy_body: float,
+    yaw: float,
+) -> Tuple[float, float]:
+    """Rotate 2-D body-frame velocity to world frame using yaw only.
+
+    Args:
+        vx_body: Forward velocity in body frame.
+        vy_body: Lateral velocity in body frame.
+        yaw: Current heading in world frame (radians).
+
+    Returns:
+        ``(vx, vy)`` in world frame.
+
+    Example::
+
+        >>> body_to_world_velocity_2d(1.0, 0.0, yaw=math.pi / 2)
+        (0.0, 1.0)   # facing +Y, forward maps to +Y
+    """
+    cos_yaw = math.cos(yaw)
+    sin_yaw = math.sin(yaw)
+    vx = vx_body * cos_yaw - vy_body * sin_yaw
+    vy = vx_body * sin_yaw + vy_body * cos_yaw
+    return vx, vy
+
+
+def body_to_world_velocity_3d(
+    vx_body: float,
+    vy_body: float,
+    vz_body: float,
+    orientation: Tuple[float, float, float, float],
+) -> Tuple[float, float, float]:
+    """Rotate 3-D body-frame velocity to world frame using full quaternion.
+
+    Uses the same quaternion convention as PyBullet: ``(x, y, z, w)``.
+
+    Args:
+        vx_body: Forward velocity in body frame (body X).
+        vy_body: Lateral velocity in body frame (body Y).
+        vz_body: Vertical velocity in body frame (body Z).
+        orientation: Quaternion ``(x, y, z, w)`` representing robot orientation.
+
+    Returns:
+        ``(vx, vy, vz)`` in world frame.
+
+    Example::
+
+        >>> from scipy.spatial.transform import Rotation
+        >>> q = Rotation.from_euler("z", 90, degrees=True).as_quat()  # xyzw
+        >>> body_to_world_velocity_3d(1.0, 0.0, 0.0, tuple(q))
+        (0.0, 1.0, 0.0)
+    """
+    return rotate_vector((vx_body, vy_body, vz_body), orientation)
 
 
 def normalize_vector_param(value: Union[float, List[float]], param_name: str, dim: int = 3) -> np.ndarray:

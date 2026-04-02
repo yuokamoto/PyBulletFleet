@@ -27,8 +27,8 @@ Layout:
 - Center: Large multi-cell object for collision demonstration
 
 Usage:
-    python examples/collision_features_demo.py
-    python examples/collision_features_demo.py --duration 30 --target-rtf 1.5
+    python examples/basics/collision_features_demo.py
+    python examples/basics/collision_features_demo.py --duration 30 --target-rtf 1.5
 
     Press 'c' to toggle collision shape visualization (wireframe)
     Press 't' to toggle structure transparency
@@ -38,7 +38,7 @@ import argparse
 import os
 import sys
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 import numpy as np
 from pybullet_fleet.agent import Agent, AgentSpawnParams
@@ -52,7 +52,7 @@ from pybullet_fleet.types import CollisionMode, SpatialHashCellSizeMode
 # ========================================
 
 # Mesh file path (using cube.obj from PyBulletFleet/mesh)
-MESH_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), "../mesh/cube.obj"))
+MESH_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../mesh/cube.obj"))
 
 # Simulation area: 20m x 20m
 AREA_SIZE = 20.0
@@ -391,8 +391,8 @@ def main():
 
     # Filter robots for movement - all except large central object (which has no name attribute)
     # Get robots by name to identify their movement group
-    left_robots = [obj for obj in objects if hasattr(obj, "name") and obj.name.startswith("Left_")]
-    right_robots = [obj for obj in objects if hasattr(obj, "name") and obj.name.startswith("Right_")]
+    left_robots = [obj for obj in objects if getattr(obj, "name", None) and obj.name.startswith("Left_")]
+    right_robots = [obj for obj in objects if getattr(obj, "name", None) and obj.name.startswith("Right_")]
 
     # Note: STATIC robot will still be moved to show it maintains STATIC mode behavior
 

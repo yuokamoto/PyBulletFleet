@@ -17,7 +17,7 @@ import os
 import sys
 
 # Add parent directory to path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 import numpy as np
 import pybullet as p
@@ -39,6 +39,8 @@ parser.add_argument(
     choices=["mixed", "single"],
     help="Spawn mode: mixed (mobile+arm) or single (mobile only)",
 )
+parser.add_argument("--robot", default="husky", help="Robot name (e.g. husky, racecar) or URDF path for mobile robots")
+parser.add_argument("--arm-robot", default="panda", help="Arm robot name (e.g. panda, kuka_iiwa, arm_robot) or URDF path")
 args = parser.parse_args()
 
 mode = args.mode
@@ -47,7 +49,7 @@ mode = args.mode
 # Load Configuration
 # ========================================
 
-config_dir = os.path.join(os.path.dirname(__file__), "../config")
+config_dir = os.path.join(os.path.dirname(__file__), "../../config")
 base_config_path = os.path.join(config_dir, "config.yaml")
 robots_config_path = os.path.join(config_dir, "100robots_config.yaml")
 
@@ -109,7 +111,10 @@ grid_params = GridSpawnParams(
 
 # Mobile robot spawn params (shared by both modes) - from config
 mobile_urdf_path = mobile_robot_config.get("urdf_path", "robots/mobile_robot.urdf")
-mobile_urdf = os.path.join(os.path.dirname(__file__), "..", mobile_urdf_path)
+from pybullet_fleet.robot_models import resolve_urdf
+
+mobile_urdf = resolve_urdf(args.robot)
+print(f"Using robot: {args.robot} -> {mobile_urdf}")
 if not os.path.exists(mobile_urdf):
     raise FileNotFoundError(f"Mobile robot URDF not found: {mobile_urdf}")
 
@@ -128,11 +133,9 @@ mobile_params = AgentSpawnParams(
 
 if mode == "mixed":
     # Mixed Mode: Spawn mixed robot types
-    # Arm robot spawn params - from config
-    arm_urdf_path = arm_robot_config.get("urdf_path", "robots/arm_robot.urdf")
-    arm_urdf = os.path.join(os.path.dirname(__file__), "..", arm_urdf_path)
-    if not os.path.exists(arm_urdf):
-        raise FileNotFoundError(f"Arm robot URDF not found: {arm_urdf}")
+    # Arm robot spawn params - resolve via robot_models
+    arm_urdf = resolve_urdf(args.arm_robot)
+    print(f"Using arm robot: {args.arm_robot} -> {arm_urdf}")
 
     arm_params = AgentSpawnParams(
         urdf_path=arm_urdf,

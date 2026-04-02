@@ -1,8 +1,8 @@
 # Tutorial 5: End-Effector Control — IK & PoseAction
 
 **Source files:**
-- [`examples/pick_drop_arm_ee_demo.py`](https://github.com/yuokamoto/PyBulletFleet/blob/main/examples/pick_drop_arm_ee_demo.py) — low-level callback approach
-- [`examples/pick_drop_arm_ee_action_demo.py`](https://github.com/yuokamoto/PyBulletFleet/blob/main/examples/pick_drop_arm_ee_action_demo.py) — action-queue approach
+- [`examples/arm/pick_drop_arm_ee_demo.py`](https://github.com/yuokamoto/PyBulletFleet/blob/main/examples/arm/pick_drop_arm_ee_demo.py) — low-level callback approach
+- [`examples/arm/pick_drop_arm_ee_action_demo.py`](https://github.com/yuokamoto/PyBulletFleet/blob/main/examples/arm/pick_drop_arm_ee_action_demo.py) — action-queue approach
 
 This tutorial shows how to control a robot arm by specifying **end-effector (EE) positions**
 instead of joint angles. PyBulletFleet's built-in IK solver converts Cartesian targets
@@ -145,7 +145,7 @@ if action.status == ActionStatus.FAILED:
 `PickAction` and `DropAction` accept `ee_target_position` as an alternative to
 joint-level positioning. When set, the action uses IK to move the EE to the
 target position before picking/dropping
-(see [`pick_drop_arm_ee_action_demo.py`](https://github.com/yuokamoto/PyBulletFleet/blob/main/examples/pick_drop_arm_ee_action_demo.py)):
+(see [`pick_drop_arm_ee_action_demo.py`](https://github.com/yuokamoto/PyBulletFleet/blob/main/examples/arm/pick_drop_arm_ee_action_demo.py)):
 
 ```python
 from pybullet_fleet.action import PickAction, DropAction, PoseAction, WaitAction
@@ -262,7 +262,7 @@ agent = Agent.from_urdf(
 All movable joints **not** in `ik_joint_names` are locked at their current positions.
 When `ik_joint_names` is `None` (default), auto-detection is used.
 
-See [`examples/mobile_manipulator_demo.py`](https://github.com/yuokamoto/PyBulletFleet/blob/main/examples/mobile_manipulator_demo.py)
+See [`examples/arm/mobile_manipulator_demo.py`](https://github.com/yuokamoto/PyBulletFleet/blob/main/examples/arm/mobile_manipulator_demo.py)
 for a full mobile manipulator demo with IK-based pick/drop.
 
 ### `drop_relative_pose` — Relative Drop Positioning
@@ -345,19 +345,35 @@ sim_core.register_callback(pick_drop_callback, frequency=10)
 
 ```bash
 # Action-queue approach (recommended)
-python examples/pick_drop_arm_ee_action_demo.py
+python examples/arm/pick_drop_arm_ee_action_demo.py
 
 # Low-level callback approach
-python examples/pick_drop_arm_ee_demo.py
+python examples/arm/pick_drop_arm_ee_demo.py
 
 # Rail arm — prismatic (linear) + revolute joints with EE control
-python examples/rail_arm_demo.py
+python examples/arm/rail_arm_demo.py
 
 # Mobile manipulator (base + arm) — kinematic IK pick/drop
-python examples/mobile_manipulator_demo.py
+python examples/arm/mobile_manipulator_demo.py
 ```
 
 Both single-arm EE demos use kinematic mode for fast execution.
+
+### Switching Robot Models
+
+All EE demos accept a `--robot` argument to swap the arm model.
+Pass an arm model name or a direct URDF path:
+
+```bash
+python examples/arm/pick_drop_arm_ee_action_demo.py --robot kuka_iiwa
+python examples/arm/pick_drop_arm_ee_demo.py --robot arm_robot
+```
+
+| `--robot` default | Alternatives |
+|-------------------|-------------|
+| `panda` | `kuka_iiwa`, `arm_robot` |
+
+See [Tutorial 6 — Robot Models](robot-models) for the full model resolution system.
 
 ---
 
@@ -367,7 +383,7 @@ The IK solver works with **prismatic (linear) joints** out of the box. A prismat
 joint in the kinematic chain lets the IK solver adjust both the linear position
 (e.g., rail height) and revolute angles to reach the target.
 
-[`examples/rail_arm_demo.py`](https://github.com/yuokamoto/PyBulletFleet/blob/main/examples/rail_arm_demo.py)
+[`examples/arm/rail_arm_demo.py`](https://github.com/yuokamoto/PyBulletFleet/blob/main/examples/arm/rail_arm_demo.py)
 demonstrates a **rail arm** (1 prismatic Z-axis + 4 revolute = 5 DOF) picking a box
 from a high shelf and placing it at a low position:
 
@@ -431,6 +447,6 @@ reference (scalar, dict, agent-level fallback).
 
 - [Tutorial 4 — Arm Joint Control](arm-pick-drop): `JointAction`, joint-level pick/drop, tolerance reference
 - [Tutorial 2 — Action System](action-system): mobile robot pick/drop with `MoveAction`
-- [Rail Arm Demo](https://github.com/yuokamoto/PyBulletFleet/blob/main/examples/rail_arm_demo.py): prismatic + revolute EE control
-- [Mobile Manipulator Demo](https://github.com/yuokamoto/PyBulletFleet/blob/main/examples/mobile_manipulator_demo.py): kinematic mobile manipulator with IK pick/drop
+- [Rail Arm Demo](https://github.com/yuokamoto/PyBulletFleet/blob/main/examples/arm/rail_arm_demo.py): prismatic + revolute EE control
+- [Mobile Manipulator Demo](https://github.com/yuokamoto/PyBulletFleet/blob/main/examples/arm/mobile_manipulator_demo.py): kinematic mobile manipulator with IK pick/drop
 - [Architecture Overview](../architecture/overview): IK internals, joint control modes

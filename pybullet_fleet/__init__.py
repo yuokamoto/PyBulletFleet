@@ -6,9 +6,10 @@ General-purpose PyBullet simulation library for multi-robot fleets
 # Type definitions
 from pybullet_fleet.types import (
     ActionStatus,
-    DifferentialPhase,
+    ControllerMode,
     MotionMode,
     MovementDirection,
+    PosePhase,
     SpatialHashCellSizeMode,
 )
 
@@ -28,15 +29,62 @@ from pybullet_fleet.core_simulation import (
 # Base classes
 from pybullet_fleet.sim_object import SimObject
 
+# Controller system
+from pybullet_fleet.controller import (
+    Controller,
+    KinematicController,
+    DifferentialController,
+    OmniController,
+    create_controller,
+    register_controller,
+)
+
+# Geometry (quaternion utilities)
+from pybullet_fleet.geometry import (  # noqa: F401,F811
+    quat_angle_between,
+    quat_from_rotvec,
+    quat_multiply,
+    quat_to_rot_matrix,
+    rotate_vector,
+)
+
 # Utilities
-from pybullet_fleet.tools import grid_to_world, world_to_grid, normalize_vector_param
+from pybullet_fleet.tools import (
+    body_to_world_velocity_2d,
+    body_to_world_velocity_3d,
+    grid_to_world,
+    world_to_grid,
+    normalize_vector_param,
+)
+
+# Config utilities
+from pybullet_fleet.config_utils import load_yaml_config
+
+# Entity registry
+from pybullet_fleet.entity_registry import register_entity_class
+
+# Robot model resolution
+from pybullet_fleet.robot_models import (
+    ModelEntry,
+    RobotProfile,
+    add_search_path,
+    auto_detect_profile,
+    detect_robot_type,
+    discover_models,
+    get_search_paths,
+    list_all_models,
+    register_model,
+    remove_search_path,
+    resolve_urdf,
+    unregister_model,
+)
 
 __all__ = [
     # Type definitions
     "ActionStatus",
-    "DifferentialPhase",
     "MotionMode",
     "MovementDirection",
+    "PosePhase",
     # Geometry
     "Pose",
     "Path",
@@ -51,8 +99,40 @@ __all__ = [
     "IKParams",
     "AgentManager",
     "GridSpawnParams",
+    # Controller system
+    "Controller",
+    "ControllerMode",
+    "KinematicController",
+    "OmniController",
+    "DifferentialController",
+    "create_controller",
+    "register_controller",
     # Utilities
+    "body_to_world_velocity_2d",
+    "body_to_world_velocity_3d",
     "grid_to_world",
     "world_to_grid",
     "normalize_vector_param",
+    "quat_to_rot_matrix",
+    "quat_angle_between",
+    "quat_from_rotvec",
+    "quat_multiply",
+    "rotate_vector",
+    # Config utilities
+    "load_yaml_config",
+    # Entity registry
+    "register_entity_class",
+    # Robot models
+    "resolve_urdf",
+    "list_all_models",
+    "ModelEntry",
+    "RobotProfile",
+    "auto_detect_profile",
+    "detect_robot_type",
+    "register_model",
+    "unregister_model",
+    "discover_models",
+    "add_search_path",
+    "remove_search_path",
+    "get_search_paths",
 ]

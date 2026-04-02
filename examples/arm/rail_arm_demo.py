@@ -12,7 +12,7 @@ and arm joint configuration automatically.
 import os
 import sys
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 import pybullet as p
 from pybullet_fleet.action import JointAction, PoseAction, PickAction, DropAction, WaitAction
 from pybullet_fleet.agent import Agent
@@ -27,7 +27,7 @@ params = SimulationParams(gui=True, timestep=0.1, physics=False, target_rtf=1, l
 sim_core = MultiRobotSimulationCore(params)
 
 # Spawn rail arm (fixed base)
-rail_arm_urdf = os.path.join(os.path.dirname(__file__), "../robots/rail_arm_robot.urdf")
+rail_arm_urdf = os.path.join(os.path.dirname(__file__), "../../robots/rail_arm_robot.urdf")
 agent = Agent.from_urdf(
     urdf_path=rail_arm_urdf,
     pose=Pose.from_xyz(0, 0, 0),

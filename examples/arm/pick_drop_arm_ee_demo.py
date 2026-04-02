@@ -9,44 +9,87 @@ Action version: pick_drop_arm_ee_action_demo.py
 Joint-target variant (low-level): pick_drop_arm_demo.py
 Joint-target variant (Action): pick_drop_arm_action_demo.py
 """
+import argparse
 import os
 import sys
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-import pybullet as p
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 from pybullet_fleet.agent import Agent
 from pybullet_fleet.core_simulation import MultiRobotSimulationCore, SimulationParams
 from pybullet_fleet.sim_object import Pose, SimObject, ShapeParams
+from pybullet_fleet.robot_models import resolve_urdf, auto_detect_profile
+
+parser = argparse.ArgumentParser(description="Robot arm pick & drop demo (EE position control)")
+parser.add_argument("--robot", default="panda", help="Robot name (e.g. panda, kuka_iiwa, arm_robot) or URDF path")
+args = parser.parse_args()
+
+# ── Per-robot EE position presets ──
+# "orn" = EE orientation quaternion [qx, qy, qz, qw].  None = position-only IK.
+# Robots with >= 6 DOF benefit from orientation constraints (more natural poses).
+_DOWN = (1.0, 0.0, 0.0, 0.0)  # gripper pointing straight down (180° around X)
+EE_PRESETS = {
+    "arm_robot": {
+        "pick": [0.3, 0.0, 0.3],
+        "drop": [-0.3, 0.0, 0.3],
+        "home": [0.0, 0.0, 0.75],
+        "box_pick": [0.3, 0.0, 0.1],
+        "box_drop": [-0.3, 0.0, 0.1],
+        "orn": None,  # 4-DOF: position-only IK is more stable
+    },
+    "panda": {
+        "pick": [0.5, 0.0, 0.4],
+        "drop": [-0.5, 0.0, 0.4],
+        "home": [0.0, 0.0, 1.5],
+        "box_pick": [0.5, 0.0, 0.1],
+        "box_drop": [-0.5, 0.0, 0.1],
+        "orn": _DOWN,  # 7-DOF: constrain orientation for natural pose
+    },
+    "kuka_iiwa": {
+        "pick": [0.5, 0.0, 0.4],
+        "drop": [-0.5, 0.0, 0.4],
+        "home": [0.0, 0.0, 1.2],
+        "box_pick": [0.5, 0.0, 0.1],
+        "box_drop": [-0.5, 0.0, 0.1],
+        "orn": _DOWN,
+    },
+}
+if args.robot not in EE_PRESETS:
+    raise SystemExit(f"No preset for '{args.robot}'. Available: {', '.join(EE_PRESETS)}")
+_P = EE_PRESETS[args.robot]
+PICK_POS = list(_P["pick"])
+DROP_POS = list(_P["drop"])
+HOME_POS = list(_P["home"])
+BOX_PICK_XYZ = _P["box_pick"]
+EE_ORN = _P["orn"]  # None or quaternion tuple
 
 # Simulation setup (kinematic mode, fast execution)
-params = SimulationParams(gui=True, timestep=0.1, physics=False, target_rtf=10)
+params = SimulationParams(gui=True, timestep=0.1, physics=False, target_rtf=3)
 sim_core = MultiRobotSimulationCore(params)
 
 # Spawn robot arm (fixed base)
-arm_urdf = os.path.join(os.path.dirname(__file__), "../robots/arm_robot.urdf")
+arm_urdf = resolve_urdf(args.robot)
 arm_agent = Agent.from_urdf(
     urdf_path=arm_urdf,
     pose=Pose.from_xyz(0, 0, 0),
     use_fixed_base=True,
     sim_core=sim_core,
 )
+profile = auto_detect_profile(arm_urdf, sim_core.client)
+print(f"Using {args.robot}: EE={profile.ee_link_name}, joints={len(profile.movable_joint_names)}")
+print(f"  PICK={PICK_POS} DROP={DROP_POS} HOME={HOME_POS}")
 
 # Spawn box to pick/drop
 box = SimObject.from_mesh(
     visual_shape=ShapeParams(shape_type="box", half_extents=[0.05, 0.05, 0.05], rgba_color=[1, 0, 0, 1]),
     collision_shape=ShapeParams(shape_type="box", half_extents=[0.05, 0.05, 0.05]),
-    pose=Pose.from_xyz(0.0, -0.3, 0.1),
+    pose=Pose.from_xyz(*BOX_PICK_XYZ),
     mass=0.0,
     sim_core=sim_core,
 )
 
-# End-effector link = last link
-EE_LINK = p.getNumJoints(arm_agent.body_id) - 1
-
-# EE target positions (world frame)
-HOME_POS = [0.0, 0.0, 0.75]  # Arm fully upright
-PICK_POS = [0.0, -0.3, 0.3]  # Reach toward box (Y-)
-DROP_POS = [0.0, 0.3, 0.3]  # Opposite side (Y+)
+# End-effector link
+EE_LINK = profile.ee_link_index if profile.ee_link_index >= 0 else arm_agent.get_num_joints() - 1
+print(f"  EE link index: {EE_LINK} ({profile.ee_link_name})")
 
 # Attachment offset (box above EE)
 OFFSET_POSE = Pose.from_xyz(0, 0, 0.14)
@@ -67,7 +110,7 @@ def pick_drop_ee_callback(sim_core, dt):
         """Call move_end_effector() only once per state."""
         global _ee_set
         if not _ee_set:
-            reachable = arm_agent.move_end_effector(pos)
+            reachable = arm_agent.move_end_effector(pos, target_orientation=EE_ORN)
             _ee_set = True
             status = "reachable" if reachable else "best-effort"
             print(f"[STEP {step}] move_end_effector({pos}) -> {status}")
