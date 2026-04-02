@@ -41,8 +41,8 @@ entities:
 
 - `type: agent` → parsed into `AgentSpawnParams`, spawned as `Agent`
 - `type: sim_object` → parsed into `SimObjectSpawnParams`, spawned as `SimObject`
-- `type` field is **required** — no implicit defaults
-- Backward-compat: old `robots:` section continues to work (agent-only, no type field needed)
+- `type` field defaults to ``"agent"`` when omitted (backward-compatible)
+- Backward-compat: old ``robots:`` section continues to work (agent-only, no ``type`` field needed)
 
 ### 2. Batch Spawn Optimization
 

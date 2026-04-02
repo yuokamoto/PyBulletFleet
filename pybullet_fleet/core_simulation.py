@@ -2014,9 +2014,10 @@ class MultiRobotSimulationCore:
     def reset(self) -> None:
         """Reset simulation to a clean state (no objects, fresh PyBullet world).
 
-        Removes all objects from the simulation, resets PyBullet, reloads the
-        ground plane (if ``enable_floor`` is *True*), and re-initialises counters
-        via :meth:`initialize_simulation`.
+        Removes all objects from the simulation, resets PyBullet, re-applies
+        physics-engine parameters, optionally reloads the ground plane (only
+        when ``enable_floor`` is *True*), and re-initialises counters via
+        :meth:`initialize_simulation`.
 
         After calling ``reset()`` the simulation is ready for new objects to be
         spawned.  Callbacks registered via :meth:`register_callback` are **preserved**

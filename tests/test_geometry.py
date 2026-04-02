@@ -11,7 +11,19 @@ This module tests:
 
 import pytest
 import numpy as np
-from pybullet_fleet.geometry import Pose, Path
+from scipy.spatial.transform import Rotation as R, Slerp
+
+from pybullet_fleet.geometry import (
+    Path,
+    Pose,
+    quat_angle_between,
+    quat_from_rotvec,
+    quat_multiply,
+    quat_slerp,
+    quat_slerp_precompute,
+    quat_to_rot_matrix,
+    rotate_vector,
+)
 
 
 # Helper functions for testing
@@ -541,9 +553,6 @@ class TestPathAdvancedFeatures:
 # Quaternion slerp utility tests
 # ============================================================================
 
-from scipy.spatial.transform import Rotation as R, Slerp
-from pybullet_fleet.geometry import quat_slerp, quat_slerp_precompute
-
 
 class TestQuatSlerp:
     """Test the fast quaternion slerp implementation against scipy Slerp."""
@@ -652,8 +661,6 @@ class TestQuatSlerp:
 # Quaternion rotation utilities (quat_to_rot_matrix, rotate_vector)
 # ============================================================================
 
-from pybullet_fleet.geometry import quat_to_rot_matrix, rotate_vector
-
 
 class TestQuatRotateVector:
     """quat_to_rot_matrix / rotate_vector standalone quaternion utilities."""
@@ -728,8 +735,6 @@ class TestQuatRotateVector:
 # ============================================================================
 # Quaternion math utilities (quat_from_rotvec, quat_multiply, quat_angle_between)
 # ============================================================================
-
-from pybullet_fleet.geometry import quat_from_rotvec, quat_multiply, quat_angle_between
 
 
 class TestNormalizeQuat:

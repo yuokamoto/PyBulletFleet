@@ -13,7 +13,7 @@
 # ========================================
 
 # Override base config settings for 100robots demo
-target_rtf: 3   # 0 = uncapped/max speed (run as fast as possible)
+target_rtf: 3   # 3× real-time cap (0 = uncapped/max speed, run as fast as possible)
 gui: true         # Show GUI
 timestep: 0.1     # 100ms timestep (10 Hz) for smooth movement
 physics: false    # Kinematic control

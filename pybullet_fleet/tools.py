@@ -5,14 +5,13 @@ import math
 import numpy as np
 import pybullet as p
 
+from pybullet_fleet.geometry import rotate_vector  # used by body_to_world_velocity_3d
+
 if TYPE_CHECKING:
     from pybullet_fleet.geometry import Pose
 
 # Create logger for this module
 logger = logging.getLogger(__name__)
-
-
-from pybullet_fleet.geometry import rotate_vector  # used by body_to_world_velocity_3d
 
 
 def body_to_world_velocity_2d(
