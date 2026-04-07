@@ -8,6 +8,7 @@ Practical guides for common tasks.
 |-------|----------------|
 | [Collision Configuration](collision-config) | Detection method, per-object modes, margin, cell size, multi-cell threshold |
 | [Custom Profiling](custom-profiling) | Adding your own profiling metrics via Agent/SimulationCore subclasses |
+| [Capturing Demos](capturing-demos) | Recording demo videos, `demos.yaml` format, centralized defaults (`_defaults.py`) |
 
 **🔧 For PyBulletFleet Developers** — developing and debugging the framework:
 
@@ -26,6 +27,7 @@ Practical guides for common tasks.
 
 collision-config
 custom-profiling
+capturing-demos
 ```
 
 ```{toctree}

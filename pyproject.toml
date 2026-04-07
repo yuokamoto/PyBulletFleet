@@ -31,6 +31,10 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+recording = [
+    "imageio>=2.9.0",
+    "imageio[pyav]",
+]
 dev = [
     "black>=23.0.0",
     "isort>=5.12.0",

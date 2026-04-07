@@ -20,6 +20,7 @@ from .tools import normalize_vector_param
 from pybullet_fleet.tools import resolve_joint_index, resolve_link_index
 from .logging_utils import get_lazy_logger
 from .robot_models import resolve_urdf
+from pybullet_fleet._defaults import AGENT as _AGT_D, IK as _IK_D
 
 # Create logger for this module
 logger = logging.getLogger(__name__)
@@ -58,12 +59,12 @@ class AgentSpawnParams(SimObjectSpawnParams):
     """
 
     urdf_path: Optional[str] = None
-    max_linear_vel: Union[float, List[float]] = 2.0
-    max_linear_accel: Union[float, List[float]] = 5.0
-    max_angular_vel: Union[float, List[float]] = 3.0
-    max_angular_accel: Union[float, List[float]] = 10.0
+    max_linear_vel: Union[float, List[float]] = _AGT_D["max_linear_vel"]
+    max_linear_accel: Union[float, List[float]] = _AGT_D["max_linear_accel"]
+    max_angular_vel: Union[float, List[float]] = _AGT_D["max_angular_vel"]
+    max_angular_accel: Union[float, List[float]] = _AGT_D["max_angular_accel"]
     motion_mode: Union[MotionMode, str] = MotionMode.DIFFERENTIAL
-    use_fixed_base: bool = False
+    use_fixed_base: bool = _AGT_D["use_fixed_base"]
     ik_params: Optional["IKParams"] = None
     controller_config: Optional[Dict[str, Any]] = None
 
@@ -126,7 +127,7 @@ class AgentSpawnParams(SimObjectSpawnParams):
             params = AgentSpawnParams.from_dict(config)
         """
         # Get motion_mode and convert string to enum if needed
-        motion_mode_value = config.get("motion_mode", MotionMode.DIFFERENTIAL)
+        motion_mode_value = config.get("motion_mode", _AGT_D["motion_mode"])
         if isinstance(motion_mode_value, str):
             motion_mode_value = MotionMode(motion_mode_value)
 
@@ -153,12 +154,12 @@ class AgentSpawnParams(SimObjectSpawnParams):
             collision_mode=base.collision_mode,
             user_data=base.user_data,
             urdf_path=config.get("urdf_path"),
-            max_linear_vel=config.get("max_linear_vel", 2.0),
-            max_linear_accel=config.get("max_linear_accel", 5.0),
-            max_angular_vel=config.get("max_angular_vel", 3.0),
-            max_angular_accel=config.get("max_angular_accel", 10.0),
+            max_linear_vel=config.get("max_linear_vel", _AGT_D["max_linear_vel"]),
+            max_linear_accel=config.get("max_linear_accel", _AGT_D["max_linear_accel"]),
+            max_angular_vel=config.get("max_angular_vel", _AGT_D["max_angular_vel"]),
+            max_angular_accel=config.get("max_angular_accel", _AGT_D["max_angular_accel"]),
             motion_mode=motion_mode_value,
-            use_fixed_base=config.get("use_fixed_base", False),
+            use_fixed_base=config.get("use_fixed_base", _AGT_D["use_fixed_base"]),
             ik_params=ik_params_value,
             controller_config=controller_config_value,
         )
@@ -203,11 +204,11 @@ class IKParams:
         robot = Agent.from_urdf("mobile_manipulator.urdf", ik_params=cfg)
     """
 
-    max_outer_iterations: int = 5
-    convergence_threshold: float = 0.01
-    max_inner_iterations: int = 200
-    residual_threshold: float = 1e-4
-    reachability_tolerance: float = 0.02
+    max_outer_iterations: int = _IK_D["max_outer_iterations"]
+    convergence_threshold: float = _IK_D["convergence_threshold"]
+    max_inner_iterations: int = _IK_D["max_inner_iterations"]
+    residual_threshold: float = _IK_D["residual_threshold"]
+    reachability_tolerance: float = _IK_D["reachability_tolerance"]
     seed_quartiles: Tuple[float, ...] = (0.25, 0.5, 0.75)
     ik_joint_names: Optional[Tuple[str, ...]] = None
 
@@ -256,12 +257,12 @@ class Agent(SimObject):
         self,
         body_id: int,
         urdf_path: Optional[str] = None,
-        max_linear_vel: Union[float, List[float]] = 2.0,
-        max_linear_accel: Union[float, List[float]] = 5.0,
-        max_angular_vel: Union[float, List[float]] = 3.0,
-        max_angular_accel: Union[float, List[float]] = 10.0,
+        max_linear_vel: Union[float, List[float]] = _AGT_D["max_linear_vel"],
+        max_linear_accel: Union[float, List[float]] = _AGT_D["max_linear_accel"],
+        max_angular_vel: Union[float, List[float]] = _AGT_D["max_angular_vel"],
+        max_angular_accel: Union[float, List[float]] = _AGT_D["max_angular_accel"],
         motion_mode: Union[MotionMode, str] = MotionMode.DIFFERENTIAL,
-        use_fixed_base: bool = False,
+        use_fixed_base: bool = _AGT_D["use_fixed_base"],
         collision_mode: CollisionMode = CollisionMode.NORMAL_3D,
         sim_core=None,
         name: Optional[str] = None,
@@ -651,12 +652,12 @@ class Agent(SimObject):
         collision_shape: Optional[ShapeParams] = None,
         pose: Pose = None,
         mass: float = 0.0,
-        max_linear_vel: Union[float, List[float]] = 2.0,
-        max_linear_accel: Union[float, List[float]] = 5.0,
-        max_angular_vel: Union[float, List[float]] = 3.0,
-        max_angular_accel: Union[float, List[float]] = 10.0,
+        max_linear_vel: Union[float, List[float]] = _AGT_D["max_linear_vel"],
+        max_linear_accel: Union[float, List[float]] = _AGT_D["max_linear_accel"],
+        max_angular_vel: Union[float, List[float]] = _AGT_D["max_angular_vel"],
+        max_angular_accel: Union[float, List[float]] = _AGT_D["max_angular_accel"],
         motion_mode: Union[MotionMode, str] = MotionMode.DIFFERENTIAL,
-        use_fixed_base: bool = False,
+        use_fixed_base: bool = _AGT_D["use_fixed_base"],
         collision_mode: CollisionMode = CollisionMode.NORMAL_3D,
         sim_core=None,
         name: Optional[str] = None,
@@ -745,12 +746,12 @@ class Agent(SimObject):
         urdf_path: str,
         pose: Pose = None,
         mass: Optional[float] = None,
-        max_linear_vel: Union[float, List[float]] = 2.0,
-        max_linear_accel: Union[float, List[float]] = 5.0,
-        max_angular_vel: Union[float, List[float]] = 3.0,
-        max_angular_accel: Union[float, List[float]] = 10.0,
+        max_linear_vel: Union[float, List[float]] = _AGT_D["max_linear_vel"],
+        max_linear_accel: Union[float, List[float]] = _AGT_D["max_linear_accel"],
+        max_angular_vel: Union[float, List[float]] = _AGT_D["max_angular_vel"],
+        max_angular_accel: Union[float, List[float]] = _AGT_D["max_angular_accel"],
         motion_mode: Union[MotionMode, str] = MotionMode.DIFFERENTIAL,
-        use_fixed_base: bool = False,
+        use_fixed_base: bool = _AGT_D["use_fixed_base"],
         collision_mode: CollisionMode = CollisionMode.NORMAL_3D,
         sim_core=None,
         name: Optional[str] = None,

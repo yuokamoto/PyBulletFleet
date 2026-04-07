@@ -14,7 +14,7 @@ repos:
       - id: check-toml                   # Validate TOML files (pyproject.toml)
       - id: debug-statements             # Detect debug statements (pdb, breakpoint)
       - id: check-added-large-files      # Prevent large files from being committed
-        args: ['--maxkb=1000']
+        args: ['--maxkb=2048']            # Allow demo media up to 2 MB
       - id: mixed-line-ending            # Detect mixed line endings (CRLF/LF)
 
 

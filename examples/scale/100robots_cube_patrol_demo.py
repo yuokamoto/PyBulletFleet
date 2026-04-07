@@ -36,6 +36,7 @@ from pybullet_fleet.robot_models import resolve_urdf
 
 parser = argparse.ArgumentParser(description="100 Robots Cube Patrol Demo")
 parser.add_argument("--robot", default="husky", help="Robot name (e.g. husky, racecar) or URDF path")
+parser.add_argument("--duration", type=float, default=None, help="Simulation duration in seconds (default: run forever)")
 _args = parser.parse_args()
 
 
@@ -285,7 +286,7 @@ def main():
     sim.register_callback(monitoring_callback, frequency=None)
 
     # Run simulation
-    sim.run_simulation()
+    sim.run_simulation(duration=_args.duration)
 
 
 if __name__ == "__main__":

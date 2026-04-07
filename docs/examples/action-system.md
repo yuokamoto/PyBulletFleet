@@ -1,5 +1,7 @@
 # Tutorial 2: High-Level Actions — Pick, Drop, Move, Wait
 
+<video src="../action_system.mp4" width="100%" autoplay loop muted playsinline></video>
+
 **Source file:** [`examples/basics/action_system_demo.py`](https://github.com/yuokamoto/PyBulletFleet/blob/main/examples/basics/action_system_demo.py)
 
 This tutorial introduces PyBulletFleet's **action queue system**: a way to give an agent

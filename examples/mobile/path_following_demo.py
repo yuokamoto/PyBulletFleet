@@ -35,12 +35,13 @@ from pybullet_fleet.types import MotionMode
 
 _parser = argparse.ArgumentParser(description="Path Following Demo")
 _parser.add_argument("--robot", default="husky", help="Robot name (e.g. husky, racecar) or URDF path for differential robots")
+_parser.add_argument("--rtf", type=float, default=None, help="Target real-time factor override")
 _args = _parser.parse_args()
 
 
 def main():
     # Create simulation
-    params = SimulationParams(gui=True, timestep=0.1, target_rtf=3.0, physics=False)
+    params = SimulationParams(gui=True, timestep=0.1, target_rtf=_args.rtf if _args.rtf is not None else 3.0, physics=False)
     sim = MultiRobotSimulationCore(params)
 
     # Get absolute paths

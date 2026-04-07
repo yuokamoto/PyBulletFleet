@@ -1,5 +1,20 @@
 # PyBulletFleet Documentation
 
+<table width="100%">
+<tr>
+<td align="center"><b>Mixed Fleet Grid</b><br><small>100robots_grid_demo.py</small><br>
+<video src="100robots_grid_mixed.mp4" width="100%" autoplay loop muted playsinline></video></td>
+<td align="center"><b>Cube Patrol</b><br><small>100robots_cube_patrol_demo.py</small><br>
+<video src="100robots_cube_patrol.mp4" width="100%" autoplay loop muted playsinline></video></td>
+</tr>
+<tr>
+<td align="center"><b>Mobile Pick & Drop</b><br><small>pick_drop_mobile_100robots_demo.py</small><br>
+<video src="pick_drop_mobile_100robots.mp4" width="100%" autoplay loop muted playsinline></video></td>
+<td align="center"><b>Arm Pick & Drop</b><br><small>pick_drop_arm_100robots_demo.py</small><br>
+<video src="pick_drop_arm_100robots.mp4" width="100%" autoplay loop muted playsinline></video></td>
+</tr>
+</table>
+
 A **kinematics-first** simulation framework for large-scale multi-robot fleets,
 built on PyBullet and designed for **fast N× real-time** evaluation.
 

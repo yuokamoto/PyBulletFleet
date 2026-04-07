@@ -21,6 +21,7 @@ from pybullet_fleet.robot_models import resolve_urdf, auto_detect_profile
 
 parser = argparse.ArgumentParser(description="Robot arm pick & drop demo (joint control)")
 parser.add_argument("--robot", default="panda", help="Robot name (e.g. panda, kuka_iiwa, arm_robot) or URDF path")
+parser.add_argument("--rtf", type=float, default=None, help="Target real-time factor override")
 args = parser.parse_args()
 
 # ── Per-robot joint presets (pick / place / init targets + box positions) ──
@@ -58,7 +59,7 @@ BOX_PLACE_POSE = Pose.from_xyz(*_P["box_place"])
 
 # Simulation setup
 params = SimulationParams(
-    gui=True, timestep=0.1, physics=False, target_rtf=1
+    gui=True, timestep=0.1, physics=False, target_rtf=args.rtf if args.rtf is not None else 3
 )  # for kinematics demo with faster execution (no physics means we can run faster than real-time)
 # params = SimulationParams(gui=True, timestep=0.01, physics=True) # for physics-based pick/drop with gravity and dynamics
 sim_core = MultiRobotSimulationCore(params)

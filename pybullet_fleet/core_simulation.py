@@ -31,6 +31,7 @@ from pybullet_fleet.logging_utils import get_lazy_logger
 from pybullet_fleet.sim_object import SimObject
 from pybullet_fleet.agent import Agent
 from pybullet_fleet.types import SpatialHashCellSizeMode, CollisionDetectionMethod, CollisionMode
+from pybullet_fleet._defaults import SIMULATION as _SIM_D
 
 # Global log_level (default: 'info')
 GLOBAL_LOG_LEVEL = "INFO"
@@ -51,37 +52,43 @@ class SimulationParams:
     Use ``from_config`` / ``from_dict`` to load from YAML files.
     """
 
-    target_rtf: float = 1.0  # target_rtf=0 means maximum speed (no sleep)
-    timestep: float = 1.0 / 240.0
-    duration: float = 0
-    gui: bool = True
-    physics: bool = False
-    monitor: bool = True
-    enable_monitor_gui: bool = True
+    target_rtf: float = _SIM_D["target_rtf"]  # target_rtf=0 means maximum speed (no sleep)
+    timestep: float = _SIM_D["timestep"]
+    duration: float = _SIM_D["duration"]
+    gui: bool = _SIM_D["gui"]
+    physics: bool = _SIM_D["physics"]
+    monitor: bool = _SIM_D["monitor"]
+    enable_monitor_gui: bool = _SIM_D["enable_monitor_gui"]
     collision_check_frequency: Optional[float] = None
-    log_level: str = "warn"
-    max_steps_per_frame: int = 10  # Maximum simulation steps per rendering frame
-    gui_min_fps: int = 30  # Minimum FPS for GUI responsiveness (default: 30 FPS = 33ms)
+    log_level: str = _SIM_D["log_level"]
+    max_steps_per_frame: int = _SIM_D["max_steps_per_frame"]
+    gui_min_fps: int = _SIM_D["gui_min_fps"]
     # Visualizer settings
-    enable_collision_shapes: bool = False
-    enable_structure_transparency: bool = False
-    enable_shadows: bool = True
-    enable_gui_panel: bool = False
-    ignore_static_collision: bool = True
-    enable_time_profiling: bool = False
-    profiling_interval: int = 100  # Steps between profiling reports
-    enable_memory_profiling: bool = False  # Memory profiling switch
-    enable_collision_color_change: bool = False
+    enable_collision_shapes: bool = _SIM_D["enable_collision_shapes"]
+    enable_structure_transparency: bool = _SIM_D["enable_structure_transparency"]
+    enable_shadows: bool = _SIM_D["enable_shadows"]
+    enable_gui_panel: bool = _SIM_D["enable_gui_panel"]
+    ignore_static_collision: bool = _SIM_D["ignore_static_collision"]
+    enable_time_profiling: bool = _SIM_D["enable_time_profiling"]
+    profiling_interval: int = _SIM_D["profiling_interval"]
+    enable_memory_profiling: bool = _SIM_D["enable_memory_profiling"]
+    enable_collision_color_change: bool = _SIM_D["enable_collision_color_change"]
     spatial_hash_cell_size_mode: SpatialHashCellSizeMode = SpatialHashCellSizeMode.AUTO_INITIAL
     spatial_hash_cell_size: Optional[float] = None  # Fixed cell size (for mode=CONSTANT)
     collision_detection_method: Optional[CollisionDetectionMethod] = None  # Auto-select based on physics
-    collision_margin: float = 0.02  # Safety clearance for getClosestPoints (meters, default: 2cm)
-    multi_cell_threshold: float = (
-        1.5  # Dimensionless multiplier of cell_size; objects larger than cell_size × this value span multiple cells (>= 1.0)
-    )
-    enable_floor: bool = True  # Load ground plane (plane.urdf). False to skip.
+    collision_margin: float = _SIM_D["collision_margin"]
+    multi_cell_threshold: float = _SIM_D["multi_cell_threshold"]
+    enable_floor: bool = _SIM_D["enable_floor"]
     camera_config: Optional[Dict[str, Any]] = None  # Camera configuration from config file
     model_paths: Optional[List[str]] = None  # Additional directories to scan for URDF/mesh models
+    # Window size parameters
+    window_width: int = _SIM_D["window_width"]
+    window_height: int = _SIM_D["window_height"]
+    # DataMonitor window parameters
+    monitor_width: int = _SIM_D["monitor_width"]
+    monitor_height: int = _SIM_D["monitor_height"]
+    monitor_x: int = _SIM_D["monitor_x"]
+    monitor_y: int = _SIM_D["monitor_y"]
 
     def __post_init__(self) -> None:
         # Auto-select collision detection method based on physics mode if not explicitly set
@@ -116,40 +123,50 @@ class SimulationParams:
             SimulationParams instance
         """
         return cls(
-            target_rtf=config.get("target_rtf", 1.0),
-            timestep=config.get("timestep", 1.0 / 10.0),
-            duration=config.get("duration", 0),
-            gui=config.get("gui", True),
-            physics=config.get("physics", False),
-            monitor=config.get("monitor", True),
-            enable_monitor_gui=config.get("enable_monitor_gui", True),
-            collision_check_frequency=config.get("collision_check_frequency", None),
-            log_level=config.get("log_level", "warn"),
-            max_steps_per_frame=config.get("max_steps_per_frame", 10),
-            gui_min_fps=config.get("gui_min_fps", 30),
+            target_rtf=config.get("target_rtf", _SIM_D["target_rtf"]),
+            timestep=config.get("timestep", _SIM_D["timestep"]),
+            duration=config.get("duration", _SIM_D["duration"]),
+            gui=config.get("gui", _SIM_D["gui"]),
+            physics=config.get("physics", _SIM_D["physics"]),
+            monitor=config.get("monitor", _SIM_D["monitor"]),
+            enable_monitor_gui=config.get("enable_monitor_gui", _SIM_D["enable_monitor_gui"]),
+            collision_check_frequency=config.get("collision_check_frequency", _SIM_D["collision_check_frequency"]),
+            log_level=config.get("log_level", _SIM_D["log_level"]),
+            max_steps_per_frame=config.get("max_steps_per_frame", _SIM_D["max_steps_per_frame"]),
+            gui_min_fps=config.get("gui_min_fps", _SIM_D["gui_min_fps"]),
             # Visualizer settings
-            enable_collision_shapes=config.get("enable_collision_shapes", False),
-            enable_structure_transparency=config.get("enable_structure_transparency", False),
-            enable_shadows=config.get("enable_shadows", True),
-            enable_gui_panel=config.get("enable_gui_panel", False),  # Default: hide GUI panel
-            ignore_static_collision=config.get("ignore_static_collision", True),
-            enable_time_profiling=config.get("enable_time_profiling", False),
-            profiling_interval=config.get("profiling_interval", 100),
-            enable_memory_profiling=config.get("enable_memory_profiling", False),
-            enable_collision_color_change=config.get("enable_collision_color_change", False),
-            spatial_hash_cell_size_mode=SpatialHashCellSizeMode(config.get("spatial_hash_cell_size_mode", "auto_initial")),
-            spatial_hash_cell_size=config.get("spatial_hash_cell_size", None),
-            # Collision detection method - auto-select based on physics mode
-            collision_detection_method=CollisionDetectionMethod(
-                config.get(
-                    "collision_detection_method", "contact_points" if config.get("physics", False) else "closest_points"
-                )
+            enable_collision_shapes=config.get("enable_collision_shapes", _SIM_D["enable_collision_shapes"]),
+            enable_structure_transparency=config.get("enable_structure_transparency", _SIM_D["enable_structure_transparency"]),
+            enable_shadows=config.get("enable_shadows", _SIM_D["enable_shadows"]),
+            enable_gui_panel=config.get("enable_gui_panel", _SIM_D["enable_gui_panel"]),
+            ignore_static_collision=config.get("ignore_static_collision", _SIM_D["ignore_static_collision"]),
+            enable_time_profiling=config.get("enable_time_profiling", _SIM_D["enable_time_profiling"]),
+            profiling_interval=config.get("profiling_interval", _SIM_D["profiling_interval"]),
+            enable_memory_profiling=config.get("enable_memory_profiling", _SIM_D["enable_memory_profiling"]),
+            enable_collision_color_change=config.get("enable_collision_color_change", _SIM_D["enable_collision_color_change"]),
+            spatial_hash_cell_size_mode=SpatialHashCellSizeMode(
+                config.get("spatial_hash_cell_size_mode", _SIM_D["spatial_hash_cell_size_mode"])
             ),
-            collision_margin=config.get("collision_margin", 0.02),  # Safety clearance (meters)
-            multi_cell_threshold=config.get("multi_cell_threshold", 1.5),  # Multi-cell registration threshold
-            enable_floor=config.get("enable_floor", True),  # Ground plane on/off
-            camera_config=config.get("camera", {}),  # Camera configuration
-            model_paths=config.get("model_paths", []),  # Additional model directories
+            spatial_hash_cell_size=config.get("spatial_hash_cell_size", _SIM_D["spatial_hash_cell_size"]),
+            # Collision detection method - let __post_init__ auto-select if not in config
+            collision_detection_method=(
+                CollisionDetectionMethod(config["collision_detection_method"])
+                if "collision_detection_method" in config
+                else None
+            ),
+            collision_margin=config.get("collision_margin", _SIM_D["collision_margin"]),
+            multi_cell_threshold=config.get("multi_cell_threshold", _SIM_D["multi_cell_threshold"]),
+            enable_floor=config.get("enable_floor", _SIM_D["enable_floor"]),
+            camera_config=config.get("camera", _SIM_D["camera_config"]),  # Camera configuration
+            model_paths=config.get("model_paths", _SIM_D["model_paths"]),  # Additional model directories
+            # Window size parameters
+            window_width=config.get("window_width", _SIM_D["window_width"]),
+            window_height=config.get("window_height", _SIM_D["window_height"]),
+            # DataMonitor window parameters
+            monitor_width=config.get("monitor_width", _SIM_D["monitor_width"]),
+            monitor_height=config.get("monitor_height", _SIM_D["monitor_height"]),
+            monitor_x=config.get("monitor_x", _SIM_D["monitor_x"]),
+            monitor_y=config.get("monitor_y", _SIM_D["monitor_y"]),
         )
 
 
@@ -284,6 +301,9 @@ class MultiRobotSimulationCore:
         # Incremental collision tracking
         self._active_collision_pairs: Set[Tuple[int, int]] = set()  # Currently colliding object_id pairs (sorted: i < j)
 
+        # --- Recording ---
+        self._recorder: Optional[Any] = None  # Optional[SimulationRecorder] (lazy import to avoid circular)
+
         self.setup_pybullet()
         self.setup_monitor()
 
@@ -291,7 +311,14 @@ class MultiRobotSimulationCore:
         # If monitor: true and console_monitor: false, start DataMonitor
 
         if self._params.monitor:
-            self._data_monitor = DataMonitor("PyBullet Simulation Monitor", enable_gui=self._params.enable_monitor_gui)
+            self._data_monitor = DataMonitor(
+                "PyBullet Simulation Monitor",
+                enable_gui=self._params.enable_monitor_gui,
+                width=self._params.monitor_width,
+                height=self._params.monitor_height,
+                x=self._params.monitor_x,
+                y=self._params.monitor_y,
+            )
             self._data_monitor.start()
         else:
             self._data_monitor = None
@@ -355,6 +382,115 @@ class MultiRobotSimulationCore:
         """
         self._callbacks.append({"func": callback, "frequency": frequency, "last_exec": 0.0})
 
+    def unregister_callback(self, callback_func: Callable) -> bool:
+        """Remove a registered callback by function reference.
+
+        Args:
+            callback_func: The callback function to remove (matched by identity).
+
+        Returns:
+            True if the callback was found and removed, False otherwise.
+        """
+        for i, cbinfo in enumerate(self._callbacks):
+            if cbinfo["func"] is callback_func:
+                self._callbacks.pop(i)
+                return True
+        return False
+
+    # ------------------------------------------------------------------
+    # Recording
+    # ------------------------------------------------------------------
+
+    def start_recording(
+        self,
+        output: str = "recording.gif",
+        width: int = 800,
+        height: int = 600,
+        fps: int = 15,
+        duration: Optional[float] = None,
+        camera_mode: str = "auto",
+        time_base: str = "sim",
+        **kwargs: Any,
+    ) -> Any:
+        """Start recording the simulation as an animated GIF or MP4.
+
+        Frames are captured via ``getCameraImage(ER_TINY_RENDERER)`` at the
+        specified *fps* frequency. Works in both ``p.DIRECT`` and ``p.GUI``.
+
+        Output format is auto-detected from the file extension:
+
+        - ``.gif`` — Animated GIF via Pillow (always available)
+        - ``.mp4`` — H.264 MP4 via imageio + ffmpeg (requires ``pip install imageio[ffmpeg]``)
+
+        Time bases:
+
+        - ``"sim"`` (default) — Capture at fixed sim-time intervals.
+          Playback always looks like 1× speed.
+        - ``"real"`` — Capture at wall-clock intervals.
+          Playback reflects actual execution speed (e.g. 10× sim → 10× video).
+
+        Args:
+            output: Output file path (``.gif`` or ``.mp4``). Parent directories created automatically.
+            width: Frame width in pixels.
+            height: Frame height in pixels.
+            fps: Capture frequency and playback FPS.
+            duration: Recording duration in sim-seconds (``time_base="sim"``) or
+                wall-clock seconds (``time_base="real"``). ``None`` for manual stop.
+            camera_mode: ``"auto"`` | ``"gui"`` | ``"orbit"`` | ``"manual"``.
+                ``"auto"`` is promoted to ``"gui"`` when running in GUI mode.
+            time_base: ``"sim"`` or ``"real"``. Controls capture timing.
+            **kwargs: Passed to ``SimulationRecorder`` (e.g. ``orbit_degrees``,
+                     ``camera_params``).
+
+        Returns:
+            :class:`~pybullet_fleet.recorder.SimulationRecorder` instance.
+
+        Example::
+
+            sim.start_recording("output.gif", duration=4.0)
+            sim.start_recording("output.mp4", duration=4.0, fps=30)
+            sim.start_recording("perf.mp4", duration=4.0, time_base="real")
+            sim.run_simulation(duration=5.0)
+            # File is auto-saved when run_simulation ends
+        """
+        from pybullet_fleet.recorder import SimulationRecorder
+
+        if self._recorder is not None:
+            self.stop_recording()  # stop existing recording
+        self._recorder = SimulationRecorder(
+            sim_core=self,
+            output=output,
+            width=width,
+            height=height,
+            fps=fps,
+            duration=duration,
+            camera_mode=camera_mode,
+            time_base=time_base,
+            **kwargs,
+        )
+        self._recorder.start()
+        logger.info("Recording started: %s", output)
+        return self._recorder
+
+    def stop_recording(self) -> Optional[str]:
+        """Stop recording and save the output file.
+
+        Returns:
+            Output file path if a recording was active, ``None`` otherwise.
+        """
+        if self._recorder is None:
+            return None
+        recorder = self._recorder
+        recorder.stop()
+        try:
+            path = recorder.save()
+            logger.info("Recording saved: %s (%d frames)", path, recorder.frame_count)
+        except ValueError:
+            logger.warning("Recording stopped but no frames were captured")
+            path = None
+        self._recorder = None
+        return path
+
     def set_collision_check_frequency(self, frequency: Optional[float] = None) -> None:
         """
         Set the frequency (Hz, number of times per second) for collision detection.
@@ -386,7 +522,17 @@ class MultiRobotSimulationCore:
 
     def setup_pybullet(self) -> None:
         """Initialize PyBullet with GUI panels hidden."""
-        self._client = p.connect(p.GUI if self._params.gui else p.DIRECT)
+        # Force headless mode when RECORD env var is set (enables zero-code-change recording).
+        # RECORD_GUI=1 overrides this to keep the GUI window open so the recorder
+        # can capture via ER_BULLET_HARDWARE_OPENGL (GPU-quality frames).
+        if os.environ.get("RECORD") and self._params.gui and not os.environ.get("RECORD_GUI"):
+            logger.info("RECORD env var detected: forcing gui=False for headless recording")
+            self._params.gui = False
+
+        options = ""
+        if self._params.gui and self._params.window_width > 0 and self._params.window_height > 0:
+            options = f"--width={self._params.window_width} --height={self._params.window_height}"
+        self._client = p.connect(p.GUI if self._params.gui else p.DIRECT, options=options)
 
         # Hide all debug UI panels immediately after connection
         if self._params.gui:
@@ -1350,6 +1496,42 @@ class MultiRobotSimulationCore:
         logger.info(f"[TRANSPARENCY] Complete: {processed} visual shapes updated")
         logger.info(f"Static objects transparency {'enabled (alpha=0.3)' if transparent else 'disabled (alpha=1.0)'}")
 
+    def compute_scene_bounds(self) -> Tuple[List[float], List[float]]:
+        """Compute scene bounding box from all sim_object positions.
+
+        Returns a ``(center, extent)`` tuple where *center* is the mean position
+        ``[cx, cy, cz]`` and *extent* is the axis-aligned size ``[ex, ey, ez]``
+        (i.e. ``max - min`` per axis).
+
+        When the scene is empty both lists are ``[0.0, 0.0, 0.0]``.
+
+        This is used by :meth:`setup_camera` (GUI) and
+        :class:`~pybullet_fleet.recorder.SimulationRecorder` (offscreen) so that
+        both share the same scene-framing logic.
+
+        Returns:
+            Tuple of ``([cx, cy, cz], [ex, ey, ez])``.
+        """
+        positions: List[List[float]] = []
+        for obj in self._sim_objects:
+            try:
+                pos, _ = p.getBasePositionAndOrientation(obj.body_id, physicsClientId=self._client)
+                positions.append(list(pos))
+            except Exception:
+                continue
+
+        if not positions:
+            return [0.0, 0.0, 0.0], [0.0, 0.0, 0.0]
+
+        arr = np.array(positions)
+        center = arr.mean(axis=0)
+        extent = arr.max(axis=0) - arr.min(axis=0)
+        return [float(center[0]), float(center[1]), float(center[2])], [
+            float(extent[0]),
+            float(extent[1]),
+            float(extent[2]),
+        ]
+
     def setup_camera(
         self, camera_config: Optional[Dict[str, Any]] = None, entity_positions: Optional[List[List[float]]] = None
     ) -> None:
@@ -1396,21 +1578,18 @@ class MultiRobotSimulationCore:
 
         elif camera_mode == "auto":
             # Calculate camera from entity positions
-            # If entity_positions is None, calculate from all simulation objects
-            if entity_positions is None or len(entity_positions) == 0:
-                if len(self._sim_objects) == 0:
+            if entity_positions is not None and len(entity_positions) > 0:
+                # Use explicitly provided positions
+                positions_array = np.array(entity_positions)
+                center = list(positions_array.mean(axis=0).astype(float))
+                extent = list((positions_array.max(axis=0) - positions_array.min(axis=0)).astype(float))
+            else:
+                # Use shared bounds computation from sim_objects
+                center, extent = self.compute_scene_bounds()
+                if center == [0.0, 0.0, 0.0] and extent == [0.0, 0.0, 0.0] and len(self._sim_objects) == 0:
                     logger.warning("Auto camera mode requested but no objects in simulation")
                     return
-                # Calculate positions from all simulation objects
-                entity_positions = []
-                for obj in self._sim_objects:
-                    pose = obj.get_pose()
-                    entity_positions.append(pose.position)
-                logger.info(f"Auto camera: calculated from {len(entity_positions)} objects")
-
-            positions_array = np.array(entity_positions)
-            center = positions_array.mean(axis=0)
-            extent = positions_array.max(axis=0) - positions_array.min(axis=0)
+                logger.info(f"Auto camera: calculated from {len(self._sim_objects)} objects")
 
             # Get camera settings
             view_type = camera_config.get("camera_view_type", "top_down")
@@ -2093,6 +2272,28 @@ class MultiRobotSimulationCore:
         if duration is None:
             duration = self._params.duration
 
+        # Auto-recording from RECORD environment variable (zero-code-change recording)
+        record_path = os.environ.get("RECORD")
+        if record_path and self._recorder is None:
+            record_duration = float(os.environ.get("RECORD_DURATION", "4.0"))
+            record_fps = int(os.environ.get("RECORD_FPS", "15"))
+            record_width = int(os.environ.get("RECORD_WIDTH", "800"))
+            record_height = int(os.environ.get("RECORD_HEIGHT", "600"))
+            record_time_base = os.environ.get("RECORD_TIME_BASE", "sim")
+            self.start_recording(
+                output=record_path,
+                duration=record_duration,
+                fps=record_fps,
+                width=record_width,
+                height=record_height,
+                time_base=record_time_base,
+            )
+            # If sim duration is unlimited (0), cap it so the process exits
+            # after recording completes (with 1s buffer for warmup).
+            if duration <= 0:
+                duration = record_duration + 1.0
+                logger.info("RECORD active: simulation duration capped to %.1fs", duration)
+
         # Initialize simulation state (counters, visualizer, rendering)
         # Note: initialize_simulation() already starts tracemalloc if needed
         self.initialize_simulation()
@@ -2178,6 +2379,10 @@ class MultiRobotSimulationCore:
         except p.error:
             logger.info("PyBullet connection lost (GUI window closed)")
         self.update_monitor()
+
+        # Auto-save recording if active
+        if self._recorder is not None:
+            self.stop_recording()
 
         # Disconnect from PyBullet if still connected
         try:

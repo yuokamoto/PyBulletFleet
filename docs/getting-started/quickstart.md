@@ -96,7 +96,8 @@ For scenes with hundreds of objects this can be slow — prefer setting
 
 ## Examples
 
-All example scripts live in the `examples/` directory, organised by category:
+All example scripts live in the `examples/` directory, organised by category.
+For step-by-step walkthroughs, see the **[Tutorials](../examples/index)** page.
 
 ### Basics (`examples/basics/`)
 

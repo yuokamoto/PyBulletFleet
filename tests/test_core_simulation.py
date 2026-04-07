@@ -468,7 +468,7 @@ class TestSimulationParams:
     def test_defaults(self):
         params = SimulationParams(gui=False, monitor=False)
         assert params.physics is False
-        assert params.timestep == pytest.approx(1.0 / 240.0)
+        assert params.timestep == pytest.approx(0.1)
         assert params.collision_margin == 0.02
         assert params.multi_cell_threshold == 1.5
 
@@ -532,6 +532,97 @@ class TestSimulationParams:
         """enable_floor should round-trip through from_dict."""
         params = SimulationParams.from_dict({"gui": False, "monitor": False, "enable_floor": False})
         assert params.enable_floor is False
+
+    # --- Window size / monitor position params ---
+
+    def test_window_size_defaults(self):
+        """Window size params default to 1024x768."""
+        params = SimulationParams(gui=False, monitor=False)
+        assert params.window_width == 1024
+        assert params.window_height == 768
+
+    def test_monitor_size_defaults(self):
+        """Monitor size/position defaults: size 200x290, position -1,-1 (WM-managed)."""
+        params = SimulationParams(gui=False, monitor=False)
+        assert params.monitor_width == 200
+        assert params.monitor_height == 290
+        assert params.monitor_x == -1
+        assert params.monitor_y == -1
+
+    def test_window_size_from_dict(self):
+        """Window size params should load from dict."""
+        cfg = {
+            "gui": False,
+            "monitor": False,
+            "window_width": 1280,
+            "window_height": 720,
+        }
+        params = SimulationParams.from_dict(cfg)
+        assert params.window_width == 1280
+        assert params.window_height == 720
+
+    def test_monitor_params_from_dict(self):
+        """Monitor size/position should load from dict."""
+        cfg = {
+            "gui": False,
+            "monitor": False,
+            "monitor_width": 300,
+            "monitor_height": 400,
+            "monitor_x": 50,
+            "monitor_y": 100,
+        }
+        params = SimulationParams.from_dict(cfg)
+        assert params.monitor_width == 300
+        assert params.monitor_height == 400
+        assert params.monitor_x == 50
+        assert params.monitor_y == 100
+
+    def test_window_size_from_dict_defaults(self):
+        """Omitted window/monitor keys should use defaults."""
+        cfg = {"gui": False, "monitor": False}
+        params = SimulationParams.from_dict(cfg)
+        assert params.window_width == 1024
+        assert params.window_height == 768
+        assert params.monitor_width == 200
+        assert params.monitor_height == 290
+        assert params.monitor_x == -1
+        assert params.monitor_y == -1
+
+
+class TestDataMonitorParams:
+    """Test DataMonitor accepts size/position params."""
+
+    def test_default_geometry(self):
+        """Default geometry string omits position when x/y are -1 (WM-managed)."""
+        from pybullet_fleet.data_monitor import DataMonitor
+
+        monitor = DataMonitor("Test")
+        assert monitor.geometry_string == "200x290"
+
+    def test_custom_geometry(self):
+        """Custom size/position should produce correct geometry string."""
+        from pybullet_fleet.data_monitor import DataMonitor
+
+        monitor = DataMonitor("Test", width=300, height=400, x=50, y=100)
+        assert monitor.geometry_string == "300x400+50+100"
+
+    def test_setup_monitor_passes_params(self):
+        """setup_monitor() should pass monitor_* params to DataMonitor."""
+        params = SimulationParams(
+            gui=False,
+            monitor=True,
+            enable_monitor_gui=False,
+            monitor_width=300,
+            monitor_height=400,
+            monitor_x=50,
+            monitor_y=100,
+        )
+        sc = MultiRobotSimulationCore(params)
+        try:
+            assert sc._data_monitor is not None
+            assert sc._data_monitor.geometry_string == "300x400+50+100"
+        finally:
+            p.disconnect(sc.client)
 
 
 class TestFloorLoading:
@@ -1303,6 +1394,7 @@ class TestRunSimulation:
             physics=False,
             monitor=False,
             target_rtf=1.0,
+            timestep=1.0 / 240.0,
             log_level="warning",
         )
         sc = MultiRobotSimulationCore(params)
@@ -1481,6 +1573,7 @@ class TestRunSimulation:
             physics=False,
             monitor=False,
             target_rtf=10000.0,
+            timestep=1.0 / 240.0,
             max_steps_per_frame=max_steps,
             log_level="warning",
         )
@@ -2356,3 +2449,50 @@ class TestModelPathsWiring:
             assert after == before
         finally:
             p.disconnect(sc.client)
+
+
+# ---------------------------------------------------------------------------
+# compute_scene_bounds
+# ---------------------------------------------------------------------------
+
+
+class TestComputeSceneBounds:
+    """Test MultiRobotSimulationCore.compute_scene_bounds()."""
+
+    def test_no_objects_returns_defaults(self, sim_core):
+        """Empty scene returns origin center and default extent."""
+        center, extent = sim_core.compute_scene_bounds()
+        assert center == [0.0, 0.0, 0.0]
+        assert extent == [0.0, 0.0, 0.0]
+
+    def test_single_object(self, sim_core):
+        """Single object: center = its position, extent = [0,0,0]."""
+        make_box(sim_core, [3.0, 4.0, 0.5])
+        center, extent = sim_core.compute_scene_bounds()
+        assert abs(center[0] - 3.0) < 0.1
+        assert abs(center[1] - 4.0) < 0.1
+        # extent should be ~0 in X/Y since single object
+        assert extent[0] < 0.5
+        assert extent[1] < 0.5
+
+    def test_multiple_objects(self, sim_core):
+        """Multiple objects: center is mean, extent is max-min."""
+        make_box(sim_core, [0.0, 0.0, 0.5])
+        make_box(sim_core, [10.0, 0.0, 0.5])
+        make_box(sim_core, [0.0, 6.0, 0.5])
+        center, extent = sim_core.compute_scene_bounds()
+        # center ~ mean([0,10,0], [0,0,6], ...) ≈ (3.3, 2.0, 0.5)
+        assert abs(center[0] - 10.0 / 3.0) < 0.5
+        assert abs(center[1] - 6.0 / 3.0) < 0.5
+        # extent X ~ 10, extent Y ~ 6
+        assert extent[0] > 8.0
+        assert extent[1] > 4.0
+
+    def test_returns_lists_of_floats(self, sim_core):
+        """Return type should be plain lists of float, not numpy arrays."""
+        make_box(sim_core, [1.0, 2.0, 0.5])
+        center, extent = sim_core.compute_scene_bounds()
+        assert isinstance(center, list)
+        assert isinstance(extent, list)
+        assert all(isinstance(v, float) for v in center)
+        assert all(isinstance(v, float) for v in extent)

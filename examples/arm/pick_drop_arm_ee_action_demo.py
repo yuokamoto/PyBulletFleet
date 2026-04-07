@@ -23,6 +23,8 @@ from pybullet_fleet.robot_models import resolve_urdf, auto_detect_profile
 
 parser = argparse.ArgumentParser(description="Robot arm pick & drop demo (Action system, EE position control)")
 parser.add_argument("--robot", default="panda", help="Robot name (e.g. panda, kuka_iiwa, arm_robot) or URDF path")
+parser.add_argument("--duration", type=float, default=None, help="Simulation duration in seconds (default: run forever)")
+parser.add_argument("--rtf", type=float, default=None, help="Target real-time factor override")
 args = parser.parse_args()
 
 # ── Per-robot EE position presets ──
@@ -65,7 +67,9 @@ BOX_DROP_XYZ = _P["box_drop"]
 EE_ORN = _P["orn"]  # None or quaternion tuple
 
 # Simulation setup (kinematic mode, fast execution)
-params = SimulationParams(gui=True, timestep=0.1, physics=False, target_rtf=3, log_level="info")
+params = SimulationParams(
+    gui=True, timestep=0.1, physics=False, target_rtf=args.rtf if args.rtf is not None else 3, log_level="info"
+)
 sim_core = MultiRobotSimulationCore(params)
 
 # Spawn robot arm (fixed base)
@@ -182,4 +186,4 @@ sim_core.setup_camera(
 )
 
 print("Starting simulation... Press Ctrl+C to stop.\n")
-sim_core.run_simulation()
+sim_core.run_simulation(duration=args.duration)

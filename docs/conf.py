@@ -57,6 +57,7 @@ html_theme_options = {
     "sticky_navigation": True,
     "titles_only": False,
 }
+html_extra_path = ["media"]
 
 # -- Intersphinx -------------------------------------------------------------
 intersphinx_mapping = {

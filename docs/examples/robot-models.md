@@ -1,5 +1,7 @@
 # Tutorial 6: Robot Models — resolve_urdf & Model Catalog
 
+![Model Catalog](../media/model_catalog.png)
+
 **Source files:** [`examples/models/`](https://github.com/yuokamoto/PyBulletFleet/tree/main/examples/models)
 
 This tutorial shows how to load robots **by name** instead of by file path,
@@ -105,6 +107,18 @@ resolve_urdf("robots/mobile_robot.urdf")
 ---
 
 ## 3. Listing All Models
+
+### Visual Catalog
+
+| Model | Preview |
+|-------|---------|
+| mobile_robot | ![mobile_robot](../media/models/mobile_robot.png) |
+| arm_robot | ![arm_robot](../media/models/arm_robot.png) |
+| panda | ![panda](../media/models/panda.png) |
+| kuka_iiwa | ![kuka_iiwa](../media/models/kuka_iiwa.png) |
+| mobile_manipulator | ![mobile_manipulator](../media/models/mobile_manipulator.png) |
+| rail_arm_robot | ![rail_arm_robot](../media/models/rail_arm_robot.png) |
+| simple_cube | ![simple_cube](../media/models/simple_cube.png) |
 
 Use `list_all_models()` to see every registered model with its tier and availability:
 

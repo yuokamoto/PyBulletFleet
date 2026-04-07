@@ -12,11 +12,21 @@ import tkinter as tk
 from tkinter import ttk
 from typing import Dict, Optional
 
+from pybullet_fleet._defaults import SIMULATION as _SIM_D
+
 
 class DataMonitor:
     """Real-time data monitoring window"""
 
-    def __init__(self, title: str = "Simulation Monitor", enable_gui: bool = True) -> None:
+    def __init__(
+        self,
+        title: str = "Simulation Monitor",
+        enable_gui: bool = True,
+        width: int = _SIM_D["monitor_width"],
+        height: int = _SIM_D["monitor_height"],
+        x: int = _SIM_D["monitor_x"],
+        y: int = _SIM_D["monitor_y"],
+    ) -> None:
         self.title: str = title
         self.enable_gui: bool = enable_gui
         self.running: bool = False
@@ -26,6 +36,12 @@ class DataMonitor:
         self.update_interval: float = 0.5  # Update every 500ms
         self.status_label: Optional[ttk.Label] = None
         self.monitor_thread: Optional[threading.Thread] = None
+        # If x/y are -1, omit position so the window manager places the window
+        # on the primary display. Explicit x/y use absolute virtual-screen coords.
+        if x >= 0 and y >= 0:
+            self.geometry_string: str = f"{width}x{height}+{x}+{y}"
+        else:
+            self.geometry_string: str = f"{width}x{height}"
 
     def start(self) -> None:
         """Start the monitor window in a separate thread"""
@@ -53,21 +69,21 @@ class DataMonitor:
         """Run the tkinter monitor window"""
         self.window = tk.Tk()
         self.window.title(self.title)
-        self.window.geometry("400x300")
+        self.window.geometry(self.geometry_string)
         self.window.configure(bg="black")
 
-        # Create main frame
-        main_frame = ttk.Frame(self.window, padding="10")
+        # Create main frame  (padding: top right bottom left)
+        main_frame = ttk.Frame(self.window, padding="4 5 4 2")
         main_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
 
         # Configure style for better visibility
         style = ttk.Style()
-        style.configure("Monitor.TLabel", foreground="lime", background="black", font=("Courier", 10))
+        style.configure("Monitor.TLabel", foreground="lime", background="black", font=("Courier", 9))
 
         # Create labels for different data fields
         self.labels = {}
         fields = [
-            "Simulation Time",
+            "Sim Time",
             "Real Time",
             "Target RTF",
             "Actual RTF",
@@ -75,8 +91,8 @@ class DataMonitor:
             "Physics",
             "Agents",
             "Objects",
-            "Active Collisions",
-            "Total Collisions",
+            "Collisions",
+            "Tot Collis.",
             "Steps",
         ]
 
@@ -112,19 +128,17 @@ class DataMonitor:
                     data = json.load(f)
 
                 # Update labels
-                self.labels["Simulation Time"].config(text=f"Simulation Time: {data.get('sim_time', 0):.1f}s")
+                self.labels["Sim Time"].config(text=f"Sim Time : {data.get('sim_time', 0):.1f}s")
                 self.labels["Real Time"].config(text=f"Real Time: {data.get('real_time', 0):.1f}s")
-                self.labels["Target RTF"].config(text=f"Target RTF: {data.get('target_rtf', 0):.1f}x")
-                self.labels["Actual RTF"].config(text=f"Actual RTF: {data.get('actual_rtf', 0):.1f}x")
-                self.labels["Time Step"].config(
-                    text=f"Time Step: {data.get('time_step', 0):.4f}s ({data.get('frequency', 0):.0f}Hz)"
-                )
-                self.labels["Physics"].config(text=f"Physics: {data.get('physics', 'Unknown')}")
-                self.labels["Agents"].config(text=f"Agents: {data.get('agents', 0)}")
-                self.labels["Objects"].config(text=f"Objects: {data.get('objects', 0)}")
-                self.labels["Active Collisions"].config(text=f"Active Collisions: {data.get('active_collisions', 0)}")
-                self.labels["Total Collisions"].config(text=f"Total Collisions: {data.get('collisions', 0)}")
-                self.labels["Steps"].config(text=f"Steps: {data.get('steps', 0)}")
+                self.labels["Target RTF"].config(text=f"Tgt RTF  : {data.get('target_rtf', 0):.1f}x")
+                self.labels["Actual RTF"].config(text=f"Act RTF  : {data.get('actual_rtf', 0):.1f}x")
+                self.labels["Time Step"].config(text=f"dt={data.get('time_step', 0):.4f}s ({data.get('frequency', 0):.0f}Hz)")
+                self.labels["Physics"].config(text=f"Physics  : {data.get('physics', '?')}")
+                self.labels["Agents"].config(text=f"Agents   : {data.get('agents', 0)}")
+                self.labels["Objects"].config(text=f"Objects  : {data.get('objects', 0)}")
+                self.labels["Collisions"].config(text=f"Collis.  : {data.get('active_collisions', 0)}")
+                self.labels["Tot Collis."].config(text=f"Tot Col. : {data.get('collisions', 0)}")
+                self.labels["Steps"].config(text=f"Steps    : {data.get('steps', 0)}")
 
                 self.status_label.config(text=f"Status: Connected (Updated: {time.strftime('%H:%M:%S')})")
             else:
@@ -138,10 +152,16 @@ class DataMonitor:
             self.window.after(int(self.update_interval * 1000), self._update_display)
 
     def write_data(self, sim_data):
-        """Write simulation data to shared file (called from main simulation)"""
+        """Write simulation data to shared file (called from main simulation).
+
+        Uses atomic write (write to temp file + os.replace) to prevent the
+        reader from seeing a truncated / partially-written JSON file.
+        """
+        tmp_path = self.data_file + ".tmp"
         try:
-            with open(self.data_file, "w") as f:
+            with open(tmp_path, "w") as f:
                 json.dump(sim_data, f)
+            os.replace(tmp_path, self.data_file)  # atomic on POSIX
         except Exception:
             pass  # Ignore errors in data writing
 

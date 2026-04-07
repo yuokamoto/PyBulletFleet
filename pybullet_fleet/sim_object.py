@@ -13,6 +13,7 @@ from .geometry import Pose
 from .logging_utils import get_lazy_logger, get_named_lazy_logger
 from .types import CollisionMode
 from .tools import resolve_link_index
+from pybullet_fleet._defaults import SIM_OBJECT as _OBJ_D, SHAPE as _SHP_D
 
 # Standard logger for info/warning/error
 logger = logging.getLogger(__name__)
@@ -68,8 +69,8 @@ class ShapeParams:
     mesh_path: Optional[str] = None
     mesh_scale: List[float] = field(default_factory=lambda: [1.0, 1.0, 1.0])
     half_extents: List[float] = field(default_factory=lambda: [0.5, 0.5, 0.5])
-    radius: float = 0.5
-    height: float = 1.0
+    radius: float = _SHP_D["radius"]
+    height: float = _SHP_D["height"]
     rgba_color: List[float] = field(default_factory=lambda: [0.8, 0.8, 0.8, 1.0])
     frame_pose: Optional[Pose] = None
 
@@ -92,8 +93,8 @@ class ShapeParams:
             mesh_path=d.get("mesh_path"),
             mesh_scale=d.get("mesh_scale", [1.0, 1.0, 1.0]),
             half_extents=d.get("half_extents", [0.5, 0.5, 0.5]),
-            radius=d.get("radius", 0.5),
-            height=d.get("height", 1.0),
+            radius=d.get("radius", _SHP_D["radius"]),
+            height=d.get("height", _SHP_D["height"]),
             rgba_color=d.get("rgba_color", [0.8, 0.8, 0.8, 1.0]),
         )
 
@@ -147,8 +148,8 @@ class SimObjectSpawnParams:
     visual_shape: Optional[ShapeParams] = None
     collision_shape: Optional[ShapeParams] = None
     initial_pose: Pose = field(default_factory=lambda: Pose.from_xyz(0.0, 0.0, 0.0))
-    mass: float = 0.0
-    pickable: bool = True
+    mass: float = _OBJ_D["mass"]
+    pickable: bool = _OBJ_D["pickable"]
     name: Optional[str] = None  # Human-readable name (duplicates allowed, use object_id for unique lookup)
     visual_frame_pose: Optional[Pose] = None
     collision_frame_pose: Optional[Pose] = None
@@ -217,8 +218,8 @@ class SimObjectSpawnParams:
             visual_shape=vs,
             collision_shape=cs,
             initial_pose=initial_pose,
-            mass=config.get("mass", 0.0),
-            pickable=config.get("pickable", True),
+            mass=config.get("mass", _OBJ_D["mass"]),
+            pickable=config.get("pickable", _OBJ_D["pickable"]),
             name=config.get("name"),
             collision_mode=collision_mode_value,
             user_data=config.get("user_data", {}),
