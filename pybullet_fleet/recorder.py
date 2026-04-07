@@ -9,7 +9,7 @@ Integrates with ``MultiRobotSimulationCore`` via the callback system.
 Output format is determined by file extension:
 
 - ``.gif`` — Animated GIF via Pillow (always available)
-- ``.mp4`` — H.264 MP4 via imageio + ffmpeg (requires ``pip install imageio[ffmpeg]``)
+- ``.mp4`` — H.264 MP4 via imageio + pyav (requires ``pip install imageio[pyav]``)
 
 Usage::
 
@@ -61,7 +61,7 @@ class SimulationRecorder:
     Output format is auto-detected from the file extension:
 
     - ``.gif`` — Animated GIF via Pillow (always available)
-    - ``.mp4`` — H.264 MP4 via imageio + ffmpeg (requires ``pip install imageio[ffmpeg]``)
+    - ``.mp4`` — H.264 MP4 via imageio + pyav (requires ``pip install imageio[pyav]``)
 
     Camera modes:
 

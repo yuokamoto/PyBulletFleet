@@ -147,6 +147,12 @@ def _apply_env_overrides() -> None:
 
 _apply_env_overrides()
 
+# Immutable baseline — captured after first env-override pass so that
+# ``reload_defaults()`` can reset values removed from the environment.
+import copy as _copy
+
+_BASELINE: Dict[str, Dict[str, Any]] = _copy.deepcopy(_DEFAULTS)
+
 
 # ---------------------------------------------------------------------------
 # Public API
@@ -159,7 +165,15 @@ def get(section: str, key: str) -> Any:
 
 
 def reload_defaults() -> None:
-    """Re-apply env overrides.  Useful after ``monkeypatch.setenv`` in tests."""
+    """Re-apply env overrides from a clean baseline.
+
+    Resets all values to the immutable baseline captured at import time,
+    then applies current ``PBF_*`` environment variables on top.  This
+    ensures that *removed* env vars revert to their original defaults.
+
+    Useful after ``monkeypatch.setenv`` / ``monkeypatch.delenv`` in tests.
+    """
+    _restore(_copy.deepcopy(_BASELINE))
     _apply_env_overrides()
 
 

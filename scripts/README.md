@@ -18,13 +18,13 @@ Records a PyBullet GUI window by name using ffmpeg (or kazam).
 
 ```bash
 # Basic usage
-bash scripts/screen_capture.sh -d 10 -o output.mp4 -- python examples/scale/100robots_grid_demo.py
+bash scripts/screen_capture.sh -d 10 -o output.mp4 -- examples/scale/100robots_grid_demo.py
 
 # With stabilize delay and custom FPS
-bash scripts/screen_capture.sh -d 10 -f 60 --delay 5 -o output.mp4 -- python demo.py
+bash scripts/screen_capture.sh -d 10 -f 60 --delay 5 -o output.mp4 -- examples/basics/simple_demo.py
 
 # Using kazam backend
-bash scripts/screen_capture.sh --kazam -d 10 -o output.mp4 -- python demo.py
+bash scripts/screen_capture.sh --kazam -d 10 -o output.mp4 -- examples/basics/simple_demo.py
 ```
 
 ### Options
@@ -35,7 +35,7 @@ bash scripts/screen_capture.sh --kazam -d 10 -o output.mp4 -- python demo.py
 | `-f FPS` | 30 | Capture framerate |
 | `-o FILE` | `output.mp4` | Output file path |
 | `--delay SECS` | 2 | Wait after window appears before recording |
-| `--wait SECS` | 30 | Window detection timeout |
+| `--wait SECS` | 15 | Window detection timeout |
 | `--kazam` | off | Use kazam instead of ffmpeg |
 | `--` | — | End of options (required before demo script) |
 

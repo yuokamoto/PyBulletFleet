@@ -2291,7 +2291,15 @@ class MultiRobotSimulationCore:
             # If sim duration is unlimited (0), cap it so the process exits
             # after recording completes (with 1s buffer for warmup).
             if duration <= 0:
-                duration = record_duration + 1.0
+                buffer = record_duration + 1.0
+                if record_time_base == "real":
+                    # Recording uses wall-clock time.  The sim loop exits
+                    # on *sim* time, which advances at target_rtf × real
+                    # speed.  Scale the cap so enough wall-clock seconds
+                    # elapse before the sim time limit is reached.
+                    duration = buffer * self._params.target_rtf
+                else:
+                    duration = buffer
                 logger.info("RECORD active: simulation duration capped to %.1fs", duration)
 
         # Initialize simulation state (counters, visualizer, rendering)

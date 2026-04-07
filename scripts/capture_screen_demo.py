@@ -147,7 +147,7 @@ def build_screen_capture_cmd(
         "-o",
         output_path,
         "-d",
-        str(int(duration)),
+        f"{duration:g}",
         "-f",
         str(int(fps)),
     ]
