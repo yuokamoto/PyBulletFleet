@@ -145,13 +145,13 @@ def _apply_env_overrides() -> None:
                 params[key] = coerce(env_val)
 
 
-_apply_env_overrides()
-
-# Immutable baseline — captured after first env-override pass so that
-# ``reload_defaults()`` can reset values removed from the environment.
+# Immutable baseline — captured BEFORE env-override pass so that
+# ``reload_defaults()`` resets to pure code defaults, not env-tainted values.
 import copy as _copy
 
 _BASELINE: Dict[str, Dict[str, Any]] = _copy.deepcopy(_DEFAULTS)
+
+_apply_env_overrides()
 
 
 # ---------------------------------------------------------------------------

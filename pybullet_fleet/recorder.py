@@ -235,7 +235,7 @@ class SimulationRecorder:
             logger.warning("GIF exceeds 5 MB (%.1f MB). Consider using MP4 or reducing fps/duration/resolution.", file_size_mb)
 
     def _save_mp4(self) -> None:
-        """Save frames as H.264 MP4 using imageio + ffmpeg.
+        """Save frames as H.264 MP4 using imageio + pyav.
 
         Raises:
             RuntimeError: If imageio is not installed.
@@ -243,7 +243,7 @@ class SimulationRecorder:
         try:
             import imageio
         except ImportError:
-            raise RuntimeError("MP4 output requires imageio: pip install imageio[ffmpeg]") from None
+            raise RuntimeError("MP4 output requires imageio: pip install imageio[pyav]") from None
 
         # Ensure frame dimensions are divisible by macro_block_size (16)
         # to avoid ffmpeg warnings and ensure codec compatibility.
