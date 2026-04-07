@@ -5,6 +5,9 @@ capture_model_catalog.py — Generate PNG thumbnails for each robot model.
 Captures a single frame per model headlessly using PyBullet's getCameraImage
 (ER_TINY_RENDERER) in p.DIRECT mode.
 
+Covers **all** local and ``pybullet_data`` models registered in
+:data:`pybullet_fleet.robot_models.KNOWN_MODELS`.
+
 Usage::
 
     python scripts/capture_model_catalog.py
@@ -13,6 +16,7 @@ Usage::
 import argparse
 import math
 import os
+from typing import List
 
 import numpy as np
 import pybullet as p
@@ -36,17 +40,41 @@ args = parser.parse_args()
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 
 # ---------------------------------------------------------------------------
-# Model definitions: (name, urdf_path, use_fixed_base, is_pybullet_data)
+# Model definitions
+#
+# Each entry: (name, rel_path, use_fixed_base, is_pybullet_data)
+# Mirrors the local + pybullet_data tiers of KNOWN_MODELS in robot_models.py.
 # ---------------------------------------------------------------------------
 
 MODELS = [
+    # --- Tier 0: local (robots/ directory) ---
     ("mobile_robot", "robots/mobile_robot.urdf", False, False),
     ("arm_robot", "robots/arm_robot.urdf", True, False),
     ("simple_cube", "robots/simple_cube.urdf", False, False),
     ("mobile_manipulator", "robots/mobile_manipulator.urdf", False, False),
     ("rail_arm_robot", "robots/rail_arm_robot.urdf", True, False),
+    # --- Tier 1: pybullet_data (always available) ---
     ("panda", "franka_panda/panda.urdf", True, True),
     ("kuka_iiwa", "kuka_iiwa/model.urdf", True, True),
+    ("husky", "husky/husky.urdf", False, True),
+    ("racecar", "racecar/racecar.urdf", False, True),
+    ("a1", "a1/a1.urdf", False, True),
+    ("laikago", "laikago/laikago.urdf", False, True),
+    ("aliengo", "aliengo/aliengo.urdf", False, True),
+    ("mini_cheetah", "mini_cheetah/mini_cheetah.urdf", False, True),
+    ("minitaur", "quadruped/minitaur.urdf", False, True),
+    ("xarm6", "xarm/xarm6_with_gripper.urdf", True, True),
+    # pybullet_data: objects / furniture
+    ("table", "table/table.urdf", True, True),
+    ("table_square", "table_square/table_square.urdf", True, True),
+    ("tray", "tray/tray.urdf", False, True),
+    ("plane", "plane.urdf", True, True),
+    ("kiva_shelf", "kiva_shelf/model.sdf", True, True),
+    ("wsg50_gripper", "gripper/wsg50_one_motor_gripper_new.sdf", True, True),
+    ("domino", "domino/domino.urdf", False, True),
+    ("jenga", "jenga/jenga.urdf", False, True),
+    ("lego", "lego/lego.urdf", False, True),
+    ("mug", "objects/mug.urdf", False, True),
 ]
 
 # ---------------------------------------------------------------------------
@@ -60,6 +88,7 @@ DISPLAY_POSES: dict = {
     "arm_robot": {0: 0.3, 1: -0.6, 2: 0.2, 3: -1.0, 4: 0.0, 5: 0.8},
     "mobile_manipulator": {0: 0.3, 1: -0.6, 2: 0.2, 3: -1.0, 4: 0.0, 5: 0.8},
     "rail_arm_robot": {1: 0.3, 2: -0.6, 3: 0.2, 4: -1.0, 5: 0.0, 6: 0.8},
+    "xarm6": {0: 0.3, 1: -0.5, 2: 0.2, 3: -1.2, 4: 0.0, 5: 0.8},
 }
 
 
@@ -75,21 +104,31 @@ def _compute_full_aabb(body_id: int):
     return aabb_min_all, aabb_max_all
 
 
+def _load_model(full_path: str, use_fixed_base: bool) -> List[int]:
+    """Load a URDF or SDF file. Returns list of body IDs."""
+    ext = os.path.splitext(full_path)[1].lower()
+    if ext == ".sdf":
+        return list(p.loadSDF(full_path))
+    else:
+        return [p.loadURDF(full_path, [0, 0, 0], useFixedBase=use_fixed_base)]
+
+
 def capture_model(
-    name: str, urdf_path: str, use_fixed_base: bool, is_pybullet_data: bool, width: int, height: int
+    name: str, rel_path: str, use_fixed_base: bool, is_pybullet_data: bool, width: int, height: int
 ) -> np.ndarray:
     """Load a model and capture a single frame. Returns RGB array (H, W, 3)."""
     client = p.connect(p.DIRECT)
     p.setAdditionalSearchPath(pybullet_data.getDataPath())
     p.setGravity(0, 0, -9.81)
 
-    # Load model
+    # Resolve path
     if is_pybullet_data:
-        full_path = urdf_path  # pybullet_data search path handles it
+        full_path = os.path.join(pybullet_data.getDataPath(), rel_path)
     else:
-        full_path = os.path.join(PROJECT_ROOT, urdf_path)
+        full_path = os.path.join(PROJECT_ROOT, rel_path)
 
-    body_id = p.loadURDF(full_path, [0, 0, 0], useFixedBase=use_fixed_base)
+    body_ids = _load_model(full_path, use_fixed_base)
+    body_id = body_ids[0]  # use first body for framing
 
     # Set joints to display pose (model-specific or generic fallback)
     num_joints = p.getNumJoints(body_id)
@@ -108,10 +147,17 @@ def capture_model(
                 target = 0.3 if info[2] == p.JOINT_REVOLUTE else 0.0
         p.resetJointState(body_id, j, target)
 
-    # Compute combined AABB across all links for proper framing
-    aabb_min, aabb_max = _compute_full_aabb(body_id)
-    center = [(aabb_min[i] + aabb_max[i]) / 2 for i in range(3)]
-    size = [aabb_max[i] - aabb_min[i] for i in range(3)]
+    # Compute combined AABB across all bodies / links for proper framing
+    aabb_min_all = [float("inf")] * 3
+    aabb_max_all = [float("-inf")] * 3
+    for bid in body_ids:
+        bmin, bmax = _compute_full_aabb(bid)
+        for i in range(3):
+            aabb_min_all[i] = min(aabb_min_all[i], bmin[i])
+            aabb_max_all[i] = max(aabb_max_all[i], bmax[i])
+
+    center = [(aabb_min_all[i] + aabb_max_all[i]) / 2 for i in range(3)]
+    size = [aabb_max_all[i] - aabb_min_all[i] for i in range(3)]
     max_dim = max(size)
 
     # Camera distance based on model size
@@ -147,10 +193,10 @@ def main():
     os.makedirs(args.output_dir, exist_ok=True)
 
     print(f"Generating model catalog PNGs ({args.width}x{args.height})...")
-    for name, urdf_path, fixed, is_pb in MODELS:
+    for name, rel_path, fixed, is_pb in MODELS:
         print(f"  {name}...", end=" ", flush=True)
         try:
-            rgb = capture_model(name, urdf_path, fixed, is_pb, args.width, args.height)
+            rgb = capture_model(name, rel_path, fixed, is_pb, args.width, args.height)
             output_path = os.path.join(args.output_dir, f"{name}.png")
             Image.fromarray(rgb).save(output_path, optimize=True)
             file_size_kb = os.path.getsize(output_path) / 1024

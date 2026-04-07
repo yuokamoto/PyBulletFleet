@@ -108,17 +108,55 @@ resolve_urdf("robots/mobile_robot.urdf")
 
 ## 3. Listing All Models
 
-### Visual Catalog
+### Local Models (project `robots/` directory)
 
 | Model | Preview |
 |-------|---------|
 | mobile_robot | ![mobile_robot](../media/models/mobile_robot.png) |
 | arm_robot | ![arm_robot](../media/models/arm_robot.png) |
-| panda | ![panda](../media/models/panda.png) |
-| kuka_iiwa | ![kuka_iiwa](../media/models/kuka_iiwa.png) |
+| simple_cube | ![simple_cube](../media/models/simple_cube.png) |
 | mobile_manipulator | ![mobile_manipulator](../media/models/mobile_manipulator.png) |
 | rail_arm_robot | ![rail_arm_robot](../media/models/rail_arm_robot.png) |
-| simple_cube | ![simple_cube](../media/models/simple_cube.png) |
+
+### Third-Party Models
+
+Models from `pybullet_data` (always available), ROS packages, and
+`robot_descriptions` are also registered.  Use `list_all_models()` to check
+availability.
+
+| Name | Tier | Category |
+|------|------|----------|
+| `panda` | pybullet_data | Arm |
+| `kuka_iiwa` | pybullet_data | Arm |
+| `xarm6` | pybullet_data | Arm |
+| `husky` | pybullet_data | Mobile |
+| `racecar` | pybullet_data | Mobile |
+| `a1` | pybullet_data | Quadruped |
+| `laikago` | pybullet_data | Quadruped |
+| `aliengo` | pybullet_data | Quadruped |
+| `mini_cheetah` | pybullet_data | Quadruped |
+| `minitaur` | pybullet_data | Quadruped |
+| `wsg50_gripper` | pybullet_data | Gripper |
+| `table` | pybullet_data | Object |
+| `table_square` | pybullet_data | Object |
+| `tray` | pybullet_data | Object |
+| `kiva_shelf` | pybullet_data | Object |
+| `plane` | pybullet_data | Object |
+| `domino` | pybullet_data | Object |
+| `jenga` | pybullet_data | Object |
+| `lego` | pybullet_data | Object |
+| `mug` | pybullet_data | Object |
+| `ur5e` | ros | Arm |
+| `turtlebot3_burger` | ros | Mobile |
+| `turtlebot3_waffle` | ros | Mobile |
+| `fetch` | ros | Mobile Manipulator |
+| `tiago` | robot_descriptions | Mobile Manipulator |
+| `pr2` | robot_descriptions | Mobile Manipulator |
+
+```{tip}
+Generate preview images for all models locally with
+`python scripts/capture_model_catalog.py`.  Output goes to `docs/media/models/`.
+```
 
 Use `list_all_models()` to see every registered model with its tier and availability:
 
