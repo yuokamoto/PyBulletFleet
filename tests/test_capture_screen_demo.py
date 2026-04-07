@@ -35,12 +35,6 @@ class TestResolveScreenParams:
         result = resolve_screen_params({}, "mp4", cli_overrides={}, demo_overrides={})
         assert isinstance(result, dict)
 
-    def test_sim_duration_from_demo(self):
-        """sim_duration is a top-level demo key, passed through demo_overrides."""
-        demo = {"sim_duration": 5.0}
-        result = resolve_screen_params({}, "mp4", cli_overrides={}, demo_overrides=demo)
-        assert result.get("sim_duration") == 5.0
-
     def test_delay_from_demo(self):
         """delay is a top-level demo key, passed through demo_overrides."""
         demo = {"delay": 3}
@@ -171,7 +165,7 @@ class TestBuildScreenCaptureCmd:
         Previous design injected --duration={sim_duration} and --rtf=1.0.
         New design: demo runs at native speed, killed after recording.
         """
-        demo_info = {"sim_duration": 5.0, "args": ["--mode=mixed"]}
+        demo_info = {"args": ["--mode=mixed"]}
 
         # Simulate new main() logic: only pass through YAML-defined args
         demo_args = list(demo_info.get("args", []))

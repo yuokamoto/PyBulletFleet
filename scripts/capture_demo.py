@@ -162,8 +162,8 @@ for name, info in demos_to_run.items():
     if args.gui:
         env["RECORD_GUI"] = "1"
 
-    # Override simulation duration to be longer than record duration
-    # so the demo runs long enough for recording to complete
+    # The demo runs until stop_recording() is called (via RECORD env var).
+    # subprocess timeout ensures the process doesn't hang indefinitely.
     cmd = [sys.executable, script] + info.get("args", [])
 
     print(f"Capturing {name}...")

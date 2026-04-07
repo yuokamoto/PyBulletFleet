@@ -198,7 +198,7 @@ class SimObjectSpawnParams:
             initial_pose = Pose.from_yaw(pose[0], pose[1], pose[2], yaw)
 
         # Resolve collision_mode
-        collision_mode_value = config.get("collision_mode", CollisionMode.NORMAL_3D)
+        collision_mode_value = config.get("collision_mode", _OBJ_D["collision_mode"])
         if isinstance(collision_mode_value, str):
             collision_mode_value = CollisionMode(collision_mode_value)
 

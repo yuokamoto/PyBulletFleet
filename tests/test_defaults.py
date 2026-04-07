@@ -98,6 +98,16 @@ class TestEnvOverride:
         # collision_check_frequency is None in _DEFAULTS, so skipped by _apply_env_overrides
         assert mod.SIMULATION["collision_check_frequency"] is None
 
+    def test_collision_mode_from_dict_respects_env_override(self, monkeypatch):
+        """SimObjectSpawnParams.from_dict() fallback must use _OBJ_D, not hardcoded NORMAL_3D."""
+        monkeypatch.setenv("PBF_SIM_OBJECT_COLLISION_MODE", "static")
+        self._reload()
+        from pybullet_fleet.sim_object import SimObjectSpawnParams
+        from pybullet_fleet.types import CollisionMode
+
+        params = SimObjectSpawnParams.from_dict({"name": "x"})
+        assert params.collision_mode == CollisionMode.STATIC
+
 
 class TestConsistency:
     """Verify all initialization paths produce identical defaults."""

@@ -73,7 +73,7 @@ class SimulationParams:
     profiling_interval: int = _SIM_D["profiling_interval"]
     enable_memory_profiling: bool = _SIM_D["enable_memory_profiling"]
     enable_collision_color_change: bool = _SIM_D["enable_collision_color_change"]
-    spatial_hash_cell_size_mode: SpatialHashCellSizeMode = SpatialHashCellSizeMode.AUTO_INITIAL
+    spatial_hash_cell_size_mode: SpatialHashCellSizeMode = SpatialHashCellSizeMode(_SIM_D["spatial_hash_cell_size_mode"])
     spatial_hash_cell_size: Optional[float] = None  # Fixed cell size (for mode=CONSTANT)
     collision_detection_method: Optional[CollisionDetectionMethod] = None  # Auto-select based on physics
     collision_margin: float = _SIM_D["collision_margin"]

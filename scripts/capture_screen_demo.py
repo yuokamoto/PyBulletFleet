@@ -77,12 +77,12 @@ def resolve_screen_params(
     cli_overrides : dict
         CLI arguments that were explicitly provided (non-None).
     demo_overrides : dict
-        Per-demo dict which may contain format sub-keys and ``sim_duration``.
+        Per-demo dict which may contain format sub-keys and ``delay``.
 
     Returns
     -------
     dict
-        Merged parameter dict with keys like fps, duration, sim_duration, etc.
+        Merged parameter dict with keys like fps, duration, delay, etc.
     """
     # Layer 1: format defaults
     params = dict(format_defaults.get(fmt, {}))
@@ -93,8 +93,8 @@ def resolve_screen_params(
     # Layer 3: per-demo format overrides
     params.update(demo_overrides.get(fmt, {}))
 
-    # Also pull in top-level demo keys like sim_duration, delay, recording_duration
-    for key in ("sim_duration", "delay", "recording_duration"):
+    # Also pull in top-level demo keys like delay, recording_duration
+    for key in ("delay", "recording_duration"):
         if key in demo_overrides:
             params[key] = demo_overrides[key]
 

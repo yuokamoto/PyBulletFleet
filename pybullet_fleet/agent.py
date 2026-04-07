@@ -63,7 +63,7 @@ class AgentSpawnParams(SimObjectSpawnParams):
     max_linear_accel: Union[float, List[float]] = _AGT_D["max_linear_accel"]
     max_angular_vel: Union[float, List[float]] = _AGT_D["max_angular_vel"]
     max_angular_accel: Union[float, List[float]] = _AGT_D["max_angular_accel"]
-    motion_mode: Union[MotionMode, str] = MotionMode.DIFFERENTIAL
+    motion_mode: Union[MotionMode, str] = MotionMode(_AGT_D["motion_mode"])
     use_fixed_base: bool = _AGT_D["use_fixed_base"]
     ik_params: Optional["IKParams"] = None
     controller_config: Optional[Dict[str, Any]] = None
@@ -261,7 +261,7 @@ class Agent(SimObject):
         max_linear_accel: Union[float, List[float]] = _AGT_D["max_linear_accel"],
         max_angular_vel: Union[float, List[float]] = _AGT_D["max_angular_vel"],
         max_angular_accel: Union[float, List[float]] = _AGT_D["max_angular_accel"],
-        motion_mode: Union[MotionMode, str] = MotionMode.DIFFERENTIAL,
+        motion_mode: Union[MotionMode, str] = MotionMode(_AGT_D["motion_mode"]),
         use_fixed_base: bool = _AGT_D["use_fixed_base"],
         collision_mode: CollisionMode = CollisionMode.NORMAL_3D,
         sim_core=None,
@@ -656,7 +656,7 @@ class Agent(SimObject):
         max_linear_accel: Union[float, List[float]] = _AGT_D["max_linear_accel"],
         max_angular_vel: Union[float, List[float]] = _AGT_D["max_angular_vel"],
         max_angular_accel: Union[float, List[float]] = _AGT_D["max_angular_accel"],
-        motion_mode: Union[MotionMode, str] = MotionMode.DIFFERENTIAL,
+        motion_mode: Union[MotionMode, str] = MotionMode(_AGT_D["motion_mode"]),
         use_fixed_base: bool = _AGT_D["use_fixed_base"],
         collision_mode: CollisionMode = CollisionMode.NORMAL_3D,
         sim_core=None,
@@ -750,7 +750,7 @@ class Agent(SimObject):
         max_linear_accel: Union[float, List[float]] = _AGT_D["max_linear_accel"],
         max_angular_vel: Union[float, List[float]] = _AGT_D["max_angular_vel"],
         max_angular_accel: Union[float, List[float]] = _AGT_D["max_angular_accel"],
-        motion_mode: Union[MotionMode, str] = MotionMode.DIFFERENTIAL,
+        motion_mode: Union[MotionMode, str] = MotionMode(_AGT_D["motion_mode"]),
         use_fixed_base: bool = _AGT_D["use_fixed_base"],
         collision_mode: CollisionMode = CollisionMode.NORMAL_3D,
         sim_core=None,
