@@ -22,14 +22,8 @@ class TestDefaultsCompleteness:
         from pybullet_fleet._defaults import SIMULATION
         from pybullet_fleet.core_simulation import SimulationParams
 
-        # Enum-typed fields (stored as string in _defaults, enum in dataclass)
-        skip = {
-            "collision_detection_method",
-            "spatial_hash_cell_size_mode",
-        }
         for f in fields(SimulationParams):
-            if f.name not in skip:
-                assert f.name in SIMULATION, f"Missing default for SimulationParams.{f.name}"
+            assert f.name in SIMULATION, f"Missing default for SimulationParams.{f.name}"
 
     def test_agent_params_fields_covered(self):
         from pybullet_fleet._defaults import AGENT
