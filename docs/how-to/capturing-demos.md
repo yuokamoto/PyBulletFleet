@@ -117,12 +117,10 @@ Set `delay` per-demo in `demos.yaml`:
 demos:
   pick_drop_arm_100robots:
     script: examples/scale/pick_drop_arm_100robots_demo.py
-    sim_duration: 8.0
     delay: 5          # Wait 5s after window appears before recording
 
   action_system:
     script: examples/basics/action_system_demo.py
-    sim_duration: 8.0
     # No delay — starts recording immediately
 ```
 
@@ -150,7 +148,6 @@ demos:
   demo_name:
     script: examples/path/to/demo.py      # Required
     args: ["--mode=mixed"]                 # Optional CLI args for the demo
-    sim_duration: 5.0                      # Optional sim-time override
     delay: 3                               # Optional stabilize delay (seconds)
     mp4:                                   # Optional per-format overrides
       fps: 60
@@ -161,7 +158,6 @@ demos:
 |-------|------|---------|-------------|
 | `script` | str | *required* | Path to demo Python script |
 | `args` | list | `[]` | CLI arguments passed to the demo |
-| `sim_duration` | float | from `format_defaults` | Simulation duration |
 | `delay` | int | CLI `--delay` or None | Stabilize delay before recording |
 | `mp4` / `gif` | dict | `{}` | Per-format parameter overrides |
 

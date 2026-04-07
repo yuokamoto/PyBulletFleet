@@ -904,6 +904,25 @@ class TestCallbackSystem:
         assert len(calls_a) == 1
         assert len(calls_b) == 1
 
+    def test_unregister_during_iteration_safe(self, sim_core):
+        """Unregistering a callback from within a callback must not skip others."""
+        calls = []
+
+        def self_removing_cb(sc, dt):
+            """Callback that unregisters itself on first call."""
+            sc.unregister_callback(self_removing_cb)
+
+        def tracking_cb(sc, dt):
+            calls.append(1)
+
+        # Register self-removing first, tracking second
+        sim_core.register_callback(self_removing_cb, frequency=None)
+        sim_core.register_callback(tracking_cb, frequency=None)
+
+        # Should not raise and tracking_cb should still fire
+        sim_core.step_once()
+        assert len(calls) == 1, f"tracking_cb should fire once, got {len(calls)}"
+
 
 # ============================================================================
 # ignore_static_collision

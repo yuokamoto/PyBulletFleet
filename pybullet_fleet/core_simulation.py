@@ -2528,7 +2528,7 @@ class MultiRobotSimulationCore:
         if measure_timing:
             t_cb0 = time.perf_counter()
 
-        for cbinfo in self._callbacks:
+        for cbinfo in list(self._callbacks):
             freq = cbinfo.get("frequency", None)
             last_exec = cbinfo.get("last_exec", 0.0)
             interval = 1.0 / freq if freq else 0.0

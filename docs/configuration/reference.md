@@ -78,8 +78,8 @@ _DEFAULTS dict
 | Layer | Mechanism | Example |
 |-------|-----------|--------|
 | 1. Code defaults | `_DEFAULTS` dict in `_defaults.py` | `"timestep": 0.1` |
-| 2. Environment vars | `PBF_{SECTION}_{KEY}` | `PBF_SIMULATION_TIMESTEP=0.05` |
-| 3. `.env` file | Auto-loaded if `python-dotenv` is installed | `PBF_SIMULATION_GUI=false` |
+| 2. `.env` file | Auto-loaded if `python-dotenv` is installed (`override=False` — fills missing keys only) | `PBF_SIMULATION_GUI=false` |
+| 3. Environment vars | `PBF_{SECTION}_{KEY}` — shell env vars override `.env` | `PBF_SIMULATION_TIMESTEP=0.05` |
 | 4. YAML config | `config.yaml` passed to `from_yaml()` | `timestep: 0.02` |
 | 5. Constructor args | Explicit `SimulationParams(...)` keyword | `SimulationParams(timestep=0.01)` |
 
