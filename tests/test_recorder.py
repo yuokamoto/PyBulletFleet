@@ -558,6 +558,10 @@ class TestCoreRecordingAPI:
         """RECORD + RECORD_GUI=1 preserves gui=True in setup_pybullet."""
         monkeypatch.setenv("RECORD", tmp_gif)
         monkeypatch.setenv("RECORD_GUI", "1")
+        # Intercept p.connect to force DIRECT (CI is headless, p.GUI crashes).
+        # We only care that params.gui stays True after setup_pybullet logic.
+        original_connect = p.connect
+        monkeypatch.setattr(p, "connect", lambda *a, **kw: original_connect(p.DIRECT))
         params = SimulationParams(gui=True, monitor=False, physics=False, duration=0, target_rtf=0)
         sim = MultiRobotSimulationCore(params)
         try:
