@@ -118,8 +118,8 @@ def capture_model(
 ) -> np.ndarray:
     """Load a model and capture a single frame. Returns RGB array (H, W, 3)."""
     client = p.connect(p.DIRECT)
-    p.setAdditionalSearchPath(pybullet_data.getDataPath())
-    p.setGravity(0, 0, -9.81)
+    p.setAdditionalSearchPath(pybullet_data.getDataPath(), physicsClientId=client)
+    p.setGravity(0, 0, -9.81, physicsClientId=client)
 
     # Resolve path
     if is_pybullet_data:
@@ -185,7 +185,7 @@ def capture_model(
 
     rgb = np.array(rgba, dtype=np.uint8).reshape(height, width, 4)[:, :, :3]
 
-    p.disconnect()
+    p.disconnect(physicsClientId=client)
     return rgb
 
 

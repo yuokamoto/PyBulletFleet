@@ -113,7 +113,7 @@ def build_screen_capture_cmd(
     fps: int,
     demo_args: list,
     recorder: str = "ffmpeg",
-    stabilize_delay: int = None,
+    stabilize_delay: float = None,
     window_wait: int = None,
 ) -> list:
     """Build the ``screen_capture.sh`` command for one demo.
@@ -132,7 +132,7 @@ def build_screen_capture_cmd(
         Extra arguments to pass to the demo script.
     recorder : str
         ``"ffmpeg"`` (default) or ``"kazam"``.
-    stabilize_delay : int, optional
+    stabilize_delay : float, optional
         Seconds to wait after window appears before recording.
     window_wait : int, optional
         Seconds to wait for the window to appear.
@@ -156,7 +156,7 @@ def build_screen_capture_cmd(
         cmd.append("--kazam")
 
     if stabilize_delay is not None:
-        cmd.extend(["--delay", str(int(stabilize_delay))])
+        cmd.extend(["--delay", f"{stabilize_delay:g}"])
 
     if window_wait is not None:
         cmd.extend(["--wait", str(int(window_wait))])
@@ -192,7 +192,7 @@ def build_parser() -> argparse.ArgumentParser:
         choices=["ffmpeg", "kazam"],
         help="Recording backend (default: ffmpeg)",
     )
-    p.add_argument("--delay", type=int, default=None, help="Stabilize delay after window appears (seconds)")
+    p.add_argument("--delay", type=float, default=None, help="Stabilize delay after window appears (seconds)")
     p.add_argument("--wait", type=int, default=None, help="Window detection timeout (seconds)")
     p.add_argument("--dry-run", action="store_true", help="Print commands without executing")
     return p

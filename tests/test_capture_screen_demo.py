@@ -152,6 +152,19 @@ class TestBuildScreenCaptureCmd:
         delay_idx = cmd.index("--delay")
         assert cmd[delay_idx + 1] == "5"
 
+    def test_stabilize_delay_fractional(self):
+        """Fractional stabilize_delay must be preserved, not truncated."""
+        cmd = build_screen_capture_cmd(
+            script_path="examples/scale/demo.py",
+            output_path="docs/media/demo.mp4",
+            duration=10,
+            fps=30,
+            demo_args=[],
+            stabilize_delay=2.5,
+        )
+        delay_idx = cmd.index("--delay")
+        assert cmd[delay_idx + 1] == "2.5"
+
     def test_screen_capture_does_not_inject_duration_or_rtf(self):
         """Screen capture mode should NOT inject --duration or --rtf to demo args.
 
