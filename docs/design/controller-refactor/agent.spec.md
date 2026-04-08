@@ -182,7 +182,7 @@ Files the implementation plan MUST read before planning:
 ### Core (must read fully)
 - `pybullet_fleet/controller.py` — current controller hierarchy (471 lines)
 - `pybullet_fleet/agent.py` — TPI fields (L338-L364), set_motion_mode (L860-L897), set_path (L938-L1027), _init_omnidirectional_trajectory (L1108-L1199), _update_omnidirectional (L1201-L1246), _init_differential_rotation_trajectory (L1250-L1432), _init_differential_forward_distance_trajectory (L1434-L1497), _update_differential (L1498-L1592), update (L1777-L1826), set_controller (L1844-L1858)
-- `pybullet_fleet/types.py` — MotionMode, PosePhase, MovementDirection enums
+- `pybullet_fleet/types.py` — MotionMode, DifferentialPhase, MovementDirection enums
 - `pybullet_fleet/__init__.py` — public exports
 
 ### Bridge (must read fully)

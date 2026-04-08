@@ -1,0 +1,56 @@
+# docker/docker-compose.yaml
+#
+# Usage:
+#   docker compose up bridge                       # headless, 3 robots
+#   GUI=true docker compose up bridge              # PyBullet GUI
+#   NUM_ROBOTS=5 GUI=true docker compose up bridge # custom
+#   docker compose run --rm test                   # integration tests
+#
+services:
+  bridge:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.jazzy
+    container_name: pybullet_bridge
+    command: >
+      bash -c "ros2 run pybullet_fleet_ros bridge_node --ros-args
+      -p num_robots:=$$NUM_ROBOTS
+      -p gui:=$$GUI
+      -p publish_rate:=$$PUBLISH_RATE
+      -p physics:=$$PHYSICS
+      -p target_rtf:=$$TARGET_RTF"
+    working_dir: /opt/pybullet_fleet
+    network_mode: host
+    environment:
+      - DISPLAY=${DISPLAY:-}
+      - ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-42}
+      - NUM_ROBOTS=${NUM_ROBOTS:-3}
+      - GUI=${GUI:-false}
+      - PUBLISH_RATE=${PUBLISH_RATE:-10.0}
+      - PHYSICS=${PHYSICS:-false}
+      - TARGET_RTF=${TARGET_RTF:-1.0}
+    volumes:
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+      - /dev/dri:/dev/dri
+      # Dev mode: mount source for live editing
+      - ../pybullet_fleet:/opt/pybullet_fleet/pybullet_fleet:ro
+      - ../ros2_bridge/pybullet_fleet_ros:/opt/bridge_ws/src/pybullet_fleet_ros:ro
+      - ../robots:/opt/pybullet_fleet/robots:ro
+      - ../config:/opt/pybullet_fleet/config:ro
+      - ../ros2_bridge/scripts:/opt/pybullet_fleet/scripts:ro
+      - ../examples:/opt/pybullet_fleet/examples:ro
+      # Overlay install/share so launch files & configs reflect local edits
+      - ../ros2_bridge/pybullet_fleet_ros/launch:/opt/bridge_ws/install/pybullet_fleet_ros/share/pybullet_fleet_ros/launch:ro
+      - ../ros2_bridge/pybullet_fleet_ros/config:/opt/bridge_ws/install/pybullet_fleet_ros/share/pybullet_fleet_ros/config:ro
+    stdin_open: true
+    tty: true
+
+  test:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.jazzy
+    command: bash /opt/pybullet_fleet/docker/test_integration.sh
+    working_dir: /opt/pybullet_fleet
+    network_mode: host
+    environment:
+      - ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-99}

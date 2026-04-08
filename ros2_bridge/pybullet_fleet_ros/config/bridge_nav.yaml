@@ -1,0 +1,28 @@
+# Bridge config: Differential-drive mobile robot for navigation tests
+#
+# テスト 1-3 向け: goal_pose / path / NavigateToPose アクション
+#
+# Usage (Docker):
+#   docker compose run --rm -d --name pbf_bridge bridge \
+#     ros2 run pybullet_fleet_ros bridge_node \
+#       --ros-args -p config_yaml:=/opt/bridge_ws/src/pybullet_fleet_ros/config/bridge_nav.yaml
+#
+# GUI mode:
+#   GUI=true docker compose run --rm --name pbf_bridge bridge \
+#     ros2 run pybullet_fleet_ros bridge_node \
+#       --ros-args -p config_yaml:=/opt/bridge_ws/src/pybullet_fleet_ros/config/bridge_nav.yaml
+
+simulation:
+  gui: true
+  physics: false
+
+robots:
+  - name: robot0
+    urdf_path: "robots/mobile_robot.urdf"
+    pose: [0.0, 0.0, 0.05]
+    yaw: 0.0
+    motion_mode: "differential"
+    max_linear_vel: 2.0
+    max_linear_accel: 5.0
+    max_angular_vel: 3.0
+    max_angular_accel: 10.0
