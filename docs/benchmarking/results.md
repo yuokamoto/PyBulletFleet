@@ -1,6 +1,6 @@
 # Benchmark Results Reference
 
-All results below were measured in the same session (2026-03-12). For how to reproduce them,
+Results are kept up-to-date with each release. For how to reproduce them,
 see [Benchmark Suite](benchmark-suite) and [Profiling Guide](profiling-guide).
 
 ---
@@ -19,16 +19,19 @@ see [Benchmark Suite](benchmark-suite) and [Profiling Guide](profiling-guide).
 
 ## Simulation Throughput
 
-**Script:** `benchmark/run_benchmark.py --sweep 100 250 500 1000 2000`
+**Script:** `make bench-full` → `benchmark/run_benchmark.py --sweep 100 500 1000`
 **Config:** `benchmark/configs/general.yaml` — `collision_check_frequency=null` (every step), 50% agents moving
+**Last measured:** 2026-04-08
 
-| Agents | Step Time (ms) | RTF | Spawn Time | Memory Delta |
-|--------|---------------|-----|------------|--------------|
-| 100    | 2.10 ± 0.09   | 48× | 27 ms      | −23.8 MB     |
-| 250    | 6.45 ± 0.30   | 16× | 65 ms      | −19.7 MB     |
-| 500    | 14.66 ± 0.18  | 6.8×| 134 ms     | −12.3 MB     |
-| 1000   | 40.94 ± 2.39  | 2.4×| 368 ms     | +3.0 MB      |
-| 2000   | 94.82 ± 5.81  | 1.1×| 731 ms     | +29.6 MB     |
+| Agents | Step Time (ms) | RTF   | Spawn Time | Memory Delta |
+|--------|----------------|-------|------------|--------------|
+| 100    | 2.17 ± 0.10    | 46.1× | 26 ms      | −24.8 MB     |
+| 250    | 6.45 ± 0.30    | 16×   | 65 ms      | −19.7 MB †   |
+| 500    | 13.21 ± 0.21   | 7.6×  | 137 ms     | −15.3 MB     |
+| 1000   | 29.98 ± 0.39   | 3.3×  | 285 ms     | −3.2 MB      |
+| 2000   | 94.82 ± 5.81   | 1.1×  | 731 ms     | +29.6 MB †   |
+
+† Row from 2026-03-12; not included in `make bench-full` (100/500/1000 only).
 
 **Source:** `benchmark/results/benchmark_sweep_10.0s.json`
 

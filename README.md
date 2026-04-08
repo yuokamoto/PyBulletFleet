@@ -94,9 +94,9 @@ See [Tutorial 6 — Robot Models](https://pybulletfleet.readthedocs.io/en/latest
 
 | Agents | Real-Time Factor | Step Time |
 |--------|-----------------|-----------|
-| 100    | 48× | 2.1 ms  |
-| 500    | 6.8×| 14.7 ms |
-| 1000   | 2.4×| 40.9 ms |
+| 100    | 46× | 2.2 ms  |
+| 500    | 7.6×| 13.2 ms |
+| 1000   | 3.3×| 30.0 ms |
 | 2000   | 1.1×| 94.8 ms |
 
 Kinematics mode (physics OFF), headless. See [Benchmark Results](benchmark/README.md#benchmark-results) for full data, component breakdown, and methodology.

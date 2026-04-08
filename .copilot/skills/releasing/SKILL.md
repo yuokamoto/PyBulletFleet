@@ -50,6 +50,22 @@ cd benchmark && python run_benchmark.py --config configs/general.yaml
 
 Record results. Include summary in release notes.
 
+**Update performance tables** — after bench-full, sync both locations:
+
+```bash
+# 1. docs/benchmarking/results.md  — the canonical numbers table (used by ReadTheDocs)
+#    Update rows for 100 / 500 / 1000 agents with new Step Time, RTF, Spawn Time, Memory Delta.
+#    Update "Last measured:" date.  Leave 250/2000 rows as-is with † note if not re-run.
+#
+# 2. README.md Performance section  (<!-- sync with docs/benchmarking/results.md --> comment marks it)
+#    Update the compact table to match the same RTF / step-time values.
+#
+# 3. docs/index.md — the landing page quick-reference table
+#    Update the 100 / 500 / 1000 / 2000 rows to match README.md values.
+```
+
+> All three files MUST be in sync before cutting the release tag.
+
 **2b. API Compatibility Check**
 
 ```bash

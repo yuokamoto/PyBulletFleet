@@ -106,10 +106,10 @@ roadmap
 
 | Agents | Real-Time Factor | Step Time |
 |--------|-----------------|-----------|
-| 100    | 41× | 2.4 ms  |
-| 500    | 6.7×| 15.0 ms |
-| 1000   | 2.4×| 42.4 ms |
-| 2000   | 1.1×| 88.6 ms |
+| 100    | 46× | 2.2 ms  |
+| 500    | 7.6×| 13.2 ms |
+| 1000   | 3.3×| 30.0 ms |
+| 2000   | 1.1×| 94.8 ms |
 
 Kinematics mode (physics OFF), headless. See {doc}`benchmarking/benchmark-suite` for full data, component breakdown, and methodology.
 
