@@ -1,5 +1,7 @@
 # Tutorial 4: Robot Arm — Joint Control & Pick/Drop
 
+<video src="../pick_drop_arm_action.mp4" width="100%" autoplay loop muted playsinline></video>
+
 **Source files:**
 - [`examples/arm/pick_drop_arm_demo.py`](https://github.com/yuokamoto/PyBulletFleet/blob/main/examples/arm/pick_drop_arm_demo.py) — low-level callback approach
 - [`examples/arm/pick_drop_arm_action_demo.py`](https://github.com/yuokamoto/PyBulletFleet/blob/main/examples/arm/pick_drop_arm_action_demo.py) — action-queue approach

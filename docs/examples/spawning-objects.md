@@ -1,5 +1,7 @@
 # Tutorial 1: Spawning Objects and Controlling Agents
 
+<video src="../robot_demo.mp4" width="100%" autoplay loop muted playsinline></video>
+
 **Source file:** [`examples/basics/robot_demo.py`](https://github.com/yuokamoto/PyBulletFleet/blob/main/examples/basics/robot_demo.py)
 
 This tutorial walks through the fundamental building blocks of every PyBulletFleet simulation:

@@ -24,6 +24,8 @@ from pybullet_fleet.robot_models import resolve_urdf
 
 parser = argparse.ArgumentParser(description="100 robot arms pick & drop demo")
 parser.add_argument("--robot", default="panda", help="Robot name (e.g. panda, kuka_iiwa, arm_robot) or URDF path")
+parser.add_argument("--duration", type=float, default=None, help="Simulation duration in seconds (default: run forever)")
+parser.add_argument("--rtf", type=float, default=None, help="Target real-time factor override")
 args = parser.parse_args()
 
 # ── Per-robot joint presets (pick / place / init targets + box positions) ──
@@ -58,7 +60,7 @@ _P = JOINT_PRESETS[args.robot]
 params = SimulationParams(
     gui=True,
     timestep=0.1,
-    target_rtf=0,
+    target_rtf=args.rtf if args.rtf is not None else 0,
     physics=False,
     ignore_static_collision=True,
     log_level="info",
@@ -258,13 +260,22 @@ print("✓ Registered AgentManager callback for automatic action repeat\n")
 
 # Auto camera setup - calculate from agent positions
 agent_positions = [agent.get_pose().position for agent in arm_agents]
+# sim_core.setup_camera(
+#     camera_config={
+#         "camera_mode": "auto",
+#         "camera_view_type": "perspective",
+#         "camera_auto_scale": 1.0,  # Zoom out to see entire 10x10 grid
+#     },
+#     entity_positions=agent_positions,
+# )
 sim_core.setup_camera(
     camera_config={
-        "camera_mode": "auto",
-        "camera_view_type": "perspective",
-        "camera_auto_scale": 1.2,  # Zoom out to see entire 10x10 grid
-    },
-    entity_positions=agent_positions,
+        "camera_mode": "manual",
+        "camera_distance": 3.0,
+        "camera_yaw": 45,
+        "camera_pitch": -35,
+        "camera_target": [7.5, 0.5, 0.5],
+    }
 )
 
 # Run simulation
@@ -274,4 +285,4 @@ print("Camera positioned to view entire 10x10 grid.")
 print("AgentManager handles bulk action coordination.")
 print("Press Ctrl+C to stop.\n")
 
-sim_core.run_simulation()
+sim_core.run_simulation(duration=args.duration)

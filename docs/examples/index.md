@@ -10,6 +10,29 @@ Jump directly to the topic you need — each tutorial lists its prerequisites
 at the top so you can backtrack only when necessary.
 ```
 
+```{toctree}
+:maxdepth: 1
+:hidden:
+
+spawning-objects
+action-system
+multi-robot-fleet
+arm-pick-drop
+arm-ee-control
+robot-models
+```
+
+## Tutorials
+
+| # | Tutorial | Script | What you'll learn |
+|---|----------|--------|-------------------|
+| 1 | [Spawning Objects](spawning-objects) | `basics/robot_demo.py` | Create sim, spawn agents & objects, `set_goal_pose()` |
+| 2 | [Action System](action-system) | `mobile/path_following_demo.py` | MoveAction, PickAction, DropAction lifecycle |
+| 3 | [Multi-Robot Fleet](multi-robot-fleet) | `scale/100robots_grid_demo.py` | AgentManager, grid spawn, 100+ robots |
+| 4 | [Arm Pick & Drop](arm-pick-drop) | `arm/pick_drop_arm_demo.py` | Joint-space IK, JointAction, tolerance tuning |
+| 5 | [Arm EE Control](arm-ee-control) | `arm/pick_drop_arm_ee_demo.py` | End-effector IK, PoseAction, mobile manipulators |
+| 6 | [Robot Models](robot-models) | `models/resolve_urdf_demo.py` | `resolve_urdf`, model registry, `robot_descriptions` |
+
 ## Switching Robot Models with `--robot`
 
 Most demo scripts accept a `--robot` argument to swap the robot model at runtime.
@@ -46,31 +69,6 @@ python examples/scale/100robots_grid_demo.py --robot racecar --arm-robot kuka_ii
 Model names are resolved by `resolve_urdf()` — see [Tutorial 6 — Robot Models](robot-models)
 for the full resolution system and `python examples/models/resolve_urdf_demo.py --list`
 for all available names.
-
-## Which tutorial should I read?
-
-| I want to… | Start here |
-|---|---|
-| Spawn objects in a scene, get/set poses, and move a single robot | [Tutorial 1 — Spawning Objects](spawning-objects) |
-| Execute a sequence of high-level tasks (pick, drop, move, charge) | [Tutorial 2 — Action System](action-system) |
-| Simulate 100 robots at once with a manager and per-robot paths | [Tutorial 3 — Managing a Fleet](multi-robot-fleet) |
-| Simulate a robot arm picking and dropping objects | [Tutorial 4 — Arm Pick & Drop](arm-pick-drop) |
-| Control an arm by end-effector position (IK) | [Tutorial 5 — EE Control & IK](arm-ee-control) |
-| Use IK on a mobile manipulator (base + arm) | [Tutorial 5 §6 — Mobile Manipulator IK](arm-ee-control) |
-| Load a robot by name from multiple sources | [Tutorial 6 — Robot Models](robot-models) |
-| Switch robot models in demos with `--robot` | [Tutorial 6 §6 — The `--robot` Argument](robot-models) |
-
-```{toctree}
-:maxdepth: 1
-:hidden:
-
-spawning-objects
-action-system
-multi-robot-fleet
-arm-pick-drop
-arm-ee-control
-robot-models
-```
 
 ## API Quick-Reference
 

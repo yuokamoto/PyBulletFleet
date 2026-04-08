@@ -29,10 +29,14 @@ from pybullet_fleet.robot_models import resolve_urdf
 
 parser = argparse.ArgumentParser(description="100 mobile robots pick & drop shuttle demo")
 parser.add_argument("--robot", default="husky", help="Robot name (e.g. husky, mobile_robot, racecar) or URDF path")
+parser.add_argument("--duration", type=float, default=None, help="Simulation duration in seconds (default: run forever)")
+parser.add_argument("--rtf", type=float, default=None, help="Target real-time factor override")
 args = parser.parse_args()
 
 # Simulation setup
-params = SimulationParams(gui=True, timestep=0.1, ignore_static_collision=True, target_rtf=10, physics=False)
+params = SimulationParams(
+    gui=True, timestep=0.1, ignore_static_collision=True, target_rtf=args.rtf if args.rtf is not None else 10, physics=False
+)
 sim_core = MultiRobotSimulationCore(params)
 
 # Create AgentManager
@@ -388,13 +392,22 @@ p.addUserDebugText("AREA B", [AREA_B_CENTER[0], AREA_B_CENTER[1], 2.0], textColo
 agent_positions = [agent.get_pose().position for agent in mobile_agents]
 # Add area centers to ensure both areas are visible
 agent_positions.extend([AREA_A_CENTER, AREA_B_CENTER])
+# sim_core.setup_camera(
+#     camera_config={
+#         "camera_mode": "auto",
+#         "camera_view_type": "perspective",
+#         "camera_auto_scale": 1.0,  # Zoom out to see both areas
+#     },
+#     entity_positions=agent_positions,
+# )
 sim_core.setup_camera(
     camera_config={
-        "camera_mode": "auto",
-        "camera_view_type": "perspective",
-        "camera_auto_scale": 1.3,  # Zoom out to see both areas
-    },
-    entity_positions=agent_positions,
+        "camera_mode": "manual",
+        "camera_distance": 15.0,
+        "camera_yaw": 0,
+        "camera_pitch": -35,
+        "camera_target": [15.0, 0.0, 5.0],
+    }
 )
 
 # Run simulation
@@ -404,4 +417,4 @@ print("All robots move together from one area to another.")
 print("AgentManager handles bulk action coordination.")
 print("Press Ctrl+C to stop.\n")
 
-sim_core.run_simulation()
+sim_core.run_simulation(duration=args.duration)

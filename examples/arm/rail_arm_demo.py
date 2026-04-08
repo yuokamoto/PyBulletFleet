@@ -13,17 +13,25 @@ import os
 import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
+import argparse
 import pybullet as p
 from pybullet_fleet.action import JointAction, PoseAction, PickAction, DropAction, WaitAction
 from pybullet_fleet.agent import Agent
 from pybullet_fleet.core_simulation import MultiRobotSimulationCore, SimulationParams
 from pybullet_fleet.sim_object import Pose, SimObject, ShapeParams
 
+_parser = argparse.ArgumentParser(description="Rail arm pick/drop demo")
+_parser.add_argument("--duration", type=float, default=None, help="Simulation duration in seconds (default: run forever)")
+_parser.add_argument("--rtf", type=float, default=None, help="Target real-time factor override")
+_args = _parser.parse_args()
+
 # ---------------------------------------------------------------------------
 # Simulation setup
 # ---------------------------------------------------------------------------
 
-params = SimulationParams(gui=True, timestep=0.1, physics=False, target_rtf=1, log_level="info")
+params = SimulationParams(
+    gui=True, timestep=0.1, physics=False, target_rtf=_args.rtf if _args.rtf is not None else 1, log_level="info"
+)
 sim_core = MultiRobotSimulationCore(params)
 
 # Spawn rail arm (fixed base)
@@ -158,4 +166,4 @@ sim_core.setup_camera(
 )
 
 print("Starting simulation... Press Ctrl+C to stop.\n")
-sim_core.run_simulation()
+sim_core.run_simulation(duration=_args.duration)

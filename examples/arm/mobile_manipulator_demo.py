@@ -16,6 +16,7 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
+import argparse
 import logging
 import pybullet as p
 import math
@@ -31,6 +32,11 @@ from pybullet_fleet.action import (
     JointAction,
 )
 from pybullet_fleet.geometry import Path
+
+_parser = argparse.ArgumentParser(description="Mobile manipulator demo")
+_parser.add_argument("--duration", type=float, default=None, help="Simulation duration in seconds (default: run forever)")
+_parser.add_argument("--rtf", type=float, default=None, help="Target real-time factor override")
+_args = _parser.parse_args()
 
 # Configure logging
 logging.basicConfig(
@@ -49,7 +55,7 @@ print("  ee_target_position solved by inverse kinematics\n")
 # ---------------------------------------------------------------------------
 # Simulation
 # ---------------------------------------------------------------------------
-params = SimulationParams(gui=True, timestep=0.1, physics=False, target_rtf=3)
+params = SimulationParams(gui=True, timestep=0.1, physics=False, target_rtf=_args.rtf if _args.rtf is not None else 3)
 sim_core = MultiRobotSimulationCore(params)
 
 # ---------------------------------------------------------------------------
@@ -100,7 +106,7 @@ print(f"End-effector link index: {end_effector_link_index}")
 # ---------------------------------------------------------------------------
 # Target box (small, graspable by EE)
 # ---------------------------------------------------------------------------
-BOX_START = [1.5, 0.0, 0.8]
+BOX_START = [1.6, 0.0, 0.8]
 
 box = SimObject.from_mesh(
     visual_shape=ShapeParams(
@@ -215,7 +221,7 @@ actions = [
     PickAction(
         target_object_id=box.body_id,
         use_approach=False,
-        pick_offset=0.5,
+        pick_offset=0.7,
         attach_link=end_effector_link_index,
         attach_relative_pose=BOX_OFFSET,
         joint_targets=ARM_PICK,
@@ -342,7 +348,7 @@ print(f"Part 2: Added {len(ik_actions)} actions")
 print("\nSimulation running ... close GUI window to exit.\n")
 
 try:
-    sim_core.run_simulation()
+    sim_core.run_simulation(duration=_args.duration)
 except KeyboardInterrupt:
     print("\nInterrupted")
 

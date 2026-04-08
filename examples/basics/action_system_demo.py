@@ -11,6 +11,7 @@ Demonstrates:
 """
 
 import os
+import argparse
 import numpy as np
 import pybullet as p
 
@@ -20,17 +21,24 @@ from pybullet_fleet.geometry import Pose, Path
 from pybullet_fleet.sim_object import SimObject, SimObjectSpawnParams, ShapeParams
 from pybullet_fleet.action import MoveAction, WaitAction, PickAction, DropAction
 
+_parser = argparse.ArgumentParser(description="Action system demo")
+_parser.add_argument("--duration", type=float, default=None, help="Simulation duration in seconds (default: run forever)")
+_parser.add_argument("--rtf", type=float, default=None, help="Target real-time factor override")
+_args = _parser.parse_args()
+
 
 def main():
     # Initialize simulation with DEBUG logging
-    params = SimulationParams(gui=True, timestep=0.1, target_rtf=3, log_level="info", physics=False)
+    params = SimulationParams(
+        gui=True, timestep=0.1, target_rtf=_args.rtf if _args.rtf is not None else 3, log_level="info", physics=False
+    )
     sim = MultiRobotSimulationCore(params)
 
     # Camera setup
     sim.setup_camera(
         camera_config={
             "camera_mode": "manual",
-            "camera_distance": 10.0,
+            "camera_distance": 5.0,
             "camera_yaw": 45,
             "camera_pitch": -30,
             "camera_target": [2, 0, 0],
@@ -191,7 +199,7 @@ def main():
     print("Press Ctrl+C to exit\n")
 
     sim.register_callback(status_display_callback, frequency=None)  # Call every step
-    sim.run_simulation()
+    sim.run_simulation(duration=_args.duration)
 
 
 if __name__ == "__main__":

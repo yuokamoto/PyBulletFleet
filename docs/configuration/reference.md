@@ -62,6 +62,39 @@ PyBulletFleet provides multiple configuration files for different simulation mod
 - Physics ON + HYBRID
 - 10-second duration, maximum speed
 
+## Centralized Default Management (`_defaults.py`)
+
+All simulation parameter defaults live in a single module:
+**`pybullet_fleet/_defaults.py`**.
+
+```
+_DEFAULTS dict
+  └── simulation / agent / sim_object / shape / ik
+       └── key: value  (the ONLY place defaults are defined)
+```
+
+### Override priority
+
+| Layer | Mechanism | Example |
+|-------|-----------|--------|
+| 1. Code defaults | `_DEFAULTS` dict in `_defaults.py` | `"timestep": 0.1` |
+| 2. `.env` file | Auto-loaded if `python-dotenv` is installed (`override=False` — fills missing keys only) | `PBF_SIMULATION_GUI=false` |
+| 3. Environment vars | `PBF_{SECTION}_{KEY}` — shell env vars override `.env` | `PBF_SIMULATION_TIMESTEP=0.05` |
+| 4. YAML config | `config.yaml` passed to `from_yaml()` | `timestep: 0.02` |
+| 5. Constructor args | Explicit `SimulationParams(...)` keyword | `SimulationParams(timestep=0.01)` |
+
+Later layers win.  The `_defaults.py` module exposes convenience dicts
+(`SIMULATION`, `AGENT`, `SIM_OBJECT`, etc.) for direct import.
+
+### Using defaults in your code
+
+```python
+from pybullet_fleet._defaults import get
+
+timestep = get("simulation", "timestep")   # 0.1 (or env-overridden)
+max_vel  = get("agent", "max_linear_vel")  # 2.0
+```
+
 ## Usage Examples
 
 ### Load Configuration in Python
@@ -104,6 +137,10 @@ This section highlights the most important parameters. For a **complete list wit
 - `"contact_points"`: Physics contact manifold (recommended for physics)
 - `"hybrid"`: Mixed approach — physics pairs use contact, kinematic pairs use closest (advanced)
 
+If omitted, the method is auto-selected based on `physics`:
+- `physics: false` → `"closest_points"`
+- `physics: true` → `"contact_points"`
+
 See [Collision Detection Narrow-Phase Details](narrow-phase-details-pybullet-apis) for design rationale, trade-offs, and method comparison.
 
 ### `collision_margin` (float, meters)
@@ -120,17 +157,6 @@ Objects larger than `cell_size × multi_cell_threshold` span multiple cells.
 - `2.0+`: Only very large objects are multi-registered
 
 **Unit**: Dimensionless (multiplier of `cell_size`). For example, with `cell_size=2.0` and `multi_cell_threshold=1.5`, the threshold becomes 3.0 m.
-
-## Auto-Selection Logic
-
-If `collision_detection_method` is not specified in config:
-```python
-# Auto-selection
-if not physics:
-    collision_detection_method = "closest_points"  # Kinematics-safe
-else:
-    collision_detection_method = "contact_points"  # Physics-accurate
-```
 
 ## Choosing the Right Configuration
 

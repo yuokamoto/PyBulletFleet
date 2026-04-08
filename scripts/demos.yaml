@@ -1,0 +1,94 @@
+# -----------------------------------------------------------------------
+# Demo capture configuration
+#
+# format_defaults: per-format recording parameters (merged with CLI args)
+# demos: name → script, args, optional per-format overrides
+#
+# Screen capture mode (capture_screen_demo.py):
+#   The demo process runs at its NATIVE speed (no --rtf or --duration
+#   injection).  screen_capture.sh records the GUI window for
+#   ``recording_duration`` seconds (falling back to format_defaults
+#   duration), then kills the demo.
+#
+#   Important:
+#     - Demo scripts MUST default to duration=None (run forever) so the
+#       window stays open for ``delay + recording_duration`` wall-clock
+#       seconds.
+#     - Simulation speed (target_rtf) determines how much sim-time
+#       activity is visible during recording — fast demos show more
+#       action, slow demos show smoother motion.
+#     - If a demo finishes before recording ends, the captured video
+#       will contain blank/desktop frames after the window disappears.
+# -----------------------------------------------------------------------
+
+format_defaults:
+  gif:
+    fps: 10
+    width: 640
+    height: 480
+    duration: 4.0
+    time_base: sim
+  mp4:
+    fps: 30
+    width: 1280
+    height: 960
+    duration: 6.0
+    time_base: sim
+
+demos:
+  # # --- scale demos -------------------------------------------------------
+  # 100robots_grid_mixed:
+  #   script: examples/scale/100robots_grid_demo.py
+  #   args: ["--mode=mixed"]
+  #   recording_duration: 5.0
+
+  # 100robots_cube_patrol:
+  #   script: examples/scale/100robots_cube_patrol_demo.py
+  #   recording_duration: 5.0
+
+  # pick_drop_arm_100robots:
+  #   script: examples/scale/pick_drop_arm_100robots_demo.py
+  #   recording_duration: 4.0  # override format_defaults if needed
+  #   delay: 5.0              # wait for arms to start moving before recording
+
+  # pick_drop_mobile_100robots:
+  #   script: examples/scale/pick_drop_mobile_100robots_demo.py
+  #   recording_duration: 10.0
+  #   delay: 3.0
+
+  # # --- arm demos ---------------------------------------------------------
+  # pick_drop_arm_action:
+  #   script: examples/arm/pick_drop_arm_action_demo.py
+  #   recording_duration: 4.0
+
+  # pick_drop_arm_ee_action:
+  #   script: examples/arm/pick_drop_arm_ee_action_demo.py
+  #   recording_duration: 3.0
+
+  # mobile_manipulator:
+  #   script: examples/arm/mobile_manipulator_demo.py
+  #   recording_duration: 6.0
+  #   delay: 0.2
+
+  # # rail_arm:
+  # #   script: examples/arm/rail_arm_demo.py
+  # #   recording_duration: 8.0
+
+  # # --- basics demos ------------------------------------------------------
+  # action_system:
+  #   script: examples/basics/action_system_demo.py
+  #   recording_duration: 8.0
+  #   delay: 0.2
+
+  # collision_features:
+  #   script: examples/basics/collision_features_demo.py
+  #   recording_duration: 6.0
+
+  robot_demo:
+    script: examples/basics/robot_demo.py
+    recording_duration: 3.0
+
+  # # --- mobile demos ------------------------------------------------------
+  # # path_following:
+  # #   script: examples/mobile/path_following_demo.py
+  # #   recording_duration: 6.0

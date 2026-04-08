@@ -26,6 +26,9 @@ from pybullet_fleet.core_simulation import (
     SimulationParams,
 )
 
+# Recorder
+from pybullet_fleet.recorder import SimulationRecorder
+
 # Base classes
 from pybullet_fleet.sim_object import SimObject
 
@@ -92,6 +95,7 @@ __all__ = [
     "MultiRobotSimulationCore",
     "SimulationParams",
     "SpatialHashCellSizeMode",
+    "SimulationRecorder",
     "SimObject",
     # Agent management
     "Agent",

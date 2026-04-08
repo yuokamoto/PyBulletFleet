@@ -48,6 +48,114 @@ External communication layers:
   - Apply incrementally after profiling confirms bottleneck (YAGNI)
   - Full scipy removal in a separate PR after all call sites are replaced
 
+## Performance
+
+Near-term optimizations within the current PyBullet-backed architecture.
+Goal: reduce per-step cost at 100–1000 agents without a full backend swap (see Long-Term section for that).
+
+### Profiling Baseline (measured 2026-04-03)
+
+Benchmark: 500 agents, omnidirectional MoveAction, `collision_check_frequency=0` (disabled), `physics=False`, `simple_cube.urdf`.
+
+**Per-step breakdown (median):**
+
+| Component | Time | % of total | What |
+|---|---|---|---|
+| Python overhead (TPI + slerp + action queue + set_pose logic) | 11.5 ms | 88% | CPython for-loop + object dispatch |
+| `p.resetBasePositionAndOrientation` | 0.7 ms | 5% | PyBullet C API |
+| `p.getAABB` | 0.5 ms | 4% | PyBullet C API |
+| Movement detection | 0.3 ms | 3% | Pure Python arithmetic |
+| **Total** | **13.0 ms** | 100% | **FPS 77** |
+
+Key insight: **88% of step time is Pure Python overhead**, not C API calls.
+
+Collision at 10 Hz adds only ~0.2 ms at 500 agents — negligible compared to agent_update.
+
+**Vectorization micro-benchmark (500 agents):**
+
+| Operation | Python for-loop | NumPy vectorized | Speedup |
+|---|---|---|---|
+| Position compute (`start + dir × ratio`) | 1,150 μs | 5.6 μs | **205×** |
+| TPI-like trapezoidal profile | (per-agent) | 33 μs | — |
+| Per-agent cost | 23 μs/agent | ~0.01 μs/agent | — |
+
+### Two-Phase Step: Decouple Computation from PyBullet C API
+
+Current `step_once()` iterates agents one-by-one, each calling `controller.compute()` (Python/NumPy) → `set_pose_raw()` (PyBullet C API + AABB update + spatial grid) interleaved. This prevents vectorization and adds per-agent Python↔C crossing overhead.
+
+**Proposed split:**
+
+| Phase | What | Hot path |
+|-------|------|----------|
+| **Phase 1 — Compute** | All controllers compute new poses; no side effects | Pure Python / NumPy |
+| **Phase 2 — Apply** | Tight loop of `p.resetBasePositionAndOrientation()` only | PyBullet C calls |
+| **Phase 3 — Bookkeep** | Batch AABB refresh (`p.performCollisionDetection()` + `p.getAABB()`) and spatial grid update | C calls + Python dict |
+
+This requires **removing direct `pybullet` API calls from `sim_object.py`, `agent.py`, and `controller.py`**. Instead, these modules produce *pose intents* (position + orientation tuples), and `core_simulation.py` flushes them to PyBullet in bulk.
+
+Key changes:
+- `SimObject.set_pose()` / `set_pose_raw()` writes to an internal buffer (cached pose + dirty flag) without calling `p.resetBasePositionAndOrientation()`
+- `Controller.compute()` returns `(new_pos, new_orn)` or writes to agent's pending pose buffer
+- `core_simulation.step_once()` collects dirty poses → batch `resetBasePositionAndOrientation` → batch AABB update
+- Movement detection stays pure Python (already cached-pose-based), unaffected
+- Attached-object propagation runs after Phase 2 using the buffered parent poses
+
+### Vectorized Agent Update (NumPy Batch)
+
+For the common "N agents on straight-line TPI paths" case, Phase 1 can be further vectorized:
+
+- Store all active agents' `forward_start_pos`, `forward_direction`, and TPI parameters in contiguous `(N, 3)` NumPy arrays
+- Compute `new_positions = start_positions + directions * ratios[:, np.newaxis]` in one vectorized call
+- Slerp batch: pre-compute all `(start_quat, target_quat, t_fraction)` and batch `quat_slerp`
+- Fallback: agents with non-standard controllers (velocity mode, custom callbacks) use the existing per-agent path
+
+This is a "BatchController" or "VectorizedOmniController" that sits alongside the existing `Controller` ABC.
+
+### C++ Extensions for Hot-Path Functions
+
+Profile-guided candidates for C++ (via pybind11) or Cython acceleration:
+
+| Function | Current | Why C++ helps |
+|----------|---------|---------------|
+| **TwoPointInterpolation** | Pure Python `math` | Called N× per step; tight numerical loop ideal for native code |
+| **`quat_slerp` / `quat_slerp_precompute`** | Python scalar math in `geometry.py` | N× per step; SIMD-friendly |
+| **Spatial hash broad-phase** | Python dict + set ops in `check_collisions()` | Dict overhead at 1000+ objects; Rust/C++ hash map faster |
+| **AABB overlap test** | Python comparisons in `_aabb_overlap_2d` | Tight inner loop; autovectorizable in C++ |
+| **`getClosestPoints` narrow-phase** | PyBullet C API (already native) | Already fast; not a candidate |
+
+Priority: TPI and slerp first (highest call frequency), then spatial hash (scales with agent count²).
+
+### Deferred AABB Update
+
+Currently `set_pose()` calls `p.getAABB()` and updates the spatial grid **per object, immediately**. For kinematic-only mode:
+
+- Defer all AABB updates to a single `p.performCollisionDetection()` call after Phase 2
+- Batch `p.getAABB()` for all moved objects at once
+- Rebuild spatial grid once per step instead of incrementally per-object
+
+This removes N `p.getAABB()` C-API round-trips from the set_pose hot path.
+
+### Summary: Expected Impact (500 agents, measured baseline)
+
+| Optimization | Estimated step time | Estimated FPS | Speedup vs current | Effort |
+|---|---|---|---|---|
+| **Current** | 13.0 ms | 77 | 1.0× | — |
+| **NumPy vectorized controller** | ~1.2 ms | ~850 | **~11×** | Medium |
+| **+ C++ TPI/slerp extensions** | ~1.0 ms | ~1,000 | **~13×** | Medium |
+| **Theoretical floor** (C API only) | 0.7 ms | ~1,400 | ~18× | — |
+
+Scaling by agent count (current → vectorized estimate):
+
+| Agents | Current FPS | Est. vectorized FPS | Speedup |
+|---|---|---|---|
+| 100 | 225 | ~2,000+ | ~9× |
+| 500 | 77 | ~850 | ~11× |
+| 1,000 | 27 | ~450 | ~17× |
+
+> **Note:** Collision detection (10 Hz spatial hash) adds <1% overhead at 500 agents. C++ spatial hash becomes relevant at 1,000+ agents with higher collision frequencies.
+
+> **Relation to Long-Term Backend Abstraction:** The two-phase split and the "remove direct pybullet calls" refactoring are natural stepping stones toward the SimBackend ABC (Phase 1 of Long-Term). The buffered-pose pattern becomes the write side of `SimBackend.set_positions_batch()`.
+
 ## Environments
 
 Simulation environment assets (warehouse floors, factory layouts, etc.):

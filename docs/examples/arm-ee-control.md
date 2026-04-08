@@ -1,5 +1,14 @@
 # Tutorial 5: End-Effector Control — IK & PoseAction
 
+<table width="100%">
+<tr>
+<td align="center"><b>EE Pick & Drop</b><br>
+<video src="../pick_drop_arm_ee_action.mp4" width="100%" autoplay loop muted playsinline></video></td>
+<td align="center"><b>Mobile Manipulator</b><br>
+<video src="../mobile_manipulator.mp4" width="100%" autoplay loop muted playsinline></video></td>
+</tr>
+</table>
+
 **Source files:**
 - [`examples/arm/pick_drop_arm_ee_demo.py`](https://github.com/yuokamoto/PyBulletFleet/blob/main/examples/arm/pick_drop_arm_ee_demo.py) — low-level callback approach
 - [`examples/arm/pick_drop_arm_ee_action_demo.py`](https://github.com/yuokamoto/PyBulletFleet/blob/main/examples/arm/pick_drop_arm_ee_action_demo.py) — action-queue approach

@@ -326,7 +326,7 @@ def create_movement_pattern(t: float, robot_id: int, side: str = "left") -> Pose
 def main():
     parser = argparse.ArgumentParser(description="Collision Features Demo")
     parser.add_argument("--duration", type=float, default=30.0, help="Simulation duration (seconds)")
-    parser.add_argument("--target-rtf", type=float, default=1.0, help="Target RTF (Real-Time Factor)")
+    parser.add_argument("--rtf", type=float, default=1.0, help="Target real-time factor override")
     args = parser.parse_args()
 
     print("=" * 70)
@@ -373,7 +373,7 @@ def main():
         # Simulation settings
         duration=args.duration,
         timestep=0.01,
-        target_rtf=args.target_rtf,
+        target_rtf=args.rtf,
         log_level="info",
     )
 

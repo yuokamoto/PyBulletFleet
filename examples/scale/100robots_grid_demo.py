@@ -41,6 +41,7 @@ parser.add_argument(
 )
 parser.add_argument("--robot", default="husky", help="Robot name (e.g. husky, racecar) or URDF path for mobile robots")
 parser.add_argument("--arm-robot", default="panda", help="Arm robot name (e.g. panda, kuka_iiwa, arm_robot) or URDF path")
+parser.add_argument("--duration", type=float, default=None, help="Simulation duration in seconds (default: run forever)")
 args = parser.parse_args()
 
 mode = args.mode
@@ -256,4 +257,4 @@ def batch_agent_movement_callback(sim_core, dt):
 # ========================================
 
 sim_core.register_callback(batch_agent_movement_callback, frequency=1)
-sim_core.run_simulation()
+sim_core.run_simulation(duration=args.duration)
