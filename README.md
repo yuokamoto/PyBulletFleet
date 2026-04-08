@@ -5,15 +5,15 @@
 <table align="center">
 <tr>
 <td align="center"><b>Mixed Fleet Grid</b><br><sub>100robots_grid_demo.py</sub><br>
-<video src="https://github.com/yuokamoto/PyBulletFleet/raw/main/docs/media/100robots_grid_mixed.mp4" width="380" autoplay loop muted playsinline></video></td>
+<img src="docs/media/100robots_grid_mixed.gif" width="380" alt="Mixed Fleet Grid"></td>
 <td align="center"><b>Cube Patrol</b><br><sub>100robots_cube_patrol_demo.py</sub><br>
-<video src="https://github.com/yuokamoto/PyBulletFleet/raw/main/docs/media/100robots_cube_patrol.mp4" width="380" autoplay loop muted playsinline></video></td>
+<img src="docs/media/100robots_cube_patrol.gif" width="380" alt="Cube Patrol"></td>
 </tr>
 <tr>
 <td align="center"><b>Mobile Pick & Drop</b><br><sub>pick_drop_mobile_100robots_demo.py</sub><br>
-<video src="https://github.com/yuokamoto/PyBulletFleet/raw/main/docs/media/pick_drop_mobile_100robots.mp4" width="380" autoplay loop muted playsinline></video></td>
+<img src="docs/media/pick_drop_mobile_100robots.gif" width="380" alt="Mobile Pick and Drop"></td>
 <td align="center"><b>Arm Pick & Drop</b><br><sub>pick_drop_arm_100robots_demo.py</sub><br>
-<video src="https://github.com/yuokamoto/PyBulletFleet/raw/main/docs/media/pick_drop_arm_100robots.mp4" width="380" autoplay loop muted playsinline></video></td>
+<img src="docs/media/pick_drop_arm_100robots.gif" width="380" alt="Arm Pick and Drop"></td>
 </tr>
 </table>
 
