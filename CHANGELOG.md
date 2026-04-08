@@ -7,78 +7,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## v0.3.0 (2026-04-08)
+
+### Breaking Changes
+
+- `DifferentialPhase` removed — motion phase logic is now owned by `DifferentialController` / `OmnidirectionalController` in `controller.py`
+
 ### Highlights
 
 - **SimulationRecorder** — Headless and GUI video capture (GIF/MP4) via `start_recording()` API or `RECORD` environment variable
 - **Centralized defaults** — All parameter defaults in `_defaults.py` with `PBF_*` env-var overrides and `.env` file support
 - **Visual documentation** — Embedded demo videos across all doc pages, YAML-driven batch capture scripts
-- **Robot model resolution** — `resolve_urdf("panda")` finds URDFs by name across local, pybullet_data, and robot_descriptions sources with auto-discovery fallback
-- **Auto-detect robot profiles** — `auto_detect_profile()` introspects any URDF to determine robot type, joint layout, EE link, and arm reach
-- **Controller refactor** — Extracted `Controller` class from `Agent`, reducing agent.py by ~500 lines
+- **Robot model resolution** — `resolve_urdf("panda")` finds URDFs by name across local, pybullet_data, and robot_descriptions sources
+- **Controller refactor** — `Controller` extracted from `Agent` into `controller.py`, reducing `agent.py` by ~500 lines
 - **Entity registry** — `register_entity_class()` for custom spawn types via YAML config
-- **Examples reorganization** — Demos organized into arm/, basics/, mobile/, scale/, models/ subdirectories
 
 ### Features
 
-- `recorder.py` — `SimulationRecorder` with camera modes (auto, gui, orbit, manual), time bases (sim, real), GIF/MP4 output
-- `core_simulation.py` — `start_recording()` / `stop_recording()` convenience API, `RECORD` env-var auto-recording in `run_simulation()`
-- `_defaults.py` — single source of truth for all defaults; `PBF_{SECTION}_{KEY}` env-var overrides; optional `.env` auto-loading via python-dotenv
-- `DataMonitor` — window position and size configurable via `_defaults.py` and env vars
-- `compute_scene_bounds()` — scene AABB calculation for auto-framing cameras
-- `unregister_callback()` — remove callbacks by function identity
-- `robot_models.py` — `resolve_urdf()` with 5-step resolution (user search paths → KNOWN_MODELS → pybullet_data scan → robot_descriptions scan → error)
-- `auto_detect_profile()` — introspects URDF via PyBullet to produce `RobotProfile` (robot_type, joints, EE, arm_reach)
-- `register_model()` / `unregister_model()` — runtime model registry management
-- `add_search_path()` / `remove_search_path()` — custom URDF search directories
-- `discover_models()` — enumerate all available models in pybullet_data or robot_descriptions
-- `controller.py` — extracted `Controller` with `OmnidirectionalController`, `DifferentialController`
+- `SimulationRecorder` — camera modes (auto, gui, orbit, manual), time bases (sim, real), GIF/MP4 output
+- `start_recording()` / `stop_recording()` on `MultiRobotSimulationCore`; `RECORD` env-var enables auto-recording in `run_simulation()`
+- `_defaults.py` — single source of truth for all defaults; `PBF_{SECTION}_{KEY}` env-var overrides; `.env` auto-loading via python-dotenv
+- `robot_models.py` — `resolve_urdf()`, `auto_detect_profile()`, `register_model()`, `discover_models()`, `add_search_path()`
+- `controller.py` — `OmnidirectionalController`, `DifferentialController` extracted from Agent
 - `entity_registry.py` — `register_entity_class()` for extensible YAML-driven spawning
+- `compute_scene_bounds()` — scene AABB for auto-framing cameras
+- `unregister_callback()` — remove callbacks by function identity
 - `SimulationParams.enable_floor` — option to skip ground plane loading
-- `config_utils.py` — improved YAML merge and validation
-- `sim_object.py` / `tools.py` — enhanced pose utilities and mesh support
-- `[models]` extra in pyproject.toml for `pip install pybullet-fleet[models]`
-
-### Scripts
-
-- `scripts/capture_demo.py` — headless batch capture via `SimulationRecorder` + `RECORD` env var
-- `scripts/capture_screen_demo.py` — YAML-driven GUI screen recording via `screen_capture.sh`
-- `scripts/screen_capture.sh` — X11 window capture with ffmpeg/kazam, pause/resume, multi-demo mode
-- `scripts/capture_model_catalog.py` — generate model catalog PNG thumbnails
-- `scripts/demos.yaml` — shared demo capture configuration with format defaults and per-demo overrides
-
-### New Examples
-
-- `examples/models/` — `resolve_urdf_demo.py`, `model_catalog_demo.py`, `robot_descriptions_demo.py`
-- All existing demos reorganized into `arm/`, `basics/`, `mobile/`, `scale/` subdirectories
-- Updated camera setup and robot profile integration in arm demos
+- `[models]` extra in `pyproject.toml` — `pip install pybullet-fleet[models]` pulls `robot_descriptions`
+- New demo scripts: `capture_demo.py` (headless), `capture_screen_demo.py` (GUI), `capture_model_catalog.py`
+- Examples reorganized into `arm/`, `basics/`, `mobile/`, `scale/`, `models/` subdirectories
 
 ### Documentation
 
-- Embedded demo videos on all example pages (action-system, arm, mobile, scale)
-- Quickstart page with single demo video
-- How-To: Capturing Demo Videos — Python API, `RECORD` env var, batch scripts
+- Embedded demo videos on all example pages; Quickstart page with single demo video
+- How-To: Capturing Demo Videos (Python API, `RECORD` env var, batch scripts)
 - Configuration Reference — centralized defaults, override priority, `.env` usage
-- Roadmap page with performance profiling plan
 - Tutorial 6: Robot Models — resolution, auto-detect, search paths, auto-discovery
-- Updated quickstart, architecture overview, spawning-objects docs
-- Research report: OSS robot models survey (pybullet_data, robot_descriptions)
-- Design specs: robot-models, controller-refactor, plugin-architecture, unified-spawn
+- Roadmap page with performance profiling plan
 
 ### Testing
 
-- `test_recorder.py` — 30+ tests covering capture, save, camera modes, time bases, env-var recording
-- `test_defaults.py` — completeness, env-var overrides, consistency, IK defaults, None sentinels
-- `test_capture_screen_demo.py` — parameter resolution and command building
-- `test_core_simulation.py` — expanded with recording API and callback tests
 - 960 tests (up from 740), coverage 82%
-- `test_robot_models.py` — 40+ tests covering resolution, auto-detect, search paths, register/unregister, auto-discovery
-- `test_controller.py` — controller extraction tests
-- `test_config_spawn.py` — YAML config and entity registry tests
-- `test_entity_registry.py`, `test_sim_object.py`, `test_tools.py` — new test modules
+- New modules: `test_recorder.py`, `test_defaults.py`, `test_robot_models.py`, `test_controller.py`, `test_entity_registry.py`
 
 ### Performance
 
-- No regressions from controller refactor
+- 1000-agent RTF improved **+38%** (2.4× → 3.3×, 40.9 ms → 30.0 ms/step)
+- 500-agent RTF improved **+12%** (6.8× → 7.6×, 14.7 ms → 13.2 ms/step)
 
 ## v0.2.0 (2026-03-20)
 
