@@ -1,0 +1,86 @@
+#!/usr/bin/env python3
+"""SDF & mesh loading demo — bulk-loading patterns.
+
+Demonstrates:
+- SimObject.from_sdf() with a multi-model SDF (one file → 5 SimObjects)
+- SimObject.from_sdf() with global_scaling and name_prefix
+- load_mesh_directory() — bulk-load a folder of OBJ meshes
+
+Usage:
+    python examples/models/sdf_demo.py
+"""
+
+import pybullet_data
+
+from pybullet_fleet import (
+    MultiRobotSimulationCore,
+    SimulationParams,
+    Agent,
+    AgentSpawnParams,
+    Pose,
+    load_mesh_directory,
+)
+from pybullet_fleet.sim_object import SimObject
+from pybullet_fleet.types import MotionMode, CollisionMode
+
+
+def main():
+    sim = MultiRobotSimulationCore(SimulationParams(gui=True, physics=False, monitor=True, duration=15.0, enable_floor=False))
+    sim.initialize_simulation()
+
+    # ==========================================================
+    # 1. Multi-model SDF — one file → multiple bodies
+    #    warehouse_layout.sdf contains 5 <model> tags:
+    #      ground_plane + shelf_A1/A2/B1/B2
+    #    loadSDF() returns all 5 as separate SimObjects.
+    # ==========================================================
+    warehouse = SimObject.from_sdf("mesh/warehouse_layout.sdf", sim_core=sim)
+    print(f"Loaded {len(warehouse)} bodies from warehouse_layout.sdf:")
+    for obj in warehouse:
+        print(f"  {obj.name} (id={obj.object_id})")
+
+    # ==========================================================
+    # 2. Single-model SDF with global_scaling / name_prefix
+    # ==========================================================
+    shelves = SimObject.from_sdf("kiva_shelf/model.sdf", sim_core=sim)
+    for shelf in shelves:
+        shelf.set_pose(Pose.from_xyz(5.0, 0.0, 0.0))
+    print(f"kiva_shelf (original) → {len(shelves)} body")
+
+    shelves_half = SimObject.from_sdf(
+        "kiva_shelf/model.sdf",
+        sim_core=sim,
+        global_scaling=0.5,
+        name_prefix="small_shelf",
+    )
+    for shelf in shelves_half:
+        shelf.set_pose(Pose.from_xyz(-5.0, 0.0, 0.0))
+    print(f"kiva_shelf (0.5x) → {len(shelves_half)} body")
+
+    # ==========================================================
+    # 3. load_mesh_directory() — bulk-load a folder of OBJ meshes
+    #    collision_mode=DISABLED — visual-only, no collision overhead.
+    # ==========================================================
+    mesh_dir = pybullet_data.getDataPath() + "/franka_panda/meshes/collision"
+    meshes = load_mesh_directory(mesh_dir, sim_core=sim, pattern="link[0-2].obj", collision_mode=CollisionMode.DISABLED)
+    print(f"load_mesh_directory → {len(meshes)} objects from {mesh_dir}")
+
+    # ==========================================================
+    # Spawn a mobile robot to navigate the warehouse
+    # ==========================================================
+    Agent.from_params(
+        AgentSpawnParams(
+            urdf_path="robots/mobile_robot.urdf",
+            initial_pose=Pose.from_xyz(3, 0, 0.1),
+            motion_mode=MotionMode.OMNIDIRECTIONAL,
+            max_linear_vel=2.0,
+            collision_mode=CollisionMode.NORMAL_2D,
+        ),
+        sim_core=sim,
+    )
+
+    sim.run_simulation()
+
+
+if __name__ == "__main__":
+    main()

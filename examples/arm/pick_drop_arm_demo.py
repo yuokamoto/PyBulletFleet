@@ -17,7 +17,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 from pybullet_fleet.agent import Agent
 from pybullet_fleet.core_simulation import MultiRobotSimulationCore, SimulationParams
 from pybullet_fleet.sim_object import Pose, SimObject, ShapeParams
-from pybullet_fleet.robot_models import resolve_urdf, auto_detect_profile
+from pybullet_fleet.robot_models import resolve_model, auto_detect_profile
 
 parser = argparse.ArgumentParser(description="Robot arm pick & drop demo (joint control)")
 parser.add_argument("--robot", default="panda", help="Robot name (e.g. panda, kuka_iiwa, arm_robot) or URDF path")
@@ -65,7 +65,7 @@ params = SimulationParams(
 sim_core = MultiRobotSimulationCore(params)
 
 # Spawn robot arm (fixed base)
-arm_urdf = resolve_urdf(args.robot)
+arm_urdf = resolve_model(args.robot)
 arm_agent = Agent.from_urdf(
     urdf_path=arm_urdf,
     pose=Pose.from_xyz(0, 0, 0),

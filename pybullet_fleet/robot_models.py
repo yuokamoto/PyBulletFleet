@@ -1,6 +1,6 @@
-"""Robot model URDF resolution and auto-detection.
+"""Robot model resolution and auto-detection.
 
-Provides a 3-tier URDF resolution system:
+Provides a 3-tier model resolution system (URDF and SDF):
 
 - **Tier 1** (``pybullet_data``): Always available with ``pip install pybullet``.
 - **Tier 2** (ROS packages): Available when ROS description packages are installed.
@@ -8,10 +8,11 @@ Provides a 3-tier URDF resolution system:
 
 Usage::
 
-    from pybullet_fleet.robot_models import resolve_urdf
+    from pybullet_fleet.robot_models import resolve_model
 
-    urdf = resolve_urdf("panda")           # Tier 1: pybullet_data
-    urdf = resolve_urdf("robots/arm.urdf") # Direct path: returned as-is
+    path = resolve_model("panda")           # Tier 1: pybullet_data
+    path = resolve_model("robots/arm.urdf") # Direct path: returned as-is
+    path = resolve_model("kiva_shelf")      # SDF model from pybullet_data
 """
 
 import os
@@ -125,10 +126,10 @@ def add_search_path(directory: str) -> None:
 
     Example::
 
-        from pybullet_fleet.robot_models import add_search_path, resolve_urdf
+        from pybullet_fleet.robot_models import add_search_path, resolve_model
 
         add_search_path("/opt/company_robots")
-        urdf = resolve_urdf("my_agv")  # → /opt/company_robots/my_agv.urdf
+        path = resolve_model("my_agv")  # → /opt/company_robots/my_agv.urdf
 
     Args:
         directory: Absolute or relative path to a directory containing
@@ -175,13 +176,13 @@ def register_model(name: str, path_or_entry: Union[str, ModelEntry], *, force: b
     """Register a custom model so it can be resolved by name.
 
     This is the recommended way to make any URDF/SDF loadable via
-    ``resolve_urdf(name)`` — including models from ``pybullet_data``,
+    ``resolve_model(name)`` — including models from ``pybullet_data``,
     ROS packages, or ``robot_descriptions`` that are not in the built-in
     :data:`KNOWN_MODELS` registry.
 
     Example::
 
-        from pybullet_fleet.robot_models import register_model, resolve_urdf
+        from pybullet_fleet.robot_models import register_model, resolve_model
 
         # Simple: register an absolute path
         register_model("my_agv", "/opt/robots/my_agv.urdf")
@@ -189,7 +190,7 @@ def register_model(name: str, path_or_entry: Union[str, ModelEntry], *, force: b
         # Or register a pybullet_data model by relative path + tier
         register_model("sphere", ModelEntry("sphere2.urdf", "pybullet_data"))
 
-        path = resolve_urdf("my_agv")
+        path = resolve_model("my_agv")
 
     Args:
         name: Short model name (e.g. ``"my_agv"``).
@@ -241,8 +242,8 @@ def _resolve_from_search_paths(name: str) -> Optional[str]:
 # ---------------------------------------------------------------------------
 
 
-def resolve_urdf(name_or_path: str) -> str:
-    """Resolve a robot name or file path to an absolute URDF path.
+def resolve_model(name_or_path: str) -> str:
+    """Resolve a model name or file path to an absolute URDF/SDF path.
 
     Resolution order:
 
@@ -257,10 +258,10 @@ def resolve_urdf(name_or_path: str) -> str:
     Auto-discovery does **not** modify :data:`KNOWN_MODELS`.
 
     Args:
-        name_or_path: Robot name (e.g. ``"panda"``, ``"r2d2"``) or file path.
+        name_or_path: Model name (e.g. ``"panda"``, ``"kiva_shelf"``) or file path.
 
     Returns:
-        Absolute path to the URDF file.
+        Absolute path to the model file (URDF or SDF).
 
     Raises:
         FileNotFoundError: If the model cannot be resolved.
@@ -289,11 +290,21 @@ def resolve_urdf(name_or_path: str) -> str:
     raise FileNotFoundError(f"Unknown robot model '{name_or_path}'. Available models: {available}")
 
 
+def resolve_urdf(name_or_path: str) -> str:
+    """Backward-compatible alias for :func:`resolve_model`.
+
+    .. deprecated::
+        Use :func:`resolve_model` instead.  ``resolve_urdf`` will be
+        removed in a future release.
+    """
+    return resolve_model(name_or_path)
+
+
 # ---------------------------------------------------------------------------
 # Auto-discovery helpers
 # ---------------------------------------------------------------------------
 
-# Cache to avoid rescanning the filesystem on every resolve_urdf() miss.
+# Cache to avoid rescanning the filesystem on every resolve_model() miss.
 _pybullet_data_cache: Optional[Dict[str, str]] = None
 
 
@@ -332,7 +343,7 @@ def _scan_robot_descriptions() -> Dict[str, str]:
 
     .. note:: Importing each module may trigger a git clone on first access
        (``robot_descriptions`` lazy-downloads).  This function is only called
-       as a fallback, not on every ``resolve_urdf()``.
+       as a fallback, not on every ``resolve_model()``.
     """
     result: Dict[str, str] = {}
     try:
@@ -366,7 +377,7 @@ def _scan_robot_descriptions() -> Dict[str, str]:
 def _fallback_discover(name: str) -> Optional[str]:
     """Try to find *name* via auto-discovery (pybullet_data, robot_descriptions).
 
-    Called by :func:`resolve_urdf` when *name* is not in :data:`KNOWN_MODELS`.
+    Called by :func:`resolve_model` when *name* is not in :data:`KNOWN_MODELS`.
     Does **not** modify :data:`KNOWN_MODELS`.
 
     Returns:
@@ -419,7 +430,7 @@ def list_all_models() -> Dict[str, dict]:
     result: Dict[str, dict] = {}
     for name, entry in KNOWN_MODELS.items():
         try:
-            path = resolve_urdf(name)
+            path = resolve_model(name)
             result[name] = {
                 "tier": entry.tier,
                 "available": os.path.isfile(path),

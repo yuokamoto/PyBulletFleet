@@ -1,4 +1,4 @@
-# Tutorial 6: Robot Models — resolve_urdf & Model Catalog
+# Tutorial 6: Robot Models — resolve_model & Model Catalog
 
 ![Model Catalog](../media/model_catalog.png)
 
@@ -9,7 +9,7 @@ browse the model catalog, and inspect robot capabilities automatically.
 
 **What you'll learn:**
 
-- Resolving a model name to a URDF path with `resolve_urdf()`
+- Resolving a model name to a URDF path with `resolve_model()`
 - How `Agent.from_urdf()` accepts model names directly
 - Auto-detecting robot type, joints, and EE with `auto_detect_profile()`
 - Listing all available models with `list_all_models()`
@@ -42,15 +42,15 @@ agent = Agent.from_urdf(
 )
 ```
 
-`Agent.from_urdf()` calls `resolve_urdf()` internally.  The name `"panda"` is
+`Agent.from_urdf()` calls `resolve_model()` internally.  The name `"panda"` is
 looked up in the `KNOWN_MODELS` registry and resolved to the absolute URDF path
 from `pybullet_data`.
 
 ---
 
-## 2. How `resolve_urdf()` Works
+## 2. How `resolve_model()` Works
 
-`resolve_urdf()` searches through **tiers** in priority order:
+`resolve_model()` searches through **tiers** in priority order:
 
 | Tier | Source | Example names |
 |------|--------|---------------|
@@ -60,7 +60,7 @@ from `pybullet_data`.
 | 3 — `robot_descriptions` | `robot_descriptions` pip package | `tiago`, `pr2` |
 
 `KNOWN_MODELS` is a **curated subset** of each tier.  However, models **not** in
-the registry are still resolved automatically — `resolve_urdf()` falls back to
+the registry are still resolved automatically — `resolve_model()` falls back to
 scanning installed packages:
 
 1. User search paths (`add_search_path()`)
@@ -72,11 +72,11 @@ scanning installed packages:
 ```python
 # Works even though "r2d2" is not in KNOWN_MODELS —
 # auto-discovered from pybullet_data
-resolve_urdf("r2d2")
+resolve_model("r2d2")
 
 # Works if robot_descriptions is installed —
 # auto-discovered from anymal_b_description module
-resolve_urdf("anymal_b")
+resolve_model("anymal_b")
 ```
 
 ```{tip}
@@ -89,18 +89,18 @@ because it imports each module (which may trigger a git clone on first access).
 `.urdf` / `.sdf` is returned as-is without tier lookup.
 
 ```python
-from pybullet_fleet.robot_models import resolve_urdf
+from pybullet_fleet.robot_models import resolve_model
 
 # Tier 0 — local robots/ dir
-resolve_urdf("arm_robot")
+resolve_model("arm_robot")
 # → /path/to/PyBulletFleet/robots/arm_robot.urdf
 
 # Tier 1 — pybullet_data
-resolve_urdf("panda")
+resolve_model("panda")
 # → /path/to/pybullet_data/franka_panda/panda.urdf
 
 # Direct path — pass through
-resolve_urdf("robots/mobile_robot.urdf")
+resolve_model("robots/mobile_robot.urdf")
 # → robots/mobile_robot.urdf
 ```
 
@@ -172,7 +172,7 @@ for name, info in models.items():
 Or from the command line:
 
 ```bash
-python examples/models/resolve_urdf_demo.py --list
+python examples/models/resolve_model_demo.py --list
 ```
 
 ---
@@ -222,14 +222,14 @@ agent = Agent.from_urdf(urdf_path="tiago", pose=Pose.from_xyz(0, 0, 0),
                         sim_core=sim)
 ```
 
-Run `resolve_urdf_demo.py --list` or call `list_all_models()` to see
+Run `resolve_model_demo.py --list` or call `list_all_models()` to see
 all registered names and their availability.
 
 (using-unlisted-models)=
 ### Auto-discovery of unlisted models
 
 `KNOWN_MODELS` is a curated set, but models **not** in the registry are still
-usable by name — `resolve_urdf()` automatically scans installed packages as a
+usable by name — `resolve_model()` automatically scans installed packages as a
 fallback:
 
 ```python
@@ -293,7 +293,7 @@ pip install pybullet-fleet[models]
 # or: pip install robot_descriptions
 ```
 
-If the package is not installed, `resolve_urdf()` raises `FileNotFoundError` with
+If the package is not installed, `resolve_model()` raises `FileNotFoundError` with
 an install hint.
 
 ---
@@ -302,21 +302,21 @@ an install hint.
 
 | Script | What it demonstrates |
 |--------|---------------------|
-| [`resolve_urdf_demo.py`](https://github.com/yuokamoto/PyBulletFleet/blob/main/examples/models/resolve_urdf_demo.py) | Three URDF resolution patterns: by name, by direct path, and listing all models |
+| [`resolve_model_demo.py`](https://github.com/yuokamoto/PyBulletFleet/blob/main/examples/models/resolve_model_demo.py) | Three URDF resolution patterns: by name, by direct path, and listing all models |
 | [`model_catalog_demo.py`](https://github.com/yuokamoto/PyBulletFleet/blob/main/examples/models/model_catalog_demo.py) | Visual grid catalog of all registered models from `KNOWN_MODELS` |
 | [`robot_descriptions_demo.py`](https://github.com/yuokamoto/PyBulletFleet/blob/main/examples/models/robot_descriptions_demo.py) | Using Tier 3 models from the `robot_descriptions` pip package |
 
 ```bash
 # Try it:
-python examples/models/resolve_urdf_demo.py --robot panda
-python examples/models/resolve_urdf_demo.py --list
+python examples/models/resolve_model_demo.py --robot panda
+python examples/models/resolve_model_demo.py --list
 python examples/models/model_catalog_demo.py
 ```
 
 ### The `--robot` Argument
 
 Most example scripts across the project accept a `--robot` argument to swap the
-robot model at runtime.  The value is passed to `resolve_urdf()`, so you can use
+robot model at runtime.  The value is passed to `resolve_model()`, so you can use
 a registered model name or a direct URDF path — as long as the model is compatible
 with the demo (e.g., arm models for arm demos, mobile models for mobile demos):
 
@@ -346,7 +346,7 @@ python examples/models/robot_descriptions_demo.py --robot pr2
 | Scale demos — arm | `--robot` | `panda` | `kuka_iiwa`, `arm_robot` |
 | `100robots_grid_demo.py` | `--robot` (mobile) | `husky` | `racecar`, `mobile_robot` |
 | `100robots_grid_demo.py` | `--arm-robot` (arm) | `panda` | `kuka_iiwa`, `arm_robot` |
-| `resolve_urdf_demo.py` | `--robot` | `panda` | any registered model |
+| `resolve_model_demo.py` | `--robot` | `panda` | any registered model |
 | `robot_descriptions_demo.py` | `--robot` | `tiago` | any `robot_descriptions` model |
 
 ---
@@ -355,10 +355,10 @@ python examples/models/robot_descriptions_demo.py --robot pr2
 ## 7. Custom Search Paths
 
 If your team maintains URDF files in a shared directory (e.g., `/opt/company_robots/`),
-you can register it as a search path so `resolve_urdf()` finds them by name:
+you can register it as a search path so `resolve_model()` finds them by name:
 
 ```python
-from pybullet_fleet.robot_models import add_search_path, resolve_urdf
+from pybullet_fleet.robot_models import add_search_path, resolve_model
 
 add_search_path("/opt/company_robots")
 

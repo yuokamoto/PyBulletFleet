@@ -5,11 +5,11 @@
 ## Requirements
 
 ### Functional
-- `resolve_urdf(name_or_path)` resolves short name → absolute URDF path via 3-tier lookup
+- `resolve_model(name_or_path)` resolves short name → absolute URDF path via 3-tier lookup
 - `auto_detect_profile(body_id)` introspects loaded URDF → `RobotProfile` with EE link, joints, limits
 - `RobotProfile` merges auto-detected values with optional manual overrides
 - Existing demos accept `--robot <name>` CLI arg to switch model (same category only)
-- Demo scripts use both `resolve_urdf()` (recommended) and direct `pybullet_data.getDataPath()` (educational)
+- Demo scripts use both `resolve_model()` (recommended) and direct `pybullet_data.getDataPath()` (educational)
 
 ### Non-Functional
 - No new required dependencies
@@ -59,7 +59,7 @@ EE link heuristic: name match ("hand", "ee", "end_effector", "tool", "gripper") 
 ### Architecture
 
 ```
-resolve_urdf("panda")
+resolve_model("panda")
     → KNOWN_MODELS registry lookup
     → Tier 1: pybullet_data path join
     → Tier 2: ROS package path resolve (optional)
@@ -79,7 +79,7 @@ auto_detect_profile(physics_client, urdf_path)
 
 | Component | Responsibility | Location |
 |-----------|---------------|----------|
-| `resolve_urdf()` | Name → absolute URDF path | `pybullet_fleet/robot_models.py` |
+| `resolve_model()` | Name → absolute URDF path | `pybullet_fleet/robot_models.py` |
 | `KNOWN_MODELS` | Registry dict: name → (rel_path, tier, install_hint) | `pybullet_fleet/robot_models.py` |
 | `RobotProfile` | Dataclass: urdf_path, ee_link, joints, max_vel, robot_type | `pybullet_fleet/robot_models.py` |
 | `auto_detect_profile()` | PyBullet introspection → RobotProfile | `pybullet_fleet/robot_models.py` |
@@ -87,7 +87,7 @@ auto_detect_profile(physics_client, urdf_path)
 
 ### Data Flow
 
-1. Demo script: `--robot panda` → `resolve_urdf("panda")` → absolute path
+1. Demo script: `--robot panda` → `resolve_model("panda")` → absolute path
 2. `AgentSpawnParams(urdf_path=resolved_path, ...)`
 3. Optionally: `auto_detect_profile(path)` → `RobotProfile` → override `AgentSpawnParams` fields
 
@@ -140,7 +140,7 @@ Robot type heuristic:
 ```python
 # examples/arm/pick_drop_arm_demo.py
 import argparse
-from pybullet_fleet.robot_models import resolve_urdf
+from pybullet_fleet.robot_models import resolve_model
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--robot", default=None, help="Robot name (e.g. panda, kuka_iiwa) or URDF path")
@@ -148,7 +148,7 @@ args = parser.parse_args()
 
 # Default to built-in URDF, override with --robot
 if args.robot:
-    urdf_path = resolve_urdf(args.robot)
+    urdf_path = resolve_model(args.robot)
 else:
     urdf_path = os.path.join(os.path.dirname(__file__), "../robots/arm_robot.urdf")
 ```
@@ -185,13 +185,13 @@ Files the plan agent MUST read before planning:
 
 ## Success Criteria
 
-- [ ] `resolve_urdf("panda")` returns valid path; file exists
-- [ ] `resolve_urdf("robots/arm_robot.urdf")` returns the input unchanged (or resolved)
-- [ ] `resolve_urdf("nonexistent")` raises `FileNotFoundError` with install hint
+- [ ] `resolve_model("panda")` returns valid path; file exists
+- [ ] `resolve_model("robots/arm_robot.urdf")` returns the input unchanged (or resolved)
+- [ ] `resolve_model("nonexistent")` raises `FileNotFoundError` with install hint
 - [ ] `auto_detect_profile` on Panda finds `panda_hand` as EE link
 - [ ] `auto_detect_profile` on Husky returns `robot_type="mobile"`, no EE
 - [ ] `pick_drop_arm_demo.py --robot panda` runs successfully
 - [ ] `100robots_grid_demo.py --robot husky` runs 100 Huskyss
 - [ ] `list_available_models()` prints table with availability status
 - [ ] Existing tests pass unchanged (866+)
-- [ ] New tests for resolve_urdf, auto_detect_profile, RobotProfile
+- [ ] New tests for resolve_model, auto_detect_profile, RobotProfile

@@ -4,7 +4,7 @@ Base class for simulation objects with attachment support.
 """
 
 from dataclasses import dataclass, field
-from typing import Any, Callable, List, Optional, Dict, Tuple, Union
+from typing import TYPE_CHECKING, Any, Callable, List, Optional, Dict, Tuple, Union
 import logging
 
 import pybullet as p
@@ -14,6 +14,9 @@ from .logging_utils import get_lazy_logger, get_named_lazy_logger
 from .types import CollisionMode
 from .tools import resolve_link_index
 from pybullet_fleet._defaults import SIM_OBJECT as _OBJ_D, SHAPE as _SHP_D
+
+if TYPE_CHECKING:
+    from pybullet_fleet.events import EventBus
 
 # Standard logger for info/warning/error
 logger = logging.getLogger(__name__)
@@ -283,6 +286,9 @@ class SimObject:
         # Examples: "LeftRobot_1", "Pallet_A", "Obstacle_Wall"
         self.name: Optional[str] = name
 
+        # Per-entity EventBus (lazy — created on first .events access)
+        self._events: Optional["EventBus"] = None
+
         # Assign unique ID from sim_core if available
         # Note: object_id is UNIQUE and should be used for programmatic object identification.
         # Use sim_core.get_object_by_id(object_id) for lookups.
@@ -334,6 +340,30 @@ class SimObject:
     def _pid(self) -> int:
         """PyBullet physicsClientId (falls back to 0 if no sim_core)."""
         return self.sim_core._client if self.sim_core is not None else 0
+
+    @property
+    def events(self) -> "EventBus":
+        """Per-entity EventBus. Created on first access (lazy).
+
+        Use in subclasses to hook into entity-specific events::
+
+            class WarehouseRobot(Agent):
+                def __init__(self, ...):
+                    super().__init__(...)
+                    from pybullet_fleet.events import SimEvents
+
+                    self.events.on(SimEvents.COLLISION_STARTED, self._on_bump)
+                    self.events.on(SimEvents.ACTION_COMPLETED, self._on_task_done)
+        """
+        if self._events is None:
+            from pybullet_fleet.events import EventBus
+
+            self._events = EventBus()
+        return self._events
+
+    def _has_entity_events(self) -> bool:
+        """Fast check: True if per-entity EventBus has been created."""
+        return self._events is not None
 
     def set_name(self, name: Optional[str]) -> None:
         """
@@ -660,6 +690,103 @@ class SimObject:
             name=name,
             user_data=user_data,
         )
+
+    @classmethod
+    def from_sdf(
+        cls,
+        sdf_path: str,
+        sim_core=None,
+        collision_mode: CollisionMode = CollisionMode.NORMAL_3D,
+        global_scaling: float = 1.0,
+        name_prefix: Optional[str] = None,
+        pickable: bool = False,
+        use_fixed_base: bool = True,
+    ) -> List["SimObject"]:
+        """Load an SDF file and wrap each body in a SimObject.
+
+        Uses PyBullet's ``p.loadSDF()`` to load the file and creates a
+        SimObject for each body. All objects are auto-registered to
+        ``sim_core`` if provided.
+
+        Note:
+            PyBullet's SDF loader does NOT support ``<world>`` tags,
+            ``<include>`` tags, or ``model://`` URIs. Use for individual
+            SDF models (e.g., pybullet_data's kiva_shelf, wsg50_gripper).
+
+        Args:
+            sdf_path: Path to SDF file (resolved via resolve_model())
+            sim_core: Simulation core for registration
+            collision_mode: Collision detection mode for all loaded objects
+            global_scaling: Uniform scale factor
+            name_prefix: Prefix for names (default: SDF filename stem)
+            pickable: Whether objects can be picked up
+            use_fixed_base: If True, fix base (mass=0, kinematic)
+
+        Returns:
+            List of SimObject instances (one per body in the SDF)
+
+        Example::
+
+            shelves = SimObject.from_sdf(
+                'kiva_shelf/model.sdf', sim_core=sim
+            )
+            for shelf in shelves:
+                print(f'{shelf.name}: {shelf.get_pose()}')
+        """
+        from pathlib import Path as PathLib
+
+        from pybullet_fleet.robot_models import resolve_model
+
+        resolved_path = resolve_model(sdf_path)
+        pid = sim_core._client if sim_core is not None else 0
+
+        # Determine name prefix from filename if not provided
+        if name_prefix is None:
+            name_prefix = PathLib(resolved_path).stem
+
+        def _load_and_wrap() -> List["SimObject"]:
+            try:
+                body_ids = p.loadSDF(
+                    resolved_path,
+                    globalScaling=global_scaling,
+                    physicsClientId=pid,
+                )
+            except p.error as exc:
+                raise FileNotFoundError(f"Failed to load SDF: {resolved_path}") from exc
+
+            if not body_ids:
+                raise RuntimeError(f"SDF loaded 0 bodies from: {resolved_path}")
+
+            objs: List["SimObject"] = []
+            for i, bid in enumerate(body_ids):
+                # Try to get model name from PyBullet
+                body_info = p.getBodyInfo(bid, physicsClientId=pid)
+                body_name = body_info[1].decode("utf-8") if body_info[1] else f"{name_prefix}_{i}"
+
+                if use_fixed_base:
+                    # Set mass to 0 for static/kinematic behavior
+                    p.changeDynamics(bid, -1, mass=0.0, physicsClientId=pid)
+
+                obj = cls(
+                    body_id=bid,
+                    sim_core=sim_core,
+                    pickable=pickable,
+                    mass=0.0 if use_fixed_base else None,
+                    collision_mode=collision_mode,
+                    name=body_name,
+                )
+                objs.append(obj)
+            return objs
+
+        # Wrap loadSDF + registration in batch_spawn (disables rendering for GUI speedup)
+        if sim_core is not None:
+            with sim_core.batch_spawn():
+                objects = _load_and_wrap()
+        else:
+            objects = _load_and_wrap()
+
+        lazy_logger.info(lambda: f"Loaded {len(objects)} objects from SDF: " f"{resolved_path}")
+        return objects
 
     @classmethod
     def from_params(cls, spawn_params: SimObjectSpawnParams, sim_core=None) -> "SimObject":

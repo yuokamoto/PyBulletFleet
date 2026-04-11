@@ -216,7 +216,7 @@ Use `Agent.from_urdf` for articulated robots (arms, mobile manipulators) whose j
 structure is defined in a URDF file.
 
 `from_urdf` accepts a **model name** (e.g., `"panda"`) or a **direct path**.
-Model names are resolved via `resolve_urdf()` — first from the curated `KNOWN_MODELS`
+Model names are resolved via `resolve_model()` — first from the curated `KNOWN_MODELS`
 registry, then by auto-scanning `pybullet_data` and `robot_descriptions` as a fallback.
 See [Tutorial 6 — Robot Models](robot-models) for details.
 

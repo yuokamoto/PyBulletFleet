@@ -31,7 +31,7 @@ from pybullet_fleet.robot_models import (
     KNOWN_MODELS,
     auto_detect_profile,
     list_all_models,
-    resolve_urdf,
+    resolve_model,
 )
 
 # ---------------------------------------------------------------------------
@@ -195,7 +195,7 @@ with sim.batch_spawn():
             continue
 
         try:
-            urdf_path = resolve_urdf(name)
+            urdf_path = resolve_model(name)
         except FileNotFoundError as e:
             print(f"  [{tier}] {name}: SKIP ({e})")
             continue

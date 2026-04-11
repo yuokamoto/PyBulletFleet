@@ -20,7 +20,7 @@ from pybullet_fleet.agent_manager import AgentManager, GridSpawnParams
 from pybullet_fleet.core_simulation import MultiRobotSimulationCore, SimulationParams
 from pybullet_fleet.sim_object import Pose, SimObject, ShapeParams
 from pybullet_fleet.action import JointAction, PickAction, DropAction, WaitAction
-from pybullet_fleet.robot_models import resolve_urdf
+from pybullet_fleet.robot_models import resolve_model
 
 parser = argparse.ArgumentParser(description="100 robot arms pick & drop demo")
 parser.add_argument("--robot", default="panda", help="Robot name (e.g. panda, kuka_iiwa, arm_robot) or URDF path")
@@ -97,7 +97,7 @@ box_objects = []
 print("\n=== Spawning 100 Robot Arms using AgentManager ===")
 
 # Setup grid spawn parameters
-arm_urdf = resolve_urdf(args.robot)
+arm_urdf = resolve_model(args.robot)
 grid_params = GridSpawnParams(
     x_min=0,
     x_max=GRID_SIZE - 1,

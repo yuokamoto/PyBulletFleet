@@ -32,7 +32,7 @@ from pybullet_fleet.agent import AgentSpawnParams, MotionMode, MovementDirection
 from pybullet_fleet.agent_manager import AgentManager, GridSpawnParams
 from pybullet_fleet.core_simulation import MultiRobotSimulationCore, SimulationParams
 from pybullet_fleet.geometry import Path, Pose
-from pybullet_fleet.robot_models import resolve_urdf
+from pybullet_fleet.robot_models import resolve_model
 
 parser = argparse.ArgumentParser(description="100 Robots Cube Patrol Demo")
 parser.add_argument("--robot", default="husky", help="Robot name (e.g. husky, racecar) or URDF path")
@@ -98,7 +98,7 @@ def main():
     sim = MultiRobotSimulationCore(params)
 
     # Get absolute path to URDF
-    urdf_path = resolve_urdf(_args.robot)
+    urdf_path = resolve_model(_args.robot)
     print(f"Using robot: {_args.robot} -> {urdf_path}")
 
     print("=" * 70)

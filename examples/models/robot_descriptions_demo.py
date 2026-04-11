@@ -33,7 +33,7 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
-from pybullet_fleet.robot_models import auto_detect_profile, list_all_models, resolve_urdf
+from pybullet_fleet.robot_models import auto_detect_profile, list_all_models, resolve_model
 
 parser = argparse.ArgumentParser(description="Tier 3 robot_descriptions demo")
 parser.add_argument("--robot", default="tiago", help="Robot name (default: tiago)")
@@ -61,7 +61,7 @@ if args.list:
 #   - If cached → instant return
 print(f"Resolving '{args.robot}'...")
 try:
-    urdf_path = resolve_urdf(args.robot)
+    urdf_path = resolve_model(args.robot)
 except FileNotFoundError as e:
     print(f"\n  ERROR: {e}")
     print("\n  To fix, run:")

@@ -25,7 +25,7 @@ from pybullet_fleet.core_simulation import MultiRobotSimulationCore, SimulationP
 from pybullet_fleet.sim_object import Pose, SimObject, ShapeParams, SimObjectSpawnParams
 from pybullet_fleet.action import MoveAction, PickAction, DropAction, WaitAction
 from pybullet_fleet.geometry import Path
-from pybullet_fleet.robot_models import resolve_urdf
+from pybullet_fleet.robot_models import resolve_model
 
 parser = argparse.ArgumentParser(description="100 mobile robots pick & drop shuttle demo")
 parser.add_argument("--robot", default="husky", help="Robot name (e.g. husky, mobile_robot, racecar) or URDF path")
@@ -87,7 +87,7 @@ grid_params_A = GridSpawnParams(
 )
 
 # Setup agent spawn parameters
-mobile_urdf = resolve_urdf(args.robot)
+mobile_urdf = resolve_model(args.robot)
 agent_spawn_params = AgentSpawnParams(
     urdf_path=mobile_urdf,
     motion_mode=MotionMode.DIFFERENTIAL,

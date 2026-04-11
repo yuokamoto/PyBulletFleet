@@ -17,7 +17,7 @@ Tiered URDF resolution with auto-detection of robot parameters:
 - **Tier 2 (ROS apt):** UR5e, TurtleBot3, Fetch, OpenManipulator — via `ros-{distro}-*-description`, declared in `package.xml`.
 - **Tier 3 (robot_descriptions):** TIAGo, PR2, etc. — via `pip install robot_descriptions` optional dep.
 
-A `resolve_urdf()` function maps short names to absolute paths. A `RobotProfile` auto-detects
+A `resolve_model()` function maps short names to absolute paths. A `RobotProfile` auto-detects
 joint info, EE link, and velocity limits from the loaded URDF via PyBullet API, with
 optional manual overrides.
 
@@ -25,7 +25,7 @@ Existing demos gain `--robot` CLI arg to switch between built-in and real-world 
 
 ## Requirements
 
-- `resolve_urdf("panda")` returns absolute path with no extra install
+- `resolve_model("panda")` returns absolute path with no extra install
 - Auto-detect EE link name, joint limits, velocity limits from URDF
 - Existing demos work unmodified (default = current self-made URDFs)
 - `--robot panda` or `--robot husky` switches model in demos
@@ -53,7 +53,7 @@ Existing demos gain `--robot` CLI arg to switch between built-in and real-world 
 
 ## Success Criteria
 
-- [ ] `resolve_urdf("panda")` works out-of-box after `pip install pybullet-fleet`
+- [ ] `resolve_model("panda")` works out-of-box after `pip install pybullet-fleet`
 - [ ] `python examples/arm/pick_drop_arm_demo.py --robot panda` runs pick & place with Panda
 - [ ] `python examples/scale/100robots_grid_demo.py --robot husky` runs 100 Huskys
 - [ ] Auto-detected EE link matches expected link for Panda and KUKA

@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
-resolve_urdf_demo.py — URDF resolution patterns demo.
+resolve_model_demo.py — URDF resolution patterns demo.
 
-Demonstrates the three ways to obtain a URDF path via ``resolve_urdf()``:
+Demonstrates the three ways to obtain a URDF path via ``resolve_model()``:
 
-1. **By name (registry lookup)** — ``resolve_urdf("panda")``
+1. **By name (registry lookup)** — ``resolve_model("panda")``
    Resolves through KNOWN_MODELS tiers: local → pybullet_data → ros → robot_descriptions.
-2. **By direct path** — ``resolve_urdf("robots/arm_robot.urdf")``
+2. **By direct path** — ``resolve_model("robots/arm_robot.urdf")``
    Any string containing ``/`` or ending in ``.urdf`` / ``.sdf`` is returned as-is.
 3. **List all models** — ``list_all_models()``
    Enumerates every registered model with availability info.
@@ -17,19 +17,19 @@ prints the auto-detected ``RobotProfile``.
 Usage::
 
     # Pattern 1: resolve by name (tier 0 — local)
-    python resolve_urdf_demo.py --robot arm_robot
+    python resolve_model_demo.py --robot arm_robot
 
     # Pattern 1: resolve by name (tier 1 — pybullet_data)
-    python resolve_urdf_demo.py --robot panda
+    python resolve_model_demo.py --robot panda
 
     # Pattern 1: resolve by name (tier 3 — robot_descriptions)
-    python resolve_urdf_demo.py --robot tiago
+    python resolve_model_demo.py --robot tiago
 
     # Pattern 2: resolve by direct file path
-    python resolve_urdf_demo.py --robot robots/mobile_robot.urdf
+    python resolve_model_demo.py --robot robots/mobile_robot.urdf
 
     # Pattern 3: list all models
-    python resolve_urdf_demo.py --list
+    python resolve_model_demo.py --list
 """
 import argparse
 import os
@@ -41,7 +41,7 @@ from pybullet_fleet.robot_models import (
     KNOWN_MODELS,
     auto_detect_profile,
     list_all_models,
-    resolve_urdf,
+    resolve_model,
 )
 
 parser = argparse.ArgumentParser(description="URDF resolution patterns demo")
@@ -72,9 +72,9 @@ if args.list:
 # ---------------------------------------------------------------------------
 # Pattern 1 & 2: resolve URDF
 #
-# Note: Agent.from_urdf() calls resolve_urdf() internally, so in normal
+# Note: Agent.from_urdf() calls resolve_model() internally, so in normal
 # usage you can simply write Agent.from_urdf(urdf_path="panda", ...).
-# This demo calls resolve_urdf() explicitly to show the resolution logic.
+# This demo calls resolve_model() explicitly to show the resolution logic.
 # ---------------------------------------------------------------------------
 name_or_path = args.robot
 
@@ -88,7 +88,7 @@ else:
     tier = entry.tier if entry else "unknown"
     pattern = f"name → {tier}"
 
-urdf_path = resolve_urdf(name_or_path)
+urdf_path = resolve_model(name_or_path)
 print(f"\nResolution pattern: {pattern}")
 print(f"  Input:  '{name_or_path}'")
 print(f"  Output: {urdf_path}")

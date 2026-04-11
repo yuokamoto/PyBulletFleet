@@ -64,7 +64,7 @@ The script:
 - Accepts `--output-dir` (default `docs/media/models`), `--width`/`--height` (default 320×240)
 - For each model in a curated list:
   - Connects `p.DIRECT`, loads ground plane
-  - Loads model URDF (using `resolve_urdf` or direct pybullet_data path)
+  - Loads model URDF (using `resolve_model` or direct pybullet_data path)
   - Computes AABB to auto-frame camera (distance = max(aabb_size) * 2.5)
   - Captures single frame
   - Saves as PNG via Pillow

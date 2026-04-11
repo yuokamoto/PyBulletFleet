@@ -27,6 +27,7 @@ import yaml
 
 from pybullet_fleet.collision_visualizer import CollisionVisualizer  # deprecated, unused
 from pybullet_fleet.data_monitor import DataMonitor
+from pybullet_fleet.events import EventBus, SimEvents
 from pybullet_fleet.logging_utils import get_lazy_logger
 from pybullet_fleet.sim_object import SimObject
 from pybullet_fleet.agent import Agent
@@ -255,9 +256,16 @@ class MultiRobotSimulationCore:
             "callbacks": [],
             "step_simulation": [],
             "collision_check": [],
+            "events_pre_step": [],
+            "events_post_step": [],
+            "events_collision": [],
             "monitor_update": [],
             "total": [],
         }
+
+        # --- EventBus ---
+        self.events: EventBus = EventBus()
+        self._prev_collision_pairs: Set[Tuple[int, int]] = set()
 
         # --- Memory profiling statistics (O(1) memory, aggregator-based) ---
         self._memory_stats: Dict[str, Union[int, float]] = {
@@ -1262,6 +1270,11 @@ class MultiRobotSimulationCore:
 
         logger.debug(f"Added object {obj.object_id} (body {obj.body_id}) to simulation")
 
+        # --- Lifecycle events ---
+        self.events.emit(SimEvents.OBJECT_SPAWNED, obj=obj)
+        if isinstance(obj, Agent):
+            self.events.emit(SimEvents.AGENT_SPAWNED, agent=obj)
+
     def remove_object(self, obj: SimObject) -> None:
         """
         Remove an object from simulation and clean up all caches.
@@ -1308,6 +1321,11 @@ class MultiRobotSimulationCore:
 
         # Remove from dynamic collision set
         self._dynamic_collision_objects.discard(obj_id)
+
+        # --- Lifecycle events ---
+        self.events.emit(SimEvents.OBJECT_REMOVED, obj=obj)
+        if isinstance(obj, Agent):
+            self.events.emit(SimEvents.AGENT_REMOVED, agent=obj)
 
         # Remove original color cache (prevents stale color on body_id reuse)
         self._robot_original_colors.pop(obj.body_id, None)
@@ -2015,6 +2033,38 @@ class MultiRobotSimulationCore:
                                 orig_color = self._robot_original_colors.get(obj.body_id, [0, 0, 0, 1])
                                 p.changeVisualShape(obj.body_id, -1, rgbaColor=orig_color, physicsClientId=self._client)
 
+            # --- Collision Enter/Exit events ---
+            if new_collisions or resolved_collisions:
+                measure_ev = self._enable_time_profiling or return_profiling
+                if measure_ev:
+                    t_ev_col0 = time.perf_counter()
+
+                for obj_id_i, obj_id_j in new_collisions:
+                    obj_a = self._sim_objects_dict.get(obj_id_i)
+                    obj_b = self._sim_objects_dict.get(obj_id_j)
+                    if obj_a is not None and obj_b is not None:
+                        self.events.emit(SimEvents.COLLISION_STARTED, obj_a=obj_a, obj_b=obj_b)
+                        # Per-entity events
+                        if obj_a._has_entity_events():
+                            obj_a.events.emit(SimEvents.COLLISION_STARTED, other=obj_b)
+                        if obj_b._has_entity_events():
+                            obj_b.events.emit(SimEvents.COLLISION_STARTED, other=obj_a)
+
+                for obj_id_i, obj_id_j in resolved_collisions:
+                    obj_a = self._sim_objects_dict.get(obj_id_i)
+                    obj_b = self._sim_objects_dict.get(obj_id_j)
+                    if obj_a is not None and obj_b is not None:
+                        self.events.emit(SimEvents.COLLISION_ENDED, obj_a=obj_a, obj_b=obj_b)
+                        if obj_a._has_entity_events():
+                            obj_a.events.emit(SimEvents.COLLISION_ENDED, other=obj_b)
+                        if obj_b._has_entity_events():
+                            obj_b.events.emit(SimEvents.COLLISION_ENDED, other=obj_a)
+
+                if measure_ev:
+                    ev_col_ms = (time.perf_counter() - t_ev_col0) * 1000
+                    if self._profiling_stats["events_collision"]:
+                        self._profiling_stats["events_collision"][-1] += ev_col_ms
+
         except p.error:
             # PyBullet disconnected, skip collision checking
             pass
@@ -2428,10 +2478,12 @@ class MultiRobotSimulationCore:
     def pause(self) -> None:
         """Pause the simulation. step_once will be skipped while paused."""
         self._simulation_paused = True
+        self.events.emit(SimEvents.PAUSED)
 
     def resume(self) -> None:
         """Resume the simulation after a pause."""
         self._simulation_paused = False
+        self.events.emit(SimEvents.RESUMED)
 
     @property
     def is_paused(self) -> bool:
@@ -2507,6 +2559,13 @@ class MultiRobotSimulationCore:
         self._moved_this_step.update(self._physics_objects)
 
         self.sim_time = self._step_count * self._params.timestep
+
+        # --- pre_step event ---
+        if measure_timing:
+            t_ev0 = time.perf_counter()
+        self.events.emit(SimEvents.PRE_STEP, dt=self._params.timestep, sim_time=self.sim_time)
+        if measure_timing:
+            self._profiling_stats["events_pre_step"][-1] = (time.perf_counter() - t_ev0) * 1000
 
         # Update all simulation objects that have update() method
         # Agent instances are automatically updated every step for movement control
@@ -2597,6 +2656,13 @@ class MultiRobotSimulationCore:
         if measure_timing:
             t_col1 = time.perf_counter()
             self._profiling_stats["collision_check"][-1] = (t_col1 - t_col0) * 1000
+
+        # --- post_step event ---
+        if measure_timing:
+            t_ev1 = time.perf_counter()
+        self.events.emit(SimEvents.POST_STEP, dt=self._params.timestep, sim_time=self.sim_time)
+        if measure_timing:
+            self._profiling_stats["events_post_step"][-1] = (time.perf_counter() - t_ev1) * 1000
 
         self._step_count += 1
         # Monitor: every step if GUI enabled, otherwise every second

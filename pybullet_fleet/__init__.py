@@ -26,6 +26,15 @@ from pybullet_fleet.core_simulation import (
     SimulationParams,
 )
 
+# EventBus
+from pybullet_fleet.events import EventBus, SimEvents  # noqa: F401
+
+# World loading  (load_rmf_world kept as backward-compatible alias)
+from pybullet_fleet.world_loader import load_mesh_directory, load_rmf_world  # noqa: F401
+
+# Robot model resolution  (resolve_urdf kept as backward-compatible alias)
+from pybullet_fleet.robot_models import resolve_model  # noqa: F401
+
 # Recorder
 from pybullet_fleet.recorder import SimulationRecorder
 
@@ -97,6 +106,9 @@ __all__ = [
     "SpatialHashCellSizeMode",
     "SimulationRecorder",
     "SimObject",
+    # Events
+    "EventBus",
+    "SimEvents",
     # Agent management
     "Agent",
     "AgentSpawnParams",
@@ -127,6 +139,7 @@ __all__ = [
     # Entity registry
     "register_entity_class",
     # Robot models
+    "resolve_model",
     "resolve_urdf",
     "list_all_models",
     "ModelEntry",

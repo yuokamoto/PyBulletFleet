@@ -138,7 +138,7 @@ For step-by-step walkthroughs, see the **[Tutorials](../examples/index)** page.
 
 | Script | Description |
 |--------|-------------|
-| `resolve_urdf_demo.py` | URDF resolution patterns — by name, by path, and listing all models |
+| `resolve_model_demo.py` | URDF resolution patterns — by name, by path, and listing all models |
 | `model_catalog_demo.py` | Visual grid catalog of all registered models from `KNOWN_MODELS` |
 | `robot_descriptions_demo.py` | Using Tier 3 models from the `robot_descriptions` pip package |
 

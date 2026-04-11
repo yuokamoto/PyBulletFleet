@@ -29,7 +29,7 @@ import pybullet as p
 from pybullet_fleet.agent import Agent, AgentSpawnParams
 from pybullet_fleet.core_simulation import MultiRobotSimulationCore, SimulationParams
 from pybullet_fleet.geometry import Path, Pose
-from pybullet_fleet.robot_models import resolve_urdf
+from pybullet_fleet.robot_models import resolve_model
 from pybullet_fleet.sim_object import ShapeParams
 from pybullet_fleet.types import MotionMode
 
@@ -47,7 +47,7 @@ def main():
     # Get absolute paths
     current_dir = os.path.dirname(os.path.abspath(__file__))
     mesh_path = os.path.join(current_dir, "..", "..", "mesh", "cube.obj")
-    urdf_path = resolve_urdf(_args.robot)
+    urdf_path = resolve_model(_args.robot)
     print(f"Using robot: {_args.robot} -> {urdf_path}")
 
     # Create robots with different motion modes

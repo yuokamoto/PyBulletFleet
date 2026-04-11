@@ -112,9 +112,9 @@ grid_params = GridSpawnParams(
 
 # Mobile robot spawn params (shared by both modes) - from config
 mobile_urdf_path = mobile_robot_config.get("urdf_path", "robots/mobile_robot.urdf")
-from pybullet_fleet.robot_models import resolve_urdf
+from pybullet_fleet.robot_models import resolve_model
 
-mobile_urdf = resolve_urdf(args.robot)
+mobile_urdf = resolve_model(args.robot)
 print(f"Using robot: {args.robot} -> {mobile_urdf}")
 if not os.path.exists(mobile_urdf):
     raise FileNotFoundError(f"Mobile robot URDF not found: {mobile_urdf}")
@@ -135,7 +135,7 @@ mobile_params = AgentSpawnParams(
 if mode == "mixed":
     # Mixed Mode: Spawn mixed robot types
     # Arm robot spawn params - resolve via robot_models
-    arm_urdf = resolve_urdf(args.arm_robot)
+    arm_urdf = resolve_model(args.arm_robot)
     print(f"Using arm robot: {args.arm_robot} -> {arm_urdf}")
 
     arm_params = AgentSpawnParams(

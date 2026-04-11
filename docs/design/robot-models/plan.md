@@ -4,13 +4,13 @@
 
 **Goal:** Add a URDF resolver and auto-detection system so demos can use real-world robot models (Panda, KUKA, Husky, etc.) with a `--robot` flag while keeping existing behavior as default.
 
-**Architecture:** A single new module `pybullet_fleet/robot_models.py` provides `resolve_urdf()` (registry-based name → path resolver) and `auto_detect_profile()` (PyBullet introspection → RobotProfile dataclass). Demos add an optional `--robot` CLI arg. No new required dependencies.
+**Architecture:** A single new module `pybullet_fleet/robot_models.py` provides `resolve_model()` (registry-based name → path resolver) and `auto_detect_profile()` (PyBullet introspection → RobotProfile dataclass). Demos add an optional `--robot` CLI arg. No new required dependencies.
 
 **Tech Stack:** Python 3.10+, PyBullet, pybullet_data (bundled), optional: robot_descriptions, ament_index_python
 
 ---
 
-## Task 1: `resolve_urdf()` — Tier 1 (pybullet_data) [SERIAL]
+## Task 1: `resolve_model()` — Tier 1 (pybullet_data) [SERIAL]
 
 **Files:**
 - Create: `pybullet_fleet/robot_models.py`
@@ -26,7 +26,7 @@ import os
 import pytest
 import pybullet_data
 
-from pybullet_fleet.robot_models import resolve_urdf, KNOWN_MODELS, list_available_models
+from pybullet_fleet.robot_models import resolve_model, KNOWN_MODELS, list_available_models
 
 
 # Collect Tier 1 model names from registry (always available)
@@ -36,11 +36,11 @@ _RD_MODELS = [name for name, entry in KNOWN_MODELS.items() if entry.tier == "rob
 
 
 class TestResolveUrdf:
-    """resolve_urdf() resolves robot names to absolute URDF paths."""
+    """resolve_model() resolves robot names to absolute URDF paths."""
 
     @pytest.mark.parametrize("model_name", _TIER1_MODELS)
     def test_tier1_model_resolves_to_existing_file(self, model_name):
-        path = resolve_urdf(model_name)
+        path = resolve_model(model_name)
         assert os.path.isfile(path), f"{model_name} resolved to {path} but file does not exist"
         assert path.endswith((".urdf", ".sdf"))
 
@@ -48,25 +48,25 @@ class TestResolveUrdf:
     def test_ros_model_raises_with_install_hint(self, model_name):
         """Tier 2 models raise FileNotFoundError with apt install hint (no ROS env in tests)."""
         with pytest.raises(FileNotFoundError, match="apt install"):
-            resolve_urdf(model_name)
+            resolve_model(model_name)
 
     @pytest.mark.parametrize("model_name", _RD_MODELS)
     def test_robot_descriptions_model_raises_with_install_hint(self, model_name):
         """Tier 3 models raise FileNotFoundError with pip install hint."""
         with pytest.raises(FileNotFoundError, match="pip install"):
-            resolve_urdf(model_name)
+            resolve_model(model_name)
 
     def test_absolute_path_returned_as_is(self):
-        path = resolve_urdf("/tmp/some_robot.urdf")
+        path = resolve_model("/tmp/some_robot.urdf")
         assert path == "/tmp/some_robot.urdf"
 
     def test_relative_path_returned_as_is(self):
-        path = resolve_urdf("robots/arm_robot.urdf")
+        path = resolve_model("robots/arm_robot.urdf")
         assert path == "robots/arm_robot.urdf"
 
     def test_unknown_name_raises_file_not_found(self):
         with pytest.raises(FileNotFoundError, match="nonexistent_robot"):
-            resolve_urdf("nonexistent_robot")
+            resolve_model("nonexistent_robot")
 
 
 class TestListAvailableModels:
@@ -102,10 +102,10 @@ Provides a 3-tier URDF resolution system:
 
 Usage::
 
-    from pybullet_fleet.robot_models import resolve_urdf
+    from pybullet_fleet.robot_models import resolve_model
 
-    urdf = resolve_urdf("panda")           # Tier 1: pybullet_data
-    urdf = resolve_urdf("robots/arm.urdf") # Direct path: returned as-is
+    urdf = resolve_model("panda")           # Tier 1: pybullet_data
+    urdf = resolve_model("robots/arm.urdf") # Direct path: returned as-is
 """
 
 import os
@@ -173,7 +173,7 @@ KNOWN_MODELS: Dict[str, ModelEntry] = {
 }
 
 
-def resolve_urdf(name_or_path: str) -> str:
+def resolve_model(name_or_path: str) -> str:
     """Resolve a robot name or file path to an absolute URDF path.
 
     Resolution order:
@@ -292,7 +292,7 @@ def list_available_models() -> Dict[str, dict]:
     result = {}
     for name, entry in KNOWN_MODELS.items():
         try:
-            path = resolve_urdf(name)
+            path = resolve_model(name)
             result[name] = {
                 "tier": entry.tier,
                 "available": os.path.isfile(path),
@@ -316,7 +316,7 @@ Expected: ALL PASS
 
 ```bash
 git add pybullet_fleet/robot_models.py tests/test_robot_models.py
-git commit -m "feat: add resolve_urdf and robot model registry (Tier 1)"
+git commit -m "feat: add resolve_model and robot model registry (Tier 1)"
 ```
 
 ---
@@ -337,7 +337,7 @@ import pybullet as p
 from pybullet_fleet.robot_models import (
     RobotProfile,
     auto_detect_profile,
-    resolve_urdf,
+    resolve_model,
     KNOWN_MODELS,
 )
 
@@ -356,7 +356,7 @@ class TestAutoDetectProfile:
     @pytest.mark.parametrize("model_name", _TIER1_MODELS)
     def test_tier1_model_profile_has_valid_fields(self, model_name):
         """Every Tier 1 model loads and produces a valid profile."""
-        path = resolve_urdf(model_name)
+        path = resolve_model(model_name)
         profile = auto_detect_profile(path, self.client)
         assert profile.urdf_path == path
         assert profile.robot_type in ("arm", "mobile", "mobile_manipulator", "unknown")
@@ -365,25 +365,25 @@ class TestAutoDetectProfile:
 
     def test_panda_ee_link_is_panda_hand(self):
         """Panda EE heuristic should find 'panda_hand'."""
-        profile = auto_detect_profile(resolve_urdf("panda"), self.client)
+        profile = auto_detect_profile(resolve_model("panda"), self.client)
         assert profile.ee_link_name == "panda_hand"
         assert profile.robot_type == "arm"
 
     def test_husky_detected_as_mobile_no_ee(self):
-        profile = auto_detect_profile(resolve_urdf("husky"), self.client)
+        profile = auto_detect_profile(resolve_model("husky"), self.client)
         assert profile.robot_type == "mobile"
         assert profile.ee_link_name is None
 
     def test_override_merges_with_detected(self):
         profile = auto_detect_profile(
-            resolve_urdf("panda"), self.client, ee_link_name="custom_link"
+            resolve_model("panda"), self.client, ee_link_name="custom_link"
         )
         assert profile.ee_link_name == "custom_link"
         assert profile.robot_type == "arm"  # still auto-detected
 
     def test_override_robot_type(self):
         profile = auto_detect_profile(
-            resolve_urdf("panda"), self.client, robot_type="mobile_manipulator"
+            resolve_model("panda"), self.client, robot_type="mobile_manipulator"
         )
         assert profile.robot_type == "mobile_manipulator"
 ```
@@ -564,14 +564,14 @@ Add after the config utilities import block:
 
 ```python
 # Robot model resolution
-from pybullet_fleet.robot_models import resolve_urdf, list_available_models, RobotProfile, auto_detect_profile
+from pybullet_fleet.robot_models import resolve_model, list_available_models, RobotProfile, auto_detect_profile
 ```
 
 Add to `__all__`:
 
 ```python
     # Robot models
-    "resolve_urdf",
+    "resolve_model",
     "list_available_models",
     "RobotProfile",
     "auto_detect_profile",
@@ -609,7 +609,7 @@ git commit -m "feat: export robot_models, add [models] optional dep"
 - Modify: `examples/arm/pick_drop_arm_ee_demo.py`
 - Modify: `examples/arm/pick_drop_arm_ee_action_demo.py`
 
-**Step 1: Add argparse + resolve_urdf to `pick_drop_arm_demo.py`**
+**Step 1: Add argparse + resolve_model to `pick_drop_arm_demo.py`**
 
 Replace the URDF path block (lines ~13-33) with:
 
@@ -623,8 +623,8 @@ args = parser.parse_args()
 # ... after sim_core created ...
 
 if args.robot:
-    from pybullet_fleet.robot_models import resolve_urdf, auto_detect_profile
-    arm_urdf = resolve_urdf(args.robot)
+    from pybullet_fleet.robot_models import resolve_model, auto_detect_profile
+    arm_urdf = resolve_model(args.robot)
     profile = auto_detect_profile(arm_urdf, sim_core.client)
     print(f"Using {args.robot}: {profile.robot_type}, EE={profile.ee_link_name}, "
           f"joints={len(profile.movable_joint_names)}")
@@ -677,8 +677,8 @@ With:
 
 ```python
 if args.robot:
-    from pybullet_fleet.robot_models import resolve_urdf
-    mobile_urdf = resolve_urdf(args.robot)
+    from pybullet_fleet.robot_models import resolve_model
+    mobile_urdf = resolve_model(args.robot)
 else:
     mobile_urdf = os.path.join(os.path.dirname(__file__), "..", mobile_urdf_path)
 ```
@@ -714,7 +714,7 @@ panda_pybullet_data_demo.py
 Demo: Using pybullet_data models directly (Panda arm + Table + Tray).
 
 Shows how to use pybullet_data.getDataPath() for URDF resolution
-without the resolve_urdf() helper.
+without the resolve_model() helper.
 """
 import os
 import sys

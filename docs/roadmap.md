@@ -165,7 +165,7 @@ Simulation environment assets (warehouse floors, factory layouts, etc.):
   - Open-RMF rmf_demos maps (office, hotel, clinic, airport, campus): OBJ mesh export
   - pybullet_data bundled environments (kiva_shelf, samurai, stadium) wrappers
   - Original license clearly noted per environment
-- **`resolve_environment()` API** — Name resolution similar to `resolve_urdf()` for loading environments. Shows install hints when not installed.
+- **`resolve_environment()` API** — Name resolution similar to `resolve_model()` for loading environments. Shows install hints when not installed.
 
 ## CI / DevOps
 

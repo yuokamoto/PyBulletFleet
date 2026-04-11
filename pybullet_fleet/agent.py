@@ -19,7 +19,8 @@ from .types import MotionMode, MovementDirection, ActionStatus, CollisionMode
 from .tools import normalize_vector_param
 from pybullet_fleet.tools import resolve_joint_index, resolve_link_index
 from .logging_utils import get_lazy_logger
-from .robot_models import resolve_urdf
+from .robot_models import resolve_model
+from pybullet_fleet.events import SimEvents
 from pybullet_fleet._defaults import AGENT as _AGT_D, IK as _IK_D
 
 # Create logger for this module
@@ -764,7 +765,7 @@ class Agent(SimObject):
 
         Args:
             urdf_path: Robot model name (e.g. ``"panda"``) or path to URDF file.
-                Names are resolved via :func:`~pybullet_fleet.robot_models.resolve_urdf`
+                Names are resolved via :func:`~pybullet_fleet.robot_models.resolve_model`
             pose: Initial Pose (position and orientation). Defaults to origin
             mass: Mass override.
                 - None (default): Use URDF file's mass values as-is
@@ -798,7 +799,7 @@ class Agent(SimObject):
             # Kinematic control (no physics)
             robot = Agent.from_urdf(urdf_path="arm_robot.urdf", mass=0.0)
         """
-        urdf_path = resolve_urdf(urdf_path)
+        urdf_path = resolve_model(urdf_path)
 
         if pose is None:
             pose = Pose.from_xyz(0.0, 0.0, 0.0)
@@ -1121,6 +1122,11 @@ class Agent(SimObject):
                 self._log.info(
                     f"Starting {self._current_action.__class__.__name__} " f"(remaining in queue: {len(self._action_queue)})"
                 )
+                # --- action_started event ---
+                if self.sim_core is not None:
+                    self.sim_core.events.emit(SimEvents.ACTION_STARTED, agent=self, action=self._current_action)
+                if self._has_entity_events():
+                    self.events.emit(SimEvents.ACTION_STARTED, action=self._current_action)
             else:
                 return  # No actions to execute
 
@@ -1137,6 +1143,13 @@ class Agent(SimObject):
                 self._log.error(f"{action_name} failed: {self._current_action.error_message}")
             elif status == ActionStatus.CANCELLED:
                 self._log.warning(f"{action_name} was cancelled")
+
+            # --- action_completed event ---
+            finished_action = self._current_action
+            if self.sim_core is not None:
+                self.sim_core.events.emit(SimEvents.ACTION_COMPLETED, agent=self, action=finished_action, status=status)
+            if self._has_entity_events():
+                self.events.emit(SimEvents.ACTION_COMPLETED, action=finished_action, status=status)
 
             # Move to next action
             self._current_action = None
@@ -1235,6 +1248,10 @@ class Agent(SimObject):
             True if the robot moved (position, orientation, or joint state changed),
             False otherwise
         """
+        # Per-entity pre_update event (inline check — ~30ns when no handlers)
+        if self._events is not None:
+            self._events.emit(SimEvents.PRE_UPDATE, dt=dt)
+
         # Process action queue first (actions may set goals/paths)
         self._update_actions(dt)
 
@@ -1259,9 +1276,15 @@ class Agent(SimObject):
         if self.is_urdf_robot() and self.attached_objects:
             self.update_attached_objects_kinematics()
 
+        result = moved or joints_moved
+
+        # Per-entity post_update event (inline check — ~30ns when no handlers)
+        if self._events is not None:
+            self._events.emit(SimEvents.POST_UPDATE, dt=dt, moved=result)
+
         # Return True if any geometry changed (base moved OR joints moved)
         # so that sim_core adds this agent to _moved_this_step for collision checks.
-        return moved or joints_moved
+        return result
 
     def get_velocity(self) -> np.ndarray:
         """

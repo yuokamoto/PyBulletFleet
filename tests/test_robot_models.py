@@ -9,7 +9,7 @@ from pybullet_fleet.robot_models import (
     KNOWN_MODELS,
     auto_detect_profile,
     list_all_models,
-    resolve_urdf,
+    resolve_model,
 )
 
 # Collect model names by tier from registry (automatically covers new entries)
@@ -18,12 +18,12 @@ _ROS_MODELS = [name for name, entry in KNOWN_MODELS.items() if entry.tier == "ro
 _RD_MODELS = [name for name, entry in KNOWN_MODELS.items() if entry.tier == "robot_descriptions"]
 
 
-class TestResolveUrdf:
-    """resolve_urdf() resolves robot names to absolute URDF paths."""
+class TestResolveModel:
+    """resolve_model() resolves robot names to absolute URDF/SDF paths."""
 
     @pytest.mark.parametrize("model_name", _TIER1_MODELS)
     def test_tier1_model_resolves_to_existing_file(self, model_name):
-        path = resolve_urdf(model_name)
+        path = resolve_model(model_name)
         assert os.path.isfile(path), f"{model_name} resolved to {path} but file does not exist"
         assert path.endswith((".urdf", ".sdf"))
 
@@ -31,7 +31,7 @@ class TestResolveUrdf:
     def test_ros_model_raises_with_install_hint(self, model_name):
         """Tier 2 models raise FileNotFoundError with apt install hint (no ROS env in tests)."""
         with pytest.raises(FileNotFoundError, match="apt install"):
-            resolve_urdf(model_name)
+            resolve_model(model_name)
 
     @pytest.mark.parametrize("model_name", _RD_MODELS)
     def test_robot_descriptions_model_raises_with_install_hint(self, model_name):
@@ -43,19 +43,19 @@ class TestResolveUrdf:
         except ImportError:
             pass
         with pytest.raises(FileNotFoundError, match="pip install"):
-            resolve_urdf(model_name)
+            resolve_model(model_name)
 
     def test_absolute_path_returned_as_is(self):
-        path = resolve_urdf("/tmp/some_robot.urdf")
+        path = resolve_model("/tmp/some_robot.urdf")
         assert path == "/tmp/some_robot.urdf"
 
     def test_relative_path_returned_as_is(self):
-        path = resolve_urdf("robots/arm_robot.urdf")
+        path = resolve_model("robots/arm_robot.urdf")
         assert path == "robots/arm_robot.urdf"
 
     def test_unknown_name_raises_file_not_found(self):
         with pytest.raises(FileNotFoundError, match="nonexistent_robot"):
-            resolve_urdf("nonexistent_robot")
+            resolve_model("nonexistent_robot")
 
 
 class TestListAvailableModels:
@@ -92,7 +92,7 @@ class TestAutoDetectProfile:
     @pytest.mark.parametrize("model_name", _TIER1_MODELS)
     def test_tier1_model_profile_has_valid_fields(self, model_name):
         """Every Tier 1 model loads and produces a valid profile."""
-        path = resolve_urdf(model_name)
+        path = resolve_model(model_name)
         profile = auto_detect_profile(path, self.client)
         assert profile.urdf_path == path
         assert profile.robot_type in ("arm", "mobile", "mobile_manipulator", "quadruped", "object", "unknown")
@@ -103,31 +103,31 @@ class TestAutoDetectProfile:
 
     def test_object_type_table(self):
         """Zero-joint model → 'object', num_joints == 0."""
-        profile = auto_detect_profile(resolve_urdf("table"), self.client)
+        profile = auto_detect_profile(resolve_model("table"), self.client)
         assert profile.robot_type == "object"
         assert profile.num_joints == 0
 
     def test_quadruped_type_a1(self):
         """Quadruped → 'quadruped', no EE."""
-        profile = auto_detect_profile(resolve_urdf("a1"), self.client)
+        profile = auto_detect_profile(resolve_model("a1"), self.client)
         assert profile.robot_type == "quadruped"
         assert profile.ee_link_name is None
 
     def test_arm_type_panda(self):
         """Arm → 'arm', EE resolved to 'panda_hand', ee_link_index valid."""
-        profile = auto_detect_profile(resolve_urdf("panda"), self.client)
+        profile = auto_detect_profile(resolve_model("panda"), self.client)
         assert profile.robot_type == "arm"
         assert profile.ee_link_name == "panda_hand"
         assert profile.ee_link_index >= 0
         # Verify ee_link_index resolves to the correct link name in PyBullet
-        body_id = p.loadURDF(resolve_urdf("panda"), useFixedBase=True, physicsClientId=self.client)
+        body_id = p.loadURDF(resolve_model("panda"), useFixedBase=True, physicsClientId=self.client)
         link_name = p.getJointInfo(body_id, profile.ee_link_index, physicsClientId=self.client)[12].decode("utf-8")
         p.removeBody(body_id, physicsClientId=self.client)
         assert link_name == profile.ee_link_name
 
     def test_mobile_type_husky(self):
         """Mobile → 'mobile', no EE, ee_link_index == -1."""
-        profile = auto_detect_profile(resolve_urdf("husky"), self.client)
+        profile = auto_detect_profile(resolve_model("husky"), self.client)
         assert profile.robot_type == "mobile"
         assert profile.ee_link_name is None
         assert profile.ee_link_index == -1
@@ -135,19 +135,19 @@ class TestAutoDetectProfile:
     # -- Override mechanism ----------------------------------------------
 
     def test_override_merges_with_detected(self):
-        profile = auto_detect_profile(resolve_urdf("panda"), self.client, ee_link_name="custom_link")
+        profile = auto_detect_profile(resolve_model("panda"), self.client, ee_link_name="custom_link")
         assert profile.ee_link_name == "custom_link"
         assert profile.robot_type == "arm"  # still auto-detected
 
     def test_override_robot_type(self):
-        profile = auto_detect_profile(resolve_urdf("panda"), self.client, robot_type="mobile_manipulator")
+        profile = auto_detect_profile(resolve_model("panda"), self.client, robot_type="mobile_manipulator")
         assert profile.robot_type == "mobile_manipulator"
 
     # -- Profile fields: joint indices, targets, arm_reach ---------------
 
     def test_movable_joint_indices_match_names(self):
         """_movable_joint_indices has same length as movable_joint_names."""
-        profile = auto_detect_profile(resolve_urdf("panda"), self.client)
+        profile = auto_detect_profile(resolve_model("panda"), self.client)
         assert len(profile._movable_joint_indices) == len(profile.movable_joint_names)
         assert len(profile._movable_joint_indices) == 9  # 7 arm + 2 finger
 
@@ -155,7 +155,7 @@ class TestAutoDetectProfile:
         """make_joint_targets produces correct-length list from fractions."""
         from pybullet_fleet.agent import Agent
 
-        path = resolve_urdf("panda")
+        path = resolve_model("panda")
         profile = auto_detect_profile(path, self.client)
         agent = Agent.from_urdf(urdf_path=path, use_fixed_base=True, sim_core=None)
         n_movable = len(profile.movable_joint_names)
@@ -171,20 +171,20 @@ class TestAutoDetectProfile:
 
     def test_arm_reach_computed_for_arm(self):
         """arm_reach is computed for arm-type robots and within expected range."""
-        profile = auto_detect_profile(resolve_urdf("panda"), self.client)
+        profile = auto_detect_profile(resolve_model("panda"), self.client)
         assert profile.arm_reach is not None
         assert 0.8 < profile.arm_reach < 1.5
 
     def test_arm_reach_none_for_mobile(self):
         """arm_reach is None for mobile-type robots."""
-        profile = auto_detect_profile(resolve_urdf("husky"), self.client)
+        profile = auto_detect_profile(resolve_model("husky"), self.client)
         assert profile.arm_reach is None
 
     # -- body_id overload: introspect without load/remove ----------------
 
     def test_body_id_returns_same_profile_as_path(self):
         """Passing body_id produces the same profile as passing urdf_path."""
-        path = resolve_urdf("panda")
+        path = resolve_model("panda")
         profile_from_path = auto_detect_profile(path, self.client)
 
         body_id = p.loadURDF(path, useFixedBase=True, physicsClientId=self.client)
@@ -198,7 +198,7 @@ class TestAutoDetectProfile:
 
     def test_body_id_does_not_remove_body(self):
         """When body_id is passed, the body must still exist after the call."""
-        path = resolve_urdf("panda")
+        path = resolve_model("panda")
         body_id = p.loadURDF(path, useFixedBase=True, physicsClientId=self.client)
 
         auto_detect_profile(body_id, self.client)
@@ -210,7 +210,7 @@ class TestAutoDetectProfile:
 
     def test_body_id_with_overrides(self):
         """Overrides work with body_id input too."""
-        path = resolve_urdf("panda")
+        path = resolve_model("panda")
         body_id = p.loadURDF(path, useFixedBase=True, physicsClientId=self.client)
 
         profile = auto_detect_profile(body_id, self.client, robot_type="mobile")
@@ -275,7 +275,7 @@ class TestSearchPath:
 
         add_search_path(str(tmp_path))
         try:
-            path = resolve_urdf("my_custom_agv")
+            path = resolve_model("my_custom_agv")
             assert path == str(urdf)
         finally:
             remove_search_path(str(tmp_path))
@@ -290,7 +290,7 @@ class TestSearchPath:
 
         add_search_path(str(tmp_path))
         try:
-            path = resolve_urdf("panda")
+            path = resolve_model("panda")
             assert path == str(urdf), "User search path should take priority over KNOWN_MODELS"
         finally:
             remove_search_path(str(tmp_path))
@@ -306,7 +306,7 @@ class TestSearchPath:
         remove_search_path(str(tmp_path))
 
         # Should resolve to pybullet_data panda, not the tmp one
-        path = resolve_urdf("panda")
+        path = resolve_model("panda")
         assert str(tmp_path) not in path
 
     def test_get_search_paths_returns_current_list(self, tmp_path):
@@ -346,7 +346,7 @@ class TestSearchPath:
 
         add_search_path(str(tmp_path))
         try:
-            path = resolve_urdf("warehouse")
+            path = resolve_model("warehouse")
             assert path == str(sdf)
         finally:
             remove_search_path(str(tmp_path))
@@ -371,7 +371,7 @@ class TestRegisterModel:
 
         register_model("custom_bot", str(urdf))
         try:
-            path = resolve_urdf("custom_bot")
+            path = resolve_model("custom_bot")
             assert path == str(urdf)
         finally:
             unregister_model("custom_bot")
@@ -400,7 +400,7 @@ class TestRegisterModel:
         unregister_model("temp_bot")
 
         with pytest.raises(FileNotFoundError):
-            resolve_urdf("temp_bot")
+            resolve_model("temp_bot")
 
     def test_unregister_unknown_is_noop(self):
         """unregister_model() for unknown name does not raise."""
@@ -423,10 +423,10 @@ class TestRegisterModel:
         urdf = tmp_path / "panda.urdf"
         urdf.write_text("<robot name='custom_panda'/>")
 
-        original_path = resolve_urdf("panda")
+        original_path = resolve_model("panda")
         register_model("panda", str(urdf), force=True)
         try:
-            path = resolve_urdf("panda")
+            path = resolve_model("panda")
             assert path == str(urdf)
         finally:
             # Restore original by unregistering custom (built-in won't be restored)
@@ -444,7 +444,7 @@ class TestAutoDiscovery:
         """A pybullet_data URDF not in KNOWN_MODELS is found by fallback scan."""
         # "r2d2" exists in pybullet_data but is NOT in KNOWN_MODELS
         assert "r2d2" not in KNOWN_MODELS
-        path = resolve_urdf("r2d2")
+        path = resolve_model("r2d2")
         assert os.path.isfile(path)
         assert "r2d2" in path
 
@@ -452,7 +452,7 @@ class TestAutoDiscovery:
         """A pybullet_data model in a subdirectory is found by fallback scan."""
         # "humanoid" exists in pybullet_data/humanoid/humanoid.urdf
         assert "humanoid" not in KNOWN_MODELS
-        path = resolve_urdf("humanoid")
+        path = resolve_model("humanoid")
         assert os.path.isfile(path)
         assert path.endswith(".urdf")
 
@@ -462,19 +462,19 @@ class TestAutoDiscovery:
         # "panda_description" is a well-known module; "panda" is in KNOWN_MODELS
         # but "ur10e" / "anymal_b" etc. are not — pick one that has URDF_PATH
         assert "anymal_b" not in KNOWN_MODELS
-        path = resolve_urdf("anymal_b")
+        path = resolve_model("anymal_b")
         assert os.path.isfile(path)
         assert path.endswith(".urdf")
 
     def test_truly_unknown_model_still_raises(self):
         """A name that doesn't exist anywhere still raises FileNotFoundError."""
         with pytest.raises(FileNotFoundError):
-            resolve_urdf("completely_nonexistent_robot_xyz_999")
+            resolve_model("completely_nonexistent_robot_xyz_999")
 
     def test_known_models_not_polluted_by_fallback(self):
         """Fallback discovery should NOT add entries to KNOWN_MODELS."""
         assert "r2d2" not in KNOWN_MODELS
-        resolve_urdf("r2d2")
+        resolve_model("r2d2")
         # KNOWN_MODELS should remain unchanged
         assert "r2d2" not in KNOWN_MODELS
 

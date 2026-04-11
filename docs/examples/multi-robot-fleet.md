@@ -397,7 +397,7 @@ python examples/scale/pick_drop_arm_100robots_demo.py
 ### Switching Robot Models
 
 All scale demos accept a `--robot` argument to swap the robot model at runtime.
-Pass a model name resolved by `resolve_urdf()` or a direct URDF path:
+Pass a model name resolved by `resolve_model()` or a direct URDF path:
 
 ```bash
 # Mobile demos — use mobile models
@@ -420,7 +420,7 @@ python examples/scale/100robots_grid_demo.py --robot racecar --arm-robot kuka_ii
 | `pick_drop_arm_100robots_demo.py` | `--robot` (arm) | `panda` | `kuka_iiwa`, `arm_robot` |
 
 See [Tutorial 6 — Robot Models](robot-models) for the full model resolution system
-and `python examples/models/resolve_urdf_demo.py --list` for all available names.
+and `python examples/models/resolve_model_demo.py --list` for all available names.
 
 ---
 

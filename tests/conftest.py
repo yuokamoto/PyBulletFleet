@@ -8,6 +8,7 @@ import pybullet_data
 import pytest
 
 from pybullet_fleet.data_monitor import DataMonitor
+from pybullet_fleet.events import EventBus
 from pybullet_fleet.sim_object import SimObject
 
 
@@ -36,6 +37,7 @@ class MockSimCore:
         self._kinematic_objects: set = set()
         self._client: int = 0
         self._params = SimpleNamespace(physics=physics)
+        self.events: EventBus = EventBus()
 
     @property
     def client(self) -> int:
