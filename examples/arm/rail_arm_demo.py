@@ -17,7 +17,8 @@ import argparse
 import pybullet as p
 from pybullet_fleet.action import JointAction, PoseAction, PickAction, DropAction, WaitAction
 from pybullet_fleet.agent import Agent
-from pybullet_fleet.core_simulation import MultiRobotSimulationCore, SimulationParams
+from pybullet_fleet.config_utils import load_yaml_config, merge_configs
+from pybullet_fleet.core_simulation import MultiRobotSimulationCore
 from pybullet_fleet.sim_object import Pose, SimObject, ShapeParams
 
 _parser = argparse.ArgumentParser(description="Rail arm pick/drop demo")
@@ -29,10 +30,12 @@ _args = _parser.parse_args()
 # Simulation setup
 # ---------------------------------------------------------------------------
 
-params = SimulationParams(
-    gui=True, timestep=0.1, physics=False, target_rtf=_args.rtf if _args.rtf is not None else 1, log_level="info"
-)
-sim_core = MultiRobotSimulationCore(params)
+# Base config + demo-specific overrides (no separate YAML needed)
+_BASE_CONFIG = os.path.join(os.path.dirname(__file__), "..", "..", "config", "config.yaml")
+_OVERRIDES = {"simulation": {"target_rtf": 1}}
+sim_core = MultiRobotSimulationCore.from_dict(merge_configs(load_yaml_config(_BASE_CONFIG), _OVERRIDES))
+if _args.rtf is not None:
+    sim_core.params.target_rtf = _args.rtf
 
 # Spawn rail arm (fixed base)
 rail_arm_urdf = os.path.join(os.path.dirname(__file__), "../../robots/rail_arm_robot.urdf")

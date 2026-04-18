@@ -17,12 +17,14 @@ import numpy as np
 import pybullet as p
 
 from pybullet_fleet.agent import Agent
-from pybullet_fleet.core_simulation import MultiRobotSimulationCore, SimulationParams
+from pybullet_fleet.config_utils import load_yaml_config, merge_configs
+from pybullet_fleet.core_simulation import MultiRobotSimulationCore
 from pybullet_fleet.sim_object import Pose, SimObject, ShapeParams
 
-# Initialize simulation
-params = SimulationParams(gui=True, timestep=0.01, physics=True)  # for robot arm
-sim_core = MultiRobotSimulationCore(params)
+# Initialize simulation from base config + inline overrides
+_BASE_CONFIG = os.path.join(os.path.dirname(__file__), "..", "..", "config", "config.yaml")
+_OVERRIDES = {"simulation": {"timestep": 0.01, "physics": True}}
+sim_core = MultiRobotSimulationCore.from_dict(merge_configs(load_yaml_config(_BASE_CONFIG), _OVERRIDES))
 
 # 1. SimObject with mesh (pallet visual)
 pallet_mesh_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../mesh/11pallet.obj"))

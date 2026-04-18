@@ -256,6 +256,9 @@ class SimObject:
         user_data: Dictionary for custom metadata (default: empty dict)
     """
 
+    # SpawnParams class used by config-driven grid spawning
+    _spawn_params_cls = SimObjectSpawnParams
+
     # Class-level shared shapes cache (for optimization)
     _shared_shapes: Dict[str, Tuple[int, int]] = {}
 

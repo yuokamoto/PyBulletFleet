@@ -24,8 +24,8 @@ import pybullet as p
 
 from pybullet_fleet.agent import Agent, AgentSpawnParams, Pose
 from pybullet_fleet.agent_manager import AgentManager, GridSpawnParams
-from pybullet_fleet.config_utils import load_config
-from pybullet_fleet.core_simulation import MultiRobotSimulationCore, SimulationParams
+from pybullet_fleet.config_utils import load_yaml_config, merge_configs
+from pybullet_fleet.core_simulation import MultiRobotSimulationCore
 
 # ========================================
 # Parse Arguments
@@ -55,7 +55,7 @@ base_config_path = os.path.join(config_dir, "config.yaml")
 robots_config_path = os.path.join(config_dir, "100robots_config.yaml")
 
 # Load both configs (100robots_config overrides config.yaml)
-config = load_config([base_config_path, robots_config_path])
+config = merge_configs(load_yaml_config(base_config_path), load_yaml_config(robots_config_path))
 
 # Extract parameters from config
 num_robots = config.get("num_robots", 100)
@@ -83,14 +83,13 @@ if mode == "mixed":
     print(f"Mobile robot probability: {mobile_robot_prob*100:.0f}%")
     print(f"Arm robot probability: {arm_robot_prob*100:.0f}%")
     if arm_robot_prob > 0:
-        config["physics"] = True
+        config.setdefault("simulation", {})["physics"] = True
         print("Mode: mixed (mobile + arm) - Physics enabled for robot arm")
 else:
-    config["physics"] = False
+    config.setdefault("simulation", {})["physics"] = False
     print("Mode: mixed (mobile + arm) - Physics disabled for maximum performance")
 
-params = SimulationParams.from_dict(config)
-sim_core = MultiRobotSimulationCore(params)
+sim_core = MultiRobotSimulationCore.from_dict(config)
 
 # ========================================
 # Setup Spawn Parameters
@@ -182,7 +181,7 @@ print(agent_manager)
 # ========================================
 
 # Setup camera view using config file settings (auto mode with agent positions)
-camera_config = params.camera_config
+camera_config = sim_core.params.camera_config
 if camera_config:
     # Provide agent positions for auto mode
     agent_positions = [agent.get_pose().position for agent in agent_manager.objects]

@@ -29,8 +29,10 @@ from pybullet_fleet.core_simulation import (
 # EventBus
 from pybullet_fleet.events import EventBus, SimEvents  # noqa: F401
 
-# World loading  (load_rmf_world kept as backward-compatible alias)
-from pybullet_fleet.world_loader import load_mesh_directory, load_rmf_world  # noqa: F401
+# World / SDF loading  (load_rmf_world kept as backward-compatible alias)
+from pybullet_fleet.sdf_loader import load_mesh_directory, load_rmf_world  # noqa: F401
+from pybullet_fleet.sdf_loader import load_sdf_world, load_sdf_world_file  # noqa: F401
+from pybullet_fleet.sdf_loader import resolve_sdf_to_urdf  # noqa: F401
 
 # Robot model resolution  (resolve_urdf kept as backward-compatible alias)
 from pybullet_fleet.robot_models import resolve_model  # noqa: F401

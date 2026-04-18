@@ -1,5 +1,8 @@
 # docker/docker-compose.yaml
 #
+# Standalone PyBulletFleet bridge (no RMF task dispatch or web dashboard).
+# For full RMF stack, use docker-compose.rmf.yaml instead.
+#
 # Usage:
 #   docker compose up bridge                       # headless, 3 robots
 #   GUI=true docker compose up bridge              # PyBullet GUI
@@ -10,7 +13,8 @@ services:
   bridge:
     build:
       context: ..
-      dockerfile: docker/Dockerfile.jazzy
+      dockerfile: docker/Dockerfile.rmf_demos
+    image: pybullet-fleet-rmf:jazzy
     container_name: pybullet_bridge
     command: >
       bash -c "ros2 run pybullet_fleet_ros bridge_node --ros-args
@@ -21,9 +25,11 @@ services:
       -p target_rtf:=$$TARGET_RTF"
     working_dir: /opt/pybullet_fleet
     network_mode: host
+    ipc: host              # Share /dev/shm for FastDDS SHM transport across containers
     environment:
       - DISPLAY=${DISPLAY:-}
       - ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-42}
+      - RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
       - NUM_ROBOTS=${NUM_ROBOTS:-3}
       - GUI=${GUI:-false}
       - PUBLISH_RATE=${PUBLISH_RATE:-10.0}
@@ -34,21 +40,24 @@ services:
       - /dev/dri:/dev/dri
       # Dev mode: mount source for live editing
       - ../pybullet_fleet:/opt/pybullet_fleet/pybullet_fleet:ro
-      - ../ros2_bridge/pybullet_fleet_ros:/opt/bridge_ws/src/pybullet_fleet_ros:ro
+      - ../ros2_bridge/pybullet_fleet_ros:/rmf_demos_ws/src/pybullet_fleet_ros:ro
       - ../robots:/opt/pybullet_fleet/robots:ro
       - ../config:/opt/pybullet_fleet/config:ro
       - ../ros2_bridge/scripts:/opt/pybullet_fleet/scripts:ro
       - ../examples:/opt/pybullet_fleet/examples:ro
       # Overlay install/share so launch files & configs reflect local edits
-      - ../ros2_bridge/pybullet_fleet_ros/launch:/opt/bridge_ws/install/pybullet_fleet_ros/share/pybullet_fleet_ros/launch:ro
-      - ../ros2_bridge/pybullet_fleet_ros/config:/opt/bridge_ws/install/pybullet_fleet_ros/share/pybullet_fleet_ros/config:ro
+      - ../ros2_bridge/pybullet_fleet_ros/launch:/rmf_demos_ws/install/pybullet_fleet_ros/share/pybullet_fleet_ros/launch:ro
+      - ../ros2_bridge/pybullet_fleet_ros/config:/rmf_demos_ws/install/pybullet_fleet_ros/share/pybullet_fleet_ros/config:ro
+      # Overlay installed Python package with local source for dev iteration
+      - ../ros2_bridge/pybullet_fleet_ros/pybullet_fleet_ros:/rmf_demos_ws/install/pybullet_fleet_ros/lib/python3.12/site-packages/pybullet_fleet_ros:ro
     stdin_open: true
     tty: true
 
   test:
     build:
       context: ..
-      dockerfile: docker/Dockerfile.jazzy
+      dockerfile: docker/Dockerfile.rmf_demos
+    image: pybullet-fleet-rmf:jazzy
     command: bash /opt/pybullet_fleet/docker/test_integration.sh
     working_dir: /opt/pybullet_fleet
     network_mode: host

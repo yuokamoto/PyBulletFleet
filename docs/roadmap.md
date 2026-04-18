@@ -27,6 +27,18 @@ External communication layers:
 
 ## Refactoring
 
+- **`MultiRobotSimulationCore` responsibility decomposition** — The core class has grown to ~3200 lines / 66 methods. Extract self-contained subsystems into dedicated classes composed into the core:
+
+  | Subsystem | Target class | Methods to extract | Est. lines |
+  |---|---|---|---|
+  | Collision detection (spatial hash, AABB, broad/narrow phase) | `CollisionSystem` | `check_collisions`, `filter_aabb_pairs`, `_update_object_spatial_grid`, … (~20 methods) | ~1000 |
+  | Visualizer (camera, transparency, keyboard) | `VisualizerController` | `configure_visualizer`, `setup_camera`, `_handle_keyboard_events`, … (~6 methods) | ~250 |
+  | Profiling & memory tracking | `SimProfiler` | `record_profiling`, `_print_profiling_summary`, `_print_memory_profiling_summary`, … (~5 methods) | ~200 |
+
+  Each subsystem is held by composition (`self._collision = CollisionSystem(self)`).
+  The core class delegates; public API does not change.
+  Natural stepping stone toward the SimBackend ABC (Long-Term Phase 1).
+
 - **Remove scipy dependency** — Currently only `scipy.spatial.transform.Rotation` is used (9 call sites for quat↔euler, quat↔matrix, relative rotation). Replace with PyBullet utilities + lightweight helpers in `geometry.py` to eliminate the ~150 MB transitive dependency. Low priority: no runtime performance impact, only install size.
 
 - **Manual quaternion helpers in `geometry.py`** — Extend the pattern established by `SlerpPrecomp` / `quat_slerp` (avoiding scipy, hand-written scalar math) by adding the following helpers to `geometry.py`. The goal is to eliminate scipy `Rotation` object creation overhead on hot paths.

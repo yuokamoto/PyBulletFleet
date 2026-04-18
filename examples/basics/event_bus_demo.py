@@ -11,22 +11,28 @@ Usage:
     python examples/basics/event_bus_demo.py
 """
 
+import os
+
 from pybullet_fleet import (
     MultiRobotSimulationCore,
-    SimulationParams,
     Agent,
     AgentSpawnParams,
     Pose,
 )
 from pybullet_fleet.action import MoveAction
+from pybullet_fleet.config_utils import load_yaml_config, merge_configs
 from pybullet_fleet.events import SimEvents
 from pybullet_fleet.geometry import Path
 from pybullet_fleet.sim_object import SimObject, SimObjectSpawnParams, ShapeParams
 from pybullet_fleet.types import MotionMode, CollisionMode
 
 
+_BASE_CONFIG = os.path.join(os.path.dirname(__file__), "..", "..", "config", "config.yaml")
+_OVERRIDES = {"simulation": {"gui": False, "monitor": False, "duration": 3.0, "enable_floor": False}}
+
+
 def main():
-    sim = MultiRobotSimulationCore(SimulationParams(gui=False, monitor=False, physics=False, duration=3.0, enable_floor=False))
+    sim = MultiRobotSimulationCore.from_dict(merge_configs(load_yaml_config(_BASE_CONFIG), _OVERRIDES))
     sim.initialize_simulation()
 
     # ==========================================================

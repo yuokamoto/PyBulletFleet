@@ -16,7 +16,7 @@ import numpy as np
 import pybullet as p
 
 from pybullet_fleet.agent import Agent, AgentSpawnParams, MotionMode
-from pybullet_fleet.core_simulation import MultiRobotSimulationCore, SimulationParams
+from pybullet_fleet.core_simulation import MultiRobotSimulationCore
 from pybullet_fleet.geometry import Pose, Path
 from pybullet_fleet.sim_object import SimObject, SimObjectSpawnParams, ShapeParams
 from pybullet_fleet.action import MoveAction, WaitAction, PickAction, DropAction
@@ -27,12 +27,14 @@ _parser.add_argument("--rtf", type=float, default=None, help="Target real-time f
 _args = _parser.parse_args()
 
 
+_CONFIG = os.path.join(os.path.dirname(__file__), "..", "..", "config", "config.yaml")
+
+
 def main():
-    # Initialize simulation with DEBUG logging
-    params = SimulationParams(
-        gui=True, timestep=0.1, target_rtf=_args.rtf if _args.rtf is not None else 3, log_level="info", physics=False
-    )
-    sim = MultiRobotSimulationCore(params)
+    # Initialize simulation from YAML config
+    sim = MultiRobotSimulationCore.from_yaml(_CONFIG)
+    if _args.rtf is not None:
+        sim.params.target_rtf = _args.rtf
 
     # Camera setup
     sim.setup_camera(

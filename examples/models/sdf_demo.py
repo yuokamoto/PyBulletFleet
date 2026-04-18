@@ -10,23 +10,28 @@ Usage:
     python examples/models/sdf_demo.py
 """
 
+import os
+
 import pybullet_data
 
 from pybullet_fleet import (
     MultiRobotSimulationCore,
-    SimulationParams,
     Agent,
     AgentSpawnParams,
     Pose,
     load_mesh_directory,
 )
+from pybullet_fleet.config_utils import load_yaml_config, merge_configs
 from pybullet_fleet.sim_object import SimObject
 from pybullet_fleet.types import MotionMode, CollisionMode
 
 
+_BASE_CONFIG = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "config", "config.yaml")
+_OVERRIDES = {"simulation": {"duration": 15.0, "enable_floor": False}}
+
+
 def main():
-    sim = MultiRobotSimulationCore(SimulationParams(gui=True, physics=False, monitor=True, duration=15.0, enable_floor=False))
-    sim.initialize_simulation()
+    sim = MultiRobotSimulationCore.from_dict(merge_configs(load_yaml_config(_BASE_CONFIG), _OVERRIDES))
 
     # ==========================================================
     # 1. Multi-model SDF — one file → multiple bodies

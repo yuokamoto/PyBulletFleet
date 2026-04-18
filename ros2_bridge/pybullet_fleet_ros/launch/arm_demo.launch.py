@@ -19,14 +19,14 @@ from launch_ros.actions import Node
 
 def generate_launch_description():
     pkg_dir = get_package_share_directory("pybullet_fleet_ros")
-    src_config = "/opt/bridge_ws/src/pybullet_fleet_ros/config"
+    src_config = "/rmf_demos_ws/src/pybullet_fleet_ros/config"
 
     rviz_config = os.path.join(pkg_dir, "config", "arm_demo.rviz")
     if not os.path.exists(rviz_config):
         rviz_config = os.path.join(src_config, "arm_demo.rviz")
 
     # Config yaml — try installed share dir first, fall back to source mount.
-    # Docker volume-mounts overlay /opt/bridge_ws/src/ but not install/,
+    # Docker volume-mounts overlay /rmf_demos_ws/src/ but not install/,
     # so newly added configs may only exist in the source tree.
     config_yaml = os.path.join(pkg_dir, "config", "bridge_arm.yaml")
     if not os.path.exists(config_yaml):

@@ -30,7 +30,8 @@ import random
 
 from pybullet_fleet.agent import AgentSpawnParams, MotionMode, MovementDirection
 from pybullet_fleet.agent_manager import AgentManager, GridSpawnParams
-from pybullet_fleet.core_simulation import MultiRobotSimulationCore, SimulationParams
+from pybullet_fleet.config_utils import load_yaml_config, merge_configs
+from pybullet_fleet.core_simulation import MultiRobotSimulationCore
 from pybullet_fleet.geometry import Path, Pose
 from pybullet_fleet.robot_models import resolve_model
 
@@ -92,10 +93,20 @@ def main():
     # Seed for reproducibility
     np.random.seed(42)
 
-    # Create simulation with config file
-    config_path = os.path.join(os.path.dirname(__file__), "..", "..", "config", "100robots_config.yaml")
-    params = SimulationParams.from_config(config_path)
-    sim = MultiRobotSimulationCore(params)
+    # Create simulation from base config + scale demo overrides
+    _BASE_CONFIG = os.path.join(os.path.dirname(__file__), "..", "..", "config", "config.yaml")
+    _OVERRIDES = {
+        "simulation": {
+            "target_rtf": 0,
+            "enable_time_profiling": True,
+            "camera": {
+                "camera_mode": "auto",
+                "camera_view_type": "perspective",
+                "camera_auto_scale": 0.5,
+            },
+        }
+    }
+    sim = MultiRobotSimulationCore.from_dict(merge_configs(load_yaml_config(_BASE_CONFIG), _OVERRIDES))
 
     # Get absolute path to URDF
     urdf_path = resolve_model(_args.robot)
@@ -234,10 +245,10 @@ def main():
     # and calculates entity_positions from all objects if entity_positions is None
     sim.setup_camera()
 
-    if params.camera_config:
-        print(f"✓ Camera configured from config file: {params.camera_config.get('camera_mode', 'none')} mode")
-        if "camera_auto_scale" in params.camera_config:
-            print(f"  Camera auto scale: {params.camera_config['camera_auto_scale']}")
+    if sim.params.camera_config:
+        print(f"✓ Camera configured from config file: {sim.params.camera_config.get('camera_mode', 'none')} mode")
+        if "camera_auto_scale" in sim.params.camera_config:
+            print(f"  Camera auto scale: {sim.params.camera_config['camera_auto_scale']}")
     else:
         print("✓ Camera setup completed (no camera_config in config file)")
 

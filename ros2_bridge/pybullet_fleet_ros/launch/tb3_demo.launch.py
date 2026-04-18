@@ -92,7 +92,7 @@ def _launch_setup(context: LaunchContext):
     publish_rate = context.launch_configurations.get("publish_rate", "50.0")
 
     pkg_dir = get_package_share_directory("pybullet_fleet_ros")
-    src_config = "/opt/bridge_ws/src/pybullet_fleet_ros/config"
+    src_config = "/rmf_demos_ws/src/pybullet_fleet_ros/config"
 
     # RViz config
     rviz_config = os.path.join(pkg_dir, "config", "tb3_demo.rviz")

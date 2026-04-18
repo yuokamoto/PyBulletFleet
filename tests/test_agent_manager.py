@@ -721,5 +721,71 @@ class TestAgentManagerSpecific:
         assert "moving=1" in result
 
 
+# ---------------------------------------------------------------------------
+# GridSpawnParams factory methods
+# ---------------------------------------------------------------------------
+
+
+class TestGridSpawnParamsFactory:
+    """Tests for GridSpawnParams.from_count and from_dict count-based format."""
+
+    def test_from_count_basic(self):
+        """from_count computes correct x_max and y_max."""
+        gp = GridSpawnParams.from_count(count=9, columns=3, spacing=[2.0, 2.0, 0.0])
+        assert gp.x_min == 0
+        assert gp.x_max == 2
+        assert gp.y_min == 0
+        assert gp.y_max == 2
+        assert gp.spacing == [2.0, 2.0, 0.0]
+        assert gp.offset == [0.0, 0.0, 0.0]
+
+    def test_from_count_non_square(self):
+        """from_count handles non-square grids (count not multiple of columns)."""
+        gp = GridSpawnParams.from_count(count=7, columns=3)
+        assert gp.x_max == 2  # 3 columns
+        assert gp.y_max == 2  # ceil(7/3) = 3 rows → y_max=2
+
+    def test_from_count_auto_columns(self):
+        """from_count auto-computes columns via ceil(sqrt(count))."""
+        gp = GridSpawnParams.from_count(count=10)
+        import math
+
+        expected_cols = math.ceil(math.sqrt(10))  # 4
+        assert gp.x_max == expected_cols - 1
+
+    def test_from_count_offset(self):
+        """from_count passes through offset."""
+        gp = GridSpawnParams.from_count(count=4, offset=[10.0, 20.0, 0.5])
+        assert gp.offset == [10.0, 20.0, 0.5]
+
+    def test_from_dict_count_based(self):
+        """from_dict with count key uses from_count internally."""
+        gp = GridSpawnParams.from_dict({"count": 12, "spacing": [3, 3], "columns": 4, "offset": [1, 2, 0]})
+        assert gp.x_max == 3  # 4 columns
+        assert gp.y_max == 2  # ceil(12/4) = 3 rows
+        assert gp.spacing == [3.0, 3.0, 0.0]
+        assert gp.offset == [1.0, 2.0, 0.0]
+
+    def test_from_dict_range_based(self):
+        """from_dict with explicit ranges still works."""
+        gp = GridSpawnParams.from_dict(
+            {
+                "x_min": 0,
+                "x_max": 4,
+                "y_min": 0,
+                "y_max": 3,
+                "spacing": [2, 2, 0],
+                "offset": [0, 0, 0.1],
+            }
+        )
+        assert gp.x_max == 4
+        assert gp.y_max == 3
+
+    def test_from_dict_count_2d_spacing(self):
+        """from_dict count-based auto-pads 2D spacing to 3D."""
+        gp = GridSpawnParams.from_dict({"count": 4, "spacing": [5, 5]})
+        assert gp.spacing == [5.0, 5.0, 0.0]
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

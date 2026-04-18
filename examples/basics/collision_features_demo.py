@@ -43,9 +43,9 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 import numpy as np
 from pybullet_fleet.agent import Agent, AgentSpawnParams
 from pybullet_fleet.sim_object import SimObject, ShapeParams
-from pybullet_fleet.core_simulation import MultiRobotSimulationCore, SimulationParams
+from pybullet_fleet.core_simulation import MultiRobotSimulationCore
 from pybullet_fleet.geometry import Pose
-from pybullet_fleet.types import CollisionMode, SpatialHashCellSizeMode
+from pybullet_fleet.types import CollisionMode
 
 # ========================================
 # Configuration
@@ -355,29 +355,27 @@ def main():
     # ========================================
     # Create Simulation
     # ========================================
-    params = SimulationParams(
-        gui=True,
-        physics=False,  # Kinematic mode for controlled movement
-        monitor=True,  # Enable performance monitoring
-        enable_monitor_gui=True,  # Show GUI monitor
-        # Collision detection settings
-        collision_margin=COLLISION_MARGIN,
-        spatial_hash_cell_size_mode=SpatialHashCellSizeMode.CONSTANT,
-        spatial_hash_cell_size=CELL_SIZE,
-        multi_cell_threshold=MULTI_CELL_THRESHOLD,
-        # Visualization settings
-        enable_collision_color_change=True,  # Enable collision visualization
-        enable_collision_shapes=False,  # Normal mesh display initially (press 'w' to toggle wireframe)
-        # Performance settings
-        enable_time_profiling=True,
-        # Simulation settings
-        duration=args.duration,
-        timestep=0.01,
-        target_rtf=args.rtf,
-        log_level="info",
+    sim_core = MultiRobotSimulationCore.from_dict(
+        {
+            "simulation": {
+                "gui": True,
+                "physics": False,
+                "monitor": True,
+                "enable_monitor_gui": True,
+                "collision_margin": COLLISION_MARGIN,
+                "spatial_hash_cell_size_mode": "constant",
+                "spatial_hash_cell_size": CELL_SIZE,
+                "multi_cell_threshold": MULTI_CELL_THRESHOLD,
+                "enable_collision_color_change": True,
+                "enable_collision_shapes": False,
+                "enable_time_profiling": True,
+                "duration": args.duration,
+                "timestep": 0.01,
+                "target_rtf": args.rtf,
+                "log_level": "info",
+            }
+        }
     )
-
-    sim_core = MultiRobotSimulationCore(params)
     sim_core.set_collision_spatial_hash_cell_size_mode()
 
     # Enable collision visualization controls
@@ -401,8 +399,8 @@ def main():
     print("=" * 70)
     print(f"Cell size: {sim_core._cached_cell_size}m")
     cell_size = sim_core._cached_cell_size if sim_core._cached_cell_size is not None else 0.0
-    print(f"Multi-cell threshold: {params.multi_cell_threshold}x = {cell_size * params.multi_cell_threshold}m")
-    print(f"Collision margin: {params.collision_margin}m")
+    print(f"Multi-cell threshold: {MULTI_CELL_THRESHOLD}x = {cell_size * MULTI_CELL_THRESHOLD}m")
+    print(f"Collision margin: {COLLISION_MARGIN}m")
     print(f"Total cells in grid: {len(sim_core._cached_spatial_grid)}")
     print(f"Total objects: {len(objects)}")
     print(f"  - Left side robots: {len(left_robots)} ({', '.join([r.name for r in left_robots])})")

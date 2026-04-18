@@ -33,7 +33,7 @@ GUI=true docker compose run --rm --name pbf_bridge bridge \
 **Terminal 2** — send a navigation goal:
 
 ```bash
-docker exec pbf_bridge bash -c 'source /opt/bridge_ws/install/setup.bash && \
+docker exec pbf_bridge bash -c 'source /rmf_demos_ws/install/setup.bash && \
   ros2 topic pub --once /tb3_0/goal_pose geometry_msgs/PoseStamped \
     "{header: {frame_id: odom}, pose: {position: {x: 2.0, y: 1.0, z: 0.01}, orientation: {w: 1.0}}}"'
 ```
@@ -62,7 +62,7 @@ GUI=true docker compose run --rm --name pbf_bridge bridge \
 **Terminal 2** — send a joint trajectory via action (with feedback):
 
 ```bash
-docker exec pbf_bridge bash -c 'source /opt/bridge_ws/install/setup.bash && \
+docker exec pbf_bridge bash -c 'source /rmf_demos_ws/install/setup.bash && \
   python3 /opt/pybullet_fleet/scripts/send_joint_goal_ur5e.py --robot ur5e_0 \
     --positions 0.0 -1.57 1.57 -1.57 -1.57 0.0'
 ```
@@ -158,19 +158,19 @@ While the bridge is running in Terminal 1, use Terminal 2 for interaction.
 
 ```bash
 # List topics / services / actions
-docker exec pbf_bridge bash -c "source /opt/bridge_ws/install/setup.bash && ros2 topic list"
-docker exec pbf_bridge bash -c "source /opt/bridge_ws/install/setup.bash && ros2 action list"
+docker exec pbf_bridge bash -c "source /rmf_demos_ws/install/setup.bash && ros2 topic list"
+docker exec pbf_bridge bash -c "source /rmf_demos_ws/install/setup.bash && ros2 action list"
 
 # Check odometry
-docker exec pbf_bridge bash -c 'source /opt/bridge_ws/install/setup.bash && \
+docker exec pbf_bridge bash -c 'source /rmf_demos_ws/install/setup.bash && \
   ros2 topic echo /tb3_0/odom --once'
 
 # Check diagnostics
-docker exec pbf_bridge bash -c 'source /opt/bridge_ws/install/setup.bash && \
+docker exec pbf_bridge bash -c 'source /rmf_demos_ws/install/setup.bash && \
   ros2 topic echo /tb3_0/diagnostics --once'
 
 # List entities
-docker exec pbf_bridge bash -c 'source /opt/bridge_ws/install/setup.bash && \
+docker exec pbf_bridge bash -c 'source /rmf_demos_ws/install/setup.bash && \
   python3 /opt/pybullet_fleet/scripts/query_entities.py'
 ```
 
@@ -178,20 +178,20 @@ docker exec pbf_bridge bash -c 'source /opt/bridge_ws/install/setup.bash && \
 
 ```bash
 # Send goal pose (topic)
-docker exec pbf_bridge bash -c 'source /opt/bridge_ws/install/setup.bash && \
+docker exec pbf_bridge bash -c 'source /rmf_demos_ws/install/setup.bash && \
   ros2 topic pub --once /tb3_0/goal_pose geometry_msgs/PoseStamped \
     "{header: {frame_id: odom}, pose: {position: {x: 2.0, y: 1.0, z: 0.01}, orientation: {w: 1.0}}}"'
 
 # Send square path (script)
-docker exec pbf_bridge bash -c 'source /opt/bridge_ws/install/setup.bash && \
+docker exec pbf_bridge bash -c 'source /rmf_demos_ws/install/setup.bash && \
   python3 /opt/pybullet_fleet/scripts/send_path.py --robot tb3_0 --size 2.0'
 
 # NavigateToPose action (with distance_remaining feedback)
-docker exec pbf_bridge bash -c 'source /opt/bridge_ws/install/setup.bash && \
+docker exec pbf_bridge bash -c 'source /rmf_demos_ws/install/setup.bash && \
   python3 /opt/pybullet_fleet/scripts/send_nav_goal.py --robot tb3_0 --x 2.0 --y 1.0'
 
 # Check remaining path
-docker exec pbf_bridge bash -c 'source /opt/bridge_ws/install/setup.bash && \
+docker exec pbf_bridge bash -c 'source /rmf_demos_ws/install/setup.bash && \
   ros2 topic echo /tb3_0/plan --once'
 ```
 
@@ -201,17 +201,17 @@ docker exec pbf_bridge bash -c 'source /opt/bridge_ws/install/setup.bash && \
 
 ```bash
 # FollowJointTrajectory action (with actual/desired/error feedback — recommended)
-docker exec pbf_bridge bash -c 'source /opt/bridge_ws/install/setup.bash && \
+docker exec pbf_bridge bash -c 'source /rmf_demos_ws/install/setup.bash && \
   python3 /opt/pybullet_fleet/scripts/send_joint_goal_ur5e.py --robot ur5e_0 \
     --positions 0.0 -1.57 1.57 -1.57 -1.57 0.0'
 
 # Joint trajectory topic (fire-and-forget)
-docker exec pbf_bridge bash -c 'source /opt/bridge_ws/install/setup.bash && \
+docker exec pbf_bridge bash -c 'source /rmf_demos_ws/install/setup.bash && \
   python3 /opt/pybullet_fleet/scripts/send_joint_trajectory.py --robot ur5e_0 \
     --positions 0.0 -1.57 1.57 -1.57 -1.57 0.0'
 
 # Check joint states
-docker exec pbf_bridge bash -c 'source /opt/bridge_ws/install/setup.bash && \
+docker exec pbf_bridge bash -c 'source /rmf_demos_ws/install/setup.bash && \
   ros2 topic echo /ur5e_0/joint_states --once'
 ```
 
@@ -219,16 +219,16 @@ docker exec pbf_bridge bash -c 'source /opt/bridge_ws/install/setup.bash && \
 
 ```bash
 # Script — move for 5 seconds
-docker exec pbf_bridge bash -c 'source /opt/bridge_ws/install/setup.bash && \
+docker exec pbf_bridge bash -c 'source /rmf_demos_ws/install/setup.bash && \
   python3 /opt/pybullet_fleet/scripts/teleop_cmd_vel.py --robot tb3_0 --vx 0.2 --wz 0.5 --duration 5.0'
 
 # Raw topic pub (single)
-docker exec pbf_bridge bash -c 'source /opt/bridge_ws/install/setup.bash && \
+docker exec pbf_bridge bash -c 'source /rmf_demos_ws/install/setup.bash && \
   ros2 topic pub --once /tb3_0/cmd_vel geometry_msgs/msg/Twist \
     "{linear: {x: 0.22}, angular: {z: 0.5}}"'
 
 # Keyboard teleop
-docker exec -it pbf_bridge bash -c 'source /opt/bridge_ws/install/setup.bash && \
+docker exec -it pbf_bridge bash -c 'source /rmf_demos_ws/install/setup.bash && \
   ros2 run teleop_twist_keyboard teleop_twist_keyboard \
     --ros-args -r /cmd_vel:=/tb3_0/cmd_vel'
 ```
@@ -237,11 +237,11 @@ docker exec -it pbf_bridge bash -c 'source /opt/bridge_ws/install/setup.bash && 
 
 ```bash
 # Spawn a UR5e arm at position (5, 3)
-docker exec pbf_bridge bash -c 'source /opt/bridge_ws/install/setup.bash && \
+docker exec pbf_bridge bash -c 'source /rmf_demos_ws/install/setup.bash && \
   python3 /opt/pybullet_fleet/scripts/spawn_robots.py --name ur5e_1 --urdf ur5e --x 5.0 --y 3.0'
 
 # Delete
-docker exec pbf_bridge bash -c 'source /opt/bridge_ws/install/setup.bash && \
+docker exec pbf_bridge bash -c 'source /rmf_demos_ws/install/setup.bash && \
   ros2 service call /sim/delete_entity simulation_interfaces/srv/DeleteEntity "{entity: ur5e_1}"'
 ```
 
@@ -249,13 +249,13 @@ docker exec pbf_bridge bash -c 'source /opt/bridge_ws/install/setup.bash && \
 
 ```bash
 # Step 100 ticks
-docker exec pbf_bridge bash -c 'source /opt/bridge_ws/install/setup.bash && \
+docker exec pbf_bridge bash -c 'source /rmf_demos_ws/install/setup.bash && \
   python3 /opt/pybullet_fleet/scripts/step_simulation.py --steps 100'
 
 # Pause / Resume / Status
-docker exec pbf_bridge bash -c 'source /opt/bridge_ws/install/setup.bash && \
+docker exec pbf_bridge bash -c 'source /rmf_demos_ws/install/setup.bash && \
   python3 /opt/pybullet_fleet/scripts/step_simulation.py --pause'
-docker exec pbf_bridge bash -c 'source /opt/bridge_ws/install/setup.bash && \
+docker exec pbf_bridge bash -c 'source /rmf_demos_ws/install/setup.bash && \
   python3 /opt/pybullet_fleet/scripts/step_simulation.py --resume'
 ```
 
@@ -268,14 +268,14 @@ Use `config_yaml` to spawn heterogeneous robots:
 GUI=true docker compose run --rm --name pbf_bridge bridge \
   ros2 run pybullet_fleet_ros bridge_node \
     --ros-args \
-    -p config_yaml:=/opt/bridge_ws/src/pybullet_fleet_ros/config/bridge_omni_demo.yaml \
+    -p config_yaml:=/rmf_demos_ws/src/pybullet_fleet_ros/config/bridge_omni_demo.yaml \
     -p gui:=true
 ```
 
 The cube responds to full 6-DoF `cmd_vel` (including `angular.x` / `angular.y` for roll/pitch):
 
 ```bash
-docker exec pbf_bridge bash -c 'source /opt/bridge_ws/install/setup.bash && \
+docker exec pbf_bridge bash -c 'source /rmf_demos_ws/install/setup.bash && \
   ros2 topic pub -r 10 /cube0/cmd_vel geometry_msgs/msg/Twist \
     "{linear: {z: 0.5}, angular: {x: 0.3, y: 0.2, z: 0.1}}"'
 ```
@@ -314,7 +314,7 @@ docker compose run --rm test
 # colcon launch_testing
 docker compose run --rm bridge bash -c "\
   source /ros_entrypoint.sh && \
-  cd /opt/bridge_ws && \
+  cd /rmf_demos_ws && \
   colcon test --packages-select pybullet_fleet_ros --event-handlers console_direct+"
 ```
 
@@ -335,15 +335,15 @@ GUI=true docker compose run --rm --name pbf_bridge bridge \
 
 ```bash
 # Verify topics and actions
-docker exec pbf_bridge bash -c "source /opt/bridge_ws/install/setup.bash && ros2 topic list"
-docker exec pbf_bridge bash -c "source /opt/bridge_ws/install/setup.bash && ros2 action list"
+docker exec pbf_bridge bash -c "source /rmf_demos_ws/install/setup.bash && ros2 topic list"
+docker exec pbf_bridge bash -c "source /rmf_demos_ws/install/setup.bash && ros2 action list"
 
 # Send goal and check diagnostics
-docker exec pbf_bridge bash -c 'source /opt/bridge_ws/install/setup.bash && \
+docker exec pbf_bridge bash -c 'source /rmf_demos_ws/install/setup.bash && \
   ros2 topic pub --once /tb3_0/goal_pose geometry_msgs/PoseStamped \
     "{header: {frame_id: odom}, pose: {position: {x: 2.0, y: 1.0, z: 0.01}, orientation: {w: 1.0}}}"'
 sleep 2
-docker exec pbf_bridge bash -c 'source /opt/bridge_ws/install/setup.bash && \
+docker exec pbf_bridge bash -c 'source /rmf_demos_ws/install/setup.bash && \
   ros2 topic echo /tb3_0/diagnostics --once'
 # Expected: is_moving=true
 
@@ -371,3 +371,48 @@ The default URDFs use primitive shapes (box, cylinder). To use custom meshes
 (`.stl` / `.dae`), reference them via `<mesh filename="..."/>` in the URDF and
 place mesh files in the `robots/` directory. `robot_state_publisher` will
 publish them to RViz automatically.
+
+## Open-RMF Integration Demo
+
+Demonstrates PyBulletFleet integrated with Open-RMF task dispatching
+using the **EasyFullControl** API (the recommended Python interface).
+
+### Prerequisites
+
+The Docker image builds `rmf_fleet_adapter_python` from source (the Jazzy
+binary is C++ only). This provides the `rmf_adapter` Python module with
+`easy_full_control` API. Build dependencies (`ros-jazzy-rmf-fleet-adapter`,
+`pybind11-dev`, `pybind11_json_vendor`) are installed automatically.
+
+### Launch
+
+```bash
+# Start bridge + fleet adapter (office demo, 2 robots)
+docker compose run --rm bridge \
+  ros2 launch pybullet_fleet_ros office_pybullet.launch.py
+
+# In another terminal: dispatch a patrol task
+docker compose run --rm bridge \
+  ros2 run rmf_demos_tasks dispatch_patrol -p pantry lounge -n 3
+```
+
+### Architecture
+
+```
+Open-RMF Traffic Schedule
+    │
+    ▼
+FleetAdapterNode (fleet_adapter.py)
+    │  EasyFullControl API → RobotCallbacks.navigate()
+    ▼
+RobotClientAPI → NavigateToPose action goal
+    │
+    ▼
+BridgeNode → RobotHandler → Agent.set_goal_pose()
+    │
+    ▼
+PyBulletFleet (kinematic navigation)
+```
+
+Fleet adapter subscribes to each robot's `/odom` topic to report position
+to Open-RMF continuously via `RobotState` updates.

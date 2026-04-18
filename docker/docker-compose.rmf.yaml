@@ -1,0 +1,98 @@
+# docker/docker-compose.rmf.yaml
+#
+# Full Open-RMF + PyBulletFleet stack.
+# Base image: ghcr.io/open-rmf/rmf/rmf_demos (includes ALL rmf packages).
+#
+# Configuration via .env file (create docker/.env):
+#   DEMO_WORLD=office          # Launch file prefix (office_pybullet.launch.py)
+#   GUI=true                   # PyBullet GUI window
+#   ROS_DOMAIN_ID=42           # ROS 2 domain isolation
+#
+# Available DEMO_WORLD values:
+#   office    — 2 robots, patrol + delivery (default)
+#   (future)  battle_royale, airport_terminal, hotel, campus
+#
+# Usage:
+#   cd docker
+#   # Build once:
+#   docker compose -f docker-compose.rmf.yaml build
+#
+#   # Start with defaults (office demo):
+#   docker compose -f docker-compose.rmf.yaml up
+#
+#   # Override demo world:
+#   DEMO_WORLD=battle_royale docker compose -f docker-compose.rmf.yaml up
+#
+#   # Headless mode:
+#   GUI=false docker compose -f docker-compose.rmf.yaml up
+#
+#   # Run bridge only (no web dashboard):
+#   docker compose -f docker-compose.rmf.yaml up bridge
+#
+#   # Interactive / custom launch (override command):
+#   docker compose -f docker-compose.rmf.yaml run --rm bridge bash
+#
+#   # Dispatch patrol from another terminal:
+#   docker compose -f docker-compose.rmf.yaml exec bridge \
+#     ros2 run rmf_demos_tasks dispatch_patrol -- -p patrol_A1 patrol_D1 -n 3
+#
+#   # Web dashboard: http://localhost:3000
+#   # REST API:      http://localhost:8000
+#
+services:
+  bridge:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.rmf_demos
+    image: pybullet-fleet-rmf:jazzy
+    container_name: pybullet_bridge_rmf
+    working_dir: /opt/pybullet_fleet
+    network_mode: host
+    ipc: host
+    environment:
+      - DISPLAY=${DISPLAY:-}
+      - ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-42}
+      - RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+      - DEMO_WORLD=${DEMO_WORLD:-office}
+    volumes:
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+      - /dev/dri:/dev/dri
+      # Persist Gazebo Fuel model cache across container restarts
+      - gz-fuel-cache:/root/.gz/fuel
+      # Dev mode: mount source for live editing
+      - ../pybullet_fleet:/opt/pybullet_fleet/pybullet_fleet:ro
+      - ../ros2_bridge/pybullet_fleet_ros:/rmf_demos_ws/src/pybullet_fleet_ros:ro
+      - ../robots:/opt/pybullet_fleet/robots:ro
+      - ../config:/opt/pybullet_fleet/config:ro
+      - ../ros2_bridge/scripts:/opt/pybullet_fleet/scripts:ro
+      - ../examples:/opt/pybullet_fleet/examples:ro
+      # Overlay install paths so launch/config/python reflect local edits
+      - ../ros2_bridge/pybullet_fleet_ros/launch:/rmf_demos_ws/install/pybullet_fleet_ros/share/pybullet_fleet_ros/launch:ro
+      - ../ros2_bridge/pybullet_fleet_ros/config:/rmf_demos_ws/install/pybullet_fleet_ros/share/pybullet_fleet_ros/config:ro
+      - ../ros2_bridge/pybullet_fleet_ros/pybullet_fleet_ros:/rmf_demos_ws/install/pybullet_fleet_ros/lib/python3.12/site-packages/pybullet_fleet_ros:ro
+    command: >
+      ros2 launch pybullet_fleet_ros ${DEMO_WORLD:-office}_pybullet.launch.py
+        gui:=${GUI:-true}
+        server_uri:=ws://localhost:8000/_internal
+    stdin_open: true
+    tty: true
+
+  # ---------- RMF-Web API server ----------
+  rmf-web-api:
+    image: ghcr.io/open-rmf/rmf-web/api-server:jazzy-nightly
+    container_name: rmf-web-api
+    network_mode: host
+    environment:
+      - ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-42}
+      - RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+
+  # ---------- RMF-Web Dashboard ----------
+  rmf-web-dashboard:
+    image: ghcr.io/open-rmf/rmf-web/demo-dashboard:jazzy-nightly
+    container_name: rmf-web-dashboard
+    network_mode: host
+    depends_on:
+      - rmf-web-api
+
+volumes:
+  gz-fuel-cache:

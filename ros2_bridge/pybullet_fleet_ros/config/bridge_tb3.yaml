@@ -1,7 +1,7 @@
 # Bridge config: TurtleBot3 Burger (Tier 2 — requires ros-${ROS_DISTRO}-turtlebot3-description)
 #
 # Demonstrates Tier 2 URDF resolution: the bridge resolves the model name
-# "turtlebot3" to the installed ROS package path via resolve_urdf().
+# "turtlebot3" to the installed ROS package path via resolve_model().
 # This is the standard ROS 2 mobile robot for navigation demos.
 #
 # Prerequisites:
@@ -9,11 +9,11 @@
 #
 # Usage (Docker):
 #   docker compose run --rm bridge ros2 run pybullet_fleet_ros bridge_node \
-#     --ros-args -p config_yaml:=/opt/bridge_ws/src/pybullet_fleet_ros/config/bridge_tb3.yaml
+#     --ros-args -p config_yaml:=/rmf_demos_ws/src/pybullet_fleet_ros/config/bridge_tb3.yaml
 #
 # GUI mode:
 #   GUI=true docker compose run --rm bridge ros2 run pybullet_fleet_ros bridge_node \
-#     --ros-args -p config_yaml:=/opt/bridge_ws/src/pybullet_fleet_ros/config/bridge_tb3.yaml
+#     --ros-args -p config_yaml:=/rmf_demos_ws/src/pybullet_fleet_ros/config/bridge_tb3.yaml
 #
 # Then send navigation goals:
 #   python3 scripts/send_nav_goal.py --robot tb3_0 --x 2.0 --y 1.0

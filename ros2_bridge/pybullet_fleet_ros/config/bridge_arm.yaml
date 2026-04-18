@@ -5,12 +5,12 @@
 # Usage (Docker):
 #   docker compose run --rm -d --name pbf_bridge bridge \
 #     ros2 run pybullet_fleet_ros bridge_node \
-#       --ros-args -p config_yaml:=/opt/bridge_ws/src/pybullet_fleet_ros/config/bridge_arm.yaml
+#       --ros-args -p config_yaml:=/rmf_demos_ws/src/pybullet_fleet_ros/config/bridge_arm.yaml
 #
 # GUI mode:
 #   GUI=true docker compose run --rm --name pbf_bridge bridge \
 #     ros2 run pybullet_fleet_ros bridge_node \
-#       --ros-args -p config_yaml:=/opt/bridge_ws/src/pybullet_fleet_ros/config/bridge_arm.yaml
+#       --ros-args -p config_yaml:=/rmf_demos_ws/src/pybullet_fleet_ros/config/bridge_arm.yaml
 
 simulation:
   gui: true

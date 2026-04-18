@@ -50,7 +50,7 @@ def _generate_ur5e_description() -> str:
 
 def generate_launch_description():
     pkg_dir = get_package_share_directory("pybullet_fleet_ros")
-    src_config = "/opt/bridge_ws/src/pybullet_fleet_ros/config"
+    src_config = "/rmf_demos_ws/src/pybullet_fleet_ros/config"
 
     # RViz config
     rviz_config = os.path.join(pkg_dir, "config", "ur5e_demo.rviz")

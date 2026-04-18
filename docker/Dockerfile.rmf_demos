@@ -1,0 +1,69 @@
+# docker/Dockerfile.rmf_demos
+# Unified PyBulletFleet + ROS 2 bridge Docker image.
+# Base: official Open-RMF demos image (includes rmf packages, maps, fleet adapter, etc.)
+#
+# Supports two usage modes via different docker-compose files:
+#   1. docker-compose.yaml       — standalone bridge (no RMF task dispatch)
+#   2. docker-compose.rmf.yaml   — full RMF stack (fleet adapter + web dashboard)
+#
+# Build:
+#   docker compose -f docker-compose.rmf.yaml build
+#   # or: docker compose build
+#
+FROM ghcr.io/open-rmf/rmf/rmf_demos:jazzy-rmf-latest
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+SHELL ["/bin/bash", "-c"]
+
+# Install additional deps not in rmf_demos image
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3-pip \
+    python3-tk \
+    ros-jazzy-nav2-msgs \
+    ros-jazzy-control-msgs \
+    ros-jazzy-tf2-ros \
+    ros-jazzy-tf2-geometry-msgs \
+    ros-jazzy-trajectory-msgs \
+    ros-jazzy-diagnostic-msgs \
+    ros-jazzy-teleop-twist-keyboard \
+    ros-jazzy-xacro \
+    ros-jazzy-turtlebot3-description \
+    ros-jazzy-ur-description \
+    # OpenGL / Mesa for PyBullet GUI inside Docker
+    libgl1-mesa-dri \
+    libglx-mesa0 \
+    libegl-mesa0 \
+    libglvnd0 \
+    libgl1 \
+    libglx0 \
+    libegl1 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install pybullet_fleet
+COPY requirements.txt /opt/pybullet_fleet/requirements.txt
+COPY pyproject.toml /opt/pybullet_fleet/pyproject.toml
+COPY pybullet_fleet/ /opt/pybullet_fleet/pybullet_fleet/
+COPY robots/ /opt/pybullet_fleet/robots/
+COPY config/ /opt/pybullet_fleet/config/
+COPY mesh/ /opt/pybullet_fleet/mesh/
+WORKDIR /opt/pybullet_fleet
+RUN pip install --break-system-packages -e .
+
+# Build pybullet_fleet_ros into the existing rmf_demos workspace
+# (rmf_fleet_adapter_python and simulation_interfaces are already installed)
+COPY ros2_bridge/pybullet_fleet_ros /rmf_demos_ws/src/pybullet_fleet_ros
+WORKDIR /rmf_demos_ws
+RUN source /opt/ros/jazzy/setup.bash && \
+    source /rmf_demos_ws/install/setup.bash && \
+    colcon build --symlink-install \
+    --packages-select pybullet_fleet_ros \
+    --cmake-args -DCMAKE_BUILD_TYPE=Release
+
+# Copy test and utility scripts
+COPY docker/test_integration.sh /opt/pybullet_fleet/docker/test_integration.sh
+RUN chmod +x /opt/pybullet_fleet/docker/test_integration.sh
+
+# Entrypoint (same as rmf_demos: sources /opt/ros/jazzy + /rmf_demos_ws/install)
+# Already set by base image's /ros_entrypoint.sh
+WORKDIR /opt/pybullet_fleet

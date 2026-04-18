@@ -16,7 +16,7 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 from pybullet_fleet.agent import Agent
-from pybullet_fleet.core_simulation import MultiRobotSimulationCore, SimulationParams
+from pybullet_fleet.core_simulation import MultiRobotSimulationCore
 from pybullet_fleet.sim_object import Pose, SimObject, ShapeParams
 from pybullet_fleet.action import PoseAction, PickAction, DropAction, WaitAction
 from pybullet_fleet.robot_models import resolve_model, auto_detect_profile
@@ -66,11 +66,11 @@ BOX_PICK_XYZ = _P["box_pick"]
 BOX_DROP_XYZ = _P["box_drop"]
 EE_ORN = _P["orn"]  # None or quaternion tuple
 
-# Simulation setup (kinematic mode, fast execution)
-params = SimulationParams(
-    gui=True, timestep=0.1, physics=False, target_rtf=args.rtf if args.rtf is not None else 3, log_level="info"
-)
-sim_core = MultiRobotSimulationCore(params)
+# Initialize simulation from YAML config
+_CONFIG = os.path.join(os.path.dirname(__file__), "..", "..", "config", "config.yaml")
+sim_core = MultiRobotSimulationCore.from_yaml(_CONFIG)
+if args.rtf is not None:
+    sim_core.params.target_rtf = args.rtf
 
 # Spawn robot arm (fixed base)
 arm_urdf = resolve_model(args.robot)

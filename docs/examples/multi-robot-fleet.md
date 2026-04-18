@@ -54,14 +54,13 @@ so you can change settings (number of agents, speed limits, collision mode)
 without editing Python code:
 
 ```python
-from pybullet_fleet.core_simulation import MultiRobotSimulationCore, SimulationParams
+from pybullet_fleet.core_simulation import MultiRobotSimulationCore
 
-params = SimulationParams.from_config("config/100robots_config.yaml")
-sim = MultiRobotSimulationCore(params)
+sim = MultiRobotSimulationCore.from_yaml("config/100robots_config.yaml")
 ```
 
-`from_config` reads the YAML and maps every key to the corresponding `SimulationParams` field.
-Any parameter not present in the file gets its default value.
+`from_yaml` reads the nested YAML config (under the `simulation:` key) and creates the
+simulation core in one call. Any parameter not present in the file gets its default value.
 
 > The config files live in `config/`. See [Configuration Reference](../configuration/index)
 > for the full parameter list.

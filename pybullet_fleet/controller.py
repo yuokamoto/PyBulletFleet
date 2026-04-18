@@ -153,10 +153,12 @@ class KinematicController(Controller):
         max_linear_vel: float = math.inf,
         max_angular_vel: float = math.inf,
         cmd_vel_timeout: float = 0.0,
+        navigation_2d: bool = False,
     ) -> None:
         self._max_linear_vel: float = max_linear_vel
         self._max_angular_vel: float = max_angular_vel
         self._cmd_vel_timeout: float = cmd_vel_timeout
+        self._navigation_2d: bool = navigation_2d
         self._time_since_last_set_velocity: float = 0.0
         self._velocity_ever_set: bool = False
         self._linear_velocity = np.zeros(3)  # body-frame [vx, vy, vz]
@@ -579,7 +581,10 @@ class KinematicController(Controller):
         → path-complete state machine internally.
         """
         # Snap to exact goal position
-        agent.set_pose_raw(self._goal_pose.position, current_pose.orientation, preserve_velocity=False)
+        snap_position = list(self._goal_pose.position)
+        if self._navigation_2d:
+            snap_position[2] = current_pose.position[2]
+        agent.set_pose_raw(snap_position, current_pose.orientation, preserve_velocity=False)
 
         logger.debug("Reached waypoint at position %s", self._goal_pose.position[:2])
 
@@ -680,11 +685,13 @@ class OmniController(KinematicController):
         max_linear_vel: float = math.inf,
         max_angular_vel: float = math.inf,
         cmd_vel_timeout: float = 0.0,
+        navigation_2d: bool = False,
     ) -> None:
         super().__init__(
             max_linear_vel=max_linear_vel,
             max_angular_vel=max_angular_vel,
             cmd_vel_timeout=cmd_vel_timeout,
+            navigation_2d=navigation_2d,
         )
 
     # -- Velocity kinematics -------------------------------------------
@@ -758,6 +765,8 @@ class OmniController(KinematicController):
         current_pose = agent.get_pose()
         current_pos = np.array(current_pose.position)
         goal_pos = np.array(goal.position)
+        if self._navigation_2d:
+            goal_pos[2] = current_pos[2]
 
         # Reset rotation state (position-only trajectory)
         self._reset_rotation_state()
@@ -827,11 +836,13 @@ class DifferentialController(KinematicController):
         max_angular_vel: float = 1.5,
         wheel_separation: float = 0.0,
         cmd_vel_timeout: float = 0.0,
+        navigation_2d: bool = False,
     ) -> None:
         super().__init__(
             max_linear_vel=max_linear_vel,
             max_angular_vel=max_angular_vel,
             cmd_vel_timeout=cmd_vel_timeout,
+            navigation_2d=navigation_2d,
         )
         self._wheel_separation = wheel_separation
 
@@ -883,6 +894,8 @@ class DifferentialController(KinematicController):
         current_pose = agent.get_pose()
         current_pos = np.array(current_pose.position)
         goal_pos = np.array(goal.position)
+        if self._navigation_2d:
+            goal_pos[2] = current_pos[2]
 
         direction_vec = goal_pos - current_pos
 

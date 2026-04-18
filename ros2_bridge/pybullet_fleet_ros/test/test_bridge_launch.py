@@ -4,7 +4,7 @@ Launches bridge_node as a ROS 2 node and verifies topics, services, and
 message publishing via the rclpy API — no shell commands needed.
 
 Run with:
-    cd /opt/bridge_ws && colcon test --packages-select pybullet_fleet_ros
+    cd /rmf_demos_ws && colcon test --packages-select pybullet_fleet_ros
     # or directly:
     launch_test src/pybullet_fleet_ros/test/test_bridge_launch.py
 """
@@ -21,8 +21,38 @@ from launch_ros.actions import Node
 
 NUM_ROBOTS = 3
 TIMEOUT_SEC = 10.0
-# Absolute path because colcon test cwd is /opt/bridge_ws, not /opt/pybullet_fleet
+# Absolute path because colcon test cwd is /rmf_demos_ws, not /opt/pybullet_fleet
 ROBOT_URDF = "/opt/pybullet_fleet/robots/mobile_robot.urdf"
+
+
+def _create_test_config() -> str:
+    """Write a temporary YAML config for launch tests and return its path."""
+    import os
+    import tempfile
+
+    import yaml
+
+    config = {
+        "simulation": {"gui": False, "physics": False},
+        "robots": [
+            {
+                "name": f"robot{i}",
+                "urdf_path": ROBOT_URDF,
+                "pose": [i * 2.0, 0.0, 0.05],
+                "motion_mode": "differential",
+                "max_linear_vel": 2.0,
+                "max_angular_vel": 3.0,
+            }
+            for i in range(NUM_ROBOTS)
+        ],
+    }
+    fd, path = tempfile.mkstemp(suffix=".yaml", prefix="test_bridge_")
+    with os.fdopen(fd, "w") as f:
+        yaml.safe_dump(config, f)
+    return path
+
+
+_TEST_CONFIG_PATH = _create_test_config()
 
 
 @pytest.mark.launch_test
@@ -34,10 +64,7 @@ def generate_test_description():
         name="pybullet_fleet_bridge",
         parameters=[
             {
-                "num_robots": NUM_ROBOTS,
-                "robot_urdf": ROBOT_URDF,
-                "gui": False,
-                "physics": False,
+                "config_yaml": _TEST_CONFIG_PATH,
                 "publish_rate": 10.0,
                 "target_rtf": 0.0,
             }

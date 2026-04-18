@@ -7,7 +7,7 @@ echo "=== Integration Test: PyBulletFleet ROS 2 Bridge ==="
 
 # Source ROS
 source /opt/ros/jazzy/setup.bash
-source /opt/bridge_ws/install/setup.bash
+source /rmf_demos_ws/install/setup.bash
 
 # URDF paths are relative to pybullet_fleet root
 cd /opt/pybullet_fleet

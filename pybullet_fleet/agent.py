@@ -67,6 +67,7 @@ class AgentSpawnParams(SimObjectSpawnParams):
     motion_mode: Union[MotionMode, str] = MotionMode(_AGT_D["motion_mode"])
     use_fixed_base: bool = _AGT_D["use_fixed_base"]
     ik_params: Optional["IKParams"] = None
+    navigation_2d: bool = False
     controller_config: Optional[Dict[str, Any]] = None
 
     def __post_init__(self):
@@ -162,6 +163,7 @@ class AgentSpawnParams(SimObjectSpawnParams):
             motion_mode=motion_mode_value,
             use_fixed_base=config.get("use_fixed_base", _AGT_D["use_fixed_base"]),
             ik_params=ik_params_value,
+            navigation_2d=config.get("navigation_2d", _AGT_D["navigation_2d"]),
             controller_config=controller_config_value,
         )
 
@@ -222,6 +224,10 @@ class Agent(SimObject):
     Supports both mobile robots (use_fixed_base=False) and fixed robots (use_fixed_base=True).
     Supports both Mesh and URDF loading.
 
+    Class Attributes:
+        _spawn_params_cls: The SpawnParams dataclass used by config-driven
+            grid spawning (``AgentSpawnParams``).
+
     Class Constants:
         _KINEMATIC_JOINT_FALLBACK_VELOCITY: Default max joint velocity for
             revolute joints (rad/s) used when the URDF
@@ -252,6 +258,9 @@ class Agent(SimObject):
     _KINEMATIC_JOINT_FALLBACK_VELOCITY: float = 2.0  # rad/s (revolute)
     _KINEMATIC_PRISMATIC_FALLBACK_VELOCITY: float = 0.5  # m/s (prismatic)
     _DEFAULT_JOINT_TOLERANCE: float = 0.01  # rad (or m for prismatic)
+
+    # Override parent: use AgentSpawnParams for config-driven grid spawning
+    _spawn_params_cls = AgentSpawnParams
     _kinematic_joints_physics_off_logged: bool = False  # Log physics=False fallback only once
 
     def __init__(
@@ -619,12 +628,19 @@ class Agent(SimObject):
                 agent._controller = OmniController(
                     max_linear_vel=float(np.max(agent.max_linear_vel)),
                     max_angular_vel=float(np.max(agent.max_angular_vel)),
+                    navigation_2d=spawn_params.navigation_2d,
                 )
             else:
                 agent._controller = DifferentialController(
                     max_linear_vel=float(np.max(agent.max_linear_vel)),
                     max_angular_vel=float(np.max(agent.max_angular_vel)),
+                    navigation_2d=spawn_params.navigation_2d,
                 )
+
+        # Propagate navigation_2d to controller (set_motion_mode may have
+        # created a default controller before from_params could configure it)
+        if hasattr(agent._controller, "_navigation_2d"):
+            agent._controller._navigation_2d = spawn_params.navigation_2d
 
         return agent
 

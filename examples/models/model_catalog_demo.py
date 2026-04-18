@@ -25,7 +25,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 import pybullet as p
 
 from pybullet_fleet.agent import Agent
-from pybullet_fleet.core_simulation import MultiRobotSimulationCore, SimulationParams
+from pybullet_fleet.core_simulation import MultiRobotSimulationCore
 from pybullet_fleet.geometry import Pose
 from pybullet_fleet.robot_models import (
     KNOWN_MODELS,
@@ -133,14 +133,16 @@ use_gui = args.gui.lower() == "true"
 cols = args.columns
 spacing = args.spacing
 
-sim = MultiRobotSimulationCore(
-    SimulationParams(
-        gui=use_gui,
-        physics=False,
-        monitor=False,
-        enable_shadows=False,
-        enable_floor=False,  # We handle floor ourselves below
-    )
+sim = MultiRobotSimulationCore.from_dict(
+    {
+        "simulation": {
+            "gui": use_gui,
+            "physics": False,
+            "monitor": False,
+            "enable_shadows": False,
+            "enable_floor": False,  # We handle floor ourselves below
+        }
+    }
 )
 client = sim.client
 

@@ -101,12 +101,21 @@ if not os.path.isfile(urdf_path):
 # Spawn and introspect
 # ---------------------------------------------------------------------------
 from pybullet_fleet.agent import Agent  # noqa: E402
-from pybullet_fleet.core_simulation import MultiRobotSimulationCore, SimulationParams  # noqa: E402
+from pybullet_fleet.core_simulation import MultiRobotSimulationCore  # noqa: E402
 from pybullet_fleet.geometry import Pose  # noqa: E402
 
 use_gui = args.gui.lower() == "true"
 
-sim = MultiRobotSimulationCore(SimulationParams(gui=use_gui, physics=False, monitor=False, target_rtf=10))
+sim = MultiRobotSimulationCore.from_dict(
+    {
+        "simulation": {
+            "gui": use_gui,
+            "physics": False,
+            "monitor": False,
+            "target_rtf": 10,
+        }
+    }
+)
 
 agent = Agent.from_urdf(
     urdf_path=urdf_path,

@@ -100,16 +100,16 @@ max_vel  = get("agent", "max_linear_vel")  # 2.0
 ### Load Configuration in Python
 
 ```python
-from pybullet_fleet.core_simulation import SimulationParams
+from pybullet_fleet.core_simulation import MultiRobotSimulationCore
 
 # Load default config
-params = SimulationParams.from_config("config/config.yaml")
+sim = MultiRobotSimulationCore.from_yaml("config/config.yaml")
 
 # Load kinematics mode config
-params = SimulationParams.from_config("config/config_physics_off.yaml")
+sim = MultiRobotSimulationCore.from_yaml("config/config_physics_off.yaml")
 
 # Load physics mode config
-params = SimulationParams.from_config("config/config_physics_on.yaml")
+sim = MultiRobotSimulationCore.from_yaml("config/config_physics_on.yaml")
 ```
 
 ### Run Config-Based Benchmark

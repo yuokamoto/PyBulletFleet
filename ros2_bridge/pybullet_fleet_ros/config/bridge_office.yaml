@@ -1,0 +1,50 @@
+# Bridge config for office demo — tinyRobot1 + tinyRobot2
+# Same robots and spawn positions as rmf_demos office demo.
+#
+# Charger positions (from office.building.yaml):
+#   tinyRobot1_charger: (10.433, -5.575)
+#   tinyRobot2_charger: (20.422, -5.312)
+#
+# Robot model: Converted on-the-fly from TinyRobot SDF (rmf_demos_assets).
+# World model: Loaded from building SDF with per-link poses (rmf_demos_maps).
+
+simulation:
+  gui: true
+  physics: false
+  target_rtf: 10.0  # Real-time factor (1.0 = real-time, 0 = max speed)
+  camera:
+    camera_mode: manual
+    camera_distance: 40
+    camera_yaw: 0
+    camera_pitch: -70
+    camera_target: [15, -3, 0]
+
+# Office building + furniture — full .world file from rmf_demos_maps.
+# Parsed by load_sdf_world_file(): resolves <include> elements,
+# downloads Gazebo Fuel models (chairs, desks, etc.) on first run.
+world:
+  world_file: "/rmf_demos_ws/install/rmf_demos_maps/share/rmf_demos_maps/maps/office/office.world"
+  # Robot/plugin models handled separately — skip in world loading
+  skip_models:
+    - TinyRobot
+    - TeleportDispenser
+    - TeleportIngestor
+
+robots:
+  - name: tinyRobot1
+    sdf_path: "/rmf_demos_ws/install/rmf_demos_assets/share/rmf_demos_assets/models/TinyRobot/model.sdf"
+    pose: [10.433, -5.575, 0.0]
+    yaw: 0.0
+    motion_mode: "differential"
+    max_linear_vel: 0.5
+    max_linear_accel: 0.75
+    navigation_2d: true
+
+  - name: tinyRobot2
+    sdf_path: "/rmf_demos_ws/install/rmf_demos_assets/share/rmf_demos_assets/models/TinyRobot/model.sdf"
+    pose: [20.422, -5.312, 0.0]
+    yaw: 0.0
+    motion_mode: "differential"
+    max_linear_vel: 0.5
+    max_linear_accel: 0.75
+    navigation_2d: true

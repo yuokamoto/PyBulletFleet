@@ -46,6 +46,7 @@ docs/_build/
 
 # Personal/WIP notes
 memo.txt
+todo_summary.txt
 
 # User environment overrides (see .env.defaults for template)
 .env

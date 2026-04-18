@@ -42,7 +42,7 @@ each built around an existing runnable example script. Tutorial style: explain
 ## Out of Scope
 
 - Auto-generated API reference (already in `docs/api/`)
-- Example pages for collision_features_demo, mobile_manipulator, memory_profiling_demo (separate request)
+- Example pages for collision_features_demo, mobile_manipulator (separate request)
 
 ## Success Criteria
 

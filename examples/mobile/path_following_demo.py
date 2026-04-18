@@ -27,7 +27,7 @@ import numpy as np
 import pybullet as p
 
 from pybullet_fleet.agent import Agent, AgentSpawnParams
-from pybullet_fleet.core_simulation import MultiRobotSimulationCore, SimulationParams
+from pybullet_fleet.core_simulation import MultiRobotSimulationCore
 from pybullet_fleet.geometry import Path, Pose
 from pybullet_fleet.robot_models import resolve_model
 from pybullet_fleet.sim_object import ShapeParams
@@ -39,10 +39,14 @@ _parser.add_argument("--rtf", type=float, default=None, help="Target real-time f
 _args = _parser.parse_args()
 
 
+_CONFIG = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "config", "config.yaml")
+
+
 def main():
     # Create simulation
-    params = SimulationParams(gui=True, timestep=0.1, target_rtf=_args.rtf if _args.rtf is not None else 3.0, physics=False)
-    sim = MultiRobotSimulationCore(params)
+    sim = MultiRobotSimulationCore.from_yaml(_CONFIG)
+    if _args.rtf is not None:
+        sim.params.target_rtf = _args.rtf
 
     # Get absolute paths
     current_dir = os.path.dirname(os.path.abspath(__file__))

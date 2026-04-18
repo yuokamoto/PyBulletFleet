@@ -82,6 +82,7 @@ _DEFAULTS: Dict[str, Dict[str, Any]] = {
         "max_angular_accel": 10.0,
         "motion_mode": "differential",
         "use_fixed_base": False,
+        "navigation_2d": False,
         # Not centralized (complex / per-instance):
         #   urdf_path          — str, per-robot URDF path
         #   ik_params          — IKParams dataclass (see "ik" section for scalars)

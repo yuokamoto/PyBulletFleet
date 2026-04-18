@@ -6,7 +6,8 @@ RTF is controlled by the timer period.
 
 Usage::
 
-    ros2 run pybullet_fleet_ros bridge_node --ros-args -p num_robots:=5
+    ros2 run pybullet_fleet_ros bridge_node \
+        --ros-args -p config_yaml:=/path/to/config.yaml
 """
 
 import logging
@@ -21,12 +22,9 @@ from pybullet_fleet import (
     Agent,
     AgentSpawnParams,
     MultiRobotSimulationCore,
-    Pose,
-    SimulationParams,
 )
 from pybullet_fleet.config_utils import load_yaml_config
 from pybullet_fleet.controller import OmniController
-from pybullet_fleet.robot_models import resolve_urdf
 from pybullet_fleet.types import MotionMode
 
 from .conversions import sim_time_to_ros_time
@@ -39,13 +37,11 @@ class BridgeNode(Node):
     """ROS 2 node that drives PyBulletFleet simulation and exposes per-robot topics.
 
     Parameters (ROS):
-        config_yaml (str): Path to PyBulletFleet YAML config file.
-        num_robots (int): Number of mobile robots to spawn at startup.
-        robot_urdf (str): URDF path for default mobile robot.
+        config_yaml (str): Path to PyBulletFleet YAML config file (required).
         publish_rate (float): State publish rate in Hz.
-        gui (bool): Enable PyBullet GUI window.
-        physics (bool): Enable physics simulation.
-        target_rtf (float): Target real-time factor (1.0 = real time).
+        gui (bool): Enable PyBullet GUI window (overrides YAML).
+        physics (bool): Enable physics simulation (overrides YAML).
+        target_rtf (float): Target real-time factor (overrides YAML).
         enable_sim_services (bool): Create simulation_interfaces services.
     """
 
@@ -58,8 +54,6 @@ class BridgeNode(Node):
 
         _dyn = ParameterDescriptor(dynamic_typing=True)
         self.declare_parameter("config_yaml", "")
-        self.declare_parameter("num_robots", 1)
-        self.declare_parameter("robot_urdf", "robots/mobile_robot.urdf")
         self.declare_parameter("publish_rate", 50.0, _dyn)
         self.declare_parameter("gui", False, _dyn)
         self.declare_parameter("physics", False, _dyn)
@@ -68,39 +62,46 @@ class BridgeNode(Node):
 
         # Read parameters (handle string overrides from launch files)
         config_yaml = self.get_parameter("config_yaml").get_parameter_value().string_value
-        num_robots = self.get_parameter("num_robots").get_parameter_value().integer_value
-        robot_urdf = self.get_parameter("robot_urdf").get_parameter_value().string_value
         publish_rate = self._get_float("publish_rate", 50.0)
         gui = self._get_bool("gui", False)
         physics = self._get_bool("physics", False)
         target_rtf = self._get_float("target_rtf", 1.0)
         enable_sim_services = self._get_bool("enable_sim_services", True)
 
-        # Create simulation core
-        if config_yaml:
-            bridge_config = load_yaml_config(config_yaml)
-            sim_overrides = bridge_config.get("simulation", {})
-            self.sim = MultiRobotSimulationCore(
-                SimulationParams(
-                    gui=sim_overrides.get("gui", gui),
-                    physics=sim_overrides.get("physics", physics),
-                    monitor=False,
-                    target_rtf=sim_overrides.get("target_rtf", target_rtf),
-                )
-            )
-        else:
-            bridge_config = {}
-            self.sim = MultiRobotSimulationCore(
-                SimulationParams(
-                    gui=gui,
-                    physics=physics,
-                    monitor=False,
-                    target_rtf=target_rtf,
-                )
+        if not config_yaml:
+            raise RuntimeError(
+                "config_yaml parameter is required. "
+                "Usage: ros2 run pybullet_fleet_ros bridge_node "
+                "--ros-args -p config_yaml:=/path/to/config.yaml"
             )
 
-        # Initialize simulation (prepare state without entering blocking loop)
-        self.sim.initialize_simulation()
+        # Create simulation core
+        # ROS parameters (from launch/CLI) override YAML config values.
+        bridge_config = load_yaml_config(config_yaml)
+        sim_overrides = bridge_config.get("simulation", {})
+        effective_gui = gui if gui else sim_overrides.get("gui", False)
+        effective_physics = physics if physics else sim_overrides.get("physics", False)
+        effective_rtf = target_rtf if target_rtf != 1.0 else sim_overrides.get("target_rtf", 1.0)
+
+        # Apply ROS parameter overrides into the config dict
+        sim_overrides = dict(sim_overrides)
+        sim_overrides["gui"] = effective_gui
+        sim_overrides["physics"] = effective_physics
+        sim_overrides["target_rtf"] = effective_rtf
+        sim_overrides["monitor"] = False
+
+        # Delegate world loading & robot spawning to core
+        full_config = dict(bridge_config)
+        full_config["simulation"] = sim_overrides
+        self.sim = MultiRobotSimulationCore.from_dict(full_config)
+
+        # Set up camera view (must be called after from_dict)
+        self.sim.setup_camera()
+
+        # Enable rendering — from_dict disables it during setup for
+        # performance.  run_simulation() re-enables it, but BridgeNode
+        # drives step_once() via ROS timer, so we must do it here.
+        self.sim.enable_rendering()
 
         # TF broadcaster (shared by all handlers)
         self._tf_broadcaster = TransformBroadcaster(self)
@@ -108,40 +109,14 @@ class BridgeNode(Node):
         # Robot handlers (object_id → RobotHandler)
         self._handlers: Dict[int, "RobotHandler"] = {}
 
-        # Spawn robots: prefer config_yaml robots list, fallback to num_robots
-        robots_config = bridge_config.get("robots", [])
-        if robots_config:
-            # Resolve model names (e.g. "ur5e") to absolute URDF paths
-            for d in robots_config:
-                if "urdf_path" in d:
-                    try:
-                        d["urdf_path"] = resolve_urdf(d["urdf_path"])
-                    except FileNotFoundError as e:
-                        logger.warning("Could not resolve '%s': %s", d["urdf_path"], e)
-            robots_params = [AgentSpawnParams.from_dict(d) for d in robots_config]
-        else:
-            # Resolve model name for the default robot_urdf parameter
-            try:
-                robot_urdf = resolve_urdf(robot_urdf)
-            except FileNotFoundError:
-                pass  # Keep as-is (relative path for pybullet)
-            robots_params = [
-                AgentSpawnParams(
-                    urdf_path=robot_urdf,
-                    initial_pose=Pose.from_xyz(i * 2.0, 0.0, 0.05),
-                    motion_mode=MotionMode.DIFFERENTIAL,
-                    max_linear_vel=2.0,
-                    max_angular_vel=3.0,
-                    name=f"robot{i}",
-                )
-                for i in range(num_robots)
-            ]
+        # Register ROS handlers for all agents already in the sim
+        for agent in self.sim.agents:
+            self._register_handler(agent)
+        actual_count = len(self.sim.agents)
 
-        with self.sim.batch_spawn():
-            for params in robots_params:
-                agent = Agent.from_params(params, sim_core=self.sim)
-                self._register_handler(agent)
-        actual_count = len(robots_params)
+        # EventBus: auto-register/unregister handlers when agents spawn/despawn
+        self.sim.events.on("agent_spawned", self._on_agent_spawned)
+        self.sim.events.on("agent_removed", self._on_agent_removed)
 
         # /clock publisher
         self._clock_pub = self.create_publisher(Clock, "/clock", 10)
@@ -240,25 +215,50 @@ class BridgeNode(Node):
         self.get_logger().info(f"Removed robot '{handler.agent.name}' (id={object_id})")
         return True
 
+    def _on_agent_spawned(self, agent):
+        """Auto-register RobotHandler when agent spawns via EventBus."""
+        if agent.object_id not in self._handlers:
+            self._register_handler(agent)
+            self.get_logger().info(f"EventBus: auto-registered handler for {agent.name}")
+
+    def _on_agent_removed(self, agent):
+        """Auto-cleanup when agent is removed via EventBus."""
+        handler = self._handlers.pop(agent.object_id, None)
+        if handler is not None:
+            handler.destroy()
+            self.get_logger().info(f"EventBus: removed handler for {agent.name}")
+
     def _step_callback(self) -> None:
         """Called every sim timestep — advance simulation."""
-        # Apply pending cmd_vel commands
-        for handler in self._handlers.values():
-            handler.apply_cmd_vel()
+        try:
+            # Apply pending cmd_vel commands
+            for handler in self._handlers.values():
+                handler.apply_cmd_vel()
 
-        # Step the simulation
-        self.sim.step_once()
+            # Step the simulation
+            self.sim.step_once()
 
-        # Publish /clock
-        clock_msg = Clock()
-        clock_msg.clock = sim_time_to_ros_time(self.sim.sim_time)
-        self._clock_pub.publish(clock_msg)
+            # Publish /clock
+            clock_msg = Clock()
+            clock_msg.clock = sim_time_to_ros_time(self.sim.sim_time)
+            self._clock_pub.publish(clock_msg)
+        except Exception as e:
+            if "Not connected" in str(e) or "physics server" in str(e):
+                self.get_logger().warn("PyBullet disconnected, requesting shutdown")
+                raise SystemExit(0)
+            raise
 
     def _publish_callback(self) -> None:
         """Called at publish_rate — publish state for all robots."""
-        stamp = sim_time_to_ros_time(self.sim.sim_time)
-        for handler in self._handlers.values():
-            handler.publish_state(stamp)
+        try:
+            stamp = sim_time_to_ros_time(self.sim.sim_time)
+            for handler in self._handlers.values():
+                handler.publish_state(stamp)
+        except Exception as e:
+            if "Not connected" in str(e) or "physics server" in str(e):
+                self.get_logger().warn("PyBullet disconnected, skipping publish")
+                return
+            raise
 
     @property
     def handlers(self) -> Dict[int, "RobotHandler"]:

@@ -17,7 +17,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 import pybullet as p
 from pybullet_fleet.agent import AgentSpawnParams
 from pybullet_fleet.agent_manager import AgentManager, GridSpawnParams
-from pybullet_fleet.core_simulation import MultiRobotSimulationCore, SimulationParams
+from pybullet_fleet.config_utils import load_yaml_config, merge_configs
+from pybullet_fleet.core_simulation import MultiRobotSimulationCore
 from pybullet_fleet.sim_object import Pose, SimObject, ShapeParams
 from pybullet_fleet.action import JointAction, PickAction, DropAction, WaitAction
 from pybullet_fleet.robot_models import resolve_model
@@ -56,19 +57,17 @@ if args.robot not in JOINT_PRESETS:
     raise SystemExit(f"No preset for '{args.robot}'. Available: {', '.join(JOINT_PRESETS)}")
 _P = JOINT_PRESETS[args.robot]
 
-# Simulation setup with memory profiling enabled
-params = SimulationParams(
-    gui=True,
-    timestep=0.1,
-    target_rtf=args.rtf if args.rtf is not None else 0,
-    physics=False,
-    ignore_static_collision=True,
-    log_level="info",
-    enable_time_profiling=False,  # Time profiling
-    enable_memory_profiling=False,  # Memory profiling
-    profiling_interval=500,  # Report every 500 steps
-)
-sim_core = MultiRobotSimulationCore(params)
+# Simulation setup — base config + demo-specific overrides (no separate YAML needed)
+_BASE_CONFIG = os.path.join(os.path.dirname(__file__), "..", "..", "config", "config.yaml")
+_OVERRIDES = {
+    "simulation": {
+        "target_rtf": 0,
+    }
+}
+config = merge_configs(load_yaml_config(_BASE_CONFIG), _OVERRIDES)
+sim_core = MultiRobotSimulationCore.from_dict(config)
+if args.rtf is not None:
+    sim_core.params.target_rtf = args.rtf
 
 # Create AgentManager
 agent_manager = AgentManager(sim_core=sim_core, update_frequency=10.0)

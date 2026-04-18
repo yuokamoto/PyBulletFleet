@@ -1,5 +1,8 @@
-# tests/test_world_loader.py
-"""Tests for load_mesh_directory() and backward-compat load_rmf_world alias."""
+# tests/test_mesh_loader.py
+"""Tests for load_mesh_directory() and backward-compat load_rmf_world alias.
+
+Functions live in sdf_loader.py; world_loader.py re-exports for compatibility.
+"""
 
 import pybullet as p
 import pytest
@@ -7,7 +10,7 @@ import pytest
 from pybullet_fleet import MultiRobotSimulationCore, SimulationParams
 from pybullet_fleet.sim_object import SimObject
 from pybullet_fleet.types import CollisionMode
-from pybullet_fleet.world_loader import load_mesh_directory, load_rmf_world
+from pybullet_fleet.sdf_loader import load_mesh_directory, load_rmf_world
 
 
 @pytest.fixture

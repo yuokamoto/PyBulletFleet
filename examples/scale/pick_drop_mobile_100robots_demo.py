@@ -21,7 +21,8 @@ import numpy as np
 
 from pybullet_fleet.agent import AgentSpawnParams, MotionMode
 from pybullet_fleet.agent_manager import AgentManager, GridSpawnParams, SimObjectManager
-from pybullet_fleet.core_simulation import MultiRobotSimulationCore, SimulationParams
+from pybullet_fleet.config_utils import load_yaml_config, merge_configs
+from pybullet_fleet.core_simulation import MultiRobotSimulationCore
 from pybullet_fleet.sim_object import Pose, SimObject, ShapeParams, SimObjectSpawnParams
 from pybullet_fleet.action import MoveAction, PickAction, DropAction, WaitAction
 from pybullet_fleet.geometry import Path
@@ -33,11 +34,17 @@ parser.add_argument("--duration", type=float, default=None, help="Simulation dur
 parser.add_argument("--rtf", type=float, default=None, help="Target real-time factor override")
 args = parser.parse_args()
 
-# Simulation setup
-params = SimulationParams(
-    gui=True, timestep=0.1, ignore_static_collision=True, target_rtf=args.rtf if args.rtf is not None else 10, physics=False
-)
-sim_core = MultiRobotSimulationCore(params)
+# Simulation setup — base config + demo-specific overrides (no separate YAML needed)
+_BASE_CONFIG = os.path.join(os.path.dirname(__file__), "..", "..", "config", "config.yaml")
+_OVERRIDES = {
+    "simulation": {
+        "target_rtf": 0,
+    }
+}
+config = merge_configs(load_yaml_config(_BASE_CONFIG), _OVERRIDES)
+sim_core = MultiRobotSimulationCore.from_dict(config)
+if args.rtf is not None:
+    sim_core.params.target_rtf = args.rtf
 
 # Create AgentManager
 agent_manager = AgentManager(sim_core=sim_core, update_frequency=10.0)

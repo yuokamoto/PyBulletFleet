@@ -5,7 +5,7 @@ with heterogeneous robot types, and that the 6-DoF OmniController
 correctly handles angular velocities (wx, wy, wz) on the cube.
 
 Run with:
-    cd /opt/bridge_ws && colcon test --packages-select pybullet_fleet_ros
+    cd /rmf_demos_ws && colcon test --packages-select pybullet_fleet_ros
 """
 
 import tempfile

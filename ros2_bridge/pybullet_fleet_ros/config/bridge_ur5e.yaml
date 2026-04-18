@@ -1,18 +1,18 @@
 # Bridge config: UR5e arm (Tier 2 — requires ros-${ROS_DISTRO}-ur-description)
 #
 # Demonstrates Tier 2 URDF resolution: the bridge resolves the model name
-# "ur5e" to the installed ROS package path via resolve_urdf().
+# "ur5e" to the installed ROS package path via resolve_model().
 #
 # Prerequisites:
 #   apt install ros-${ROS_DISTRO}-ur-description
 #
 # Usage (Docker):
 #   docker compose run --rm bridge ros2 run pybullet_fleet_ros bridge_node \
-#     --ros-args -p config_yaml:=/opt/bridge_ws/src/pybullet_fleet_ros/config/bridge_ur5e.yaml
+#     --ros-args -p config_yaml:=/rmf_demos_ws/src/pybullet_fleet_ros/config/bridge_ur5e.yaml
 #
 # GUI mode:
 #   GUI=true docker compose run --rm bridge ros2 run pybullet_fleet_ros bridge_node \
-#     --ros-args -p config_yaml:=/opt/bridge_ws/src/pybullet_fleet_ros/config/bridge_ur5e.yaml
+#     --ros-args -p config_yaml:=/rmf_demos_ws/src/pybullet_fleet_ros/config/bridge_ur5e.yaml
 #
 # Then send joint goals:
 #   python3 scripts/send_joint_goal.py --robot ur5e_0 \

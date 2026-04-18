@@ -59,14 +59,39 @@ class GridSpawnParams:
     z_min: int = 0
     z_max: int = 0
 
+    @property
+    def total_cells(self) -> int:
+        """Total number of grid cells: (x range) * (y range) * (z range)."""
+        return (self.x_max - self.x_min + 1) * (self.y_max - self.y_min + 1) * (self.z_max - self.z_min + 1)
+
     @classmethod
     def from_dict(cls, config: Dict[str, Any]) -> "GridSpawnParams":
         """Create GridSpawnParams from a configuration dictionary.
 
-        Required keys: ``x_min``, ``x_max``, ``y_min``, ``y_max``,
-        ``spacing``, ``offset``.
+        Supports two formats:
 
-        Optional keys: ``z_min`` (default 0), ``z_max`` (default 0).
+        **Explicit ranges** (original) — requires ``x_min``, ``x_max``,
+        ``y_min``, ``y_max``, ``spacing``, ``offset``::
+
+            grid:
+              x_min: 0
+              x_max: 9
+              y_min: 0
+              y_max: 4
+              spacing: [3.0, 3.0, 0.0]
+              offset: [0, 0, 0.05]
+
+        **Count-based** (convenience) — requires ``count`` and
+        ``spacing``; ``columns`` and ``offset`` are optional::
+
+            grid:
+              count: 50
+              spacing: [3.0, 3.0]
+              offset: [0, 0, 0.05]
+              columns: 10
+
+        When ``count`` is present, :meth:`from_count` is used to
+        compute the grid ranges.
 
         Args:
             config: Configuration dictionary.
@@ -77,6 +102,16 @@ class GridSpawnParams:
         Raises:
             KeyError: If a required key is missing.
         """
+        if "count" in config:
+            import math
+
+            count = config["count"]
+            spacing_raw = config["spacing"]
+            spacing = [spacing_raw[0], spacing_raw[1], 0.0] if len(spacing_raw) == 2 else list(spacing_raw)
+            offset = list(config.get("offset", [0.0, 0.0, 0.0]))
+            columns = config.get("columns", math.ceil(math.sqrt(count)))
+            return cls.from_count(count=count, columns=columns, spacing=spacing, offset=offset)
+
         return cls(
             x_min=config["x_min"],
             x_max=config["x_max"],
@@ -86,6 +121,46 @@ class GridSpawnParams:
             offset=config["offset"],
             z_min=config.get("z_min", 0),
             z_max=config.get("z_max", 0),
+        )
+
+    @classmethod
+    def from_count(
+        cls,
+        count: int,
+        columns: Optional[int] = None,
+        spacing: Optional[List[float]] = None,
+        offset: Optional[List[float]] = None,
+    ) -> "GridSpawnParams":
+        """Create GridSpawnParams from a total entity count.
+
+        Computes ``x_max`` and ``y_max`` from *count* and *columns*
+        so that the grid has exactly enough cells.  Useful when you
+        know "I want 50 robots" rather than "x_max=9, y_max=4".
+
+        Args:
+            count: Total number of entities to place.
+            columns: Grid width (X cells) before wrapping to the next
+                row.  Defaults to ``ceil(sqrt(count))``.
+            spacing: ``[sx, sy, sz]`` in metres.  Default ``[1,1,0]``.
+            offset: ``[ox, oy, oz]`` origin offset.  Default ``[0,0,0]``.
+
+        Returns:
+            GridSpawnParams with ``x_min=0``, ``y_min=0``,
+            ``x_max=columns-1``, ``y_max=ceil(count/columns)-1``.
+        """
+        import math
+
+        if columns is None:
+            columns = math.ceil(math.sqrt(count))
+        rows = math.ceil(count / columns)
+
+        return cls(
+            x_min=0,
+            x_max=columns - 1,
+            y_min=0,
+            y_max=rows - 1,
+            spacing=spacing if spacing is not None else [1.0, 1.0, 0.0],
+            offset=offset if offset is not None else [0.0, 0.0, 0.0],
         )
 
 
@@ -149,6 +224,45 @@ class SimObjectManager(Generic[T]):
         self.objects.append(obj)
         self.body_ids[obj.body_id] = obj
         self.object_ids[obj.object_id] = obj
+
+    def remove_object(self, obj: T) -> bool:
+        """Remove an object from the manager's tracking lists.
+
+        This only removes the object from the *manager's* bookkeeping
+        (``objects``, ``body_ids``, ``object_ids``).  It does **not**
+        touch ``sim_core`` or PyBullet — that is handled by
+        :meth:`MultiRobotSimulationCore.remove_object`.
+
+        Called automatically by ``sim_core.remove_object()`` when this
+        manager is registered via ``sim_core.register_manager()``.
+
+        Args:
+            obj: The object to remove.
+
+        Returns:
+            True if the object was found and removed, False otherwise.
+        """
+        if obj.object_id not in self.object_ids:
+            return False
+        try:
+            self.objects.remove(obj)
+        except ValueError:
+            pass
+        self.body_ids.pop(obj.body_id, None)
+        self.object_ids.pop(obj.object_id, None)
+        return True
+
+    def clear(self) -> None:
+        """Remove all objects from the manager's tracking lists.
+
+        This is a manager-only operation — it does **not** remove objects
+        from ``sim_core`` or PyBullet.  Typically called by
+        ``sim_core.reset()`` to keep the manager in sync after a full
+        simulation reset.
+        """
+        self.objects.clear()
+        self.body_ids.clear()
+        self.object_ids.clear()
 
     def spawn_objects_grid(
         self, num_objects: int, grid_params: GridSpawnParams, spawn_params: SimObjectSpawnParams

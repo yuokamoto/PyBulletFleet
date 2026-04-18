@@ -41,17 +41,26 @@ The action queue solves this:
 
 ```python
 from pybullet_fleet.agent import Agent, AgentSpawnParams, MotionMode
-from pybullet_fleet.core_simulation import MultiRobotSimulationCore, SimulationParams
+from pybullet_fleet.core_simulation import MultiRobotSimulationCore
 from pybullet_fleet.geometry import Pose, Path
 from pybullet_fleet.sim_object import SimObject, SimObjectSpawnParams, ShapeParams
 from pybullet_fleet.action import MoveAction, WaitAction, PickAction, DropAction
 
-params = SimulationParams(gui=True, timestep=0.1, target_rtf=3, physics=False)
-sim = MultiRobotSimulationCore(params)
+sim = MultiRobotSimulationCore.from_yaml("config/config.yaml")
 ```
 
-**`target_rtf=3`** — the simulation runs at most 3× real time, making the GUI easy to follow.
-For maximum speed (benchmarking / headless) use `target_rtf=0`.
+The YAML config uses a nested format under the `simulation:` key:
+
+```yaml
+simulation:
+  gui: true
+  timestep: 0.1
+  target_rtf: 3
+  physics: false
+```
+
+**`target_rtf: 3`** — the simulation runs at most 3× real time, making the GUI easy to follow.
+For maximum speed (benchmarking / headless) use `target_rtf: 0`.
 
 ```python
 import os

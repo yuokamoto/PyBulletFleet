@@ -595,3 +595,137 @@ class TestSpawnParamsControllerConfig:
         agent = Agent.from_params(params, sim_core)
         assert isinstance(agent._controller, DifferentialController)
         assert agent._controller._max_linear_vel == pytest.approx(1.5)
+
+
+# -----------------------------------------------------------------------
+# navigation_2d flag
+# -----------------------------------------------------------------------
+
+
+class TestNavigation2DFlag:
+    """Tests for the navigation_2d flag on KinematicController.
+
+    Default (True) preserves current Z during pose-mode navigation.
+    When False, goal Z is used as-is for 3D movement.
+    """
+
+    @staticmethod
+    def _run_path(agent, sim_core, steps=2000):
+        """Tick sim_time + agent.update in lockstep."""
+        dt = sim_core._dt
+        for _ in range(steps):
+            sim_core.sim_time += dt
+            agent.update(dt)
+
+    def test_default_is_2d(self):
+        """KinematicController defaults to navigation_2d=False."""
+        ctrl = OmniController()
+        assert ctrl._navigation_2d is False
+
+    def test_omni_2d_preserves_z(self, sim_core):
+        """Omni with navigation_2d=True: Z stays at initial value (current behavior)."""
+        spawn_z = 0.05
+        params = AgentSpawnParams(
+            urdf_path="robots/mobile_robot.urdf",
+            initial_pose=Pose.from_xyz(0, 0, spawn_z),
+            motion_mode=MotionMode.OMNIDIRECTIONAL,
+        )
+        agent = Agent.from_params(params, sim_core)
+        ctrl = OmniController(navigation_2d=True)
+        agent.set_controller(ctrl)
+
+        # Goal at z=5.0 — should be ignored in 2D mode
+        goal = Pose.from_xyz(3.0, 4.0, 5.0)
+        ctrl.set_path(agent, [goal], final_orientation_align=False)
+
+        self._run_path(agent, sim_core)
+        final_pose = agent.get_pose()
+
+        assert final_pose.x == pytest.approx(3.0, abs=0.05)
+        assert final_pose.y == pytest.approx(4.0, abs=0.05)
+        assert final_pose.z == pytest.approx(spawn_z, abs=0.02), "Z should be preserved in 2D mode"
+
+    def test_omni_3d_reaches_goal_z(self, sim_core):
+        """Omni with navigation_2d=False: Z reaches goal value."""
+        spawn_z = 0.05
+        params = AgentSpawnParams(
+            urdf_path="robots/mobile_robot.urdf",
+            initial_pose=Pose.from_xyz(0, 0, spawn_z),
+            motion_mode=MotionMode.OMNIDIRECTIONAL,
+        )
+        agent = Agent.from_params(params, sim_core)
+        ctrl = OmniController(navigation_2d=False)
+        agent.set_controller(ctrl)
+
+        goal_z = 5.0
+        goal = Pose.from_xyz(3.0, 4.0, goal_z)
+        ctrl.set_path(agent, [goal], final_orientation_align=False)
+
+        self._run_path(agent, sim_core)
+        final_pose = agent.get_pose()
+
+        assert final_pose.x == pytest.approx(3.0, abs=0.05)
+        assert final_pose.y == pytest.approx(4.0, abs=0.05)
+        assert final_pose.z == pytest.approx(goal_z, abs=0.05), "Z should reach goal in 3D mode"
+
+    def test_diff_3d_reaches_goal_z(self, sim_core):
+        """Differential with navigation_2d=False: Z reaches goal value."""
+        spawn_z = 0.05
+        params = AgentSpawnParams(
+            urdf_path="robots/mobile_robot.urdf",
+            initial_pose=Pose.from_xyz(0, 0, spawn_z),
+            motion_mode=MotionMode.DIFFERENTIAL,
+        )
+        agent = Agent.from_params(params, sim_core)
+        ctrl = DifferentialController(navigation_2d=False)
+        agent.set_controller(ctrl)
+
+        goal_z = 3.0
+        goal = Pose.from_xyz(5.0, 0.0, goal_z)
+        ctrl.set_path(agent, [goal], final_orientation_align=False)
+
+        self._run_path(agent, sim_core)
+        final_pose = agent.get_pose()
+
+        assert final_pose.x == pytest.approx(5.0, abs=0.1)
+        assert final_pose.z == pytest.approx(goal_z, abs=0.1), "Z should reach goal in 3D mode"
+
+    def test_diff_2d_preserves_z(self, sim_core):
+        """Differential with navigation_2d=True: Z stays at initial value."""
+        spawn_z = 0.05
+        params = AgentSpawnParams(
+            urdf_path="robots/mobile_robot.urdf",
+            initial_pose=Pose.from_xyz(0, 0, spawn_z),
+            motion_mode=MotionMode.DIFFERENTIAL,
+        )
+        agent = Agent.from_params(params, sim_core)
+        ctrl = DifferentialController(navigation_2d=True)
+        agent.set_controller(ctrl)
+
+        goal = Pose.from_xyz(5.0, 0.0, 10.0)
+        ctrl.set_path(agent, [goal], final_orientation_align=False)
+
+        self._run_path(agent, sim_core)
+        final_pose = agent.get_pose()
+
+        assert final_pose.x == pytest.approx(5.0, abs=0.1)
+        assert final_pose.z == pytest.approx(spawn_z, abs=0.02), "Z should be preserved in 2D mode"
+
+    def test_from_config_navigation_2d(self):
+        """from_config passes navigation_2d to controller."""
+        ctrl = OmniController.from_config({"navigation_2d": True})
+        assert ctrl._navigation_2d is True  # type: ignore[reportAttributeAccessIssue]
+
+        ctrl2 = DifferentialController.from_config({"navigation_2d": True})
+        assert ctrl2._navigation_2d is True  # type: ignore[reportAttributeAccessIssue]
+
+    def test_spawn_params_navigation_2d(self, sim_core):
+        """AgentSpawnParams.navigation_2d propagates to default controller."""
+        params = AgentSpawnParams(
+            urdf_path="robots/mobile_robot.urdf",
+            initial_pose=Pose.from_xyz(0, 0, 0.05),
+            motion_mode=MotionMode.OMNIDIRECTIONAL,
+            navigation_2d=True,
+        )
+        agent = Agent.from_params(params, sim_core)
+        assert agent._controller._navigation_2d is True

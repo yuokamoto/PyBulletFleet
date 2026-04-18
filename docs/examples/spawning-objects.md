@@ -22,13 +22,22 @@ After this tutorial you can move on to
 
 ## 1. Initialize the Simulation
 
-Every simulation starts with two objects: `SimulationParams` and `MultiRobotSimulationCore`.
+Every simulation starts by creating a `MultiRobotSimulationCore` — the recommended way is
+`from_yaml()`, which loads all parameters from a nested YAML config file in one call:
 
 ```python
-from pybullet_fleet.core_simulation import MultiRobotSimulationCore, SimulationParams
+from pybullet_fleet.core_simulation import MultiRobotSimulationCore
 
-params = SimulationParams(gui=True, timestep=0.01, physics=True)
-sim_core = MultiRobotSimulationCore(params)
+sim_core = MultiRobotSimulationCore.from_yaml("config/config.yaml")
+```
+
+The YAML file uses a nested format under the `simulation:` key:
+
+```yaml
+simulation:
+  gui: true
+  timestep: 0.01
+  physics: true
 ```
 
 **Key parameters:**

@@ -7,29 +7,27 @@
 #
 # ========================================
 
-
 # ========================================
 # Simulation Parameters (Override)
 # ========================================
+simulation:
+  # Override base config settings for 100robots demo
+  target_rtf: 0     # real-time cap (0 = uncapped/max speed, run as fast as possible)
+  gui: true         # Show GUI
+  timestep: 0.1     # 100ms timestep (10 Hz) for smooth movement
+  physics: false    # Kinematic control
+  monitor: true     # Enable monitor
+  log_level: info   # Show INFO level logs for profiling
 
-# Override base config settings for 100robots demo
-target_rtf: 0     # real-time cap (0 = uncapped/max speed, run as fast as possible)
-gui: true         # Show GUI
-timestep: 0.1     # 100ms timestep (10 Hz) for smooth movement
-physics: false    # Kinematic control
-monitor: true     # Enable monitor
-log_level: info   # Show INFO level logs for profiling
+  # Profiling configuration
+  enable_time_profiling: true
+  profiling_interval: 100  # Print average every 100 steps
 
-# Profiling configuration
-enable_time_profiling: true
-profiling_interval: 100  # Print average every 100 steps
-
-# Camera settings for 100 robots
-camera:
-  camera_mode: auto              # Use auto mode for automatic camera positioning
-  camera_view_type: perspective  # Perspective view for grid visualization
-  camera_auto_scale: 0.5         # Scale factor for camera distance (larger = farther away)
-
+  # Camera settings for 100 robots
+  camera:
+    camera_mode: auto              # Use auto mode for automatic camera positioning
+    camera_view_type: perspective  # Perspective view for grid visualization
+    camera_auto_scale: 0.5         # Scale factor for camera distance (larger = farther away)
 
 # ========================================
 # Robot Parameters

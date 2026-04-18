@@ -22,7 +22,7 @@ import pybullet as p
 import math
 
 from pybullet_fleet.agent import Agent, AgentSpawnParams, IKParams, MotionMode
-from pybullet_fleet.core_simulation import MultiRobotSimulationCore, SimulationParams
+from pybullet_fleet.core_simulation import MultiRobotSimulationCore
 from pybullet_fleet.sim_object import Pose, SimObject, ShapeParams
 from pybullet_fleet.action import (
     MoveAction,
@@ -55,8 +55,10 @@ print("  ee_target_position solved by inverse kinematics\n")
 # ---------------------------------------------------------------------------
 # Simulation
 # ---------------------------------------------------------------------------
-params = SimulationParams(gui=True, timestep=0.1, physics=False, target_rtf=_args.rtf if _args.rtf is not None else 3)
-sim_core = MultiRobotSimulationCore(params)
+_CONFIG = os.path.join(os.path.dirname(__file__), "..", "..", "config", "config.yaml")
+sim_core = MultiRobotSimulationCore.from_yaml(_CONFIG)
+if _args.rtf is not None:
+    sim_core.params.target_rtf = _args.rtf
 
 # ---------------------------------------------------------------------------
 # Robot  (ik_joint_names tells IK to only solve arm joints, not wheels)

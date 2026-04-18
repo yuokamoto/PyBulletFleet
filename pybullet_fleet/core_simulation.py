@@ -26,11 +26,13 @@ import pybullet_data
 import yaml
 
 from pybullet_fleet.collision_visualizer import CollisionVisualizer  # deprecated, unused
+from pybullet_fleet.config_utils import load_yaml_config
 from pybullet_fleet.data_monitor import DataMonitor
 from pybullet_fleet.events import EventBus, SimEvents
 from pybullet_fleet.logging_utils import get_lazy_logger
 from pybullet_fleet.sim_object import SimObject
 from pybullet_fleet.agent import Agent
+from pybullet_fleet.agent_manager import SimObjectManager
 from pybullet_fleet.types import SpatialHashCellSizeMode, CollisionDetectionMethod, CollisionMode
 from pybullet_fleet._defaults import SIMULATION as _SIM_D
 
@@ -110,7 +112,9 @@ class SimulationParams:
     def from_config(cls, config_path: str = "config.yaml") -> "SimulationParams":
         with open(config_path, "r") as f:
             config = yaml.safe_load(f)
-        return cls.from_dict(config)
+        # Support nested layout: {simulation: {...}, world: {...}, robots: [...]}
+        sim_config = config.get("simulation", config) if isinstance(config, dict) else config
+        return cls.from_dict(sim_config)
 
     @classmethod
     def from_dict(cls, config: Dict[str, Any]) -> "SimulationParams":
@@ -185,22 +189,147 @@ class MultiRobotSimulationCore:
 
     @classmethod
     def from_yaml(cls, yaml_path: str = "config.yaml") -> "MultiRobotSimulationCore":
-        params = SimulationParams.from_config(yaml_path)
-        return cls(params)
+        """Create and initialise a simulation from a YAML config file.
+
+        Supports two YAML layouts:
+
+        **Nested** (recommended) — ``simulation``, ``world``, and
+        ``robots`` sections::
+
+            simulation:
+              gui: true
+              physics: false
+            world:
+              world_file: "/path/to/office.world"
+            robots:
+              - name: robot0
+                urdf_path: "robots/mobile_robot.urdf"
+                pose: [0, 0, 0.05]
+
+        **Flat** (legacy) — all keys at the top level::
+
+            gui: true
+            physics: false
+            timestep: 0.1
+
+        **Custom entity types** — register classes via dotted Python
+        paths so ``type:`` dispatch works without any Python code::
+
+            entity_classes:
+              forklift: "my_ros_pkg.entities.ForkliftAgent"
+              conveyor: "warehouse_sim.conveyor.ConveyorObject"
+
+            robots:
+              - type: forklift
+                urdf_path: robots/forklift.urdf
+                pose: [0, 0, 0.05]
+
+        When a ``world`` section is present and ``enable_floor`` is not
+        explicitly set in the simulation config, the floor plane is
+        automatically disabled (the world geometry replaces it).
+
+        Args:
+            yaml_path: Path to YAML config file.
+
+        Returns:
+            Fully initialised ``MultiRobotSimulationCore`` with world
+            loaded and robots spawned (if configured).
+        """
+        config = load_yaml_config(yaml_path)
+
+        # Register custom entity classes before spawning
+        entity_classes = config.get("entity_classes")
+        if entity_classes:
+            from pybullet_fleet.entity_registry import register_entity_classes_from_config
+
+            register_entity_classes_from_config(entity_classes)
+
+        # Extract each section independently
+        sim_config = config.get("simulation")
+        world_config = config.get("world", {})
+        robots_config = config.get("robots", [])
+
+        # Flat layout (legacy): no nested keys, entire config is sim params
+        if sim_config is None and not world_config and not robots_config:
+            sim_config = config
+        else:
+            sim_config = sim_config or {}
+
+        # Auto-disable floor when world geometry is provided
+        # (unless explicitly set in the config)
+        if world_config and "enable_floor" not in sim_config:
+            sim_config = dict(sim_config)  # avoid mutating caller's dict
+            sim_config["enable_floor"] = False
+
+        params = SimulationParams.from_dict(sim_config)
+        sim = cls(params)
+
+        # Load world environment if configured
+        if world_config:
+            skip_models = world_config.get("skip_models", [])
+            # Auto-skip robot model names so they aren't loaded as scenery
+            robot_names = [r.get("name", "") for r in robots_config if r.get("name")]
+            all_skip = list(set(skip_models + robot_names))
+            sim.load_world(world_config, skip_models=all_skip)
+
+        # Spawn robots if configured
+        if robots_config:
+            sim.spawn_robots_from_config(robots_config)
+
+        return sim
 
     @classmethod
     def from_dict(cls, config: Dict[str, Any]) -> "MultiRobotSimulationCore":
-        """
-        Create MultiRobotSimulationCore from a configuration dictionary.
+        """Create MultiRobotSimulationCore from a configuration dictionary.
+
+        Supports both flat simulation-params dicts and nested dicts with
+        ``simulation``, ``world``, and ``robots`` sections.  When nested
+        keys are present they are processed the same way as
+        :meth:`from_yaml`.
+
+        An optional ``entity_classes`` section maps names to dotted
+        Python paths for dynamic class registration (see
+        :meth:`from_yaml` for details).
 
         Args:
-            config: Configuration dictionary
+            config: Configuration dictionary.
 
         Returns:
-            MultiRobotSimulationCore instance
+            MultiRobotSimulationCore instance.
         """
-        params = SimulationParams.from_dict(config)
-        return cls(params)
+        # Register custom entity classes before spawning
+        entity_classes = config.get("entity_classes")
+        if entity_classes:
+            from pybullet_fleet.entity_registry import register_entity_classes_from_config
+
+            register_entity_classes_from_config(entity_classes)
+
+        # Extract each section independently
+        sim_config = config.get("simulation")
+        world_config = config.get("world", {})
+        robots_config = config.get("robots", [])
+
+        # Flat layout (legacy): no nested keys, entire config is sim params
+        if sim_config is None and not world_config and not robots_config:
+            params = SimulationParams.from_dict(config)
+            return cls(params)
+
+        sim_config = sim_config or {}
+
+        if world_config and "enable_floor" not in sim_config:
+            sim_config = dict(sim_config)
+            sim_config["enable_floor"] = False
+
+        params = SimulationParams.from_dict(sim_config)
+        sim = cls(params)
+
+        if world_config:
+            robot_names = [r.get("name", "") for r in robots_config if r.get("name")]
+            skip = list(set(world_config.get("skip_models", []) + robot_names))
+            sim.load_world(world_config, skip_models=skip)
+        if robots_config:
+            sim.spawn_robots_from_config(robots_config)
+        return sim
 
     def __init__(self, params: SimulationParams, collision_color: Optional[List[float]] = None) -> None:
         # Initialize log level from params
@@ -312,6 +441,9 @@ class MultiRobotSimulationCore:
         # --- Recording ---
         self._recorder: Optional[Any] = None  # Optional[SimulationRecorder] (lazy import to avoid circular)
 
+        # --- Registered managers (optional overlays for batch API) ---
+        self._registered_managers: List[SimObjectManager] = []
+
         self.setup_pybullet()
         self.setup_monitor()
 
@@ -389,6 +521,47 @@ class MultiRobotSimulationCore:
             sim_core.register_callback(my_callback, frequency=10.0)  # 10 Hz
         """
         self._callbacks.append({"func": callback, "frequency": frequency, "last_exec": 0.0})
+
+    def register_manager(self, manager: "SimObjectManager") -> None:
+        """Register a :class:`SimObjectManager` (or subclass) with this simulation.
+
+        Registered managers are automatically synchronised when objects are
+        removed via :meth:`remove_object` or the simulation is :meth:`reset`.
+        The manager's ``sim_core`` attribute is set to *self*.
+
+        A manager can only be registered once; duplicate calls are ignored.
+
+        Args:
+            manager: The manager instance to register.
+
+        Example::
+
+            from pybullet_fleet.agent_manager import AgentManager
+
+            mgr = AgentManager()
+            sim.register_manager(mgr)
+            mgr.spawn_agents_grid(10, grid_params, spawn_params)
+            # When sim.remove_object(agent) is called later,
+            # mgr.objects is kept in sync automatically.
+        """
+        if manager in self._registered_managers:
+            return
+        manager.sim_core = self
+        self._registered_managers.append(manager)
+        logger.debug("Registered manager %r (total: %d)", manager, len(self._registered_managers))
+
+    def unregister_manager(self, manager: "SimObjectManager") -> bool:
+        """Remove a manager from the registry.
+
+        Returns:
+            True if the manager was found and removed, False otherwise.
+        """
+        try:
+            self._registered_managers.remove(manager)
+            logger.debug("Unregistered manager %r", manager)
+            return True
+        except ValueError:
+            return False
 
     def unregister_callback(self, callback_func: Callable) -> bool:
         """Remove a registered callback by function reference.
@@ -1337,6 +1510,11 @@ class MultiRobotSimulationCore:
             except p.error:
                 logger.warning(f"Failed to remove PyBullet body {obj.body_id}")
 
+        # Sync registered managers: remove object if tracked
+        for mgr in self._registered_managers:
+            if obj_id in mgr.object_ids:
+                mgr.remove_object(obj)
+
         # Trigger cell_size recalculation in auto_adaptive mode
         if self._params.spatial_hash_cell_size_mode == SpatialHashCellSizeMode.AUTO_ADAPTIVE:
             self.set_collision_spatial_hash_cell_size_mode()
@@ -2283,6 +2461,10 @@ class MultiRobotSimulationCore:
         self._robot_original_colors.clear()
         self._original_visual_colors.clear()
 
+        # 1b. Clear registered managers
+        for mgr in self._registered_managers:
+            mgr.clear()
+
         # 2. Reset PyBullet world (removes all bodies including ground plane)
         p.resetSimulation(physicsClientId=self._client)
 
@@ -2302,6 +2484,241 @@ class MultiRobotSimulationCore:
         self.initialize_simulation()
 
         logger.info("Simulation reset: all objects removed, world reloaded")
+
+    # ------------------------------------------------------------------
+    # Config-driven world & robot loading
+    # ------------------------------------------------------------------
+
+    def load_world(
+        self,
+        world_config: Dict[str, Any],
+        skip_models: Optional[List[str]] = None,
+    ) -> List[SimObject]:
+        """Load world environment from a configuration dictionary.
+
+        Supports three sources (checked in priority order):
+
+        1. ``world_file`` — a Gazebo ``.world`` file with ``<include>``
+           elements (buildings, furniture, props).
+        2. ``sdf`` — a single SDF model file (building geometry).
+        3. ``mesh_dir`` — a directory of OBJ/STL mesh files.
+
+        Args:
+            world_config: Dictionary with world loading options::
+
+                {
+                    "world_file": "/path/to/office.world",
+                    "skip_models": ["TinyRobot", "TeleportDispenser"],
+                }
+
+                or::
+
+                    {"sdf": "/path/to/model.sdf"}
+
+                or::
+
+                    {"mesh_dir": "/path/to/meshes/"}
+
+            skip_models: Model names to skip when loading a ``.world``
+                file (e.g. robot names that are spawned separately).
+
+        Returns:
+            List of :class:`SimObject` instances created from the world.
+
+        Example::
+
+            sim = MultiRobotSimulationCore(SimulationParams(enable_floor=False))
+            sim.initialize_simulation()
+            objs = sim.load_world({"world_file": "/maps/office.world"})
+        """
+        from pybullet_fleet.sdf_loader import (
+            load_mesh_directory,
+            load_sdf_world,
+            load_sdf_world_file,
+        )
+
+        world_file = world_config.get("world_file", "")
+        world_sdf = world_config.get("sdf", "")
+        world_mesh_dir = world_config.get("mesh_dir", "")
+        skip = skip_models or world_config.get("skip_models", [])
+
+        if world_file:
+            objs = load_sdf_world_file(world_file, sim_core=self, skip_models=skip)
+            logger.info("Loaded %d objects from world file %s", len(objs), world_file)
+            return objs
+
+        if world_sdf:
+            objs = load_sdf_world(world_sdf, sim_core=self)
+            logger.info("Loaded %d links from SDF %s", len(objs), world_sdf)
+            return objs
+
+        if world_mesh_dir:
+            if not os.path.isabs(world_mesh_dir):
+                world_mesh_dir = os.path.join(os.getcwd(), world_mesh_dir)
+            if os.path.isdir(world_mesh_dir):
+                objs = load_mesh_directory(world_mesh_dir, sim_core=self)
+                logger.info("Loaded %d meshes from %s", len(objs), world_mesh_dir)
+                return objs
+            logger.warning("World mesh directory not found: %s", world_mesh_dir)
+
+        return []
+
+    def spawn_robots_from_config(self, robots_config: List[Dict[str, Any]]) -> List[SimObject]:
+        """Spawn robots/entities from a YAML-style configuration list.
+
+        Each entry in *robots_config* is a dict understood by
+        :meth:`AgentSpawnParams.from_dict` (or the appropriate
+        ``SpawnParams`` for the entity ``type``).  SDF models are
+        automatically converted to temporary URDF files via
+        :func:`resolve_sdf_to_urdf`, and model names are resolved
+        through :func:`resolve_model`.
+
+        **Grid spawning**: If an entry contains a ``grid`` key, the
+        entry is expanded into multiple entities placed on a grid.
+        The ``grid`` dict is parsed by
+        :meth:`~pybullet_fleet.agent_manager.GridSpawnParams.from_dict`
+        and supports two formats:
+
+        *Count-based* (convenience)::
+
+            {
+                "urdf_path": "robots/mobile_robot.urdf",
+                "motion_mode": "omnidirectional",
+                "grid": {
+                    "count": 50,
+                    "spacing": [3.0, 3.0],
+                    "offset": [0, 0, 0.05],
+                    "columns": 10,          # optional
+                },
+            }
+
+        *Range-based* (explicit grid extents)::
+
+            {
+                "urdf_path": "robots/mobile_robot.urdf",
+                "grid": {
+                    "x_min": 0, "x_max": 9,
+                    "y_min": 0, "y_max": 4,
+                    "spacing": [3.0, 3.0, 0.0],
+                    "offset": [0, 0, 0.05],
+                },
+            }
+
+        Grid entries create a :class:`~pybullet_fleet.agent_manager.SimObjectManager`
+        internally and register it with this simulation, so objects are
+        automatically synchronised on :meth:`remove_object` and
+        :meth:`reset`.
+
+        **Entity type dispatch**: If an entry contains a ``type`` key
+        (e.g. ``"agent"``, ``"sim_object"``, or a custom registered
+        type), the corresponding class from the entity registry is
+        used.  Default is ``"agent"``.
+
+        Args:
+            robots_config: List of robot/entity parameter dicts.
+
+        Returns:
+            List of spawned :class:`SimObject` (or subclass) instances.
+
+        Example::
+
+            sim.spawn_robots_from_config([
+                # Individual robot
+                {"urdf_path": "robots/mobile_robot.urdf", "pose": [0, 0, 0.05]},
+                # Grid of 20 robots (count-based)
+                {
+                    "urdf_path": "robots/mobile_robot.urdf",
+                    "motion_mode": "omnidirectional",
+                    "grid": {"count": 20, "spacing": [3, 3]},
+                },
+                # Grid with explicit ranges
+                {
+                    "urdf_path": "robots/mobile_robot.urdf",
+                    "grid": {"x_min": 0, "x_max": 4, "y_min": 0, "y_max": 3,
+                             "spacing": [3, 3, 0], "offset": [0, 0, 0.05]},
+                },
+                # Custom entity type
+                {"type": "forklift", "urdf_path": "robots/forklift.urdf", "pose": [10, 0, 0]},
+            ])
+        """
+        from pybullet_fleet.agent_manager import GridSpawnParams, SimObjectManager
+        from pybullet_fleet.entity_registry import ENTITY_REGISTRY
+        from pybullet_fleet.robot_models import resolve_model
+        from pybullet_fleet.sdf_loader import resolve_sdf_to_urdf
+
+        spawned: List[SimObject] = []
+
+        # --- Helper: resolve SDF→URDF and model paths on a dict --------
+        def _resolve_paths(d: Dict[str, Any]) -> None:
+            if "sdf_path" in d and "urdf_path" not in d:
+                try:
+                    d["urdf_path"] = resolve_sdf_to_urdf(d["sdf_path"])
+                    logger.info("Converted SDF %s → %s", d["sdf_path"], d["urdf_path"])
+                except Exception as exc:
+                    logger.error("Failed to convert SDF %s: %s", d.get("sdf_path"), exc)
+            if "urdf_path" in d:
+                try:
+                    d["urdf_path"] = resolve_model(d["urdf_path"])
+                except FileNotFoundError as exc:
+                    logger.warning("Could not resolve '%s': %s", d["urdf_path"], exc)
+
+        idx_counter = 0  # for auto-naming
+
+        for d in robots_config:
+            d = dict(d)  # avoid mutating caller's data
+            grid_cfg = d.pop("grid", None)
+            entity_type = d.pop("type", "agent")
+
+            if entity_type not in ENTITY_REGISTRY:
+                raise KeyError(f"Unknown entity type: {entity_type!r}. " f"Available: {list(ENTITY_REGISTRY)}")
+            entity_cls = ENTITY_REGISTRY[entity_type]
+
+            _resolve_paths(d)
+
+            if grid_cfg is None:
+                # --- Individual entity ----------------------------------
+                if "name" not in d:
+                    d["name"] = f"entity_{len(self._sim_objects) + idx_counter}"
+                    idx_counter += 1
+
+                with self.batch_spawn():
+                    obj = entity_cls.from_dict(d, sim_core=self)
+                spawned.append(obj)
+            else:
+                # --- Grid spawn via SimObjectManager --------------------
+                grid_params = GridSpawnParams.from_dict(grid_cfg)
+                count = grid_cfg.get("count", grid_params.total_cells)
+
+                name_base = d.get("name", d.get("urdf_path", "robot"))
+                # Remove pose from template — grid sets position per-entity.
+                # Set a placeholder name (will be overwritten per-entity below).
+                d.pop("pose", None)
+                d["name"] = name_base
+
+                # Build SpawnParams from the template dict
+                spawn_params = entity_cls._spawn_params_cls.from_dict(d)
+
+                # Create manager and spawn (deterministic X→Y→Z order)
+                mgr = SimObjectManager(sim_core=self, object_class=entity_cls)
+                grid_objects = mgr.spawn_grid_mixed(count, grid_params, [(spawn_params, 1.0)])
+
+                # Assign sequential names
+                for i, obj in enumerate(grid_objects):
+                    obj.name = f"{name_base}_{i}"
+
+                self.register_manager(mgr)
+                spawned.extend(grid_objects)
+
+                logger.info(
+                    "Grid-spawned '%s': %d entities (type=%s, grid=%s)",
+                    name_base,
+                    len(grid_objects),
+                    entity_type,
+                    f"{grid_params.x_max - grid_params.x_min + 1}x" f"{grid_params.y_max - grid_params.y_min + 1}",
+                )
+
+        logger.info("Spawned %d entities from config", len(spawned))
+        return spawned
 
     def run_simulation(self, duration: Optional[float] = None) -> None:
         """
