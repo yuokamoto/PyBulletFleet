@@ -25,6 +25,7 @@ import pybullet_data
 
 import yaml
 
+from pybullet_fleet.camera_controller import CameraController
 from pybullet_fleet.collision_visualizer import CollisionVisualizer  # deprecated, unused
 from pybullet_fleet.config_utils import load_yaml_config
 from pybullet_fleet.data_monitor import DataMonitor
@@ -366,6 +367,8 @@ class MultiRobotSimulationCore:
         self._collision_visualizer: CollisionVisualizer = CollisionVisualizer()  # Collision shape visualizer
 
         self._keyboard_events_registered: bool = False  # Track if keyboard events are registered
+        self._camera_controller: Optional[CameraController] = None  # Interactive camera control
+        self._camera_configured: bool = False  # True after explicit setup_camera() — prevents configure_visualizer overwrite
         self._original_visual_colors: Dict[Tuple[int, int], List[float]] = (
             {}
         )  # Store original colors: (body_id, link_index) -> rgba
@@ -1537,6 +1540,11 @@ class MultiRobotSimulationCore:
         - Press SPACE to pause/play simulation
         - Press 't' to toggle structure transparency ON/OFF
 
+        Camera controls (always active in GUI mode):
+        - Right-drag to pan camera
+        - Press '=' to zoom in, '-' to zoom out
+        - Press 'o' for top-down view
+
         PyBullet built-in keyboard shortcuts (always available):
         - Press 'w' to toggle wireframe / collision shape display
         - Press 'g' to toggle grid display
@@ -1571,25 +1579,33 @@ class MultiRobotSimulationCore:
         # Enable keyboard event handling in step_once()
         self._keyboard_events_registered = True
 
+        # Auto-setup camera from params (creates CameraController if interactive)
+        if self._params.camera_config and not self._camera_configured:
+            self.setup_camera()
+
         logger.info(
             "Visualizer configured: transparency=%s, shadows=%s",
             enable_structure_transparency,
             enable_shadows,
         )
-        logger.info("Keyboard controls registered: SPACE=pause, t=transparency")
+        logger.info("Keyboard controls registered: SPACE=pause, t=transparency, +/-=zoom, o=top-down, right-drag=pan")
         print("\n[KEYBOARD CONTROLS]")
         print("  Custom:")
-        print("    Press SPACE to pause/play simulation")
-        print("    Press 't' to toggle structure transparency " f"(current: {'ON' if self._structure_transparent else 'OFF'})")
+        print("    SPACE       pause / resume simulation")
+        print("    t           toggle structure transparency " f"(current: {'ON' if self._structure_transparent else 'OFF'})")
         if len(self._static_collision_objects) > 100:
             print(
                 f"             ⚠️  Warning: {len(self._static_collision_objects)} static objects detected - "
                 "toggling may be slow (not recommended)"
             )
+        print("  Camera:")
+        print("    right-drag  pan camera")
+        print("    = / -       zoom in / out")
+        print("    o           top-down view")
         print("  PyBullet built-in:")
-        print("    Press 'w' to toggle wireframe / collision shapes")
-        print("    Press 'g' to toggle grid")
-        print("    Press 'j' to toggle joint axes")
+        print("    w           toggle wireframe / collision shapes")
+        print("    g           toggle grid")
+        print("    j           toggle joint axes")
 
     def _save_original_visual_colors(self) -> None:
         """
@@ -1629,6 +1645,14 @@ class MultiRobotSimulationCore:
             else:
                 self.pause()
             print(f"\n[PAUSE] Simulation: {'PAUSED' if self.is_paused else 'PLAYING'}")
+
+        # Camera controller (interactive mode)
+        if self._camera_controller is not None:
+            try:
+                mouse_events = p.getMouseEvents(physicsClientId=self._client)
+            except p.error:
+                mouse_events = []
+            self._camera_controller.update(keys, mouse_events=mouse_events)
 
         # 't' key (ASCII 116) - toggle structure transparency
         if ord("t") in keys and keys[ord("t")] & p.KEY_WAS_TRIGGERED:
@@ -1734,6 +1758,16 @@ class MultiRobotSimulationCore:
         """
         Set up camera view based on configuration.
 
+        Valid ``camera_mode`` values:
+
+        - ``"auto"`` (default) — Auto-calculates camera distance and target
+          from entity positions or ``sim_objects``.
+        - ``"manual"`` — Uses explicit ``camera_distance``, ``camera_yaw``,
+          ``camera_pitch``, and ``camera_target`` from the config.
+
+        Interactive controls (right-drag pan, +/- zoom, o=top-down) are
+        always enabled in GUI mode regardless of camera_mode.
+
         Args:
             camera_config: Dictionary with camera settings (from yaml config)
             entity_positions: List of [x, y, z] positions for auto camera calculation
@@ -1741,21 +1775,21 @@ class MultiRobotSimulationCore:
         if not self._params.gui:
             return  # No camera setup needed without GUI
 
+        # Mark that setup_camera was called (prevents configure_visualizer overwrite)
+        self._camera_configured = True
+
         # Use self._params.camera_config if camera_config is not provided
         if camera_config is None:
             camera_config = self._params.camera_config
 
-        camera_mode = camera_config.get("camera_mode", "none")
+        camera_mode = camera_config.get("camera_mode", "auto")
 
-        valid_modes = ("none", "manual", "auto")
+        valid_modes = ("manual", "auto")
         if camera_mode not in valid_modes:
             logger.warning(f"Unknown camera_mode '{camera_mode}'. Valid modes: {valid_modes}")
             return
 
-        if camera_mode == "none":
-            return  # Skip camera setup
-
-        elif camera_mode == "manual":
+        if camera_mode == "manual":
             # Use manual camera settings
             distance = camera_config.get("camera_distance", 10.0)
             yaw = camera_config.get("camera_yaw", 0)
@@ -1818,6 +1852,11 @@ class MultiRobotSimulationCore:
             logger.info(f"  Structure extent: [{extent[0]:.2f} x {extent[1]:.2f} x {extent[2]:.2f}] meters")
             logger.info(f"  Center: [{center[0]:.2f}, {center[1]:.2f}, {center[2]:.2f}]")
             logger.info(f"  Yaw: {yaw}°, Pitch: {pitch}°")
+
+        # Always enable interactive camera controller in GUI mode
+        if self._params.gui and self._camera_controller is None:
+            self._camera_controller = CameraController(client_id=self._client)
+            logger.info("Interactive camera controls enabled: right-drag=pan, +/-=zoom, o=top-down")
 
     def get_aabbs(self) -> List[Tuple[Tuple[float, float, float], Tuple[float, float, float]]]:
         """Get AABBs for all simulation objects."""
@@ -2460,6 +2499,9 @@ class MultiRobotSimulationCore:
         self._active_collision_pairs.clear()
         self._robot_original_colors.clear()
         self._original_visual_colors.clear()
+
+        # Reset camera flag so configure_visualizer can re-apply camera settings
+        self._camera_configured = False
 
         # 1b. Clear registered managers
         for mgr in self._registered_managers:

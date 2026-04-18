@@ -1092,6 +1092,50 @@ class TestSetStructureTransparencyRendering:
         assert rendering_states[-1] == 1, f"Rendering should be re-enabled after exception, states: {rendering_states}"
 
 
+class TestConfigureVisualizerCameraGuard:
+    """configure_visualizer must not overwrite an explicit setup_camera call."""
+
+    def test_explicit_setup_camera_not_overwritten(self, sim_core, monkeypatch):
+        """If the user called setup_camera() before run_simulation, configure_visualizer must not re-call it."""
+        call_count = 0
+
+        def counting_setup_camera(camera_config=None, entity_positions=None):
+            nonlocal call_count
+            call_count += 1
+
+        sim_core._params.gui = True
+        # Populate camera_config so the guard `if self._params.camera_config:` is truthy
+        sim_core._params.camera_config = {"camera_mode": "manual", "camera_distance": 20.0}
+
+        # Simulate user explicitly calling setup_camera
+        sim_core.setup_camera(camera_config={"camera_mode": "manual", "camera_distance": 2.0})
+
+        # Now monkeypatch setup_camera to count re-calls
+        monkeypatch.setattr(sim_core, "setup_camera", counting_setup_camera)
+
+        # configure_visualizer should NOT call setup_camera again
+        sim_core.configure_visualizer()
+
+        assert call_count == 0, f"configure_visualizer should not re-call setup_camera, but called it {call_count} time(s)"
+
+    def test_no_explicit_setup_camera_allows_configure_visualizer(self, sim_core, monkeypatch):
+        """If user never called setup_camera, configure_visualizer should call it."""
+        call_count = 0
+
+        def counting_setup_camera(camera_config=None, entity_positions=None):
+            nonlocal call_count
+            call_count += 1
+
+        sim_core._params.gui = True
+        sim_core._params.camera_config = {"camera_mode": "manual", "camera_distance": 20.0}
+
+        monkeypatch.setattr(sim_core, "setup_camera", counting_setup_camera)
+
+        sim_core.configure_visualizer()
+
+        assert call_count == 1, f"configure_visualizer should call setup_camera once, but called it {call_count} time(s)"
+
+
 # ---------------------------------------------------------------------------
 # setup_camera
 # ---------------------------------------------------------------------------
@@ -1107,9 +1151,9 @@ class TestSetupCamera:
         sim_core._params.gui = True
 
         with caplog.at_level(logging.WARNING, logger="pybullet_fleet.core_simulation"):
-            sim_core.setup_camera(camera_config={"camera_mode": "autto"})
+            sim_core.setup_camera(camera_config={"camera_mode": "bogus"})
 
-        assert any("autto" in r.message for r in caplog.records), "Should warn about unknown camera_mode"
+        assert any("bogus" in r.message for r in caplog.records), "Should warn about unknown camera_mode"
 
     def test_auto_mode_minimum_distance(self, sim_core, monkeypatch):
         """auto mode should enforce a minimum distance when all objects are co-located."""
