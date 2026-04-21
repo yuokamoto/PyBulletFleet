@@ -6,7 +6,7 @@ import pybullet_data
 import pytest
 
 from pybullet_fleet import MultiRobotSimulationCore, SimulationParams
-from pybullet_fleet.sdf_loader import _parse_pose, load_sdf_world, DEFAULT_SCENERY_COLOR
+from pybullet_fleet.sdf_loader import _parse_pose, load_sdf_world, resolve_sdf_to_urdf, DEFAULT_SCENERY_COLOR
 from pybullet_fleet.sim_object import SimObject
 from pybullet_fleet.types import CollisionMode
 
@@ -231,3 +231,163 @@ class TestDefaultSceneryColor:
     def test_matches_gazebo_sim_default(self):
         """Value matches Gazebo Sim (Harmonic) default of 0.7 grey."""
         assert DEFAULT_SCENERY_COLOR == [0.7, 0.7, 0.7, 1.0]
+
+
+class TestResolveSdfToUrdf:
+    """Tests for resolve_sdf_to_urdf() — SDF-to-URDF conversion."""
+
+    def _make_sdf(self, tmp_path, joints_xml: str, extra_links: str = "") -> str:
+        """Write a minimal SDF with custom joints and return its path."""
+        sdf = f"""\
+<?xml version="1.0"?>
+<sdf version="1.6">
+  <model name="test_robot">
+    <link name="base_link">
+      <inertial><mass>1.0</mass></inertial>
+    </link>
+    <link name="child_link">
+      <pose>0 0 0.1 0 0 0</pose>
+      <inertial><mass>0.5</mass></inertial>
+    </link>
+    {extra_links}
+    {joints_xml}
+  </model>
+</sdf>"""
+        sdf_path = tmp_path / "model.sdf"
+        sdf_path.write_text(sdf)
+        return str(sdf_path)
+
+    def test_prismatic_joint_gets_limit(self, tmp_path):
+        """Prismatic joints must produce <limit> in URDF (PyBullet requirement)."""
+        sdf_path = self._make_sdf(
+            tmp_path,
+            """
+            <joint name="slider" type="prismatic">
+              <parent>base_link</parent>
+              <child>child_link</child>
+              <axis><xyz>0 0 1</xyz></axis>
+            </joint>
+            """,
+        )
+        urdf_path = resolve_sdf_to_urdf(sdf_path)
+        urdf_content = open(urdf_path).read()
+        assert 'type="prismatic"' in urdf_content
+        assert "<limit" in urdf_content
+        # Default range for prismatic without SDF limits
+        assert 'lower="-1.0"' in urdf_content
+        assert 'upper="1.0"' in urdf_content
+
+    def test_prismatic_with_sdf_limits_preserved(self, tmp_path):
+        """SDF <limit> values for prismatic joints are preserved in URDF."""
+        sdf_path = self._make_sdf(
+            tmp_path,
+            """
+            <joint name="slider" type="prismatic">
+              <parent>base_link</parent>
+              <child>child_link</child>
+              <axis>
+                <xyz>0 0 1</xyz>
+                <limit><lower>-0.05</lower><upper>0.05</upper></limit>
+              </axis>
+            </joint>
+            """,
+        )
+        urdf_path = resolve_sdf_to_urdf(sdf_path)
+        urdf_content = open(urdf_path).read()
+        assert 'lower="-0.05"' in urdf_content
+        assert 'upper="0.05"' in urdf_content
+
+    def test_revolute_without_limits_becomes_continuous(self, tmp_path):
+        """Revolute joints without SDF <limit> become continuous in URDF."""
+        sdf_path = self._make_sdf(
+            tmp_path,
+            """
+            <joint name="wheel" type="revolute">
+              <parent>base_link</parent>
+              <child>child_link</child>
+              <axis><xyz>0 1 0</xyz></axis>
+            </joint>
+            """,
+        )
+        urdf_path = resolve_sdf_to_urdf(sdf_path)
+        urdf_content = open(urdf_path).read()
+        # No limits → continuous (unlimited rotation, no <limit> needed)
+        assert 'type="continuous"' in urdf_content
+
+    def test_revolute_with_finite_limits_stays_revolute(self, tmp_path):
+        """Revolute joints with finite SDF limits stay revolute in URDF."""
+        sdf_path = self._make_sdf(
+            tmp_path,
+            """
+            <joint name="hinge" type="revolute">
+              <parent>base_link</parent>
+              <child>child_link</child>
+              <axis>
+                <xyz>0 0 1</xyz>
+                <limit><lower>-1.57</lower><upper>1.57</upper></limit>
+              </axis>
+            </joint>
+            """,
+        )
+        urdf_path = resolve_sdf_to_urdf(sdf_path)
+        urdf_content = open(urdf_path).read()
+        assert 'type="revolute"' in urdf_content
+        assert 'lower="-1.57"' in urdf_content
+        assert 'upper="1.57"' in urdf_content
+
+    def test_revolute_with_infinite_limits_becomes_continuous(self, tmp_path):
+        """Revolute joints with ±inf SDF limits become continuous in URDF."""
+        sdf_path = self._make_sdf(
+            tmp_path,
+            """
+            <joint name="spinner" type="revolute">
+              <parent>base_link</parent>
+              <child>child_link</child>
+              <axis>
+                <xyz>0 0 1</xyz>
+                <limit><lower>-1e16</lower><upper>1e16</upper></limit>
+              </axis>
+            </joint>
+            """,
+        )
+        urdf_path = resolve_sdf_to_urdf(sdf_path)
+        urdf_content = open(urdf_path).read()
+        assert 'type="continuous"' in urdf_content
+
+    def test_mixed_joints_all_valid(self, tmp_path, sim_core):
+        """SDF with prismatic + revolute joints produces a PyBullet-loadable URDF.
+
+        Mimics DeliveryRobot structure: prismatic suspension + revolute wheels.
+        """
+        extra_links = """
+    <link name="suspension">
+      <pose>0 0.26 0.1 0 0 0</pose>
+      <inertial><mass>1.0</mass></inertial>
+    </link>
+    <link name="wheel">
+      <pose>0 0.26 0.1 0 0 0</pose>
+      <inertial><mass>2.0</mass></inertial>
+    </link>"""
+
+        joints = """
+    <joint name="suspension_joint" type="prismatic">
+      <parent>base_link</parent>
+      <child>suspension</child>
+      <axis><xyz>0 0 1</xyz></axis>
+    </joint>
+    <joint name="wheel_joint" type="revolute">
+      <parent>suspension</parent>
+      <child>wheel</child>
+      <axis><xyz>0 1 0</xyz></axis>
+    </joint>
+    <joint name="fixed_child" type="fixed">
+      <parent>base_link</parent>
+      <child>child_link</child>
+    </joint>"""
+
+        sdf_path = self._make_sdf(tmp_path, joints, extra_links)
+        urdf_path = resolve_sdf_to_urdf(sdf_path)
+
+        # Must load without error in PyBullet
+        body_id = p.loadURDF(urdf_path, physicsClientId=sim_core.client)
+        assert body_id >= 0

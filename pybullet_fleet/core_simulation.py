@@ -779,6 +779,9 @@ class MultiRobotSimulationCore:
         """Enable rendering before starting simulation."""
         if self._params.gui and not self._rendering_enabled:
             p.configureDebugVisualizer(p.COV_ENABLE_RENDERING, 1, physicsClientId=self._client)
+            # Re-assert GUI panel hidden — toggling COV_ENABLE_RENDERING
+            # can reset the panel state on some PyBullet builds.
+            p.configureDebugVisualizer(p.COV_ENABLE_GUI, 0, physicsClientId=self._client)
             self._rendering_enabled = True
             logger.info("Rendering enabled for simulation")
 
@@ -1583,6 +1586,11 @@ class MultiRobotSimulationCore:
         if self._params.camera_config and not self._camera_configured:
             self.setup_camera()
 
+        # Always create CameraController in GUI mode so right-drag/zoom/topdown
+        # work even when no camera_config is specified in YAML.
+        if self._camera_controller is None:
+            self._camera_controller = CameraController(client_id=self._client)
+
         logger.info(
             "Visualizer configured: transparency=%s, shadows=%s",
             enable_structure_transparency,
@@ -1712,6 +1720,8 @@ class MultiRobotSimulationCore:
         finally:
             # Always re-enable rendering, even if an error occurred
             p.configureDebugVisualizer(p.COV_ENABLE_RENDERING, 1, physicsClientId=self._client)
+            # Re-assert GUI panel hidden
+            p.configureDebugVisualizer(p.COV_ENABLE_GUI, 0, physicsClientId=self._client)
 
         logger.info(f"[TRANSPARENCY] Complete: {processed} visual shapes updated")
         logger.info(f"Static objects transparency {'enabled (alpha=0.3)' if transparent else 'disabled (alpha=1.0)'}")

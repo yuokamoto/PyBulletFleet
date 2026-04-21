@@ -70,7 +70,7 @@ _DEFAULTS: Dict[str, Dict[str, Any]] = {
         "collision_detection_method": None,
         # None = auto-calculate from largest entity AABB
         "spatial_hash_cell_size": None,
-        # None = no camera configuration (use PyBullet defaults)
+        # Default: interactive camera (Shift+drag pan, +/- zoom, o top-down)
         "camera_config": None,
         # None = no additional model search paths
         "model_paths": None,
@@ -104,10 +104,10 @@ _DEFAULTS: Dict[str, Dict[str, Any]] = {
     "shape": {
         "radius": 0.5,
         "height": 1.0,
+        "rgba_color": (0.8, 0.8, 0.8, 1.0),
         # Not centralized (mutable list defaults — use field(default_factory)):
         #   mesh_scale    — [1.0, 1.0, 1.0]
         #   half_extents  — [0.5, 0.5, 0.5]
-        #   rgba_color    — [0.8, 0.8, 0.8, 1.0]
     },
     "ik": {
         "max_outer_iterations": 5,

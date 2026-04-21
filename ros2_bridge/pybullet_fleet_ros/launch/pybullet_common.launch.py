@@ -17,8 +17,8 @@ Required launch arguments (must be declared by the parent launch):
     nav_graph:    Path to RMF navigation graph YAML
 
 Optional launch arguments (defaults provided):
-    gui:          Enable PyBullet GUI (default: ``true``)
-    target_rtf:   Target real-time factor (default: ``1.0``)
+    gui:          Enable PyBullet GUI (default: use YAML config)
+    target_rtf:   Target real-time factor (default: use YAML config)
     server_uri:   API server WebSocket URI (default: ``""``)
 
 Example (from a demo launch file)::
@@ -35,14 +35,44 @@ Example (from a demo launch file)::
     )
 """
 
-from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument
+from launch import LaunchContext, LaunchDescription
+from launch.actions import DeclareLaunchArgument, OpaqueFunction
+from launch.conditions import IfCondition, UnlessCondition
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 
 
+def _bridge_node_setup(context: LaunchContext):
+    """Build bridge_node with conditional parameter overrides."""
+    use_sim_time = context.launch_configurations.get("use_sim_time", "true")
+
+    params = {
+        "config_yaml": context.launch_configurations["config_yaml"],
+        "use_sim_time": use_sim_time.lower() in ("true", "1", "yes"),
+    }
+    gui = context.launch_configurations.get("gui", "")
+    if gui:
+        params["gui"] = gui.lower() in ("true", "1", "yes")
+    target_rtf = context.launch_configurations.get("target_rtf", "")
+    if target_rtf:
+        params["target_rtf"] = float(target_rtf)
+
+    return [
+        Node(
+            package="pybullet_fleet_ros",
+            executable="bridge_node",
+            name="pybullet_fleet_bridge",
+            parameters=[params],
+            output="screen",
+        ),
+    ]
+
+
 def generate_launch_description():
     """Launch PyBulletFleet bridge + RMF adapters."""
+
+    use_sim_time = LaunchConfiguration("use_sim_time")
+
     return LaunchDescription(
         [
             # ── Arguments ────────────────────────────────────────────
@@ -58,12 +88,17 @@ def generate_launch_description():
                 "nav_graph",
                 description="Path to RMF navigation graph YAML",
             ),
-            DeclareLaunchArgument("gui", default_value="true"),
-            DeclareLaunchArgument("target_rtf", default_value="1.0"),
+            DeclareLaunchArgument("gui", default_value=""),
+            DeclareLaunchArgument("target_rtf", default_value=""),
             DeclareLaunchArgument(
                 "server_uri",
                 default_value="",
                 description="API server WebSocket URI",
+            ),
+            DeclareLaunchArgument(
+                "use_sim_time",
+                default_value="true",
+                description="Use simulation clock (/clock) for all nodes. Default true for acceleration.",
             ),
             # ── Door adapter ────────────────────────────────────────
             # Instant open/close (replaces Gazebo door plugin)
@@ -71,6 +106,7 @@ def generate_launch_description():
                 package="pybullet_fleet_ros",
                 executable="door_adapter",
                 name="pybullet_door_adapter",
+                parameters=[{"use_sim_time": use_sim_time}],
                 output="screen",
             ),
             # ── Workcell adapter ────────────────────────────────────
@@ -80,28 +116,18 @@ def generate_launch_description():
                 package="pybullet_fleet_ros",
                 executable="workcell_adapter",
                 name="pybullet_workcell_adapter",
+                parameters=[{"use_sim_time": use_sim_time}],
                 output="screen",
             ),
             # ── PyBulletFleet simulation ────────────────────────────
-            Node(
-                package="pybullet_fleet_ros",
-                executable="bridge_node",
-                name="pybullet_fleet_bridge",
-                parameters=[
-                    {
-                        "config_yaml": LaunchConfiguration("config_yaml"),
-                        "gui": LaunchConfiguration("gui"),
-                        "target_rtf": LaunchConfiguration("target_rtf"),
-                    }
-                ],
-                output="screen",
-            ),
-            # ── Fleet adapter ───────────────────────────────────────
-            # Open-RMF EasyFullControl (replaces rmf_demos_fleet_adapter)
+            OpaqueFunction(function=_bridge_node_setup),
+            # ── Fleet adapter (wall clock) ──────────────────────────
+            # Launched when use_sim_time is false
             Node(
                 package="pybullet_fleet_ros",
                 executable="fleet_adapter",
                 name="pybullet_fleet_adapter",
+                condition=UnlessCondition(use_sim_time),
                 arguments=[
                     "-c",
                     LaunchConfiguration("fleet_config"),
@@ -111,6 +137,29 @@ def generate_launch_description():
                 parameters=[
                     {
                         "server_uri": LaunchConfiguration("server_uri"),
+                        "use_sim_time": use_sim_time,
+                    }
+                ],
+                output="screen",
+            ),
+            # ── Fleet adapter (sim time) ────────────────────────────
+            # Launched when use_sim_time is true — passes -sim flag
+            Node(
+                package="pybullet_fleet_ros",
+                executable="fleet_adapter",
+                name="pybullet_fleet_adapter",
+                condition=IfCondition(use_sim_time),
+                arguments=[
+                    "-c",
+                    LaunchConfiguration("fleet_config"),
+                    "-n",
+                    LaunchConfiguration("nav_graph"),
+                    "-sim",
+                ],
+                parameters=[
+                    {
+                        "server_uri": LaunchConfiguration("server_uri"),
+                        "use_sim_time": use_sim_time,
                     }
                 ],
                 output="screen",

@@ -25,6 +25,18 @@ External communication layers:
 - **ROS 2** — Topic / service / action bridge for ROS 2 ecosystem integration
 - **gRPC** — Language-agnostic RPC interface for orchestrators, WMS, and fleet managers
 
+### ROS 2 Bridge: Handler Decomposition
+
+The current `RobotHandler` is a monolithic class managing odometry, TF, joint states, `cmd_vel`, and action servers. As the bridge matures, split it into focused, composable handlers (Gazebo-plugin style):
+
+- **OdometryHandler** — `/odom` publisher + TF `odom → base_link`
+- **JointStateHandler** — `/joint_states` publisher
+- **CmdVelHandler** — `/cmd_vel` subscriber + controller integration
+- **NavigationHandler** — `navigate_to_pose` action server
+- **DiagnosticsHandler** — Status/heartbeat publishing
+
+The multi-handler registry (`resolve_handler_classes`) already supports assigning multiple handler classes per robot. This decomposition would let users compose exactly the handlers they need per robot type via `handler_classes:` config.
+
 ## Refactoring
 
 - **`MultiRobotSimulationCore` responsibility decomposition** — The core class has grown to ~3200 lines / 66 methods. Extract self-contained subsystems into dedicated classes composed into the core:
@@ -167,6 +179,72 @@ Scaling by agent count (current → vectorized estimate):
 > **Note:** Collision detection (10 Hz spatial hash) adds <1% overhead at 500 agents. C++ spatial hash becomes relevant at 1,000+ agents with higher collision frequencies.
 
 > **Relation to Long-Term Backend Abstraction:** The two-phase split and the "remove direct pybullet calls" refactoring are natural stepping stones toward the SimBackend ABC (Phase 1 of Long-Term). The buffered-pose pattern becomes the write side of `SimBackend.set_positions_batch()`.
+
+## SDF & DAE Support Improvements
+
+PyBulletFleet currently has two self-implemented workarounds for Gazebo ecosystem interop:
+
+1. **`resolve_sdf_to_urdf`** — Hand-rolled SDF→URDF XML converter (PyBullet cannot load SDF directly)
+2. **DAE defensive fallbacks** — Colour extraction, texture symlinks, collision try/except (PyBullet has poor DAE support)
+
+Both are functional but hacky. This section tracks improvements to make them more robust or replace them entirely.
+
+### SDF → URDF Conversion: `gz sdf -p` Replacement
+
+`resolve_sdf_to_urdf()` in `sdf_loader.py` is a minimal self-implemented SDF→URDF converter using `xml.etree`. It covers only `<link>`, `<joint>`, `<mesh>`, and primitive geometries — enough for simple robots (DeliveryRobot) but fragile for complex SDF models.
+
+**Why self-implemented?** No usable Python SDF→URDF tool exists:
+- `sdformat_urdf` — C++ only, no Python bindings
+- `pysdf` (PyPI) — fails to build on Python 3.12+
+- `libsdformat14` — C++ template API, not callable via ctypes
+- `gz sdf -p model.sdf` — converts SDF→URDF via CLI subprocess (see evaluation below)
+
+**`gz sdf -p` evaluation (Gazebo Harmonic / sdformat 14, as of 2026-04):**
+
+| | Self-implemented parser | `gz sdf -p` |
+|---|---|---|
+| Dependencies | None (`xml.etree` stdlib) | `sdformat14` + `gz-tools` (~200 MB) |
+| Coverage | Minimal (link/joint/mesh only) | Broader (frames, nested models partial) |
+| Edge cases | Fix ourselves immediately | Wait for upstream fix |
+| DAE colour injection | `_extract_dae_diffuse_color` embeds into URDF | Not supported (no colour in output URDF) |
+| Nested `<model>` | Not supported | Partial support |
+| Known issues | Pose hierarchy may drift for deep nesting | Nested model bugs, some pose frame resolution errors |
+| Stability | Tested for our models | "Best effort" — known regressions between versions |
+
+**Verdict:** `gz sdf -p` is **usable but not fully stable**. For simple robots it works; for complex SDF it has regressions. The dependency cost (~200 MB) is also significant. **Current self-implemented parser is the pragmatic choice.**
+
+**Future action:**
+- Monitor `gz sdf -p` stability across Gazebo releases
+- If it stabilises + we already have `gz-tools` in Docker for other reasons → switch to subprocess call and delete `resolve_sdf_to_urdf()`
+- If we support complex SDF robots (nested models, sensors) → worth the dependency
+
+### DAE → OBJ Automatic Conversion
+
+PyBullet has poor DAE (COLLADA) support: textures are not loaded, diffuse colours are ignored, and some meshes fail `createCollisionShape`. Gazebo Fuel models ship exclusively as DAE.
+
+**Proposal:** Use `assimp export` (from `assimp-utils`, ~2 MB) to convert DAE meshes to OBJ + MTL at download time. OBJ is PyBullet's best-supported mesh format — colours, textures via MTL, and collision all work reliably.
+
+Changes needed:
+1. **`docker/Dockerfile.rmf_demos`** — `apt install assimp-utils`
+2. **`docker/download_fuel_models.py`** — Post-download `assimp export *.dae *.obj` conversion step
+3. **`pybullet_fleet/sdf_loader.py`** — Prefer `.obj` over `.dae` when both exist (`mesh_path.replace(".dae", ".obj")`)
+
+**Simplification benefit:** Once all DAE meshes have OBJ counterparts, three defensive workarounds in `sdf_loader.py` become unnecessary and can be removed:
+
+| Current workaround | Why it exists | Removed after conversion |
+|---|---|---|
+| `is_fuel` flag on `_IncludeInfo` | Fuel DAE has embedded colours; local OBJ does not → different `rgba_color` handling | OBJ+MTL always carries material info → uniform `rgba_color=None` for all models |
+| `_ensure_texture_symlinks()` | DAE references textures by bare filename; PyBullet resolves relative to `meshes/` not `materials/textures/` | OBJ+MTL uses relative paths that resolve correctly |
+| `try/except` around `createCollisionShape` in `sim_object.py` | Some DAE meshes crash PyBullet's collision shape loader | OBJ collision shapes load reliably |
+
+The `is_fuel` flag would be replaced by a mesh-format check (e.g. "does an `.obj` file exist alongside the `.dae`?"), making the loader source-agnostic — any DAE model from any provider would be handled the same way.
+
+### Priority
+
+Low — the current SDF parser + DAE defensive fallbacks are functional for demo purposes. These improvements primarily affect:
+- **Visual fidelity** (DAE→OBJ: textures and materials render correctly)
+- **Maintainability** (gz sdf -p: delete ~150 lines of hand-rolled XML conversion)
+- **Robustness** (both: fewer edge-case failures with complex models)
 
 ## Environments
 

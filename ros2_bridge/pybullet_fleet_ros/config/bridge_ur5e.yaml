@@ -23,6 +23,7 @@
 simulation:
   gui: true
   physics: false
+  target_rtf: 5.0
 
 robots:
   - name: ur5e_0

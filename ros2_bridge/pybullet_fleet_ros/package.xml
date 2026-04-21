@@ -20,6 +20,7 @@
   <depend>diagnostic_msgs</depend>
   <depend>rosgraph_msgs</depend>
   <depend>simulation_interfaces</depend>
+  <depend>pybullet_fleet_msgs</depend>
 
   <test_depend>ament_copyright</test_depend>
   <test_depend>ament_pep257</test_depend>

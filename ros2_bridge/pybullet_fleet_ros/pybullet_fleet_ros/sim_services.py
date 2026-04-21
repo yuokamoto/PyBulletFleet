@@ -318,10 +318,7 @@ class SimServices:
 
     def _reset_sim(self, request, response):
         """Reset simulation to initial state."""
-        for handler in list(self._bridge.handlers.values()):
-            handler.destroy()
-        self._bridge.handlers.clear()
-        self._sim.reset()
+        self._bridge.reset()
         response.result.result = _OK
         response.result.error_message = "Simulation reset. Re-spawn entities as needed."
         return response

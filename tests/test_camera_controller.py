@@ -5,6 +5,8 @@ from unittest.mock import patch
 import pybullet as p
 import pytest
 
+from pybullet_fleet.camera_controller import _MIN_ZOOM_DIST
+
 
 # --- Mouse event constants (mirror PyBullet API) ---
 MOUSE_MOVE = 1
@@ -201,10 +203,24 @@ class TestKeyboardControls:
         dist, yaw, pitch, target = _extract(_call_update(controller, {ord("-"): p.KEY_IS_DOWN}))
         assert dist > 10.0, "- key should zoom out (increase distance)"
 
-    def test_zoom_in_respects_minimum_distance(self, controller):
-        close_camera = (None,) * 8 + (0.0, -45.0, 1.5, (0.0, 0.0, 0.0))
+    def test_zoom_in_moves_target_at_minimum_distance(self, controller):
+        """When at min distance, zoom in should move target forward (away from camera)."""
+        # yaw=0, pitch=-45 → camera is at (0, -dist*0.707, dist*0.707) relative to target
+        # Forward direction (camera→target) = (0, +0.707, -0.707)
+        close_camera = (None,) * 8 + (0.0, -45.0, _MIN_ZOOM_DIST, (0.0, 0.0, 0.0))
         dist, yaw, pitch, target = _extract(_call_update(controller, {ord("="): p.KEY_IS_DOWN}, camera=close_camera))
-        assert dist >= 1.0, "Zoom should not go below minimum distance"
+        # Distance must clamp at minimum — zoom energy goes into target movement
+        assert dist == pytest.approx(_MIN_ZOOM_DIST, abs=1e-6), "Distance should clamp at minimum"
+        # Target should have moved forward: +Y, -Z for yaw=0, pitch=-45
+        assert target[1] > 0.0, "Target Y should increase (forward direction)"
+        assert target[2] < 0.0, "Target Z should decrease (forward direction at pitch=-45)"
+
+    def test_zoom_has_minimum_step(self, controller):
+        """Even at small distances, zoom step should be at least 0.5."""
+        start_dist = _MIN_ZOOM_DIST + 1.0  # just above minimum
+        small_camera = (None,) * 8 + (0.0, -45.0, start_dist, (0.0, 0.0, 0.0))
+        dist, yaw, pitch, target = _extract(_call_update(controller, {ord("="): p.KEY_IS_DOWN}, camera=small_camera))
+        assert dist <= start_dist - 0.5, "Zoom step should be at least 0.5 even at small distances"
 
     def test_topdown_sets_pitch_and_yaw(self, controller):
         dist, yaw, pitch, target = _extract(_call_update(controller, {ord("o"): p.KEY_WAS_TRIGGERED}))

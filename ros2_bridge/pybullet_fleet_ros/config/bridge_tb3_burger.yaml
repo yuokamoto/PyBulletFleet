@@ -1,0 +1,27 @@
+# Bridge config: TurtleBot3 Burger (Tier 2 — requires ros-${ROS_DISTRO}-turtlebot3-description)
+#
+# Demonstrates Tier 2 URDF resolution: the bridge resolves the model name
+# "turtlebot3_burger" to the installed ROS package path via resolve_model().
+#
+# Prerequisites:
+#   apt install ros-${ROS_DISTRO}-turtlebot3-description
+#
+# Usage:
+#   ros2 launch pybullet_fleet_ros tb3_demo.launch.py model:=burger
+#   ros2 launch pybullet_fleet_ros tb3_demo.launch.py model:=burger gui:=true
+
+simulation:
+  gui: true
+  physics: false
+  target_rtf: 5.0
+
+robots:
+  - name: tb3_0
+    urdf_path: "turtlebot3_burger"
+    pose: [0.0, 0.0, 0.01]
+    yaw: 0.0
+    motion_mode: "differential"
+    max_linear_vel: 0.22
+    max_linear_accel: 2.5
+    max_angular_vel: 2.84
+    max_angular_accel: 10.0

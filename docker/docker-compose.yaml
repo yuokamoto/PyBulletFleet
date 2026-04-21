@@ -19,10 +19,10 @@ services:
     command: >
       bash -c "ros2 run pybullet_fleet_ros bridge_node --ros-args
       -p num_robots:=$$NUM_ROBOTS
-      -p gui:=$$GUI
+      $${GUI:+-p gui:=$$GUI}
       -p publish_rate:=$$PUBLISH_RATE
-      -p physics:=$$PHYSICS
-      -p target_rtf:=$$TARGET_RTF"
+      $${PHYSICS:+-p physics:=$$PHYSICS}
+      $${TARGET_RTF:+-p target_rtf:=$$TARGET_RTF}"
     working_dir: /opt/pybullet_fleet
     network_mode: host
     ipc: host              # Share /dev/shm for FastDDS SHM transport across containers
@@ -31,10 +31,10 @@ services:
       - ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-42}
       - RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
       - NUM_ROBOTS=${NUM_ROBOTS:-3}
-      - GUI=${GUI:-false}
+      - GUI=${GUI:-}
       - PUBLISH_RATE=${PUBLISH_RATE:-10.0}
-      - PHYSICS=${PHYSICS:-false}
-      - TARGET_RTF=${TARGET_RTF:-1.0}
+      - PHYSICS=${PHYSICS:-}
+      - TARGET_RTF=${TARGET_RTF:-}
     volumes:
       - /tmp/.X11-unix:/tmp/.X11-unix:rw
       - /dev/dri:/dev/dri

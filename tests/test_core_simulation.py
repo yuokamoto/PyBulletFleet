@@ -1037,19 +1037,27 @@ class TestSetStructureTransparencyRendering:
         sim_core._set_structure_transparency(True)
 
         # Rendering must be disabled (COV_ENABLE_RENDERING=0) before any changeVisualShape
-        # and re-enabled (COV_ENABLE_RENDERING=1) after all changeVisualShape calls
-        assert len(calls) >= 3, f"Expected at least 3 calls, got {len(calls)}"
+        # and re-enabled (COV_ENABLE_RENDERING=1) after all changeVisualShape calls.
+        # After re-enabling rendering, COV_ENABLE_GUI is reasserted to 0 to prevent
+        # the side panel from re-appearing.
+        assert len(calls) >= 4, f"Expected at least 4 calls, got {len(calls)}"
 
         # First call: disable rendering
         assert calls[0] == ("configDbgVis", pb.COV_ENABLE_RENDERING, 0), f"First call should disable rendering, got {calls[0]}"
-        # Last call: re-enable rendering
-        assert calls[-1] == (
+        # Second-to-last call: re-enable rendering
+        assert calls[-2] == (
             "configDbgVis",
             pb.COV_ENABLE_RENDERING,
             1,
-        ), f"Last call should re-enable rendering, got {calls[-1]}"
+        ), f"Second-to-last call should re-enable rendering, got {calls[-2]}"
+        # Last call: reassert GUI hidden
+        assert calls[-1] == (
+            "configDbgVis",
+            pb.COV_ENABLE_GUI,
+            0,
+        ), f"Last call should hide GUI panel, got {calls[-1]}"
         # All middle calls should be changeVisualShape
-        for c in calls[1:-1]:
+        for c in calls[1:-2]:
             assert c == ("changeVis",), f"Middle calls should be changeVisualShape, got {c}"
 
     def test_rendering_restored_on_exception(self, sim_core, monkeypatch):

@@ -10,7 +10,29 @@
 #   docker compose -f docker-compose.rmf.yaml build
 #   # or: docker compose build
 #
-FROM ghcr.io/open-rmf/rmf/rmf_demos:jazzy-rmf-latest
+# Multi-stage layout:
+#   Stage 1 (fuel-cache): Downloads Gazebo Fuel models (~80 models, ~20 min).
+#     - Only invalidated when download_fuel_models.py itself changes.
+#   Stage 2 (bridge):     Installs pybullet_fleet + ROS 2 bridge code.
+#     - Invalidated on any pybullet_fleet/ or ros2_bridge/ change.
+#     - Copies pre-downloaded Fuel models from stage 1 (instant).
+#
+# Result: code-only changes rebuild in ~5 min instead of ~25 min.
+
+
+# ===========================================================================
+# Stage 1: Fuel model cache (only rebuilds when download script changes)
+# ===========================================================================
+FROM ghcr.io/open-rmf/rmf/rmf_demos:jazzy-rmf-latest AS fuel-cache
+
+COPY docker/download_fuel_models.py /opt/download_fuel_models.py
+RUN python3 /opt/download_fuel_models.py
+
+
+# ===========================================================================
+# Stage 2: Main bridge image
+# ===========================================================================
+FROM ghcr.io/open-rmf/rmf/rmf_demos:jazzy-rmf-latest AS bridge
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
@@ -40,6 +62,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libegl1 \
     && rm -rf /var/lib/apt/lists/*
 
+# Copy pre-downloaded Fuel models from stage 1 (instant, ~200 MB)
+COPY --from=fuel-cache /root/.gz/fuel /root/.gz/fuel
+
 # Install pybullet_fleet
 COPY requirements.txt /opt/pybullet_fleet/requirements.txt
 COPY pyproject.toml /opt/pybullet_fleet/pyproject.toml
@@ -50,19 +75,23 @@ COPY mesh/ /opt/pybullet_fleet/mesh/
 WORKDIR /opt/pybullet_fleet
 RUN pip install --break-system-packages -e .
 
-# Build pybullet_fleet_ros into the existing rmf_demos workspace
+# Build pybullet_fleet_msgs and pybullet_fleet_ros into the existing rmf_demos workspace
 # (rmf_fleet_adapter_python and simulation_interfaces are already installed)
+COPY ros2_bridge/pybullet_fleet_msgs /rmf_demos_ws/src/pybullet_fleet_msgs
 COPY ros2_bridge/pybullet_fleet_ros /rmf_demos_ws/src/pybullet_fleet_ros
 WORKDIR /rmf_demos_ws
 RUN source /opt/ros/jazzy/setup.bash && \
     source /rmf_demos_ws/install/setup.bash && \
     colcon build --symlink-install \
-    --packages-select pybullet_fleet_ros \
+    --packages-select pybullet_fleet_msgs pybullet_fleet_ros \
     --cmake-args -DCMAKE_BUILD_TYPE=Release
 
 # Copy test and utility scripts
 COPY docker/test_integration.sh /opt/pybullet_fleet/docker/test_integration.sh
 RUN chmod +x /opt/pybullet_fleet/docker/test_integration.sh
+
+# Keep download script in image for manual re-runs if needed
+COPY docker/download_fuel_models.py /opt/pybullet_fleet/docker/download_fuel_models.py
 
 # Entrypoint (same as rmf_demos: sources /opt/ros/jazzy + /rmf_demos_ws/install)
 # Already set by base image's /ros_entrypoint.sh

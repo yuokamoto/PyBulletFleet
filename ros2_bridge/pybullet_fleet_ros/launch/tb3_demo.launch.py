@@ -15,29 +15,17 @@ Usage::
 """
 
 import os
-import tempfile
 
 import xacro
-import yaml
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchContext, LaunchDescription
 from launch.actions import DeclareLaunchArgument, OpaqueFunction
 from launch_ros.actions import Node
 
-# TB3 model parameters
-_TB3_MODELS = {
-    "burger": {
-        "urdf_file": "turtlebot3_burger.urdf",
-        "model_name": "turtlebot3_burger",
-        "max_linear_vel": 0.22,
-        "max_angular_vel": 2.84,
-    },
-    "waffle": {
-        "urdf_file": "turtlebot3_waffle.urdf",
-        "model_name": "turtlebot3_waffle",
-        "max_linear_vel": 0.26,
-        "max_angular_vel": 1.82,
-    },
+# TB3 URDF file names (for robot_state_publisher / RViz)
+_TB3_URDF_FILES = {
+    "burger": "turtlebot3_burger.urdf",
+    "waffle": "turtlebot3_waffle.urdf",
 }
 
 
@@ -50,7 +38,7 @@ def _load_tb3_urdf(model: str) -> str:
     """
     try:
         tb3_dir = get_package_share_directory("turtlebot3_description")
-        urdf_file = _TB3_MODELS.get(model, _TB3_MODELS["burger"])["urdf_file"]
+        urdf_file = _TB3_URDF_FILES.get(model, _TB3_URDF_FILES["burger"])
         urdf_path = os.path.join(tb3_dir, "urdf", urdf_file)
         doc = xacro.process_file(urdf_path)
         return doc.toxml()
@@ -59,37 +47,30 @@ def _load_tb3_urdf(model: str) -> str:
         return ""
 
 
-def _generate_config(model: str, gui: bool = False) -> str:
-    """Generate a bridge config YAML for the selected TB3 model."""
-    params = _TB3_MODELS.get(model, _TB3_MODELS["burger"])
-    config = {
-        "simulation": {"gui": gui, "physics": False},
-        "robots": [
-            {
-                "name": "tb3_0",
-                "urdf_path": params["model_name"],
-                "pose": [0.0, 0.0, 0.01],
-                "yaw": 0.0,
-                "motion_mode": "differential",
-                "max_linear_vel": params["max_linear_vel"],
-                "max_linear_accel": 2.5,
-                "max_angular_vel": params["max_angular_vel"],
-                "max_angular_accel": 10.0,
-            }
-        ],
-    }
-    tmp = os.path.join(tempfile.gettempdir(), f"bridge_tb3_{model}.yaml")
-    with open(tmp, "w") as f:
-        yaml.dump(config, f)
-    return tmp
+def _resolve_config(model: str, pkg_dir: str) -> str:
+    """Resolve the bridge config YAML for the selected TB3 model.
+
+    Looks for ``config/bridge_tb3_{model}.yaml`` in the package share
+    directory first, then falls back to the dev-mount source path.
+    """
+    filename = f"bridge_tb3_{model}.yaml"
+    config_path = os.path.join(pkg_dir, "config", filename)
+    if not os.path.exists(config_path):
+        # Dev-mount fallback (Docker volume overlay)
+        config_path = os.path.join("/rmf_demos_ws/src/pybullet_fleet_ros/config", filename)
+    if not os.path.exists(config_path):
+        raise FileNotFoundError(
+            f"TB3 config not found for model '{model}': tried {filename} "
+            f"in {pkg_dir}/config/ and /rmf_demos_ws/src/pybullet_fleet_ros/config/"
+        )
+    return config_path
 
 
 def _launch_setup(context: LaunchContext):
     model = context.launch_configurations.get("model", "burger")
-    gui = context.launch_configurations.get("gui", "false")
+    gui = context.launch_configurations.get("gui", "")
     rviz = context.launch_configurations.get("rviz", "true")
-    target_rtf = context.launch_configurations.get("target_rtf", "1.0")
-    publish_rate = context.launch_configurations.get("publish_rate", "50.0")
+    target_rtf = context.launch_configurations.get("target_rtf", "")
 
     pkg_dir = get_package_share_directory("pybullet_fleet_ros")
     src_config = "/rmf_demos_ws/src/pybullet_fleet_ros/config"
@@ -99,25 +80,26 @@ def _launch_setup(context: LaunchContext):
     if not os.path.exists(rviz_config):
         rviz_config = os.path.join(src_config, "tb3_demo.rviz")
 
-    # Generate model-specific bridge config
-    config_yaml = _generate_config(model, gui=gui.lower() == "true")
+    # Resolve model-specific bridge config from package share
+    config_yaml = _resolve_config(model, pkg_dir)
 
     # Load URDF for robot_state_publisher (RViz rendering)
     robot_description = _load_tb3_urdf(model)
+
+    bridge_params = {
+        "config_yaml": config_yaml,
+    }
+    if gui:
+        bridge_params["gui"] = gui.lower() in ("true", "1", "yes")
+    if target_rtf:
+        bridge_params["target_rtf"] = float(target_rtf)
 
     nodes = [
         Node(
             package="pybullet_fleet_ros",
             executable="bridge_node",
             name="pybullet_fleet_bridge",
-            parameters=[
-                {
-                    "config_yaml": config_yaml,
-                    "gui": gui.lower() == "true",
-                    "target_rtf": float(target_rtf),
-                    "publish_rate": float(publish_rate),
-                }
-            ],
+            parameters=[bridge_params],
             output="screen",
         ),
     ]
@@ -158,10 +140,9 @@ def generate_launch_description():
     return LaunchDescription(
         [
             DeclareLaunchArgument("model", default_value="burger", description="TB3 model: burger or waffle"),
-            DeclareLaunchArgument("gui", default_value="false"),
+            DeclareLaunchArgument("gui", default_value=""),
             DeclareLaunchArgument("rviz", default_value="true", description="Launch RViz"),
-            DeclareLaunchArgument("target_rtf", default_value="1.0"),
-            DeclareLaunchArgument("publish_rate", default_value="50.0"),
+            DeclareLaunchArgument("target_rtf", default_value=""),
             OpaqueFunction(function=_launch_setup),
         ]
     )

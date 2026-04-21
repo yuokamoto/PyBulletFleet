@@ -20,8 +20,8 @@ import os
 
 import xacro
 from ament_index_python.packages import get_package_share_directory
-from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument
+from launch import LaunchContext, LaunchDescription
+from launch.actions import DeclareLaunchArgument, OpaqueFunction
 from launch.conditions import IfCondition
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
@@ -48,7 +48,7 @@ def _generate_ur5e_description() -> str:
         return ""
 
 
-def generate_launch_description():
+def _launch_setup(context: LaunchContext):
     pkg_dir = get_package_share_directory("pybullet_fleet_ros")
     src_config = "/rmf_demos_ws/src/pybullet_fleet_ros/config"
 
@@ -65,23 +65,23 @@ def generate_launch_description():
     # Expand UR5e xacro at launch time for robot_state_publisher (RViz)
     robot_description = _generate_ur5e_description()
 
+    gui = context.launch_configurations.get("gui", "")
+    target_rtf = context.launch_configurations.get("target_rtf", "")
+
+    bridge_params = {
+        "config_yaml": config_yaml,
+    }
+    if gui:
+        bridge_params["gui"] = gui.lower() in ("true", "1", "yes")
+    if target_rtf:
+        bridge_params["target_rtf"] = float(target_rtf)
+
     nodes = [
-        DeclareLaunchArgument("gui", default_value="false"),
-        DeclareLaunchArgument("rviz", default_value="true", description="Launch RViz"),
-        DeclareLaunchArgument("target_rtf", default_value="1.0"),
-        DeclareLaunchArgument("publish_rate", default_value="50.0"),
         Node(
             package="pybullet_fleet_ros",
             executable="bridge_node",
             name="pybullet_fleet_bridge",
-            parameters=[
-                {
-                    "config_yaml": config_yaml,
-                    "gui": LaunchConfiguration("gui"),
-                    "target_rtf": LaunchConfiguration("target_rtf"),
-                    "publish_rate": LaunchConfiguration("publish_rate"),
-                }
-            ],
+            parameters=[bridge_params],
             output="screen",
         ),
         Node(
@@ -114,4 +114,15 @@ def generate_launch_description():
             )
         )
 
-    return LaunchDescription(nodes)
+    return nodes
+
+
+def generate_launch_description():
+    return LaunchDescription(
+        [
+            DeclareLaunchArgument("gui", default_value=""),
+            DeclareLaunchArgument("rviz", default_value="true", description="Launch RViz"),
+            DeclareLaunchArgument("target_rtf", default_value=""),
+            OpaqueFunction(function=_launch_setup),
+        ]
+    )

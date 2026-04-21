@@ -10,14 +10,14 @@ Usage::
 import os
 
 from ament_index_python.packages import get_package_share_directory
-from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument
+from launch import LaunchContext, LaunchDescription
+from launch.actions import DeclareLaunchArgument, OpaqueFunction
 from launch.conditions import IfCondition
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 
 
-def generate_launch_description():
+def _launch_setup(context: LaunchContext):
     pkg_dir = get_package_share_directory("pybullet_fleet_ros")
     src_config = "/rmf_demos_ws/src/pybullet_fleet_ros/config"
 
@@ -25,9 +25,6 @@ def generate_launch_description():
     if not os.path.exists(rviz_config):
         rviz_config = os.path.join(src_config, "nav_demo.rviz")
 
-    # Config yaml — try installed share dir first, fall back to source mount.
-    # Docker volume-mounts overlay /rmf_demos_ws/src/ but not install/,
-    # so newly added configs may only exist in the source tree.
     config_yaml = os.path.join(pkg_dir, "config", "bridge_nav.yaml")
     if not os.path.exists(config_yaml):
         config_yaml = os.path.join(src_config, "bridge_nav.yaml")
@@ -40,23 +37,23 @@ def generate_launch_description():
     except FileNotFoundError:
         robot_description = ""
 
+    gui = context.launch_configurations.get("gui", "")
+    target_rtf = context.launch_configurations.get("target_rtf", "")
+
+    bridge_params = {
+        "config_yaml": config_yaml,
+    }
+    if gui:
+        bridge_params["gui"] = gui.lower() in ("true", "1", "yes")
+    if target_rtf:
+        bridge_params["target_rtf"] = float(target_rtf)
+
     nodes = [
-        DeclareLaunchArgument("gui", default_value="false"),
-        DeclareLaunchArgument("rviz", default_value="true", description="Launch RViz"),
-        DeclareLaunchArgument("target_rtf", default_value="1.0"),
-        DeclareLaunchArgument("publish_rate", default_value="50.0"),
         Node(
             package="pybullet_fleet_ros",
             executable="bridge_node",
             name="pybullet_fleet_bridge",
-            parameters=[
-                {
-                    "config_yaml": config_yaml,
-                    "publish_rate": LaunchConfiguration("publish_rate"),
-                    "gui": LaunchConfiguration("gui"),
-                    "target_rtf": LaunchConfiguration("target_rtf"),
-                }
-            ],
+            parameters=[bridge_params],
             output="screen",
         ),
         Node(
@@ -69,9 +66,6 @@ def generate_launch_description():
         ),
     ]
 
-    # robot_state_publisher for URDF visualisation in RViz
-    # frame_prefix ensures TF frames are robot0/base_link, robot0/shoulder_link, etc.
-    # matching the bridge's TF: odom → robot0/base_link
     if robot_description:
         nodes.append(
             Node(
@@ -91,4 +85,15 @@ def generate_launch_description():
             )
         )
 
-    return LaunchDescription(nodes)
+    return nodes
+
+
+def generate_launch_description():
+    return LaunchDescription(
+        [
+            DeclareLaunchArgument("gui", default_value=""),
+            DeclareLaunchArgument("rviz", default_value="true", description="Launch RViz"),
+            DeclareLaunchArgument("target_rtf", default_value=""),
+            OpaqueFunction(function=_launch_setup),
+        ]
+    )

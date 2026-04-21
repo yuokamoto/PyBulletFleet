@@ -10,7 +10,7 @@
 #
 # Available DEMO_WORLD values:
 #   office    — 2 robots, patrol + delivery (default)
-#   (future)  battle_royale, airport_terminal, hotel, campus
+#   airport_terminal — 4 fleets (tinyRobot, deliveryRobot, cleanerBotA, cleanerBotE)
 #
 # Usage:
 #   cd docker

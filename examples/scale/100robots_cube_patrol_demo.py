@@ -246,7 +246,7 @@ def main():
     sim.setup_camera()
 
     if sim.params.camera_config:
-        print(f"✓ Camera configured from config file: {sim.params.camera_config.get('camera_mode', 'none')} mode")
+        print(f"✓ Camera configured from config file: {sim.params.camera_config.get('camera_mode', 'auto')} mode")
         if "camera_auto_scale" in sim.params.camera_config:
             print(f"  Camera auto scale: {sim.params.camera_config['camera_auto_scale']}")
     else:

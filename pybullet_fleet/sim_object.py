@@ -74,7 +74,7 @@ class ShapeParams:
     half_extents: List[float] = field(default_factory=lambda: [0.5, 0.5, 0.5])
     radius: float = _SHP_D["radius"]
     height: float = _SHP_D["height"]
-    rgba_color: List[float] = field(default_factory=lambda: [0.8, 0.8, 0.8, 1.0])
+    rgba_color: Optional[List[float]] = field(default_factory=lambda: list(_SHP_D["rgba_color"]))
     frame_pose: Optional[Pose] = None
 
     @classmethod
@@ -98,7 +98,7 @@ class ShapeParams:
             half_extents=d.get("half_extents", [0.5, 0.5, 0.5]),
             radius=d.get("radius", _SHP_D["radius"]),
             height=d.get("height", _SHP_D["height"]),
-            rgba_color=d.get("rgba_color", [0.8, 0.8, 0.8, 1.0]),
+            rgba_color=d.get("rgba_color", list(_SHP_D["rgba_color"])),
         )
 
 
@@ -456,12 +456,17 @@ class SimObject:
             cls._create_visual_shape(visual_shape, physics_client_id) if visual_shape and visual_shape.shape_type else -1
         )
 
-        # Create collision shape
-        collision_id = (
-            cls._create_collision_shape(collision_shape, physics_client_id)
-            if collision_shape and collision_shape.shape_type
-            else -1
-        )
+        # Create collision shape (fall back to -1 if mesh can't be loaded)
+        collision_id = -1
+        if collision_shape and collision_shape.shape_type:
+            try:
+                collision_id = cls._create_collision_shape(collision_shape, physics_client_id)
+            except Exception:
+                logger.warning(
+                    "Failed to create collision shape for %s — using visual-only body",
+                    collision_shape.mesh_path or collision_shape.shape_type,
+                )
+                collision_id = -1
 
         # Cache only if at least one is a mesh shape
         if visual_needs_cache or collision_needs_cache:
@@ -475,10 +480,11 @@ class SimObject:
         frame_pos = shape.frame_pose.position if shape.frame_pose else [0, 0, 0]
         frame_orn = shape.frame_pose.orientation if shape.frame_pose else [0, 0, 0, 1]
 
+        color_key = tuple(shape.rgba_color) if shape.rgba_color is not None else "native"
         return (
             f"{shape.shape_type}_{shape.mesh_path}_{tuple(shape.mesh_scale)}_"
             f"{tuple(shape.half_extents)}_{shape.radius}_{shape.height}_"
-            f"{tuple(shape.rgba_color)}_{tuple(frame_pos)}_{tuple(frame_orn)}"
+            f"{color_key}_{tuple(frame_pos)}_{tuple(frame_orn)}"
         )
 
     @staticmethod
@@ -493,20 +499,24 @@ class SimObject:
         if shape.shape_type == "mesh":
             if not shape.mesh_path:
                 raise ValueError("mesh_path is required for shape_type='mesh'")
-            return p.createVisualShape(
-                p.GEOM_MESH,
+            kwargs: dict = dict(
+                shapeType=p.GEOM_MESH,
                 fileName=shape.mesh_path,
                 meshScale=shape.mesh_scale,
-                rgbaColor=shape.rgba_color,
                 visualFramePosition=frame_position,
                 visualFrameOrientation=frame_orientation,
                 physicsClientId=physics_client_id,
             )
+            # Only pass rgbaColor if explicitly set — omitting it lets
+            # PyBullet read native colours from DAE/OBJ materials.
+            if shape.rgba_color is not None:
+                kwargs["rgbaColor"] = shape.rgba_color
+            return p.createVisualShape(**kwargs)
         elif shape.shape_type == "box":
             return p.createVisualShape(
                 p.GEOM_BOX,
                 halfExtents=shape.half_extents,
-                rgbaColor=shape.rgba_color,
+                rgbaColor=shape.rgba_color or list(_SHP_D["rgba_color"]),
                 visualFramePosition=frame_position,
                 visualFrameOrientation=frame_orientation,
                 physicsClientId=physics_client_id,
@@ -515,7 +525,7 @@ class SimObject:
             return p.createVisualShape(
                 p.GEOM_SPHERE,
                 radius=shape.radius,
-                rgbaColor=shape.rgba_color,
+                rgbaColor=shape.rgba_color or list(_SHP_D["rgba_color"]),
                 visualFramePosition=frame_position,
                 visualFrameOrientation=frame_orientation,
                 physicsClientId=physics_client_id,
@@ -525,7 +535,7 @@ class SimObject:
                 p.GEOM_CYLINDER,
                 radius=shape.radius,
                 length=shape.height,
-                rgbaColor=shape.rgba_color,
+                rgbaColor=shape.rgba_color or list(_SHP_D["rgba_color"]),
                 visualFramePosition=frame_position,
                 visualFrameOrientation=frame_orientation,
                 physicsClientId=physics_client_id,

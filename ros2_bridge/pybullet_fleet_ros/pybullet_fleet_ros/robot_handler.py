@@ -38,16 +38,17 @@ from .conversions import (
     ros_pose_to_pbf,
 )
 
+from .robot_handler_base import RobotHandlerBase
+
 if TYPE_CHECKING:
     from pybullet_fleet.agent import Agent
-    from pybullet_fleet.controller import KinematicController
     from rclpy.node import Node
     from tf2_ros import TransformBroadcaster
 
 logger = logging.getLogger(__name__)
 
 
-class RobotHandler:
+class RobotHandler(RobotHandlerBase):
     """Manages all ROS 2 interfaces for a single simulated Agent.
 
     Creates:
@@ -71,16 +72,15 @@ class RobotHandler:
         self,
         node: "Node",
         agent: "Agent",
-        vel_controller: Optional["KinematicController"] = None,
         tf_broadcaster: Optional["TransformBroadcaster"] = None,
     ):
+        super().__init__(node, agent, tf_broadcaster)
+        # Backward-compat aliases for internal use
         self._node = node
-        self.agent = agent
-        self._vel_controller = vel_controller
         self._tf_broadcaster = tf_broadcaster
         self._latest_twist: Optional[Twist] = None
 
-        ns = agent.name or f"robot{agent.object_id}"
+        ns = self.ns
         self._ns = ns
 
         # --- Publishers (existing) ---
@@ -207,23 +207,28 @@ class RobotHandler:
             return
         self.agent.set_all_joints_targets(positions)
 
-    def apply_cmd_vel(self) -> None:
-        """Apply stored cmd_vel as a velocity command via KinematicController.
+    def pre_step(self, dt: float = 0.0, stamp: Optional[TimeMsg] = None) -> None:
+        """Apply stored cmd_vel before the simulation step.
 
-        Called once per sim step by BridgeNode._step_callback().
+        Called once per sim step by BridgeNode._on_pre_step().
         Passes body-frame Twist directly to the controller's set_velocity().
         The controller handles kinematics (body→world rotation) internally.
         """
+        self._apply_cmd_vel()
+
+    def _apply_cmd_vel(self) -> None:
+        """Internal: apply stored cmd_vel as a velocity command."""
         if self._latest_twist is None:
             return
-        if self._vel_controller is None:
+        ctrl = self.agent._controller
+        if ctrl is None:
             logger.warning("RobotHandler '%s': no controller set, ignoring cmd_vel", self._ns)
             self._latest_twist = None
             return
 
         twist = self._latest_twist
         # Pass body-frame Twist directly — controller handles kinematics
-        self._vel_controller.set_velocity(
+        ctrl.set_velocity(
             vx=twist.linear.x,
             vy=twist.linear.y,
             vz=twist.linear.z,
@@ -232,8 +237,10 @@ class RobotHandler:
             wz=twist.angular.z,
         )
 
-    def publish_state(self, stamp: TimeMsg) -> None:
-        """Publish odom, joint_states, TF, and status for this agent."""
+    def post_step(self, dt: float = 0.0, stamp: Optional[TimeMsg] = None) -> None:
+        """Publish odom, joint_states, TF, and status after each step."""
+        if stamp is None:
+            stamp = TimeMsg()
         pose = self.agent.get_pose()
         velocity = list(self.agent.velocity)
         angular_vel = self.agent.angular_velocity

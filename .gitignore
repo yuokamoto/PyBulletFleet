@@ -50,3 +50,6 @@ todo_summary.txt
 
 # User environment overrides (see .env.defaults for template)
 .env
+
+# ROSCon JP submission draft (personal)
+_roscon_jp_2026/

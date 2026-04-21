@@ -51,7 +51,7 @@ def generate_launch_description():
     return LaunchDescription(
         [
             DeclareLaunchArgument("gui", default_value="true"),
-            DeclareLaunchArgument("target_rtf", default_value="1.0"),
+            DeclareLaunchArgument("target_rtf", default_value=""),
             DeclareLaunchArgument(
                 "server_uri",
                 default_value="",
@@ -61,6 +61,11 @@ def generate_launch_description():
                 "headless",
                 default_value="false",
                 description="Skip rviz launch",
+            ),
+            DeclareLaunchArgument(
+                "use_sim_time",
+                default_value="true",
+                description="Use simulation clock",
             ),
             # ============================================================
             # RMF common infra — reuse rmf_demos common.launch.xml
@@ -75,6 +80,7 @@ def generate_launch_description():
                     "headless": LaunchConfiguration("headless"),
                     "server_uri": LaunchConfiguration("server_uri"),
                     "use_reservation_node": "true",
+                    "use_sim_time": LaunchConfiguration("use_sim_time"),
                 }.items(),
             ),
             # ============================================================
@@ -90,6 +96,7 @@ def generate_launch_description():
                     "gui": LaunchConfiguration("gui"),
                     "target_rtf": LaunchConfiguration("target_rtf"),
                     "server_uri": LaunchConfiguration("server_uri"),
+                    "use_sim_time": LaunchConfiguration("use_sim_time"),
                 }.items(),
             ),
         ]

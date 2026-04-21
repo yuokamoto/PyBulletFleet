@@ -1,8 +1,7 @@
 """Main bridge node — wraps MultiRobotSimulationCore as a ROS 2 node.
 
-The ROS timer drives ``step_once()`` calls; ``initialize_simulation()``
-prepares the sim without entering the blocking loop.
-RTF is controlled by the timer period.
+The simulation loop (``run_simulation()``) runs on a background thread.
+Bridge publishes state via EventBus callbacks (``POST_STEP``).
 
 Usage::
 
@@ -11,7 +10,8 @@ Usage::
 """
 
 import logging
-from typing import Dict
+import threading
+from typing import Any, Dict, List, Type
 
 import rclpy
 from rclpy.node import Node
@@ -22,13 +22,17 @@ from pybullet_fleet import (
     Agent,
     AgentSpawnParams,
     MultiRobotSimulationCore,
+    SimEvents,
 )
 from pybullet_fleet.config_utils import load_yaml_config
 from pybullet_fleet.controller import OmniController
 from pybullet_fleet.types import MotionMode
 
 from .conversions import sim_time_to_ros_time
+from .handler_registry import HandlerMap, load_handler_map_from_config, resolve_handler_classes
+from .param_utils import get_bool_param, get_float_param
 from .robot_handler import RobotHandler
+from .robot_handler_base import RobotHandlerBase
 
 logger = logging.getLogger(__name__)
 
@@ -38,88 +42,101 @@ class BridgeNode(Node):
 
     Parameters (ROS):
         config_yaml (str): Path to PyBulletFleet YAML config file (required).
-        publish_rate (float): State publish rate in Hz.
+        publish_rate (float): State publish rate in Hz (default: 1/timestep, i.e. every step).
         gui (bool): Enable PyBullet GUI window (overrides YAML).
         physics (bool): Enable physics simulation (overrides YAML).
         target_rtf (float): Target real-time factor (overrides YAML).
         enable_sim_services (bool): Create simulation_interfaces services.
     """
 
-    def __init__(self) -> None:
-        super().__init__("pybullet_fleet_bridge")
+    #: Default handler class(es) for all robots.  Override in subclasses
+    #: or pass ``handler_map`` to use per-robot handlers.
+    handler_class: Type[RobotHandler] = RobotHandler
 
-        # Declare parameters — use dynamic_typing so LaunchConfiguration
-        # string overrides don't conflict with the default type.
+    def __init__(self, handler_map: HandlerMap | None = None) -> None:
+        super().__init__("pybullet_fleet_bridge")
+        self._handler_map: HandlerMap = handler_map or {}
+
+        # -- Step 1: Read config_yaml and load YAML config --
+        self.declare_parameter("config_yaml", "")
+        config_yaml = self.get_parameter("config_yaml").get_parameter_value().string_value
+
+        if not config_yaml:
+            self.get_logger().info("config_yaml not set, starting with defaults")
+            bridge_config: Dict[str, Any] = {}
+        else:
+            bridge_config = load_yaml_config(config_yaml)
+
+        sim_cfg = bridge_config.get("simulation", {})
+
+        # -- Step 2: Declare params with YAML values as defaults --
+        # ROS 2 parameter overrides (from launch file or -p flag)
+        # automatically take precedence over these defaults.
+        # Priority: code default → YAML config → command-line parameter.
         from rcl_interfaces.msg import ParameterDescriptor
 
         _dyn = ParameterDescriptor(dynamic_typing=True)
-        self.declare_parameter("config_yaml", "")
-        self.declare_parameter("publish_rate", 50.0, _dyn)
-        self.declare_parameter("gui", False, _dyn)
-        self.declare_parameter("physics", False, _dyn)
-        self.declare_parameter("target_rtf", 1.0, _dyn)
+        self.declare_parameter("publish_rate", 0.0, _dyn)
+        self.declare_parameter("gui", sim_cfg.get("gui", False), _dyn)
+        self.declare_parameter("physics", sim_cfg.get("physics", False), _dyn)
+        self.declare_parameter("target_rtf", float(sim_cfg.get("target_rtf", 1.0)), _dyn)
         self.declare_parameter("enable_sim_services", True, _dyn)
 
-        # Read parameters (handle string overrides from launch files)
-        config_yaml = self.get_parameter("config_yaml").get_parameter_value().string_value
-        publish_rate = self._get_float("publish_rate", 50.0)
-        gui = self._get_bool("gui", False)
-        physics = self._get_bool("physics", False)
-        target_rtf = self._get_float("target_rtf", 1.0)
-        enable_sim_services = self._get_bool("enable_sim_services", True)
+        # -- Step 3: Read final resolved values --
+        publish_rate_param = get_float_param(self, "publish_rate", 0.0)
+        enable_sim_services = get_bool_param(self, "enable_sim_services", True)
+        effective_gui = get_bool_param(self, "gui", sim_cfg.get("gui", False))
+        effective_physics = get_bool_param(self, "physics", sim_cfg.get("physics", False))
+        effective_rtf = get_float_param(self, "target_rtf", float(sim_cfg.get("target_rtf", 1.0)))
 
-        if not config_yaml:
-            raise RuntimeError(
-                "config_yaml parameter is required. "
-                "Usage: ros2 run pybullet_fleet_ros bridge_node "
-                "--ros-args -p config_yaml:=/path/to/config.yaml"
-            )
-
-        # Create simulation core
-        # ROS parameters (from launch/CLI) override YAML config values.
-        bridge_config = load_yaml_config(config_yaml)
-        sim_overrides = bridge_config.get("simulation", {})
-        effective_gui = gui if gui else sim_overrides.get("gui", False)
-        effective_physics = physics if physics else sim_overrides.get("physics", False)
-        effective_rtf = target_rtf if target_rtf != 1.0 else sim_overrides.get("target_rtf", 1.0)
-
-        # Apply ROS parameter overrides into the config dict
-        sim_overrides = dict(sim_overrides)
+        # Apply resolved values into the config dict
+        sim_overrides = dict(sim_cfg)
         sim_overrides["gui"] = effective_gui
         sim_overrides["physics"] = effective_physics
         sim_overrides["target_rtf"] = effective_rtf
-        sim_overrides["monitor"] = False
+
+        # Load handler_map from config (if present) and merge with
+        # programmatic handler_map.  Config entries have lower priority
+        # (programmatic handler_map wins on key conflict).
+        config_handler_map = bridge_config.get("handler_map", {})
+        if config_handler_map:
+            config_map = load_handler_map_from_config(config_handler_map)
+            # Programmatic handler_map takes priority over config
+            config_map.update(self._handler_map)
+            self._handler_map = config_map
 
         # Delegate world loading & robot spawning to core
         full_config = dict(bridge_config)
         full_config["simulation"] = sim_overrides
         self.sim = MultiRobotSimulationCore.from_dict(full_config)
 
-        # Set up camera view (must be called after from_dict)
-        self.sim.setup_camera()
-
-        # Enable rendering — from_dict disables it during setup for
-        # performance.  run_simulation() re-enables it, but BridgeNode
-        # drives step_once() via ROS timer, so we must do it here.
-        self.sim.enable_rendering()
+        # Resolve publish_rate: 0 (default) = every simulation step
+        timestep = self.sim.params.timestep
+        publish_rate = publish_rate_param if publish_rate_param > 0 else 1.0 / timestep
 
         # TF broadcaster (shared by all handlers)
         self._tf_broadcaster = TransformBroadcaster(self)
 
-        # Robot handlers (object_id → RobotHandler)
-        self._handlers: Dict[int, "RobotHandler"] = {}
+        # Robot handlers (object_id → list of RobotHandlerBase instances)
+        self._handlers: Dict[int, List["RobotHandlerBase"]] = {}
+
+        # /clock publisher and throttle state
+        self._clock_pub = self.create_publisher(Clock, "/clock", 10)
+        self._last_clock_time: float = -1.0
+        self._clock_min_interval: float = 1.0 / publish_rate  # throttle /clock
 
         # Register ROS handlers for all agents already in the sim
         for agent in self.sim.agents:
-            self._register_handler(agent)
+            self._register_robot_handler(agent)
         actual_count = len(self.sim.agents)
 
-        # EventBus: auto-register/unregister handlers when agents spawn/despawn
-        self.sim.events.on("agent_spawned", self._on_agent_spawned)
-        self.sim.events.on("agent_removed", self._on_agent_removed)
+        # Auto-register/unregister handlers when agents spawn/despawn
+        self.sim.events.on(SimEvents.AGENT_SPAWNED, self._on_agent_spawned)
+        self.sim.events.on(SimEvents.AGENT_REMOVED, self._on_agent_removed)
 
-        # /clock publisher
-        self._clock_pub = self.create_publisher(Clock, "/clock", 10)
+        # Drive publish from simulation step
+        self.sim.events.on(SimEvents.PRE_STEP, self._on_pre_step)
+        self.sim.events.on(SimEvents.POST_STEP, self._on_post_step)
 
         # simulation_interfaces services
         self._sim_services = None
@@ -128,50 +145,22 @@ class BridgeNode(Node):
 
             self._sim_services = SimServices(self, self.sim, self)
 
-        # Simulation step timer — period controls RTF
-        dt = self.sim.params.timestep
-        effective_rtf = target_rtf if target_rtf > 0 else 0.0
-        if effective_rtf > 0:
-            timer_period = dt / effective_rtf
-        else:
-            timer_period = 0.0  # As fast as possible
-        self._step_timer = self.create_timer(timer_period, self._step_callback)
-
-        # Publish timer (may be slower than step rate)
-        publish_period = 1.0 / publish_rate
-        self._publish_timer = self.create_timer(publish_period, self._publish_callback)
+        # Start simulation loop on a daemon thread.
+        # rclpy.spin() runs on the main thread for action server callbacks.
+        self._sim_thread = threading.Thread(target=self._run_simulation_loop, daemon=True, name="sim_loop")
+        self._sim_thread.start()
 
         self.get_logger().info(
-            f"BridgeNode started: {actual_count} robots, dt={dt:.4f}s, "
-            f"rtf={target_rtf}, publish_rate={publish_rate}Hz, gui={gui}, physics={physics}"
+            f"BridgeNode started: {actual_count} robots, "
+            f"dt={timestep:.4f}s, target_rtf={effective_rtf}, "
+            f"publish_rate={publish_rate:.1f}Hz, gui={effective_gui}, physics={effective_physics}"
         )
 
     # ------------------------------------------------------------------
-    # Parameter helpers — handle string overrides from launch files
+    # Robot handler registration
     # ------------------------------------------------------------------
 
-    def _get_float(self, name: str, default: float) -> float:
-        """Read a parameter as float, coercing from string if needed."""
-        val = self.get_parameter(name).value
-        if isinstance(val, (int, float)):
-            return float(val)
-        if isinstance(val, str):
-            try:
-                return float(val)
-            except ValueError:
-                pass
-        return default
-
-    def _get_bool(self, name: str, default: bool) -> bool:
-        """Read a parameter as bool, coercing from string if needed."""
-        val = self.get_parameter(name).value
-        if isinstance(val, bool):
-            return val
-        if isinstance(val, str):
-            return val.lower() in ("true", "1", "yes")
-        return default
-
-    def _register_handler(self, agent: Agent) -> None:
+    def _register_robot_handler(self, agent: Agent) -> None:
         """Create a RobotHandler for *agent* and register it.
 
         If the agent already has a KinematicController (e.g. from
@@ -181,87 +170,107 @@ class BridgeNode(Node):
         is attached **only for omnidirectional agents**. Differential-drive
         agents use TPI-based navigation directly and do not need a controller
         for ``cmd_vel`` (they use ``goal_pose`` / ``path`` topics instead).
-
-        This is the **post-hook** that adds ROS interfaces after
-        ``spawn_from_config`` / ``Agent.from_params`` creates the
-        simulation-layer agent.
         """
-        vel_ctrl = agent._controller
-        if vel_ctrl is None and agent._motion_mode == MotionMode.OMNIDIRECTIONAL:
-            vel_ctrl = OmniController()
-            agent.set_controller(vel_ctrl)
-        handler = RobotHandler(
-            self,
-            agent,
-            vel_controller=vel_ctrl,
-            tf_broadcaster=self._tf_broadcaster,
-        )
-        self._handlers[agent.object_id] = handler
+        motion_ctrl = agent._controller
+        if motion_ctrl is None and agent._motion_mode == MotionMode.OMNIDIRECTIONAL:
+            motion_ctrl = OmniController()
+            agent.set_controller(motion_ctrl)
+        classes = resolve_handler_classes(agent, self._handler_map, [self.handler_class])
+        handlers = []
+        for cls in classes:
+            handler = cls(
+                self,
+                agent,
+                tf_broadcaster=self._tf_broadcaster,
+            )
+            handlers.append(handler)
+            if cls is not RobotHandler:
+                logger.info("Using custom handler %s for '%s'", cls.__name__, agent.name)
+        self._handlers[agent.object_id] = handlers
 
     def spawn_robot(self, spawn_params: AgentSpawnParams) -> Agent:
         """Spawn a robot dynamically (e.g., via SpawnEntity service)."""
         agent = Agent.from_params(spawn_params, sim_core=self.sim)
-        self._register_handler(agent)
+        self._register_robot_handler(agent)
         self.get_logger().info(f"Spawned robot '{agent.name}' (id={agent.object_id})")
         return agent
 
     def remove_robot(self, object_id: int) -> bool:
         """Remove a robot and its ROS interfaces."""
-        handler = self._handlers.pop(object_id, None)
-        if handler is None:
+        handlers = self._handlers.pop(object_id, None)
+        if handlers is None:
             return False
-        handler.destroy()
-        self.sim.remove_object(handler.agent)
-        self.get_logger().info(f"Removed robot '{handler.agent.name}' (id={object_id})")
+        agent = handlers[0].agent
+        for h in handlers:
+            h.destroy()
+        self.sim.remove_object(agent)
+        self.get_logger().info(f"Removed robot '{agent.name}' (id={object_id})")
         return True
 
-    def _on_agent_spawned(self, agent):
-        """Auto-register RobotHandler when agent spawns via EventBus."""
+    def _on_agent_spawned(self, agent, **kwargs):
+        """Auto-register RobotHandler when a new agent spawns."""
         if agent.object_id not in self._handlers:
-            self._register_handler(agent)
-            self.get_logger().info(f"EventBus: auto-registered handler for {agent.name}")
+            self._register_robot_handler(agent)
+            n = len(self._handlers[agent.object_id])
+            self.get_logger().info(f"Registered {n} handler(s) for {agent.name}")
 
-    def _on_agent_removed(self, agent):
-        """Auto-cleanup when agent is removed via EventBus."""
-        handler = self._handlers.pop(agent.object_id, None)
-        if handler is not None:
-            handler.destroy()
-            self.get_logger().info(f"EventBus: removed handler for {agent.name}")
+    def _on_agent_removed(self, agent, **kwargs):
+        """Auto-cleanup when agent is removed."""
+        handlers = self._handlers.pop(agent.object_id, None)
+        if handlers is not None:
+            for h in handlers:
+                h.destroy()
+            self.get_logger().info(f"Removed handler(s) for {agent.name}")
 
-    def _step_callback(self) -> None:
-        """Called every sim timestep — advance simulation."""
+    def _run_simulation_loop(self) -> None:
+        """Run ``sim.run_simulation()`` on a daemon thread."""
         try:
-            # Apply pending cmd_vel commands
-            for handler in self._handlers.values():
-                handler.apply_cmd_vel()
-
-            # Step the simulation
-            self.sim.step_once()
-
-            # Publish /clock
-            clock_msg = Clock()
-            clock_msg.clock = sim_time_to_ros_time(self.sim.sim_time)
-            self._clock_pub.publish(clock_msg)
+            self.sim.run_simulation()
         except Exception as e:
             if "Not connected" in str(e) or "physics server" in str(e):
-                self.get_logger().warn("PyBullet disconnected, requesting shutdown")
-                raise SystemExit(0)
-            raise
+                self.get_logger().warn("PyBullet disconnected, sim thread exiting")
+            else:
+                self.get_logger().error(f"Simulation error: {e}")
 
-    def _publish_callback(self) -> None:
-        """Called at publish_rate — publish state for all robots."""
+    def _on_pre_step(self, dt, sim_time, **kwargs) -> None:
+        """PRE_STEP — delegate to handler.pre_step()."""
+        stamp = sim_time_to_ros_time(sim_time)
+        for handlers in self._handlers.values():
+            for h in handlers:
+                h.pre_step(dt=dt, stamp=stamp)
+
+    def _on_post_step(self, dt, sim_time, **kwargs) -> None:
+        """POST_STEP — publish /clock and delegate to handler.post_step()."""
         try:
-            stamp = sim_time_to_ros_time(self.sim.sim_time)
-            for handler in self._handlers.values():
-                handler.publish_state(stamp)
+            stamp = sim_time_to_ros_time(sim_time)
+
+            # Publish /clock (throttled)
+            if sim_time - self._last_clock_time >= self._clock_min_interval:
+                clock_msg = Clock()
+                clock_msg.clock = stamp
+                self._clock_pub.publish(clock_msg)
+                self._last_clock_time = sim_time
+
+            # Per-robot update (odom, TF, joint_states, diagnostics)
+            for handlers in self._handlers.values():
+                for h in handlers:
+                    h.post_step(dt=dt, stamp=stamp)
         except Exception as e:
             if "Not connected" in str(e) or "physics server" in str(e):
-                self.get_logger().warn("PyBullet disconnected, skipping publish")
                 return
             raise
 
+    def reset(self) -> None:
+        """Destroy all robot handlers and reset the simulation."""
+        for handlers in list(self._handlers.values()):
+            for h in handlers:
+                h.destroy()
+        self._handlers.clear()
+        self.sim.reset()
+        self.get_logger().info("BridgeNode reset: all handlers destroyed, simulation reset")
+
     @property
-    def handlers(self) -> Dict[int, "RobotHandler"]:
+    def handlers(self) -> Dict[int, List["RobotHandlerBase"]]:
         """Access robot handlers (used by SimServices for spawn/delete)."""
         return self._handlers
 

@@ -28,6 +28,9 @@ _CAM_PITCH = 9
 _CAM_DIST = 10
 _CAM_TARGET = 11
 
+#: Minimum camera distance before zoom switches to target-forward mode.
+_MIN_ZOOM_DIST = 2.0
+
 # Type alias for a single mouse event tuple from PyBullet
 MouseEvent = Tuple[int, int, int, int, int]
 
@@ -80,12 +83,31 @@ class CameraController:
             if self._process_mouse(mouse_events, target, dist, yaw, pitch):
                 camera_changed = True
 
-        # +/- → zoom
+        # +/- → zoom (proportional: 10% per press, min step 0.5)
+        # When distance is already small, move the *target* forward so the
+        # camera keeps advancing — like a two-finger pinch zoom.
         if _pressed(keys, ord("=")):
-            dist = max(1.0, dist - self._zoom_speed)
+            step = max(0.5, dist * 0.1 * self._zoom_speed)
+            new_dist = dist - step
+            if new_dist < _MIN_ZOOM_DIST:
+                # Shift target forward (camera→target direction) instead of stopping
+                overshoot = _MIN_ZOOM_DIST - new_dist
+                rad_yaw = math.radians(yaw)
+                rad_pitch = math.radians(pitch)
+                cos_pitch = math.cos(rad_pitch)
+                # Forward direction: camera → target (away from camera)
+                fwd_x = -math.sin(rad_yaw) * cos_pitch
+                fwd_y = math.cos(rad_yaw) * cos_pitch
+                fwd_z = math.sin(rad_pitch)
+                target[0] += overshoot * fwd_x
+                target[1] += overshoot * fwd_y
+                target[2] += overshoot * fwd_z
+                new_dist = _MIN_ZOOM_DIST
+            dist = new_dist
             camera_changed = True
         if _pressed(keys, ord("-")):
-            dist += self._zoom_speed
+            step = max(0.5, dist * 0.1 * self._zoom_speed)
+            dist += step
             camera_changed = True
 
         # 'o' → top-down view

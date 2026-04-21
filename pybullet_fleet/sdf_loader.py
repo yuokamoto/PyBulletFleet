@@ -89,6 +89,9 @@ def _resolve_model_uri(uri: str, model_dir: str, model_name: str) -> str:
         return os.path.join(os.path.expanduser("~/.gz/fuel"), *stripped.split("/"))
 
     if not uri.startswith("model://"):
+        # Plain relative path (e.g. "meshes/suv.obj") — resolve relative to model_dir
+        if not os.path.isabs(uri):
+            return os.path.join(model_dir, uri)
         return uri
 
     # model://ModelName/rest/of/path  OR  model://other_model/...
@@ -267,7 +270,7 @@ def load_sdf_world(
     if not model_els:
         raise ValueError(f"No <model> element found in {sdf_path}")
 
-    color = rgba_color or list(DEFAULT_SCENERY_COLOR)
+    color = rgba_color  # None → use mesh native colours (DAE materials)
     objects: List[SimObject] = []
 
     def _load() -> None:
@@ -304,19 +307,29 @@ def load_sdf_world(
                     continue
 
                 # Find collision mesh and scale (use visual mesh as fallback)
-                collision_uri = None
-                collision_scale = list(visual_scale)
-                for coll in link.findall("collision"):
-                    coll_mesh = coll.find(".//mesh/uri")
-                    if coll_mesh is not None and coll_mesh.text:
-                        collision_uri = coll_mesh.text
-                        coll_scale_el = coll.find(".//mesh/scale")
-                        if coll_scale_el is not None and coll_scale_el.text:
-                            parts = coll_scale_el.text.strip().split()
-                            if len(parts) >= 3:
-                                collision_scale = [float(parts[0]), float(parts[1]), float(parts[2])]
-                        break
-                collision_path = _resolve_model_uri(collision_uri, model_dir, model_name) if collision_uri else mesh_path
+                # Skip collision shape entirely when collision is disabled — many
+                # Gazebo Fuel .dae meshes fail createCollisionShape but render
+                # fine as visual-only bodies.
+                coll_shape_for_link: Optional[ShapeParams] = None
+                if collision_mode != CollisionMode.DISABLED:
+                    collision_uri = None
+                    collision_scale = list(visual_scale)
+                    for coll in link.findall("collision"):
+                        coll_mesh = coll.find(".//mesh/uri")
+                        if coll_mesh is not None and coll_mesh.text:
+                            collision_uri = coll_mesh.text
+                            coll_scale_el = coll.find(".//mesh/scale")
+                            if coll_scale_el is not None and coll_scale_el.text:
+                                parts = coll_scale_el.text.strip().split()
+                                if len(parts) >= 3:
+                                    collision_scale = [float(parts[0]), float(parts[1]), float(parts[2])]
+                            break
+                    collision_path = _resolve_model_uri(collision_uri, model_dir, model_name) if collision_uri else mesh_path
+                    coll_shape_for_link = ShapeParams(
+                        shape_type="mesh",
+                        mesh_path=collision_path if os.path.isfile(collision_path) else mesh_path,
+                        mesh_scale=collision_scale,
+                    )
 
                 visual_shape = ShapeParams(
                     shape_type="mesh",
@@ -324,15 +337,10 @@ def load_sdf_world(
                     mesh_scale=visual_scale,
                     rgba_color=color,
                 )
-                collision_shape = ShapeParams(
-                    shape_type="mesh",
-                    mesh_path=collision_path if os.path.isfile(collision_path) else mesh_path,
-                    mesh_scale=collision_scale,
-                )
 
                 obj = SimObject.from_mesh(
                     visual_shape=visual_shape,
-                    collision_shape=collision_shape,
+                    collision_shape=coll_shape_for_link,
                     pose=Pose.from_euler(x, y, z, roll, pitch, yaw),
                     mass=0.0,
                     sim_core=sim_core,
@@ -381,6 +389,7 @@ def _resolve_fuel_uri(uri: str) -> Optional[str]:
         if versions:
             candidate = os.path.join(cache_dir, versions[-1])
             if os.path.isfile(os.path.join(candidate, "model.sdf")):
+                _ensure_texture_symlinks(candidate)
                 return candidate
 
     # Download via gz fuel
@@ -405,10 +414,41 @@ def _resolve_fuel_uri(uri: str) -> Optional[str]:
         if versions:
             candidate = os.path.join(cache_dir, versions[-1])
             if os.path.isfile(os.path.join(candidate, "model.sdf")):
+                _ensure_texture_symlinks(candidate)
                 return candidate
 
     logger.warning("Fuel model not found after download: %s", uri)
     return None
+
+
+def _ensure_texture_symlinks(model_version_dir: str) -> None:
+    """Create symlinks in ``meshes/`` for textures in ``materials/textures/``.
+
+    Gazebo Fuel models store texture images in ``materials/textures/`` but
+    DAE files reference them by bare filename.  PyBullet resolves textures
+    relative to the DAE file's directory (``meshes/``), so it cannot find them.
+    This function creates relative symlinks to bridge the gap.
+    """
+    tex_dir = os.path.join(model_version_dir, "materials", "textures")
+    if not os.path.isdir(tex_dir):
+        return
+
+    meshes_dir = os.path.join(model_version_dir, "meshes")
+    if not os.path.isdir(meshes_dir):
+        return
+
+    for fname in os.listdir(tex_dir):
+        ext = os.path.splitext(fname)[1].lower()
+        if ext not in (".png", ".jpg", ".jpeg", ".tga", ".bmp"):
+            continue
+        link_path = os.path.join(meshes_dir, fname)
+        if os.path.exists(link_path):
+            continue
+        target = os.path.join("..", "materials", "textures", fname)
+        try:
+            os.symlink(target, link_path)
+        except OSError:
+            pass  # read-only filesystem or permission issue — skip silently
 
 
 def _resolve_include_uri(
@@ -506,6 +546,9 @@ def load_sdf_world_file(
         iroll: float
         ipitch: float
         iyaw: float
+        is_fuel: bool = False  # True → Gazebo Fuel model (.dae with embedded colours).
+        # Currently only Fuel URIs are detected.  With DAE→OBJ conversion
+        # (see roadmap) this could become a generic "has_native_materials" flag.
 
     resolved: List[_IncludeInfo] = []
 
@@ -525,6 +568,12 @@ def load_sdf_world_file(
             continue
 
         # Resolve URI to local directory (may download from Fuel)
+        # NOTE: is_fuel is currently a simple URL prefix check, meaning it only
+        # handles Gazebo Fuel models.  If DAE→OBJ auto-conversion is added
+        # (see roadmap), the is_fuel flag could be replaced with a mesh-format
+        # check (e.g. "does the model contain .dae files?") to handle
+        # arbitrary DAE models from any source generically.
+        is_fuel = uri.startswith("https://fuel.gazebosim.org/")
         model_dir = _resolve_include_uri(uri, effective_paths)
         if model_dir is None:
             logger.warning("Cannot resolve include URI: %s", uri)
@@ -548,6 +597,7 @@ def load_sdf_world_file(
                 iroll=iroll,
                 ipitch=ipitch,
                 iyaw=iyaw,
+                is_fuel=is_fuel,
             )
         )
 
@@ -555,11 +605,22 @@ def load_sdf_world_file(
 
     # --- Phase 2: load into PyBullet --------------------------------------
     for info in resolved:
+        # Fuel models (.dae) have embedded materials → rgba_color=None lets
+        # PyBullet read native colours.  Local building models (.obj from
+        # rmf_building_map_tools) lack material info → use default grey.
+        model_color = None if info.is_fuel else list(DEFAULT_SCENERY_COLOR)
+
+        # Ensure texture symlinks exist for Fuel models so PyBullet can
+        # resolve DAE <init_from> texture references (textures live in
+        # materials/textures/ but DAE refs use bare filenames).
+        if info.is_fuel:
+            _ensure_texture_symlinks(os.path.dirname(info.sdf_path))
         try:
             model_objs = load_sdf_world(
                 info.sdf_path,
                 sim_core=sim_core,
                 collision_mode=collision_mode,
+                rgba_color=model_color,
             )
         except Exception as e:
             logger.warning("Failed to load model SDF %s: %s", info.sdf_path, e)
@@ -728,10 +789,13 @@ def resolve_sdf_to_urdf(sdf_path: str) -> str:
     for joint_el in joints:
         jname = joint_el.get("name", "joint")
         jtype = joint_el.get("type", "fixed")
-        # SDF "revolute" maps to URDF "continuous" (unlimited) or "revolute" (limited)
+        limit_el = joint_el.find(".//limit")
+
+        # Map SDF joint type → URDF joint type
         urdf_type = jtype
         if jtype == "revolute":
-            limit_el = joint_el.find(".//limit")
+            # Revolute with explicit finite limits → URDF "revolute"
+            # Revolute without limits or with ±inf → URDF "continuous"
             if limit_el is not None:
                 lower = limit_el.find("lower")
                 upper = limit_el.find("upper")
@@ -740,6 +804,11 @@ def resolve_sdf_to_urdf(sdf_path: str) -> str:
                     hi = float(upper.text.strip())
                     if abs(lo) > 1e10 or abs(hi) > 1e10:
                         urdf_type = "continuous"
+                else:
+                    urdf_type = "continuous"
+            else:
+                # No <limit> in SDF → unlimited rotation
+                urdf_type = "continuous"
 
         child = joint_el.find("child")
         parent = joint_el.find("parent")
@@ -772,15 +841,28 @@ def resolve_sdf_to_urdf(sdf_path: str) -> str:
         # Add dynamics (PyBullet requires damping/friction for revolute/continuous)
         lines.append('    <dynamics damping="0.0" friction="0.0"/>')
 
-        # Limits for revolute joints
+        # URDF <limit> is REQUIRED for revolute and prismatic joints.
+        # Without it PyBullet rejects the URDF ("joint xml is not initialized correctly").
         if urdf_type == "revolute":
-            limit_el = joint_el.find(".//limit")
+            lo_val, hi_val = "-3.14159", "3.14159"
             if limit_el is not None:
                 lower = limit_el.find("lower")
                 upper = limit_el.find("upper")
-                lo = lower.text.strip() if lower is not None else "-3.14159"
-                hi = upper.text.strip() if upper is not None else "3.14159"
-                lines.append(f'    <limit lower="{lo}" upper="{hi}" effort="100" velocity="10"/>')
+                if lower is not None:
+                    lo_val = lower.text.strip()
+                if upper is not None:
+                    hi_val = upper.text.strip()
+            lines.append(f'    <limit lower="{lo_val}" upper="{hi_val}" effort="100" velocity="10"/>')
+        elif urdf_type == "prismatic":
+            lo_val, hi_val = "-1.0", "1.0"
+            if limit_el is not None:
+                lower = limit_el.find("lower")
+                upper = limit_el.find("upper")
+                if lower is not None:
+                    lo_val = lower.text.strip()
+                if upper is not None:
+                    hi_val = upper.text.strip()
+            lines.append(f'    <limit lower="{lo_val}" upper="{hi_val}" effort="100" velocity="10"/>')
 
         lines.append("  </joint>")
 
