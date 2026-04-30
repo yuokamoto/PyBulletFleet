@@ -46,10 +46,14 @@ class MovementDirection(str, Enum):
         FORWARD: Robot X+ axis points towards target, moves forward along path
         BACKWARD: Robot X- axis points towards target (X+ points away), moves along path
                  (robot appears to move "backward" relative to its X+ orientation)
+        AUTO: Automatically choose FORWARD or BACKWARD based on the angle
+              between the robot's current heading and the movement direction.
+              Uses BACKWARD when the goal is more than 90° behind the robot.
     """
 
     FORWARD = "forward"
     BACKWARD = "backward"
+    AUTO = "auto"
 
 
 class ActionStatus(Enum):
@@ -87,6 +91,22 @@ class SpatialHashCellSizeMode(Enum):
     CONSTANT = "constant"
     AUTO_ADAPTIVE = "auto_adaptive"
     AUTO_INITIAL = "auto_initial"
+
+
+class DoorState(str, Enum):
+    """Door operational state.
+
+    Attributes:
+        CLOSED: Door is fully closed.
+        OPENING: Door is transitioning toward the open position.
+        OPEN: Door is fully open.
+        CLOSING: Door is transitioning toward the closed position.
+    """
+
+    CLOSED = "closed"
+    OPENING = "opening"
+    OPEN = "open"
+    CLOSING = "closing"
 
 
 class ControllerMode(str, Enum):

@@ -24,10 +24,11 @@ from pybullet_fleet import (
     MultiRobotSimulationCore,
     SimEvents,
 )
-from pybullet_fleet.config_utils import load_yaml_config
+from pybullet_fleet.config_utils import load_yaml_config, resolve_class
 from pybullet_fleet.controller import OmniController
 from pybullet_fleet.types import MotionMode
 
+from .bridge_plugin_base import BridgePluginBase
 from .conversions import sim_time_to_ros_time
 from .handler_registry import HandlerMap, load_handler_map_from_config, resolve_handler_classes
 from .param_utils import get_bool_param, get_float_param
@@ -76,7 +77,7 @@ class BridgeNode(Node):
         from rcl_interfaces.msg import ParameterDescriptor
 
         _dyn = ParameterDescriptor(dynamic_typing=True)
-        self.declare_parameter("publish_rate", 0.0, _dyn)
+        self.declare_parameter("publish_rate", float(sim_cfg.get("publish_rate", 0.0)), _dyn)
         self.declare_parameter("gui", sim_cfg.get("gui", False), _dyn)
         self.declare_parameter("physics", sim_cfg.get("physics", False), _dyn)
         self.declare_parameter("target_rtf", float(sim_cfg.get("target_rtf", 1.0)), _dyn)
@@ -130,6 +131,9 @@ class BridgeNode(Node):
             self._register_robot_handler(agent)
         actual_count = len(self.sim.agents)
 
+        # Bridge plugins (singleton handlers loaded from config)
+        self._bridge_plugins: List[BridgePluginBase] = self._load_bridge_plugins(bridge_config)
+
         # Auto-register/unregister handlers when agents spawn/despawn
         self.sim.events.on(SimEvents.AGENT_SPAWNED, self._on_agent_spawned)
         self.sim.events.on(SimEvents.AGENT_REMOVED, self._on_agent_removed)
@@ -155,6 +159,57 @@ class BridgeNode(Node):
             f"dt={timestep:.4f}s, target_rtf={effective_rtf}, "
             f"publish_rate={publish_rate:.1f}Hz, gui={effective_gui}, physics={effective_physics}"
         )
+
+    # ------------------------------------------------------------------
+    # Bridge plugins (singleton handlers loaded from config)
+    # ------------------------------------------------------------------
+
+    def _load_bridge_plugins(self, bridge_config: Dict[str, Any]) -> List[BridgePluginBase]:
+        """Dynamically load bridge plugins from config.
+
+        Config format::
+
+            bridge:
+              bridge_plugins:
+                - class: pybullet_fleet_ros.workcell_handler.WorkcellHandler
+                  config:
+                    item_search_radius: 1.0
+
+        Each plugin class must be a :class:`BridgePluginBase` subclass.
+        """
+        entries: List[Dict[str, Any]] = list(bridge_config.get("bridge_plugins", []))
+        import sys
+
+        print(f"[bridge_plugins] Found {len(entries)} entries: {entries}", file=sys.stderr, flush=True)
+
+        plugins: List[BridgePluginBase] = []
+        for entry in entries:
+            cls_path = entry.get("class", "")
+            if not cls_path:
+                continue
+            try:
+                cls = resolve_class(cls_path)
+                if not (isinstance(cls, type) and issubclass(cls, BridgePluginBase)):
+                    raise TypeError(
+                        f"Bridge plugin class must be a BridgePluginBase subclass, "
+                        f"got {cls!r}. Did you inherit from BridgePluginBase?"
+                    )
+                plugin = cls(self, self.sim, entry.get("config", {}))
+                plugins.append(plugin)
+                print(f"[bridge_plugins] Loaded: {cls_path}", file=sys.stderr, flush=True)
+                logger.info("Loaded bridge plugin: %s", cls_path)
+            except ImportError as e:
+                print(f"[bridge_plugins] Import error: {cls_path}: {e}", file=sys.stderr, flush=True)
+                logger.warning("Bridge plugin %s not available: %s", cls_path, e)
+            except Exception as e:
+                print(f"[bridge_plugins] FAILED: {cls_path}: {e}", file=sys.stderr, flush=True)
+                import traceback as tb
+
+                tb.print_exc(file=sys.stderr)
+                logger.error("Failed to load bridge plugin %s: %s", cls_path, e)
+
+        print(f"[bridge_plugins] Total loaded: {len(plugins)}", file=sys.stderr, flush=True)
+        return plugins
 
     # ------------------------------------------------------------------
     # Robot handler registration
@@ -255,6 +310,10 @@ class BridgeNode(Node):
             for handlers in self._handlers.values():
                 for h in handlers:
                     h.post_step(dt=dt, stamp=stamp)
+
+            # Bridge plugins (workcell handler, etc.)
+            for bp in self._bridge_plugins:
+                bp.post_step(sim_time)
         except Exception as e:
             if "Not connected" in str(e) or "physics server" in str(e):
                 return
@@ -266,6 +325,9 @@ class BridgeNode(Node):
             for h in handlers:
                 h.destroy()
         self._handlers.clear()
+        for bp in self._bridge_plugins:
+            bp.destroy()
+        self._bridge_plugins.clear()
         self.sim.reset()
         self.get_logger().info("BridgeNode reset: all handlers destroyed, simulation reset")
 
@@ -276,6 +338,9 @@ class BridgeNode(Node):
 
 
 def main(args=None):
+    # Enable Python logging so that logger.info() from WorkcellHandler,
+    # DoorHandler, etc. is visible in docker logs.
+    logging.basicConfig(level=logging.INFO, format="[%(name)s] %(levelname)s: %(message)s")
     rclpy.init(args=args)
     node = BridgeNode()
     # MultiThreadedExecutor allows action server execute callbacks

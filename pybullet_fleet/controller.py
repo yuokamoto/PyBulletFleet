@@ -102,7 +102,16 @@ class Controller(ABC):
     Pure base class: only ``compute()`` + lifecycle hooks.
     All built-in controllers are **kinematic**: they update agent pose directly
     via ``agent.set_pose()``.  No physics forces or torques are applied.
+
+    Subclasses with a ``_registry_name`` class attribute are auto-registered
+    in ``CONTROLLER_REGISTRY`` (e.g. ``_registry_name = "omni"``).
     """
+
+    def __init_subclass__(cls, **kwargs):
+        super().__init_subclass__(**kwargs)
+        name = getattr(cls, "_registry_name", None)
+        if name and not inspect.isabstract(cls):
+            CONTROLLER_REGISTRY[name] = cls
 
     @abstractmethod
     def compute(self, agent: "Agent", dt: float) -> bool:
@@ -154,11 +163,15 @@ class KinematicController(Controller):
         max_angular_vel: float = math.inf,
         cmd_vel_timeout: float = 0.0,
         navigation_2d: bool = False,
+        default_direction: MovementDirection = MovementDirection.FORWARD,
     ) -> None:
         self._max_linear_vel: float = max_linear_vel
         self._max_angular_vel: float = max_angular_vel
         self._cmd_vel_timeout: float = cmd_vel_timeout
         self._navigation_2d: bool = navigation_2d
+        if isinstance(default_direction, str):
+            default_direction = MovementDirection(default_direction)
+        self._default_direction: MovementDirection = default_direction
         self._time_since_last_set_velocity: float = 0.0
         self._velocity_ever_set: bool = False
         self._linear_velocity = np.zeros(3)  # body-frame [vx, vy, vz]
@@ -190,6 +203,17 @@ class KinematicController(Controller):
 
         # Pose phase state machine: ROTATE → FORWARD
         self._pose_phase: PosePhase = PosePhase.FORWARD
+
+    @property
+    def default_direction(self) -> MovementDirection:
+        """Default movement direction used when ``set_path`` is called without explicit direction."""
+        return self._default_direction
+
+    @default_direction.setter
+    def default_direction(self, value: MovementDirection) -> None:
+        if isinstance(value, str):
+            value = MovementDirection(value)
+        self._default_direction = value
 
     @property
     def mode(self) -> ControllerMode:
@@ -328,7 +352,7 @@ class KinematicController(Controller):
         agent: "Agent",
         path: List[Pose],
         final_orientation_align: bool = True,
-        direction: MovementDirection = MovementDirection.FORWARD,
+        direction: Optional[MovementDirection] = None,
     ) -> None:
         """Set a waypoint path for the agent to follow.
 
@@ -341,12 +365,15 @@ class KinematicController(Controller):
             path: Non-empty list of waypoint Poses.
             final_orientation_align: Rotate to match last waypoint orientation
                 after reaching its position.
-            direction: ``FORWARD`` or ``BACKWARD`` (differential only).
+            direction: ``None`` (use ``default_direction``), ``FORWARD``, ``AUTO``,
+                or ``BACKWARD`` (differential only).
         """
+        effective_direction = direction if direction is not None else self._default_direction
         self._path = list(path)
         self._current_waypoint_index = 0
         self._goal_pose = path[0]
-        self._movement_direction = direction
+        self._movement_direction = effective_direction
+        self._original_direction = effective_direction  # Preserve for AUTO re-evaluation per waypoint
         self._is_final_orientation_aligning = False
 
         if final_orientation_align and path:
@@ -360,7 +387,7 @@ class KinematicController(Controller):
         if self._mode == ControllerMode.VELOCITY:
             self._zero_velocity()
         self._mode = ControllerMode.POSE
-        self._init_pose_trajectory(agent, path[0], direction=direction)
+        self._init_pose_trajectory(agent, path[0], direction=effective_direction)
 
     def _init_forward_trajectory(self, agent: "Agent", distance: float) -> None:
         """Initialize a single distance TPI for straight-line forward motion.
@@ -599,7 +626,7 @@ class KinematicController(Controller):
                 logger.debug("Moving to next waypoint %d", self._current_waypoint_index)
                 self._goal_pose = self._path[self._current_waypoint_index]
                 agent._is_moving = True
-                self._init_pose_trajectory(agent, self._goal_pose, direction=self._movement_direction)
+                self._init_pose_trajectory(agent, self._goal_pose, direction=self._original_direction)
             else:
                 # All waypoints visited
                 if self._align_final_orientation and self._final_target_orientation is not None:
@@ -657,7 +684,8 @@ class KinematicController(Controller):
         self._path = []
         self._current_waypoint_index = 0
         self._goal_pose = None
-        self._movement_direction = MovementDirection.FORWARD
+        self._movement_direction = self._default_direction
+        self._original_direction = self._default_direction
         self._align_final_orientation = False
         self._final_target_orientation = None
         self._is_final_orientation_aligning = False
@@ -679,6 +707,8 @@ class OmniController(KinematicController):
         Per-axis TPI with distance-ratio velocity scaling for straight-line
         motion from start to goal.
     """
+
+    _registry_name = "omni"
 
     def __init__(
         self,
@@ -830,6 +860,8 @@ class DifferentialController(KinematicController):
         Uses TPI + quaternion slerp for smooth rotation.
     """
 
+    _registry_name = "differential"
+
     def __init__(
         self,
         max_linear_vel: float = 2.0,
@@ -837,12 +869,14 @@ class DifferentialController(KinematicController):
         wheel_separation: float = 0.0,
         cmd_vel_timeout: float = 0.0,
         navigation_2d: bool = False,
+        default_direction: MovementDirection = MovementDirection.FORWARD,
     ) -> None:
         super().__init__(
             max_linear_vel=max_linear_vel,
             max_angular_vel=max_angular_vel,
             cmd_vel_timeout=cmd_vel_timeout,
             navigation_2d=navigation_2d,
+            default_direction=default_direction,
         )
         self._wheel_separation = wheel_separation
 
@@ -898,6 +932,21 @@ class DifferentialController(KinematicController):
             goal_pos[2] = current_pos[2]
 
         direction_vec = goal_pos - current_pos
+
+        # AUTO direction: choose FORWARD/BACKWARD based on yaw delta
+        if self._movement_direction == MovementDirection.AUTO:
+            dist_2d = float(np.linalg.norm(direction_vec[:2]))
+            if dist_2d > 1e-6:
+                goal_heading = math.atan2(direction_vec[1], direction_vec[0])
+                current_heading = current_pose.yaw
+                delta = goal_heading - current_heading
+                # Normalize to [-pi, pi]
+                delta = (delta + math.pi) % (2 * math.pi) - math.pi
+                self._movement_direction = (
+                    MovementDirection.BACKWARD if abs(delta) > math.pi / 2 else MovementDirection.FORWARD
+                )
+            else:
+                self._movement_direction = MovementDirection.FORWARD
 
         # Cache forward direction for straight-line phase
         self._forward_start_pos = current_pos.copy()
@@ -962,7 +1011,7 @@ class DifferentialController(KinematicController):
 
 
 # ---------------------------------------------------------------------------
-# Auto-register built-in controllers
+# Import high-level controllers so __init_subclass__ auto-registration fires
 # ---------------------------------------------------------------------------
-register_controller("omni", OmniController)
-register_controller("differential", DifferentialController)
+from pybullet_fleet.controllers.patrol_controller import PatrolController  # noqa: E402, F401
+from pybullet_fleet.controllers.random_walk_controller import RandomWalkController  # noqa: E402, F401

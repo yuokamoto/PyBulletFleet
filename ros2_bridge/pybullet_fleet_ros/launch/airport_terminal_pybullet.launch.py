@@ -41,12 +41,14 @@ def generate_launch_description():
     airport_config_dir = os.path.join(rmf_demos_dir, "config", "airport_terminal")
     airport_nav_dir = os.path.join(rmf_demos_maps_dir, "maps", "airport_terminal", "nav_graphs")
 
-    # Fleet configs from rmf_demos
+    # Fleet configs
     # Nav graph assignments must match rmf_demos airport_terminal.launch.xml:
     #   tinyRobot → 2.yaml, deliveryRobot → 1.yaml,
     #   cleanerBotA → 0.yaml, cleanerBotE → 4.yaml
+    # tinyRobot uses a custom fleet config with finishing_request="nothing"
+    # to avoid the charge deadlock in sim (battery is always 100%).
     fleet_configs = {
-        "tinyRobot": (os.path.join(airport_config_dir, "tinyRobot_config.yaml"), os.path.join(airport_nav_dir, "2.yaml")),
+        "tinyRobot": (os.path.join(pkg_dir, "config", "tinyRobot_airport.yaml"), os.path.join(airport_nav_dir, "2.yaml")),
         "deliveryRobot": (
             os.path.join(airport_config_dir, "deliveryRobot_config.yaml"),
             os.path.join(airport_nav_dir, "1.yaml"),

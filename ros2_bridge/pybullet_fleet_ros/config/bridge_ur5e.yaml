@@ -25,7 +25,7 @@ simulation:
   physics: false
   target_rtf: 5.0
 
-robots:
+entities:
   - name: ur5e_0
     urdf_path: "ur5e"
     pose: [0.0, 0.0, 0.0]

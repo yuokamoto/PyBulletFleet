@@ -676,6 +676,52 @@ class TestSimObjectAttachDetach:
         assert parent.attach_object(child) is True
         assert child.is_attached() is True
 
+    def test_attach_keep_world_pose(self, pybullet_env):
+        """keep_world_pose=True computes relative offset from current positions."""
+        parent = create_mesh_object(pose=Pose.from_xyz(0, 0, 0))
+        child = create_mesh_object(pose=Pose.from_xyz(2, 3, 0))
+
+        result = parent.attach_object(child, keep_world_pose=True)
+        assert result is True
+
+        # Child should stay at (2, 3, 0) — offset auto-computed
+        assert_object_properties(child, position=(2, 3, 0))
+
+        # Move parent → child should maintain its relative offset
+        parent.set_pose(Pose.from_xyz(10, 10, 0))
+        assert_object_properties(child, position=(12, 13, 0))
+
+    def test_attach_keep_world_pose_with_rotation(self, pybullet_env):
+        """keep_world_pose preserves world orientation of the child."""
+        import math
+
+        parent = create_mesh_object(pose=Pose.from_xyz(0, 0, 0))
+        child = create_mesh_object(pose=Pose.from_euler(1, 0, 0, roll=0, pitch=0, yaw=math.pi / 2))
+
+        parent.attach_object(child, keep_world_pose=True)
+
+        # Move parent with yaw=90° — child's world position
+        # should be parent's new transform applied to the relative offset
+        parent.set_pose(Pose.from_euler(5, 5, 0, roll=0, pitch=0, yaw=math.pi / 2))
+        # Offset (1,0,0) rotated by yaw=90° → (0,1,0)
+        # Child world position = (5,5,0) + (0,1,0) = (5,6,0)
+        child_pos = child.get_pose().position
+        assert abs(child_pos[0] - 5.0) < 0.01
+        assert abs(child_pos[1] - 6.0) < 0.01
+        assert abs(child_pos[2] - 0.0) < 0.01
+
+    def test_attach_keep_world_pose_conflicts_with_relative_pose(self, pybullet_env):
+        """keep_world_pose=True and relative_pose cannot both be specified."""
+        parent = create_mesh_object(pose=Pose.from_xyz(0, 0, 0))
+        child = create_mesh_object(pose=Pose.from_xyz(1, 0, 0))
+
+        with pytest.raises(ValueError, match="relative_pose.*keep_world_pose"):
+            parent.attach_object(
+                child,
+                relative_pose=Pose.from_xyz(1, 0, 0),
+                keep_world_pose=True,
+            )
+
     # ========================================
     # Chained attachment tests (A → B → C)
     # ========================================
@@ -931,6 +977,256 @@ class TestSimObjectAttachDetach:
         assert_object_properties(b, position=(11, 0, 0))
         assert_object_properties(c, position=(12, 0, 0))
         assert_object_properties(d, position=(13, 0, 0))
+
+    # ------------------------------------------------------------------
+    # Immediate teleport on attach / detach
+    # ------------------------------------------------------------------
+
+    def test_attach_teleports_child_immediately(self, pybullet_env):
+        """attach_object() should immediately teleport child to the correct
+        world position based on parent pose + relative_pose."""
+        parent = create_mesh_object(pose=Pose.from_xyz(0, 0, 0))
+        child = create_mesh_object(pose=Pose.from_xyz(99, 99, 99))  # far away
+
+        offset = Pose.from_xyz(1.0, 0, 0)
+        parent.attach_object(child, relative_pose=offset)
+
+        # Child should be at parent(0,0,0) + offset(1,0,0) = (1,0,0)
+        # immediately — no set_pose on parent needed.
+        assert_object_properties(child, position=(1, 0, 0))
+
+    def test_attach_teleports_child_with_parent_offset(self, pybullet_env):
+        """Teleport accounts for parent's current position."""
+        parent = create_mesh_object(pose=Pose.from_xyz(5, 5, 0))
+        child = create_mesh_object(pose=Pose.from_xyz(0, 0, 0))
+
+        offset = Pose.from_xyz(2.0, 0, 0)
+        parent.attach_object(child, relative_pose=offset)
+
+        # 5+2=7
+        assert_object_properties(child, position=(7, 5, 0))
+
+    def test_attach_teleports_child_with_parent_rotation(self, pybullet_env):
+        """Teleport accounts for parent's orientation."""
+        import math
+
+        parent = create_mesh_object(pose=Pose.from_euler(5, 5, 0, yaw=math.pi / 2))
+        child = create_mesh_object(pose=Pose.from_xyz(0, 0, 0))
+
+        offset = Pose.from_xyz(1.0, 0, 0)
+        parent.attach_object(child, relative_pose=offset)
+
+        # yaw 90° rotates (1,0,0) → (0,1,0)
+        # parent(5,5,0) + (0,1,0) = (5,6,0)
+        # child orientation inherits parent's yaw=90°
+        assert_object_properties(
+            child,
+            position=(5, 6, 0),
+            orientation=(0, 0, 0.707107, 0.707107),
+        )
+
+    def test_attach_zero_offset_teleports_to_parent(self, pybullet_env):
+        """Default zero offset teleports child to parent origin."""
+        parent = create_mesh_object(pose=Pose.from_xyz(3, 4, 5))
+        child = create_mesh_object(pose=Pose.from_xyz(99, 99, 99))
+
+        parent.attach_object(child)  # default relative_pose = zero offset
+        assert_object_properties(child, position=(3, 4, 5))
+
+    def test_attach_keep_world_pose_no_teleport(self, pybullet_env):
+        """keep_world_pose=True: child stays in place (no unexpected teleport)."""
+        parent = create_mesh_object(pose=Pose.from_xyz(0, 0, 0))
+        child = create_mesh_object(pose=Pose.from_xyz(2, 3, 0))
+
+        parent.attach_object(child, keep_world_pose=True)
+        # Child should remain at (2,3,0)
+        assert_object_properties(child, position=(2, 3, 0))
+
+    def test_detach_with_drop_pose(self, pybullet_env):
+        """detach_object(obj, drop_pose=...) teleports child to drop_pose."""
+        parent = create_mesh_object(pose=Pose.from_xyz(0, 0, 0))
+        child = create_mesh_object(pose=Pose.from_xyz(0, 0, 0))
+
+        parent.attach_object(child)
+        result = parent.detach_object(child, drop_pose=Pose.from_xyz(10, 20, 0.1))
+        assert result is True
+        assert_object_properties(child, position=(10, 20, 0.1))
+
+    def test_detach_with_drop_pose_orientation(self, pybullet_env):
+        """drop_pose orientation is applied to the detached object."""
+        import math
+
+        parent = create_mesh_object(pose=Pose.from_xyz(0, 0, 0))
+        child = create_mesh_object(pose=Pose.from_xyz(0, 0, 0))
+
+        parent.attach_object(child)
+        drop = Pose.from_euler(5, 5, 0, yaw=math.pi / 2)
+        parent.detach_object(child, drop_pose=drop)
+        assert_object_properties(
+            child,
+            position=(5, 5, 0),
+            orientation=(0, 0, 0.707107, 0.707107),
+        )
+
+    def test_detach_without_drop_pose_keeps_position(self, pybullet_env):
+        """Backward compat: no drop_pose means child stays where it was."""
+        parent = create_mesh_object(pose=Pose.from_xyz(5, 5, 0))
+        child = create_mesh_object(pose=Pose.from_xyz(0, 0, 0))
+
+        parent.attach_object(child, relative_pose=Pose.from_xyz(1, 0, 0))
+        # After attach, child at (6,5,0) due to teleport
+        parent.detach_object(child)
+        # Should stay at (6,5,0) — no teleport
+        assert_object_properties(child, position=(6, 5, 0))
+
+    def test_detach_with_drop_relative_pose(self, pybullet_env):
+        """drop_relative_pose offsets from current (pre-detach) object position."""
+        parent = create_mesh_object(pose=Pose.from_xyz(5, 0, 0))
+        child = create_mesh_object(pose=Pose.from_xyz(0, 0, 0))
+
+        parent.attach_object(child, relative_pose=Pose.from_xyz(1, 0, 0))
+        # child is now at (6, 0, 0) due to immediate teleport
+
+        # Detach with relative offset (0, 0, -0.5) → final = (6, 0, -0.5)
+        result = parent.detach_object(child, drop_relative_pose=Pose.from_xyz(0, 0, -0.5))
+        assert result is True
+        assert_object_properties(child, position=(6, 0, -0.5))
+
+    def test_detach_with_drop_relative_pose_rotation(self, pybullet_env):
+        """drop_relative_pose applies rotation relative to current object orientation."""
+        import math
+
+        parent = create_mesh_object(pose=Pose.from_euler(0, 0, 0, yaw=math.pi / 2))
+        child = create_mesh_object(pose=Pose.from_xyz(0, 0, 0))
+
+        parent.attach_object(child)
+        # child is at (0,0,0) with yaw=90° (inherited from parent via teleport)
+
+        # Relative offset (1,0,0) rotated by child's yaw=90° → (0,1,0)
+        result = parent.detach_object(child, drop_relative_pose=Pose.from_xyz(1, 0, 0))
+        assert result is True
+        assert_object_properties(
+            child,
+            position=(0, 1, 0),
+            orientation=(0, 0, 0.707107, 0.707107),  # retains yaw=90°
+        )
+
+    def test_detach_drop_pose_and_drop_relative_pose_conflict(self, pybullet_env):
+        """Cannot specify both drop_pose and drop_relative_pose."""
+        parent = create_mesh_object(pose=Pose.from_xyz(0, 0, 0))
+        child = create_mesh_object(pose=Pose.from_xyz(0, 0, 0))
+
+        parent.attach_object(child)
+        with pytest.raises(ValueError, match="drop_pose.*drop_relative_pose"):
+            parent.detach_object(
+                child,
+                drop_pose=Pose.from_xyz(1, 0, 0),
+                drop_relative_pose=Pose.from_xyz(0, 1, 0),
+            )
+
+
+class TestFindNearestPickable:
+    """Test SimObject.find_nearest_pickable() utility method."""
+
+    @pytest.fixture
+    def sim_env(self, pybullet_env):
+        """Create a MockSimCore and register objects."""
+        from tests.conftest import MockSimCore
+
+        sim = MockSimCore()
+        sim._client = pybullet_env
+        return sim
+
+    def test_finds_nearest(self, sim_env):
+        """Returns the closest pickable, unattached object."""
+        parent = create_mesh_object(pose=Pose.from_xyz(0, 0, 0))
+        parent.sim_core = sim_env
+        sim_env.sim_objects.append(parent)
+
+        far_obj = SimObject.from_mesh(
+            visual_shape=ShapeParams(shape_type="box", half_extents=[0.1, 0.1, 0.1]),
+            pose=Pose.from_xyz(3, 0, 0),
+            pickable=True,
+        )
+        sim_env.sim_objects.append(far_obj)
+
+        near_obj = SimObject.from_mesh(
+            visual_shape=ShapeParams(shape_type="box", half_extents=[0.1, 0.1, 0.1]),
+            pose=Pose.from_xyz(0.5, 0, 0),
+            pickable=True,
+        )
+        sim_env.sim_objects.append(near_obj)
+
+        result = parent.find_nearest_pickable(search_radius=5.0)
+        assert result is near_obj
+
+    def test_excludes_self(self, sim_env):
+        """Doesn't return self even if pickable."""
+        obj = create_mesh_object(pose=Pose.from_xyz(0, 0, 0))
+        obj.sim_core = sim_env
+        sim_env.sim_objects.append(obj)
+
+        result = obj.find_nearest_pickable(search_radius=5.0)
+        assert result is None
+
+    def test_excludes_attached(self, sim_env):
+        """Doesn't return objects already attached to something."""
+        parent = create_mesh_object(pose=Pose.from_xyz(0, 0, 0))
+        parent.sim_core = sim_env
+        sim_env.sim_objects.append(parent)
+
+        child = SimObject.from_mesh(
+            visual_shape=ShapeParams(shape_type="box", half_extents=[0.1, 0.1, 0.1]),
+            pose=Pose.from_xyz(0.5, 0, 0),
+            pickable=True,
+        )
+        sim_env.sim_objects.append(child)
+
+        # Attach child to something else
+        other = create_mesh_object(pose=Pose.from_xyz(10, 10, 0))
+        other.attach_object(child)
+
+        result = parent.find_nearest_pickable(search_radius=5.0)
+        assert result is None
+
+    def test_excludes_non_pickable(self, sim_env):
+        """Doesn't return non-pickable objects."""
+        parent = create_mesh_object(pose=Pose.from_xyz(0, 0, 0))
+        parent.sim_core = sim_env
+        sim_env.sim_objects.append(parent)
+
+        wall = SimObject.from_mesh(
+            visual_shape=ShapeParams(shape_type="box", half_extents=[0.1, 0.1, 0.1]),
+            pose=Pose.from_xyz(0.5, 0, 0),
+            pickable=False,
+        )
+        sim_env.sim_objects.append(wall)
+
+        result = parent.find_nearest_pickable(search_radius=5.0)
+        assert result is None
+
+    def test_respects_radius(self, sim_env):
+        """Returns None if nothing within search_radius."""
+        parent = create_mesh_object(pose=Pose.from_xyz(0, 0, 0))
+        parent.sim_core = sim_env
+        sim_env.sim_objects.append(parent)
+
+        far_obj = SimObject.from_mesh(
+            visual_shape=ShapeParams(shape_type="box", half_extents=[0.1, 0.1, 0.1]),
+            pose=Pose.from_xyz(10, 0, 0),
+            pickable=True,
+        )
+        sim_env.sim_objects.append(far_obj)
+
+        result = parent.find_nearest_pickable(search_radius=1.0)
+        assert result is None
+
+    def test_no_sim_core_returns_none(self, pybullet_env):
+        """Returns None if sim_core is not set."""
+        obj = create_mesh_object(pose=Pose.from_xyz(0, 0, 0))
+        # obj.sim_core is None by default with create_mesh_object
+        result = obj.find_nearest_pickable(search_radius=5.0)
+        assert result is None
 
 
 class TestCollisionMode:

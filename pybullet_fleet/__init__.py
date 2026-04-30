@@ -4,9 +4,10 @@ General-purpose PyBullet simulation library for multi-robot fleets
 """
 
 # Type definitions
-from pybullet_fleet.types import (
+from pybullet_fleet.types import (  # noqa: F401
     ActionStatus,
     ControllerMode,
+    DoorState,
     MotionMode,
     MovementDirection,
     PosePhase,
@@ -77,6 +78,16 @@ from pybullet_fleet.config_utils import load_yaml_config
 # Entity registry
 from pybullet_fleet.entity_registry import register_entity_class
 
+# Plugin system
+from pybullet_fleet.sim_plugin import SimPlugin
+
+# Device classes
+from pybullet_fleet.devices.door import Door, DoorParams
+from pybullet_fleet.devices.elevator import Elevator, ElevatorParams
+
+# High-level controllers
+from pybullet_fleet.controllers import PatrolController, RandomWalkController
+
 # Robot model resolution
 from pybullet_fleet.robot_models import (
     ModelEntry,
@@ -140,6 +151,16 @@ __all__ = [
     "load_yaml_config",
     # Entity registry
     "register_entity_class",
+    # Plugin system
+    "SimPlugin",
+    # Device classes
+    "Door",
+    "DoorParams",
+    "Elevator",
+    "ElevatorParams",
+    # High-level controllers
+    "PatrolController",
+    "RandomWalkController",
     # Robot models
     "resolve_model",
     "resolve_urdf",

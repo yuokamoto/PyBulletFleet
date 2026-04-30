@@ -3,6 +3,7 @@ project(pybullet_fleet_msgs)
 
 find_package(ament_cmake REQUIRED)
 find_package(rosidl_default_generators REQUIRED)
+find_package(geometry_msgs REQUIRED)
 
 # Auto-collect all .msg, .srv, .action files
 file(GLOB MSG_FILES RELATIVE "${CMAKE_CURRENT_SOURCE_DIR}" "msg/*.msg")
@@ -12,6 +13,7 @@ set(INTERFACE_FILES ${MSG_FILES} ${SRV_FILES} ${ACTION_FILES})
 
 rosidl_generate_interfaces(${PROJECT_NAME}
   ${INTERFACE_FILES}
+  DEPENDENCIES geometry_msgs
 )
 
 ament_export_dependencies(rosidl_default_runtime)

@@ -573,16 +573,16 @@ class SimObjectManager(Generic[T]):
 
         return result
 
-    def spawn_from_yaml(self, yaml_path: str, key: str = "robots") -> List[T]:
+    def spawn_from_yaml(self, yaml_path: str, key: str = "entities") -> List[T]:
         """Load a YAML file and spawn entities from the specified section.
 
-        Reads *yaml_path*, extracts the *key* section (default ``"robots"``),
+        Reads *yaml_path*, extracts the *key* section (default ``"entities"``),
         and delegates to :meth:`spawn_from_config`.
 
         Args:
             yaml_path: Path to YAML config file.
             key: Top-level YAML key containing the entity list.
-                 Default ``"robots"``.
+                 Default ``"entities"``.
 
         Returns:
             List of spawned objects (empty if *key* is missing).

@@ -1,7 +1,6 @@
-# Goal
-string robot_name
-string action_type          # "move" | "pick" | "drop" | "wait" | "joint"
-string action_params_json   # JSON-encoded parameters
+# Goal — reuses ExecuteActionGoal.msg so topic and action share the
+# same payload.  robot_name is implicit in the topic/action namespace.
+ExecuteActionGoal goal
 ---
 # Result
 bool success

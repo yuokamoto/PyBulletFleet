@@ -25,8 +25,6 @@ setup(
         "console_scripts": [
             "bridge_node = pybullet_fleet_ros.bridge_node:main",
             "fleet_adapter = pybullet_fleet_ros.fleet_adapter:main",
-            "door_adapter = pybullet_fleet_ros.door_adapter:main",
-            "workcell_adapter = pybullet_fleet_ros.workcell_adapter:main",
         ],
     },
 )

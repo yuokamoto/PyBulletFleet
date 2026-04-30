@@ -1,0 +1,278 @@
+[
+  {
+    "num_agents": 100,
+    "benchmark_type": "mobile",
+    "duration_s": 5.0,
+    "scenario": null,
+    "num_reps": 2,
+    "gui": false,
+    "spawn_time_s": {
+      "median": 0.03179676100000961,
+      "mean": 0.03179676100000961,
+      "stdev": 0.003948044445715753,
+      "min": 0.029005072000018117,
+      "max": 0.0345884500000011
+    },
+    "spawn_cpu_s": {
+      "median": 0.030000000000000027,
+      "mean": 0.030000000000000027,
+      "stdev": 0.0,
+      "min": 0.030000000000000027,
+      "max": 0.030000000000000027
+    },
+    "spawn_cpu_percent": {
+      "median": 95.08217087791667,
+      "mean": 95.08217087791667,
+      "stdev": 11.805876599224726,
+      "min": 86.73415547675329,
+      "max": 103.43018627908005
+    },
+    "simulation_wall_s": {
+      "median": 0.1824663390001433,
+      "mean": 0.1824663390001433,
+      "stdev": 0.026963210518191488,
+      "min": 0.16340047000016966,
+      "max": 0.20153220800011695
+    },
+    "simulation_cpu_s": {
+      "median": 0.17999999999999994,
+      "mean": 0.17999999999999994,
+      "stdev": 0.028284271247461926,
+      "min": 0.15999999999999992,
+      "max": 0.19999999999999996
+    },
+    "simulation_cpu_percent": {
+      "median": 98.57932776287804,
+      "mean": 98.57932776287804,
+      "stdev": 0.9339364096836528,
+      "min": 97.91893499439371,
+      "max": 99.23972053136237
+    },
+    "real_time_factor": {
+      "median": 27.704798659294323,
+      "mean": 27.704798659294323,
+      "stdev": 4.093962331397878,
+      "min": 24.809930132840595,
+      "max": 30.59966718574805
+    },
+    "avg_step_time_ms": {
+      "median": 3.649326780002866,
+      "mean": 3.649326780002866,
+      "stdev": 0.5392642103638298,
+      "min": 3.2680094000033932,
+      "max": 4.030644160002339
+    },
+    "system_info": {
+      "platform": "Linux",
+      "platform_release": "5.15.0-139-generic",
+      "platform_version": "#149~20.04.1-Ubuntu SMP Wed Apr 16 08:29:56 UTC 2025",
+      "architecture": "x86_64",
+      "processor": "x86_64",
+      "python_version": "3.8.10",
+      "cpu_count": 4,
+      "cpu_count_logical": 8,
+      "total_memory_gb": 31.06,
+      "cpu_model": "11th Gen Intel(R) Core(TM) i7-1185G7 @ 3.00GHz",
+      "cpu_max_mhz": 4800.0
+    },
+    "mem_spawn_rss_mb": {
+      "median": 2.1953125,
+      "mean": 2.1953125,
+      "stdev": 0.10496116283237815,
+      "min": 2.12109375,
+      "max": 2.26953125
+    },
+    "mem_total_rss_mb": {
+      "median": -24.59375,
+      "mean": -24.59375,
+      "stdev": 0.17125242356861697,
+      "min": -24.71484375,
+      "max": -24.47265625
+    },
+    "expected_steps": 50
+  },
+  {
+    "num_agents": 500,
+    "benchmark_type": "mobile",
+    "duration_s": 5.0,
+    "scenario": null,
+    "num_reps": 2,
+    "gui": false,
+    "spawn_time_s": {
+      "median": 0.15172870900005364,
+      "mean": 0.15172870900005364,
+      "stdev": 0.005472016536756866,
+      "min": 0.14785940900014793,
+      "max": 0.15559800899995935
+    },
+    "spawn_cpu_s": {
+      "median": 0.1499999999999999,
+      "mean": 0.1499999999999999,
+      "stdev": 0.014142135623730963,
+      "min": 0.1399999999999999,
+      "max": 0.15999999999999992
+    },
+    "spawn_cpu_percent": {
+      "median": 98.7568092039257,
+      "mean": 98.7568092039257,
+      "stdev": 5.759059541537149,
+      "min": 94.68453914884769,
+      "max": 102.8290792590037
+    },
+    "simulation_wall_s": {
+      "median": 0.8344710300000315,
+      "mean": 0.8344710300000315,
+      "stdev": 0.02226903265384523,
+      "min": 0.8187244460000329,
+      "max": 0.8502176140000302
+    },
+    "simulation_cpu_s": {
+      "median": 0.8400000000000001,
+      "mean": 0.8400000000000001,
+      "stdev": 0.028284271247461926,
+      "min": 0.8200000000000001,
+      "max": 0.8600000000000001
+    },
+    "simulation_cpu_percent": {
+      "median": 100.65318604637069,
+      "mean": 100.65318604637069,
+      "stdev": 0.7034133203713264,
+      "min": 100.15579771755918,
+      "max": 101.1505743751822
+    },
+    "real_time_factor": {
+      "median": 5.993954091915425,
+      "mean": 5.993954091915425,
+      "stdev": 0.15995709209762413,
+      "min": 5.8808473473943135,
+      "max": 6.107060836436536
+    },
+    "avg_step_time_ms": {
+      "median": 16.68942060000063,
+      "mean": 16.68942060000063,
+      "stdev": 0.44538065307690455,
+      "min": 16.37448892000066,
+      "max": 17.004352280000603
+    },
+    "system_info": {
+      "platform": "Linux",
+      "platform_release": "5.15.0-139-generic",
+      "platform_version": "#149~20.04.1-Ubuntu SMP Wed Apr 16 08:29:56 UTC 2025",
+      "architecture": "x86_64",
+      "processor": "x86_64",
+      "python_version": "3.8.10",
+      "cpu_count": 4,
+      "cpu_count_logical": 8,
+      "total_memory_gb": 31.06,
+      "cpu_model": "11th Gen Intel(R) Core(TM) i7-1185G7 @ 3.00GHz",
+      "cpu_max_mhz": 4800.0
+    },
+    "mem_spawn_rss_mb": {
+      "median": 10.486328125,
+      "mean": 10.486328125,
+      "stdev": 0.113247570424408,
+      "min": 10.40625,
+      "max": 10.56640625
+    },
+    "mem_total_rss_mb": {
+      "median": -15.03515625,
+      "mean": -15.03515625,
+      "stdev": 0.03314563036811941,
+      "min": -15.05859375,
+      "max": -15.01171875
+    },
+    "expected_steps": 50
+  },
+  {
+    "num_agents": 1000,
+    "benchmark_type": "mobile",
+    "duration_s": 5.0,
+    "scenario": null,
+    "num_reps": 2,
+    "gui": false,
+    "spawn_time_s": {
+      "median": 0.28685343699999066,
+      "mean": 0.28685343699999066,
+      "stdev": 0.004586158818259423,
+      "min": 0.28361053300000094,
+      "max": 0.2900963409999804
+    },
+    "spawn_cpu_s": {
+      "median": 0.2799999999999999,
+      "mean": 0.2799999999999999,
+      "stdev": 1.5700924586837752e-16,
+      "min": 0.2799999999999998,
+      "max": 0.28
+    },
+    "spawn_cpu_percent": {
+      "median": 97.62329952234276,
+      "mean": 97.62329952234276,
+      "stdev": 1.5607829582044426,
+      "min": 96.51965930863601,
+      "max": 98.72693973604953
+    },
+    "simulation_wall_s": {
+      "median": 1.7568562669999892,
+      "mean": 1.7568562669999892,
+      "stdev": 0.007406647962395396,
+      "min": 1.751618975999918,
+      "max": 1.7620935580000605
+    },
+    "simulation_cpu_s": {
+      "median": 1.7550000000000001,
+      "mean": 1.7550000000000001,
+      "stdev": 0.007071067811865638,
+      "min": 1.75,
+      "max": 1.7600000000000002
+    },
+    "simulation_cpu_percent": {
+      "median": 99.8943808809806,
+      "mean": 99.8943808809806,
+      "stdev": 0.018655898058330473,
+      "min": 99.88118916895444,
+      "max": 99.90757259300678
+    },
+    "real_time_factor": {
+      "median": 2.84601792864742,
+      "mean": 2.84601792864742,
+      "stdev": 0.011998393544255356,
+      "min": 2.8375337832089325,
+      "max": 2.854502074085908
+    },
+    "avg_step_time_ms": {
+      "median": 35.137125339999784,
+      "mean": 35.137125339999784,
+      "stdev": 0.1481329592479079,
+      "min": 35.03237951999836,
+      "max": 35.24187116000121
+    },
+    "system_info": {
+      "platform": "Linux",
+      "platform_release": "5.15.0-139-generic",
+      "platform_version": "#149~20.04.1-Ubuntu SMP Wed Apr 16 08:29:56 UTC 2025",
+      "architecture": "x86_64",
+      "processor": "x86_64",
+      "python_version": "3.8.10",
+      "cpu_count": 4,
+      "cpu_count_logical": 8,
+      "total_memory_gb": 31.06,
+      "cpu_model": "11th Gen Intel(R) Core(TM) i7-1185G7 @ 3.00GHz",
+      "cpu_max_mhz": 4800.0
+    },
+    "mem_spawn_rss_mb": {
+      "median": 20.92578125,
+      "mean": 20.92578125,
+      "stdev": 0.03314563036811941,
+      "min": 20.90234375,
+      "max": 20.94921875
+    },
+    "mem_total_rss_mb": {
+      "median": -2.794921875,
+      "mean": -2.794921875,
+      "stdev": 0.02485922277608956,
+      "min": -2.8125,
+      "max": -2.77734375
+    },
+    "expected_steps": 50
+  }
+]

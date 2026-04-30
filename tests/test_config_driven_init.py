@@ -125,7 +125,7 @@ class TestConfigFactory:
         """Robots listed in config are spawned automatically."""
         config = {
             "simulation": _HEADLESS_SIM,
-            "robots": [_robot("r0")],
+            "entities": [_robot("r0")],
         }
         with _make_sim(config, via=via) as sim:
             assert len(sim.agents) == 1
@@ -170,7 +170,7 @@ class TestConfigFactory:
         """Robots get correct pose and motion_mode from config."""
         config = {
             "simulation": _HEADLESS_SIM,
-            "robots": [
+            "entities": [
                 _robot("bot0", motion_mode="omnidirectional"),
                 _robot("bot1", pose=[2, 0, 0.05], motion_mode="differential"),
             ],
@@ -266,7 +266,7 @@ class TestSimulationParamsFromConfig:
     def test_nested_simulation_section(self):
         config = {
             "simulation": {**_HEADLESS_SIM, "physics": True, "timestep": 0.01},
-            "robots": [{"name": "r0"}],  # ignored by SimulationParams
+            "entities": [{"name": "r0"}],  # ignored by SimulationParams
         }
         with _yaml_file(config) as path:
             params = SimulationParams.from_config(path)
@@ -345,7 +345,7 @@ class TestGridExpansion:
         """Grid spawning works end-to-end via from_dict."""
         config = {
             "simulation": _HEADLESS_SIM,
-            "robots": [_robot(pose=None, grid={"count": 6, "spacing": [2, 2]})],
+            "entities": [_robot(pose=None, grid={"count": 6, "spacing": [2, 2]})],
         }
         with _make_sim(config) as sim:
             assert len(sim.agents) == 6
@@ -657,7 +657,7 @@ class TestEntityClassesFromConfig:
         config = {
             "simulation": _HEADLESS_SIM,
             "entity_classes": {alias: "pybullet_fleet.agent.Agent"},
-            "robots": [_robot(type=alias)],
+            "entities": [_robot(type=alias)],
         }
         try:
             with _make_sim(config, via=via) as sim:
@@ -671,7 +671,7 @@ class TestEntityClassesFromConfig:
         """Config without entity_classes section works as before."""
         config = {
             "simulation": _HEADLESS_SIM,
-            "robots": [_robot()],
+            "entities": [_robot()],
         }
         with _make_sim(config) as sim:
             assert len(sim.agents) == 1

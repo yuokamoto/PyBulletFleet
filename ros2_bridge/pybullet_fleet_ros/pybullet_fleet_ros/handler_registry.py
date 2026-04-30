@@ -16,10 +16,11 @@ a ROS workspace.
 """
 
 import fnmatch
-import importlib
 import logging
 import re
 from typing import TYPE_CHECKING, Any, Dict, List, Pattern, Union
+
+from pybullet_fleet.config_utils import resolve_class
 
 if TYPE_CHECKING:
     from pybullet_fleet.agent import Agent
@@ -46,15 +47,17 @@ def _normalize_to_list(value: HandlerMapValue) -> List[type]:
 def _import_class(dotted_path: str) -> type:
     """Import a class from a dotted module path.
 
-    Example::
+    Delegates to :func:`pybullet_fleet.config_utils.resolve_class`.
 
-        cls = _import_class("my_pkg.handlers.ArmHandler")
+    Raises:
+        ImportError: Wraps ``ValueError`` from ``resolve_class``
+            for backward compatibility with callers that catch
+            ``ImportError``.
     """
-    module_path, _, class_name = dotted_path.rpartition(".")
-    if not module_path:
-        raise ImportError(f"Invalid dotted path: '{dotted_path}' (no module component)")
-    module = importlib.import_module(module_path)
-    return getattr(module, class_name)
+    try:
+        return resolve_class(dotted_path)
+    except ValueError as exc:
+        raise ImportError(str(exc)) from exc
 
 
 def resolve_handler_classes(
@@ -187,23 +190,28 @@ def load_handler_map_from_config(config: Dict[str, Any]) -> HandlerMap:
     return handler_map
 
 
-def _validate_dotted_path(name_or_pattern: str, dotted_path: str) -> None:
-    """Raise ValueError if *dotted_path* is not a valid dotted Python path."""
-    if not isinstance(dotted_path, str) or "." not in dotted_path:
-        raise ValueError(
-            f"handler_map[{name_or_pattern!r}] must be a dotted Python path " f"'module.ClassName', got: {dotted_path!r}"
-        )
-
-
 def _resolve_config_value(name_or_pattern: str, value: Any) -> List[type]:
-    """Resolve a config value (string or list of strings) to a list of classes."""
+    """Resolve a config value (string or list of strings) to a list of classes.
+
+    Uses :func:`pybullet_fleet.config_utils.resolve_class` for import.
+    Re-raises ``ValueError`` with a handler_map-specific message for
+    non-dotted paths.
+    """
     if isinstance(value, str):
-        _validate_dotted_path(name_or_pattern, value)
-        return [_import_class(value)]
+        try:
+            return [resolve_class(value)]
+        except ValueError:
+            raise ValueError(
+                f"handler_map[{name_or_pattern!r}] must be a dotted Python path " f"'module.ClassName', got: {value!r}"
+            ) from None
     if isinstance(value, list):
         classes = []
         for v in value:
-            _validate_dotted_path(name_or_pattern, v)
-            classes.append(_import_class(v))
+            try:
+                classes.append(resolve_class(v))
+            except ValueError:
+                raise ValueError(
+                    f"handler_map[{name_or_pattern!r}] must be a dotted Python path " f"'module.ClassName', got: {v!r}"
+                ) from None
         return classes
     raise ValueError(f"handler_map[{name_or_pattern!r}] must be a dotted Python path " f"or list of paths, got: {value!r}")

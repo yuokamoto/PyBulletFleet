@@ -36,59 +36,59 @@ format_defaults:
     time_base: sim
 
 demos:
-  # # --- scale demos -------------------------------------------------------
-  # 100robots_grid_mixed:
-  #   script: examples/scale/100robots_grid_demo.py
-  #   args: ["--mode=mixed"]
-  #   recording_duration: 5.0
+  # --- scale demos -------------------------------------------------------
+  100robots_grid_mixed:
+    script: examples/scale/100robots_grid_demo.py
+    args: ["--mode=mixed"]
+    recording_duration: 5.0
 
-  # 100robots_cube_patrol:
-  #   script: examples/scale/100robots_cube_patrol_demo.py
-  #   recording_duration: 5.0
+  100robots_cube_patrol:
+    script: examples/scale/100robots_cube_patrol_demo.py
+    recording_duration: 5.0
 
-  # pick_drop_arm_100robots:
-  #   script: examples/scale/pick_drop_arm_100robots_demo.py
-  #   recording_duration: 4.0  # override format_defaults if needed
-  #   delay: 5.0              # wait for arms to start moving before recording
+  pick_drop_arm_100robots:
+    script: examples/scale/pick_drop_arm_100robots_demo.py
+    recording_duration: 4.0  # override format_defaults if needed
+    delay: 5.0              # wait for arms to start moving before recording
 
-  # pick_drop_mobile_100robots:
-  #   script: examples/scale/pick_drop_mobile_100robots_demo.py
-  #   recording_duration: 10.0
-  #   delay: 3.0
+  pick_drop_mobile_100robots:
+    script: examples/scale/pick_drop_mobile_100robots_demo.py
+    recording_duration: 10.0
+    delay: 3.0
 
-  # # --- arm demos ---------------------------------------------------------
-  # pick_drop_arm_action:
-  #   script: examples/arm/pick_drop_arm_action_demo.py
-  #   recording_duration: 4.0
+  # --- arm demos ---------------------------------------------------------
+  pick_drop_arm_action:
+    script: examples/arm/pick_drop_arm_action_demo.py
+    recording_duration: 4.0
 
-  # pick_drop_arm_ee_action:
-  #   script: examples/arm/pick_drop_arm_ee_action_demo.py
-  #   recording_duration: 3.0
+  pick_drop_arm_ee_action:
+    script: examples/arm/pick_drop_arm_ee_action_demo.py
+    recording_duration: 3.0
 
-  # mobile_manipulator:
-  #   script: examples/arm/mobile_manipulator_demo.py
-  #   recording_duration: 6.0
-  #   delay: 0.2
+  mobile_manipulator:
+    script: examples/arm/mobile_manipulator_demo.py
+    recording_duration: 6.0
+    delay: 0.2
 
-  # # rail_arm:
-  # #   script: examples/arm/rail_arm_demo.py
-  # #   recording_duration: 8.0
+  rail_arm:
+    script: examples/arm/rail_arm_demo.py
+    recording_duration: 8.0
 
-  # # --- basics demos ------------------------------------------------------
-  # action_system:
-  #   script: examples/basics/action_system_demo.py
-  #   recording_duration: 8.0
-  #   delay: 0.2
+  # --- basics demos ------------------------------------------------------
+  action_system:
+    script: examples/basics/action_system_demo.py
+    recording_duration: 8.0
+    delay: 0.2
 
-  # collision_features:
-  #   script: examples/basics/collision_features_demo.py
-  #   recording_duration: 6.0
+  collision_features:
+    script: examples/basics/collision_features_demo.py
+    recording_duration: 6.0
 
   robot_demo:
     script: examples/basics/robot_demo.py
     recording_duration: 3.0
 
-  # # --- mobile demos ------------------------------------------------------
-  # # path_following:
-  # #   script: examples/mobile/path_following_demo.py
-  # #   recording_duration: 6.0
+  # --- mobile demos ------------------------------------------------------
+  path_following:
+    script: examples/mobile/path_following_demo.py
+    recording_duration: 6.0

@@ -56,7 +56,7 @@ world:
   world_file: "/rmf_demos_ws/.../airport_terminal.world"
   skip_models: [TinyRobot, DeliveryRobot, CleanerBot, ...]
 
-robots:
+entities:
   # Fleet 1: TinyRobot
   - name: tinyRobot1
     sdf_path: ".../TinyRobot/model.sdf"

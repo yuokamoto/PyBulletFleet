@@ -1,0 +1,32 @@
+<?xml version="1.0"?>
+<robot name="elevator">
+  <link name="shaft">
+    <visual>
+      <geometry><box size="0.01 0.01 0.01"/></geometry>
+    </visual>
+    <inertial>
+      <mass value="0.0"/>
+      <inertia ixx="0" ixy="0" ixz="0" iyy="0" iyz="0" izz="0"/>
+    </inertial>
+  </link>
+  <joint name="lift" type="prismatic">
+    <parent link="shaft"/>
+    <child link="platform"/>
+    <origin xyz="0 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="0" upper="30.0" effort="100" velocity="2.0"/>
+  </joint>
+  <link name="platform">
+    <visual>
+      <geometry><box size="3.0 3.0 0.2"/></geometry>
+      <material name="steel"><color rgba="0.7 0.7 0.7 1.0"/></material>
+    </visual>
+    <collision>
+      <geometry><box size="3.0 3.0 0.2"/></geometry>
+    </collision>
+    <inertial>
+      <mass value="0.0"/>
+      <inertia ixx="0" ixy="0" ixz="0" iyy="0" iyz="0" izz="0"/>
+    </inertial>
+  </link>
+</robot>

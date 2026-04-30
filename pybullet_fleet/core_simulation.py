@@ -15,7 +15,7 @@ import tracemalloc  # Memory profiling (imported once at module level)
 from collections import deque
 from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union, cast
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Set, Tuple, Union, cast
 
 import numpy as np
 
@@ -36,6 +36,9 @@ from pybullet_fleet.agent import Agent
 from pybullet_fleet.agent_manager import SimObjectManager
 from pybullet_fleet.types import SpatialHashCellSizeMode, CollisionDetectionMethod, CollisionMode
 from pybullet_fleet._defaults import SIMULATION as _SIM_D
+
+if TYPE_CHECKING:
+    from pybullet_fleet.sim_plugin import SimPlugin
 
 # Global log_level (default: 'info')
 GLOBAL_LOG_LEVEL = "INFO"
@@ -128,51 +131,12 @@ class SimulationParams:
         Returns:
             SimulationParams instance
         """
-        return cls(
-            target_rtf=config.get("target_rtf", _SIM_D["target_rtf"]),
-            timestep=config.get("timestep", _SIM_D["timestep"]),
-            duration=config.get("duration", _SIM_D["duration"]),
-            gui=config.get("gui", _SIM_D["gui"]),
-            physics=config.get("physics", _SIM_D["physics"]),
-            monitor=config.get("monitor", _SIM_D["monitor"]),
-            enable_monitor_gui=config.get("enable_monitor_gui", _SIM_D["enable_monitor_gui"]),
-            collision_check_frequency=config.get("collision_check_frequency", _SIM_D["collision_check_frequency"]),
-            log_level=config.get("log_level", _SIM_D["log_level"]),
-            max_steps_per_frame=config.get("max_steps_per_frame", _SIM_D["max_steps_per_frame"]),
-            gui_min_fps=config.get("gui_min_fps", _SIM_D["gui_min_fps"]),
-            # Visualizer settings
-            enable_collision_shapes=config.get("enable_collision_shapes", _SIM_D["enable_collision_shapes"]),
-            enable_structure_transparency=config.get("enable_structure_transparency", _SIM_D["enable_structure_transparency"]),
-            enable_shadows=config.get("enable_shadows", _SIM_D["enable_shadows"]),
-            enable_gui_panel=config.get("enable_gui_panel", _SIM_D["enable_gui_panel"]),
-            ignore_static_collision=config.get("ignore_static_collision", _SIM_D["ignore_static_collision"]),
-            enable_time_profiling=config.get("enable_time_profiling", _SIM_D["enable_time_profiling"]),
-            profiling_interval=config.get("profiling_interval", _SIM_D["profiling_interval"]),
-            enable_memory_profiling=config.get("enable_memory_profiling", _SIM_D["enable_memory_profiling"]),
-            enable_collision_color_change=config.get("enable_collision_color_change", _SIM_D["enable_collision_color_change"]),
-            spatial_hash_cell_size_mode=SpatialHashCellSizeMode(
-                config.get("spatial_hash_cell_size_mode", _SIM_D["spatial_hash_cell_size_mode"])
-            ),
-            spatial_hash_cell_size=config.get("spatial_hash_cell_size", _SIM_D["spatial_hash_cell_size"]),
-            # Collision detection method - let __post_init__ auto-select if not in config
-            collision_detection_method=(
-                CollisionDetectionMethod(config["collision_detection_method"])
-                if "collision_detection_method" in config
-                else None
-            ),
-            collision_margin=config.get("collision_margin", _SIM_D["collision_margin"]),
-            multi_cell_threshold=config.get("multi_cell_threshold", _SIM_D["multi_cell_threshold"]),
-            enable_floor=config.get("enable_floor", _SIM_D["enable_floor"]),
-            camera_config=config.get("camera", _SIM_D["camera_config"]),  # Camera configuration
-            model_paths=config.get("model_paths", _SIM_D["model_paths"]),  # Additional model directories
-            # Window size parameters
-            window_width=config.get("window_width", _SIM_D["window_width"]),
-            window_height=config.get("window_height", _SIM_D["window_height"]),
-            # DataMonitor window parameters
-            monitor_width=config.get("monitor_width", _SIM_D["monitor_width"]),
-            monitor_height=config.get("monitor_height", _SIM_D["monitor_height"]),
-            monitor_x=config.get("monitor_x", _SIM_D["monitor_x"]),
-            monitor_y=config.get("monitor_y", _SIM_D["monitor_y"]),
+        from pybullet_fleet.config_utils import dataclass_from_dict
+
+        return dataclass_from_dict(
+            cls,
+            config,
+            aliases={"camera_config": "camera"},
         )
 
 
@@ -195,17 +159,23 @@ class MultiRobotSimulationCore:
         Supports two YAML layouts:
 
         **Nested** (recommended) — ``simulation``, ``world``, and
-        ``robots`` sections::
+        ``entities`` sections::
 
             simulation:
               gui: true
               physics: false
             world:
               world_file: "/path/to/office.world"
-            robots:
+            entities:
               - name: robot0
                 urdf_path: "robots/mobile_robot.urdf"
                 pose: [0, 0, 0.05]
+              - type: sim_object
+                name: box0
+                visual_shape:
+                  shape_type: box
+                  half_extents: [0.3, 0.3, 0.1]
+                pose: [3, 0, 0.1]
 
         **Flat** (legacy) — all keys at the top level::
 
@@ -220,7 +190,7 @@ class MultiRobotSimulationCore:
               forklift: "my_ros_pkg.entities.ForkliftAgent"
               conveyor: "warehouse_sim.conveyor.ConveyorObject"
 
-            robots:
+            entities:
               - type: forklift
                 urdf_path: robots/forklift.urdf
                 pose: [0, 0, 0.05]
@@ -237,56 +207,16 @@ class MultiRobotSimulationCore:
             loaded and robots spawned (if configured).
         """
         config = load_yaml_config(yaml_path)
-
-        # Register custom entity classes before spawning
-        entity_classes = config.get("entity_classes")
-        if entity_classes:
-            from pybullet_fleet.entity_registry import register_entity_classes_from_config
-
-            register_entity_classes_from_config(entity_classes)
-
-        # Extract each section independently
-        sim_config = config.get("simulation")
-        world_config = config.get("world", {})
-        robots_config = config.get("robots", [])
-
-        # Flat layout (legacy): no nested keys, entire config is sim params
-        if sim_config is None and not world_config and not robots_config:
-            sim_config = config
-        else:
-            sim_config = sim_config or {}
-
-        # Auto-disable floor when world geometry is provided
-        # (unless explicitly set in the config)
-        if world_config and "enable_floor" not in sim_config:
-            sim_config = dict(sim_config)  # avoid mutating caller's dict
-            sim_config["enable_floor"] = False
-
-        params = SimulationParams.from_dict(sim_config)
-        sim = cls(params)
-
-        # Load world environment if configured
-        if world_config:
-            skip_models = world_config.get("skip_models", [])
-            # Auto-skip robot model names so they aren't loaded as scenery
-            robot_names = [r.get("name", "") for r in robots_config if r.get("name")]
-            all_skip = list(set(skip_models + robot_names))
-            sim.load_world(world_config, skip_models=all_skip)
-
-        # Spawn robots if configured
-        if robots_config:
-            sim.spawn_robots_from_config(robots_config)
-
-        return sim
+        return cls.from_dict(config)
 
     @classmethod
     def from_dict(cls, config: Dict[str, Any]) -> "MultiRobotSimulationCore":
         """Create MultiRobotSimulationCore from a configuration dictionary.
 
         Supports both flat simulation-params dicts and nested dicts with
-        ``simulation``, ``world``, and ``robots`` sections.  When nested
-        keys are present they are processed the same way as
-        :meth:`from_yaml`.
+        ``simulation``, ``world``, and ``entities`` sections.
+        When nested keys are present they are processed the same way
+        as :meth:`from_yaml`.
 
         An optional ``entity_classes`` section maps names to dotted
         Python paths for dynamic class registration (see
@@ -308,10 +238,10 @@ class MultiRobotSimulationCore:
         # Extract each section independently
         sim_config = config.get("simulation")
         world_config = config.get("world", {})
-        robots_config = config.get("robots", [])
+        entities_config = list(config.get("entities", []))
 
         # Flat layout (legacy): no nested keys, entire config is sim params
-        if sim_config is None and not world_config and not robots_config:
+        if sim_config is None and not world_config and not entities_config:
             params = SimulationParams.from_dict(config)
             return cls(params)
 
@@ -325,11 +255,15 @@ class MultiRobotSimulationCore:
         sim = cls(params)
 
         if world_config:
-            robot_names = [r.get("name", "") for r in robots_config if r.get("name")]
-            skip = list(set(world_config.get("skip_models", []) + robot_names))
+            entity_names = [e.get("name", "") for e in entities_config if e.get("name")]
+            skip = list(set(world_config.get("skip_models", []) + entity_names))
             sim.load_world(world_config, skip_models=skip)
-        if robots_config:
-            sim.spawn_robots_from_config(robots_config)
+        if entities_config:
+            sim.spawn_robots_from_config(entities_config)
+
+        # Load and initialise plugins
+        sim._load_and_init_plugins(config)
+
         return sim
 
     def __init__(self, params: SimulationParams, collision_color: Optional[List[float]] = None) -> None:
@@ -447,6 +381,9 @@ class MultiRobotSimulationCore:
         # --- Registered managers (optional overlays for batch API) ---
         self._registered_managers: List[SimObjectManager] = []
 
+        # --- Plugins ---
+        self._plugins: List["SimPlugin"] = []
+
         self.setup_pybullet()
         self.setup_monitor()
 
@@ -502,6 +439,93 @@ class MultiRobotSimulationCore:
     def enable_memory_profiling(self) -> bool:
         """Whether memory profiling is enabled."""
         return self._enable_memory_profiling
+
+    # ------------------------------------------------------------------
+    # Plugin system
+    # ------------------------------------------------------------------
+
+    def register_plugin(
+        self,
+        plugin_or_cls,
+        config: Optional[Dict[str, Any]] = None,
+        frequency: Optional[float] = None,
+    ):
+        """Register a simulation plugin.
+
+        Args:
+            plugin_or_cls: Either a :class:`SimPlugin` instance or a
+                :class:`SimPlugin` subclass (will be instantiated).
+            config: Config dict (only used when *plugin_or_cls* is a class).
+            frequency: Step frequency in Hz (``None`` = every step).
+
+        Returns:
+            The registered :class:`SimPlugin` instance.
+
+        Raises:
+            TypeError: If *plugin_or_cls* is not a SimPlugin.
+        """
+        from pybullet_fleet.sim_plugin import SimPlugin
+
+        if isinstance(plugin_or_cls, SimPlugin):
+            plugin = plugin_or_cls
+        elif isinstance(plugin_or_cls, type) and issubclass(plugin_or_cls, SimPlugin):
+            plugin = plugin_or_cls(self, config or {})
+        else:
+            raise TypeError(f"Expected SimPlugin instance or subclass, got {plugin_or_cls!r}")
+
+        self._plugins.append(plugin)
+        plugin.frequency = frequency
+        return plugin
+
+    @property
+    def plugins(self) -> "List[SimPlugin]":
+        """Read-only list of active plugins."""
+        return list(self._plugins)
+
+    def _load_and_init_plugins(self, config: Dict[str, Any]) -> None:
+        """Load plugins from *config* and call ``on_init()`` on each.
+
+        Shared helper used by :meth:`from_yaml` and :meth:`from_dict`.
+        """
+        plugin_configs = config.get("plugins", [])
+        if plugin_configs:
+            from pybullet_fleet.sim_plugin import _load_plugins_from_config
+
+            plugins = _load_plugins_from_config(plugin_configs, self)
+            self._plugins.extend(plugins)
+        self._init_plugins()
+
+    def _init_plugins(self) -> None:
+        """Call ``on_init()`` on all loaded plugins (after spawn)."""
+        for plugin in self._plugins:
+            plugin.on_init()
+
+    def _step_plugins(self, dt: float) -> None:
+        """Dispatch ``on_step()`` to plugins respecting frequency control."""
+        for plugin in self._plugins:
+            freq = plugin.frequency
+            if freq is None:
+                try:
+                    plugin.on_step(dt)
+                except Exception:
+                    logger.error("Plugin %s.on_step() failed", type(plugin).__name__, exc_info=True)
+            else:
+                plugin._accumulator += dt
+                interval = 1.0 / freq
+                if plugin._accumulator >= interval:
+                    try:
+                        plugin.on_step(plugin._accumulator)
+                    except Exception:
+                        logger.error("Plugin %s.on_step() failed", type(plugin).__name__, exc_info=True)
+                    plugin._accumulator = 0.0
+
+    def _shutdown_plugins(self) -> None:
+        """Call ``on_shutdown()`` on all plugins."""
+        for plugin in self._plugins:
+            try:
+                plugin.on_shutdown()
+            except Exception:
+                logger.error("Plugin %s.on_shutdown() failed", type(plugin).__name__, exc_info=True)
 
     def register_callback(self, callback: Callable, frequency: Optional[float] = None) -> None:
         """
@@ -1688,15 +1712,12 @@ class MultiRobotSimulationCore:
 
         alpha = 0.3 if transparent else 1.0
 
-        logger.info(f"[TRANSPARENCY] Applying alpha={alpha} to {len(self._static_collision_objects)} static objects...")
-
-        # Apply alpha only to static bodies using pre-saved colors (FAST)
-        # Convert object_ids to body_ids for visual shape manipulation
-        static_body_ids = {
-            self._sim_objects_dict[obj_id].body_id
-            for obj_id in self._static_collision_objects
-            if obj_id in self._sim_objects_dict
+        # Use _static_collision_objects — world-loaded objects default to
+        # CollisionMode.STATIC, so this covers walls, floors, furniture, etc.
+        structure_body_ids = {
+            self._sim_objects_dict[oid].body_id for oid in self._static_collision_objects if oid in self._sim_objects_dict
         }
+        logger.info(f"[TRANSPARENCY] Applying alpha={alpha} to {len(structure_body_ids)} static objects...")
 
         processed = 0
         # Disable rendering during batch update to avoid per-call OpenGL re-render
@@ -1705,8 +1726,8 @@ class MultiRobotSimulationCore:
             for key, rgba in self._original_visual_colors.items():
                 body_id, link_index = key
 
-                # Only process static bodies (O(1) lookup with set)
-                if body_id not in static_body_ids:
+                # Only process structure bodies (skip agents/robots)
+                if body_id not in structure_body_ids:
                     continue
 
                 try:
@@ -2517,6 +2538,17 @@ class MultiRobotSimulationCore:
         for mgr in self._registered_managers:
             mgr.clear()
 
+        # 1c. Notify plugins of reset
+        for plugin in self._plugins:
+            try:
+                plugin.on_reset()
+            except Exception:
+                logger.error("Plugin %s.on_reset() failed", type(plugin).__name__, exc_info=True)
+
+        # Reset plugin accumulators
+        for plugin in self._plugins:
+            plugin._accumulator = 0.0
+
         # 2. Reset PyBullet world (removes all bodies including ground plane)
         p.resetSimulation(physicsClientId=self._client)
 
@@ -2898,6 +2930,9 @@ class MultiRobotSimulationCore:
         if self._recorder is not None:
             self.stop_recording()
 
+        # Shutdown plugins before disconnecting
+        self._shutdown_plugins()
+
         # Disconnect from PyBullet if still connected
         try:
             p.getConnectionInfo(physicsClientId=self.client)
@@ -3036,17 +3071,17 @@ class MultiRobotSimulationCore:
         if measure_timing:
             self._profiling_stats["events_pre_step"][-1] = (time.perf_counter() - t_ev0) * 1000
 
-        # Update all simulation objects that have update() method
-        # Agent instances are automatically updated every step for movement control
-        # OPTIMIZATION: Use self._agents list for O(M) iteration instead of O(N) with isinstance() check
+        # Update all simulation objects that need per-step updates.
+        # Agent and Device subclasses set _needs_update = True.
+        # Unified loop replaces the former _agents-only iteration.
         if measure_timing:
             t0 = time.perf_counter()
 
-        for agent in self._agents:
-            moved = agent.update(self._params.timestep)
-            # Track kinematic agent movement
-            if moved and agent.object_id in self._kinematic_objects:
-                self._moved_this_step.add(agent.object_id)
+        for obj in self._sim_objects:
+            if obj._needs_update:
+                moved = obj.update(self._params.timestep)
+                if moved and obj.object_id in self._kinematic_objects:
+                    self._moved_this_step.add(obj.object_id)
 
         if measure_timing:
             t1 = time.perf_counter()
@@ -3069,6 +3104,9 @@ class MultiRobotSimulationCore:
         if measure_timing:
             t_cb1 = time.perf_counter()
             self._profiling_stats["callbacks"][-1] = (t_cb1 - t_cb0) * 1000
+
+        # --- Plugin on_step dispatch ---
+        self._step_plugins(self._params.timestep)
 
         # Check if PyBullet is still connected before stepping
         if not p.isConnected(physicsClientId=self.client):

@@ -6,6 +6,7 @@
 # Configuration via .env file (create docker/.env):
 #   DEMO_WORLD=office          # Launch file prefix (office_pybullet.launch.py)
 #   GUI=true                   # PyBullet GUI window
+#   RVIZ=false                 # Disable RViz (saves CPU/GPU)
 #   ROS_DOMAIN_ID=42           # ROS 2 domain isolation
 #
 # Available DEMO_WORLD values:
@@ -54,6 +55,8 @@ services:
       - ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-42}
       - RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
       - DEMO_WORLD=${DEMO_WORLD:-office}
+      - RVIZ=${RVIZ:-true}
+      - GUI=${GUI:-true}
     volumes:
       - /tmp/.X11-unix:/tmp/.X11-unix:rw
       - /dev/dri:/dev/dri
@@ -70,10 +73,15 @@ services:
       - ../ros2_bridge/pybullet_fleet_ros/launch:/rmf_demos_ws/install/pybullet_fleet_ros/share/pybullet_fleet_ros/launch:ro
       - ../ros2_bridge/pybullet_fleet_ros/config:/rmf_demos_ws/install/pybullet_fleet_ros/share/pybullet_fleet_ros/config:ro
       - ../ros2_bridge/pybullet_fleet_ros/pybullet_fleet_ros:/rmf_demos_ws/install/pybullet_fleet_ros/lib/python3.12/site-packages/pybullet_fleet_ros:ro
-    command: >
-      ros2 launch pybullet_fleet_ros ${DEMO_WORLD:-office}_pybullet.launch.py
-        gui:=${GUI:-true}
-        server_uri:=ws://localhost:8000/_internal
+    command:
+      - bash
+      - -c
+      - |
+        if [ "$$RVIZ" = "false" ]; then HEADLESS=true; else HEADLESS=false; fi
+        exec ros2 launch pybullet_fleet_ros $${DEMO_WORLD}_pybullet.launch.py \
+          gui:=$$GUI \
+          headless:=$$HEADLESS \
+          server_uri:=ws://localhost:8000/_internal
     stdin_open: true
     tty: true
 

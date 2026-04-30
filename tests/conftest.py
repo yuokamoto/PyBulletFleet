@@ -65,13 +65,19 @@ class MockSimCore:
         self._registered_callbacks.append({"func": callback, "frequency": frequency})
 
     def tick(self, n: int = 1):
-        """Advance sim_time by *n* time-steps, with physics stepping if enabled."""
-        if self._params.physics:
-            for _ in range(n):
+        """Advance sim_time by *n* time-steps, with physics stepping if enabled.
+
+        Also calls ``obj.update(dt)`` for every registered object that has
+        ``_needs_update = True``, mirroring the unified loop in
+        ``MultiRobotSimulationCore.step_once()``.
+        """
+        for _ in range(n):
+            if self._params.physics:
                 p.stepSimulation(physicsClientId=self._client)
-                self.sim_time += self._dt
-        else:
-            self.sim_time += self._dt * n
+            self.sim_time += self._dt
+            for obj in self.sim_objects:
+                if getattr(obj, "_needs_update", False):
+                    obj.update(self._dt)
 
 
 @pytest.fixture(autouse=True)

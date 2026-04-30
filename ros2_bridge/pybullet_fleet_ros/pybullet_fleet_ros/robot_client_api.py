@@ -14,6 +14,7 @@ pattern established by ``rmf_demos_fleet_adapter/RobotClientAPI.py``.
 import logging
 import math
 import threading
+import time
 from dataclasses import dataclass
 from typing import Optional
 
@@ -23,6 +24,9 @@ from nav2_msgs.action import NavigateToPose
 from nav_msgs.msg import Odometry
 from rclpy.action import ActionClient
 from rclpy.node import Node
+from std_srvs.srv import SetBool
+
+from pybullet_fleet_msgs.srv import AttachObject
 
 logger = logging.getLogger(__name__)
 
@@ -66,9 +70,16 @@ class RobotClientAPI:
 
         # Current state (from odom)
         self._position = [0.0, 0.0, 0.0]  # [x, y, yaw]
-        self._battery_soc = 1.0  # Simulated: always full
+        self._has_odom = False  # True after first odom callback
         self._last_completed_cmd_id = 0
         self._active_cmd_id = 0
+
+        # Battery simulation: start at 80% and charge to 100% over 30s.
+        # This prevents the charging deadlock where RMF waits for a
+        # positive charging rate but battery is already 100%.
+        self._battery_soc = 0.80
+        self._battery_start_time = time.monotonic()
+        self._battery_charge_duration = 30.0  # seconds to reach 100%
 
         # Subscribe to odom
         self._odom_sub = node.create_subscription(
@@ -86,20 +97,49 @@ class RobotClientAPI:
         )
         self._active_goal_handle = None
 
+        # toggle_attach service client (for delivery pick/drop)
+        self._attach_client = node.create_client(
+            SetBool,
+            f"/{robot_name}/toggle_attach",
+        )
+
+        # attach_object service client (detailed attach/detach)
+        self._attach_object_client = node.create_client(
+            AttachObject,
+            f"/{robot_name}/attach_object",
+        )
+
     def get_data(self) -> Optional[RobotUpdateData]:
         """Return current robot state snapshot.
 
         Returns:
             RobotUpdateData with current position, map, battery,
-            and last completed command ID. None if no odom received yet.
+            and last completed command ID. Returns ``None`` until
+            the first odom message is received (prevents registering
+            the robot at (0,0,0) which is off the navigation graph).
         """
         with self._lock:
+            if not self._has_odom:
+                return None
+            # Simulate battery charging: 80% → 100% over _battery_charge_duration
+            if self._battery_soc < 1.0:
+                elapsed = time.monotonic() - self._battery_start_time
+                self._battery_soc = min(
+                    1.0,
+                    0.80 + 0.20 * min(1.0, elapsed / self._battery_charge_duration),
+                )
             return RobotUpdateData(
                 map=self._map_name,
                 position=list(self._position),
                 battery_soc=self._battery_soc,
                 last_completed_cmd_id=self._last_completed_cmd_id,
             )
+
+    def set_map_name(self, map_name: str) -> None:
+        """Update the current map/level name (e.g. after elevator transition)."""
+        if self._map_name != map_name:
+            logger.info("[%s] Map changed: %s -> %s", self._name, self._map_name, map_name)
+            self._map_name = map_name
 
     def navigate(
         self,
@@ -149,6 +189,125 @@ class RobotClientAPI:
             self._active_goal_handle = None
         return True
 
+    def toggle_attach(self, attach: bool, cmd_id: int) -> bool:
+        """Request attach/detach via the bridge's toggle_attach service.
+
+        Mirrors rmf_demos' ``RobotAPI.toggle_attach``.  The service call
+        is async — when the bridge completes the PickAction/DropAction it
+        returns success, and we update ``_last_completed_cmd_id``.
+
+        Args:
+            attach: True to pick (attach), False to drop (detach).
+            cmd_id: Command ID for completion tracking.
+
+        Returns:
+            True if the service call was sent successfully.
+        """
+        self._active_cmd_id = cmd_id
+
+        if not self._attach_client.wait_for_service(timeout_sec=5.0):
+            logger.error("[%s] toggle_attach service not available", self._name)
+            return False
+
+        req = SetBool.Request(data=attach)
+        future = self._attach_client.call_async(req)
+        future.add_done_callback(self._on_attach_done)
+        return True
+
+    def _on_attach_done(self, future) -> None:
+        """Callback when toggle_attach service response arrives."""
+        try:
+            result = future.result()
+        except Exception as e:
+            logger.error("[%s] toggle_attach service call failed: %s", self._name, e)
+            return
+
+        if result is not None and result.success:
+            logger.info("[%s] toggle_attach completed (cmd %d): %s", self._name, self._active_cmd_id, result.message)
+            with self._lock:
+                self._last_completed_cmd_id = self._active_cmd_id
+        else:
+            msg = result.message if result else "no response"
+            logger.warning("[%s] toggle_attach failed (cmd %d): %s", self._name, self._active_cmd_id, msg)
+            # Still mark as completed so RMF can proceed
+            with self._lock:
+                self._last_completed_cmd_id = self._active_cmd_id
+
+    def attach_object(
+        self,
+        attach: bool,
+        cmd_id: int,
+        object_name: str = "",
+        parent_link: str = "",
+        offset_position: tuple = (0.0, 0.0, 0.0),
+        offset_orientation: tuple = (0.0, 0.0, 0.0, 1.0),
+        search_radius: float = 0.0,
+    ) -> bool:
+        """Request detailed attach/detach via the attach_object service.
+
+        Args:
+            attach: True to pick, False to drop.
+            cmd_id: Command ID for completion tracking.
+            object_name: Target object name (empty = nearest/first).
+            parent_link: Link name to attach to (empty = base_link).
+            offset_position: Attachment offset position [x, y, z].
+            offset_orientation: Attachment offset quaternion [x, y, z, w].
+            search_radius: Search radius for nearest mode (0 = default 0.5m).
+
+        Returns:
+            True if the service call was sent successfully.
+        """
+        self._active_cmd_id = cmd_id
+
+        if not self._attach_object_client.wait_for_service(timeout_sec=5.0):
+            logger.error("[%s] attach_object service not available", self._name)
+            return False
+
+        from geometry_msgs.msg import Pose as RosPose, Point, Quaternion
+
+        req = AttachObject.Request()
+        req.attach = attach
+        req.object_name = object_name
+        req.parent_link = parent_link
+        req.offset = RosPose(
+            position=Point(x=offset_position[0], y=offset_position[1], z=offset_position[2]),
+            orientation=Quaternion(
+                x=offset_orientation[0],
+                y=offset_orientation[1],
+                z=offset_orientation[2],
+                w=offset_orientation[3],
+            ),
+        )
+        req.search_radius = float(search_radius)
+
+        future = self._attach_object_client.call_async(req)
+        future.add_done_callback(self._on_attach_object_done)
+        return True
+
+    def _on_attach_object_done(self, future) -> None:
+        """Callback when attach_object service response arrives."""
+        try:
+            result = future.result()
+        except Exception as e:
+            logger.error("[%s] attach_object service call failed: %s", self._name, e)
+            return
+
+        if result is not None and result.success:
+            logger.info(
+                "[%s] attach_object completed (cmd %d): %s (obj='%s')",
+                self._name,
+                self._active_cmd_id,
+                result.message,
+                result.attached_object_name,
+            )
+            with self._lock:
+                self._last_completed_cmd_id = self._active_cmd_id
+        else:
+            msg = result.message if result else "no response"
+            logger.warning("[%s] attach_object failed (cmd %d): %s", self._name, self._active_cmd_id, msg)
+            with self._lock:
+                self._last_completed_cmd_id = self._active_cmd_id
+
     # -- Callbacks ----------------------------------------------------------
 
     def _odom_callback(self, msg: Odometry):
@@ -160,6 +319,7 @@ class RobotClientAPI:
                 msg.pose.pose.position.y,
                 yaw,
             ]
+            self._has_odom = True
 
     def _on_goal_accepted(self, future):
         """Handle goal acceptance response."""

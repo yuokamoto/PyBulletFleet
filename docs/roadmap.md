@@ -18,12 +18,28 @@ New robot and infrastructure models:
 - **Behavior tree integration** — Create agent behavior from behavior trees
 - **`SimObject.from_sdf()` → `List[SimObject]`** — Factory method that loads an SDF file via `p.loadSDF()` and wraps each returned body_id in a `SimObject`. Collision detection and lifecycle management via `add_object()` are applied automatically. Required for Open-RMF SDF environment loading and official support for pybullet_data SDF models (kiva_shelf, wsg50_gripper, etc.). Currently the catalog demo calls raw `p.loadSDF()` directly.
 
+### Devices
+
+- **Elevator doors** — Physical door joints on the Elevator platform that open/close on arrival/departure. Currently `LiftHandler` manages door state as an RMF protocol flag (`LiftState.DOOR_OPEN/CLOSED`) only — no visual representation in PyBullet. Would require adding revolute or prismatic door joints to the elevator URDF and driving them via `JointAction` from `Elevator.request_floor()` / arrival callback.
+- **Double-hinge door** — Support for doors with two leaves (e.g. double swing doors common in hospital/hotel corridors). Requires a new URDF with two revolute joints and coordinated open/close `JointAction` targets. `DoorParams.open_positions` already supports multi-joint dicts, so the `Door` class may need minimal changes beyond the URDF and appropriate config.
+- **Xacro-parameterised device URDFs** — Replace static `door_hinge.urdf`, `door_slide.urdf`, and `elevator.urdf` with xacro templates that accept dimensions (door width/height, elevator platform size, door leaf count) as parameters. Enables per-instance sizing from YAML config without hand-editing URDFs. Requires ROS (`xacro` package) at URDF generation time; pre-built URDFs would remain as defaults for non-ROS standalone usage.
+
 ## Interfaces
 
 External communication layers:
 
 - **ROS 2** — Topic / service / action bridge for ROS 2 ecosystem integration
 - **gRPC** — Language-agnostic RPC interface for orchestrators, WMS, and fleet managers
+
+### Direct Python Connection (no ROS)
+
+Connect `fleet_adapter` directly to `MultiRobotSimulationCore` via Python API, bypassing the ROS 2 topic/service layer entirely.  Enables lower latency and simpler deployment for pure-simulation use cases.
+
+Key design points:
+
+- **`cargo_relative_pose` on Agent** — Move `attach_z_offset` from `WorkcellPlugin` config to `Agent` / `AgentSpawnParams` as a full `Pose` (`cargo_relative_pose`).  `dispense()` reads `robot.cargo_relative_pose` to set `PickAction.attach_relative_pose`, allowing per-robot attachment geometry (e.g. forklift fork tip vs AMR top surface vs gripper link).  `WorkcellPlugin._attach_z_offset` remains as the fallback default when the robot does not define one.
+- **Event-based communication** — Use the existing `EventBus` for fleet adapter ↔ sim core communication instead of ROS topics.
+- **Shared-process deployment** — Fleet adapter and sim core run in the same Python process; no serialization overhead.
 
 ### ROS 2 Bridge: Handler Decomposition
 
@@ -50,6 +66,8 @@ The multi-handler registry (`resolve_handler_classes`) already supports assignin
   Each subsystem is held by composition (`self._collision = CollisionSystem(self)`).
   The core class delegates; public API does not change.
   Natural stepping stone toward the SimBackend ABC (Long-Term Phase 1).
+
+- **Move `controller.py` into `controllers/` package** — Base controller classes (`Controller`, `KinematicController`, `OmniController`, `DifferentialController`, `create_controller`, `register_controller`) live in `pybullet_fleet/controller.py` while higher-level controllers (`PatrolController`, `RandomWalkController`) are already in `pybullet_fleet/controllers/`. Consolidate by moving the base module into the package as `controllers/base.py` (or splitting omni/differential into separate files) and re-exporting from `controllers/__init__.py`. Preserve the `from pybullet_fleet.controller import ...` path via a compatibility shim or `__init__.py` re-export.
 
 - **Remove scipy dependency** — Currently only `scipy.spatial.transform.Rotation` is used (9 call sites for quat↔euler, quat↔matrix, relative rotation). Replace with PyBullet utilities + lightweight helpers in `geometry.py` to eliminate the ~150 MB transitive dependency. Low priority: no runtime performance impact, only install size.
 

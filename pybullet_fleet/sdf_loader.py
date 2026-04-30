@@ -32,6 +32,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
+import pybullet as p
+
 from pybullet_fleet.geometry import Pose
 from pybullet_fleet.sim_object import SimObject, ShapeParams
 from pybullet_fleet.types import CollisionMode
@@ -224,10 +226,12 @@ def load_rmf_world(*args, **kwargs) -> List[SimObject]:
 def load_sdf_world(
     sdf_path: str,
     sim_core=None,
-    collision_mode: CollisionMode = CollisionMode.DISABLED,
+    collision_mode: CollisionMode = CollisionMode.STATIC,
     rgba_color: Optional[List[float]] = None,
+    mass: float = 0.0,
+    pickable: bool = False,
 ) -> List[SimObject]:
-    """Load static building models from an SDF file.
+    """Load building/prop models from an SDF file.
 
     Parses all ``<model>`` elements, iterates over their ``<link>`` children,
     extracts mesh ``<uri>`` from the *first* ``<visual>`` and the
@@ -243,8 +247,11 @@ def load_sdf_world(
         sdf_path: Absolute path to ``model.sdf``.
         sim_core: Simulation core for object registration.
         collision_mode: Collision mode for environment objects
-            (default: ``DISABLED`` — static scenery).
+            (default: ``STATIC`` — static scenery participates in
+            collision detection without moving).
         rgba_color: Optional colour override ``[r, g, b, a]``.
+        mass: Mass for the created objects (default: 0.0 for static).
+        pickable: Whether objects can be picked up (default: False).
 
     Returns:
         List of created SimObject instances.
@@ -283,9 +290,10 @@ def load_sdf_world(
                 pose_el = link.find("pose")
                 x, y, z, roll, pitch, yaw = _parse_pose(pose_el.text if pose_el is not None else None)
 
-                # Find first visual mesh URI and scale
+                # Find first visual mesh URI, scale, and per-visual material color
                 mesh_uri = None
                 visual_scale = [1.0, 1.0, 1.0]
+                per_visual_color = None  # SDF <material><diffuse> RGBA if present
                 for visual in link.findall("visual"):
                     mesh_el = visual.find(".//mesh/uri")
                     if mesh_el is not None and mesh_el.text:
@@ -295,6 +303,17 @@ def load_sdf_world(
                             parts = scale_el.text.strip().split()
                             if len(parts) >= 3:
                                 visual_scale = [float(parts[0]), float(parts[1]), float(parts[2])]
+                        # Extract per-visual SDF material color (including alpha)
+                        mat_color_str = _extract_sdf_material_color(visual)
+                        if mat_color_str:
+                            mat_parts = mat_color_str.split()
+                            if len(mat_parts) >= 4:
+                                per_visual_color = [
+                                    float(mat_parts[0]),
+                                    float(mat_parts[1]),
+                                    float(mat_parts[2]),
+                                    float(mat_parts[3]),
+                                ]
                         break
 
                 if mesh_uri is None:
@@ -331,22 +350,43 @@ def load_sdf_world(
                         mesh_scale=collision_scale,
                     )
 
+                # Use per-visual SDF material color if available, else fallback
+                effective_color = per_visual_color if per_visual_color else color
+
                 visual_shape = ShapeParams(
                     shape_type="mesh",
                     mesh_path=mesh_path,
                     mesh_scale=visual_scale,
-                    rgba_color=color,
+                    rgba_color=effective_color,
                 )
 
                 obj = SimObject.from_mesh(
                     visual_shape=visual_shape,
                     collision_shape=coll_shape_for_link,
                     pose=Pose.from_euler(x, y, z, roll, pitch, yaw),
-                    mass=0.0,
+                    mass=mass,
                     sim_core=sim_core,
                     collision_mode=collision_mode,
                     name=link_name,
+                    pickable=pickable,
                 )
+
+                # Apply per-visual alpha post-load if alpha < 1.0.
+                # PyBullet changeVisualShape is needed because the RGBA set
+                # during shape creation may be overridden when meshes have
+                # their own materials.
+                if effective_color and len(effective_color) >= 4 and effective_color[3] < 1.0:
+                    pid = sim_core.client if sim_core is not None else 0
+                    try:
+                        p.changeVisualShape(
+                            obj.body_id,
+                            -1,
+                            rgbaColor=effective_color,
+                            physicsClientId=pid,
+                        )
+                    except Exception:
+                        pass
+
                 objects.append(obj)
 
     if sim_core is not None:
@@ -487,7 +527,7 @@ def _resolve_include_uri(
 def load_sdf_world_file(
     world_path: str,
     sim_core=None,
-    collision_mode: CollisionMode = CollisionMode.DISABLED,
+    collision_mode: CollisionMode = CollisionMode.STATIC,
     skip_models: Optional[List[str]] = None,
     resource_paths: Optional[List[str]] = None,
 ) -> List[SimObject]:
@@ -549,6 +589,8 @@ def load_sdf_world_file(
         is_fuel: bool = False  # True → Gazebo Fuel model (.dae with embedded colours).
         # Currently only Fuel URIs are detected.  With DAE→OBJ conversion
         # (see roadmap) this could become a generic "has_native_materials" flag.
+        is_static: bool = True  # True → static scenery (default); False → movable/pickable object.
+        model_mass: float = 0.0  # Total mass from SDF <inertial><mass> (used when physics=True).
 
     resolved: List[_IncludeInfo] = []
 
@@ -565,6 +607,26 @@ def load_sdf_world_file(
         model_type = uri.rstrip("/").split("/")[-1]
         if model_type.lower() in skip or include_name.lower() in skip:
             logger.debug("Skipping model: %s (%s)", include_name, model_type)
+            # Record the skipped model's position on sim_core so that
+            # downstream components (like WorkcellHandler) can look up
+            # workcell positions even though the visual model was not
+            # loaded into PyBullet.  This mirrors how Gazebo's
+            # TeleportDispenser uses its own model <pose> for spatial
+            # lookups.
+            if sim_core is not None and include_name:
+                pose_el = include.find("pose")
+                pose_text = pose_el.text if pose_el is not None else None
+                sx, sy, sz, _, _, _ = _parse_pose(pose_text)
+                if not hasattr(sim_core, "skipped_model_positions"):
+                    sim_core.skipped_model_positions = {}
+                sim_core.skipped_model_positions[include_name] = (sx, sy, sz)
+                logger.debug(
+                    "Recorded skipped model position: %s -> (%.2f, %.2f, %.2f)",
+                    include_name,
+                    sx,
+                    sy,
+                    sz,
+                )
             continue
 
         # Resolve URI to local directory (may download from Fuel)
@@ -586,6 +648,26 @@ def load_sdf_world_file(
         pose_text = pose_el.text if pose_el is not None else None
         ix, iy, iz, iroll, ipitch, iyaw = _parse_pose(pose_text)
 
+        # Parse include-level <static> tag (default: True — scenery).
+        # SDF convention: <static>false</static> marks movable objects.
+        static_el = include.find("static")
+        is_static = True
+        if static_el is not None and static_el.text:
+            is_static = static_el.text.strip().lower() != "false"
+
+        # Extract total mass from model SDF for non-static objects.
+        model_mass = 0.0
+        if not is_static and os.path.isfile(sdf_path):
+            try:
+                model_tree = ET.parse(sdf_path)
+                model_root = model_tree.getroot()
+                for link_el in model_root.findall(".//model/link"):
+                    mass_el = link_el.find(".//inertial/mass")
+                    if mass_el is not None and mass_el.text:
+                        model_mass += float(mass_el.text.strip())
+            except Exception:
+                pass
+
         resolved.append(
             _IncludeInfo(
                 name=include_name,
@@ -598,6 +680,8 @@ def load_sdf_world_file(
                 ipitch=ipitch,
                 iyaw=iyaw,
                 is_fuel=is_fuel,
+                is_static=is_static,
+                model_mass=model_mass,
             )
         )
 
@@ -615,26 +699,59 @@ def load_sdf_world_file(
         # materials/textures/ but DAE refs use bare filenames).
         if info.is_fuel:
             _ensure_texture_symlinks(os.path.dirname(info.sdf_path))
+
+        # Determine collision_mode, mass and pickable based on <static> tag.
+        # Non-static objects are movable/pickable with NORMAL_3D collision.
+        # Mass is taken from SDF <inertial> when physics is enabled,
+        # otherwise 0.0 (kinematic mode teleports objects).
+        if info.is_static:
+            obj_collision_mode = collision_mode
+            obj_mass = 0.0
+            obj_pickable = False
+        else:
+            obj_collision_mode = CollisionMode.NORMAL_3D
+            obj_pickable = True
+            physics_enabled = sim_core is not None and hasattr(sim_core, "params") and sim_core.params.physics
+            if physics_enabled:
+                # Use SDF mass; fall back to 0.1 if <inertial> was absent.
+                obj_mass = info.model_mass if info.model_mass > 0 else 0.1
+            else:
+                obj_mass = 0.0
+
         try:
             model_objs = load_sdf_world(
                 info.sdf_path,
                 sim_core=sim_core,
-                collision_mode=collision_mode,
+                collision_mode=obj_collision_mode,
                 rgba_color=model_color,
+                mass=obj_mass,
+                pickable=obj_pickable,
             )
         except Exception as e:
             logger.warning("Failed to load model SDF %s: %s", info.sdf_path, e)
             continue
 
-        # Offset each object by the include-level pose
+        # Offset each object by the include-level pose.
+        # Use resetBasePositionAndOrientation directly instead of set_pose()
+        # because set_pose() rejects STATIC objects (by design — static
+        # objects should not move during simulation).  This is an initial
+        # placement, not a runtime move.
         cos_y, sin_y = math.cos(info.iyaw), math.sin(info.iyaw)
+        pid = sim_core.client if sim_core is not None else 0
         for obj in model_objs:
             obj_pose = obj.get_pose()
             ox, oy, oz = obj_pose.position
             rx = ox * cos_y - oy * sin_y + info.ix
             ry = ox * sin_y + oy * cos_y + info.iy
             rz = oz + info.iz
-            obj.set_pose(Pose.from_euler(rx, ry, rz, info.iroll, info.ipitch, info.iyaw))
+            new_pose = Pose.from_euler(rx, ry, rz, info.iroll, info.ipitch, info.iyaw)
+            pos, orn = new_pose.as_position_orientation()
+            p.resetBasePositionAndOrientation(obj.body_id, pos, orn, physicsClientId=pid)
+            obj._cached_pose = new_pose
+            # Update AABB/spatial-grid so collision system sees
+            # the relocated position (not the pre-offset origin).
+            if sim_core is not None:
+                sim_core._update_object_aabb(obj.object_id, update_grid=True)
             base_name = info.name or info.model_type
             obj.name = f"{base_name}/{obj.name}"
 
@@ -649,7 +766,7 @@ def load_sdf_world_file(
 # ---------------------------------------------------------------------------
 
 
-def resolve_sdf_to_urdf(sdf_path: str) -> str:
+def resolve_sdf_to_urdf(sdf_path: str, model_yaw_offset: float = 0.0) -> str:
     """Convert an SDF robot model to a temporary URDF file.
 
     PyBullet cannot reliably load Gazebo SDF files (``model://`` URIs,
@@ -663,8 +780,15 @@ def resolve_sdf_to_urdf(sdf_path: str) -> str:
     The caller is responsible for deleting the temp file when done
     (or it will be cleaned up on process exit by the OS).
 
+    The base link's ``<pose>`` yaw is automatically detected and applied
+    to visual/collision origins, so ``model_yaw_offset`` is normally not
+    needed.
+
     Args:
         sdf_path: Absolute path to the robot ``model.sdf``.
+        model_yaw_offset: Additional rotation offset (radians) applied on
+            top of the auto-detected base-link ``<pose>`` yaw.  Defaults
+            to ``0.0``.  Only needed if the auto-detected value is wrong.
 
     Returns:
         Absolute path to the generated temporary URDF file.
@@ -697,6 +821,14 @@ def resolve_sdf_to_urdf(sdf_path: str) -> str:
     for joint in model_el.findall("joint"):
         joints.append(joint)
 
+    # Identify the base link (the link that is NOT a child of any joint).
+    # Only the base link's visuals/collisions get the model_yaw_offset applied.
+    child_link_names: set = set()
+    for joint in model_el.findall("joint"):
+        child_el = joint.find("child")
+        if child_el is not None and child_el.text:
+            child_link_names.add(child_el.text.strip())
+
     # Build URDF string
     lines: List[str] = [
         '<?xml version="1.0"?>',
@@ -705,6 +837,19 @@ def resolve_sdf_to_urdf(sdf_path: str) -> str:
 
     for link_name, link_el in links.items():
         lines.append(f'  <link name="{link_name}">')
+
+        # Only apply yaw offset to the base link (not child links like wheels).
+        # Auto-detect the base link's own <pose> yaw from SDF and combine
+        # with the explicit model_yaw_offset (default 0.0).
+        is_base_link = link_name not in child_link_names
+        effective_yaw_offset = model_yaw_offset
+        if is_base_link:
+            base_pose_el = link_el.find("pose")
+            if base_pose_el is not None and base_pose_el.text:
+                base_pose_parts = base_pose_el.text.strip().split()
+                if len(base_pose_parts) >= 6:
+                    effective_yaw_offset += float(base_pose_parts[5])
+        apply_yaw_offset = abs(effective_yaw_offset) > 1e-9 and is_base_link
 
         # Inertial
         inertial = link_el.find("inertial")
@@ -736,8 +881,20 @@ def resolve_sdf_to_urdf(sdf_path: str) -> str:
             vis_name = visual.get("name", "visual")
             pose_el = visual.find("pose")
             vpose = pose_el.text.strip().split() if pose_el is not None else ["0"] * 6
-            origin_xyz = " ".join(vpose[:3])
-            origin_rpy = " ".join(vpose[3:6]) if len(vpose) >= 6 else "0 0 0"
+            xyz_parts = list(vpose[:3])
+            rpy_parts = vpose[3:6] if len(vpose) >= 6 else ["0", "0", "0"]
+            if apply_yaw_offset:
+                # Rotate the XYZ position around Z axis
+                x, y = float(xyz_parts[0]), float(xyz_parts[1])
+                cos_a = math.cos(effective_yaw_offset)
+                sin_a = math.sin(effective_yaw_offset)
+                xyz_parts[0] = str(x * cos_a - y * sin_a)
+                xyz_parts[1] = str(x * sin_a + y * cos_a)
+                # Add yaw offset to RPY
+                rpy_parts = list(rpy_parts)
+                rpy_parts[2] = str(float(rpy_parts[2]) + effective_yaw_offset)
+            origin_xyz = " ".join(xyz_parts)
+            origin_rpy = " ".join(rpy_parts)
 
             # Extract color from SDF <material>
             mat_color = _extract_sdf_material_color(visual)
@@ -773,8 +930,18 @@ def resolve_sdf_to_urdf(sdf_path: str) -> str:
         for coll in link_el.findall("collision"):
             pose_el = coll.find("pose")
             cpose = pose_el.text.strip().split() if pose_el is not None else ["0"] * 6
-            origin_xyz = " ".join(cpose[:3])
-            origin_rpy = " ".join(cpose[3:6]) if len(cpose) >= 6 else "0 0 0"
+            xyz_parts = list(cpose[:3])
+            rpy_parts = cpose[3:6] if len(cpose) >= 6 else ["0", "0", "0"]
+            if apply_yaw_offset:
+                x, y = float(xyz_parts[0]), float(xyz_parts[1])
+                cos_a = math.cos(effective_yaw_offset)
+                sin_a = math.sin(effective_yaw_offset)
+                xyz_parts[0] = str(x * cos_a - y * sin_a)
+                xyz_parts[1] = str(x * sin_a + y * cos_a)
+                rpy_parts = list(rpy_parts)
+                rpy_parts[2] = str(float(rpy_parts[2]) + effective_yaw_offset)
+            origin_xyz = " ".join(xyz_parts)
+            origin_rpy = " ".join(rpy_parts)
 
             geom = _sdf_geometry_to_urdf(coll.find("geometry"), model_dir, model_name)
             if geom:
@@ -817,17 +984,50 @@ def resolve_sdf_to_urdf(sdf_path: str) -> str:
         child_name = child.text.strip()
         parent_name = parent.text.strip()
 
-        # Joint pose (child frame relative to parent)
-        # In SDF, the link itself has a <pose> that defines its frame.
-        # For URDF, the joint <origin> is the child link's pose relative to parent.
+        # --- Joint origin: child link pose RELATIVE to parent link ---
+        # In SDF, link poses are specified in the model frame.
+        # In URDF, joint origins are relative to the parent link frame.
+        # For base-link parents (model frame origin), child model-frame pose
+        # is already the correct joint origin.
+        # For chained joints (non-base parent), we subtract the parent's
+        # model-frame pose from the child's to get the relative offset.
         child_link = links.get(child_name)
-        if child_link is not None:
-            child_pose_el = child_link.find("pose")
-            cpose = child_pose_el.text.strip().split() if child_pose_el is not None else ["0"] * 6
+        parent_link = links.get(parent_name)
+
+        child_pose_el = child_link.find("pose") if child_link is not None else None
+        cpose = child_pose_el.text.strip().split() if child_pose_el is not None else ["0"] * 6
+
+        parent_pose_el = parent_link.find("pose") if parent_link is not None else None
+        ppose = parent_pose_el.text.strip().split() if parent_pose_el is not None else ["0"] * 6
+
+        # Check if parent is a non-base link (child of another joint)
+        parent_is_base = parent_name not in child_link_names
+
+        if parent_is_base:
+            # Base link frame in URDF = model frame (no transformation needed)
+            origin_xyz = " ".join(cpose[:3])
+            origin_rpy = " ".join(cpose[3:6]) if len(cpose) >= 6 else "0 0 0"
         else:
-            cpose = ["0"] * 6
-        origin_xyz = " ".join(cpose[:3])
-        origin_rpy = " ".join(cpose[3:6]) if len(cpose) >= 6 else "0 0 0"
+            # Compute relative pose: child_model - parent_model
+            cx, cy, cz = float(cpose[0]), float(cpose[1]), float(cpose[2])
+            px, py, pz = float(ppose[0]), float(ppose[1]), float(ppose[2])
+            dx, dy, dz = cx - px, cy - py, cz - pz
+
+            # If parent has rotation, transform delta into parent frame
+            if len(ppose) >= 6:
+                p_yaw = float(ppose[5])
+                if abs(p_yaw) > 1e-9:
+                    cos_a = math.cos(-p_yaw)
+                    sin_a = math.sin(-p_yaw)
+                    dx, dy = dx * cos_a - dy * sin_a, dx * sin_a + dy * cos_a
+
+            # RPY relative
+            c_rpy = [float(cpose[i]) if len(cpose) > i else 0.0 for i in (3, 4, 5)]
+            p_rpy = [float(ppose[i]) if len(ppose) > i else 0.0 for i in (3, 4, 5)]
+            dr, dp, dyaw = c_rpy[0] - p_rpy[0], c_rpy[1] - p_rpy[1], c_rpy[2] - p_rpy[2]
+
+            origin_xyz = f"{dx} {dy} {dz}"
+            origin_rpy = f"{dr} {dp} {dyaw}"
 
         axis_el = joint_el.find(".//axis/xyz")
         axis = axis_el.text.strip() if axis_el is not None else "0 0 1"
@@ -882,24 +1082,51 @@ def _extract_sdf_material_color(visual_el: ET.Element) -> Optional[str]:
     """Extract RGBA color string from SDF ``<material>`` inside a ``<visual>``.
 
     Looks for ``<diffuse>``, ``<ambient>``, or ``<emissive>`` (in that order).
+    Also reads the SDF ``<transparency>`` tag (child of ``<visual>``, **not**
+    ``<material>``) which ``building_map_tools`` generates per-wall.
+
+    ``<transparency>`` is a float 0.0 (opaque) → 1.0 (invisible).  When
+    present it overrides the alpha channel:  ``alpha = 1.0 - transparency``.
+
     Returns ``"r g b a"`` string suitable for URDF ``<color rgba="..."/>``
     or *None* if no color information is found.
     """
+    # --- SDF <transparency> on the visual element --------------------------
+    transparency_el = visual_el.find("transparency")
+    transparency: Optional[float] = None
+    if transparency_el is not None and transparency_el.text:
+        try:
+            transparency = float(transparency_el.text.strip())
+        except ValueError:
+            pass
+
     mat = visual_el.find("material")
-    if mat is None:
-        return None
 
-    for tag in ("diffuse", "ambient", "emissive"):
-        el = mat.find(tag)
-        if el is not None and el.text:
-            parts = el.text.strip().split()
-            if len(parts) >= 3:
-                r, g, b = parts[0], parts[1], parts[2]
-                a = parts[3] if len(parts) >= 4 else "1"
-                return f"{r} {g} {b} {a}"
+    # Extract base RGBA from <material> (diffuse/ambient/emissive)
+    base_color: Optional[str] = None
+    if mat is not None:
+        for tag in ("diffuse", "ambient", "emissive"):
+            el = mat.find(tag)
+            if el is not None and el.text:
+                parts = el.text.strip().split()
+                if len(parts) >= 3:
+                    r, g, b = parts[0], parts[1], parts[2]
+                    a = parts[3] if len(parts) >= 4 else "1"
+                    base_color = f"{r} {g} {b} {a}"
+                    break
 
-    # Gazebo classic <script><name> (e.g. "Gazebo/Grey") — no direct RGBA
-    return None
+    # Apply <transparency> override
+    if transparency is not None and transparency > 0.0:
+        alpha = 1.0 - transparency
+        if base_color:
+            parts = base_color.split()
+            return f"{parts[0]} {parts[1]} {parts[2]} {alpha}"
+        else:
+            # No material — use white with the transparency-derived alpha
+            return f"1 1 1 {alpha}"
+
+    # No transparency — return whatever we found (may be None)
+    return base_color
 
 
 def _extract_dae_diffuse_color(dae_path: str) -> Optional[str]:

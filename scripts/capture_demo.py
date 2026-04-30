@@ -31,6 +31,12 @@ Usage::
 
     # List available demos
     python scripts/capture_demo.py --list
+
+    # Run all demos without recording (smoke test)
+    python scripts/capture_demo.py --run-only
+
+    # Run a specific demo without recording
+    python scripts/capture_demo.py --run-only --demo robot_demo
 """
 import argparse
 import os
@@ -110,6 +116,11 @@ parser.add_argument(
     action="store_true",
     help="Keep GUI window open during recording (GPU-quality via ER_BULLET_HARDWARE_OPENGL)",
 )
+parser.add_argument(
+    "--run-only",
+    action="store_true",
+    help="Run demos without recording (smoke test). Uses --duration or format_defaults duration as timeout.",
+)
 args = parser.parse_args()
 
 # Load config
@@ -147,6 +158,48 @@ for name, info in demos_to_run.items():
 
     # Resolve recording params: format_defaults → CLI → per-demo override
     rec = resolve_recording_params(format_defaults, args.format, args, info)
+
+    if args.run_only:
+        # --run-only: run demo without RECORD env vars (headless, no output)
+        env = {**os.environ}
+        # Use duration as subprocess timeout (sim-seconds ≈ wall-seconds at rtf=1)
+        run_duration = float(rec.get("duration", 4.0))
+        timeout = run_duration + 10.0  # extra margin
+        cmd = [sys.executable, script] + info.get("args", [])
+        # Inject --duration if the demo supports it (argparse ignores unknown args only
+        # if parse_known_args is used, so we check the script source for '--duration')
+        with open(script) as f:
+            script_src = f.read()
+        if "--duration" in script_src:
+            cmd += [f"--duration={run_duration}"]
+
+        print(f"Running {name} (max {run_duration:.0f}s)...")
+        print(f"  cmd: {' '.join(cmd)}")
+        try:
+            result = subprocess.run(
+                cmd,
+                env=env,
+                cwd=PROJECT_ROOT,
+                timeout=timeout,
+                capture_output=True,
+                text=True,
+            )
+            if result.returncode == 0:
+                print(f"  OK (exit {result.returncode})")
+                results.append((name, "OK", 0))
+            else:
+                print(f"  FAIL (exit {result.returncode})")
+                if result.stderr:
+                    for line in result.stderr.strip().split("\n")[-5:]:
+                        print(f"    {line}")
+                results.append((name, "FAIL", 0))
+        except subprocess.TimeoutExpired:
+            print(f"  TIMEOUT ({timeout:.0f}s) — demo may not accept --duration")
+            results.append((name, "TIMEOUT", 0))
+        except Exception as e:
+            print(f"  ERROR: {e}")
+            results.append((name, "ERROR", 0))
+        continue
 
     env = {
         **os.environ,
@@ -200,14 +253,23 @@ for name, info in demos_to_run.items():
 # ---------------------------------------------------------------------------
 
 print(f"\n{'='*50}")
-print(f"{'Demo':30s} {'Status':8s} {'Size':>8s}")
-print(f"{'-'*50}")
-total_mb = 0.0
-for name, status, size in results:
-    size_str = f"{size:.1f} MB" if size > 0 else "-"
-    print(f"{name:30s} {status:8s} {size_str:>8s}")
-    total_mb += size
-print(f"{'-'*50}")
-print(f"{'Total':30s} {'':8s} {total_mb:.1f} MB")
-ok_count = sum(1 for _, s, _ in results if s == "OK")
-print(f"\n{ok_count}/{len(results)} demos captured successfully")
+if args.run_only:
+    print(f"{'Demo':30s} {'Status':8s}")
+    print(f"{'-'*50}")
+    for name, status, _ in results:
+        print(f"{name:30s} {status:8s}")
+    print(f"{'-'*50}")
+    ok_count = sum(1 for _, s, _ in results if s == "OK")
+    print(f"\n{ok_count}/{len(results)} demos ran successfully")
+else:
+    print(f"{'Demo':30s} {'Status':8s} {'Size':>8s}")
+    print(f"{'-'*50}")
+    total_mb = 0.0
+    for name, status, size in results:
+        size_str = f"{size:.1f} MB" if size > 0 else "-"
+        print(f"{name:30s} {status:8s} {size_str:>8s}")
+        total_mb += size
+    print(f"{'-'*50}")
+    print(f"{'Total':30s} {'':8s} {total_mb:.1f} MB")
+    ok_count = sum(1 for _, s, _ in results if s == "OK")
+    print(f"\n{ok_count}/{len(results)} demos captured successfully")

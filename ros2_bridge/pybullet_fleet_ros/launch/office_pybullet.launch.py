@@ -41,9 +41,11 @@ def generate_launch_description():
     rmf_demos_dir = get_package_share_directory("rmf_demos")
     rmf_demos_maps_dir = get_package_share_directory("rmf_demos_maps")
 
-    # Config paths — reuse rmf_demos fleet config directly
+    # Config paths — use our custom fleet config to avoid charging deadlock.
+    # The original rmf_demos config uses finishing_request="charge" +
+    # recharge_soc=1.0 which deadlocks because our sim doesn't drain battery.
     bridge_config = os.path.join(pkg_dir, "config", "bridge_office.yaml")
-    fleet_config = os.path.join(rmf_demos_dir, "config", "office", "tinyRobot_config.yaml")
+    fleet_config = os.path.join(pkg_dir, "config", "tinyRobot_office.yaml")
     nav_graph = os.path.join(rmf_demos_maps_dir, "maps", "office", "nav_graphs", "0.yaml")
     building_yaml = os.path.join(rmf_demos_maps_dir, "office", "office.building.yaml")
     rviz_config = os.path.join(rmf_demos_dir, "include", "office", "office.rviz")
@@ -85,7 +87,7 @@ def generate_launch_description():
             ),
             # ============================================================
             # PyBulletFleet simulation + RMF adapters
-            # (bridge_node, door_adapter, workcell_adapter, fleet_adapter)
+            # (bridge_node + workcell_handler, door_adapter, fleet_adapter)
             # ============================================================
             IncludeLaunchDescription(
                 PythonLaunchDescriptionSource(os.path.join(pkg_dir, "launch", "pybullet_common.launch.py")),

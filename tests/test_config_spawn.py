@@ -21,6 +21,9 @@ import yaml
 from pybullet_fleet import AgentSpawnParams, Pose
 from pybullet_fleet.agent import Agent
 from pybullet_fleet.agent_manager import AgentManager, GridSpawnParams
+from pybullet_fleet.config_utils import resolve_class
+from pybullet_fleet.core_simulation import MultiRobotSimulationCore
+from pybullet_fleet.sim_object import SimObject
 from tests.conftest import MockSimCore
 
 
@@ -51,12 +54,12 @@ class TestLoadYamlConfig:
         """load_yaml_config reads a YAML file and returns dict."""
         from pybullet_fleet.config_utils import load_yaml_config
 
-        config = {"robots": [{"name": "r0"}], "simulation": {"gui": False}}
+        config = {"entities": [{"name": "r0"}], "simulation": {"gui": False}}
         yaml_file = tmp_path / "test.yaml"
         yaml_file.write_text(yaml.dump(config))
 
         result = load_yaml_config(str(yaml_file))
-        assert "robots" in result
+        assert "entities" in result
         assert result["simulation"]["gui"] is False
 
     def test_missing_file_raises(self):
@@ -72,7 +75,7 @@ class TestLoadYamlConfig:
 
         config = {
             "simulation": {"gui": True, "physics": False},
-            "robots": [{"name": "robot0"}],
+            "entities": [{"name": "robot0"}],
         }
         yaml_file = tmp_path / "sim.yaml"
         yaml_file.write_text(yaml.dump(config))
@@ -80,8 +83,8 @@ class TestLoadYamlConfig:
         result = load_yaml_config(str(yaml_file))
         assert result.get("simulation", {}).get("gui") is True
 
-    def test_missing_robots_returns_empty_list(self, tmp_path):
-        """YAML without robots key returns empty when accessed with .get()."""
+    def test_missing_entities_returns_empty_list(self, tmp_path):
+        """YAML without entities key returns empty when accessed with .get()."""
         from pybullet_fleet.config_utils import load_yaml_config
 
         config = {"simulation": {"gui": False}}
@@ -89,7 +92,7 @@ class TestLoadYamlConfig:
         yaml_file.write_text(yaml.dump(config))
 
         result = load_yaml_config(str(yaml_file))
-        assert result.get("robots", []) == []
+        assert result.get("entities", []) == []
 
 
 # =====================================================================
@@ -317,9 +320,9 @@ class TestSpawnFromYaml:
     """SimObjectManager.spawn_from_yaml(yaml_path) loads YAML then spawns entities."""
 
     def test_spawns_from_yaml_file(self, manager, tmp_path):
-        """Loads YAML file and spawns robots from the 'robots' section."""
+        """Loads YAML file and spawns robots from the 'entities' section."""
         config = {
-            "robots": [
+            "entities": [
                 {"name": "robot0", "urdf_path": "robots/mobile_robot.urdf", "pose": [0, 0, 0.05]},
                 {"name": "robot1", "urdf_path": "robots/mobile_robot.urdf", "pose": [2, 0, 0.05]},
             ]
@@ -365,7 +368,7 @@ class TestSpawnFromYaml:
         """spawn_from_yaml only uses the robots section, ignores simulation."""
         config = {
             "simulation": {"gui": True, "physics": True},
-            "robots": [
+            "entities": [
                 {"name": "robot0", "urdf_path": "robots/mobile_robot.urdf", "pose": [0, 0, 0.05]},
             ],
         }
@@ -541,3 +544,106 @@ class TestGridSpawnBatchOptimization:
         grid = GridSpawnParams(x_min=0, x_max=1, y_min=0, y_max=0, spacing=[2, 2, 0], offset=[0, 0, 0.05])
         manager.spawn_grid_mixed(num_objects=2, grid_params=grid, spawn_params_list=[(params, 1.0)])
         assert len(entered) == 1
+
+
+# =====================================================================
+# resolve_class (unit)
+# =====================================================================
+class TestResolveClass:
+    """resolve_class imports a class from a dotted Python path."""
+
+    def test_resolves_known_class(self):
+        """Returns the class object for a valid dotted path."""
+        cls = resolve_class("pybullet_fleet.sim_plugin.SimPlugin")
+        from pybullet_fleet.sim_plugin import SimPlugin
+
+        assert cls is SimPlugin
+
+    def test_resolves_nested_module(self):
+        """Works for deeply nested modules."""
+        cls = resolve_class("pybullet_fleet.config_utils.load_yaml_config")
+        from pybullet_fleet.config_utils import load_yaml_config
+
+        assert cls is load_yaml_config
+
+    def test_invalid_path_no_dot(self):
+        """Raises ValueError when path has no dot separator."""
+        with pytest.raises(ValueError, match="dotted Python path"):
+            resolve_class("NoDotHere")
+
+    def test_invalid_path_empty_string(self):
+        """Raises ValueError for empty string."""
+        with pytest.raises(ValueError, match="dotted Python path"):
+            resolve_class("")
+
+    def test_invalid_path_not_string(self):
+        """Raises ValueError for non-string input."""
+        with pytest.raises(ValueError, match="dotted Python path"):
+            resolve_class(42)  # type: ignore[arg-type]
+
+    def test_missing_module(self):
+        """Raises ModuleNotFoundError for non-existent module."""
+        with pytest.raises(ModuleNotFoundError, match="package installed"):
+            resolve_class("totally_fake_module.FakeClass")
+
+    def test_missing_class_in_module(self):
+        """Raises AttributeError with available names when class doesn't exist."""
+        with pytest.raises(AttributeError, match="not found in module"):
+            resolve_class("pybullet_fleet.config_utils.ThisDoesNotExist")
+
+    def test_missing_class_lists_available(self):
+        """Error message includes available public names from the module."""
+        with pytest.raises(AttributeError, match="load_yaml_config"):
+            resolve_class("pybullet_fleet.config_utils.Bogus")
+
+
+# =====================================================================
+# entities: top-level key (alias for robots:)
+# =====================================================================
+
+
+class TestEntitiesKey:
+    """from_dict supports 'entities:' as alias for 'robots:'."""
+
+    def test_entities_key_spawns_agents(self):
+        """entities: key spawns agents just like robots:."""
+        config = {
+            "simulation": {"gui": False, "physics": False, "monitor": False},
+            "entities": [
+                {"name": "r0", "urdf_path": "robots/mobile_robot.urdf", "pose": [0, 0, 0.05]},
+            ],
+        }
+        sim = MultiRobotSimulationCore.from_dict(config)
+        try:
+            assert len(sim.agents) == 1
+            assert sim.agents[0].name == "r0"
+        finally:
+            import pybullet as p
+
+            p.disconnect(sim.client)
+
+    def test_entities_key_spawns_sim_objects(self):
+        """entities: key spawns SimObjects with type: sim_object."""
+        config = {
+            "simulation": {"gui": False, "physics": False, "monitor": False},
+            "entities": [
+                {
+                    "type": "sim_object",
+                    "name": "box0",
+                    "visual_shape": {"shape_type": "box", "half_extents": [0.2, 0.2, 0.1]},
+                    "collision_shape": {"shape_type": "box", "half_extents": [0.2, 0.2, 0.1]},
+                    "pose": [1, 0, 0.1],
+                },
+            ],
+        }
+        sim = MultiRobotSimulationCore.from_dict(config)
+        try:
+            assert len(sim.agents) == 0
+            assert len(sim.sim_objects) == 1
+            assert sim.sim_objects[0].name == "box0"
+            assert isinstance(sim.sim_objects[0], SimObject)
+            assert not isinstance(sim.sim_objects[0], Agent)
+        finally:
+            import pybullet as p
+
+            p.disconnect(sim.client)

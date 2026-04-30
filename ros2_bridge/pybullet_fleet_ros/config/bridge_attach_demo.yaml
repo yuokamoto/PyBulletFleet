@@ -1,0 +1,70 @@
+# Bridge config: Attach/Detach Demo
+#
+# Demonstrates the attach_object and toggle_attach services.
+# Spawns 1 TurtleBot3 and 3 pickable boxes at known positions.
+#
+# Usage:
+#   ros2 launch pybullet_fleet_ros attach_demo.launch.py gui:=true
+#
+# Then in another terminal:
+#   # Attach nearest pickable object (within 1m)
+#   python3 /opt/pybullet_fleet/scripts/attach_object.py --robot tb3_0 --attach
+#
+#   # Detach
+#   python3 /opt/pybullet_fleet/scripts/attach_object.py --robot tb3_0 --detach
+#
+#   # Attach specific object by name
+#   python3 /opt/pybullet_fleet/scripts/attach_object.py --robot tb3_0 --attach --object box_B
+
+simulation:
+  gui: true
+  physics: false
+  target_rtf: 5.0
+
+entities:
+  - name: tb3_0
+    urdf_path: "turtlebot3_burger"
+    pose: [0.0, 0.0, 0.01]
+    yaw: 0.0
+    motion_mode: "differential"
+    max_linear_vel: 0.22
+    max_angular_vel: 2.84
+
+  - type: sim_object
+    name: box_A
+    visual_shape:
+      shape_type: box
+      half_extents: [0.15, 0.15, 0.08]
+      rgba_color: [0.9, 0.3, 0.2, 1.0]   # red
+    collision_shape:
+      shape_type: box
+      half_extents: [0.15, 0.15, 0.08]
+    pose: [0.5, 0.0, 0.08]
+    mass: 0.5
+    pickable: true
+
+  - type: sim_object
+    name: box_B
+    visual_shape:
+      shape_type: box
+      half_extents: [0.15, 0.15, 0.08]
+      rgba_color: [0.2, 0.7, 0.3, 1.0]   # green
+    collision_shape:
+      shape_type: box
+      half_extents: [0.15, 0.15, 0.08]
+    pose: [2.0, 1.0, 0.08]
+    mass: 0.5
+    pickable: true
+
+  - type: sim_object
+    name: box_C
+    visual_shape:
+      shape_type: box
+      half_extents: [0.15, 0.15, 0.08]
+      rgba_color: [0.2, 0.4, 0.9, 1.0]   # blue
+    collision_shape:
+      shape_type: box
+      half_extents: [0.15, 0.15, 0.08]
+    pose: [1.0, -1.0, 0.08]
+    mass: 0.5
+    pickable: true

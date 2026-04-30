@@ -6,7 +6,13 @@ using the **EasyFullControl** API (introduced in rmf_fleet_adapter 2.3).
 
 Each simulated robot is registered via ``RobotCallbacks`` that forward
 navigate/stop/action commands as ``NavigateToPose`` action goals
-to the bridge node's per-robot action servers.
+and ``toggle_attach`` service calls to the bridge node's per-robot
+ROS 2 interfaces.
+
+Follows the ``rmf_demos`` fleet adapter pattern:
+- ``navigate`` → NavigateToPose action
+- ``delivery_pickup`` → toggle_attach(True) → PickAction
+- ``delivery_dropoff`` → toggle_attach(False) → DropAction
 
 Usage::
 
@@ -147,6 +153,26 @@ def main(argv=sys.argv):
     fleet_handle = adapter.add_easy_fleet(fleet_config)
     fleet_handle.more().set_planner_cache_reset_size(2500)
 
+    # Register performable actions from config (e.g. teleop, clean).
+    # Standard delivery tasks (dispatch_delivery) are handled by RMF's
+    # built-in delivery category — no fleet_adapter code needed.
+    # Cart delivery (dispatch_cart_delivery) uses delivery_pickup /
+    # delivery_dropoff PerformAction phases — handled by execute_action()
+    # if present in the config's actions list.
+    rmf_fleet_cfg = config_yaml.get("rmf_fleet", {})
+    configured_actions = rmf_fleet_cfg.get("actions", [])
+
+    for action_name in configured_actions:
+
+        def _consider_action(desc, _name=action_name):
+            confirmation = rmf_adapter.fleet_update_handle.Confirmation()
+            confirmation.accept()
+            node.get_logger().info(f"Accepted action '{_name}': {desc}")
+            return confirmation
+
+        fleet_handle.more().add_performable_action(action_name, _consider_action)
+        node.get_logger().info(f"Performable action '{action_name}' registered")
+
     # Build RobotClientAPI wrappers for each robot
     pybullet_config = config_yaml.get("pybullet_fleet", {})
     update_period = 1.0 / pybullet_config.get("robot_state_update_frequency", 10.0)
@@ -155,9 +181,37 @@ def main(argv=sys.argv):
     for robot_name in fleet_config.known_robots:
         robot_config = fleet_config.get_known_robot_configuration(robot_name)
         api = RobotClientAPI(robot_name=robot_name, node=node)
-        robots[robot_name] = RobotAdapter(robot_name, robot_config, node, api, fleet_handle)
+        robots[robot_name] = RobotAdapter(
+            robot_name,
+            robot_config,
+            node,
+            api,
+            fleet_handle,
+        )
 
     node.get_logger().info(f"EasyFullControl fleet adapter started: {len(robots)} robots")
+
+    # Subscribe to /lift_states for multi-floor map tracking.
+    # When a lift session ends (session_id cleared), the robot's map name
+    # is updated to the elevator's current floor.
+    def _on_lift_state(msg):
+        """Track elevator floor and update robot map names."""
+        session_id = msg.session_id
+        if not session_id:
+            return
+        # session_id format: "fleetName/robotName" (from RMF lift protocol)
+        parts = session_id.split("/")
+        robot_name = parts[-1] if parts else session_id
+        robot = robots.get(robot_name)
+        if robot is None:
+            return
+        # Update the robot's map to the elevator's current floor
+        if msg.current_floor:
+            robot.api.set_map_name(msg.current_floor)
+
+    from rmf_lift_msgs.msg import LiftState as LiftStateMsg
+
+    _lift_state_sub = node.create_subscription(LiftStateMsg, "lift_states", _on_lift_state, 10)
 
     # Background update loop
     reassign_task_interval = config_yaml.get("rmf_fleet", {}).get(
@@ -210,10 +264,18 @@ class RobotAdapter:
     - Retry-until-success for all API commands
     - Teleop support (override_schedule tracking)
     - Dock fallback (treat as regular navigate)
+    - Delivery pick/drop via toggle_attach (matching rmf_demos)
     - Thread-safe command cancellation
     """
 
-    def __init__(self, name: str, configuration, node, api, fleet_handle):
+    def __init__(
+        self,
+        name: str,
+        configuration,
+        node,
+        api,
+        fleet_handle,
+    ):
         self.name = name
         self.execution = None
         self.teleoperation = None
@@ -262,8 +324,8 @@ class RobotAdapter:
         self.execution = execution
         self.node.get_logger().info(
             f"Commanding [{self.name}] to navigate to "
-            f"{destination.position} on map [{destination.map}]: "
-            f"cmd_id {self.cmd_id}"
+            f"{destination.position} on map [{destination.map}] "
+            f"(wp={getattr(destination, 'name', '')}): cmd_id {self.cmd_id}"
         )
 
         if destination.dock is not None:
@@ -297,27 +359,30 @@ class RobotAdapter:
 
         Supported categories:
         - ``teleop``: Track robot position and override RMF schedule.
-        - ``delivery_pickup`` / ``delivery_dropoff``: Log and finish
-          (pick/drop not yet wired to PyBulletFleet actions).
+        - ``delivery_pickup``: Attach cart/item via toggle_attach(True).
+        - ``delivery_dropoff``: Detach cart/item via toggle_attach(False).
         - ``clean``: Log and finish (no cleaning simulation).
         - Others: Log warning and finish immediately.
         """
         self.cmd_id += 1
         self.execution = execution
+        self.node.get_logger().info(f"[{self.name}] execute_action called: category='{category}', description={description}")
 
         if category == "teleop":
             self.teleoperation = Teleoperation(execution)
             self.node.get_logger().info(f"[{self.name}] Teleop mode activated")
-            # No api.toggle_teleop needed — sim robots can be moved
-            # externally; we just track position via override_schedule.
         elif category == "delivery_pickup":
-            self.node.get_logger().info(f"[{self.name}] Delivery pickup requested (no-op in sim), " "finishing.")
-            execution.finished()
-            self.execution = None
+            self.node.get_logger().info(f"[{self.name}] delivery_pickup — toggle_attach(True)")
+            self.attempt_cmd_until_success(
+                cmd=self.api.toggle_attach,
+                args=(True, self.cmd_id),
+            )
         elif category == "delivery_dropoff":
-            self.node.get_logger().info(f"[{self.name}] Delivery dropoff requested (no-op in sim), " "finishing.")
-            execution.finished()
-            self.execution = None
+            self.node.get_logger().info(f"[{self.name}] delivery_dropoff — toggle_attach(False)")
+            self.attempt_cmd_until_success(
+                cmd=self.api.toggle_attach,
+                args=(False, self.cmd_id),
+            )
         elif category == "clean":
             zone = description.get("zone", "unknown")
             self.node.get_logger().info(f"[{self.name}] Clean zone '{zone}' requested " "(no cleaning simulation), finishing.")

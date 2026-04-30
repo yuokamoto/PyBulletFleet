@@ -97,7 +97,7 @@ simulation:
   gui: false
   physics: false
 
-robots:
+entities:
   - name: pb_0
     urdf_path: "robots/mobile_robot.urdf"
     pose: [0.0, 0.0, 0.1]

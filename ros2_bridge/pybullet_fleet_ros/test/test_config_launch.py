@@ -29,7 +29,7 @@ def _write_test_config(tmp_dir: str) -> str:
     """Write a temporary bridge config YAML with mixed robots."""
     config = {
         "simulation": {"gui": False, "physics": False},
-        "robots": [
+        "entities": [
             {"name": "robot0", "urdf_path": ROBOT_URDF, "pose": [0.0, 0.0, 0.05]},
             {"name": "cube0", "urdf_path": CUBE_URDF, "pose": [2.0, 0.0, 0.5]},
         ],

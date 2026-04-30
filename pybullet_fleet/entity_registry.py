@@ -123,10 +123,12 @@ def list_entity_classes() -> Dict[str, Type[SimObject]]:
 
 
 def _register_builtins() -> None:
-    """Auto-register built-in entity types (deferred to avoid circular imports)."""
-    from pybullet_fleet.agent import Agent
+    """Register ``sim_object`` — the only built-in that lacks ``__init_subclass__``.
 
-    register_entity_class("agent", Agent)
+    ``Agent``, ``Door``, and ``Elevator`` self-register via
+    ``_entity_type_name`` when their modules are imported (which happens
+    in ``pybullet_fleet/__init__.py``).
+    """
     register_entity_class("sim_object", SimObject)
 
 

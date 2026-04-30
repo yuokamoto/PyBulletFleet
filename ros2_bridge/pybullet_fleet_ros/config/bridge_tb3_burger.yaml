@@ -15,7 +15,7 @@ simulation:
   physics: false
   target_rtf: 5.0
 
-robots:
+entities:
   - name: tb3_0
     urdf_path: "turtlebot3_burger"
     pose: [0.0, 0.0, 0.01]

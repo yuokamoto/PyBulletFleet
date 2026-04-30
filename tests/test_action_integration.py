@@ -509,6 +509,34 @@ class TestPickActionIntegration:
 
         assert action.status is ActionStatus.FAILED
 
+    def test_pick_by_position_skips_attached(self, sim):
+        """PickAction with target_position must skip already-attached objects."""
+        search_pos = (2, 0, 0)
+        agent = create_agent(sim)
+
+        # Create two pickable boxes near the search position
+        box_near = create_pickable_box(sim, pos=(2.0, 0.1, 0))
+        box_far = create_pickable_box(sim, pos=(2.0, 0.3, 0))
+
+        # Attach the nearer box to a different agent (simulate already picked)
+        other = create_agent(sim, pose=Pose.from_xyz(5, 0, 0))
+        other.attach_object(box_near)
+
+        action = PickAction(
+            target_position=list(search_pos),
+            search_radius=1.0,
+            use_approach=True,
+            approach_offset=0.5,
+        )
+        agent.add_action(action)
+
+        run_until_idle(agent, sim)
+
+        # Should pick box_far (skip attached box_near)
+        assert action.status is ActionStatus.COMPLETED
+        assert box_far.is_attached()
+        assert action._target_object is box_far
+
     def test_pick_with_explicit_approach_pose(self, sim):
         """PickAction with explicit approach_pose not on the agent-target line.
 
@@ -550,6 +578,32 @@ class TestPickActionIntegration:
         final_pos = np.array(trajectory[-1])
         dist_to_approach = np.linalg.norm(final_pos - np.array([2, 1]))
         assert dist_to_approach < 0.3, f"Agent should retreat to approach_pose (2,1), but ended at {final_pos}"
+
+    def test_pick_zero_distance_skip(self, sim):
+        """Pick with pick_offset == distance(robot, item) skips MOVING_TO_PICK.
+
+        When the robot is already at the pick pose (distance < threshold),
+        MOVING_TO_PICK is skipped and the item is attached immediately.
+        This mimics the workcell handler dispensing in-place.
+        """
+        # Place agent right at the item
+        box = create_pickable_box(sim, pos=(1, 0, 0))
+        agent = create_agent(sim, pose=Pose.from_xyz(1, 0, 0))
+
+        # pick_offset = distance = 0 → skip MOVING_TO_PICK
+        action = PickAction(
+            target_object_id=box.body_id,
+            use_approach=False,
+            pick_offset=0.0,
+        )
+        agent.add_action(action)
+
+        run_until_idle(agent, sim)
+
+        assert action.status is ActionStatus.COMPLETED
+        assert box.is_attached()
+        # Agent should not have moved significantly
+        assert abs(agent.get_pose().position[0] - 1.0) < TIGHT_TOL
 
 
 # ---------------------------------------------------------------------------
@@ -760,6 +814,44 @@ class TestDropActionIntegration:
         assert action.status is ActionStatus.COMPLETED
         box_orn = box.get_pose().orientation
         assert np.allclose(box_orn, yaw_quat, atol=TIGHT_TOL)
+
+    def test_drop_zero_distance_teleports(self, sim):
+        """Drop with drop_offset == distance skips MOVING_TO_DROP and teleports.
+
+        When the robot is far from the drop_pose but drop_offset equals
+        that distance, _drop_pose == robot position → distance < threshold
+        → skip MoveAction → go straight to DROPPING → item teleports to
+        drop_pose.  This mimics the workcell handler ingestor drop.
+        """
+        drop_target = [5, 0, 0]
+
+        # Agent at (2, 0), box picked, drop at (5, 0) with offset=3
+        agent = create_agent(sim, pose=Pose.from_xyz(2, 0, 0))
+        box = create_pickable_box(sim, pos=(2, 0, 0))
+        self._pick_box(agent, box, sim)
+
+        # drop_offset = distance from agent(2,0) to drop_pose(5,0) = 3.0
+        action = DropAction(
+            drop_pose=Pose(position=drop_target),
+            use_approach=False,
+            drop_offset=3.0,
+            place_gently=True,
+        )
+        agent.add_action(action)
+
+        run_until_idle(agent, sim)
+
+        assert action.status is ActionStatus.COMPLETED
+        assert not box.is_attached()
+
+        # Box should be at the drop_pose (teleported), NOT at the agent
+        box_pos = box.get_pose().position
+        assert abs(box_pos[0] - 5.0) < TIGHT_TOL, f"Box should teleport to x=5, got x={box_pos[0]:.3f}"
+        assert abs(box_pos[1] - 0.0) < TIGHT_TOL
+
+        # Agent should NOT have moved significantly
+        agent_pos = agent.get_pose().position
+        assert abs(agent_pos[0] - 2.0) < TIGHT_TOL, f"Agent should stay at x=2, got x={agent_pos[0]:.3f}"
 
     def test_drop_no_attached_object_fails(self, sim):
         """DropAction fails if agent has nothing attached."""

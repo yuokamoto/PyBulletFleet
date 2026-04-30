@@ -16,7 +16,7 @@ simulation:
   gui: true
   physics: false
 
-robots:
+entities:
   - name: arm0
     urdf_path: "robots/arm_robot.urdf"
     pose: [0.0, 0.0, 0.0]

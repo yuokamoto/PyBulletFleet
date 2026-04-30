@@ -14,6 +14,7 @@ from .logging_utils import get_lazy_logger, get_named_lazy_logger
 from .types import CollisionMode
 from .tools import resolve_link_index
 from pybullet_fleet._defaults import SIM_OBJECT as _OBJ_D, SHAPE as _SHP_D
+from pybullet_fleet.config_utils import forward_spawn_params as _forward_spawn_params
 
 if TYPE_CHECKING:
     from pybullet_fleet.events import EventBus
@@ -91,15 +92,9 @@ class ShapeParams:
         Returns:
             ShapeParams instance.
         """
-        return cls(
-            shape_type=d.get("shape_type"),
-            mesh_path=d.get("mesh_path"),
-            mesh_scale=d.get("mesh_scale", [1.0, 1.0, 1.0]),
-            half_extents=d.get("half_extents", [0.5, 0.5, 0.5]),
-            radius=d.get("radius", _SHP_D["radius"]),
-            height=d.get("height", _SHP_D["height"]),
-            rgba_color=d.get("rgba_color", list(_SHP_D["rgba_color"])),
-        )
+        from pybullet_fleet.config_utils import dataclass_from_dict
+
+        return dataclass_from_dict(cls, d)
 
 
 @dataclass
@@ -259,8 +254,26 @@ class SimObject:
     # SpawnParams class used by config-driven grid spawning
     _spawn_params_cls = SimObjectSpawnParams
 
+    # Subclasses override to True for per-step update() calls in step_once().
+    _needs_update: bool = False
+
     # Class-level shared shapes cache (for optimization)
     _shared_shapes: Dict[str, Tuple[int, int]] = {}
+
+    # --- Auto-registration via __init_subclass__ ---
+    # Subclasses that set ``_entity_type_name`` are automatically registered
+    # in :data:`~pybullet_fleet.entity_registry.ENTITY_REGISTRY`.
+    _entity_type_name: Optional[str] = None
+
+    def __init_subclass__(cls, **kwargs: Any) -> None:
+        super().__init_subclass__(**kwargs)
+        # Only register if _entity_type_name is defined directly on this class
+        # (not inherited from a parent).
+        name = cls.__dict__.get("_entity_type_name")
+        if name is not None:
+            from pybullet_fleet.entity_registry import register_entity_class
+
+            register_entity_class(name, cls)
 
     def __init__(
         self,
@@ -338,6 +351,24 @@ class SimObject:
         if sim_core is not None:
             # Centralized registration via add_object() for consistency
             sim_core.add_object(self)
+
+    # ------------------------------------------------------------------
+    # Per-step update hook (overridden by Agent, Device subclasses)
+    # ------------------------------------------------------------------
+
+    def update(self, dt: float) -> bool:
+        """Called every simulation step for objects with ``_needs_update = True``.
+
+        Override in subclasses to implement per-step behavior (e.g. device
+        state machines, animated objects).
+
+        Args:
+            dt: Time step in seconds.
+
+        Returns:
+            ``True`` if the object moved or changed state, ``False`` otherwise.
+        """
+        return False
 
     @property
     def _pid(self) -> int:
@@ -832,15 +863,12 @@ class SimObject:
             obj = SimObject.from_params(params, sim_core)
         """
         obj = cls.from_mesh(
-            visual_shape=spawn_params.visual_shape,
-            collision_shape=spawn_params.collision_shape,
-            pose=spawn_params.initial_pose,
-            mass=spawn_params.mass,
-            pickable=spawn_params.pickable,
-            sim_core=sim_core,
-            collision_mode=spawn_params.collision_mode,
-            name=spawn_params.name,
-            user_data=spawn_params.user_data,
+            **_forward_spawn_params(
+                cls.from_mesh,
+                spawn_params,
+                aliases={"initial_pose": "pose"},
+                extra_kwargs={"sim_core": sim_core},
+            )
         )
 
         return obj
@@ -850,8 +878,8 @@ class SimObject:
         """Create a SimObject from a raw config dict.
 
         Combines :meth:`SimObjectSpawnParams.from_dict` and :meth:`from_params`
-        in a single call.  Subclasses can override to use a custom
-        ``SpawnParams`` class.
+        in a single call.  Uses ``cls._spawn_params_cls`` so subclasses
+        automatically use their own SpawnParams.
 
         Args:
             config: Entity definition dict (as parsed from YAML).
@@ -860,7 +888,7 @@ class SimObject:
         Returns:
             ``cls`` instance.
         """
-        params = SimObjectSpawnParams.from_dict(config)
+        params = cls._spawn_params_cls.from_dict(config)
         return cls.from_params(params, sim_core)
 
     @property
@@ -1107,6 +1135,7 @@ class SimObject:
         parent_link_index: Union[int, str] = -1,
         relative_pose: Optional[Pose] = None,
         joint_type: int = p.JOINT_FIXED,
+        keep_world_pose: bool = False,
     ) -> bool:
         """
         Attach another SimObject to this object.
@@ -1118,27 +1147,47 @@ class SimObject:
             relative_pose: Position and orientation offset in parent link's frame as Pose object
                           (default: None, which uses Pose(position=[0, 0, 0], orientation=[0, 0, 0, 1]))
             joint_type: PyBullet joint type (default: JOINT_FIXED)
+            keep_world_pose: If True, automatically compute ``relative_pose``
+                            so that the child keeps its current world position
+                            and orientation.  Cannot be combined with an
+                            explicit ``relative_pose``.
 
         Returns:
             True if attachment successful, False otherwise
+
+        Raises:
+            ValueError: If both ``relative_pose`` and ``keep_world_pose=True``
+                        are specified.
 
         Example::
 
             # Attach to base link at 0.5m in front
             agent.attach_object(pallet, relative_pose=Pose.from_xyz(0.5, 0, 0))
 
-            # Attach with position and orientation
-            agent.attach_object(pallet, relative_pose=Pose.from_euler(0.6, 0, -0.2,
-                                                                       roll=1.5708, pitch=0, yaw=0))
-
-            # Attach to specific link by index
-            agent.attach_object(box, parent_link_index=2)
+            # Keep the child where it currently is in the world
+            agent.attach_object(box, parent_link_index=2, keep_world_pose=True)
 
             # Attach to specific link by name
             agent.attach_object(box, parent_link_index="end_effector")
         """
         # Resolve link name to index
         parent_link_index = resolve_link_index(self.body_id, parent_link_index)
+
+        if keep_world_pose and relative_pose is not None:
+            raise ValueError("relative_pose and keep_world_pose=True cannot both be specified")
+
+        if keep_world_pose:
+            # Compute relative pose from current world positions
+            if parent_link_index == -1:
+                par_pos, par_orn = p.getBasePositionAndOrientation(self.body_id, physicsClientId=self._pid)
+            else:
+                ls = p.getLinkState(self.body_id, parent_link_index, computeForwardKinematics=1, physicsClientId=self._pid)
+                par_pos, par_orn = ls[0], ls[1]
+            inv_pos, inv_orn = p.invertTransform(par_pos, par_orn)
+            obj_pose = obj.get_pose()
+            obj_pos, obj_orn = obj_pose.as_position_orientation()
+            rel_pos, rel_orn = p.multiplyTransforms(inv_pos, inv_orn, obj_pos, obj_orn)
+            relative_pose = Pose.from_pybullet(rel_pos, rel_orn)
 
         # Default to zero offset if not specified
         if relative_pose is None:
@@ -1204,23 +1253,62 @@ class SimObject:
                 physicsClientId=self._pid,
             )
 
+        # Immediately teleport child to the correct world position so that
+        # callers never see a 1-frame lag where the object is still at its
+        # old location.  Uses the parent link pose already fetched above.
+        new_pos, new_orn = p.multiplyTransforms(parent_pos, parent_orn, relative_pose.position, relative_pose.orientation)
+        obj.set_pose_raw(new_pos, new_orn)
+
         self._log.info(f"Attached object {obj.body_id} to link {parent_link_index}")
         return True
 
-    def detach_object(self, obj: "SimObject") -> bool:
+    def detach_object(
+        self,
+        obj: "SimObject",
+        drop_pose: Optional[Pose] = None,
+        drop_relative_pose: Optional[Pose] = None,
+    ) -> bool:
         """
         Detach an object from this object.
 
+        After detaching, the object can optionally be teleported:
+
+        - ``drop_pose`` — absolute world pose.
+        - ``drop_relative_pose`` — offset applied to the object's current
+          (pre-detach) world pose (position **and** orientation are composed
+          via ``multiplyTransforms``).
+        - Neither — the object stays at its current world position.
+
+        These two parameters are mutually exclusive.
+
         Args:
             obj: Object to detach
+            drop_pose: Absolute world pose to teleport the object to after
+                      detaching.  Mutually exclusive with ``drop_relative_pose``.
+            drop_relative_pose: Pose offset relative to the object's current
+                      (pre-detach) world pose.  Mutually exclusive with
+                      ``drop_pose``.
 
         Returns:
             True if detachment successful, False otherwise
 
+        Raises:
+            ValueError: If both ``drop_pose`` and ``drop_relative_pose`` are
+                        specified.
+
         Example::
 
+            # Detach and leave in place
             agent.detach_object(pallet)
+
+            # Detach and place at absolute world position
+            agent.detach_object(pallet, drop_pose=Pose.from_xyz(10, 5, 0.1))
+
+            # Detach and offset from current position (e.g. lower by 0.5m)
+            agent.detach_object(pallet, drop_relative_pose=Pose.from_xyz(0, 0, -0.5))
         """
+        if drop_pose is not None and drop_relative_pose is not None:
+            raise ValueError("drop_pose and drop_relative_pose cannot both be specified")
 
         if obj not in self.attached_objects:
             self._log.info(f"Object {obj.body_id} is not attached")
@@ -1245,6 +1333,17 @@ class SimObject:
         obj._attached_to = None
         obj._attached_link_index = -1
 
+        # Teleport to final pose if requested
+        if drop_relative_pose is not None:
+            # Compute world pose from current position + relative offset
+            cur_pos, cur_orn = obj.get_pose().as_position_orientation()
+            final_pos, final_orn = p.multiplyTransforms(
+                cur_pos, cur_orn, drop_relative_pose.position, drop_relative_pose.orientation
+            )
+            obj.set_pose_raw(final_pos, final_orn)
+        elif drop_pose is not None:
+            obj.set_pose(drop_pose)
+
         self._log.info(f"Detached object {obj.body_id}")
         return True
 
@@ -1265,6 +1364,32 @@ class SimObject:
             True if attached to another object, False otherwise
         """
         return self._attached_to is not None
+
+    def find_nearest_pickable(self, search_radius: float = 1.0) -> Optional["SimObject"]:
+        """Find the nearest pickable, unattached SimObject within radius.
+
+        Convenience wrapper around :func:`tools.find_nearest` that
+        searches from this object's current position with the standard
+        ``pickable and not attached`` filter.
+
+        Args:
+            search_radius: Maximum search distance in metres (default: 1.0)
+
+        Returns:
+            Nearest SimObject or ``None`` if nothing found.
+        """
+        from . import tools
+
+        if self.sim_core is None:
+            return None
+
+        return tools.find_nearest(
+            self.sim_core.sim_objects,
+            position=self.get_pose().position,
+            search_radius=search_radius,
+            predicate=lambda o: o.pickable and not o.is_attached(),
+            exclude=self,
+        )
 
     def register_callback(self, callback: Callable, frequency: float = 0.25):
         """Register a callback function to be executed periodically."""

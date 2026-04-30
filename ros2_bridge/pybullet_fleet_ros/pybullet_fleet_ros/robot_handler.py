@@ -5,8 +5,8 @@ Passes body-frame cmd_vel directly to the KinematicController's set_velocity().
 The controller handles kinematics (body→world rotation) internally.
 
 Layers:
-- **Topic layer:**  goal_pose / path / joint_trajectory / joint_commands → Agent API
-- **Action layer:** NavigateToPose / FollowPath / FollowJointTrajectory
+- **Topic layer:**  goal_pose / path / joint_trajectory / joint_commands / execute_action → Agent API
+- **Action layer:** NavigateToPose / FollowPath / FollowJointTrajectory / ExecuteAction
 - **Status layer:** plan / current_goal / diagnostics publishers
 """
 
@@ -66,6 +66,10 @@ class RobotHandler(RobotHandlerBase):
     - ``/{name}/navigate_to_pose`` action server (NavigateToPose)
     - ``/{name}/follow_path`` action server (FollowPath)
     - ``/{name}/follow_joint_trajectory`` action server (FollowJointTrajectory)
+    - ``/{name}/execute_action`` subscriber (ExecuteActionGoal) → fire-and-forget action queue
+    - ``/{name}/execute_action`` action server (ExecuteAction) → blocking with feedback
+    - ``/{name}/toggle_attach`` service (SetBool) — rmf_demos cart delivery compat
+    - ``/{name}/attach_object`` service (AttachObject) — detailed attach/detach
     """
 
     def __init__(
@@ -103,8 +107,15 @@ class RobotHandler(RobotHandlerBase):
         self._joint_traj_sub = node.create_subscription(JointTrajectory, f"/{ns}/joint_trajectory", self._joint_traj_cb, 10)
         self._joint_cmd_sub = node.create_subscription(Float64MultiArray, f"/{ns}/joint_commands", self._joint_cmd_cb, 10)
 
-        # --- Action servers (new) ---
+        # --- Action servers ---
         self._setup_action_servers(node, ns)
+
+        # --- ExecuteAction topic + action ---
+        self._setup_execute_action(node, ns)
+
+        # --- Attach/detach services ---
+        self._setup_attach_service(node, ns)
+        self._setup_attach_object_service(node, ns)
 
         logger.info("RobotHandler created for '%s' (object_id=%d)", ns, agent.object_id)
 
@@ -155,6 +166,316 @@ class RobotHandler(RobotHandlerBase):
             cancel_callback=_accept_cancel,
             callback_group=self._action_group,
         )
+
+    def _setup_execute_action(self, node: "Node", ns: str) -> None:
+        """Create /{robot}/execute_action topic subscriber and action server.
+
+        Topic subscriber (fire-and-forget):
+            Receives ``ExecuteActionGoal`` messages and queues actions
+            via ``agent.add_action()``.  Status is observable through
+            the ``/{robot}/diagnostics`` topic.
+
+        Action server (blocking):
+            Receives ``ExecuteAction`` goals and polls until the queued
+            action completes, publishing progress feedback.
+        """
+        from pybullet_fleet_msgs.action import ExecuteAction
+        from pybullet_fleet_msgs.msg import ExecuteActionGoal
+        from rclpy.action import ActionServer, CancelResponse, GoalResponse
+        from rclpy.callback_groups import ReentrantCallbackGroup
+
+        # Topic subscriber — fire and forget
+        self._exec_action_sub = node.create_subscription(
+            ExecuteActionGoal,
+            f"/{ns}/execute_action",
+            self._execute_action_topic_cb,
+            10,
+        )
+
+        # Action server — blocking with feedback
+        self._exec_action_group = ReentrantCallbackGroup()
+        self._exec_action_server = ActionServer(
+            node,
+            ExecuteAction,
+            f"/{ns}/execute_action_blocking",
+            execute_callback=self._execute_action_execute,
+            goal_callback=lambda _: GoalResponse.ACCEPT,
+            cancel_callback=self._execute_action_cancel,
+            callback_group=self._exec_action_group,
+        )
+
+    def _execute_action_topic_cb(self, msg) -> None:
+        """Handle execute_action topic — parse and queue action (fire-and-forget)."""
+        from .action_parser import parse_action_goal
+
+        action = parse_action_goal(msg.action_type, msg.action_params_json)
+        if action is None:
+            logger.error(
+                "'%s': failed to parse execute_action topic: type='%s'",
+                self._ns,
+                msg.action_type,
+            )
+            return
+        self.agent.add_action(action)
+        logger.info(
+            "'%s': execute_action topic → queued %s (queue size: %d)",
+            self._ns,
+            type(action).__name__,
+            self.agent.get_action_queue_size(),
+        )
+
+    def _execute_action_cancel(self, goal_handle):
+        """Cancel callback for ExecuteAction — cancel current agent action."""
+        from rclpy.action import CancelResponse
+
+        self.agent.stop()
+        return CancelResponse.ACCEPT
+
+    def _execute_action_execute(self, goal_handle):
+        """Execute callback for ExecuteAction action server.
+
+        Parses the goal, queues the action, and polls until completion.
+        """
+        from pybullet_fleet.types import ActionStatus
+        from pybullet_fleet_msgs.action import ExecuteAction
+
+        from .action_parser import parse_action_goal
+
+        goal_msg = goal_handle.request.goal
+        action = parse_action_goal(goal_msg.action_type, goal_msg.action_params_json)
+        if action is None:
+            goal_handle.abort()
+            result = ExecuteAction.Result()
+            result.success = False
+            result.message = f"Failed to parse action: type='{goal_msg.action_type}'"
+            return result
+
+        self.agent.add_action(action)
+        logger.info(
+            "'%s': ExecuteAction started — %s",
+            self._ns,
+            type(action).__name__,
+        )
+
+        feedback = ExecuteAction.Feedback()
+        poll_period = 0.1
+
+        while True:
+            if goal_handle.is_cancel_requested:
+                action.cancel()
+                goal_handle.canceled()
+                result = ExecuteAction.Result()
+                result.success = False
+                result.message = "Cancelled"
+                return result
+
+            status = action.status
+            if status == ActionStatus.COMPLETED:
+                break
+            if status == ActionStatus.FAILED:
+                goal_handle.abort()
+                result = ExecuteAction.Result()
+                result.success = False
+                result.message = f"{type(action).__name__} failed"
+                return result
+            if status == ActionStatus.CANCELLED:
+                goal_handle.abort()
+                result = ExecuteAction.Result()
+                result.success = False
+                result.message = f"{type(action).__name__} cancelled"
+                return result
+
+            # Publish feedback
+            feedback.status = (
+                ExecuteAction.Feedback.STATUS_IN_PROGRESS
+                if status == ActionStatus.IN_PROGRESS
+                else ExecuteAction.Feedback.STATUS_NOT_STARTED
+            )
+            feedback.progress = getattr(action, "progress", 0.0)
+            goal_handle.publish_feedback(feedback)
+
+            time.sleep(poll_period)
+
+        goal_handle.succeed()
+        logger.info("'%s': ExecuteAction succeeded — %s", self._ns, type(action).__name__)
+        result = ExecuteAction.Result()
+        result.success = True
+        result.message = f"{type(action).__name__} completed"
+        return result
+
+    def _setup_attach_service(self, node: "Node", ns: str) -> None:
+        """Create /{robot}/toggle_attach SetBool service for delivery pick/drop.
+
+        Mirrors rmf_demos' ``toggle_attach`` endpoint.  When called with
+        ``data=True``, queues a PickAction on the agent; ``data=False``
+        queues a DropAction.  The service blocks until the action
+        completes (same pattern as the NavigateToPose action server).
+        """
+        from rclpy.callback_groups import ReentrantCallbackGroup
+        from std_srvs.srv import SetBool
+
+        self._attach_group = ReentrantCallbackGroup()
+        self._attach_srv = node.create_service(
+            SetBool,
+            f"/{ns}/toggle_attach",
+            self._toggle_attach_cb,
+            callback_group=self._attach_group,
+        )
+
+    def _toggle_attach_cb(self, request, response):  # type: ignore[no-untyped-def]
+        """Handle toggle_attach service — immediate attach/detach.
+
+        Calls ``agent.attach_object()`` / ``agent.detach_object()``
+        directly (no action queue).  Finds the nearest pickable object
+        within 1.0m search radius for attach, or detaches the first
+        attached object for detach.
+        """
+        if request.data:
+            obj = self._find_nearest_pickable(search_radius=1.0)
+            if obj is None:
+                response.success = False
+                response.message = "No pickable object within 1.0m"
+                return response
+            ok = self.agent.attach_object(obj, keep_world_pose=True)
+            response.success = ok
+            response.message = f"attached '{obj.name}'" if ok else f"attach failed for '{obj.name}'"
+        else:
+            attached = self.agent.get_attached_objects()
+            if not attached:
+                response.success = False
+                response.message = "No attached object to detach"
+                return response
+            obj = attached[0]
+            ok = self.agent.detach_object(obj)
+            response.success = ok
+            response.message = f"detached '{obj.name}'" if ok else f"detach failed for '{obj.name}'"
+
+        logger.info("'%s': toggle_attach done — %s", self._ns, response.message)
+        return response
+
+    def _setup_attach_object_service(self, node: "Node", ns: str) -> None:
+        """Create /{robot}/attach_object service for detailed attach/detach.
+
+        Unlike ``toggle_attach`` (SetBool, rmf_demos compat), this service
+        allows specifying the target object by name, the parent link, an
+        attachment offset, and a search radius.  Useful for external systems
+        and scripted scenarios that need fine-grained control.
+        """
+        from pybullet_fleet_msgs.srv import AttachObject
+        from rclpy.callback_groups import ReentrantCallbackGroup
+
+        self._attach_object_group = ReentrantCallbackGroup()
+        self._attach_object_srv = node.create_service(
+            AttachObject,
+            f"/{ns}/attach_object",
+            self._attach_object_cb,
+            callback_group=self._attach_object_group,
+        )
+
+    def _attach_object_cb(self, request, response):  # type: ignore[no-untyped-def]
+        """Handle attach_object service — immediate attach/detach with parameters.
+
+        Calls ``agent.attach_object()`` / ``agent.detach_object()``
+        directly (no action queue, no approach phase).  For action-based
+        pick/drop with approach, use ``ExecuteAction.action`` instead.
+        """
+        from pybullet_fleet.geometry import Pose as PbfPose
+
+        object_name = request.object_name if request.object_name else ""
+        parent_link = request.parent_link if request.parent_link else "base_link"
+        search_radius = request.search_radius if request.search_radius > 0 else 0.5
+
+        # Build offset Pose from geometry_msgs/Pose
+        offset_pos = [
+            request.offset.position.x,
+            request.offset.position.y,
+            request.offset.position.z,
+        ]
+        offset_ori = [
+            request.offset.orientation.x,
+            request.offset.orientation.y,
+            request.offset.orientation.z,
+            request.offset.orientation.w,
+        ]
+        # Treat identity quaternion (0,0,0,0) as (0,0,0,1)
+        if all(v == 0.0 for v in offset_ori):
+            offset_ori = [0.0, 0.0, 0.0, 1.0]
+        attach_offset = PbfPose(position=offset_pos, orientation=offset_ori)
+
+        if request.attach:
+            # --- Attach ---
+            target_obj = None
+            if object_name:
+                sim_core = getattr(self.agent, "sim_core", None)
+                if sim_core is not None:
+                    for obj in sim_core.sim_objects:
+                        if obj.name == object_name:
+                            target_obj = obj
+                            break
+                if target_obj is None:
+                    response.success = False
+                    response.message = f"Object '{object_name}' not found"
+                    response.attached_object_name = ""
+                    return response
+            else:
+                target_obj = self._find_nearest_pickable(search_radius=search_radius)
+                if target_obj is None:
+                    response.success = False
+                    response.message = f"No pickable object within {search_radius}m"
+                    response.attached_object_name = ""
+                    return response
+
+            ok = self.agent.attach_object(
+                target_obj,
+                parent_link_index=parent_link,
+                relative_pose=attach_offset,
+            )
+            response.success = ok
+            response.attached_object_name = target_obj.name or ""
+            response.message = f"attached '{target_obj.name}'" if ok else f"attach failed for '{target_obj.name}'"
+        else:
+            # --- Detach ---
+            target_obj = None
+            if object_name:
+                for obj in self.agent.get_attached_objects():
+                    if obj.name == object_name:
+                        target_obj = obj
+                        break
+                if target_obj is None:
+                    response.success = False
+                    response.message = f"Object '{object_name}' not attached"
+                    response.attached_object_name = ""
+                    return response
+            else:
+                attached = self.agent.get_attached_objects()
+                if not attached:
+                    response.success = False
+                    response.message = "No attached object to detach"
+                    response.attached_object_name = ""
+                    return response
+                target_obj = attached[0]
+
+            ok = self.agent.detach_object(target_obj)
+            response.success = ok
+            response.attached_object_name = target_obj.name or ""
+            response.message = f"detached '{target_obj.name}'" if ok else f"detach failed for '{target_obj.name}'"
+
+        logger.info("'%s': attach_object done — %s", self._ns, response.message)
+        return response
+
+    # ------------------------------------------------------------------
+    # Attach helpers
+    # ------------------------------------------------------------------
+
+    def _find_nearest_pickable(self, search_radius: float = 1.0):
+        """Find the nearest pickable, unattached SimObject within radius.
+
+        Delegates to ``SimObject.find_nearest_pickable()`` on the agent.
+
+        Returns:
+            SimObject or None
+        """
+        return self.agent.find_nearest_pickable(search_radius=search_radius)
 
     def _cmd_vel_cb(self, msg: Twist) -> None:
         """Store latest cmd_vel for application in next step.
@@ -505,4 +826,10 @@ class RobotHandler(RobotHandlerBase):
         self._nav_action.destroy()
         self._follow_path_action.destroy()
         self._follow_jt_action.destroy()
+        # ExecuteAction
+        self._node.destroy_subscription(self._exec_action_sub)
+        self._exec_action_server.destroy()
+        # Attach services
+        self._node.destroy_service(self._attach_srv)
+        self._node.destroy_service(self._attach_object_srv)
         logger.info("RobotHandler destroyed for '%s'", self._ns)

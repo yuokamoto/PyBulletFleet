@@ -20,7 +20,7 @@ from pybullet_fleet.controller import (
     create_controller,
     register_controller,
 )
-from pybullet_fleet.types import MotionMode
+from pybullet_fleet.types import MotionMode, MovementDirection
 from tests.conftest import MockSimCore
 
 
@@ -556,6 +556,286 @@ class TestDifferentialController:
         ctrl = DifferentialController.from_config({})
         assert ctrl._max_linear_vel == pytest.approx(2.0)  # type: ignore[reportAttributeAccessIssue]
         assert ctrl._max_angular_vel == pytest.approx(1.5)  # type: ignore[reportAttributeAccessIssue]
+
+
+# -----------------------------------------------------------------------
+# MovementDirection.AUTO — auto-detect forward/backward
+# -----------------------------------------------------------------------
+
+
+class TestAutoDirection:
+    """AUTO direction: choose FORWARD/BACKWARD based on yaw delta to goal."""
+
+    @staticmethod
+    def _run_path(agent, sim_core, steps=2000):
+        dt = sim_core._dt
+        for _ in range(steps):
+            sim_core.sim_time += dt
+            agent.update(dt)
+
+    def test_default_direction_is_none(self):
+        """set_path direction default is None (uses controller's default_direction)."""
+        import inspect
+
+        ctrl = DifferentialController()
+        sig = inspect.signature(ctrl.set_path)
+        default = sig.parameters["direction"].default
+        assert default is None, f"Default direction should be None, got {default}"
+
+    def test_controller_default_direction_is_forward(self):
+        """DifferentialController.default_direction defaults to FORWARD."""
+        from pybullet_fleet.types import MovementDirection
+
+        ctrl = DifferentialController()
+        assert ctrl.default_direction == MovementDirection.FORWARD
+
+    def test_controller_default_direction_auto(self):
+        """DifferentialController accepts default_direction=AUTO via constructor."""
+        from pybullet_fleet.types import MovementDirection
+
+        ctrl = DifferentialController(default_direction=MovementDirection.AUTO)
+        assert ctrl.default_direction == MovementDirection.AUTO
+
+    def test_set_path_none_uses_controller_default(self, sim_core):
+        """set_path(direction=None) uses controller.default_direction."""
+        from pybullet_fleet.types import MovementDirection
+
+        params = AgentSpawnParams(
+            urdf_path="robots/mobile_robot.urdf",
+            initial_pose=Pose.from_yaw(0, 0, 0.05, 0.0),
+            motion_mode=MotionMode.DIFFERENTIAL,
+        )
+        agent = Agent.from_params(params, sim_core)
+        ctrl = DifferentialController(default_direction=MovementDirection.AUTO)
+        agent.set_controller(ctrl)
+
+        # Goal behind — AUTO should resolve to BACKWARD
+        goal = Pose.from_xyz(-5.0, 0.0, 0.05)
+        ctrl.set_path(agent, [goal])  # direction=None → uses AUTO
+
+        assert ctrl._movement_direction == MovementDirection.BACKWARD
+
+    def test_set_path_explicit_overrides_default(self, sim_core):
+        """Explicit direction=FORWARD overrides controller default_direction=AUTO."""
+        from pybullet_fleet.types import MovementDirection
+
+        params = AgentSpawnParams(
+            urdf_path="robots/mobile_robot.urdf",
+            initial_pose=Pose.from_yaw(0, 0, 0.05, 0.0),
+            motion_mode=MotionMode.DIFFERENTIAL,
+        )
+        agent = Agent.from_params(params, sim_core)
+        ctrl = DifferentialController(default_direction=MovementDirection.AUTO)
+        agent.set_controller(ctrl)
+
+        # Goal behind — but explicit FORWARD should override AUTO
+        goal = Pose.from_xyz(-5.0, 0.0, 0.05)
+        ctrl.set_path(agent, [goal], direction=MovementDirection.FORWARD)
+
+        assert ctrl._movement_direction == MovementDirection.FORWARD
+
+    def test_agent_set_path_inherits_controller_default(self, sim_core):
+        """Agent.set_path() without direction uses controller's default_direction."""
+        from pybullet_fleet.types import MovementDirection
+
+        params = AgentSpawnParams(
+            urdf_path="robots/mobile_robot.urdf",
+            initial_pose=Pose.from_yaw(0, 0, 0.05, 0.0),
+            motion_mode=MotionMode.DIFFERENTIAL,
+        )
+        agent = Agent.from_params(params, sim_core)
+        ctrl = DifferentialController(default_direction=MovementDirection.AUTO)
+        agent.set_controller(ctrl)
+
+        # Goal behind — AUTO should resolve to BACKWARD via agent.set_path
+        # Use auto_approach=False to avoid approach waypoint insertion
+        goal = Pose.from_xyz(-5.0, 0.0, 0.05)
+        agent.set_path([goal], auto_approach=False)
+
+        assert ctrl._movement_direction == MovementDirection.BACKWARD
+
+    def test_movement_direction_from_config(self, sim_core):
+        """movement_direction in YAML config sets controller default_direction."""
+        from pybullet_fleet.types import MovementDirection
+
+        params = AgentSpawnParams(
+            urdf_path="robots/mobile_robot.urdf",
+            initial_pose=Pose.from_yaw(0, 0, 0.05, 0.0),
+            motion_mode=MotionMode.DIFFERENTIAL,
+            controller_config={"type": "differential", "default_direction": "auto"},
+        )
+        agent = Agent.from_params(params, sim_core)
+        ctrl = agent._controllers[0]
+
+        assert ctrl.default_direction == MovementDirection.AUTO
+
+    def test_controller_config_from_dict(self, sim_core):
+        """controller_config in from_dict sets controller default_direction."""
+        from pybullet_fleet.types import MovementDirection
+
+        params = AgentSpawnParams.from_dict(
+            {
+                "name": "test_robot",
+                "urdf_path": "robots/mobile_robot.urdf",
+                "motion_mode": "differential",
+                "controller_config": {"type": "differential", "default_direction": "auto"},
+            }
+        )
+        agent = Agent.from_params(params, sim_core)
+        ctrl = agent._controllers[0]
+
+        assert ctrl.default_direction == MovementDirection.AUTO
+
+    def test_auto_enum_value(self):
+        """MovementDirection.AUTO is a valid enum value."""
+        from pybullet_fleet.types import MovementDirection
+
+        d = MovementDirection("auto")
+        assert d is MovementDirection.AUTO
+
+    def test_auto_forward_when_goal_ahead(self, sim_core):
+        """AUTO resolves to FORWARD when goal is ahead of robot (|delta_yaw| < pi/2)."""
+        params = AgentSpawnParams(
+            urdf_path="robots/mobile_robot.urdf",
+            initial_pose=Pose.from_yaw(0, 0, 0.05, 0.0),  # Facing +X
+            motion_mode=MotionMode.DIFFERENTIAL,
+        )
+        agent = Agent.from_params(params, sim_core)
+        ctrl = DifferentialController()
+        agent.set_controller(ctrl)
+
+        # Goal ahead (+X direction) — should choose FORWARD
+        goal = Pose.from_xyz(5.0, 0.0, 0.05)
+        ctrl.set_path(agent, [goal], direction=MovementDirection.AUTO)
+
+        # After init, movement direction should be FORWARD
+        assert ctrl._movement_direction == MovementDirection.FORWARD
+
+    def test_auto_backward_when_goal_behind(self, sim_core):
+        """AUTO resolves to BACKWARD when goal is behind robot (|delta_yaw| > pi/2)."""
+        params = AgentSpawnParams(
+            urdf_path="robots/mobile_robot.urdf",
+            initial_pose=Pose.from_yaw(0, 0, 0.05, 0.0),  # Facing +X
+            motion_mode=MotionMode.DIFFERENTIAL,
+        )
+        agent = Agent.from_params(params, sim_core)
+        ctrl = DifferentialController()
+        agent.set_controller(ctrl)
+
+        # Goal behind (-X direction) — should choose BACKWARD
+        goal = Pose.from_xyz(-5.0, 0.0, 0.05)
+        ctrl.set_path(agent, [goal], direction=MovementDirection.AUTO)
+
+        assert ctrl._movement_direction == MovementDirection.BACKWARD
+
+    def test_auto_forward_diagonal(self, sim_core):
+        """AUTO picks FORWARD for diagonal goal within ±90° of heading."""
+        params = AgentSpawnParams(
+            urdf_path="robots/mobile_robot.urdf",
+            initial_pose=Pose.from_yaw(0, 0, 0.05, 0.0),  # Facing +X
+            motion_mode=MotionMode.DIFFERENTIAL,
+        )
+        agent = Agent.from_params(params, sim_core)
+        ctrl = DifferentialController()
+        agent.set_controller(ctrl)
+
+        # Goal at 45° — ahead, should be FORWARD
+        goal = Pose.from_xyz(5.0, 5.0, 0.05)
+        ctrl.set_path(agent, [goal], direction=MovementDirection.AUTO)
+
+        assert ctrl._movement_direction == MovementDirection.FORWARD
+
+    def test_auto_backward_diagonal(self, sim_core):
+        """AUTO picks BACKWARD for diagonal goal beyond ±90° of heading."""
+        params = AgentSpawnParams(
+            urdf_path="robots/mobile_robot.urdf",
+            initial_pose=Pose.from_yaw(0, 0, 0.05, 0.0),  # Facing +X
+            motion_mode=MotionMode.DIFFERENTIAL,
+        )
+        agent = Agent.from_params(params, sim_core)
+        ctrl = DifferentialController()
+        agent.set_controller(ctrl)
+
+        # Goal at 135° — behind, should be BACKWARD
+        goal = Pose.from_xyz(-5.0, 5.0, 0.05)
+        ctrl.set_path(agent, [goal], direction=MovementDirection.AUTO)
+
+        assert ctrl._movement_direction == MovementDirection.BACKWARD
+
+    def test_auto_reaches_goal_ahead(self, sim_core):
+        """AUTO + goal ahead: robot reaches goal (FORWARD path)."""
+        params = AgentSpawnParams(
+            urdf_path="robots/mobile_robot.urdf",
+            initial_pose=Pose.from_yaw(0, 0, 0.05, 0.0),
+            motion_mode=MotionMode.DIFFERENTIAL,
+            max_linear_vel=2.0,
+        )
+        agent = Agent.from_params(params, sim_core)
+        ctrl = DifferentialController()
+        agent.set_controller(ctrl)
+
+        goal = Pose.from_xyz(3.0, 0.0, 0.05)
+        ctrl.set_path(agent, [goal], direction=MovementDirection.AUTO)
+
+        self._run_path(agent, sim_core, steps=3000)
+
+        final = agent.get_pose()
+        assert final.x == pytest.approx(3.0, abs=0.1)
+
+    def test_auto_reaches_goal_behind(self, sim_core):
+        """AUTO + goal behind: robot reaches goal via BACKWARD motion."""
+        params = AgentSpawnParams(
+            urdf_path="robots/mobile_robot.urdf",
+            initial_pose=Pose.from_yaw(0, 0, 0.05, 0.0),
+            motion_mode=MotionMode.DIFFERENTIAL,
+            max_linear_vel=2.0,
+        )
+        agent = Agent.from_params(params, sim_core)
+        ctrl = DifferentialController()
+        agent.set_controller(ctrl)
+
+        goal = Pose.from_xyz(-3.0, 0.0, 0.05)
+        ctrl.set_path(agent, [goal], direction=MovementDirection.AUTO)
+
+        self._run_path(agent, sim_core, steps=3000)
+
+        final = agent.get_pose()
+        assert final.x == pytest.approx(-3.0, abs=0.1)
+
+    def test_auto_string_accepted(self):
+        """'auto' string is accepted and converted to MovementDirection.AUTO."""
+        from pybullet_fleet.types import MovementDirection
+
+        d = MovementDirection("auto")
+        assert d is MovementDirection.AUTO
+
+    def test_auto_reevaluates_per_waypoint(self, sim_core):
+        """AUTO re-evaluates direction for each waypoint, not just the first."""
+        params = AgentSpawnParams(
+            urdf_path="robots/mobile_robot.urdf",
+            initial_pose=Pose.from_yaw(0, 0, 0.05, 0.0),  # Facing +X
+            motion_mode=MotionMode.DIFFERENTIAL,
+            max_linear_vel=2.0,
+        )
+        agent = Agent.from_params(params, sim_core)
+        ctrl = DifferentialController()
+        agent.set_controller(ctrl)
+
+        # Path: forward (+X), then back to origin — second waypoint should go BACKWARD
+        goal1 = Pose.from_xyz(3.0, 0.0, 0.05)
+        goal2 = Pose.from_xyz(0.0, 0.0, 0.05)
+        ctrl.set_path(agent, [goal1, goal2], direction=MovementDirection.AUTO)
+
+        # _original_direction should be preserved as AUTO
+        assert ctrl._original_direction == MovementDirection.AUTO
+        # First waypoint resolves to FORWARD
+        assert ctrl._movement_direction == MovementDirection.FORWARD
+
+        # Run until first waypoint is reached and second starts
+        self._run_path(agent, sim_core, steps=5000)
+
+        final = agent.get_pose()
+        assert final.x == pytest.approx(0.0, abs=0.3)
 
 
 # -----------------------------------------------------------------------

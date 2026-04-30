@@ -22,6 +22,7 @@ from pybullet_fleet.action import (
     DEFAULT_MAX_FORCE,
     DEFAULT_JOINT_TOLERANCE,
     DEFAULT_EE_TOLERANCE,
+    DEFAULT_MOVE_SKIP_THRESHOLD,
 )
 from pybullet_fleet.geometry import Pose, Path
 from pybullet_fleet.types import ActionStatus, MovementDirection
@@ -39,6 +40,7 @@ class TestActionConstants:
         assert DEFAULT_MAX_FORCE == 500.0
         assert DEFAULT_JOINT_TOLERANCE == 0.01
         assert DEFAULT_EE_TOLERANCE == 0.02
+        assert DEFAULT_MOVE_SKIP_THRESHOLD == 0.05
 
 
 # ---------------------------------------------------------------------------
@@ -438,6 +440,14 @@ class TestPickAction:
         assert action.ee_tolerance == 0.03
         assert action.joint_tolerance == 0.1
 
+    def test_move_skip_threshold_default(self):
+        action = PickAction(target_object_id=1)
+        assert action.move_skip_threshold == DEFAULT_MOVE_SKIP_THRESHOLD
+
+    def test_move_skip_threshold_custom(self):
+        action = PickAction(target_object_id=1, move_skip_threshold=0.1)
+        assert action.move_skip_threshold == 0.1
+
 
 # ---------------------------------------------------------------------------
 # DropAction (creation only)
@@ -550,6 +560,14 @@ class TestDropAction:
         )
         assert action.ee_tolerance == 0.03
         assert action.joint_tolerance == 0.1
+
+    def test_move_skip_threshold_default(self):
+        action = DropAction(drop_pose=Pose.from_xyz(1, 0, 0))
+        assert action.move_skip_threshold == DEFAULT_MOVE_SKIP_THRESHOLD
+
+    def test_move_skip_threshold_custom(self):
+        action = DropAction(drop_pose=Pose.from_xyz(1, 0, 0), move_skip_threshold=0.2)
+        assert action.move_skip_threshold == 0.2
 
 
 # ---------------------------------------------------------------------------

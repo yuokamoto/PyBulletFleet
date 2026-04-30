@@ -34,7 +34,7 @@ def _create_test_config() -> str:
 
     config = {
         "simulation": {"gui": False, "physics": False},
-        "robots": [
+        "entities": [
             {
                 "name": f"robot{i}",
                 "urdf_path": ROBOT_URDF,

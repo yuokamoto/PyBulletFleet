@@ -98,6 +98,40 @@ GUI=true docker compose run --rm --name pbf_bridge bridge \
   ros2 launch pybullet_fleet_ros tb3_demo.launch.py model:=waffle gui:=true
 ```
 
+### Attach/Detach Demo — Pick and Place Objects
+
+Spawns a TurtleBot3 + 3 pickable boxes. Navigate close to a box and attach it.
+
+**Terminal 1** — launch the attach demo:
+
+```bash
+cd docker
+xhost +local:docker
+
+GUI=true docker compose run --rm --name pbf_bridge bridge \
+  ros2 launch pybullet_fleet_ros attach_demo.launch.py gui:=true
+```
+
+**Terminal 2** — navigate to box_A and attach it:
+
+```bash
+# Navigate close to box_A (at x=0.5)
+docker exec pbf_bridge bash -c 'source /rmf_demos_ws/install/setup.bash && \
+  python3 /opt/pybullet_fleet/scripts/send_nav_goal.py --robot tb3_0 --x 0.3 --y 0.0'
+
+# Wait, then attach nearest object
+docker exec pbf_bridge bash -c 'source /rmf_demos_ws/install/setup.bash && \
+  python3 /opt/pybullet_fleet/scripts/attach_object.py --robot tb3_0 --attach'
+
+# Drive with the object attached
+docker exec pbf_bridge bash -c 'source /rmf_demos_ws/install/setup.bash && \
+  python3 /opt/pybullet_fleet/scripts/send_nav_goal.py --robot tb3_0 --x 2.0 --y 2.0'
+
+# Detach the object at the new location
+docker exec pbf_bridge bash -c 'source /rmf_demos_ws/install/setup.bash && \
+  python3 /opt/pybullet_fleet/scripts/attach_object.py --robot tb3_0 --detach'
+```
+
 ### Environment Variables (docker compose)
 
 | Variable | Default | Description |
@@ -135,6 +169,13 @@ GUI=true docker compose run --rm --name pbf_bridge bridge \
 | `navigate_to_pose` | NavigateToPose | Nav2-compatible navigation |
 | `follow_path` | FollowPath | Nav2-compatible path following |
 | `follow_joint_trajectory` | FollowJointTrajectory | MoveIt-compatible joint control |
+
+### Services (per robot)
+
+| Service | Type | Description |
+|---------|------|-------------|
+| `toggle_attach` | SetBool | rmf_demos cart delivery compat — `true`=attach nearest, `false`=detach first |
+| `attach_object` | AttachObject | Detailed attach/detach — object name, parent link, offset, search radius |
 
 ### Simulation Services
 
@@ -233,6 +274,64 @@ docker exec -it pbf_bridge bash -c 'source /rmf_demos_ws/install/setup.bash && \
     --ros-args -r /cmd_vel:=/tb3_0/cmd_vel'
 ```
 
+### Attach / Detach Objects
+
+Requires pickable objects in the simulation. Use the **attach demo** config
+which spawns a robot + pickable boxes:
+
+```bash
+# Terminal 1 — launch attach demo
+GUI=true docker compose run --rm --name pbf_bridge bridge \
+  ros2 launch pybullet_fleet_ros attach_demo.launch.py gui:=true
+```
+
+```bash
+# Navigate close to box_A (at 0.5, 0)
+docker exec pbf_bridge bash -c 'source /rmf_demos_ws/install/setup.bash && \
+  python3 /opt/pybullet_fleet/scripts/send_nav_goal.py --robot tb3_0 --x 0.3 --y 0.0'
+
+# Attach nearest pickable object (script)
+docker exec pbf_bridge bash -c 'source /rmf_demos_ws/install/setup.bash && \
+  python3 /opt/pybullet_fleet/scripts/attach_object.py --robot tb3_0 --attach'
+
+# Attach specific object by name
+docker exec pbf_bridge bash -c 'source /rmf_demos_ws/install/setup.bash && \
+  python3 /opt/pybullet_fleet/scripts/attach_object.py --robot tb3_0 --attach --object box_A'
+
+# Attach to a specific link with offset
+docker exec pbf_bridge bash -c 'source /rmf_demos_ws/install/setup.bash && \
+  python3 /opt/pybullet_fleet/scripts/attach_object.py --robot tb3_0 --attach \
+    --object box_A --parent-link base_link --offset 0 0 0.2'
+
+# Attach with larger search radius
+docker exec pbf_bridge bash -c 'source /rmf_demos_ws/install/setup.bash && \
+  python3 /opt/pybullet_fleet/scripts/attach_object.py --robot tb3_0 --attach --search-radius 3.0'
+
+# Detach (first attached object)
+docker exec pbf_bridge bash -c 'source /rmf_demos_ws/install/setup.bash && \
+  python3 /opt/pybullet_fleet/scripts/attach_object.py --robot tb3_0 --detach'
+
+# Detach specific object by name
+docker exec pbf_bridge bash -c 'source /rmf_demos_ws/install/setup.bash && \
+  python3 /opt/pybullet_fleet/scripts/attach_object.py --robot tb3_0 --detach --object box_A'
+```
+
+Alternatively, use `toggle_attach` (rmf_demos compatible SetBool service):
+
+```bash
+# Attach nearest (toggle mode)
+docker exec pbf_bridge bash -c 'source /rmf_demos_ws/install/setup.bash && \
+  python3 /opt/pybullet_fleet/scripts/attach_object.py --robot tb3_0 --attach --toggle'
+
+# Raw service call (without script)
+docker exec pbf_bridge bash -c 'source /rmf_demos_ws/install/setup.bash && \
+  ros2 service call /tb3_0/toggle_attach std_srvs/srv/SetBool "{data: true}"'
+
+# Detach via raw service call
+docker exec pbf_bridge bash -c 'source /rmf_demos_ws/install/setup.bash && \
+  ros2 service call /tb3_0/toggle_attach std_srvs/srv/SetBool "{data: false}"'
+```
+
 ### Spawn / Delete Entities
 
 ```bash
@@ -289,6 +388,7 @@ docker exec pbf_bridge bash -c 'source /rmf_demos_ws/install/setup.bash && \
 | `config/bridge_nav.yaml` | Generic differential drive navigation (used by `nav_demo.launch.py`) |
 | `config/bridge_arm.yaml` | Generic arm robot joint control (used by `arm_demo.launch.py`) |
 | `config/bridge_omni_demo.yaml` | Omni + 6-DoF cube demo |
+| `config/bridge_attach_demo.yaml` | Attach/detach demo — robot + pickable boxes (used by `attach_demo.launch.py`) |
 
 When `config_yaml` is not set, the bridge falls back to `num_robots` + `robot_urdf` parameters.
 
@@ -351,6 +451,16 @@ docker exec pbf_bridge bash -c 'source /rmf_demos_ws/install/setup.bash && \
 ```
 
 ## Troubleshooting
+
+### Login Screen / Stale Volume Data
+
+If the bridge container shows a login screen or behaves unexpectedly after
+image rebuilds, stale Docker volumes (Fuel cache, colcon build artifacts) may
+be the cause.  Clean up with:
+
+```bash
+docker system prune --volumes
+```
 
 ### `Error in gladLoadGLX`
 

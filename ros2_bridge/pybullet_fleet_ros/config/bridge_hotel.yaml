@@ -1,0 +1,242 @@
+# Bridge config for hotel demo — 3 fleets + doors + elevators
+# Multi-floor demo with doors, 2 elevators, 3 robot fleets
+#
+# Fleet 1: tinyRobot       (nav_graph 0) — 1 robot  (tinyBot_1)
+# Fleet 2: deliveryRobot   (nav_graph 1) — 1 robot  (deliveryBot_1)
+# Fleet 3: cleanerBotA     (nav_graph 2) — 2 robots (cleanerBotA_1, cleanerBotA_2)
+#
+# Robot names MUST match the fleet adapter config (rmf_demos hotel/*.yaml).
+# Positions extracted from hotel.world SDF <include> poses.
+#
+# Doors use Door (Agent subclass) with URDF joint open/close.
+# Elevators use Elevator (Agent subclass) with prismatic Z joint.
+
+# handler_map assigns RMF protocol handlers to doors/elevators.
+# These handlers run inside BridgeNode with direct sim_core access,
+# replacing the standalone door_adapter / lift_adapter nodes.
+handler_map:
+  "L*_door*": pybullet_fleet_ros.door_handler.DoorHandler
+  "Lift*": pybullet_fleet_ros.lift_handler.LiftHandler
+
+simulation:
+  gui: true
+  physics: false
+  target_rtf: 3.0
+  publish_rate: 1  # Hz (sim-time) — at RTF=10 this is ~10 Hz wall-clock
+  enable_structure_transparency: true
+  camera:
+    camera_mode: manual
+    camera_distance: 55
+    camera_yaw: 0
+    camera_pitch: -70
+    camera_target: [17, -25, 0]
+
+world:
+  world_file: "/rmf_demos_ws/install/rmf_demos_maps/share/rmf_demos_maps/maps/hotel/hotel.world"
+  skip_models:
+    - TinyRobot
+    - DeliveryRobot
+    - CleanerBotA
+    - TeleportDispenser
+    - TeleportIngestor
+
+entities:
+  # ── Fleet: tinyRobot (nav_graph 0) ─────────────────
+  - name: tinyBot_1
+    sdf_path: "/rmf_demos_ws/install/rmf_demos_assets/share/rmf_demos_assets/models/TinyRobot/model.sdf"
+    pose: [23.54, -27.42, 0.0]
+    yaw: 1.566
+    motion_mode: "differential"
+    max_linear_vel: 0.5
+    max_linear_accel: 0.75
+    navigation_2d: true
+    controller_config:
+      type: differential
+      default_direction: auto
+
+  # ── Fleet: deliveryRobot (nav_graph 1) ──────────────
+  - name: deliveryBot_1
+    sdf_path: "/rmf_demos_ws/install/rmf_demos_assets/share/rmf_demos_assets/models/DeliveryRobot/model.sdf"
+    pose: [14.56, -38.98, 0.0]
+    yaw: 1.690
+    motion_mode: "differential"
+    max_linear_vel: 0.7
+    max_linear_accel: 0.5
+    navigation_2d: true
+    controller_config:
+      type: differential
+      default_direction: auto
+
+  # ── Fleet: cleanerBotA (nav_graph 2) ────────────────
+  - name: cleanerBotA_1
+    sdf_path: "/rmf_demos_ws/install/rmf_demos_assets/share/rmf_demos_assets/models/CleanerBotA/model.sdf"
+    pose: [26.36, -27.75, 0.0]
+    yaw: -1.194
+    motion_mode: "differential"
+    max_linear_vel: 0.7
+    max_linear_accel: 0.5
+    navigation_2d: true
+    controller_config:
+      type: differential
+      default_direction: auto
+
+  - name: cleanerBotA_2
+    sdf_path: "/rmf_demos_ws/install/rmf_demos_assets/share/rmf_demos_assets/models/CleanerBotA/model.sdf"
+    pose: [29.24, -27.66, 0.0]
+    yaw: 1.344
+    motion_mode: "differential"
+    max_linear_vel: 0.7
+    max_linear_accel: 0.5
+    navigation_2d: true
+    controller_config:
+      type: differential
+      default_direction: auto
+
+  # ── Doors (Door) ─────────────────────────────
+  # L1 doors — hinge positions from hotel.building.yaml vertices
+  # Hinged doors: pose = hinge vertex (v1), yaw = hinge→end angle
+  # Sliding doors: pose = SDF center, urdf = door_slide.urdf
+  - name: L1_door1
+    type: door
+    urdf_path: "robots/door_hinge.urdf"
+    pose: [9.917, -32.627, 0.0]
+    yaw: -0.951
+    collision_mode: disabled
+    use_fixed_base: true
+    open_positions: {hinge: -1.57}
+    close_positions: {hinge: 0.0}
+
+  - name: L1_door2
+    type: door
+    urdf_path: "robots/door_slide.urdf"
+    pose: [11.515, -19.601, 0.0]
+    yaw: -3.137
+    collision_mode: disabled
+    use_fixed_base: true
+    open_positions: {slide: 1.2}
+    close_positions: {slide: 0.0}
+
+  - name: L1_door3
+    type: door
+    urdf_path: "robots/door_slide.urdf"
+    pose: [20.334, -40.407, 0.0]
+    yaw: -3.137
+    collision_mode: disabled
+    use_fixed_base: true
+    open_positions: {slide: 1.2}
+    close_positions: {slide: 0.0}
+
+  - name: L1_door4
+    type: door
+    urdf_path: "robots/door_hinge.urdf"
+    pose: [20.349, -11.117, 0.0]
+    yaw: 3.132
+    collision_mode: disabled
+    use_fixed_base: true
+    open_positions: {hinge: -1.57}
+    close_positions: {hinge: 0.0}
+
+  - name: L1_door5
+    type: door
+    urdf_path: "robots/door_slide.urdf"
+    pose: [28.079, -30.437, 0.0]
+    yaw: -0.002
+    collision_mode: disabled
+    use_fixed_base: true
+    open_positions: {slide: 1.2}
+    close_positions: {slide: 0.0}
+
+  # L2 doors — hinge positions from hotel.building.yaml vertices
+  - name: L2_door2
+    type: door
+    urdf_path: "robots/door_hinge.urdf"
+    pose: [6.759, -31.762, 8.0]
+    yaw: -1.571
+    collision_mode: disabled
+    use_fixed_base: true
+    open_positions: {hinge: 1.57}
+    close_positions: {hinge: 0.0}
+
+  - name: L2_door5
+    type: door
+    urdf_path: "robots/door_hinge.urdf"
+    pose: [18.896, -34.211, 8.0]
+    yaw: -0.006
+    collision_mode: disabled
+    use_fixed_base: true
+    open_positions: {hinge: 1.57}
+    close_positions: {hinge: 0.0}
+
+  - name: L2_door9
+    type: door
+    urdf_path: "robots/door_hinge.urdf"
+    pose: [13.013, -17.064, 8.0]
+    yaw: -1.555
+    collision_mode: disabled
+    use_fixed_base: true
+    open_positions: {hinge: 1.57}
+    close_positions: {hinge: 0.0}
+
+  - name: L2_door11
+    type: door
+    urdf_path: "robots/door_hinge.urdf"
+    pose: [13.084, -7.494, 8.0]
+    yaw: -1.571
+    collision_mode: disabled
+    use_fixed_base: true
+    open_positions: {hinge: 1.57}
+    close_positions: {hinge: 0.0}
+
+  - name: L2_door12
+    type: door
+    urdf_path: "robots/door_hinge.urdf"
+    pose: [15.283, -26.487, 8.0]
+    yaw: -1.571
+    collision_mode: disabled
+    use_fixed_base: true
+    open_positions: {hinge: -1.57}
+    close_positions: {hinge: 0.0}
+
+  - name: L2_door14
+    type: door
+    urdf_path: "robots/door_hinge.urdf"
+    pose: [21.932, -31.093, 8.0]
+    yaw: -0.005
+    collision_mode: disabled
+    use_fixed_base: true
+    open_positions: {hinge: -1.57}
+    close_positions: {hinge: 0.0}
+
+  - name: L2_door15
+    type: door
+    urdf_path: "robots/door_hinge.urdf"
+    pose: [28.547, -34.184, 8.0]
+    yaw: -0.014
+    collision_mode: disabled
+    use_fixed_base: true
+    open_positions: {hinge: 1.57}
+    close_positions: {hinge: 0.0}
+
+  # ── Elevators (Elevator) ─────────────────────
+  # Positions extracted from hotel.world SDF <model name="Lift*"><pose>
+  - name: Lift1
+    type: elevator
+    urdf_path: "robots/elevator.urdf"
+    pose: [19.766, -18.931, 0.0]
+    yaw: 0.0
+    collision_mode: disabled
+    use_fixed_base: true
+    floors: {L1: 0.0, L2: 8.0, L3: 16.0}
+    initial_floor: L1
+    joint_name: lift
+
+  - name: Lift2
+    type: elevator
+    urdf_path: "robots/elevator.urdf"
+    pose: [16.982, -24.221, 0.0]
+    yaw: 0.0
+    collision_mode: disabled
+    use_fixed_base: true
+    floors: {L1: 0.0, L2: 8.0, L3: 16.0}
+    initial_floor: L1
+    joint_name: lift

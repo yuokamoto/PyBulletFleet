@@ -1,12 +1,11 @@
 """Reusable PyBulletFleet simulation nodes for Open-RMF demos.
 
-Launches the four nodes that replace Gazebo in an rmf_demos scenario:
+Launches the nodes that replace Gazebo in an rmf_demos scenario:
 
-1. **bridge_node** — PyBulletFleet simulation backend
-2. **door_adapter** — instant open/close (replaces Gazebo door plugin)
-3. **workcell_adapter** — instant dispenser/ingestor (replaces Gazebo
-   TeleportDispenser / TeleportIngestor plugins)
-4. **fleet_adapter** — Open-RMF EasyFullControl fleet adapter
+1. **bridge_node** — PyBulletFleet simulation backend.
+   Door, lift, and workcell handlers are loaded inside this node
+   via ``handler_map`` / ``handler_registry`` in the bridge YAML.
+2. **fleet_adapter** — Open-RMF EasyFullControl fleet adapter
 
 Include this from a demo-specific launch file and pass the required
 arguments to configure it for each map/scenario.
@@ -100,26 +99,6 @@ def generate_launch_description():
                 default_value="true",
                 description="Use simulation clock (/clock) for all nodes. Default true for acceleration.",
             ),
-            # ── Door adapter ────────────────────────────────────────
-            # Instant open/close (replaces Gazebo door plugin)
-            Node(
-                package="pybullet_fleet_ros",
-                executable="door_adapter",
-                name="pybullet_door_adapter",
-                parameters=[{"use_sim_time": use_sim_time}],
-                output="screen",
-            ),
-            # ── Workcell adapter ────────────────────────────────────
-            # Instant dispenser/ingestor (replaces Gazebo
-            # TeleportDispenser/TeleportIngestor plugins)
-            Node(
-                package="pybullet_fleet_ros",
-                executable="workcell_adapter",
-                name="pybullet_workcell_adapter",
-                parameters=[{"use_sim_time": use_sim_time}],
-                output="screen",
-            ),
-            # ── PyBulletFleet simulation ────────────────────────────
             OpaqueFunction(function=_bridge_node_setup),
             # ── Fleet adapter (wall clock) ──────────────────────────
             # Launched when use_sim_time is false

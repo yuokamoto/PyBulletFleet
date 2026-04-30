@@ -318,7 +318,7 @@ simulation:
   timestep: 0.01
   physics: false
 
-robots:
+entities:
   - type: forklift
     urdf_path: robots/forklift.urdf
     count: 10

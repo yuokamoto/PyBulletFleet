@@ -56,7 +56,7 @@ def test_load_yaml_config_with_robots():
 
     config = {
         "simulation": {"gui": False, "physics": False},
-        "robots": [
+        "entities": [
             {"name": "robot0", "urdf_path": "robots/mobile_robot.urdf", "pose": [0, 0, 0.05]},
             {"name": "cube0", "urdf_path": "robots/simple_cube.urdf", "pose": [2, 0, 0.5]},
         ],
@@ -66,4 +66,4 @@ def test_load_yaml_config_with_robots():
         config_path = f.name
 
     result = load_yaml_config(config_path)
-    assert len(result["robots"]) == 2
+    assert len(result["entities"]) == 2

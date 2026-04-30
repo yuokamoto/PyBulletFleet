@@ -8,8 +8,30 @@
 # (caddy is read-only / passive — not spawned)
 #
 # Add more fleets by:
-#   1. Adding robots here under the robots: section
+#   1. Adding robots here under the entities: section
 #   2. Adding a fleet_adapter Node in airport_terminal_pybullet.launch.py
+
+handler_map:
+  "*_door": pybullet_fleet_ros.door_handler.DoorHandler
+
+bridge_plugins:
+  - class: pybullet_fleet_ros.workcell_handler.WorkcellHandler
+    config:
+      item_search_radius: 2.0
+      attach_z_offset: 0.15
+      # Workcell positions from generated airport_terminal.world SDF.
+      # These correspond to the TeleportDispenser/TeleportIngestor model
+      # poses, matching Gazebo's teleport behaviour for pick/drop.
+      overrides:
+        mopcart_dispenser:
+          position: [23.346, -36.437, 0.0]   # SDF model pose (floor level)
+          item:                               # fallback cargo uses MopCart3 mesh
+            mesh_path: "/root/.gz/fuel/fuel.gazebosim.org/openrobotics/models/mopcart3/2/meshes/MopCart3.obj"
+            mesh_scale: [1.0, 1.0, 1.0]
+            mass: 5.0
+          item_search_radius: 2.0             # waypoint ~1.2m from model
+        mopcart_collector:
+          position: [26.063, -48.377, 0.0]    # SDF model pose (floor level)
 
 simulation:
   gui: true
@@ -30,7 +52,7 @@ world:
     - TeleportDispenser
     - TeleportIngestor
 
-robots:
+entities:
   # ── Fleet: tinyRobot (nav_graph 2) ───────────────────────────────
   # Spawn positions from airport_terminal.world (charger waypoints)
   - name: tinyRobot_0
@@ -126,3 +148,49 @@ robots:
     max_linear_vel: 0.7
     max_linear_accel: 0.5
     navigation_2d: true
+
+  # ── Doors (Door) ─────────────────────────────
+  - name: n02_door
+    type: door
+    urdf_path: "robots/door_hinge.urdf"
+    pose: [54, -31, 0.0]
+    yaw: 0.0
+    use_fixed_base: true
+    open_positions: {hinge: 1.57}
+    close_positions: {hinge: 0.0}
+
+  - name: n01_door
+    type: door
+    urdf_path: "robots/door_hinge.urdf"
+    pose: [42, -31, 0.0]
+    yaw: 0.0
+    use_fixed_base: true
+    open_positions: {hinge: 1.57}
+    close_positions: {hinge: 0.0}
+
+  - name: s04_door
+    type: door
+    urdf_path: "robots/door_slide.urdf"
+    pose: [97, -40, 0.0]
+    yaw: 0.0
+    use_fixed_base: true
+    open_positions: {slide: 1.0}
+    close_positions: {slide: 0.0}
+
+  - name: s08_door
+    type: door
+    urdf_path: "robots/door_slide.urdf"
+    pose: [138, -40, 0.0]
+    yaw: 0.0
+    use_fixed_base: true
+    open_positions: {slide: 1.0}
+    close_positions: {slide: 0.0}
+
+  - name: zone_4_door
+    type: door
+    urdf_path: "robots/door_hinge.urdf"
+    pose: [162, -35, 0.0]
+    yaw: 1.57
+    use_fixed_base: true
+    open_positions: {hinge: 1.57}
+    close_positions: {hinge: 0.0}
