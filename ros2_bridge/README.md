@@ -3,15 +3,15 @@
 <table>
 <tr>
 <td align="center"><b>Office (Open-RMF)</b><br>
-<video src="videos/office.mp4" width="380" controls muted></video></td>
+<video src="https://raw.githubusercontent.com/yuokamoto/PyBulletFleet/feat/ros2-bridge-v2/ros2_bridge/videos/office.mp4" width="380" controls muted></video></td>
 <td align="center"><b>Hotel (Open-RMF)</b><br>
-<video src="videos/hotel.mp4" width="380" controls muted></video></td>
+<video src="https://raw.githubusercontent.com/yuokamoto/PyBulletFleet/feat/ros2-bridge-v2/ros2_bridge/videos/hotel.mp4" width="380" controls muted></video></td>
 </tr>
 <tr>
 <td align="center"><b>TurtleBot3 Demo</b><br>
-<video src="videos/tb3.mp4" width="380" controls muted></video></td>
+<video src="https://raw.githubusercontent.com/yuokamoto/PyBulletFleet/feat/ros2-bridge-v2/ros2_bridge/videos/tb3.mp4" width="380" controls muted></video></td>
 <td align="center"><b>UR5 Arm</b><br>
-<video src="videos/ur5.mp4" width="380" controls muted></video></td>
+<video src="https://raw.githubusercontent.com/yuokamoto/PyBulletFleet/feat/ros2-bridge-v2/ros2_bridge/videos/ur5.mp4" width="380" controls muted></video></td>
 </tr>
 </table>
 
