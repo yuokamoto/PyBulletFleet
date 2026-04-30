@@ -1,0 +1,179 @@
+# Bridge config for clinic demo — 2 fleets + doors + elevators
+# Multi-floor clinic with ~10 doors, 2 elevators, 2 robot fleets
+#
+# Fleet 1: deliveryRobot  (nav_graph 0) — 2 robots
+# Fleet 2: tinyRobot      (nav_graph 1) — 2 robots
+
+handler_map:
+  "clinic_door_*": pybullet_fleet_rmf.door_handler.DoorHandler
+
+simulation:
+  gui: true
+  physics: false
+  target_rtf: 3.0
+  publish_rate: 1  # Hz (sim-time) — at RTF=3 this is ~3 Hz wall-clock
+  camera:
+    camera_mode: manual
+    camera_distance: 50
+    camera_yaw: 0
+    camera_pitch: -70
+    camera_target: [20, -10, 0]
+
+world:
+  world_file: "/rmf_demos_ws/install/rmf_demos_maps/share/rmf_demos_maps/maps/clinic/clinic.world"
+  skip_models:
+    - DeliveryRobot
+    - TinyRobot
+    - TeleportDispenser
+    - TeleportIngestor
+
+entities:
+  # ── Fleet: deliveryRobot (nav_graph 0) ──────────────
+  - name: deliveryRobot_0
+    sdf_path: "/rmf_demos_ws/install/rmf_demos_assets/share/rmf_demos_assets/models/DeliveryRobot/model.sdf"
+    pose: [5, -5, 0.0]
+    yaw: 0.0
+    motion_mode: "differential"
+    max_linear_vel: 0.7
+    max_linear_accel: 0.5
+    navigation_2d: true
+
+  - name: deliveryRobot_1
+    sdf_path: "/rmf_demos_ws/install/rmf_demos_assets/share/rmf_demos_assets/models/DeliveryRobot/model.sdf"
+    pose: [10, -5, 0.0]
+    yaw: 0.0
+    motion_mode: "differential"
+    max_linear_vel: 0.7
+    max_linear_accel: 0.5
+    navigation_2d: true
+
+  # ── Fleet: tinyRobot (nav_graph 1) ─────────────────
+  - name: tinyRobot_0
+    sdf_path: "/rmf_demos_ws/install/rmf_demos_assets/share/rmf_demos_assets/models/TinyRobot/model.sdf"
+    pose: [15, -5, 0.0]
+    yaw: 0.0
+    motion_mode: "differential"
+    max_linear_vel: 0.5
+    max_linear_accel: 0.75
+    navigation_2d: true
+
+  - name: tinyRobot_1
+    sdf_path: "/rmf_demos_ws/install/rmf_demos_assets/share/rmf_demos_assets/models/TinyRobot/model.sdf"
+    pose: [20, -5, 0.0]
+    yaw: 0.0
+    motion_mode: "differential"
+    max_linear_vel: 0.5
+    max_linear_accel: 0.75
+    navigation_2d: true
+
+  # ── Doors (Door) ─────────────────────────────
+  - name: clinic_door_01
+    type: door
+    urdf_path: "robots/door_hinge.urdf"
+    pose: [8, -3, 0.0]
+    yaw: 0.0
+    use_fixed_base: true
+    open_positions: {hinge: 1.57}
+    close_positions: {hinge: 0.0}
+
+  - name: clinic_door_02
+    type: door
+    urdf_path: "robots/door_slide.urdf"
+    pose: [12, -3, 0.0]
+    yaw: 0.0
+    use_fixed_base: true
+    open_positions: {slide: 1.0}
+    close_positions: {slide: 0.0}
+
+  - name: clinic_door_03
+    type: door
+    urdf_path: "robots/door_hinge.urdf"
+    pose: [16, -3, 0.0]
+    yaw: 0.0
+    use_fixed_base: true
+    open_positions: {hinge: 1.57}
+    close_positions: {hinge: 0.0}
+
+  - name: clinic_door_04
+    type: door
+    urdf_path: "robots/door_hinge.urdf"
+    pose: [20, -3, 0.0]
+    yaw: 0.0
+    use_fixed_base: true
+    open_positions: {hinge: 1.57}
+    close_positions: {hinge: 0.0}
+
+  - name: clinic_door_05
+    type: door
+    urdf_path: "robots/door_hinge.urdf"
+    pose: [24, -3, 0.0]
+    yaw: 0.0
+    use_fixed_base: true
+    open_positions: {hinge: 1.57}
+    close_positions: {hinge: 0.0}
+
+  - name: clinic_door_06
+    type: door
+    urdf_path: "robots/door_hinge.urdf"
+    pose: [8, -8, 0.0]
+    yaw: 1.57
+    use_fixed_base: true
+    open_positions: {hinge: 1.57}
+    close_positions: {hinge: 0.0}
+
+  - name: clinic_door_07
+    type: door
+    urdf_path: "robots/door_slide.urdf"
+    pose: [12, -8, 0.0]
+    yaw: 1.57
+    use_fixed_base: true
+    open_positions: {slide: 1.0}
+    close_positions: {slide: 0.0}
+
+  - name: clinic_door_08
+    type: door
+    urdf_path: "robots/door_hinge.urdf"
+    pose: [8, -3, 8.0]
+    yaw: 0.0
+    use_fixed_base: true
+    open_positions: {hinge: 1.57}
+    close_positions: {hinge: 0.0}
+
+  - name: clinic_door_09
+    type: door
+    urdf_path: "robots/door_hinge.urdf"
+    pose: [12, -3, 8.0]
+    yaw: 0.0
+    use_fixed_base: true
+    open_positions: {hinge: 1.57}
+    close_positions: {hinge: 0.0}
+
+  - name: clinic_door_10
+    type: door
+    urdf_path: "robots/door_slide.urdf"
+    pose: [16, -3, 8.0]
+    yaw: 0.0
+    use_fixed_base: true
+    open_positions: {slide: 1.0}
+    close_positions: {slide: 0.0}
+
+  # ── Elevators (Elevator) ─────────────────────
+  - name: lift_1
+    type: elevator
+    urdf_path: "robots/elevator.urdf"
+    pose: [3, -10, 0.0]
+    yaw: 0.0
+    use_fixed_base: true
+    floors: {L1: 0.0, L2: 8.0}
+    initial_floor: L1
+    joint_name: lift
+
+  - name: lift_25
+    type: elevator
+    urdf_path: "robots/elevator.urdf"
+    pose: [25, -10, 0.0]
+    yaw: 0.0
+    use_fixed_base: true
+    floors: {L1: 0.0, L2: 8.0}
+    initial_floor: L1
+    joint_name: lift

@@ -72,7 +72,7 @@ ament_package()
   <name>pybullet_fleet_msgs</name>
   <version>0.1.0</version>
   <description>ROS 2 message definitions for PyBulletFleet</description>
-  <maintainer email="yu.okamoto@rapyuta-robotics.com">Yu Okamoto</maintainer>
+  <maintainer email="yuokamoto1988@gmail.com">Yu Okamoto</maintainer>
   <license>Apache-2.0</license>
 
   <buildtool_depend>ament_cmake</buildtool_depend>

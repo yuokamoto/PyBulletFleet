@@ -1,8 +1,8 @@
 # Docker — ROS 2 Bridge
 
 Docker environment for the [`ros2_bridge/`](../ros2_bridge/) package (ROS 2 Jazzy).
-The Dockerfile builds both `pybullet_fleet` and `pybullet_fleet_ros` inside
-a single colcon workspace.
+The Dockerfile builds `pybullet_fleet`, `pybullet_fleet_ros`, and `pybullet_fleet_rmf`
+inside a single colcon workspace.
 
 ## Build
 

@@ -20,38 +20,14 @@ New robot and infrastructure models:
 
 ### Devices
 
-- **Elevator doors** — Physical door joints on the Elevator platform that open/close on arrival/departure. Currently `LiftHandler` manages door state as an RMF protocol flag (`LiftState.DOOR_OPEN/CLOSED`) only — no visual representation in PyBullet. Would require adding revolute or prismatic door joints to the elevator URDF and driving them via `JointAction` from `Elevator.request_floor()` / arrival callback.
-- **Double-hinge door** — Support for doors with two leaves (e.g. double swing doors common in hospital/hotel corridors). Requires a new URDF with two revolute joints and coordinated open/close `JointAction` targets. `DoorParams.open_positions` already supports multi-joint dicts, so the `Door` class may need minimal changes beyond the URDF and appropriate config.
-- **Xacro-parameterised device URDFs** — Replace static `door_hinge.urdf`, `door_slide.urdf`, and `elevator.urdf` with xacro templates that accept dimensions (door width/height, elevator platform size, door leaf count) as parameters. Enables per-instance sizing from YAML config without hand-editing URDFs. Requires ROS (`xacro` package) at URDF generation time; pre-built URDFs would remain as defaults for non-ROS standalone usage.
+See [ros2_bridge/README.md](../ros2_bridge/README.md) for device enhancements (elevator doors, double-hinge doors, xacro-parameterised URDFs).
 
 ## Interfaces
 
 External communication layers:
 
-- **ROS 2** — Topic / service / action bridge for ROS 2 ecosystem integration
+- **ROS 2** — Topic / service / action bridge for ROS 2 ecosystem integration (see [ros2_bridge/README.md](../ros2_bridge/README.md))
 - **gRPC** — Language-agnostic RPC interface for orchestrators, WMS, and fleet managers
-
-### Direct Python Connection (no ROS)
-
-Connect `fleet_adapter` directly to `MultiRobotSimulationCore` via Python API, bypassing the ROS 2 topic/service layer entirely.  Enables lower latency and simpler deployment for pure-simulation use cases.
-
-Key design points:
-
-- **`cargo_relative_pose` on Agent** — Move `attach_z_offset` from `WorkcellPlugin` config to `Agent` / `AgentSpawnParams` as a full `Pose` (`cargo_relative_pose`).  `dispense()` reads `robot.cargo_relative_pose` to set `PickAction.attach_relative_pose`, allowing per-robot attachment geometry (e.g. forklift fork tip vs AMR top surface vs gripper link).  `WorkcellPlugin._attach_z_offset` remains as the fallback default when the robot does not define one.
-- **Event-based communication** — Use the existing `EventBus` for fleet adapter ↔ sim core communication instead of ROS topics.
-- **Shared-process deployment** — Fleet adapter and sim core run in the same Python process; no serialization overhead.
-
-### ROS 2 Bridge: Handler Decomposition
-
-The current `RobotHandler` is a monolithic class managing odometry, TF, joint states, `cmd_vel`, and action servers. As the bridge matures, split it into focused, composable handlers (Gazebo-plugin style):
-
-- **OdometryHandler** — `/odom` publisher + TF `odom → base_link`
-- **JointStateHandler** — `/joint_states` publisher
-- **CmdVelHandler** — `/cmd_vel` subscriber + controller integration
-- **NavigationHandler** — `navigate_to_pose` action server
-- **DiagnosticsHandler** — Status/heartbeat publishing
-
-The multi-handler registry (`resolve_handler_classes`) already supports assigning multiple handler classes per robot. This decomposition would let users compose exactly the handlers they need per robot type via `handler_classes:` config.
 
 ## Refactoring
 

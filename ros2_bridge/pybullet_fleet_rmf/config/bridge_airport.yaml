@@ -1,0 +1,196 @@
+# Bridge config for airport_terminal demo — multi-fleet
+# Demonstrates 4 fleets sharing a single PyBulletFleet bridge_node.
+#
+# Fleet 1: tinyRobot     (nav_graph 2) — 4 robots, patrol + delivery
+# Fleet 2: deliveryRobot  (nav_graph 1) — 3 robots, delivery
+# Fleet 3: cleanerBotA    (nav_graph 0) — 1 robot, clean (zone 1–4)
+# Fleet 4: cleanerBotE    (nav_graph 4) — 2 robots, clean (zone 2–4)
+# (caddy is read-only / passive — not spawned)
+#
+# Add more fleets by:
+#   1. Adding robots here under the entities: section
+#   2. Adding a fleet_adapter Node in airport_terminal_pybullet.launch.py
+
+handler_map:
+  "*_door": pybullet_fleet_rmf.door_handler.DoorHandler
+
+bridge_plugins:
+  - class: pybullet_fleet_rmf.workcell_handler.WorkcellHandler
+    config:
+      item_search_radius: 2.0
+      attach_z_offset: 0.15
+      # Workcell positions from generated airport_terminal.world SDF.
+      # These correspond to the TeleportDispenser/TeleportIngestor model
+      # poses, matching Gazebo's teleport behaviour for pick/drop.
+      overrides:
+        mopcart_dispenser:
+          position: [23.346, -36.437, 0.0]   # SDF model pose (floor level)
+          item:                               # fallback cargo uses MopCart3 mesh
+            mesh_path: "/root/.gz/fuel/fuel.gazebosim.org/openrobotics/models/mopcart3/2/meshes/MopCart3.obj"
+            mesh_scale: [1.0, 1.0, 1.0]
+            mass: 5.0
+          item_search_radius: 2.0             # waypoint ~1.2m from model
+        mopcart_collector:
+          position: [26.063, -48.377, 0.0]    # SDF model pose (floor level)
+
+simulation:
+  gui: true
+  physics: false
+  target_rtf: 10.0
+  camera:
+    camera_mode: auto
+    camera_auto_scale: 1.2
+
+world:
+  world_file: "/rmf_demos_ws/install/rmf_demos_maps/share/rmf_demos_maps/maps/airport_terminal/airport_terminal.world"
+  skip_models:
+    - TinyRobot
+    - DeliveryRobot
+    - CleanerBotA
+    - CleanerBotE
+    - Caddy
+    - TeleportDispenser
+    - TeleportIngestor
+
+entities:
+  # ── Fleet: tinyRobot (nav_graph 2) ───────────────────────────────
+  # Spawn positions from airport_terminal.world (charger waypoints)
+  - name: tinyRobot_0
+    sdf_path: "/rmf_demos_ws/install/rmf_demos_assets/share/rmf_demos_assets/models/TinyRobot/model.sdf"
+    pose: [28.72, -51.19, 0.0]
+    yaw: -1.568
+    motion_mode: "differential"
+    max_linear_vel: 0.5
+    max_linear_accel: 0.75
+    navigation_2d: true
+
+  - name: tinyRobot_1
+    sdf_path: "/rmf_demos_ws/install/rmf_demos_assets/share/rmf_demos_assets/models/TinyRobot/model.sdf"
+    pose: [67.97, -49.36, 0.0]
+    yaw: -1.598
+    motion_mode: "differential"
+    max_linear_vel: 0.5
+    max_linear_accel: 0.75
+    navigation_2d: true
+
+  - name: tinyRobot_2
+    sdf_path: "/rmf_demos_ws/install/rmf_demos_assets/share/rmf_demos_assets/models/TinyRobot/model.sdf"
+    pose: [86.50, -9.63, 0.0]
+    yaw: -0.002
+    motion_mode: "differential"
+    max_linear_vel: 0.5
+    max_linear_accel: 0.75
+    navigation_2d: true
+
+  - name: tinyRobot_3
+    sdf_path: "/rmf_demos_ws/install/rmf_demos_assets/share/rmf_demos_assets/models/TinyRobot/model.sdf"
+    pose: [21.78, -27.45, 0.0]
+    yaw: 1.582
+    motion_mode: "differential"
+    max_linear_vel: 0.5
+    max_linear_accel: 0.75
+    navigation_2d: true
+
+  # ── Fleet: deliveryRobot (nav_graph 1) ───────────────────────────
+  # Spawn positions from airport_terminal.world (charger waypoints)
+  - name: deliveryRobot_0
+    sdf_path: "/rmf_demos_ws/install/rmf_demos_assets/share/rmf_demos_assets/models/DeliveryRobot/model.sdf"
+    pose: [96.60, -51.96, 0.0]
+    yaw: -0.016
+    motion_mode: "differential"
+    max_linear_vel: 0.7
+    max_linear_accel: 0.5
+    navigation_2d: true
+
+  - name: deliveryRobot_1
+    sdf_path: "/rmf_demos_ws/install/rmf_demos_assets/share/rmf_demos_assets/models/DeliveryRobot/model.sdf"
+    pose: [152.35, -44.32, 0.0]
+    yaw: 0.031
+    motion_mode: "differential"
+    max_linear_vel: 0.7
+    max_linear_accel: 0.5
+    navigation_2d: true
+
+  - name: deliveryRobot_2
+    sdf_path: "/rmf_demos_ws/install/rmf_demos_assets/share/rmf_demos_assets/models/DeliveryRobot/model.sdf"
+    pose: [14.78, -9.28, 0.0]
+    yaw: 0.005
+    motion_mode: "differential"
+    max_linear_vel: 0.7
+    max_linear_accel: 0.5
+    navigation_2d: true
+
+  # ── Fleet: cleanerBotA (nav_graph 0) ─────────────────────────────
+  - name: cleanerBotA_0
+    sdf_path: "/rmf_demos_ws/install/rmf_demos_assets/share/rmf_demos_assets/models/CleanerBotA/model.sdf"
+    pose: [117.41, -49.48, 0.0]
+    yaw: -1.573
+    motion_mode: "differential"
+    max_linear_vel: 0.7
+    max_linear_accel: 0.5
+    navigation_2d: true
+
+  # ── Fleet: cleanerBotE (nav_graph 4) ─────────────────────────────
+  - name: cleanerBotE_0
+    sdf_path: "/rmf_demos_ws/install/rmf_demos_assets/share/rmf_demos_assets/models/CleanerBotE/model.sdf"
+    pose: [159.70, -55.56, 0.0]
+    yaw: 1.571
+    motion_mode: "differential"
+    max_linear_vel: 0.7
+    max_linear_accel: 0.5
+    navigation_2d: true
+
+  - name: cleanerBotE_1
+    sdf_path: "/rmf_demos_ws/install/rmf_demos_assets/share/rmf_demos_assets/models/CleanerBotE/model.sdf"
+    pose: [163.42, -55.63, 0.0]
+    yaw: 1.563
+    motion_mode: "differential"
+    max_linear_vel: 0.7
+    max_linear_accel: 0.5
+    navigation_2d: true
+
+  # ── Doors (Door) ─────────────────────────────
+  - name: n02_door
+    type: door
+    urdf_path: "robots/door_hinge.urdf"
+    pose: [54, -31, 0.0]
+    yaw: 0.0
+    use_fixed_base: true
+    open_positions: {hinge: 1.57}
+    close_positions: {hinge: 0.0}
+
+  - name: n01_door
+    type: door
+    urdf_path: "robots/door_hinge.urdf"
+    pose: [42, -31, 0.0]
+    yaw: 0.0
+    use_fixed_base: true
+    open_positions: {hinge: 1.57}
+    close_positions: {hinge: 0.0}
+
+  - name: s04_door
+    type: door
+    urdf_path: "robots/door_slide.urdf"
+    pose: [97, -40, 0.0]
+    yaw: 0.0
+    use_fixed_base: true
+    open_positions: {slide: 1.0}
+    close_positions: {slide: 0.0}
+
+  - name: s08_door
+    type: door
+    urdf_path: "robots/door_slide.urdf"
+    pose: [138, -40, 0.0]
+    yaw: 0.0
+    use_fixed_base: true
+    open_positions: {slide: 1.0}
+    close_positions: {slide: 0.0}
+
+  - name: zone_4_door
+    type: door
+    urdf_path: "robots/door_hinge.urdf"
+    pose: [162, -35, 0.0]
+    yaw: 1.57
+    use_fixed_base: true
+    open_positions: {hinge: 1.57}
+    close_positions: {hinge: 0.0}

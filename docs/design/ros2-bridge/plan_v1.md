@@ -253,7 +253,7 @@ git commit -m "feat(ros2): add Docker environment for Jazzy"
   <name>pybullet_fleet_ros</name>
   <version>0.1.0</version>
   <description>ROS 2 bridge for PyBulletFleet multi-robot simulation</description>
-  <maintainer email="yu.okamoto@rapyuta-robotics.com">Yu Okamoto</maintainer>
+  <maintainer email="yuokamoto1988@gmail.com">Yu Okamoto</maintainer>
   <license>Apache-2.0</license>
 
   <depend>rclpy</depend>
@@ -304,7 +304,7 @@ setup(
     install_requires=['setuptools'],
     zip_safe=True,
     maintainer='Yu Okamoto',
-    maintainer_email='yu.okamoto@rapyuta-robotics.com',
+    maintainer_email='yuokamoto1988@gmail.com',
     description='ROS 2 bridge for PyBulletFleet multi-robot simulation',
     license='Apache-2.0',
     tests_require=['pytest'],
@@ -2458,7 +2458,7 @@ git commit -m "feat(ros2): add AgentManagerROSWrapper stub (Phase 2 prep)"
 ```markdown
 # PyBulletFleet ROS 2 Bridge
 
-ROS 2 bridge for [PyBulletFleet](https://github.com/rapyuta-robotics/PyBulletFleet) multi-robot simulation.
+ROS 2 bridge for [PyBulletFleet](https://github.com/yuokamoto/PyBulletFleet) multi-robot simulation.
 
 ## Quick Start
 

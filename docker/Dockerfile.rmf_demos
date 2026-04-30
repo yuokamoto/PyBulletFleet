@@ -2,13 +2,8 @@
 # Unified PyBulletFleet + ROS 2 bridge Docker image.
 # Base: official Open-RMF demos image (includes rmf packages, maps, fleet adapter, etc.)
 #
-# Supports two usage modes via different docker-compose files:
-#   1. docker-compose.yaml       — standalone bridge (no RMF task dispatch)
-#   2. docker-compose.rmf.yaml   — full RMF stack (fleet adapter + web dashboard)
-#
 # Build:
-#   docker compose -f docker-compose.rmf.yaml build
-#   # or: docker compose build
+#   cd docker && docker compose build
 #
 # Multi-stage layout:
 #   Stage 1 (fuel-cache): Downloads Gazebo Fuel models (~80 models, ~20 min).
@@ -75,15 +70,16 @@ COPY mesh/ /opt/pybullet_fleet/mesh/
 WORKDIR /opt/pybullet_fleet
 RUN pip install --break-system-packages -e .
 
-# Build pybullet_fleet_msgs and pybullet_fleet_ros into the existing rmf_demos workspace
+# Build pybullet_fleet_msgs, pybullet_fleet_ros, and pybullet_fleet_rmf into the existing rmf_demos workspace
 # (rmf_fleet_adapter_python and simulation_interfaces are already installed)
 COPY ros2_bridge/pybullet_fleet_msgs /rmf_demos_ws/src/pybullet_fleet_msgs
 COPY ros2_bridge/pybullet_fleet_ros /rmf_demos_ws/src/pybullet_fleet_ros
+COPY ros2_bridge/pybullet_fleet_rmf /rmf_demos_ws/src/pybullet_fleet_rmf
 WORKDIR /rmf_demos_ws
 RUN source /opt/ros/jazzy/setup.bash && \
     source /rmf_demos_ws/install/setup.bash && \
     colcon build --symlink-install \
-    --packages-select pybullet_fleet_msgs pybullet_fleet_ros \
+    --packages-select pybullet_fleet_msgs pybullet_fleet_ros pybullet_fleet_rmf \
     --cmake-args -DCMAKE_BUILD_TYPE=Release
 
 # Copy test and utility scripts
