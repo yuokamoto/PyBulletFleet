@@ -1,19 +1,21 @@
 # ROS 2 Bridge & Open-RMF Integration
 
-<table>
-<tr>
-<td align="center"><b>Office (Open-RMF)</b><br>
-<img src="videos/office.gif" width="380" alt="Office Demo"></td>
-<td align="center"><b>Hotel (Open-RMF)</b><br>
-<img src="videos/hotel.gif" width="380" alt="Hotel Demo"></td>
-</tr>
-<tr>
-<td align="center"><b>TurtleBot3 Demo</b><br>
-<img src="videos/tb3.gif" width="380" alt="TurtleBot3 Demo"></td>
-<td align="center"><b>UR5 Arm</b><br>
-<img src="videos/ur5.gif" width="380" alt="UR5 Arm Demo"></td>
-</tr>
-</table>
+<p align="center">
+<b>Office (Open-RMF)</b><br>
+<img src="videos/office.gif" width="760" alt="Office Demo">
+</p>
+<p align="center">
+<b>Hotel (Open-RMF)</b><br>
+<img src="videos/hotel.gif" width="760" alt="Hotel Demo">
+</p>
+<p align="center">
+<b>TurtleBot3 Demo</b><br>
+<img src="videos/tb3.gif" width="760" alt="TurtleBot3 Demo">
+</p>
+<p align="center">
+<b>UR5 Arm</b><br>
+<img src="videos/ur5.gif" width="760" alt="UR5 Arm Demo">
+</p>
 
 ROS 2 interface layer for [PyBulletFleet](../README.md).
 Three packages provide a clean separation between general ROS 2 connectivity, Open-RMF integration, and custom message definitions.
