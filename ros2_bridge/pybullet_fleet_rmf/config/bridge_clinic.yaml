@@ -13,6 +13,7 @@ handler_map:
   "L1_*": pybullet_fleet_rmf.door_handler.DoorHandler
   "L2_*": pybullet_fleet_rmf.door_handler.DoorHandler
   "m": pybullet_fleet_rmf.door_handler.DoorHandler
+  "lift_*": pybullet_fleet_rmf.lift_handler.LiftHandler
 
 simulation:
   gui: true
