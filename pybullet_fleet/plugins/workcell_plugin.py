@@ -210,7 +210,10 @@ class WorkcellPlugin(SimPlugin):
         from pybullet_fleet.action import PickAction
         from pybullet_fleet.geometry import Pose as PbfPose
 
-        workcell_pos = self._resolve_workcell_position(workcell_name, robot)
+        workcell_pos = self.get_workcell_position(workcell_name)
+        if workcell_pos is None:
+            logger.error("Dispense '%s': workcell position unknown — add it to overrides", workcell_name)
+            return None, None
 
         # Ensure at least one pickable object exists near the workcell
         wc = self._workcells[workcell_name]
@@ -291,8 +294,10 @@ class WorkcellPlugin(SimPlugin):
         from pybullet_fleet.action import DropAction
         from pybullet_fleet.geometry import Pose as PbfPose
 
-        # Determine drop position (auto-discover from robot if unknown)
-        ingestor_pos = self._resolve_workcell_position(workcell_name, robot)
+        ingestor_pos = self.get_workcell_position(workcell_name)
+        if ingestor_pos is None:
+            logger.error("Ingest '%s': workcell position unknown — add it to overrides", workcell_name)
+            return None
         drop_x, drop_y, drop_z = ingestor_pos
 
         # Robot is already at the RMF waypoint near the ingestor.
