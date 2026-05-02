@@ -20,6 +20,7 @@ simulation:
   physics: false
   target_rtf: 3.0
   publish_rate: 1  # Hz (sim-time) — at RTF=3 this is ~3 Hz wall-clock
+  enable_structure_transparency: true
   camera:
     camera_mode: manual
     camera_distance: 50
@@ -45,6 +46,9 @@ entities:
     max_linear_vel: 0.7
     max_linear_accel: 0.5
     navigation_2d: true
+    controller_config:
+      type: differential
+      default_direction: auto
 
   - name: deliveryRobot_2
     sdf_path: "/rmf_demos_ws/install/rmf_demos_assets/share/rmf_demos_assets/models/DeliveryRobot/model.sdf"
@@ -54,6 +58,9 @@ entities:
     max_linear_vel: 0.7
     max_linear_accel: 0.5
     navigation_2d: true
+    controller_config:
+      type: differential
+      default_direction: auto
 
   # ── Fleet: tinyRobot (nav_graph 1, L2) ─────────────
   - name: tinyRobot_1
@@ -64,6 +71,9 @@ entities:
     max_linear_vel: 0.5
     max_linear_accel: 0.75
     navigation_2d: true
+    controller_config:
+      type: differential
+      default_direction: auto
 
   - name: tinyRobot_2
     sdf_path: "/rmf_demos_ws/install/rmf_demos_assets/share/rmf_demos_assets/models/TinyRobot/model.sdf"
@@ -73,6 +83,9 @@ entities:
     max_linear_vel: 0.5
     max_linear_accel: 0.75
     navigation_2d: true
+    controller_config:
+      type: differential
+      default_direction: auto
 
   # ── L1 Doors ─────────────────────────────────────────
   - name: L1_clinic_a

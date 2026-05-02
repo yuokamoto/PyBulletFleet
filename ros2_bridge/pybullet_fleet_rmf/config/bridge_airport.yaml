@@ -63,6 +63,9 @@ entities:
     max_linear_vel: 0.5
     max_linear_accel: 0.75
     navigation_2d: true
+    controller_config:
+      type: differential
+      default_direction: auto
 
   - name: tinyRobot_1
     sdf_path: "/rmf_demos_ws/install/rmf_demos_assets/share/rmf_demos_assets/models/TinyRobot/model.sdf"
@@ -72,6 +75,9 @@ entities:
     max_linear_vel: 0.5
     max_linear_accel: 0.75
     navigation_2d: true
+    controller_config:
+      type: differential
+      default_direction: auto
 
   - name: tinyRobot_2
     sdf_path: "/rmf_demos_ws/install/rmf_demos_assets/share/rmf_demos_assets/models/TinyRobot/model.sdf"
@@ -81,6 +87,9 @@ entities:
     max_linear_vel: 0.5
     max_linear_accel: 0.75
     navigation_2d: true
+    controller_config:
+      type: differential
+      default_direction: auto
 
   - name: tinyRobot_3
     sdf_path: "/rmf_demos_ws/install/rmf_demos_assets/share/rmf_demos_assets/models/TinyRobot/model.sdf"
@@ -90,6 +99,9 @@ entities:
     max_linear_vel: 0.5
     max_linear_accel: 0.75
     navigation_2d: true
+    controller_config:
+      type: differential
+      default_direction: auto
 
   # ── Fleet: deliveryRobot (nav_graph 1) ───────────────────────────
   # Spawn positions from airport_terminal.world (charger waypoints)
@@ -101,6 +113,9 @@ entities:
     max_linear_vel: 0.7
     max_linear_accel: 0.5
     navigation_2d: true
+    controller_config:
+      type: differential
+      default_direction: auto
 
   - name: deliveryRobot_1
     sdf_path: "/rmf_demos_ws/install/rmf_demos_assets/share/rmf_demos_assets/models/DeliveryRobot/model.sdf"
@@ -110,6 +125,9 @@ entities:
     max_linear_vel: 0.7
     max_linear_accel: 0.5
     navigation_2d: true
+    controller_config:
+      type: differential
+      default_direction: auto
 
   - name: deliveryRobot_2
     sdf_path: "/rmf_demos_ws/install/rmf_demos_assets/share/rmf_demos_assets/models/DeliveryRobot/model.sdf"
@@ -119,6 +137,9 @@ entities:
     max_linear_vel: 0.7
     max_linear_accel: 0.5
     navigation_2d: true
+    controller_config:
+      type: differential
+      default_direction: auto
 
   # ── Fleet: cleanerBotA (nav_graph 0) ─────────────────────────────
   - name: cleanerBotA_0
@@ -129,6 +150,9 @@ entities:
     max_linear_vel: 0.7
     max_linear_accel: 0.5
     navigation_2d: true
+    controller_config:
+      type: differential
+      default_direction: auto
 
   # ── Fleet: cleanerBotE (nav_graph 4) ─────────────────────────────
   - name: cleanerBotE_0
@@ -139,6 +163,9 @@ entities:
     max_linear_vel: 0.7
     max_linear_accel: 0.5
     navigation_2d: true
+    controller_config:
+      type: differential
+      default_direction: auto
 
   - name: cleanerBotE_1
     sdf_path: "/rmf_demos_ws/install/rmf_demos_assets/share/rmf_demos_assets/models/CleanerBotE/model.sdf"
@@ -148,6 +175,9 @@ entities:
     max_linear_vel: 0.7
     max_linear_accel: 0.5
     navigation_2d: true
+    controller_config:
+      type: differential
+      default_direction: auto
 
   # ── Doors (Door) ─────────────────────────────
   - name: n02_door
