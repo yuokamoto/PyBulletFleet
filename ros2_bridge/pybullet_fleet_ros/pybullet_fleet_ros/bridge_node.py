@@ -178,9 +178,6 @@ class BridgeNode(Node):
         Each plugin class must be a :class:`BridgePluginBase` subclass.
         """
         entries: List[Dict[str, Any]] = list(bridge_config.get("bridge_plugins", []))
-        import sys
-
-        print(f"[bridge_plugins] Found {len(entries)} entries: {entries}", file=sys.stderr, flush=True)
 
         plugins: List[BridgePluginBase] = []
         for entry in entries:
@@ -196,19 +193,12 @@ class BridgeNode(Node):
                     )
                 plugin = cls(self, self.sim, entry.get("config", {}))
                 plugins.append(plugin)
-                print(f"[bridge_plugins] Loaded: {cls_path}", file=sys.stderr, flush=True)
                 logger.info("Loaded bridge plugin: %s", cls_path)
             except ImportError as e:
-                print(f"[bridge_plugins] Import error: {cls_path}: {e}", file=sys.stderr, flush=True)
                 logger.warning("Bridge plugin %s not available: %s", cls_path, e)
             except Exception as e:
-                print(f"[bridge_plugins] FAILED: {cls_path}: {e}", file=sys.stderr, flush=True)
-                import traceback as tb
+                logger.error("Failed to load bridge plugin %s: %s", cls_path, e, exc_info=True)
 
-                tb.print_exc(file=sys.stderr)
-                logger.error("Failed to load bridge plugin %s: %s", cls_path, e)
-
-        print(f"[bridge_plugins] Total loaded: {len(plugins)}", file=sys.stderr, flush=True)
         return plugins
 
     # ------------------------------------------------------------------
