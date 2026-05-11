@@ -469,7 +469,7 @@ class MultiRobotSimulationCore:
         if isinstance(plugin_or_cls, SimPlugin):
             plugin = plugin_or_cls
         elif isinstance(plugin_or_cls, type) and issubclass(plugin_or_cls, SimPlugin):
-            plugin = plugin_or_cls(self, config or {})
+            plugin = plugin_or_cls.from_config(self, config or {})
         else:
             raise TypeError(f"Expected SimPlugin instance or subclass, got {plugin_or_cls!r}")
 

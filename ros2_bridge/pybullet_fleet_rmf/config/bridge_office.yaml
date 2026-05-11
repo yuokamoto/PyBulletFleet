@@ -50,7 +50,7 @@ bridge_plugins:
   - class: pybullet_fleet_rmf.workcell_handler.WorkcellHandler
     config:
       item_search_radius: 1.0
-      attach_z_offset: 0.15
+      attach_offset: [0.0, 0.0, 0.15, 0.0, 0.0, 0.0]
       # Workcell positions from office nav graph waypoints.
       # Workcell positions from the generated office.world SDF.
       # These correspond to the TeleportDispenser/TeleportIngestor model
@@ -60,10 +60,10 @@ bridge_plugins:
       overrides:
         coke_dispenser:
           position: [17.755, -5.501, 1.08]     # SDF model pose (pantry counter)
-          item:                        # fallback cargo uses coke mesh
+          item_shape:                  # fallback cargo uses coke mesh
             mesh_path: "/root/.gz/fuel/fuel.gazebosim.org/openrobotics/models/coke/6/meshes/coke.obj"
             mesh_scale: [1.0, 1.0, 1.0]
-            mass: 0.3
+          item_mass: 0.3
           spawn_offset: [0.0, 0.0, 0.02, 0.0, 0.0, 0.0]  # slight offset above counter
           item_search_radius: 2.0      # wider: waypoint is ~0.9m from model
         coke_ingestor:
@@ -82,7 +82,13 @@ entities:
     navigation_2d: true
     controller_config:
       type: differential
-      default_direction: auto
+      config:
+        default_direction: auto
+    plugins:
+      - type: battery
+        config:
+          discharge_rate: 0.001
+          charge_rate: 0.005
 
   - name: tinyRobot2
     sdf_path: "/rmf_demos_ws/install/rmf_demos_assets/share/rmf_demos_assets/models/TinyRobot/model.sdf"
@@ -94,7 +100,13 @@ entities:
     navigation_2d: true
     controller_config:
       type: differential
-      default_direction: auto
+      config:
+        default_direction: auto
+    plugins:
+      - type: battery
+        config:
+          discharge_rate: 0.001
+          charge_rate: 0.005
 
   # ── Doors (Door) ─────────────────────────────
   # Positions are at hinge vertex (v1) from office.building.yaml.

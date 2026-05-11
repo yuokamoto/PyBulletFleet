@@ -45,14 +45,95 @@ methods your plugin needs.
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Type
 
-from pybullet_fleet.config_utils import resolve_class
+from pybullet_fleet.plugin_utils import PluginRegistry, from_config_introspect
 
 if TYPE_CHECKING:
     from pybullet_fleet.core_simulation import MultiRobotSimulationCore
 
 logger = logging.getLogger(__name__)
+
+
+# ------------------------------------------------------------------
+# Registry
+# ------------------------------------------------------------------
+
+_registry: PluginRegistry["SimPlugin"] = PluginRegistry("sim_plugin")
+
+
+def register_sim_plugin(name: str, cls: Type["SimPlugin"]) -> None:
+    """Register a sim plugin class under *name*."""
+    _registry.register(name, cls)
+
+
+def create_sim_plugin(
+    name: str,
+    sim_core: "MultiRobotSimulationCore",
+    config: Optional[Dict[str, Any]] = None,
+    frequency: Optional[float] = None,
+) -> "SimPlugin":
+    """Create a sim plugin by registered *name*.
+
+    Convenience wrapper around :func:`create_sim_plugin_from_entry`.
+
+    Args:
+        name: Registry name (e.g. ``"workcell"``).
+        sim_core: The simulation core instance.
+        config: Optional configuration dict.
+        frequency: Step frequency in Hz (``None`` = every step).
+
+    Raises:
+        KeyError: If *name* is not registered.
+    """
+    entry: Dict[str, Any] = {"type": name, "config": config or {}}
+    if frequency is not None:
+        entry["frequency"] = frequency
+    return create_sim_plugin_from_entry(entry, sim_core)
+
+
+def create_sim_plugin_from_entry(
+    entry: Dict[str, Any],
+    sim_core: "MultiRobotSimulationCore",
+) -> "SimPlugin":
+    """Create a sim plugin from a YAML-style config entry.
+
+    Supports two formats:
+
+    - **Registry shorthand**: ``{"type": "workcell", "config": {...}}``
+    - **Dotted path**: ``{"class": "my_pkg.MyPlugin", "config": {...}}``
+
+    Both formats support an optional ``frequency`` field (Hz).
+
+    Args:
+        entry: Plugin definition dict with ``type`` or ``class`` key.
+        sim_core: The simulation core instance.
+
+    Returns:
+        Instantiated :class:`SimPlugin` with ``frequency`` set.
+
+    Raises:
+        KeyError: If ``type`` is not in the registry.
+        TypeError: If ``class`` does not resolve to a SimPlugin subclass.
+        ValueError: If neither ``type`` nor ``class`` is present.
+    """
+    cls = _registry.resolve_from_entry(entry, SimPlugin)
+    config = entry.get("config", {})
+    freq = entry.get("frequency", None)
+
+    plugin = cls.from_config(sim_core, config)
+    plugin.frequency = freq
+    return plugin
+
+
+def list_sim_plugins() -> Dict[str, Type["SimPlugin"]]:
+    """Return a copy of the sim plugin registry for inspection."""
+    return _registry.items()
+
+
+# ------------------------------------------------------------------
+# Base class
+# ------------------------------------------------------------------
 
 
 class SimPlugin:
@@ -69,18 +150,40 @@ class SimPlugin:
 
     Lifecycle::
 
-        __init__(sim_core, config)   # construction (before world/robots)
-        on_init()                    # after world/robots are spawned
-        on_step(dt)                  # each simulation step (frequency-controlled)
-        on_reset()                   # when simulation is reset
-        on_shutdown()                # before PyBullet disconnects
+        __init__(sim_core)               # construction (typed kwargs in subclasses)
+        on_init()                        # after world/robots are spawned
+        on_step(dt)                      # each simulation step (frequency-controlled)
+        on_reset()                       # when simulation is reset
+        on_shutdown()                    # before PyBullet disconnects
+
+    Subclasses with a ``_registry_name`` class attribute are auto-registered
+    via ``_registry_name`` class attribute (e.g. ``_registry_name = "workcell"``).
     """
 
-    def __init__(self, sim_core: "MultiRobotSimulationCore", config: Dict[str, Any]) -> None:
+    def __init_subclass__(cls, **kwargs):
+        super().__init_subclass__(**kwargs)
+        _registry.auto_register_subclass(cls)
+
+    def __init__(self, sim_core: "MultiRobotSimulationCore") -> None:
         self.sim_core = sim_core
-        self.config = config
+        self.config: Dict[str, Any] = {}
         self.frequency: Optional[float] = None  # Step frequency in Hz (None = every step)
         self._accumulator: float = 0.0  # Time accumulator for frequency control
+
+    @classmethod
+    def from_config(cls, sim_core: "MultiRobotSimulationCore", config: Dict[str, Any] | None = None) -> "SimPlugin":
+        """Create from config dict, matching keys to ``__init__`` parameters.
+
+        Works like :meth:`Controller.from_config`: inspects the subclass
+        ``__init__`` signature and passes matching keys as kwargs.
+        The raw *config* dict is stored as :attr:`config`.
+
+        Args:
+            sim_core: The simulation core instance.
+            config: Configuration dict whose keys are matched to ``__init__``
+                parameters (unmatched keys are silently ignored).
+        """
+        return from_config_introspect(cls, (sim_core,), config or {})
 
     def on_init(self) -> None:
         """Called after world and robots are spawned.
@@ -122,8 +225,11 @@ def _load_plugins_from_config(
     Each plugin's :attr:`frequency` is set from the YAML entry's
     ``frequency`` field (``None`` means every step).
 
+    Supports both ``type:`` (registry lookup) and ``class:`` (dotted path)
+    entries.
+
     Args:
-        plugin_configs: List of dicts, each with ``class`` (dotted path),
+        plugin_configs: List of dicts, each with ``type`` or ``class``,
             optional ``frequency`` (Hz), and optional ``config`` (dict).
         sim_core: The simulation core instance passed to each plugin.
 
@@ -132,6 +238,7 @@ def _load_plugins_from_config(
         ``frequency`` already set).
 
     Raises:
+        KeyError: If ``type`` is not in the registry.
         ValueError: If ``class`` is not a valid dotted path.
         ModuleNotFoundError: If the module cannot be imported.
         AttributeError: If the class is not found in the module.
@@ -140,18 +247,8 @@ def _load_plugins_from_config(
     plugins: List[SimPlugin] = []
 
     for entry in plugin_configs:
-        dotted_path = entry["class"]
-        freq = entry.get("frequency", None)
-        config = entry.get("config", {})
-
-        cls = resolve_class(dotted_path)
-
-        if not (isinstance(cls, type) and issubclass(cls, SimPlugin)):
-            raise TypeError(f"Plugin class must be a SimPlugin subclass, got {cls!r}. " f"Did you inherit from SimPlugin?")
-
-        plugin = cls(sim_core, config)
-        plugin.frequency = freq
+        plugin = create_sim_plugin_from_entry(entry, sim_core)
         plugins.append(plugin)
-        logger.info("Loaded plugin %r from %s", cls.__name__, dotted_path)
+        logger.info("Loaded sim plugin %r", plugin.__class__.__name__)
 
     return plugins

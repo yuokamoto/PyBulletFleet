@@ -12,7 +12,7 @@ from pybullet_fleet.action import PickAction, DropAction
 from pybullet_fleet.agent import Agent, AgentSpawnParams
 from pybullet_fleet.core_simulation import MultiRobotSimulationCore, SimulationParams
 from pybullet_fleet.geometry import Pose
-from pybullet_fleet.plugins.workcell_plugin import WorkcellPlugin, PendingAction
+from pybullet_fleet.plugins.workcell_plugin import WorkcellPlugin
 from pybullet_fleet.sim_object import SimObject, SimObjectSpawnParams, ShapeParams
 from pybullet_fleet.types import ActionStatus, CollisionMode
 
@@ -63,6 +63,11 @@ class TestPluginConstruction:
         plugin = sim.register_plugin(WorkcellPlugin)
         assert plugin._item_search_radius == 1.0
         assert plugin._return_home is True
+        # Default item shape is a box
+        assert plugin._default_item_visual.shape_type == "box"
+        assert plugin._default_item_visual.half_extents == [0.15, 0.15, 0.1]
+        assert plugin._default_item_visual.rgba_color == [0.8, 0.5, 0.2, 1.0]
+        assert plugin._default_item_mass == 0.5
         p.disconnect(sim.client)
 
     def test_custom_config(self):
@@ -73,6 +78,54 @@ class TestPluginConstruction:
         )
         assert plugin._item_search_radius == 2.5
         assert plugin._return_home is False
+        p.disconnect(sim.client)
+
+    def test_custom_item_shape(self):
+        """Top-level item_shape overrides default box shape."""
+        sim = _make_sim()
+        plugin = sim.register_plugin(
+            WorkcellPlugin,
+            config={
+                "item_shape": {
+                    "shape_type": "box",
+                    "half_extents": [0.3, 0.3, 0.2],
+                    "rgba_color": [1.0, 0.0, 0.0, 1.0],
+                },
+                "item_mass": 2.0,
+            },
+        )
+        assert plugin._default_item_visual.half_extents == [0.3, 0.3, 0.2]
+        assert plugin._default_item_visual.rgba_color == [1.0, 0.0, 0.0, 1.0]
+        assert plugin._default_item_mass == 2.0
+        p.disconnect(sim.client)
+
+    def test_item_shape_infers_mesh_type(self):
+        """shape_type is inferred as 'mesh' when mesh_path is present."""
+        sim = _make_sim()
+        plugin = sim.register_plugin(
+            WorkcellPlugin,
+            config={
+                "item_shape": {
+                    "mesh_path": "robots/simple_cube.urdf",
+                    "mesh_scale": [0.5, 0.5, 0.5],
+                },
+            },
+        )
+        assert plugin._default_item_visual.shape_type == "mesh"
+        assert plugin._default_item_visual.mesh_path == "robots/simple_cube.urdf"
+        p.disconnect(sim.client)
+
+    def test_item_shape_infers_box_type(self):
+        """shape_type defaults to 'box' when not specified and no mesh_path."""
+        sim = _make_sim()
+        plugin = sim.register_plugin(
+            WorkcellPlugin,
+            config={
+                "item_shape": {"half_extents": [0.2, 0.2, 0.1]},
+            },
+        )
+        assert plugin._default_item_visual.shape_type == "box"
+        assert plugin._default_item_visual.half_extents == [0.2, 0.2, 0.1]
         p.disconnect(sim.client)
 
     def test_spawn_fallback_default_enabled(self):
@@ -191,7 +244,11 @@ class TestWorkcellPosition:
         p.disconnect(sim.client)
 
     def test_nearest_robot_uses_3d_distance(self):
-        """Nearest robot considers z distance for multi-floor."""
+        """3D distance matters: robot closer in Z wins over robot closer in XY.
+
+        Without the dz term the XY-closer robot would win — this layout
+        ensures the test *fails* if only 2D distance is used.
+        """
         sim = _make_sim()
         plugin = sim.register_plugin(
             WorkcellPlugin,
@@ -199,19 +256,20 @@ class TestWorkcellPosition:
                 "overrides": {"wc_floor2": {"position": [0.0, 0.0, 10.0]}},
             },
         )
-        # Both robots at same XY, but robot_high is on same floor as workcell
-        robot_low = _spawn_agent(sim, "low", 0.0, 0.0)  # z≈0.05
-        robot_high = _spawn_agent(sim, "high", 1.0, 0.0)  # z≈0.05, but closer XY-only
+        # close_xy: near in XY (1m) but on ground floor (z≈0.05)
+        #   2D dist = 1.0,  3D dist = sqrt(1 + 0 + ~100) ≈ 10.05
+        # close_z:  far in XY (5m) but teleported near workcell floor (z=9.5)
+        #   2D dist = 5.0,  3D dist = sqrt(25 + 0 + 0.25) ≈ 5.02
+        # With 2D only → close_xy wins (1 < 5)  ← WRONG
+        # With 3D     → close_z  wins (5.02 < 10.05) ← CORRECT
+        close_xy = _spawn_agent(sim, "close_xy", 1.0, 0.0)
+        close_z = _spawn_agent(sim, "close_z", 5.0, 0.0)
+        # Teleport close_z to near the workcell's floor (use set_pose_raw
+        # so the kinematic pose cache is updated)
+        close_z.set_pose_raw([5.0, 0.0, 9.5], [0, 0, 0, 1])
 
-        # With 2D distance, robot_high (1m XY) would be farther than robot_low (0m XY)
-        # but with 3D, robot_low is ~10m away (z diff), robot_high is ~sqrt(1+100)≈10.05m
-        # So robot_low is still nearest in 3D here. Let's use a clearer setup:
-        # workcell at z=10, robot_low at z=0 (10m z-diff), robot_far at x=5 z=0 (~11.2m)
-        robot_far = _spawn_agent(sim, "far", 5.0, 0.0)
-        result = plugin.find_nearest_robot("wc_floor2", [robot_low, robot_far])
-        # robot_low: 3D dist = sqrt(0+0+100) = 10
-        # robot_far: 3D dist = sqrt(25+0+100) ≈ 11.18
-        assert result.name == "low"
+        result = plugin.find_nearest_robot("wc_floor2", [close_xy, close_z])
+        assert result.name == "close_z"
         p.disconnect(sim.client)
 
 
@@ -389,7 +447,7 @@ class TestDispense:
         p.disconnect(sim.client)
 
     def test_dispense_fallback_uses_item_config_box(self):
-        """Per-workcell item config overrides global half_extents and color."""
+        """Per-workcell item_shape overrides global shape and color."""
         sim = _make_sim()
         plugin = sim.register_plugin(
             WorkcellPlugin,
@@ -397,11 +455,11 @@ class TestDispense:
                 "overrides": {
                     "wc": {
                         "position": [0.0, 0.0],
-                        "item": {
+                        "item_shape": {
                             "half_extents": [0.3, 0.3, 0.2],
-                            "color": [1.0, 0.0, 0.0, 1.0],
-                            "mass": 1.5,
+                            "rgba_color": [1.0, 0.0, 0.0, 1.0],
                         },
+                        "item_mass": 1.5,
                     },
                 },
             },
@@ -415,7 +473,13 @@ class TestDispense:
         p.disconnect(sim.client)
 
     def test_dispense_fallback_uses_item_config_mesh(self):
-        """Per-workcell item config with mesh_path spawns mesh-based cargo."""
+        """Smoke test: mesh item_shape spawns without error and applies mass.
+
+        Verifies that the mesh code path in _spawn_fallback_cargo (which
+        calls p.createVisualShape with GEOM_MESH) doesn't crash.  Shape
+        attributes (mesh_path, mesh_scale) are not accessible from the
+        spawned SimObject, so only mass is checked — same as the box test.
+        """
         sim = _make_sim()
         plugin = sim.register_plugin(
             WorkcellPlugin,
@@ -423,11 +487,12 @@ class TestDispense:
                 "overrides": {
                     "wc": {
                         "position": [0.0, 0.0],
-                        "item": {
+                        "item_shape": {
                             "mesh_path": "robots/simple_cube.urdf",
                             "mesh_scale": [0.5, 0.5, 0.5],
-                            "color": [0.0, 1.0, 0.0, 1.0],
+                            "rgba_color": [0.0, 1.0, 0.0, 1.0],
                         },
+                        "item_mass": 2.5,
                     },
                 },
             },
@@ -438,6 +503,7 @@ class TestDispense:
         assert isinstance(pick, PickAction)
         cargo = [o for o in sim.sim_objects if o.name == "robot0_cargo"]
         assert len(cargo) == 1
+        assert cargo[0].mass == 2.5
         p.disconnect(sim.client)
 
     def test_dispense_no_fallback_when_disabled(self):
@@ -475,50 +541,6 @@ class TestDispense:
         assert "1" in plugin.pending_actions
         p.disconnect(sim.client)
 
-    def test_dispense_auto_discovers_position_from_robot(self):
-        """When workcell has no configured position, use robot's current position."""
-        sim = _make_sim()
-        # No overrides — workcell position unknown
-        plugin = sim.register_plugin(
-            WorkcellPlugin,
-            config={
-                "item_search_radius": 5.0,
-            },
-        )
-        robot = _spawn_agent(sim, "robot0", 8.0, 3.0)
-
-        _, pick = plugin.dispense("unknown_wc", robot, key="r1")
-
-        # Should create a PickAction (not return None)
-        assert isinstance(pick, PickAction)
-        assert "r1" in plugin.pending_actions
-
-        # Position should be auto-discovered and registered
-        pos = plugin.get_workcell_position("unknown_wc")
-        assert pos is not None
-        assert abs(pos[0] - 8.0) < 0.1
-        assert abs(pos[1] - 3.0) < 0.1
-        p.disconnect(sim.client)
-
-    def test_dispense_auto_discovered_position_reused(self):
-        """Auto-discovered workcell position is reused for subsequent requests."""
-        sim = _make_sim()
-        plugin = sim.register_plugin(WorkcellPlugin)
-        robot = _spawn_agent(sim, "robot0", 5.0, 7.0)
-
-        plugin.dispense("wc_auto", robot, key="r1")
-
-        # Move robot far away
-        robot.set_pose(Pose.from_xyz(50.0, 50.0, 0.05))
-
-        # Second dispense should use the first-discovered position, not robot's new position
-        plugin.dispense("wc_auto", robot, key="r2")
-        pos = plugin.get_workcell_position("wc_auto")
-        assert pos is not None
-        assert abs(pos[0] - 5.0) < 0.1  # original position
-        assert abs(pos[1] - 7.0) < 0.1
-        p.disconnect(sim.client)
-
 
 # ---------------------------------------------------------------------------
 # Tests: Ingest
@@ -541,22 +563,14 @@ class TestIngest:
         assert "drop1" in plugin.pending_actions
         p.disconnect(sim.client)
 
-    def test_ingest_auto_discovers_position_from_robot(self):
-        """When ingestor has no configured position, register it from robot position."""
+    def test_ingest_unknown_workcell_returns_none(self):
+        """When ingestor has no configured position, ingest returns None."""
         sim = _make_sim()
         plugin = sim.register_plugin(WorkcellPlugin)
         robot = _spawn_agent(sim, "robot0", 4.0, 6.0)
 
         drop = plugin.ingest("unknown_ingestor", robot, key="d1")
-
-        assert isinstance(drop, DropAction)
-        assert "d1" in plugin.pending_actions
-
-        # Position should be auto-registered
-        pos = plugin.get_workcell_position("unknown_ingestor")
-        assert pos is not None
-        assert abs(pos[0] - 4.0) < 0.1
-        assert abs(pos[1] - 6.0) < 0.1
+        assert drop is None
         p.disconnect(sim.client)
 
 
@@ -654,50 +668,14 @@ class TestPendingCompletion:
 
 
 class TestReturnHome:
-    def test_item_returns_after_delay(self):
-        sim = _make_sim()
-        plugin = sim.register_plugin(WorkcellPlugin, config={"return_home_delay": 1.0})
+    def test_return_home_after_delay_preserves_orientation(self):
+        """Full lifecycle: dispense → pick → ingest → drop → return-home.
 
-        item = _spawn_item(sim, "cargo", 2.0, 3.0)
-        plugin._item_initial_poses[item.body_id] = ((2.0, 3.0, 0.1), (0.0, 0.0, 0.0, 1.0))
-
-        # Move item away
-        item.set_pose_raw([10.0, 10.0, 0.1], [0, 0, 0, 1])
-
-        # Schedule return
-        from pybullet_fleet.plugins.workcell_plugin import _ReturnHomeEntry
-
-        plugin._return_home_queue.append(
-            _ReturnHomeEntry(
-                body_id=item.body_id,
-                home_position=(2.0, 3.0, 0.1),
-                home_orientation=(0.0, 0.0, 0.0, 1.0),
-                scheduled_time=1.0,
-            )
-        )
-
-        # Before schedule time
-        sim.sim_time = 0.5
-        plugin._process_return_home()
-        pos = item.get_pose().position
-        assert abs(pos[0] - 10.0) < 0.1  # still at 10,10
-
-        # After schedule time
-        sim.sim_time = 1.5
-        plugin._process_return_home()
-        pos = item.get_pose().position
-        assert abs(pos[0] - 2.0) < 0.1  # returned to 2,3
-        assert abs(pos[1] - 3.0) < 0.1
-        p.disconnect(sim.client)
-
-    def test_return_home_disabled(self):
-        sim = _make_sim()
-        plugin = sim.register_plugin(WorkcellPlugin, config={"return_home_delay": 0})
-        assert plugin._return_home is False
-        p.disconnect(sim.client)
-
-    def test_return_home_preserves_orientation(self):
-        """Return-home restores the item's original orientation, not identity."""
+        Verifies:
+        1. Item does NOT teleport before the scheduled delay.
+        2. Item teleports back to its original position after the delay.
+        3. Original orientation (non-identity) is preserved.
+        """
         sim = _make_sim()
         plugin = sim.register_plugin(
             WorkcellPlugin,
@@ -723,25 +701,32 @@ class TestReturnHome:
         pick.status = ActionStatus.COMPLETED
         plugin.on_step(0.1)
 
-        # Now ingest (drop) and simulate completion
+        # Ingest (drop) and simulate completion — this schedules return-home
         drop = plugin.ingest("wc", robot, key="i1")
         drop._target_object = item
         drop.status = ActionStatus.COMPLETED
+        sim.sim_time = 5.0  # set a baseline sim_time for scheduling
         plugin.on_step(0.1)
 
         # Move item away with different orientation
         item.set_pose_raw([10.0, 10.0, 0.1], [0, 0, 0, 1])
 
-        # Process return-home
-        sim.sim_time = 10.0
+        # 1. Before delay expires — item should NOT have returned
+        sim.sim_time = 5.5  # only 0.5s after scheduling (delay=1.0)
+        plugin._process_return_home()
+        pos = item.get_pose().position
+        assert abs(pos[0] - 10.0) < 0.1, "Item should still be at 10,10 before delay"
+
+        # 2. After delay expires — item should return
+        sim.sim_time = 7.0  # well past the scheduled time
         plugin._process_return_home()
 
         pose = item.get_pose()
-        # Position should be item's original spawn position (snapshotted
-        # by _snapshot_pickable_poses before PickAction runs).
+        # Position should be item's original spawn position
         assert abs(pose.position[0] - 2.5) < 0.1  # item x
         assert abs(pose.position[1] - 3.5) < 0.1  # item y
-        # Orientation should be the original (90° yaw), not identity
+
+        # 3. Orientation should be the original (90° yaw), not identity
         restored_quat = pose.orientation
         for i in range(4):
             assert (

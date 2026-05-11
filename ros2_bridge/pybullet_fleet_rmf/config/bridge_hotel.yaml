@@ -52,7 +52,13 @@ entities:
     navigation_2d: true
     controller_config:
       type: differential
-      default_direction: auto
+      config:
+        default_direction: auto
+    plugins:
+      - type: battery
+        config:
+          discharge_rate: 0.001
+          charge_rate: 0.005
 
   # ── Fleet: deliveryRobot (nav_graph 1) ──────────────
   - name: deliveryBot_1
@@ -65,7 +71,13 @@ entities:
     navigation_2d: true
     controller_config:
       type: differential
-      default_direction: auto
+      config:
+        default_direction: auto
+    plugins:
+      - type: battery
+        config:
+          discharge_rate: 0.001
+          charge_rate: 0.005
 
   # ── Fleet: cleanerBotA (nav_graph 2) ────────────────
   - name: cleanerBotA_1
@@ -78,7 +90,13 @@ entities:
     navigation_2d: true
     controller_config:
       type: differential
-      default_direction: auto
+      config:
+        default_direction: auto
+    plugins:
+      - type: battery
+        config:
+          discharge_rate: 0.001
+          charge_rate: 0.005
 
   - name: cleanerBotA_2
     sdf_path: "/rmf_demos_ws/install/rmf_demos_assets/share/rmf_demos_assets/models/CleanerBotA/model.sdf"
@@ -90,7 +108,13 @@ entities:
     navigation_2d: true
     controller_config:
       type: differential
-      default_direction: auto
+      config:
+        default_direction: auto
+    plugins:
+      - type: battery
+        config:
+          discharge_rate: 0.001
+          charge_rate: 0.005
 
   # ── Doors (Door) ─────────────────────────────
   # L1 doors — hinge positions from hotel.building.yaml vertices

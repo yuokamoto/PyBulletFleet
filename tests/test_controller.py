@@ -14,10 +14,10 @@ from pybullet_fleet import Agent, AgentSpawnParams, Pose
 from pybullet_fleet.controller import (
     Controller,
     KinematicController,
-    CONTROLLER_REGISTRY,
     OmniController,
     DifferentialController,
     create_controller,
+    list_controllers,
     register_controller,
 )
 from pybullet_fleet.types import MotionMode, MovementDirection
@@ -368,8 +368,9 @@ class TestControllerRegistry:
 
     def test_builtins_registered(self):
         """Built-in controllers are auto-registered."""
-        assert "omni" in CONTROLLER_REGISTRY
-        assert "differential" in CONTROLLER_REGISTRY
+        registry = list_controllers()
+        assert "omni" in registry
+        assert "differential" in registry
 
     def test_create_velocity(self):
         """create_controller('omni_velocity') returns OmniController."""
@@ -401,12 +402,14 @@ class TestControllerRegistry:
                 return False
 
         register_controller("my_custom", MyController)
-        assert "my_custom" in CONTROLLER_REGISTRY
+        assert "my_custom" in list_controllers()
         ctrl = create_controller("my_custom")
         assert isinstance(ctrl, MyController)
 
         # Cleanup
-        del CONTROLLER_REGISTRY["my_custom"]
+        from pybullet_fleet.controller import _registry
+
+        _registry.unregister("my_custom")
 
 
 # -----------------------------------------------------------------------
@@ -662,7 +665,7 @@ class TestAutoDirection:
             urdf_path="robots/mobile_robot.urdf",
             initial_pose=Pose.from_yaw(0, 0, 0.05, 0.0),
             motion_mode=MotionMode.DIFFERENTIAL,
-            controller_config={"type": "differential", "default_direction": "auto"},
+            controller_config={"type": "differential", "config": {"default_direction": "auto"}},
         )
         agent = Agent.from_params(params, sim_core)
         ctrl = agent._controllers[0]
@@ -678,7 +681,7 @@ class TestAutoDirection:
                 "name": "test_robot",
                 "urdf_path": "robots/mobile_robot.urdf",
                 "motion_mode": "differential",
-                "controller_config": {"type": "differential", "default_direction": "auto"},
+                "controller_config": {"type": "differential", "config": {"default_direction": "auto"}},
             }
         )
         agent = Agent.from_params(params, sim_core)
@@ -870,7 +873,7 @@ class TestSpawnParamsControllerConfig:
         params = AgentSpawnParams(
             urdf_path="robots/mobile_robot.urdf",
             initial_pose=Pose.from_xyz(0, 0, 0.05),
-            controller_config={"type": "differential", "max_linear_vel": 1.5},
+            controller_config={"type": "differential", "config": {"max_linear_vel": 1.5}},
         )
         agent = Agent.from_params(params, sim_core)
         assert isinstance(agent._controller, DifferentialController)

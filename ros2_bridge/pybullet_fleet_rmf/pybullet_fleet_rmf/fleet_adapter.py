@@ -61,7 +61,7 @@ if HAS_RMF:
     from rmf_fleet_msgs.msg import RobotMode
     from rmf_fleet_msgs.msg import SpeedLimitRequest
 
-    from pybullet_fleet_ros.robot_client_api import RobotClientAPI
+    from pybullet_fleet_rmf.robot_client_api import RobotClientAPI
 
 
 def main(argv=sys.argv):
@@ -177,6 +177,10 @@ def main(argv=sys.argv):
     pybullet_config = config_yaml.get("pybullet_fleet", {})
     update_period = 1.0 / pybullet_config.get("robot_state_update_frequency", 10.0)
 
+    # The nav graph is used to detect charger waypoints via the
+    # is_charger attribute (set in the building.yaml / nav_graph).
+    nav_graph = fleet_config.graph
+
     robots: dict[str, "RobotAdapter"] = {}
     for robot_name in fleet_config.known_robots:
         robot_config = fleet_config.get_known_robot_configuration(robot_name)
@@ -187,6 +191,7 @@ def main(argv=sys.argv):
             node,
             api,
             fleet_handle,
+            nav_graph=nav_graph,
         )
 
     node.get_logger().info(f"EasyFullControl fleet adapter started: {len(robots)} robots")
@@ -275,6 +280,7 @@ class RobotAdapter:
         node,
         api,
         fleet_handle,
+        nav_graph=None,
     ):
         self.name = name
         self.execution = None
@@ -288,6 +294,7 @@ class RobotAdapter:
         self.override = None
         self.issue_cmd_thread = None
         self.cancel_cmd_event = threading.Event()
+        self.nav_graph = nav_graph
 
     def update(self, state, data):
         """Update RMF with robot state and check command completion."""
@@ -314,24 +321,50 @@ class RobotAdapter:
             lambda category, description, execution: self.execute_action(category, description, execution),
         )
 
+    def _is_charger_waypoint(self, destination) -> bool:
+        """Check if destination is a charger waypoint via the nav graph.
+
+        Uses ``destination.graph_index`` to look up the waypoint's
+        ``charger`` attribute in the traffic graph.  This is the
+        canonical source of truth — set via ``is_charger: true`` in
+        the building YAML / nav_graph file.
+        """
+        if self.nav_graph is None:
+            return False
+        graph_index = getattr(destination, "graph_index", None)
+        if graph_index is None:
+            return False
+        try:
+            wp = self.nav_graph.get_waypoint(graph_index)
+            return bool(wp.charger)
+        except Exception:
+            return False
+
     def navigate(self, destination, execution):
         """Navigate to a destination via NavigateToPose action.
 
-        If a dock name is specified, logs a warning and falls back to
-        regular navigation (PyBulletFleet has no docking server).
+        When the destination is a charger waypoint (detected via the
+        nav graph's ``is_charger`` attribute), navigates to the
+        position first, then starts charging via the bridge's
+        ``set_charging`` service.  When navigating away from a
+        charger, charging is stopped automatically.
         """
         self.cmd_id += 1
         self.execution = execution
+
+        # Detect charger destination from nav graph is_charger attribute.
+        wp_name = getattr(destination, "name", "") or ""
+        is_charger = self._is_charger_waypoint(destination)
+
         self.node.get_logger().info(
             f"Commanding [{self.name}] to navigate to "
             f"{destination.position} on map [{destination.map}] "
-            f"(wp={getattr(destination, 'name', '')}): cmd_id {self.cmd_id}"
+            f"(wp={wp_name}, charger={is_charger})"
+            f": cmd_id {self.cmd_id}"
         )
 
-        if destination.dock is not None:
-            self.node.get_logger().info(
-                f"[{self.name}] Dock '{destination.dock}' requested, " "treating as regular navigate (docking not supported)"
-            )
+        # Stop charging whenever we navigate (we're leaving the charger)
+        self.api.stop_charge()
 
         self.attempt_cmd_until_success(
             cmd=self.api.navigate,
@@ -342,6 +375,15 @@ class RobotAdapter:
                 destination.speed_limit,
             ),
         )
+
+        # After arriving at charger waypoint, start charging
+        if is_charger:
+            self.node.get_logger().info(f"[{self.name}] Arrived at charger '{wp_name}' — starting charge")
+            self.cmd_id += 1
+            self.attempt_cmd_until_success(
+                cmd=self.api.start_charge,
+                args=(self.cmd_id,),
+            )
 
     def stop(self, activity):
         """Cancel current navigation with retry."""

@@ -19,6 +19,7 @@ from pybullet_fleet.geometry import Path, Pose
 
 # Robot/Agent management
 from pybullet_fleet.agent import Agent, AgentSpawnParams, IKParams
+from pybullet_fleet.plugins.battery_plugin import BatteryPlugin
 from pybullet_fleet.agent_manager import AgentManager, GridSpawnParams
 
 # Core simulation classes
@@ -51,6 +52,7 @@ from pybullet_fleet.controller import (
     DifferentialController,
     OmniController,
     create_controller,
+    create_controller_from_entry,
     register_controller,
 )
 
@@ -79,7 +81,21 @@ from pybullet_fleet.config_utils import load_yaml_config
 from pybullet_fleet.entity_registry import register_entity_class
 
 # Plugin system
-from pybullet_fleet.sim_plugin import SimPlugin
+from pybullet_fleet.sim_plugin import (
+    SimPlugin,
+    create_sim_plugin,
+    create_sim_plugin_from_entry,
+    list_sim_plugins,
+    register_sim_plugin,
+)
+from pybullet_fleet.agent_plugin import (
+    AgentPlugin,
+    create_agent_plugin,
+    list_agent_plugins,
+    register_agent_plugin,
+)
+from pybullet_fleet.plugin_utils import PluginRegistry
+from pybullet_fleet.plugins.battery_plugin import BatteryPlugin
 
 # Device classes
 from pybullet_fleet.devices.door import Door, DoorParams
@@ -125,6 +141,7 @@ __all__ = [
     # Agent management
     "Agent",
     "AgentSpawnParams",
+    "BatteryPlugin",
     "IKParams",
     "AgentManager",
     "GridSpawnParams",
@@ -153,6 +170,11 @@ __all__ = [
     "register_entity_class",
     # Plugin system
     "SimPlugin",
+    "AgentPlugin",
+    "BatteryPlugin",
+    "create_agent_plugin",
+    "list_agent_plugins",
+    "register_agent_plugin",
     # Device classes
     "Door",
     "DoorParams",

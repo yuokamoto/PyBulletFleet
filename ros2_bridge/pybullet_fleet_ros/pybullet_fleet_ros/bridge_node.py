@@ -24,11 +24,11 @@ from pybullet_fleet import (
     MultiRobotSimulationCore,
     SimEvents,
 )
-from pybullet_fleet.config_utils import load_yaml_config, resolve_class
+from pybullet_fleet.config_utils import load_yaml_config
 from pybullet_fleet.controller import OmniController
 from pybullet_fleet.types import MotionMode
 
-from .bridge_plugin_base import BridgePluginBase
+from .bridge_plugin import BridgePlugin
 from .conversions import sim_time_to_ros_time
 from .handler_registry import HandlerMap, load_handler_map_from_config, resolve_handler_classes
 from .param_utils import get_bool_param, get_float_param
@@ -132,7 +132,9 @@ class BridgeNode(Node):
         actual_count = len(self.sim.agents)
 
         # Bridge plugins (singleton handlers loaded from config)
-        self._bridge_plugins: List[BridgePluginBase] = self._load_bridge_plugins(bridge_config)
+        self._bridge_plugins: List[BridgePlugin] = self._load_bridge_plugins(bridge_config)
+        for bp in self._bridge_plugins:
+            bp.on_init()
 
         # Auto-register/unregister handlers when agents spawn/despawn
         self.sim.events.on(SimEvents.AGENT_SPAWNED, self._on_agent_spawned)
@@ -164,40 +166,41 @@ class BridgeNode(Node):
     # Bridge plugins (singleton handlers loaded from config)
     # ------------------------------------------------------------------
 
-    def _load_bridge_plugins(self, bridge_config: Dict[str, Any]) -> List[BridgePluginBase]:
+    def _load_bridge_plugins(self, bridge_config: Dict[str, Any]) -> List[BridgePlugin]:
         """Dynamically load bridge plugins from config.
 
         Config format::
 
-            bridge:
-              bridge_plugins:
-                - class: pybullet_fleet_ros.workcell_handler.WorkcellHandler
-                  config:
-                    item_search_radius: 1.0
+            bridge_plugins:
+              - class: my_pkg.workcell_handler.WorkcellHandler  # cross-package
+                config:
+                  item_search_radius: 1.0
+              - type: my_plugin        # registry shorthand (same package only)
+                config: {}
 
-        Each plugin class must be a :class:`BridgePluginBase` subclass.
+        Each plugin class must be a :class:`BridgePlugin` subclass.
+
+        Note: ``type:`` shorthand only works when the plugin class module
+        has already been imported (so ``__init_subclass__`` can register it).
+        For cross-package plugins, use the ``class:`` dotted-path format.
         """
+        from .bridge_plugin import create_bridge_plugin_from_entry
+
         entries: List[Dict[str, Any]] = list(bridge_config.get("bridge_plugins", []))
 
-        plugins: List[BridgePluginBase] = []
+        plugins: List[BridgePlugin] = []
         for entry in entries:
-            cls_path = entry.get("class", "")
-            if not cls_path:
+            if not (entry.get("type") or entry.get("class")):
                 continue
+            label = entry.get("type") or entry.get("class", "?")
             try:
-                cls = resolve_class(cls_path)
-                if not (isinstance(cls, type) and issubclass(cls, BridgePluginBase)):
-                    raise TypeError(
-                        f"Bridge plugin class must be a BridgePluginBase subclass, "
-                        f"got {cls!r}. Did you inherit from BridgePluginBase?"
-                    )
-                plugin = cls(self, self.sim, entry.get("config", {}))
+                plugin = create_bridge_plugin_from_entry(entry, self, self.sim)
                 plugins.append(plugin)
-                logger.info("Loaded bridge plugin: %s", cls_path)
+                self.get_logger().info(f"Loaded bridge plugin: {label}")
             except ImportError as e:
-                logger.warning("Bridge plugin %s not available: %s", cls_path, e)
+                self.get_logger().warning(f"Bridge plugin {label} not available: {e}")
             except Exception as e:
-                logger.error("Failed to load bridge plugin %s: %s", cls_path, e, exc_info=True)
+                self.get_logger().error(f"Failed to load bridge plugin {label}: {e}", exc_info=True)
 
         return plugins
 
@@ -316,6 +319,7 @@ class BridgeNode(Node):
                 h.destroy()
         self._handlers.clear()
         for bp in self._bridge_plugins:
+            bp.on_reset()
             bp.destroy()
         self._bridge_plugins.clear()
         self.sim.reset()

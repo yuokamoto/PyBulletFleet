@@ -28,10 +28,13 @@ Config (bridge YAML)::
 
     workcell:
       enabled: true                # default: true
-      item_half_extents: [0.15, 0.15, 0.1]
-      item_color: [0.8, 0.5, 0.2, 1.0]
+      item_shape:                  # ShapeParams-compatible dict
+        shape_type: box
+        half_extents: [0.15, 0.15, 0.1]
+        rgba_color: [0.8, 0.5, 0.2, 1.0]
+      item_mass: 0.5
       item_search_radius: 1.0
-      attach_z_offset: 0.15
+      attach_offset: [0.0, 0.0, 0.15, 0.0, 0.0, 0.0]  # [dx, dy, dz, roll, pitch, yaw]
       return_home_delay: 5.0
 
 The handler auto-discovers workcell names from incoming requests
@@ -47,7 +50,8 @@ from rmf_ingestor_msgs.msg import IngestorRequest, IngestorResult, IngestorState
 
 from pybullet_fleet.plugins.workcell_plugin import WorkcellPlugin, PendingAction
 
-from pybullet_fleet_ros.bridge_plugin_base import BridgePluginBase
+from pybullet_fleet_ros.bridge_plugin import BridgePlugin
+from pybullet_fleet_ros.conversions import sim_time_to_ros_time
 
 logger = logging.getLogger(__name__)
 
@@ -64,7 +68,7 @@ class _WorkcellInfo:
         self.last_result: Optional[int] = None  # cached result for duplicate requests
 
 
-class WorkcellHandler(BridgePluginBase):
+class WorkcellHandler(BridgePlugin):
     """Singleton ROS bridge for all dispensers and ingestors.
 
     Instantiated once by BridgeNode.  Manages the RMF workcell protocol:
@@ -79,15 +83,13 @@ class WorkcellHandler(BridgePluginBase):
     - Result/state message publishing
     """
 
-    def __init__(self, node, sim_core, config: Optional[dict] = None):
-        super().__init__(node, sim_core, config)
+    _registry_name = "workcell"
+
+    def __init__(self, node, sim_core):
+        super().__init__(node, sim_core)
         # Backward-compat aliases used internally
         self._node = node
         self._sim_core = sim_core
-        cfg = self.config
-
-        # Register the WorkcellPlugin on sim_core
-        self._plugin: WorkcellPlugin = sim_core.register_plugin(WorkcellPlugin, config=cfg)
 
         # Tracked workcells (auto-discovered from requests)
         self._dispensers: Dict[str, _WorkcellInfo] = {}
@@ -118,11 +120,18 @@ class WorkcellHandler(BridgePluginBase):
         self._last_state_publish: float = -1.0
         self._state_publish_interval: float = 2.0
 
-        # ── Pre-register workcells from overrides ──
-        # RMF expects workcell State messages to be published before
-        # sending requests.  Without these, the delivery task may skip
-        # the pickup/dropoff phase entirely (RMF thinks no workcell exists).
-        self._pre_register_workcells(cfg)
+    def on_init(self) -> None:
+        """Register WorkcellPlugin and pre-register workcells from config.
+
+        Called by BridgeNode after all plugins are loaded.
+        ``self.config`` is available here (set by ``from_config_introspect``
+        after ``__init__`` returns).
+        """
+        # Register the WorkcellPlugin on sim_core (passes config through)
+        self._plugin: WorkcellPlugin = self._sim_core.register_plugin(WorkcellPlugin, config=self.config)
+
+        # Pre-register workcells from overrides so RMF publishes requests
+        self._pre_register_workcells(self.config)
 
         logger.info("WorkcellHandler started (plugin=%s)", type(self._plugin).__name__)
 
@@ -435,7 +444,10 @@ class WorkcellHandler(BridgePluginBase):
             return
         self._last_state_publish = sim_time
 
-        now = self._node.get_clock().now().to_msg()
+        # Use sim_time directly — with use_sim_time=true, get_clock().now()
+        # returns the same value from /clock, but this avoids the extra call.
+        # now = self._node.get_clock().now().to_msg()
+        now = sim_time_to_ros_time(sim_time)
 
         for info in self._dispensers.values():
             state = DispenserState()

@@ -37,7 +37,7 @@ Registry
 import inspect
 import math
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Dict, List, Optional, Type
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Type
 
 import numpy as np
 from scipy.spatial.transform import Rotation as R  # used only in DifferentialController init
@@ -52,6 +52,7 @@ from pybullet_fleet.geometry import (
     rotate_vector,
 )
 from pybullet_fleet.logging_utils import get_lazy_logger
+from pybullet_fleet.plugin_utils import PluginRegistry, from_config_introspect
 from pybullet_fleet.types import ControllerMode, MovementDirection, PosePhase
 
 from two_point_interpolation import TwoPointInterpolation
@@ -66,29 +67,51 @@ logger = get_lazy_logger(__name__)
 # Registry
 # ---------------------------------------------------------------------------
 
-CONTROLLER_REGISTRY: Dict[str, Type["Controller"]] = {}
+_registry: PluginRegistry["Controller"] = PluginRegistry("controller")
 
 
 def register_controller(name: str, cls: Type["Controller"]) -> None:
     """Register a controller class under *name*."""
-    CONTROLLER_REGISTRY[name] = cls
+    _registry.register(name, cls)
 
 
 def create_controller(name: str, config: Optional[dict] = None) -> "Controller":
     """Create a controller by registered *name*, optionally passing *config*.
 
+    Convenience wrapper around :func:`create_controller_from_entry`.
+
     Raises:
         KeyError: If *name* is not registered.
     """
-    if name not in CONTROLLER_REGISTRY:
-        raise KeyError(f"Unknown controller: {name!r}. Available: {list(CONTROLLER_REGISTRY)}")
-    cls = CONTROLLER_REGISTRY[name]
-    return cls.from_config(config or {})
+    return create_controller_from_entry({"type": name, "config": config or {}})
+
+
+def create_controller_from_entry(entry: Dict[str, Any]) -> "Controller":
+    """Create a controller from a YAML-style entry dict.
+
+    Supports two formats:
+
+    - ``{"type": "omni", "config": {"max_linear_vel": 2.0}}`` — registry lookup.
+    - ``{"class": "my_pkg.MyController", "config": {...}}`` — dotted path.
+
+    Both formats use a nested ``config`` sub-dict for parameters.
+
+    Returns:
+        Instantiated :class:`Controller`.
+
+    Raises:
+        KeyError: If ``type`` is not in the registry.
+        TypeError: If ``class`` does not resolve to a Controller subclass.
+        ValueError: If neither ``type`` nor ``class`` is present.
+    """
+    cls = _registry.resolve_from_entry(entry, Controller)
+    config = entry.get("config", {})
+    return cls.from_config(config)
 
 
 def list_controllers() -> Dict[str, Type["Controller"]]:
     """Return a copy of the controller registry for inspection."""
-    return dict(CONTROLLER_REGISTRY)
+    return _registry.items()
 
 
 # ---------------------------------------------------------------------------
@@ -104,14 +127,12 @@ class Controller(ABC):
     via ``agent.set_pose()``.  No physics forces or torques are applied.
 
     Subclasses with a ``_registry_name`` class attribute are auto-registered
-    in ``CONTROLLER_REGISTRY`` (e.g. ``_registry_name = "omni"``).
+    via ``_registry_name`` class attribute (e.g. ``_registry_name = "omni"``).
     """
 
     def __init_subclass__(cls, **kwargs):
         super().__init_subclass__(**kwargs)
-        name = getattr(cls, "_registry_name", None)
-        if name and not inspect.isabstract(cls):
-            CONTROLLER_REGISTRY[name] = cls
+        _registry.auto_register_subclass(cls)
 
     @abstractmethod
     def compute(self, agent: "Agent", dt: float) -> bool:
@@ -125,10 +146,7 @@ class Controller(ABC):
     @classmethod
     def from_config(cls, config: dict) -> "Controller":
         """Create from config dict, matching keys to ``__init__`` parameters."""
-        sig = inspect.signature(cls.__init__)
-        valid = {p for p in sig.parameters if p != "self"}
-        kwargs = {k: v for k, v in config.items() if k in valid}
-        return cls(**kwargs)
+        return from_config_introspect(cls, (), config)
 
     def on_stop(self, agent: "Agent") -> None:
         """Called when ``stop()`` is invoked on the agent."""

@@ -18,17 +18,17 @@ bridge_plugins:
   - class: pybullet_fleet_rmf.workcell_handler.WorkcellHandler
     config:
       item_search_radius: 2.0
-      attach_z_offset: 0.15
+      attach_offset: [0.0, 0.0, 0.15, 0.0, 0.0, 0.0]
       # Workcell positions from generated airport_terminal.world SDF.
       # These correspond to the TeleportDispenser/TeleportIngestor model
       # poses, matching Gazebo's teleport behaviour for pick/drop.
       overrides:
         mopcart_dispenser:
           position: [23.346, -36.437, 0.0]   # SDF model pose (floor level)
-          item:                               # fallback cargo uses MopCart3 mesh
+          item_shape:                         # fallback cargo uses MopCart3 mesh
             mesh_path: "/root/.gz/fuel/fuel.gazebosim.org/openrobotics/models/mopcart3/2/meshes/MopCart3.obj"
             mesh_scale: [1.0, 1.0, 1.0]
-            mass: 5.0
+          item_mass: 5.0
           item_search_radius: 2.0             # waypoint ~1.2m from model
         mopcart_collector:
           position: [26.063, -48.377, 0.0]    # SDF model pose (floor level)
@@ -65,7 +65,13 @@ entities:
     navigation_2d: true
     controller_config:
       type: differential
-      default_direction: auto
+      config:
+        default_direction: auto
+    plugins:
+      - type: battery
+        config:
+          discharge_rate: 0.001
+          charge_rate: 0.005
 
   - name: tinyRobot_1
     sdf_path: "/rmf_demos_ws/install/rmf_demos_assets/share/rmf_demos_assets/models/TinyRobot/model.sdf"
@@ -77,7 +83,13 @@ entities:
     navigation_2d: true
     controller_config:
       type: differential
-      default_direction: auto
+      config:
+        default_direction: auto
+    plugins:
+      - type: battery
+        config:
+          discharge_rate: 0.001
+          charge_rate: 0.005
 
   - name: tinyRobot_2
     sdf_path: "/rmf_demos_ws/install/rmf_demos_assets/share/rmf_demos_assets/models/TinyRobot/model.sdf"
@@ -89,7 +101,13 @@ entities:
     navigation_2d: true
     controller_config:
       type: differential
-      default_direction: auto
+      config:
+        default_direction: auto
+    plugins:
+      - type: battery
+        config:
+          discharge_rate: 0.001
+          charge_rate: 0.005
 
   - name: tinyRobot_3
     sdf_path: "/rmf_demos_ws/install/rmf_demos_assets/share/rmf_demos_assets/models/TinyRobot/model.sdf"
@@ -101,7 +119,13 @@ entities:
     navigation_2d: true
     controller_config:
       type: differential
-      default_direction: auto
+      config:
+        default_direction: auto
+    plugins:
+      - type: battery
+        config:
+          discharge_rate: 0.001
+          charge_rate: 0.005
 
   # ── Fleet: deliveryRobot (nav_graph 1) ───────────────────────────
   # Spawn positions from airport_terminal.world (charger waypoints)
@@ -115,7 +139,13 @@ entities:
     navigation_2d: true
     controller_config:
       type: differential
-      default_direction: auto
+      config:
+        default_direction: auto
+    plugins:
+      - type: battery
+        config:
+          discharge_rate: 0.001
+          charge_rate: 0.005
 
   - name: deliveryRobot_1
     sdf_path: "/rmf_demos_ws/install/rmf_demos_assets/share/rmf_demos_assets/models/DeliveryRobot/model.sdf"
@@ -127,7 +157,13 @@ entities:
     navigation_2d: true
     controller_config:
       type: differential
-      default_direction: auto
+      config:
+        default_direction: auto
+    plugins:
+      - type: battery
+        config:
+          discharge_rate: 0.001
+          charge_rate: 0.005
 
   - name: deliveryRobot_2
     sdf_path: "/rmf_demos_ws/install/rmf_demos_assets/share/rmf_demos_assets/models/DeliveryRobot/model.sdf"
@@ -139,7 +175,13 @@ entities:
     navigation_2d: true
     controller_config:
       type: differential
-      default_direction: auto
+      config:
+        default_direction: auto
+    plugins:
+      - type: battery
+        config:
+          discharge_rate: 0.001
+          charge_rate: 0.005
 
   # ── Fleet: cleanerBotA (nav_graph 0) ─────────────────────────────
   - name: cleanerBotA_0
@@ -152,7 +194,13 @@ entities:
     navigation_2d: true
     controller_config:
       type: differential
-      default_direction: auto
+      config:
+        default_direction: auto
+    plugins:
+      - type: battery
+        config:
+          discharge_rate: 0.001
+          charge_rate: 0.005
 
   # ── Fleet: cleanerBotE (nav_graph 4) ─────────────────────────────
   - name: cleanerBotE_0
@@ -165,7 +213,13 @@ entities:
     navigation_2d: true
     controller_config:
       type: differential
-      default_direction: auto
+      config:
+        default_direction: auto
+    plugins:
+      - type: battery
+        config:
+          discharge_rate: 0.001
+          charge_rate: 0.005
 
   - name: cleanerBotE_1
     sdf_path: "/rmf_demos_ws/install/rmf_demos_assets/share/rmf_demos_assets/models/CleanerBotE/model.sdf"
@@ -177,7 +231,13 @@ entities:
     navigation_2d: true
     controller_config:
       type: differential
-      default_direction: auto
+      config:
+        default_direction: auto
+    plugins:
+      - type: battery
+        config:
+          discharge_rate: 0.001
+          charge_rate: 0.005
 
   # ── Doors (Door) ─────────────────────────────
   - name: n02_door

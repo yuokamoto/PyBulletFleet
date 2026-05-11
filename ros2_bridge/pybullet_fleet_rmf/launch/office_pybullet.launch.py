@@ -41,11 +41,9 @@ def generate_launch_description():
     rmf_demos_dir = get_package_share_directory("rmf_demos")
     rmf_demos_maps_dir = get_package_share_directory("rmf_demos_maps")
 
-    # Config paths — use our custom fleet config to avoid charging deadlock.
-    # The original rmf_demos config uses finishing_request="charge" +
-    # recharge_soc=1.0 which deadlocks because our sim doesn't drain battery.
     bridge_config = os.path.join(pkg_dir, "config", "bridge_office.yaml")
-    fleet_config = os.path.join(pkg_dir, "config", "tinyRobot_office.yaml")
+    office_config_dir = os.path.join(rmf_demos_dir, "config", "office")
+    fleet_config = os.path.join(office_config_dir, "tinyRobot_config.yaml")
     nav_graph = os.path.join(rmf_demos_maps_dir, "maps", "office", "nav_graphs", "0.yaml")
     building_yaml = os.path.join(rmf_demos_maps_dir, "office", "office.building.yaml")
     rviz_config = os.path.join(rmf_demos_dir, "include", "office", "office.rviz")

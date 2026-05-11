@@ -27,7 +27,8 @@ entities:
     navigation_2d: true
     controller_config:
       type: differential
-      default_direction: auto
+      config:
+        default_direction: auto
 
   - name: tinyRobotB
     sdf_path: "/rmf_demos_ws/install/rmf_demos_assets/share/rmf_demos_assets/models/TinyRobot/model.sdf"
@@ -39,7 +40,8 @@ entities:
     navigation_2d: true
     controller_config:
       type: differential
-      default_direction: auto
+      config:
+        default_direction: auto
 
   - name: tinyRobotC
     sdf_path: "/rmf_demos_ws/install/rmf_demos_assets/share/rmf_demos_assets/models/TinyRobot/model.sdf"
@@ -51,7 +53,8 @@ entities:
     navigation_2d: true
     controller_config:
       type: differential
-      default_direction: auto
+      config:
+        default_direction: auto
 
   - name: tinyRobotD
     sdf_path: "/rmf_demos_ws/install/rmf_demos_assets/share/rmf_demos_assets/models/TinyRobot/model.sdf"
@@ -63,4 +66,5 @@ entities:
     navigation_2d: true
     controller_config:
       type: differential
-      default_direction: auto
+      config:
+        default_direction: auto

@@ -203,7 +203,7 @@ ROS 2 topic/service 層をバイパスし、低レイテンシ・シンプルデ
 
 #### `cargo_relative_pose` on Agent
 
-`WorkcellPlugin._attach_z_offset` を `Agent` / `AgentSpawnParams` に `cargo_relative_pose: Pose` として移動。
+`WorkcellPlugin._attach_offset` を `Agent` / `AgentSpawnParams` に `cargo_relative_pose: Pose` として移動。
 `dispense()` が `robot.cargo_relative_pose` → `PickAction.attach_relative_pose` を設定。
 ロボットごとの取り付け位置（フォークリフト先端 vs AMR 上面 vs グリッパリンク）に対応。
 
@@ -215,6 +215,43 @@ ROS 2 topic/service 層をバイパスし、低レイテンシ・シンプルデ
 
 - `p.changeVisualShape(rgbaColor=[..., alpha=0])` で非表示フロアを透明化
 - キーボードでフロア切替 (1, 2, 3 キー)
+
+---
+
+### Reference Implementation
+
+#### rmf_demos Fleet Adapter 流用パターン
+
+現行の自前 `fleet_adapter` + `RobotClientAPI` (ROS 2 Action/Service 直接通信) に加え、
+`rmf_demos` の `fleet_adapter` + `fleet_manager` を流用するパターンを reference 実装として用意する。
+
+**アーキテクチャ比較:**
+
+```
+[現行] fleet_adapter → RobotClientAPI (ROS 2) → robot_handler → Agent API
+[rmf_demos] fleet_adapter → RobotClientAPI (HTTP) → fleet_manager (FastAPI) → ROS topics → robot_handler
+```
+
+**必要な変更:**
+
+1. **robot_handler に rmf_fleet_msgs トピック追加** (~80行)
+   - `RobotState` publisher — odom + battery_state + mode を集約
+   - `PathRequest` subscriber — waypoints → MoveAction 変換
+   - `ModeRequest` subscriber — charging mode 等のハンドリング
+2. **Launch / config** — `fleet_manager.py` (FastAPI) 起動追加、`fleet_adapter` を rmf_demos 版に差替え
+3. **依存追加** — `rmf_fleet_msgs` (RMF 環境では既存)
+
+**設計方針:** Handler Decomposition と同時に実装する。
+
+- `robot_handler_base.py` — 共通部分 (Agent 参照, TF, timer 管理, pose/battery 取得)
+- `robot_handler.py` — 現行 (standard msgs, NavigateToPose action server)
+- `robot_handler_rmf.py` — rmf_demos 互換 (RobotState pub, PathRequest/ModeRequest sub)
+
+共通 core を base に抽出し、2つの handler を config/launch で切り替え。
+rmf_demos に慣れた人が Gazebo 実装からの移行を理解しやすい reference とする。
+Mid-Term の Plugin Only (Direct Python) パターンには自前実装が適しているため、メインパスは変更しない。
+
+**Depends on:** Handler Decomposition, `rmf_fleet_msgs`, `rmf_demos_fleet_adapter` パッケージ
 
 ---
 

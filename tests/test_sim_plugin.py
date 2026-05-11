@@ -22,8 +22,8 @@ from pybullet_fleet.sim_plugin import SimPlugin, _load_plugins_from_config
 class LifecyclePlugin(SimPlugin):
     """Records every lifecycle call for assertion."""
 
-    def __init__(self, sim_core, config):
-        super().__init__(sim_core, config)
+    def __init__(self, sim_core):
+        super().__init__(sim_core)
         self.calls: list = []
 
     def on_init(self) -> None:
@@ -62,8 +62,8 @@ class ConfigPlugin(SimPlugin):
 class CounterPlugin(SimPlugin):
     """Counts on_step invocations."""
 
-    def __init__(self, sim_core, config):
-        super().__init__(sim_core, config)
+    def __init__(self, sim_core):
+        super().__init__(sim_core)
         self.step_count = 0
 
     def on_init(self) -> None:
@@ -100,7 +100,7 @@ class TestSimPluginABC:
 
     def test_base_class_instantiates_with_noop_defaults(self):
         """SimPlugin can be instantiated directly — all hooks are no-op."""
-        plugin = SimPlugin(None, {})  # type: ignore[arg-type]
+        plugin = SimPlugin(None)  # type: ignore[arg-type]
         assert plugin.sim_core is None
         assert plugin.config == {}
         # All lifecycle methods are callable no-ops
@@ -111,18 +111,18 @@ class TestSimPluginABC:
 
     def test_concrete_subclass_instantiates(self):
         """A concrete subclass can be instantiated."""
-        plugin = LifecyclePlugin(None, {"key": "val"})
+        plugin = LifecyclePlugin.from_config(None, {"key": "val"})
         assert plugin.sim_core is None
         assert plugin.config == {"key": "val"}
 
     def test_on_reset_default_noop(self):
         """on_reset default does nothing (no error)."""
-        plugin = LifecyclePlugin(None, {})
+        plugin = LifecyclePlugin(None)
         plugin.on_reset()  # should not raise
 
     def test_on_shutdown_default_noop(self):
         """on_shutdown default does nothing (no error)."""
-        plugin = LifecyclePlugin(None, {})
+        plugin = LifecyclePlugin(None)
         plugin.on_shutdown()  # should not raise
 
 
@@ -137,7 +137,7 @@ class TestPluginLifecycle:
     def test_register_plugin_instance(self):
         """register_plugin(instance) adds plugin to sim.plugins."""
         sim = _make_sim()
-        plugin = LifecyclePlugin(sim, {})
+        plugin = LifecyclePlugin(sim)
         result = sim.register_plugin(plugin)
         assert result is plugin
         assert plugin in sim.plugins
@@ -163,7 +163,7 @@ class TestPluginLifecycle:
     def test_lifecycle_order(self):
         """on_init → on_step × N → on_shutdown called in order."""
         sim = _make_sim()
-        plugin = LifecyclePlugin(sim, {})
+        plugin = LifecyclePlugin(sim)
         sim.register_plugin(plugin)
 
         # on_init is called explicitly
@@ -186,7 +186,7 @@ class TestPluginLifecycle:
     def test_on_reset_called(self):
         """on_reset is called during sim.reset()."""
         sim = _make_sim()
-        plugin = LifecyclePlugin(sim, {})
+        plugin = LifecyclePlugin(sim)
         sim.register_plugin(plugin)
         sim._init_plugins()
 
@@ -197,7 +197,7 @@ class TestPluginLifecycle:
     def test_plugins_property_returns_copy(self):
         """sim.plugins returns a copy — mutation doesn't affect internals."""
         sim = _make_sim()
-        plugin = LifecyclePlugin(sim, {})
+        plugin = LifecyclePlugin(sim)
         sim.register_plugin(plugin)
         plugins_copy = sim.plugins
         plugins_copy.clear()
@@ -216,7 +216,7 @@ class TestPluginFrequency:
     def test_no_frequency_calls_every_step(self):
         """Plugin with frequency=None is called every step."""
         sim = _make_sim()
-        plugin = CounterPlugin(sim, {})
+        plugin = CounterPlugin(sim)
         sim.register_plugin(plugin, frequency=None)
 
         for _ in range(10):
@@ -228,7 +228,7 @@ class TestPluginFrequency:
     def test_frequency_throttles_calls(self):
         """Plugin with frequency=Hz is called approximately at that rate."""
         sim = _make_sim()
-        plugin = CounterPlugin(sim, {})
+        plugin = CounterPlugin(sim)
         # Default timestep = 0.1s, frequency = 2 Hz → interval = 0.5s → every 5 steps
         sim.register_plugin(plugin, frequency=2.0)
 
@@ -251,8 +251,8 @@ class TestPluginErrorIsolation:
     def test_step_error_logged_and_isolated(self, caplog):
         """Exception in on_step is logged, sim continues stepping."""
         sim = _make_sim()
-        error_plugin = ErrorPlugin(sim, {})
-        counter_plugin = CounterPlugin(sim, {})
+        error_plugin = ErrorPlugin(sim)
+        counter_plugin = CounterPlugin(sim)
         sim.register_plugin(error_plugin)
         sim.register_plugin(counter_plugin)
 
@@ -281,8 +281,8 @@ class TestPluginErrorIsolation:
                 raise RuntimeError("shutdown boom")
 
         sim = _make_sim()
-        error_plugin = ShutdownErrorPlugin(sim, {})
-        lifecycle_plugin = LifecyclePlugin(sim, {})
+        error_plugin = ShutdownErrorPlugin(sim)
+        lifecycle_plugin = LifecyclePlugin(sim)
         sim.register_plugin(error_plugin)
         sim.register_plugin(lifecycle_plugin)
 
@@ -407,7 +407,7 @@ class TestPluginSimCoreAccess:
                 pass
 
         sim = _make_sim()
-        plugin = AgentCheckPlugin(sim, {})
+        plugin = AgentCheckPlugin(sim)
         sim.register_plugin(plugin)
         sim._init_plugins()
         assert plugin.agent_count == 0  # no agents spawned
@@ -417,8 +417,8 @@ class TestPluginSimCoreAccess:
         """plugin.sim_core.sim_time updates during on_step."""
 
         class TimePlugin(SimPlugin):
-            def __init__(self, sim_core, config):
-                super().__init__(sim_core, config)
+            def __init__(self, sim_core):
+                super().__init__(sim_core)
                 self.times: list = []
 
             def on_init(self):
@@ -428,7 +428,7 @@ class TestPluginSimCoreAccess:
                 self.times.append(self.sim_core.sim_time)
 
         sim = _make_sim()
-        plugin = TimePlugin(sim, {})
+        plugin = TimePlugin(sim)
         sim.register_plugin(plugin)
 
         for _ in range(5):

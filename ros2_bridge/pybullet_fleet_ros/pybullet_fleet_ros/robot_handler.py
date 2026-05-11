@@ -21,7 +21,7 @@ from diagnostic_msgs.msg import DiagnosticArray
 from geometry_msgs.msg import PoseStamped, Twist
 from nav_msgs.msg import Odometry
 from nav_msgs.msg import Path as PathMsg
-from sensor_msgs.msg import JointState
+from sensor_msgs.msg import BatteryState, JointState
 from std_msgs.msg import Float64MultiArray
 from trajectory_msgs.msg import JointTrajectory
 
@@ -70,6 +70,8 @@ class RobotHandler(RobotHandlerBase):
     - ``/{name}/execute_action`` action server (ExecuteAction) → blocking with feedback
     - ``/{name}/toggle_attach`` service (SetBool) — rmf_demos cart delivery compat
     - ``/{name}/attach_object`` service (AttachObject) — detailed attach/detach
+    - ``/{name}/set_charging`` service (SetBool) — start/stop battery charging
+    - ``/{name}/battery_state`` publisher (BatteryState) — battery status and SOC
     """
 
     def __init__(
@@ -116,6 +118,13 @@ class RobotHandler(RobotHandlerBase):
         # --- Attach/detach services ---
         self._setup_attach_service(node, ns)
         self._setup_attach_object_service(node, ns)
+
+        # --- Battery (only if plugin is attached) ---
+        self._battery_pub = None
+        self._charging_srv = None
+        if self.agent.battery_plugin is not None:
+            self._battery_pub = node.create_publisher(BatteryState, f"/{ns}/battery_state", 10)
+            self._setup_charging_service(node, ns)
 
         logger.info("RobotHandler created for '%s' (object_id=%d)", ns, agent.object_id)
 
@@ -477,6 +486,37 @@ class RobotHandler(RobotHandlerBase):
         """
         return self.agent.find_nearest_pickable(search_radius=search_radius)
 
+    # ------------------------------------------------------------------
+    # Charging service
+    # ------------------------------------------------------------------
+
+    def _setup_charging_service(self, node: "Node", ns: str) -> None:
+        """Create /{robot}/set_charging SetBool service.
+
+        ``data=True`` starts charging, ``data=False`` stops.
+        Only effective when the agent has a :class:`BatteryPlugin`.
+        """
+        from std_srvs.srv import SetBool
+
+        self._charging_srv = node.create_service(
+            SetBool,
+            f"/{ns}/set_charging",
+            self._set_charging_cb,
+        )
+
+    def _set_charging_cb(self, request, response):  # type: ignore[no-untyped-def]
+        """Handle set_charging service — start/stop battery charging."""
+        if self.agent.battery_plugin is None:
+            response.success = False
+            response.message = "Battery simulation not configured for this agent"
+            return response
+        self.agent.set_charging(request.data)
+        state = "started" if request.data else "stopped"
+        response.success = True
+        response.message = f"Charging {state}"
+        logger.info("'%s': set_charging → %s", self._ns, state)
+        return response
+
     def _cmd_vel_cb(self, msg: Twist) -> None:
         """Store latest cmd_vel for application in next step.
 
@@ -595,6 +635,41 @@ class RobotHandler(RobotHandlerBase):
         # Status & diagnostics
         self._publish_status(stamp)
 
+        # Battery state (skip call entirely when no plugin)
+        if self._battery_pub is not None:
+            self._publish_battery_state(stamp)
+
+    def _publish_battery_state(self, stamp: TimeMsg) -> None:
+        """Publish sensor_msgs/BatteryState with current SOC and status."""
+        bp = self.agent.battery_plugin
+        msg = BatteryState()
+        msg.header.stamp = stamp
+        msg.header.frame_id = self._ns
+        msg.percentage = float(self.agent.battery_soc)
+        msg.present = True
+
+        if self.agent.is_charging:
+            if self.agent.battery_soc >= 1.0:
+                msg.power_supply_status = BatteryState.POWER_SUPPLY_STATUS_FULL
+            else:
+                msg.power_supply_status = BatteryState.POWER_SUPPLY_STATUS_CHARGING
+        elif self.agent.is_moving:
+            msg.power_supply_status = BatteryState.POWER_SUPPLY_STATUS_DISCHARGING
+        elif bp is not None and bp.idle_rate > 0:
+            msg.power_supply_status = BatteryState.POWER_SUPPLY_STATUS_DISCHARGING
+        else:
+            msg.power_supply_status = BatteryState.POWER_SUPPLY_STATUS_NOT_CHARGING
+
+        # Fields we don't simulate — set to NaN per ROS convention
+        msg.voltage = float("nan")
+        msg.current = float("nan")
+        msg.charge = float("nan")
+        msg.capacity = float("nan")
+        msg.design_capacity = float("nan")
+        msg.temperature = float("nan")
+
+        self._battery_pub.publish(msg)
+
     def _publish_joint_states(self, stamp: TimeMsg) -> None:
         """Publish sensor_msgs/JointState for all joints."""
         joints_by_name = self.agent.get_all_joints_state_by_name()
@@ -688,7 +763,7 @@ class RobotHandler(RobotHandlerBase):
 
         goal_pose = ros_pose_to_pbf(goal_handle.request.pose.pose)
         self.agent.set_goal_pose(goal_pose)
-        logger.info("'%s': NavigateToPose started → (%.2f, %.2f)", self._ns, goal_pose.x, goal_pose.y)
+        self._node.get_logger().info(f"'{self._ns}': NavigateToPose started → ({goal_pose.x:.2f}, {goal_pose.y:.2f})")
 
         feedback = NavigateToPose.Feedback()
         poll_period = 0.1  # seconds
@@ -697,7 +772,7 @@ class RobotHandler(RobotHandlerBase):
             if goal_handle.is_cancel_requested:
                 self.agent.stop()
                 goal_handle.canceled()
-                logger.info("'%s': NavigateToPose canceled", self._ns)
+                self._node.get_logger().info(f"'{self._ns}': NavigateToPose canceled")
                 return NavigateToPose.Result()
 
             # Publish feedback
@@ -711,7 +786,7 @@ class RobotHandler(RobotHandlerBase):
             time.sleep(poll_period)
 
         goal_handle.succeed()
-        logger.info("'%s': NavigateToPose succeeded", self._ns)
+        self._node.get_logger().info(f"'{self._ns}': NavigateToPose succeeded")
         return NavigateToPose.Result()
 
     def _follow_path_execute(self, goal_handle):  # type: ignore[no-untyped-def]
@@ -724,7 +799,7 @@ class RobotHandler(RobotHandlerBase):
             return FollowPath.Result()
 
         self.agent.set_path(waypoints)
-        logger.info("'%s': FollowPath started (%d waypoints)", self._ns, len(waypoints))
+        self._node.get_logger().info(f"'{self._ns}': FollowPath started ({len(waypoints)} waypoints)")
 
         feedback = FollowPath.Feedback()
         poll_period = 0.1
@@ -743,7 +818,7 @@ class RobotHandler(RobotHandlerBase):
             time.sleep(poll_period)
 
         goal_handle.succeed()
-        logger.info("'%s': FollowPath succeeded", self._ns)
+        self._node.get_logger().info(f"'{self._ns}': FollowPath succeeded")
         return FollowPath.Result()
 
     def _follow_jt_execute(self, goal_handle):  # type: ignore[no-untyped-def]
@@ -832,4 +907,9 @@ class RobotHandler(RobotHandlerBase):
         # Attach services
         self._node.destroy_service(self._attach_srv)
         self._node.destroy_service(self._attach_object_srv)
+        # Battery
+        if self._battery_pub is not None:
+            self._node.destroy_publisher(self._battery_pub)
+        if self._charging_srv is not None:
+            self._node.destroy_service(self._charging_srv)
         logger.info("RobotHandler destroyed for '%s'", self._ns)

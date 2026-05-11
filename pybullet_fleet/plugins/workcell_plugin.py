@@ -22,10 +22,13 @@ messaging (subscriptions, publishers, result/state messages).
 
 **Config keys** (passed via ``config`` dict)::
 
-    item_half_extents: [0.15, 0.15, 0.1]
-    item_color: [0.8, 0.5, 0.2, 1.0]
+    item_shape:                              # ShapeParams-compatible dict (default: box)
+      shape_type: box
+      half_extents: [0.15, 0.15, 0.1]
+      rgba_color: [0.8, 0.5, 0.2, 1.0]
+    item_mass: 0.5
     item_search_radius: 1.0
-    attach_z_offset: 0.15
+    attach_offset: [0.0, 0.0, 0.15, 0.0, 0.0, 0.0]  # [dx, dy, dz, roll, pitch, yaw]
     spawn_fallback: true
     spawn_offset: [0.0, 0.0, 0.3, 0.0, 0.0, 0.0]  # [dx, dy, dz, roll, pitch, yaw]
     return_home: true
@@ -37,11 +40,11 @@ messaging (subscriptions, publishers, result/state messages).
         spawn_fallback: false
       dispenser_2:
         position: [1.0, 2.0, 5.0]   # multi-floor (z=5)
-        item:                        # custom fallback cargo shape
+        item_shape:                  # ShapeParams dict (shape_type inferred if omitted)
           mesh_path: "mesh/coke_can.obj"
           mesh_scale: [0.01, 0.01, 0.01]
-          color: [1.0, 0.0, 0.0, 1.0]
-          mass: 0.3
+          rgba_color: [1.0, 0.0, 0.0, 1.0]
+        item_mass: 0.3
 
 **Usage (standalone, no ROS)**::
 
@@ -73,6 +76,11 @@ logger = get_lazy_logger(__name__)
 
 # Default delay (sim-seconds) before returning an item to its home position.
 _DEFAULT_RETURN_HOME_DELAY: float = 5.0
+
+# Default fallback cargo shape (box, orange).
+_DEFAULT_ITEM_HALF_EXTENTS: List[float] = [0.15, 0.15, 0.1]
+_DEFAULT_ITEM_COLOR: List[float] = [0.8, 0.5, 0.2, 1.0]
+_DEFAULT_ITEM_MASS: float = 0.5
 
 
 # ------------------------------------------------------------------
@@ -117,7 +125,8 @@ class WorkcellConfig:
     search_radius: float = 1.0
     spawn_fallback: bool = True
     spawn_offset: List[float] = field(default_factory=lambda: [0.0, 0.0, 0.3, 0.0, 0.0, 0.0])
-    item: Optional[Dict[str, Any]] = None
+    item_visual: Optional["ShapeParams"] = None  # Pre-resolved visual ShapeParams
+    item_mass: float = _DEFAULT_ITEM_MASS
 
 
 # ------------------------------------------------------------------
@@ -134,21 +143,37 @@ class WorkcellPlugin(SimPlugin):
     each operation.
     """
 
-    def __init__(self, sim_core: "MultiRobotSimulationCore", config: Dict[str, Any]) -> None:
-        super().__init__(sim_core, config)
+    _registry_name = "workcell"
 
-        # Config
-        self._item_half_extents: List[float] = config.get("item_half_extents", [0.15, 0.15, 0.1])
-        self._item_color: List[float] = config.get("item_color", [0.8, 0.5, 0.2, 1.0])
-        self._item_search_radius: float = config.get("item_search_radius", 1.0)
-        self._attach_z_offset: float = config.get("attach_z_offset", 0.15)
-        self._spawn_fallback: bool = config.get("spawn_fallback", True)
-        self._spawn_offset: List[float] = config.get("spawn_offset", [0.0, 0.0, 0.3, 0.0, 0.0, 0.0])
-        self._return_home_delay: float = config.get("return_home_delay", _DEFAULT_RETURN_HOME_DELAY)
-        self._return_home: bool = config.get("return_home", True) and self._return_home_delay > 0
+    def __init__(
+        self,
+        sim_core: "MultiRobotSimulationCore",
+        item_shape: Optional[Dict[str, Any]] = None,
+        item_mass: float = _DEFAULT_ITEM_MASS,
+        item_search_radius: float = 1.0,
+        attach_offset: Optional[List[float]] = None,
+        spawn_fallback: bool = True,
+        spawn_offset: Optional[List[float]] = None,
+        return_home_delay: float = _DEFAULT_RETURN_HOME_DELAY,
+        return_home: bool = True,
+        overrides: Optional[Dict[str, Dict[str, Any]]] = None,
+    ) -> None:
+        super().__init__(sim_core)
+
+        from pybullet_fleet.sim_object import ShapeParams
+
+        # Config — default item shape (resolved to ShapeParams at init time)
+        self._default_item_visual: ShapeParams = self._parse_item_shape(item_shape)
+        self._default_item_mass: float = item_mass
+        self._item_search_radius: float = item_search_radius
+        self._attach_offset: List[float] = attach_offset or [0.0, 0.0, 0.15, 0.0, 0.0, 0.0]
+        self._spawn_fallback: bool = spawn_fallback
+        self._spawn_offset: List[float] = spawn_offset or [0.0, 0.0, 0.3, 0.0, 0.0, 0.0]
+        self._return_home_delay: float = return_home_delay
+        self._return_home: bool = return_home and self._return_home_delay > 0
 
         # Pre-built per-workcell config (resolved from overrides at init time)
-        overrides: Dict[str, Dict[str, Any]] = config.get("overrides", {})
+        overrides = overrides or {}
         self._workcells: Dict[str, WorkcellConfig] = {}
         for wc_name, wc_cfg in overrides.items():
             position: Optional[Tuple[float, float, float]] = None
@@ -156,6 +181,10 @@ class WorkcellPlugin(SimPlugin):
                 pos = wc_cfg["position"]
                 z = float(pos[2]) if len(pos) > 2 else 0.0
                 position = (float(pos[0]), float(pos[1]), z)
+            # Per-workcell item shape: if item_shape dict provided, resolve to ShapeParams
+            wc_item_shape = wc_cfg.get("item_shape")
+            item_visual = self._parse_item_shape(wc_item_shape) if wc_item_shape else None
+            wc_item_mass = float(wc_cfg["item_mass"]) if "item_mass" in wc_cfg else self._default_item_mass
             self._workcells[wc_name] = WorkcellConfig(
                 position=position,
                 search_radius=(
@@ -163,7 +192,8 @@ class WorkcellPlugin(SimPlugin):
                 ),
                 spawn_fallback=bool(wc_cfg["spawn_fallback"]) if "spawn_fallback" in wc_cfg else self._spawn_fallback,
                 spawn_offset=list(wc_cfg["spawn_offset"]) if "spawn_offset" in wc_cfg else list(self._spawn_offset),
-                item=wc_cfg.get("item"),
+                item_visual=item_visual,
+                item_mass=wc_item_mass,
             )
 
         # Pending actions (key is caller-chosen, e.g. RMF GUID or sequential id)
@@ -247,7 +277,7 @@ class WorkcellPlugin(SimPlugin):
             pick_offset=0.0,
             move_skip_threshold=search_radius,
             attach_link=-1,
-            attach_relative_pose=PbfPose.from_xyz(0.0, 0.0, self._attach_z_offset),
+            attach_relative_pose=PbfPose.from_euler(*self._attach_offset),
         )
         robot.add_action(pick)
 
@@ -388,55 +418,10 @@ class WorkcellPlugin(SimPlugin):
               dispenser_2:
                 position: [1.0, 2.0, 5.0]   # multi-floor
 
-        Positions can also be auto-discovered from the robot's position
-        at the time of the first ``dispense()`` or ``ingest()`` call
-        for that workcell.
-
         Returns:
             ``(x, y, z)`` tuple, or ``None`` if not found.
         """
         return self._workcells[name].position if name in self._workcells else None
-
-    def _resolve_workcell_position(self, workcell_name: str, robot: "Agent") -> Tuple[float, float, float]:
-        """Return workcell position, auto-discovering from robot if unknown.
-
-        If the workcell has a configured position (via overrides), return it.
-        Otherwise, use the robot's current position (the robot is at the
-        RMF waypoint when the request arrives) and register it for future
-        lookups.
-
-        This mirrors Gazebo's TeleportDispenser/TeleportIngestor which use
-        their SDF model pose — since we skip those models, we infer the
-        position from the robot that arrived at the waypoint.
-        """
-        pos = self.get_workcell_position(workcell_name)
-        if pos is not None:
-            return pos
-
-        # Auto-discover from robot's current position
-        robot_pose = robot.get_pose()
-        pos = (robot_pose.x, robot_pose.y, robot_pose.z)
-
-        # Register for future lookups
-        if workcell_name not in self._workcells:
-            self._workcells[workcell_name] = WorkcellConfig(
-                position=pos,
-                search_radius=self._item_search_radius,
-                spawn_fallback=self._spawn_fallback,
-                spawn_offset=list(self._spawn_offset),
-            )
-        else:
-            self._workcells[workcell_name].position = pos
-
-        logger.info(
-            "Auto-discovered workcell '%s' position from robot '%s': (%.2f, %.2f, %.2f)",
-            workcell_name,
-            robot.name,
-            pos[0],
-            pos[1],
-            pos[2],
-        )
-        return pos
 
     @property
     def pending_actions(self) -> Dict[str, PendingAction]:
@@ -528,26 +513,28 @@ class WorkcellPlugin(SimPlugin):
     def _spawn_fallback_cargo(self, robot: "Agent", workcell_name: str) -> Optional["SimObject"]:
         """Spawn a fallback cargo item when no pre-placed item exists.
 
-        Shape and mass can be customized per-workcell via the ``item``
-        config key::
+        Shape and mass can be customized per-workcell via ``item_shape``
+        (a ``ShapeParams``-compatible dict) and ``item_mass``::
 
             overrides:
               dispenser_1:
-                item:
+                item_shape:
+                  shape_type: box
                   half_extents: [0.3, 0.3, 0.2]
-                  color: [1.0, 0.0, 0.0, 1.0]
-                  mass: 1.5
+                  rgba_color: [1.0, 0.0, 0.0, 1.0]
+                item_mass: 1.5
               dispenser_2:
-                item:
+                item_shape:
                   mesh_path: "mesh/coke_can.obj"
                   mesh_scale: [0.01, 0.01, 0.01]
         """
+        from dataclasses import replace as dc_replace
+
         from pybullet_fleet.geometry import Pose as PbfPose
-        from pybullet_fleet.sim_object import ShapeParams, SimObject, SimObjectSpawnParams
+        from pybullet_fleet.sim_object import SimObject, SimObjectSpawnParams
 
         wc = self._workcells.get(workcell_name)
         offset = wc.spawn_offset if wc else self._spawn_offset
-        # Pad to 6 elements: [dx, dy, dz, roll, pitch, yaw]
         dx, dy, dz = offset[0], offset[1], offset[2]
         roll = offset[3] if len(offset) > 3 else 0.0
         pitch = offset[4] if len(offset) > 4 else 0.0
@@ -566,32 +553,10 @@ class WorkcellPlugin(SimPlugin):
 
         spawn_pose = PbfPose.from_euler(spawn_x, spawn_y, spawn_z, roll, pitch, yaw)
 
-        # Per-workcell item config
-        wc = self._workcells.get(workcell_name)
-        item_cfg = wc.item if wc else None
-
-        if isinstance(item_cfg, dict) and item_cfg.get("mesh_path"):
-            # Mesh-based item
-            mesh_path = item_cfg["mesh_path"]
-            mesh_scale = item_cfg.get("mesh_scale", [1.0, 1.0, 1.0])
-            color = item_cfg.get("color", self._item_color)
-            mass = item_cfg.get("mass", 0.5)
-            visual = ShapeParams(shape_type="mesh", mesh_path=mesh_path, mesh_scale=list(mesh_scale), rgba_color=list(color))
-            collision = ShapeParams(shape_type="mesh", mesh_path=mesh_path, mesh_scale=list(mesh_scale))
-        elif isinstance(item_cfg, dict):
-            # Box with custom params
-            he = item_cfg.get("half_extents", self._item_half_extents)
-            color = item_cfg.get("color", self._item_color)
-            mass = item_cfg.get("mass", 0.5)
-            visual = ShapeParams(shape_type="box", half_extents=list(he), rgba_color=list(color))
-            collision = ShapeParams(shape_type="box", half_extents=list(he))
-        else:
-            # Global defaults
-            he = self._item_half_extents
-            color = self._item_color
-            mass = 0.5
-            visual = ShapeParams(shape_type="box", half_extents=list(he), rgba_color=list(color))
-            collision = ShapeParams(shape_type="box", half_extents=list(he))
+        # Use per-workcell ShapeParams if available, otherwise global default
+        visual = wc.item_visual if wc and wc.item_visual else self._default_item_visual
+        mass = wc.item_mass if wc else self._default_item_mass
+        collision = dc_replace(visual, rgba_color=None)
 
         cargo_params = SimObjectSpawnParams(
             visual_shape=visual,
@@ -606,6 +571,29 @@ class WorkcellPlugin(SimPlugin):
         except Exception as e:
             logger.error("Failed to spawn fallback cargo: %s", e)
             return None
+
+    @staticmethod
+    def _parse_item_shape(shape_dict: Optional[Dict[str, Any]] = None) -> "ShapeParams":
+        """Parse a dict into ``ShapeParams``, inferring ``shape_type`` if omitted.
+
+        If *shape_dict* is ``None``, returns the default box shape
+        (0.15 x 0.15 x 0.1, orange).  When ``shape_type`` is not
+        specified, it is inferred: ``"mesh"`` if ``mesh_path`` is
+        present, otherwise ``"box"``.
+        """
+        from pybullet_fleet.sim_object import ShapeParams
+
+        if shape_dict is None:
+            return ShapeParams(
+                shape_type="box",
+                half_extents=list(_DEFAULT_ITEM_HALF_EXTENTS),
+                rgba_color=list(_DEFAULT_ITEM_COLOR),
+            )
+        # Infer shape_type when not explicitly provided
+        d = dict(shape_dict)  # shallow copy — don't mutate caller's dict
+        if "shape_type" not in d:
+            d["shape_type"] = "mesh" if "mesh_path" in d else "box"
+        return ShapeParams.from_dict(d)
 
     # ------------------------------------------------------------------
     # Internal — robot lookup

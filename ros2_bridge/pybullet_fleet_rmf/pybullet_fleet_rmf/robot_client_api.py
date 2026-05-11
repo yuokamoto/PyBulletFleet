@@ -3,9 +3,11 @@
 Provides a ``RobotClientAPI`` that communicates with the PyBulletFleet
 bridge node via ROS 2 topics and actions:
 
-- **State**: Subscribes to ``/<robot>/odom`` for position/orientation.
+- **State**: Subscribes to ``/<robot>/odom`` for position/orientation
+  and ``/<robot>/battery_state`` for battery state.
 - **Navigate**: Sends ``NavigateToPose`` action goals.
 - **Stop**: Cancels active NavigateToPose goals.
+- **Charging**: Calls ``/<robot>/set_charging`` service to start/stop charging.
 
 This replaces the old ``PybulletCommandHandle`` and follows the
 pattern established by ``rmf_demos_fleet_adapter/RobotClientAPI.py``.
@@ -14,7 +16,6 @@ pattern established by ``rmf_demos_fleet_adapter/RobotClientAPI.py``.
 import logging
 import math
 import threading
-import time
 from dataclasses import dataclass
 from typing import Optional
 
@@ -24,6 +25,7 @@ from nav2_msgs.action import NavigateToPose
 from nav_msgs.msg import Odometry
 from rclpy.action import ActionClient
 from rclpy.node import Node
+from sensor_msgs.msg import BatteryState
 from std_srvs.srv import SetBool
 
 from pybullet_fleet_msgs.srv import AttachObject
@@ -74,18 +76,23 @@ class RobotClientAPI:
         self._last_completed_cmd_id = 0
         self._active_cmd_id = 0
 
-        # Battery simulation: start at 80% and charge to 100% over 30s.
-        # This prevents the charging deadlock where RMF waits for a
-        # positive charging rate but battery is already 100%.
-        self._battery_soc = 0.80
-        self._battery_start_time = time.monotonic()
-        self._battery_charge_duration = 30.0  # seconds to reach 100%
+        # Full BatteryState message from the bridge (driven by BatteryPlugin in sim).
+        # None until the first message arrives; get_data() falls back to 1.0 SOC.
+        self._battery_state: Optional[BatteryState] = None
 
         # Subscribe to odom
         self._odom_sub = node.create_subscription(
             Odometry,
             f"/{robot_name}/odom",
             self._odom_callback,
+            10,
+        )
+
+        # Subscribe to battery_state
+        self._battery_sub = node.create_subscription(
+            BatteryState,
+            f"/{robot_name}/battery_state",
+            self._battery_callback,
             10,
         )
 
@@ -109,6 +116,12 @@ class RobotClientAPI:
             f"/{robot_name}/attach_object",
         )
 
+        # set_charging service client (battery start/stop)
+        self._charging_client = node.create_client(
+            SetBool,
+            f"/{robot_name}/set_charging",
+        )
+
     def get_data(self) -> Optional[RobotUpdateData]:
         """Return current robot state snapshot.
 
@@ -121,17 +134,11 @@ class RobotClientAPI:
         with self._lock:
             if not self._has_odom:
                 return None
-            # Simulate battery charging: 80% → 100% over _battery_charge_duration
-            if self._battery_soc < 1.0:
-                elapsed = time.monotonic() - self._battery_start_time
-                self._battery_soc = min(
-                    1.0,
-                    0.80 + 0.20 * min(1.0, elapsed / self._battery_charge_duration),
-                )
+            battery_soc = self._battery_state.percentage if self._battery_state is not None else 1.0
             return RobotUpdateData(
                 map=self._map_name,
                 position=list(self._position),
-                battery_soc=self._battery_soc,
+                battery_soc=battery_soc,
                 last_completed_cmd_id=self._last_completed_cmd_id,
             )
 
@@ -169,9 +176,11 @@ class RobotClientAPI:
         nav_goal = NavigateToPose.Goal()
         nav_goal.pose = goal
 
-        if not self._nav_client.wait_for_server(timeout_sec=5.0):
-            logger.error("[%s] NavigateToPose server not available", self._name)
-            return False
+        if not self._nav_client.server_is_ready():
+            # First call may need a brief wait; subsequent calls are instant.
+            if not self._nav_client.wait_for_server(timeout_sec=5.0):
+                logger.error("[%s] NavigateToPose server not available", self._name)
+                return False
 
         future = self._nav_client.send_goal_async(nav_goal)
         future.add_done_callback(self._on_goal_accepted)
@@ -188,6 +197,76 @@ class RobotClientAPI:
             self._active_goal_handle.cancel_goal_async()
             self._active_goal_handle = None
         return True
+
+    def start_charge(self, cmd_id: int) -> bool:
+        """Start charging by calling /{robot}/set_charging(True).
+
+        Args:
+            cmd_id: Command ID for completion tracking.
+
+        Returns:
+            True if the service call was sent successfully.
+        """
+        self._active_cmd_id = cmd_id
+        if not self._charging_client.service_is_ready():
+            # First call: briefly wait for service to become available
+            if not self._charging_client.wait_for_service(timeout_sec=2.0):
+                logger.error("[%s] set_charging service not available", self._name)
+                return False
+
+        req = SetBool.Request(data=True)
+        future = self._charging_client.call_async(req)
+        future.add_done_callback(self._on_charge_done)
+        logger.info("[%s] Charging requested (cmd %d)", self._name, cmd_id)
+        return True
+
+    def stop_charge(self) -> bool:
+        """Stop charging by calling /{robot}/set_charging(False).
+
+        Uses non-blocking ``service_is_ready()`` instead of
+        ``wait_for_service()`` to avoid stalling navigation.
+
+        Returns:
+            True if the service call was sent.
+        """
+        if not self._charging_client.service_is_ready():
+            return False
+
+        req = SetBool.Request(data=False)
+        future = self._charging_client.call_async(req)
+        future.add_done_callback(self._on_stop_charge_done)
+        logger.info("[%s] Charging stop requested", self._name)
+        return True
+
+    def _on_charge_done(self, future) -> None:
+        """Callback when set_charging service response arrives."""
+        try:
+            result = future.result()
+        except Exception as e:
+            logger.error("[%s] set_charging service call failed: %s", self._name, e)
+            return
+
+        if result is not None and result.success:
+            logger.info("[%s] set_charging completed (cmd %d): %s", self._name, self._active_cmd_id, result.message)
+            with self._lock:
+                self._last_completed_cmd_id = self._active_cmd_id
+        else:
+            msg = result.message if result else "no response"
+            logger.warning("[%s] set_charging failed (cmd %d): %s", self._name, self._active_cmd_id, msg)
+            with self._lock:
+                self._last_completed_cmd_id = self._active_cmd_id
+
+    def _on_stop_charge_done(self, future) -> None:
+        """Callback when stop-charging service response arrives (error logging only)."""
+        try:
+            result = future.result()
+        except Exception as e:
+            logger.error("[%s] stop_charge service call failed: %s", self._name, e)
+            return
+
+        if result is None or not result.success:
+            msg = result.message if result else "no response"
+            logger.warning("[%s] stop_charge failed: %s", self._name, msg)
 
     def toggle_attach(self, attach: bool, cmd_id: int) -> bool:
         """Request attach/detach via the bridge's toggle_attach service.
@@ -320,6 +399,11 @@ class RobotClientAPI:
                 yaw,
             ]
             self._has_odom = True
+
+    def _battery_callback(self, msg: BatteryState):
+        """Store latest BatteryState from the bridge."""
+        with self._lock:
+            self._battery_state = msg
 
     def _on_goal_accepted(self, future):
         """Handle goal acceptance response."""

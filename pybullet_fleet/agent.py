@@ -23,6 +23,7 @@ from .robot_models import resolve_model
 from pybullet_fleet.events import SimEvents
 from pybullet_fleet._defaults import AGENT as _AGT_D, IK as _IK_D
 from pybullet_fleet.config_utils import forward_spawn_params as _forward_spawn_params
+from pybullet_fleet.agent_plugin import AgentPlugin
 
 # Create logger for this module
 logger = logging.getLogger(__name__)
@@ -50,6 +51,9 @@ class AgentSpawnParams(SimObjectSpawnParams):
         max_angular_accel: Maximum angular acceleration in rad/s² (for differential drive, default: 10.0)
         motion_mode: MotionMode.OMNIDIRECTIONAL (move in any direction) or MotionMode.DIFFERENTIAL (rotate then move forward)
         use_fixed_base: If True, robot base is fixed and doesn't move (default: False)
+        plugins: List of plugin config dicts for per-agent plugins.
+            Each entry is ``{"type": "battery", "config": {...}}``
+            or ``{"class": "my.Module", "config": {...}}``.
 
     Inherited from SimObjectSpawnParams:
         name: Optional string name for human-readable identification.
@@ -70,6 +74,7 @@ class AgentSpawnParams(SimObjectSpawnParams):
     ik_params: Optional["IKParams"] = None
     navigation_2d: bool = False
     controller_config: Optional[Dict[str, Any]] = None
+    plugins: Optional[List[Dict[str, Any]]] = None
 
     def __post_init__(self):
         """Validate agent spawn parameters."""
@@ -148,6 +153,9 @@ class AgentSpawnParams(SimObjectSpawnParams):
         if isinstance(controller_config_value, str):
             controller_config_value = {"type": controller_config_value}
 
+        # Parse plugins list (pass through as-is; resolved in from_params)
+        plugins_value = list(config.get("plugins") or [])
+
         return cls(
             **base_kwargs,
             urdf_path=config.get("urdf_path"),
@@ -160,6 +168,7 @@ class AgentSpawnParams(SimObjectSpawnParams):
             ik_params=ik_params_value,
             navigation_2d=config.get("navigation_2d", _AGT_D["navigation_2d"]),
             controller_config=controller_config_value,
+            plugins=plugins_value or None,
         )
 
 
@@ -378,6 +387,9 @@ class Agent(SimObject):
         # Override pickable default for Agent (robots are not pickable by default)
         self.pickable = False
 
+        # Per-agent plugin system (e.g. BatteryPlugin)
+        self._plugins: List[AgentPlugin] = []
+
         # Path visualization settings
         self.path_visualize: bool = False  # Enable/disable path visualization
         self.path_visualize_color: Optional[List[float]] = None  # RGB color (None = default [0, 1, 1])
@@ -458,6 +470,97 @@ class Agent(SimObject):
             True if robot is moving, False otherwise
         """
         return self._is_moving
+
+    # -- Battery properties (delegate to BatteryPlugin) ----------------------
+
+    def _get_battery_plugin(self):
+        """Return the BatteryPlugin instance, or None."""
+        from pybullet_fleet.plugins.battery_plugin import BatteryPlugin
+
+        return self.get_plugin(BatteryPlugin)
+
+    @property
+    def battery_soc(self) -> float:
+        """Current state of charge [0.0, 1.0].
+
+        Always returns ``1.0`` when no :class:`BatteryPlugin` is attached.
+        """
+        bp = self._get_battery_plugin()
+        return bp.soc if bp is not None else 1.0
+
+    @property
+    def is_charging(self) -> bool:
+        """Whether the agent is currently charging."""
+        bp = self._get_battery_plugin()
+        return bp.is_charging if bp is not None else False
+
+    @property
+    def battery_plugin(self):
+        """The :class:`~pybullet_fleet.plugins.battery_plugin.BatteryPlugin` instance, or ``None``."""
+        return self._get_battery_plugin()
+
+    def set_charging(self, charging: bool) -> None:
+        """Start or stop charging.
+
+        Args:
+            charging: ``True`` to start, ``False`` to stop.
+        """
+        bp = self._get_battery_plugin()
+        if bp is None:
+            return
+        bp.set_charging(charging)
+
+    # -- Agent plugin system -------------------------------------------------
+
+    @property
+    def plugins(self) -> List[AgentPlugin]:
+        """Read-only list of active per-agent plugins."""
+        return list(self._plugins)
+
+    def add_plugin(self, plugin: AgentPlugin) -> None:
+        """Attach a per-agent plugin.
+
+        Args:
+            plugin: An :class:`AgentPlugin` instance bound to this agent.
+
+        Raises:
+            ValueError: If *plugin* is not bound to this agent.
+        """
+        if plugin.agent is not self:
+            raise ValueError(f"Plugin {plugin!r} is bound to a different agent")
+        self._plugins.append(plugin)
+
+    def remove_plugin(self, plugin_or_cls) -> None:
+        """Remove a plugin by instance or class.
+
+        When a **class** is given, the first instance of that class is
+        removed.  When an **instance** is given, that exact instance is
+        removed.
+
+        Args:
+            plugin_or_cls: An :class:`AgentPlugin` instance or subclass.
+        """
+        if isinstance(plugin_or_cls, type):
+            for i, p in enumerate(self._plugins):
+                if isinstance(p, plugin_or_cls):
+                    self._plugins.pop(i)
+                    return
+        else:
+            self._plugins.remove(plugin_or_cls)
+
+    def get_plugin(self, cls: type) -> Optional[AgentPlugin]:
+        """Return the first plugin matching *cls*, or ``None``."""
+        for p in self._plugins:
+            if isinstance(p, cls):
+                return p
+        return None
+
+    def _update_plugins(self, dt: float) -> None:
+        """Run all per-agent plugins.  Called from :meth:`update`."""
+        for plugin in self._plugins:
+            plugin.on_update(dt)
+
+    # -- Motion properties --------------------------------------------------
 
     @property
     def motion_mode(self) -> MotionMode:
@@ -598,10 +701,9 @@ class Agent(SimObject):
 
         # Auto-create controller from config if specified
         if spawn_params.controller_config:
-            from pybullet_fleet.controller import create_controller
+            from pybullet_fleet.controller import create_controller_from_entry
 
-            ctrl_config = spawn_params.controller_config
-            ctrl = create_controller(ctrl_config["type"], ctrl_config)
+            ctrl = create_controller_from_entry(spawn_params.controller_config)
             agent.set_controller(ctrl)
 
         # Default controller: if none specified, create one based on motion_mode
@@ -629,6 +731,13 @@ class Agent(SimObject):
         # created a default controller before from_params could configure it)
         if agent._controllers and hasattr(agent._controllers[0], "_navigation_2d"):
             agent._controllers[0]._navigation_2d = spawn_params.navigation_2d
+
+        # Load per-agent plugins from YAML config (if any)
+        if spawn_params.plugins:
+            from pybullet_fleet.agent_plugin import create_agent_plugin_from_entry
+
+            for entry in spawn_params.plugins:
+                agent.add_plugin(create_agent_plugin_from_entry(entry, agent))
 
         return agent
 
@@ -1293,6 +1402,9 @@ class Agent(SimObject):
 
         result = moved or joints_moved
 
+        # Per-agent plugins (battery, sensors, etc.)
+        self._update_plugins(dt)
+
         # Per-entity post_update event (inline check — ~30ns when no handlers)
         if self._events is not None:
             self._events.emit(SimEvents.POST_UPDATE, dt=dt, moved=result)
@@ -1341,17 +1453,48 @@ class Agent(SimObject):
         """
         self._controllers.append(controller)
 
-    def remove_controller(self, controller) -> None:
-        """Remove a non-base controller from the chain.
+    def remove_controller(self, controller_or_cls) -> None:
+        """Remove a non-base controller by instance or class.
 
         The base controller (index 0) cannot be removed via this method.
         Use :meth:`set_controller` to replace it.
 
+        When a **class** is given, the first instance of that class
+        (excluding the base controller) is removed.  When an **instance**
+        is given, that exact instance is removed.
+
         Args:
-            controller: Controller instance to remove.
+            controller_or_cls: A Controller instance or subclass.
         """
-        if controller in self._controllers[1:]:
-            self._controllers.remove(controller)
+        if isinstance(controller_or_cls, type):
+            for i, c in enumerate(self._controllers[1:], start=1):
+                if isinstance(c, controller_or_cls):
+                    self._controllers.pop(i)
+                    return
+        else:
+            if controller_or_cls in self._controllers[1:]:
+                self._controllers.remove(controller_or_cls)
+
+    def get_controller_by_type(self, cls: type) -> Optional[Any]:
+        """Return the first controller matching *cls*, or ``None``.
+
+        Searches the entire chain (including the base controller).
+
+        Args:
+            cls: Controller class to search for.
+
+        Returns:
+            The first matching controller instance, or ``None``.
+        """
+        for c in self._controllers:
+            if isinstance(c, cls):
+                return c
+        return None
+
+    @property
+    def controllers(self) -> List[Any]:
+        """Read-only list of active controllers (copy)."""
+        return list(self._controllers)
 
     @property
     def controller(self):
