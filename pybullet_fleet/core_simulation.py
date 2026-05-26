@@ -15,7 +15,7 @@ import tracemalloc  # Memory profiling (imported once at module level)
 from collections import deque
 from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Set, Tuple, Union, cast
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Sequence, Set, Tuple, Union, cast
 
 import numpy as np
 
@@ -317,8 +317,16 @@ class MultiRobotSimulationCore:
         self._enable_memory_profiling: bool = params.enable_memory_profiling  # Memory profiling switch
 
         # --- Profiling statistics ---
+        # Two-phase step keys (spec.md):
+        #   phase1_update          — agent.update + callbacks + plugin on_step (buffered writes)
+        #   phase2_pose_flush      — _flush_pending_poses: PyBullet pose writes
+        #   phase3_aabb_grid_flush — _flush_aabb_and_grid: kinematic AABB + spatial-grid refresh
+        # `agent_update` is kept for backward compatibility (legacy per-object update loop only).
         self._profiling_stats: Dict[str, List[float]] = {
             "agent_update": [],
+            "phase1_update": [],
+            "phase2_pose_flush": [],
+            "phase3_aabb_grid_flush": [],
             "callbacks": [],
             "step_simulation": [],
             "collision_check": [],
@@ -380,6 +388,20 @@ class MultiRobotSimulationCore:
 
         # --- Registered managers (optional overlays for batch API) ---
         self._registered_managers: List[SimObjectManager] = []
+
+        # --- Two-phase step state ---
+        # _in_step is True while step_once() is executing. SimObject._set_pose_internal
+        # checks this flag to decide between buffered (Phase 2 flush) and immediate writes.
+        # _pending_pose_ids holds object_ids whose _pending_pose buffer is non-empty.
+        # See docs/design/two-phase-step/spec.md.
+        self._in_step: bool = False
+        self._pending_pose_ids: Set[int] = set()
+
+        # --- Batch controllers (Phase B opt-in) ---
+        # Vectorised controllers managing many agents per instance. Each is
+        # invoked once in step_once Phase 1 via batch_advance(dt). See
+        # docs/architecture/two-phase-step.md.
+        self._batch_controllers: List[Any] = []  # List["BatchKinematicController"]
 
         # --- Plugins ---
         self._plugins: List["SimPlugin"] = []
@@ -905,6 +927,158 @@ class MultiRobotSimulationCore:
         """
         self._moved_this_step.add(object_id)
         logger.debug(f"Object {object_id} marked as moved")
+
+    # ----------------------------------------------------------------------
+    # Public batch pose API (D8: two-phase-step spec)
+    # ----------------------------------------------------------------------
+    def set_poses(
+        self,
+        object_ids: Sequence[int],
+        positions: np.ndarray,
+        orientations: np.ndarray,
+        *,
+        preserve_velocity: bool = True,
+    ) -> None:
+        """Set poses for N objects in one call (batch / high-throughput path).
+
+        Use this when poses are already in array form (ROS ``PoseArray``,
+        vectorized controllers, NumPy pipelines). For single-object writes
+        prefer :meth:`SimObject.set_pose` with a :class:`Pose` object — this
+        method intentionally takes raw ndarrays to avoid per-object ``Pose``
+        allocations on the hot path.
+
+        Internally honours the same two-phase semantics as ``SimObject.set_pose``:
+        inside ``step_once()`` the writes are buffered to be flushed in Phase 2,
+        outside they propagate to PyBullet immediately. ``get_pose`` /
+        ``get_poses`` always reflect the new values regardless of phase.
+
+        Args:
+            object_ids: N object ids to write to (in matching order).
+            positions: ``(N, 3)`` float array of XYZ positions.
+            orientations: ``(N, 4)`` float array of XYZW quaternions.
+            preserve_velocity: If True, preserve current velocities (dynamic
+                objects only; ignored for kinematic objects).
+
+        Raises:
+            ValueError: if shapes don't match ``(N, 3)`` / ``(N, 4)`` for
+                ``N = len(object_ids)``.
+            KeyError: if any ``object_id`` is not registered in this sim.
+        """
+        n = len(object_ids)
+        if n == 0:
+            return
+        if positions.shape != (n, 3):
+            raise ValueError(f"positions must have shape ({n}, 3), got {positions.shape}")
+        if orientations.shape != (n, 4):
+            raise ValueError(f"orientations must have shape ({n}, 4), got {orientations.shape}")
+
+        # Resolve all objects up front so we raise before any partial write.
+        objects = []
+        for oid in object_ids:
+            obj = self._sim_objects_dict.get(oid)
+            if obj is None:
+                raise KeyError(f"object_id {oid} not registered in this simulation")
+            objects.append(obj)
+
+        for i, obj in enumerate(objects):
+            obj.set_pose_raw(positions[i], orientations[i], preserve_velocity=preserve_velocity)
+
+    def get_poses(self, object_ids: Sequence[int]) -> Tuple[np.ndarray, np.ndarray]:
+        """Return ``(positions, orientations)`` arrays for N objects (batch read).
+
+        Counterpart of :meth:`set_poses`. Returns raw ndarrays for direct use
+        in vectorized math, ROS message construction, or controller state.
+        For single-object reads prefer :meth:`SimObject.get_pose` which returns
+        a :class:`Pose` object.
+
+        Reads each object's cached pose (no PyBullet API call), so values are
+        always consistent with the two-phase semantics — buffered writes made
+        during the current step are visible immediately.
+
+        Args:
+            object_ids: N object ids to read (output order matches input).
+
+        Returns:
+            Tuple ``(positions (N, 3), orientations (N, 4))`` as float64 arrays.
+
+        Raises:
+            KeyError: if any ``object_id`` is not registered in this sim.
+        """
+        n = len(object_ids)
+        positions = np.empty((n, 3), dtype=np.float64)
+        orientations = np.empty((n, 4), dtype=np.float64)
+        for i, oid in enumerate(object_ids):
+            obj = self._sim_objects_dict.get(oid)
+            if obj is None:
+                raise KeyError(f"object_id {oid} not registered in this simulation")
+            positions[i] = obj._cached_pose.position
+            orientations[i] = obj._cached_pose.orientation
+        return positions, orientations
+
+    # ------------------------------------------------------------------ #
+    # Batch controller registration (Phase B opt-in)
+    # ------------------------------------------------------------------ #
+
+    def _flush_pending_poses(self, ids: Set[int]) -> None:
+        """
+        Two-phase step Phase 2: drain pending pose writes into PyBullet.
+
+        Called once per step_once() right after the agent/plugin update loop and
+        before stepSimulation(). The source of truth for each write is
+        ``obj._cached_pose`` (kept up-to-date eagerly in ``_set_pose_internal``);
+        we only need per-object ``preserve_velocity`` from
+        ``obj._pending_preserve_velocity``. This means no per-call tuple
+        allocation in the buffered write path.
+
+        Args:
+            ids: Snapshot of object_ids to flush. The caller owns the lifecycle
+                of ``_pending_pose_ids`` (snapshot → reset → pass here); this
+                method neither reads nor mutates that field, so call order
+                between the two flush helpers is explicit at the call site.
+
+        See docs/design/two-phase-step/spec.md (D2/D3b).
+        """
+        if not ids:
+            return
+        for object_id in ids:
+            obj = self._sim_objects_dict.get(object_id)
+            if obj is None:
+                continue
+            position = obj._cached_pose.position
+            orientation = obj._cached_pose.orientation
+            preserve_velocity = obj._pending_preserve_velocity
+            # Match the legacy immediate path exactly: velocity preservation for
+            # non-kinematic objects, fast path for kinematics.
+            if preserve_velocity and not obj.is_kinematic:
+                linear_vel, angular_vel = p.getBaseVelocity(obj.body_id, physicsClientId=self._client)
+                p.resetBasePositionAndOrientation(obj.body_id, position, orientation, physicsClientId=self._client)
+                p.resetBaseVelocity(obj.body_id, linear_vel, angular_vel, physicsClientId=self._client)
+            else:
+                p.resetBasePositionAndOrientation(obj.body_id, position, orientation, physicsClientId=self._client)
+
+    def _flush_aabb_and_grid(self, ids: Set[int]) -> None:
+        """
+        Two-phase step Phase 3: refresh AABB + spatial grid for buffered objects.
+
+        Runs after stepSimulation() and before collision_check() so that
+        collision detection sees up-to-date geometry. Only kinematic objects
+        are refreshed here — physics objects are handled by the dedicated
+        post-stepSimulation loop in step_once() that walks ``_physics_objects``.
+
+        Args:
+            ids: Snapshot of object_ids to refresh (same set passed to
+                ``_flush_pending_poses``). Independent of ``_pending_pose_ids``
+                so the two flush helpers have no implicit ordering coupling.
+        """
+        if not ids:
+            return
+        kinematic = self._kinematic_objects
+        cell_size_set = self._cached_cell_size is not None
+        for object_id in ids:
+            if object_id in kinematic:
+                self._update_object_aabb(object_id)
+                if cell_size_set:
+                    self._update_object_spatial_grid(object_id)
 
     def _update_object_aabb(self, object_id: int, update_grid: bool = True) -> None:
         """
@@ -3056,177 +3230,220 @@ class MultiRobotSimulationCore:
             for data in self._profiling_stats.values():
                 data.append(0.0)
 
-        # Physics objects are always considered as potentially moved (conservative approach)
-        # This avoids expensive pose comparison every step
-        # Note: _moved_this_step is cleared in check_collisions() to accumulate movements
-        # across multiple steps when collision_check_frequency < step_frequency
-        self._moved_this_step.update(self._physics_objects)
-
-        self.sim_time = self._step_count * self._params.timestep
-
-        # --- pre_step event ---
+        # --- Two-phase step boundary ---
+        # _in_step gates SimObject._set_pose_internal between buffered and immediate paths.
+        # try/finally guarantees the flag is cleared even if a callback / plugin raises.
+        self._in_step = True
         if measure_timing:
-            t_ev0 = time.perf_counter()
-        self.events.emit(SimEvents.PRE_STEP, dt=self._params.timestep, sim_time=self.sim_time)
-        if measure_timing:
-            self._profiling_stats["events_pre_step"][-1] = (time.perf_counter() - t_ev0) * 1000
+            t_phase1 = time.perf_counter()
+        try:
+            # Physics objects are always considered as potentially moved (conservative approach)
+            # This avoids expensive pose comparison every step
+            # Note: _moved_this_step is cleared in check_collisions() to accumulate movements
+            # across multiple steps when collision_check_frequency < step_frequency
+            self._moved_this_step.update(self._physics_objects)
 
-        # Update all simulation objects that need per-step updates.
-        # Agent and Device subclasses set _needs_update = True.
-        # Unified loop replaces the former _agents-only iteration.
-        if measure_timing:
-            t0 = time.perf_counter()
+            self.sim_time = self._step_count * self._params.timestep
 
-        for obj in self._sim_objects:
-            if obj._needs_update:
-                moved = obj.update(self._params.timestep)
-                if moved and obj.object_id in self._kinematic_objects:
-                    self._moved_this_step.add(obj.object_id)
+            # --- pre_step event ---
+            if measure_timing:
+                t_ev0 = time.perf_counter()
+            self.events.emit(SimEvents.PRE_STEP, dt=self._params.timestep, sim_time=self.sim_time)
+            if measure_timing:
+                self._profiling_stats["events_pre_step"][-1] = (time.perf_counter() - t_ev0) * 1000
 
-        if measure_timing:
-            t1 = time.perf_counter()
-            self._profiling_stats["agent_update"][-1] = (t1 - t0) * 1000
+            # Update all simulation objects that need per-step updates.
+            # Agent and Device subclasses set _needs_update = True.
+            # Unified loop replaces the former _agents-only iteration.
+            if measure_timing:
+                t0 = time.perf_counter()
 
-        # Global callbacks (frequency control)
-        if measure_timing:
-            t_cb0 = time.perf_counter()
+            # Batch controllers run BEFORE the per-object update loop. They
+            # write poses for their managed agents in one batched call via
+            # set_poses() (no per-agent Python dispatch). Agents managed by a
+            # batch controller still appear in self._sim_objects and have
+            # _needs_update=True, but their own controller is IDLE so the
+            # per-object loop is a cheap no-op for them.
+            for bc in self._batch_controllers:
+                bc.batch_advance(self._params.timestep)
 
-        for cbinfo in list(self._callbacks):
-            freq = cbinfo.get("frequency", None)
-            last_exec = cbinfo.get("last_exec", 0.0)
-            interval = 1.0 / freq if freq else 0.0
-            # Judge based on self.sim_time
-            if freq is None or self.sim_time - last_exec >= interval:
-                dt = self.sim_time - last_exec if last_exec > 0 else self._params.timestep
-                cbinfo["func"](self, dt)
-                cbinfo["last_exec"] = self.sim_time
+            for obj in self._sim_objects:
+                if obj._needs_update:
+                    moved = obj.update(self._params.timestep)
+                    if moved and obj.object_id in self._kinematic_objects:
+                        self._moved_this_step.add(obj.object_id)
 
-        if measure_timing:
-            t_cb1 = time.perf_counter()
-            self._profiling_stats["callbacks"][-1] = (t_cb1 - t_cb0) * 1000
+            if measure_timing:
+                t1 = time.perf_counter()
+                # agent_update covers the per-object update loop only (legacy metric).
+                self._profiling_stats["agent_update"][-1] = (t1 - t0) * 1000
 
-        # --- Plugin on_step dispatch ---
-        self._step_plugins(self._params.timestep)
+            # Global callbacks (frequency control)
+            if measure_timing:
+                t_cb0 = time.perf_counter()
 
-        # Check if PyBullet is still connected before stepping
-        if not p.isConnected(physicsClientId=self.client):
-            raise RuntimeError("PyBullet disconnected (GUI window closed)")
+            for cbinfo in list(self._callbacks):
+                freq = cbinfo.get("frequency", None)
+                last_exec = cbinfo.get("last_exec", 0.0)
+                interval = 1.0 / freq if freq else 0.0
+                # Judge based on self.sim_time
+                if freq is None or self.sim_time - last_exec >= interval:
+                    dt = self.sim_time - last_exec if last_exec > 0 else self._params.timestep
+                    cbinfo["func"](self, dt)
+                    cbinfo["last_exec"] = self.sim_time
 
-        if measure_timing:
-            t_sim0 = time.perf_counter()
+            if measure_timing:
+                t_cb1 = time.perf_counter()
+                self._profiling_stats["callbacks"][-1] = (t_cb1 - t_cb0) * 1000
 
-        # stepSimulation() control based on physics mode
-        # Physics ON: Call stepSimulation() every step (rigid body integration, contact resolution)
-        # Physics OFF: Skip stepSimulation() for pure kinematics (position updates via reset API)
-        if self._params.physics:
-            p.stepSimulation(physicsClientId=self._client)
-        # Note: Even in Physics OFF mode, collision detection still works via getClosestPoints()
-        # which queries geometry directly without requiring stepSimulation()
+            # --- Plugin on_step dispatch ---
+            self._step_plugins(self._params.timestep)
 
-        # Update AABBs and spatial grid for physics objects AFTER stepSimulation()
-        # This ensures collision detection uses current-frame positions, not stale ones.
-        # Kinematic objects update their AABBs and spatial grid in set_pose() for immediate consistency.
-        for obj_id in self._physics_objects:
-            # Safeguard against stale _physics_objects entries
-            if obj_id not in self._sim_objects_dict:
-                continue
-            self._update_object_aabb(obj_id)
-            # Update spatial grid if cell_size is initialized
-            if self._cached_cell_size is not None:
-                self._update_object_spatial_grid(obj_id)
+            # --- Two-phase step Phase 2: flush pending pose writes to PyBullet ---
+            # Snapshot + reset the buffer here so re-entrant set_pose calls after this
+            # point (e.g. from post_step events or the physics-objects loop below) start
+            # a fresh buffer. The snapshot is threaded explicitly into the Phase 3 flush
+            # to avoid hidden ordering coupling between the two helpers.
+            if measure_timing:
+                t_phase1_end = time.perf_counter()
+                self._profiling_stats["phase1_update"][-1] = (t_phase1_end - t_phase1) * 1000
+                t_phase2 = time.perf_counter()
+            flushed_ids = self._pending_pose_ids
+            self._pending_pose_ids = set()
+            self._flush_pending_poses(flushed_ids)
+            if measure_timing:
+                self._profiling_stats["phase2_pose_flush"][-1] = (time.perf_counter() - t_phase2) * 1000
 
-        if measure_timing:
-            t_sim1 = time.perf_counter()
-            self._profiling_stats["step_simulation"][-1] = (t_sim1 - t_sim0) * 1000
+            # Check if PyBullet is still connected before stepping
+            if not p.isConnected(physicsClientId=self.client):
+                raise RuntimeError("PyBullet disconnected (GUI window closed)")
 
-        # Collision check frequency control
-        if measure_timing:
-            t_col0 = time.perf_counter()
+            if measure_timing:
+                t_sim0 = time.perf_counter()
 
-        collision_breakdown = None  # per-phase breakdown (only when return_profiling=True)
-        freq = self._collision_check_frequency
-        # freq = None: check every step
-        # freq = 0: disabled (never check)
-        # freq > 0: check at specified frequency (Hz)
-        if freq is None:
-            # Check every step
-            _, collision_breakdown = self.check_collisions(return_profiling=return_profiling)
-            self._last_collision_check = self.sim_time
-        elif freq > 0:
-            # Check at specified frequency
-            interval = 1.0 / freq
-            if self.sim_time - self._last_collision_check >= interval:
+            # stepSimulation() control based on physics mode
+            # Physics ON: Call stepSimulation() every step (rigid body integration, contact resolution)
+            # Physics OFF: Skip stepSimulation() for pure kinematics (position updates via reset API)
+            if self._params.physics:
+                p.stepSimulation(physicsClientId=self._client)
+            # Note: Even in Physics OFF mode, collision detection still works via getClosestPoints()
+            # which queries geometry directly without requiring stepSimulation()
+
+            # Update AABBs and spatial grid for physics objects AFTER stepSimulation()
+            # This ensures collision detection uses current-frame positions, not stale ones.
+            # Kinematic objects update their AABBs and spatial grid in set_pose() for immediate consistency.
+            for obj_id in self._physics_objects:
+                # Safeguard against stale _physics_objects entries
+                if obj_id not in self._sim_objects_dict:
+                    continue
+                self._update_object_aabb(obj_id)
+                # Update spatial grid if cell_size is initialized
+                if self._cached_cell_size is not None:
+                    self._update_object_spatial_grid(obj_id)
+
+            # --- Two-phase step Phase 3: flush AABB + spatial grid for buffered kinematic objects ---
+            # Uses the snapshot captured at Phase 2 — no dependency on _pending_pose_ids,
+            # so the two flush helpers can be reordered or invoked independently if needed.
+            if measure_timing:
+                t_phase3 = time.perf_counter()
+            self._flush_aabb_and_grid(flushed_ids)
+            if measure_timing:
+                self._profiling_stats["phase3_aabb_grid_flush"][-1] = (time.perf_counter() - t_phase3) * 1000
+
+            if measure_timing:
+                t_sim1 = time.perf_counter()
+                self._profiling_stats["step_simulation"][-1] = (t_sim1 - t_sim0) * 1000
+
+            # Collision check frequency control
+            if measure_timing:
+                t_col0 = time.perf_counter()
+
+            collision_breakdown = None  # per-phase breakdown (only when return_profiling=True)
+            freq = self._collision_check_frequency
+            # freq = None: check every step
+            # freq = 0: disabled (never check)
+            # freq > 0: check at specified frequency (Hz)
+            if freq is None:
+                # Check every step
                 _, collision_breakdown = self.check_collisions(return_profiling=return_profiling)
                 self._last_collision_check = self.sim_time
-        # else: freq = 0, skip collision checks entirely
+            elif freq > 0:
+                # Check at specified frequency
+                interval = 1.0 / freq
+                if self.sim_time - self._last_collision_check >= interval:
+                    _, collision_breakdown = self.check_collisions(return_profiling=return_profiling)
+                    self._last_collision_check = self.sim_time
+            # else: freq = 0, skip collision checks entirely
 
-        if measure_timing:
-            t_col1 = time.perf_counter()
-            self._profiling_stats["collision_check"][-1] = (t_col1 - t_col0) * 1000
+            if measure_timing:
+                t_col1 = time.perf_counter()
+                self._profiling_stats["collision_check"][-1] = (t_col1 - t_col0) * 1000
 
-        # --- post_step event ---
-        if measure_timing:
-            t_ev1 = time.perf_counter()
-        self.events.emit(SimEvents.POST_STEP, dt=self._params.timestep, sim_time=self.sim_time)
-        if measure_timing:
-            self._profiling_stats["events_post_step"][-1] = (time.perf_counter() - t_ev1) * 1000
+            # --- post_step event ---
+            if measure_timing:
+                t_ev1 = time.perf_counter()
+            self.events.emit(SimEvents.POST_STEP, dt=self._params.timestep, sim_time=self.sim_time)
+            if measure_timing:
+                self._profiling_stats["events_post_step"][-1] = (time.perf_counter() - t_ev1) * 1000
 
-        self._step_count += 1
-        # Monitor: every step if GUI enabled, otherwise every second
-        if measure_timing:
-            t_mon0 = time.perf_counter()
+            self._step_count += 1
+            # Monitor: every step if GUI enabled, otherwise every second
+            if measure_timing:
+                t_mon0 = time.perf_counter()
 
-        if self._monitor_enabled:
-            interval = self._params.timestep if self._params.gui else 1.0
-            if self.sim_time - self._last_monitor_update > interval:
-                self.update_monitor()
-                self._last_monitor_update = self.sim_time
+            if self._monitor_enabled:
+                interval = self._params.timestep if self._params.gui else 1.0
+                if self.sim_time - self._last_monitor_update > interval:
+                    self.update_monitor()
+                    self._last_monitor_update = self.sim_time
 
-        if measure_timing:
-            t_mon1 = time.perf_counter()
-            t_end = time.perf_counter()
-            self._profiling_stats["monitor_update"][-1] = (t_mon1 - t_mon0) * 1000
-            self._profiling_stats["total"][-1] = (t_end - t_step) * 1000
+            if measure_timing:
+                t_mon1 = time.perf_counter()
+                t_end = time.perf_counter()
+                self._profiling_stats["monitor_update"][-1] = (t_mon1 - t_mon0) * 1000
+                self._profiling_stats["total"][-1] = (t_end - t_step) * 1000
 
-        # Return profiling data if requested (pop values from _profiling_stats)
-        if return_profiling:
-            result: Dict[str, Any] = {name: data.pop() for name, data in self._profiling_stats.items() if data}
-            if collision_breakdown is not None:
-                result["collision_breakdown"] = collision_breakdown
-            return result
+            # Return profiling data if requested (pop values from _profiling_stats)
+            if return_profiling:
+                result: Dict[str, Any] = {name: data.pop() for name, data in self._profiling_stats.items() if data}
+                if collision_breakdown is not None:
+                    result["collision_breakdown"] = collision_breakdown
+                return result
 
-        # Profiling output (only when time profiling is enabled and not returning data)
-        if self._enable_time_profiling:
-            # All values already written to _profiling_stats via [-1] assignment/accumulation
+            # Profiling output (only when time profiling is enabled and not returning data)
+            if self._enable_time_profiling:
+                # All values already written to _profiling_stats via [-1] assignment/accumulation
 
-            # Print average statistics every N steps
-            if self._step_count % self._profiling_interval == 0 and len(self._profiling_stats["total"]) > 0:
-                self._print_profiling_summary()
+                # Print average statistics every N steps
+                if self._step_count % self._profiling_interval == 0 and len(self._profiling_stats["total"]) > 0:
+                    self._print_profiling_summary()
 
-        # Memory profiling output (O(1) aggregator-based statistics)
-        if self._enable_memory_profiling and tracemalloc.is_tracing():
-            # Get memory usage (no import needed - already at top)
-            current, peak = tracemalloc.get_traced_memory()
-            current_mb = current / 1024 / 1024  # Convert to MB
-            peak_mb = peak / 1024 / 1024  # Convert to MB
+            # Memory profiling output (O(1) aggregator-based statistics)
+            if self._enable_memory_profiling and tracemalloc.is_tracing():
+                # Get memory usage (no import needed - already at top)
+                current, peak = tracemalloc.get_traced_memory()
+                current_mb = current / 1024 / 1024  # Convert to MB
+                peak_mb = peak / 1024 / 1024  # Convert to MB
 
-            # Update aggregators (O(1) memory)
-            count = self._memory_stats["count"] + 1
-            self._memory_stats["count"] = count
-            self._memory_stats["current_sum"] += current_mb
-            self._memory_stats["current_min"] = min(self._memory_stats["current_min"], current_mb)
-            self._memory_stats["current_max"] = max(self._memory_stats["current_max"], current_mb)
-            self._memory_stats["peak_sum"] += peak_mb
-            self._memory_stats["peak_max"] = max(self._memory_stats["peak_max"], peak_mb)
+                # Update aggregators (O(1) memory)
+                count = self._memory_stats["count"] + 1
+                self._memory_stats["count"] = count
+                self._memory_stats["current_sum"] += current_mb
+                self._memory_stats["current_min"] = min(self._memory_stats["current_min"], current_mb)
+                self._memory_stats["current_max"] = max(self._memory_stats["current_max"], current_mb)
+                self._memory_stats["peak_sum"] += peak_mb
+                self._memory_stats["peak_max"] = max(self._memory_stats["peak_max"], peak_mb)
 
-            # Track first and last samples for growth calculation
-            if count == 1:
-                self._memory_stats["current_first"] = current_mb
-            self._memory_stats["current_last"] = current_mb
+                # Track first and last samples for growth calculation
+                if count == 1:
+                    self._memory_stats["current_first"] = current_mb
+                self._memory_stats["current_last"] = current_mb
 
-            # Print average statistics every N steps
-            if self._step_count % self._profiling_interval == 0 and count > 0:
-                self._print_memory_profiling_summary()
+                # Print average statistics every N steps
+                if self._step_count % self._profiling_interval == 0 and count > 0:
+                    self._print_memory_profiling_summary()
+        finally:
+            self._in_step = False
 
     def _print_profiling_summary(self) -> None:
         """Print profiling statistics summary (average over last N steps).

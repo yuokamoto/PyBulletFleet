@@ -38,6 +38,10 @@ class MockSimCore:
         self._client: int = 0
         self._params = SimpleNamespace(physics=physics)
         self.events: EventBus = EventBus()
+        # Two-phase step state — mock stays in "outside step_once" mode so all
+        # set_pose calls take the immediate path (legacy behaviour for tests).
+        self._in_step: bool = False
+        self._pending_pose_ids: set = set()
 
     @property
     def client(self) -> int:

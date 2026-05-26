@@ -11,9 +11,13 @@ Demonstrates:
 """
 
 import os
+import sys
 import argparse
 import numpy as np
 import pybullet as p
+
+# Add parent directory to path so the in-repo package is used during development
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from pybullet_fleet.agent import Agent, AgentSpawnParams, MotionMode
 from pybullet_fleet.core_simulation import MultiRobotSimulationCore

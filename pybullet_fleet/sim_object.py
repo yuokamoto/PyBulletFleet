@@ -340,6 +340,14 @@ class SimObject:
         self._cached_pose: Pose = Pose.from_pybullet(initial_pos, initial_orn)
         self._cached_pose_sim_time: float = -1.0  # Simulation time when pose was cached
 
+        # Two-phase step buffer: when sim_core._in_step is True, _set_pose_internal()
+        # stores `preserve_velocity` here and registers this object's id with
+        # sim_core._pending_pose_ids. `_cached_pose` is the source of truth for the
+        # pending (pos, orn) write — Phase 2 flush reads it back. Default True so an
+        # accidental read before any buffered write still matches caller intent.
+        # See docs/design/two-phase-step/spec.md (D2/D3b).
+        self._pending_preserve_velocity: bool = True
+
         # Disable PyBullet physics collision if collision_mode is DISABLED
         if self.collision_mode == CollisionMode.DISABLED:
             # setCollisionFilterGroupMask: (bodyId, linkId, collisionFilterGroup, collisionFilterMask)
@@ -976,6 +984,23 @@ class SimObject:
         """
         Set position and orientation from a Pose object.
 
+        Two-phase step behaviour (see ``docs/design/two-phase-step/spec.md``):
+
+        - **Outside ``step_once()``** (immediate path): writes to PyBullet via
+          ``resetBasePositionAndOrientation`` and, for kinematic objects, refreshes
+          the AABB + spatial grid immediately. Same behaviour as legacy callers.
+        - **Inside ``step_once()``** (buffered path, ``sim_core._in_step == True``):
+          updates only the internal pose cache and registers this object for the
+          Phase 2 / Phase 3 batch flush. ``get_pose()`` returns the new pose
+          immediately (cache is the source of truth), but PyBullet's view, AABBs,
+          and the spatial grid are not refreshed until the flush runs later in the
+          same ``step_once()`` invocation. A no-op set_pose (same pose as cache)
+          is skipped entirely with zero PyBullet cost.
+
+        Attached children (base-link attachments) are propagated recursively
+        through the same code path \u2014 so they take the buffered path inside the
+        step and the immediate path outside it.
+
         Args:
             pose: Pose object containing position and orientation
             preserve_velocity: If True, preserve current velocity after setting pose.
@@ -1067,7 +1092,40 @@ class SimObject:
 
         moved = pos_diff_sq > 1e-12 or orn_diff_sq > 1e-12
 
-        # Optimization: Skip velocity operations for kinematic objects
+        # ----- Update pose cache (only when actually moved — saves ~70ns/call) -----
+        # The `moved` check is free because we already computed it above.
+        # Slice assignment is ~2x faster than 7 individual element writes (single C memcpy).
+        if moved:
+            self._cached_pose.position[:] = position
+            self._cached_pose.orientation[:] = orientation
+
+        # Timestamp is always refreshed so get_pose() cache validity (D2) stays correct,
+        # even when the new pose equals the old one.
+        self._cached_pose_sim_time = self.sim_core.sim_time if self.sim_core is not None else -1.0
+
+        # ----- Two-phase step buffered path -----
+        # Inside step_once(), defer PyBullet write + AABB/grid refresh to the
+        # Phase-2 flush. Kinematic agent updates (the hot path) take this branch.
+        # `_cached_pose` is the source of truth for the pending write — we only need
+        # to remember per-call `preserve_velocity`. See docs/design/two-phase-step/spec.md (D2/D3b).
+        #
+        # No-op set_pose (moved=False) is dropped entirely: nothing changed, so neither
+        # the PyBullet write nor the AABB/grid refresh is needed. Idle agents that keep
+        # calling set_pose every tick (post-goal hover, stationary fleet) get a clean
+        # zero-cost path. This matches the immediate path, which also gates the AABB/grid
+        # refresh on `moved` (the unconditional reset call there is a legacy artefact).
+        if self.sim_core is not None and self.sim_core._in_step:
+            if moved:
+                self._pending_preserve_velocity = preserve_velocity
+                self.sim_core._pending_pose_ids.add(self.object_id)
+                self.sim_core._mark_object_moved(self.object_id)
+                # Attached-object propagation still recurses through _set_pose_internal,
+                # so child writes also get buffered (each child sees _in_step True).
+                # Skipped when parent didn't move — children's relative pose is unchanged.
+                self._propagate_to_attached(position, orientation, preserve_velocity)
+            return moved
+
+        # ----- Immediate path (legacy / outside step_once) -----
         # Use cached is_kinematic flag to avoid PyBullet API calls
         if preserve_velocity and not self.is_kinematic:
             # Get current velocities to preserve them (for dynamic objects only)
@@ -1091,24 +1149,22 @@ class SimObject:
                 if self.sim_core._cached_cell_size is not None:
                     self.sim_core._update_object_spatial_grid(self.object_id)
 
-        # Update pose cache (reuse existing Pose object to avoid allocation)
-        if self._cached_pose is not None:
-            # Reuse existing Pose object - just update its internal lists
-            self._cached_pose.position[0] = position[0]
-            self._cached_pose.position[1] = position[1]
-            self._cached_pose.position[2] = position[2]
-            self._cached_pose.orientation[0] = orientation[0]
-            self._cached_pose.orientation[1] = orientation[1]
-            self._cached_pose.orientation[2] = orientation[2]
-            self._cached_pose.orientation[3] = orientation[3]
-        else:
-            # Create new Pose object for cache
-            self._cached_pose = Pose.from_pybullet(position, orientation)
+        # Recursively apply the same coordinates and velocity to attached_objects.
+        # Skipped when the parent didn't move — children's relative pose is unchanged.
+        if moved:
+            self._propagate_to_attached(position, orientation, preserve_velocity)
 
-        # Update cache timestamp to current sim_time
-        self._cached_pose_sim_time = self.sim_core.sim_time if self.sim_core is not None else -1.0
+        return moved  # Return movement detection result
 
-        # Recursively apply the same coordinates and velocity to attached_objects
+    def _propagate_to_attached(self, position, orientation, preserve_velocity: bool) -> None:
+        """Recursively forward this object's pose to attached children (base-link attachments only).
+
+        Link-level attachments are handled by Agent.update_attached_objects_kinematics().
+        Each recursive set_pose_raw() naturally takes the same code path
+        (buffered inside step_once, immediate outside) as the parent call.
+        """
+        if not self.attached_objects:
+            return
         self._log.debug(lambda: f"set_pose: attached_objects(before)={[o.body_id for o in self.attached_objects]}")
         for obj in self.attached_objects:
             # Skip objects attached to a specific link (not base link).
@@ -1126,8 +1182,6 @@ class SimObject:
                 lambda obj=obj: f"attached_object set pose: obj_body_id={obj.body_id} "
                 f"position={obj._attach_offset.position} orientation={obj._attach_offset.orientation}"
             )
-
-        return moved  # Return movement detection result
 
     def attach_object(
         self,

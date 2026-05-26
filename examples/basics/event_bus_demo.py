@@ -12,6 +12,10 @@ Usage:
 """
 
 import os
+import sys
+
+# Add parent directory to path so the in-repo package is used during development
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from pybullet_fleet import (
     MultiRobotSimulationCore,
