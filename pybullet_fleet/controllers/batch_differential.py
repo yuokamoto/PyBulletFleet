@@ -30,7 +30,7 @@ import numpy as np
 from scipy.spatial.transform import Rotation as R
 
 from pybullet_fleet.controllers.batch_base import BatchKinematicController
-from pybullet_fleet.controllers._tpi import trapezoid_distance, trapezoid_params
+from pybullet_fleet._tpi import build_tpi, extract_phase_params, trapezoid_distance
 from pybullet_fleet.geometry import Pose
 from pybullet_fleet.logging_utils import get_lazy_logger
 
@@ -262,7 +262,8 @@ class BatchDifferentialController(BatchKinematicController):
 
         ang_vel = float(agent.max_angular_vel[0])
         ang_accel = float(agent.max_angular_accel[0])
-        t_acc, t_cst, t_tot = trapezoid_params(angle, ang_vel, ang_accel)
+        tpi = build_tpi(p0=0.0, pe=angle, vmax=ang_vel, accel=ang_accel, t0=sim_time)
+        t_acc, t_cst, t_tot, accel_eff = extract_phase_params(tpi)
 
         self._phase[idx] = _PHASE_ROTATE
         self._rot_t_start[idx] = sim_time
@@ -275,7 +276,7 @@ class BatchDifferentialController(BatchKinematicController):
         self._rot_t_accel[idx] = t_acc
         self._rot_t_const[idx] = t_cst
         self._rot_t_total[idx] = t_tot
-        self._rot_accel[idx] = ang_accel
+        self._rot_accel[idx] = accel_eff
 
     def _begin_forward(self, idx: int, agent: "Agent", target_quat: np.ndarray, sim_time: float) -> None:
         """Switch to FORWARD phase: snap heading, init distance TPI."""
@@ -289,14 +290,15 @@ class BatchDifferentialController(BatchKinematicController):
         distance = float(self._fwd_total_distance[idx])
         avg_vel = float(np.mean(agent.max_linear_vel))
         avg_accel = float(np.mean(agent.max_linear_accel))
-        t_acc, t_cst, t_tot = trapezoid_params(distance, avg_vel, avg_accel)
+        tpi = build_tpi(p0=0.0, pe=distance, vmax=avg_vel, accel=avg_accel, t0=sim_time)
+        t_acc, t_cst, t_tot, accel_eff = extract_phase_params(tpi)
 
         self._phase[idx] = _PHASE_FORWARD
         self._fwd_t_start[idx] = sim_time
         self._fwd_t_accel[idx] = t_acc
         self._fwd_t_const[idx] = t_cst
         self._fwd_t_total[idx] = t_tot
-        self._fwd_accel[idx] = avg_accel
+        self._fwd_accel[idx] = accel_eff
 
     def _advance_waypoint(self, idx: int, sim_time: float) -> None:
         path = self._paths[idx]

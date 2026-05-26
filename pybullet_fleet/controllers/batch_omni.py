@@ -24,7 +24,7 @@ from typing import TYPE_CHECKING, List
 
 import numpy as np
 
-from pybullet_fleet.controllers._tpi import trapezoid_distance, trapezoid_params
+from pybullet_fleet._tpi import build_tpi, extract_phase_params, trapezoid_distance
 from pybullet_fleet.controllers.batch_base import BatchKinematicController
 from pybullet_fleet.geometry import Pose
 from pybullet_fleet.logging_utils import get_lazy_logger
@@ -150,11 +150,13 @@ class BatchOmniController(BatchKinematicController):
         total = float(np.linalg.norm(disp))
 
         # Use agent's own kinematic limits (per-axis arrays — average like
-        # OmniController._init_pose_trajectory does).
+        # OmniController._init_pose_trajectory does). Build the canonical
+        # TPI via the shared factory and extract phase scalars.
         avg_vel = float(np.mean(agent.max_linear_vel))
         avg_accel = float(np.mean(agent.max_linear_accel))
 
-        t_accel, t_const, t_total = trapezoid_params(total, avg_vel, avg_accel)
+        tpi = build_tpi(p0=0.0, pe=total, vmax=avg_vel, accel=avg_accel, t0=sim_time)
+        t_accel, t_const, t_total_rel, accel_eff = extract_phase_params(tpi)
 
         self._t_start[idx] = sim_time
         self._p_start[idx] = start
@@ -162,8 +164,8 @@ class BatchOmniController(BatchKinematicController):
         self._total_distance[idx] = total
         self._t_accel[idx] = t_accel
         self._t_const[idx] = t_const
-        self._t_total[idx] = t_total
-        self._accel_buf[idx] = avg_accel
+        self._t_total[idx] = t_total_rel
+        self._accel_buf[idx] = accel_eff
         # Omni does not rotate during translation: hold current orientation.
         self._target_orientation[idx] = current.orientation
         self._active[idx] = True

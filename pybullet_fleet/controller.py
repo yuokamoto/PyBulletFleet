@@ -56,6 +56,8 @@ from pybullet_fleet.types import ControllerMode, MovementDirection, PosePhase
 
 from two_point_interpolation import TwoPointInterpolation
 
+from pybullet_fleet._tpi import build_tpi
+
 if TYPE_CHECKING:
     from pybullet_fleet.agent import Agent
 
@@ -401,33 +403,7 @@ class KinematicController(Controller):
         avg_vel = float(np.mean(agent.max_linear_vel))
         avg_accel = float(np.mean(agent.max_linear_accel))
 
-        try:
-            self._tpi_forward = TwoPointInterpolation()
-            self._tpi_forward.init(
-                p0=0.0,
-                pe=distance,
-                acc_max=avg_accel,
-                vmax=avg_vel,
-                t0=t0,
-                v0=0.0,
-                ve=0.0,
-                dec_max=avg_accel,
-            )
-            self._tpi_forward.calc_trajectory()
-        except ValueError:
-            # Fallback: zero-distance trajectory (already at goal)
-            self._tpi_forward = TwoPointInterpolation()
-            self._tpi_forward.init(
-                p0=0.0,
-                pe=0.0,
-                acc_max=avg_accel,
-                vmax=avg_vel,
-                t0=t0,
-                v0=0.0,
-                ve=0.0,
-                dec_max=avg_accel,
-            )
-            self._tpi_forward.calc_trajectory()
+        self._tpi_forward = build_tpi(p0=0.0, pe=distance, vmax=avg_vel, accel=avg_accel, t0=t0)
 
     def _init_rotation_tpi(
         self,
@@ -461,18 +437,7 @@ class KinematicController(Controller):
         angular_accel = agent.max_angular_accel[0]
 
         try:
-            self._tpi_rotation_angle = TwoPointInterpolation()
-            self._tpi_rotation_angle.init(
-                p0=0.0,
-                pe=rotation_angle,
-                acc_max=angular_accel,
-                vmax=angular_vel,
-                t0=t0,
-                v0=0.0,
-                ve=0.0,
-                dec_max=angular_accel,
-            )
-            self._tpi_rotation_angle.calc_trajectory()
+            self._tpi_rotation_angle = build_tpi(p0=0.0, pe=rotation_angle, vmax=angular_vel, accel=angular_accel, t0=t0)
             self._slerp_precomp = quat_slerp_precompute(self._rotation_start_quat, self._rotation_target_quat)
             return True
         except ValueError:
