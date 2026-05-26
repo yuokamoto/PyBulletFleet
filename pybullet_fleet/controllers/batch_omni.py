@@ -20,11 +20,11 @@ within ~1e-6 per step (see ``tests/test_batch_controller.py``).
 
 from __future__ import annotations
 
-import math
 from typing import TYPE_CHECKING, List
 
 import numpy as np
 
+from pybullet_fleet.controllers._tpi import trapezoid_distance, trapezoid_params
 from pybullet_fleet.controllers.batch_base import BatchKinematicController
 from pybullet_fleet.geometry import Pose
 from pybullet_fleet.logging_utils import get_lazy_logger
@@ -154,7 +154,7 @@ class BatchOmniController(BatchKinematicController):
         avg_vel = float(np.mean(agent.max_linear_vel))
         avg_accel = float(np.mean(agent.max_linear_accel))
 
-        t_accel, t_const, t_total = _trapezoid_params(total, avg_vel, avg_accel)
+        t_accel, t_const, t_total = trapezoid_params(total, avg_vel, avg_accel)
 
         self._t_start[idx] = sim_time
         self._p_start[idx] = start
@@ -193,7 +193,7 @@ class BatchOmniController(BatchKinematicController):
         now = float(sim_core.sim_time)
         tau = np.maximum(now - self._t_start, 0.0)
         # distance traveled along straight-line displacement (vectorised TPI)
-        distance = _trapezoid_distance(
+        distance = trapezoid_distance(
             tau,
             self._t_accel,
             self._t_const,
@@ -244,67 +244,3 @@ class BatchOmniController(BatchKinematicController):
             self._active[idx] = False
             self._paths[idx] = []
             self._wp_index[idx] = 0
-
-
-# ---------------------------------------------------------------------------
-# Vectorised trapezoidal-velocity TPI primitives
-# ---------------------------------------------------------------------------
-
-
-def _trapezoid_params(distance: float, vmax: float, accel: float):
-    """Solve a symmetric trapezoidal profile (v0 = ve = 0).
-
-    Returns (t_accel, t_const, t_total) for a single trajectory. ``distance``
-    must be non-negative.
-    """
-    if distance <= 1e-12 or vmax <= 0.0 or accel <= 0.0 or not math.isfinite(vmax) or not math.isfinite(accel):
-        return 0.0, 0.0, 0.0
-    d_to_vmax = vmax * vmax / (2.0 * accel)
-    if 2.0 * d_to_vmax <= distance:
-        t_accel = vmax / accel
-        t_const = (distance - 2.0 * d_to_vmax) / vmax
-        t_total = 2.0 * t_accel + t_const
-    else:
-        v_peak = math.sqrt(accel * distance)
-        t_accel = v_peak / accel
-        t_const = 0.0
-        t_total = 2.0 * t_accel
-    return t_accel, t_const, t_total
-
-
-def _trapezoid_distance(
-    tau: np.ndarray,
-    t_accel: np.ndarray,
-    t_const: np.ndarray,
-    t_total: np.ndarray,
-    accel: np.ndarray,
-    total_distance: np.ndarray,
-) -> np.ndarray:
-    """Vectorised distance-traveled lookup for trapezoidal profiles.
-
-    All inputs are (N,) arrays; returns (N,).
-    """
-    out = np.zeros_like(tau)
-    # phase masks
-    in_const = (tau > t_accel) & (tau <= t_accel + t_const)
-    in_decel = (tau > t_accel + t_const) & (tau < t_total)
-    done = tau >= t_total
-    in_accel = (tau > 0.0) & ~in_const & ~in_decel & ~done
-
-    # accel phase: 0.5 * a * t^2
-    if in_accel.any():
-        out[in_accel] = 0.5 * accel[in_accel] * tau[in_accel] * tau[in_accel]
-    # const phase: 0.5 * a * t_accel^2 + v_peak * (t - t_accel),
-    # where v_peak = a * t_accel
-    if in_const.any():
-        ta = t_accel[in_const]
-        a = accel[in_const]
-        out[in_const] = 0.5 * a * ta * ta + (a * ta) * (tau[in_const] - ta)
-    # decel phase: total_distance - 0.5 * a * (t_total - t)^2
-    if in_decel.any():
-        a = accel[in_decel]
-        t_left = t_total[in_decel] - tau[in_decel]
-        out[in_decel] = total_distance[in_decel] - 0.5 * a * t_left * t_left
-    if done.any():
-        out[done] = total_distance[done]
-    return out
