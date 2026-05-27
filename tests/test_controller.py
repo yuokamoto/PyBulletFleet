@@ -1012,3 +1012,315 @@ class TestNavigation2DFlag:
         )
         agent = Agent.from_params(params, sim_core)
         assert agent._controller._navigation_2d is True
+
+
+# -----------------------------------------------------------------------
+# PatrolController
+# -----------------------------------------------------------------------
+
+
+class _FakeAgent:
+    """Minimal mock agent for high-level controller tests.
+
+    Only implements the interface that PatrolController / RandomWalkController
+    call: ``is_moving``, ``set_goal_pose()``, ``get_pose()``.
+    """
+
+    def __init__(self, x: float = 0.0, y: float = 0.0, z: float = 0.05):
+        self._pose = Pose.from_xyz(x, y, z)
+        self.is_moving = False
+        self.goals: list = []  # recorded set_goal_pose calls
+
+    def set_goal_pose(self, pose):
+        self.goals.append(pose)
+
+    def get_pose(self):
+        return self._pose
+
+
+class TestPatrolController:
+    def test_empty_waypoints_returns_false(self):
+        """No waypoints → compute returns False immediately."""
+        from pybullet_fleet.controllers.patrol_controller import PatrolController
+
+        ctrl = PatrolController(waypoints=[])
+        agent = _FakeAgent()
+        assert ctrl.compute(agent, 0.1) is False
+        assert len(agent.goals) == 0
+
+    def test_first_call_sets_first_waypoint(self):
+        """First compute() sets the initial waypoint goal."""
+        from pybullet_fleet.controllers.patrol_controller import PatrolController
+
+        wps = [[1.0, 2.0, 0.0], [3.0, 4.0, 0.0]]
+        ctrl = PatrolController(waypoints=wps)
+        agent = _FakeAgent()
+
+        ctrl.compute(agent, 0.1)
+        assert len(agent.goals) == 1
+        assert agent.goals[0].x == pytest.approx(1.0)
+        assert agent.goals[0].y == pytest.approx(2.0)
+
+    def test_advances_to_next_waypoint_when_stopped(self):
+        """When agent stops, controller advances to next waypoint."""
+        from pybullet_fleet.controllers.patrol_controller import PatrolController
+
+        wps = [[1.0, 0.0, 0.0], [2.0, 0.0, 0.0], [3.0, 0.0, 0.0]]
+        ctrl = PatrolController(waypoints=wps)
+        agent = _FakeAgent()
+
+        # First call: sets wp[0]
+        ctrl.compute(agent, 0.1)
+        assert len(agent.goals) == 1
+
+        # Agent still moving — no advance
+        agent.is_moving = True
+        ctrl.compute(agent, 0.1)
+        assert len(agent.goals) == 1
+
+        # Agent stopped — advance to wp[1]
+        agent.is_moving = False
+        ctrl.compute(agent, 0.1)
+        assert len(agent.goals) == 2
+        assert agent.goals[1].x == pytest.approx(2.0)
+
+        # Agent stopped — advance to wp[2]
+        ctrl.compute(agent, 0.1)
+        assert len(agent.goals) == 3
+        assert agent.goals[2].x == pytest.approx(3.0)
+
+    def test_loop_wraps_around(self):
+        """With loop=True, wraps back to first waypoint."""
+        from pybullet_fleet.controllers.patrol_controller import PatrolController
+
+        wps = [[1.0, 0.0, 0.0], [2.0, 0.0, 0.0]]
+        ctrl = PatrolController(waypoints=wps, loop=True)
+        agent = _FakeAgent()
+
+        # wp[0]
+        ctrl.compute(agent, 0.1)
+        # wp[1]
+        ctrl.compute(agent, 0.1)
+        # wrap → wp[0]
+        ctrl.compute(agent, 0.1)
+        assert len(agent.goals) == 3
+        assert agent.goals[2].x == pytest.approx(1.0)
+
+    def test_no_loop_stops_at_end(self):
+        """With loop=False, returns False after last waypoint."""
+        from pybullet_fleet.controllers.patrol_controller import PatrolController
+
+        wps = [[1.0, 0.0, 0.0], [2.0, 0.0, 0.0]]
+        ctrl = PatrolController(waypoints=wps, loop=False)
+        agent = _FakeAgent()
+
+        ctrl.compute(agent, 0.1)  # wp[0]
+        ctrl.compute(agent, 0.1)  # wp[1]
+        result = ctrl.compute(agent, 0.1)  # past end
+        assert result is False
+        assert len(agent.goals) == 2  # no new goal set
+
+    def test_wait_time_delays_advance(self):
+        """wait_time prevents immediate advance to next waypoint."""
+        from pybullet_fleet.controllers.patrol_controller import PatrolController
+
+        wps = [[1.0, 0.0, 0.0], [2.0, 0.0, 0.0]]
+        ctrl = PatrolController(waypoints=wps, wait_time=1.0)
+        agent = _FakeAgent()
+
+        ctrl.compute(agent, 0.1)  # wp[0], agent stopped → advance sets wait
+        ctrl.compute(agent, 0.1)  # wp[1] set, wait_timer = 1.0
+
+        # Now waiting — should not advance even though agent is stopped
+        goals_before = len(agent.goals)
+        ctrl.compute(agent, 0.3)  # timer: 1.0 - 0.3 = 0.7 (still waiting)
+        assert len(agent.goals) == goals_before
+
+        # Drain the timer
+        ctrl.compute(agent, 0.8)  # timer: 0.7 - 0.8 = -0.1 (expired)
+        # Next call should advance
+        ctrl.compute(agent, 0.1)
+        assert len(agent.goals) > goals_before
+
+
+# -----------------------------------------------------------------------
+# RandomWalkController
+# -----------------------------------------------------------------------
+
+
+class TestRandomWalkController:
+    def test_captures_origin_on_first_call(self):
+        """Origin is captured from agent's initial position."""
+        from pybullet_fleet.controllers.random_walk_controller import RandomWalkController
+
+        ctrl = RandomWalkController(radius=5.0)
+        agent = _FakeAgent(x=10.0, y=20.0)
+
+        assert ctrl._origin is None
+        ctrl.compute(agent, 0.1)
+        assert ctrl._origin == [10.0, 20.0]
+
+    def test_target_within_radius(self):
+        """Generated target is within the configured radius."""
+        from pybullet_fleet.controllers.random_walk_controller import RandomWalkController
+
+        ctrl = RandomWalkController(radius=3.0, wait_range=(0.0, 0.0))
+        agent = _FakeAgent(x=5.0, y=5.0)
+
+        # Run multiple iterations to check statistically
+        for _ in range(20):
+            agent.is_moving = False
+            ctrl.compute(agent, 0.1)
+
+        for goal in agent.goals:
+            dx = goal.x - 5.0
+            dy = goal.y - 5.0
+            dist = math.sqrt(dx * dx + dy * dy)
+            assert dist <= 3.0 + 0.01, f"Target at dist {dist:.2f} exceeds radius 3.0"
+
+    def test_preserves_z(self):
+        """Generated target preserves agent's Z coordinate."""
+        from pybullet_fleet.controllers.random_walk_controller import RandomWalkController
+
+        ctrl = RandomWalkController(radius=5.0, wait_range=(0.0, 0.0))
+        agent = _FakeAgent(x=0.0, y=0.0, z=0.42)
+
+        agent.is_moving = False
+        ctrl.compute(agent, 0.1)
+
+        assert len(agent.goals) >= 1
+        assert agent.goals[0].z == pytest.approx(0.42)
+
+    def test_wait_range_delays_next_target(self):
+        """After setting a target, wait timer prevents immediate re-target."""
+        from pybullet_fleet.controllers.random_walk_controller import RandomWalkController
+
+        ctrl = RandomWalkController(radius=5.0, wait_range=(10.0, 10.0))
+        agent = _FakeAgent()
+
+        # First call: captures origin + sets target (agent not moving)
+        ctrl.compute(agent, 0.1)
+        n_goals = len(agent.goals)
+
+        # Agent stops again but timer is ~10s — should not set new target
+        agent.is_moving = False
+        ctrl.compute(agent, 0.1)
+        assert len(agent.goals) == n_goals, "Should not set new target while waiting"
+
+    def test_does_not_move_while_agent_moving(self):
+        """No new target while agent is still moving."""
+        from pybullet_fleet.controllers.random_walk_controller import RandomWalkController
+
+        ctrl = RandomWalkController(radius=5.0, wait_range=(0.0, 0.0))
+        agent = _FakeAgent()
+
+        ctrl.compute(agent, 0.1)  # first target
+        n_goals = len(agent.goals)
+
+        agent.is_moving = True
+        ctrl.compute(agent, 0.1)
+        assert len(agent.goals) == n_goals, "Should not set target while agent moving"
+
+
+class TestControllerChainWiring:
+    """Verify that from_params correctly wires high-level controllers
+    (patrol, random_walk) as chain entries while keeping the base
+    navigation controller at index 0."""
+
+    def test_patrol_config_creates_chain(self, sim_core):
+        """PatrolController from controller_config should be appended,
+        not replace the base controller."""
+        params = AgentSpawnParams(
+            urdf_path="robots/mobile_robot.urdf",
+            initial_pose=Pose.from_xyz(0, 0, 0.05),
+            motion_mode=MotionMode.DIFFERENTIAL,
+            max_linear_vel=1.0,
+            controller_config={
+                "type": "patrol",
+                "config": {"waypoints": [[1, 0, 0], [2, 0, 0]], "loop": True},
+            },
+        )
+        agent = Agent.from_params(params, sim_core)
+
+        from pybullet_fleet.controllers.patrol_controller import PatrolController
+
+        assert len(agent._controllers) == 2, "Should have base + patrol"
+        assert isinstance(agent._controllers[0], KinematicController), "Index 0 should be base controller"
+        assert isinstance(agent._controllers[1], PatrolController), "Index 1 should be PatrolController"
+
+    def test_random_walk_config_creates_chain(self, sim_core):
+        """RandomWalkController from controller_config should be appended."""
+        params = AgentSpawnParams(
+            urdf_path="robots/mobile_robot.urdf",
+            initial_pose=Pose.from_xyz(0, 0, 0.05),
+            motion_mode=MotionMode.OMNIDIRECTIONAL,
+            max_linear_vel=1.0,
+            controller_config={
+                "type": "random_walk",
+                "config": {"radius": 5.0},
+            },
+        )
+        agent = Agent.from_params(params, sim_core)
+
+        from pybullet_fleet.controllers.random_walk_controller import RandomWalkController
+
+        assert len(agent._controllers) == 2
+        assert isinstance(agent._controllers[0], OmniController)
+        assert isinstance(agent._controllers[1], RandomWalkController)
+
+    def test_kinematic_controller_replaces_base(self, sim_core):
+        """DifferentialController from controller_config should replace base."""
+        params = AgentSpawnParams(
+            urdf_path="robots/mobile_robot.urdf",
+            initial_pose=Pose.from_xyz(0, 0, 0.05),
+            motion_mode=MotionMode.OMNIDIRECTIONAL,
+            max_linear_vel=1.0,
+            controller_config={
+                "type": "differential",
+                "config": {"default_direction": "auto"},
+            },
+        )
+        agent = Agent.from_params(params, sim_core)
+
+        assert len(agent._controllers) == 1
+        assert isinstance(agent._controllers[0], DifferentialController)
+
+    def test_list_config_base_plus_high_level(self, sim_core):
+        """A list of controller_config entries should wire base + high-level."""
+        params = AgentSpawnParams(
+            urdf_path="robots/mobile_robot.urdf",
+            initial_pose=Pose.from_xyz(0, 0, 0.05),
+            motion_mode=MotionMode.DIFFERENTIAL,
+            max_linear_vel=1.0,
+            controller_config=[
+                {"type": "differential", "config": {"default_direction": "auto"}},
+                {"type": "patrol", "config": {"waypoints": [[1, 0, 0]]}},
+            ],
+        )
+        agent = Agent.from_params(params, sim_core)
+
+        from pybullet_fleet.controllers.patrol_controller import PatrolController
+
+        assert len(agent._controllers) == 2
+        assert isinstance(agent._controllers[0], DifferentialController)
+        assert isinstance(agent._controllers[1], PatrolController)
+
+    def test_patrol_chain_actually_moves_agent(self, sim_core):
+        """End-to-end: patrol sets goal, base controller drives toward it."""
+        params = AgentSpawnParams(
+            urdf_path="robots/mobile_robot.urdf",
+            initial_pose=Pose.from_xyz(0, 0, 0.05),
+            motion_mode=MotionMode.OMNIDIRECTIONAL,
+            max_linear_vel=2.0,
+            controller_config={
+                "type": "patrol",
+                "config": {"waypoints": [[1.0, 0, 0.05]], "loop": False},
+            },
+        )
+        agent = Agent.from_params(params, sim_core)
+
+        # Use sim_core.tick() so sim_time advances (TPI is time-based)
+        sim_core.tick(100)
+
+        pos = agent.get_pose().position
+        assert pos[0] > 0.1, f"Agent should have moved toward waypoint, x={pos[0]}"

@@ -54,6 +54,11 @@ class AgentSpawnParams(SimObjectSpawnParams):
         plugins: List of plugin config dicts for per-agent plugins.
             Each entry is ``{"type": "battery", "config": {...}}``
             or ``{"class": "my.Module", "config": {...}}``.
+        controller_config: Controller config — single dict or list of dicts.
+            KinematicController entries (omni, differential) replace the base controller.
+            High-level entries (patrol, random_walk) are appended after the base.
+            Example single: ``{"type": "patrol", "config": {"waypoints": [...]}}``
+            Example list: ``[{"type": "differential", ...}, {"type": "patrol", ...}]``
 
     Inherited from SimObjectSpawnParams:
         name: Optional string name for human-readable identification.
@@ -73,7 +78,7 @@ class AgentSpawnParams(SimObjectSpawnParams):
     use_fixed_base: bool = _AGT_D["use_fixed_base"]
     ik_params: Optional["IKParams"] = None
     navigation_2d: bool = False
-    controller_config: Optional[Dict[str, Any]] = None
+    controller_config: Optional[Union[Dict[str, Any], List[Dict[str, Any]]]] = None
     plugins: Optional[List[Dict[str, Any]]] = None
 
     def __post_init__(self):
@@ -699,12 +704,24 @@ class Agent(SimObject):
                 )
             )
 
-        # Auto-create controller from config if specified
+        # Auto-create controller(s) from config if specified.
+        # Supports a single entry or a list of entries.
+        # KinematicController subclasses replace the base (index 0);
+        # plain Controllers (patrol, random_walk) are deferred and
+        # added as high-level controllers after the base is ready.
+        _pending_high_level: list = []
         if spawn_params.controller_config:
-            from pybullet_fleet.controller import create_controller_from_entry
+            from pybullet_fleet.controller import KinematicController, create_controller_from_entry
 
-            ctrl = create_controller_from_entry(spawn_params.controller_config)
-            agent.set_controller(ctrl)
+            entries = spawn_params.controller_config
+            if isinstance(entries, dict) or isinstance(entries, str):
+                entries = [entries]
+            for entry in entries:
+                ctrl = create_controller_from_entry(entry if isinstance(entry, dict) else {"type": entry})
+                if isinstance(ctrl, KinematicController):
+                    agent.set_controller(ctrl)
+                else:
+                    _pending_high_level.append(ctrl)
 
         # Default controller: if none specified, create one based on motion_mode
         if not agent._controllers:
@@ -726,6 +743,10 @@ class Agent(SimObject):
                         navigation_2d=spawn_params.navigation_2d,
                     )
                 )
+
+        # Append deferred high-level controllers (patrol, random_walk, etc.)
+        for hlc in _pending_high_level:
+            agent.add_controller(hlc)
 
         # Propagate navigation_2d to base controller (set_motion_mode may have
         # created a default controller before from_params could configure it)

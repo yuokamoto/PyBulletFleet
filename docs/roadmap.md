@@ -18,6 +18,30 @@ New robot and infrastructure models:
 - **Behavior tree integration** — Create agent behavior from behavior trees
 - **`SimObject.from_sdf()` → `List[SimObject]`** — Factory method that loads an SDF file via `p.loadSDF()` and wraps each returned body_id in a `SimObject`. Collision detection and lifecycle management via `add_object()` are applied automatically. Required for Open-RMF SDF environment loading and official support for pybullet_data SDF models (kiva_shelf, wsg50_gripper, etc.). Currently the catalog demo calls raw `p.loadSDF()` directly.
 
+### Crowd Simulation (lightweight)
+
+Lightweight crowd simulation for NPC pedestrians in RMF demo environments. Provides more realistic pedestrian behavior than the current `RandomWalkController` (random point within radius) while staying far simpler than Gazebo's full Menge/ORCA `crowd_simulator` plugin.
+
+**Motivation:** RMF demos (airport_terminal) use Gazebo's `crowd_simulator` with Menge BFSM + ORCA + nav mesh for 10 pedestrians. PyBulletFleet currently substitutes `RandomWalkController` which has no obstacle avoidance and no agent-agent interaction. A middle-ground is useful for visual fidelity in demo environments without the complexity of a full crowd simulation framework.
+
+**Scope:**
+
+| Feature | RandomWalkController (current) | Proposed | Gazebo crowd_simulator |
+|---------|-------------------------------|----------|----------------------|
+| Obstacle avoidance | None | Simple raycast or AABB check | ORCA + nav mesh |
+| Agent-agent avoidance | None | Separation force (boids-style) | ORCA mutual |
+| Goal selection | Uniform random in radius | Weighted goal sets (configurable) | BFSM state machine |
+| Nav mesh | Not required | Not required | Required |
+| Config complexity | 2 params | ~5 params (YAML) | 3 XML files |
+| Computation | ~0 | O(n·k) neighbor lookup | O(n²) ORCA |
+
+**Approach:** A new `CrowdController` (or enhancement of `RandomWalkController`) that adds:
+1. **Goal sets** — Named groups of positions with transition weights (like Menge BFSM but in YAML)
+2. **Simple separation** — Repulsive force from nearby agents (boids separation rule, not full ORCA)
+3. **Static obstacle avoidance** — Optional raycast or AABB query to avoid walls (PyBullet `rayTest`)
+
+**Priority:** Low — current `RandomWalkController` is functional for demo purposes. This is primarily for RMF demo visual fidelity (再現度).
+
 ### Devices
 
 See [ros2_bridge/README.md](../ros2_bridge/README.md) for device enhancements (elevator doors, double-hinge doors, xacro-parameterised URDFs).
