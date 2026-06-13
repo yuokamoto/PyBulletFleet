@@ -47,18 +47,28 @@ def sim():
     p.disconnect(sc.client)
 
 
-def _spawn_agent(sim, x=0.0, y=0.0, z=0.1, max_vel=1.0):
+def _spawn_agent(sim, x=0.0, y=0.0, z=0.1, max_vel=1.0, mode=MotionMode.OMNIDIRECTIONAL):
     return Agent.from_params(
         AgentSpawnParams(
             urdf_path="robots/simple_cube.urdf",
             initial_pose=Pose.from_xyz(x, y, z),
-            motion_mode=MotionMode.OMNIDIRECTIONAL,
+            motion_mode=mode,
             collision_mode=CollisionMode.NORMAL_3D,
-            max_linear_vel=max_vel,
-            max_linear_accel=2.0,
+            controller={
+                "max_linear_vel": max_vel,
+                "max_linear_accel": 2.0,
+                **({"max_angular_vel": 2.0, "max_angular_accel": 4.0} if mode == MotionMode.DIFFERENTIAL else {}),
+            },
         ),
         sim_core=sim,
     )
+
+
+def _make_batch_manager(sim, batch_controller="batch_omni"):
+    """Create an AgentManager with a batch controller, registered with sim_core."""
+    from pybullet_fleet.agent_manager import AgentManager
+
+    return AgentManager(sim_core=sim, batch_controller=batch_controller)
 
 
 # ----------------------------------------------------------------------
@@ -125,22 +135,23 @@ class TestBatchControllerLifecycle:
         assert bc._agents == []
         assert bc._pos_buf.shape == (0, 3)
 
-    def test_first_register_auto_attaches(self, sim):
+    def test_first_register_records_sim_core(self, sim):
         bc = _NoopBatchController()
         assert bc._sim_core is None
-        assert bc not in sim._batch_controllers
         a = _spawn_agent(sim, x=0.0)
         bc.register_agent(a)
+        # sim_core is recorded for _apply_phase1; no longer auto-appended
+        # to sim._batch_controllers (owned by AgentManager now).
         assert bc._sim_core is sim
-        assert bc in sim._batch_controllers
 
-    def test_last_unregister_auto_detaches(self, sim):
+    def test_last_unregister_clears_agent_only(self, sim):
         bc = _NoopBatchController()
         a = _spawn_agent(sim, x=0.0)
         bc.register_agent(a)
         bc.unregister_agent(a)
-        assert bc._sim_core is None
-        assert bc not in sim._batch_controllers
+        assert len(bc._agents) == 0
+        # _sim_core is kept (BC may be reused by its AgentManager)
+        assert a._batch_controller is None
 
     def test_register_agent_without_sim_core_raises(self, sim):
         bc = _NoopBatchController()
@@ -159,36 +170,35 @@ class TestBatchControllerLifecycle:
 
 class TestBatchOmniBasics:
     def test_set_path_requires_registered_agent(self, sim):
-        bc = BatchOmniController()
-        # Register a sentinel so the controller is attached to sim_core,
-        # then verify set_path() rejects an agent that isn't in the set.
+        mgr = _make_batch_manager(sim)
+        bc = mgr.batch_controller
         sentinel = _spawn_agent(sim, x=-1.0)
-        bc.register_agent(sentinel)
+        mgr.add_object(sentinel)
         a = _spawn_agent(sim, x=0.0)
         with pytest.raises(KeyError):
             bc.set_path(a, [Pose.from_xyz(1.0, 0.0, 0.1)])
 
     def test_step_once_advances_position(self, sim):
-        bc = BatchOmniController()
+        mgr = _make_batch_manager(sim)
+        bc = mgr.batch_controller
         a = _spawn_agent(sim, x=0.0)
-        bc.register_agent(a)
+        mgr.add_object(a)
         bc.set_path(a, [Pose.from_xyz(1.0, 0.0, 0.1)])
         start_x = a.get_pose().x
         for _ in range(60):
             sim.step_once()
-        # After 1s with max_vel=1, accel=2, should have arrived at x=1.
         end_x = a.get_pose().x
-        assert end_x > start_x + 0.5  # at least moved a substantial fraction
-        # Eventually reaches the goal
+        assert end_x > start_x + 0.5
         for _ in range(120):
             sim.step_once()
         assert a.get_pose().x == pytest.approx(1.0, abs=1e-3)
 
     def test_multi_agent_step(self, sim):
-        bc = BatchOmniController()
+        mgr = _make_batch_manager(sim)
+        bc = mgr.batch_controller
         agents = [_spawn_agent(sim, x=float(i)) for i in range(5)]
         for a in agents:
-            bc.register_agent(a)
+            mgr.add_object(a)
             bc.set_path(a, [Pose.from_xyz(a.get_pose().x + 1.0, 0.0, 0.1)])
         for _ in range(180):
             sim.step_once()
@@ -202,17 +212,15 @@ class TestBatchOmniEquivalence:
 
     @pytest.mark.parametrize("goal_xyz", [(1.5, 0.0, 0.1), (0.0, 2.0, 0.1), (1.0, 1.0, 0.1)])
     def test_per_step_position_matches_omni(self, sim, goal_xyz):
-        # Per-agent reference
         ref = _spawn_agent(sim, x=0.0, y=0.0, max_vel=1.2)
         ref.set_path([Pose.from_xyz(*goal_xyz)], final_orientation_align=False)
 
-        # Batched agent at the same start
+        mgr = _make_batch_manager(sim)
+        bc = mgr.batch_controller
         target = _spawn_agent(sim, x=0.0, y=0.0, max_vel=1.2)
-        bc = BatchOmniController()
-        bc.register_agent(target)
+        mgr.add_object(target)
         bc.set_path(target, [Pose.from_xyz(*goal_xyz)])
 
-        # Step in lock-step and compare positions
         for _ in range(120):
             sim.step_once()
             ref_pos = np.asarray(ref.get_pose().position)
@@ -223,25 +231,130 @@ class TestBatchOmniEquivalence:
 
 class TestBatchOmniIntegration:
     def test_uses_buffered_pose_write(self, sim):
-        """Batch controller should write via the buffered set_poses path during
-        step_once (verifiable by checking the pose lands in PyBullet after the step)."""
-        bc = BatchOmniController()
+        mgr = _make_batch_manager(sim)
+        bc = mgr.batch_controller
         a = _spawn_agent(sim, x=0.0)
-        bc.register_agent(a)
+        mgr.add_object(a)
         bc.set_path(a, [Pose.from_xyz(1.0, 0.0, 0.1)])
 
         sim.step_once()
         pb_pos, _ = p.getBasePositionAndOrientation(a.object_id, physicsClientId=sim.client)
         cache_pos = a.get_pose().position
-        # After step_once, PyBullet and cache must agree (Phase 2 flushed).
         assert pb_pos[0] == pytest.approx(cache_pos[0], abs=1e-9)
 
     def test_inactive_agents_dont_move(self, sim):
-        bc = BatchOmniController()
+        mgr = _make_batch_manager(sim)
         a = _spawn_agent(sim, x=0.0)
-        bc.register_agent(a)
-        # No set_path called — agent should stay put across many steps.
+        mgr.add_object(a)
         start = a.get_pose().position[:]
         for _ in range(30):
             sim.step_once()
         assert np.allclose(a.get_pose().position, start)
+
+
+# ----------------------------------------------------------------------
+# AgentManager batch integration
+# ----------------------------------------------------------------------
+
+
+class TestAgentManagerBatch:
+    """AgentManager.enable_batch / batch_controller= integration."""
+
+    def test_enable_batch_returns_controller(self, sim):
+        from pybullet_fleet.agent_manager import AgentManager
+        from pybullet_fleet.controllers import BatchOmniController
+
+        mgr = AgentManager(sim_core=sim)
+        bc = mgr.enable_batch("batch_omni")
+        assert isinstance(bc, BatchOmniController)
+        assert mgr.batch_controller is bc
+
+    def test_batch_mode_init_param(self, sim):
+        from pybullet_fleet.agent_manager import AgentManager
+        from pybullet_fleet.controllers import BatchOmniController
+
+        mgr = AgentManager(sim_core=sim, batch_controller="batch_omni")
+        assert isinstance(mgr.batch_controller, BatchOmniController)
+
+    def test_spawned_agents_auto_registered(self, sim):
+        from pybullet_fleet.agent_manager import AgentManager, GridSpawnParams
+
+        mgr = AgentManager(sim_core=sim, batch_controller="batch_omni")
+        params = AgentSpawnParams(
+            urdf_path="robots/simple_cube.urdf",
+            initial_pose=Pose.from_xyz(0.0, 0.0, 0.1),
+            motion_mode=MotionMode.OMNIDIRECTIONAL,
+            collision_mode=CollisionMode.NORMAL_3D,
+        )
+        agents = mgr.spawn_objects_grid(
+            3,
+            GridSpawnParams.from_count(3, 1, spacing=[2.0, 2.0, 0.0], offset=[0.0, 0.0, 0.1]),
+            params,
+        )
+        bc = mgr.batch_controller
+        for a in agents:
+            assert a._batch_controller is bc
+        assert len(bc._agents) == 3
+
+    def test_existing_agents_registered_on_enable_batch(self, sim):
+        """Agents added before enable_batch() get picked up retroactively."""
+        from pybullet_fleet.agent_manager import AgentManager
+
+        mgr = AgentManager(sim_core=sim)
+        a1 = _spawn_agent(sim)
+        a2 = _spawn_agent(sim, x=2.0)
+        mgr.add_object(a1)
+        mgr.add_object(a2)
+        assert a1._batch_controller is None
+
+        bc = mgr.enable_batch("batch_omni")
+        assert a1._batch_controller is bc
+        assert a2._batch_controller is bc
+
+    def test_remove_object_unregisters_from_batch(self, sim):
+        from pybullet_fleet.agent_manager import AgentManager
+
+        mgr = AgentManager(sim_core=sim, batch_controller="batch_omni")
+        a = _spawn_agent(sim)
+        mgr.add_object(a)
+        bc = mgr.batch_controller
+        assert a._batch_controller is bc
+
+        mgr.remove_object(a)
+        assert a._batch_controller is None
+        assert a not in bc._agents
+
+    def test_disable_batch(self, sim):
+        from pybullet_fleet.agent_manager import AgentManager
+
+        mgr = AgentManager(sim_core=sim, batch_controller="batch_omni")
+        a = _spawn_agent(sim)
+        mgr.add_object(a)
+        bc = mgr.batch_controller
+
+        mgr.disable_batch()
+        assert mgr.batch_controller is None
+        assert a._batch_controller is None
+        assert len(bc._agents) == 0  # all agents unregistered
+
+    def test_invalid_mode_raises(self, sim):
+        from pybullet_fleet.agent_manager import AgentManager
+
+        mgr = AgentManager(sim_core=sim)
+        with pytest.raises(ValueError, match="Unknown batch controller"):
+            mgr.enable_batch("nonexistent_mode")
+
+    def test_agents_move_via_manager_batch(self, sim):
+        """End-to-end: agents registered via AgentManager actually move."""
+        from pybullet_fleet.agent_manager import AgentManager
+
+        mgr = AgentManager(sim_core=sim, batch_controller="batch_omni")
+        a = _spawn_agent(sim, x=0.0)
+        mgr.add_object(a)
+
+        goal = Pose.from_xyz(2.0, 0.0, 0.1)
+        a.set_path([goal])
+        for _ in range(200):
+            sim.step_once()
+        pos = a.get_pose().position
+        assert np.linalg.norm(np.array(pos) - np.array(goal.position)) < 0.15

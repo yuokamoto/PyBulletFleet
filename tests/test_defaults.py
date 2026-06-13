@@ -33,7 +33,7 @@ class TestDefaultsCompleteness:
         # Skip inherited SimObjectSpawnParams fields (covered by sim_object test)
         # and agent-specific fields that are None/enum/complex types
         inherited = {f.name for f in fields(SimObjectSpawnParams)}
-        skip = inherited | {"urdf_path", "ik_params", "controller_config"}
+        skip = inherited | {"urdf_path", "ik_params", "controller"}
         for f in fields(AgentSpawnParams):
             if f.name not in skip:
                 assert f.name in AGENT, f"Missing default for AgentSpawnParams.{f.name}"

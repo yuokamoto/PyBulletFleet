@@ -104,8 +104,10 @@ def create_test_agents(
             urdf_path=robot_urdf,
             initial_pose=Pose.from_xyz(x, y, 0.1),
             motion_mode=motion_mode,
-            max_linear_vel=2.0,
-            max_angular_vel=3.0,
+            controller={
+                "max_linear_vel": 2.0,
+                "max_angular_vel": 3.0,
+            },
             mass=0.0,  # Kinematic
         )
         agent = Agent.from_params(spawn_params, sim_core=sim_core)

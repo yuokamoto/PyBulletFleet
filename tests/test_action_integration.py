@@ -26,6 +26,7 @@ from pybullet_fleet.action import (
     WaitAction,
 )
 from pybullet_fleet.agent import Agent
+from pybullet_fleet.controller_params import ControllerParams
 from pybullet_fleet.geometry import Pose, Path
 from pybullet_fleet.sim_object import SimObject, ShapeParams
 from pybullet_fleet.types import ActionStatus, MotionMode, MovementDirection
@@ -79,10 +80,12 @@ def create_agent(sim_core, *, pose=None, motion_mode=MotionMode.OMNIDIRECTIONAL)
         collision_shape=ShapeParams(shape_type="box", half_extents=[0.1, 0.1, 0.1]),
         pose=pose,
         mass=0.0,
-        max_linear_vel=5.0,
-        max_linear_accel=20.0,
-        max_angular_vel=6.0,
-        max_angular_accel=20.0,
+        controller=ControllerParams(
+            max_linear_vel=5.0,
+            max_linear_accel=20.0,
+            max_angular_vel=6.0,
+            max_angular_accel=20.0,
+        ),
         motion_mode=motion_mode,
         sim_core=sim_core,
     )

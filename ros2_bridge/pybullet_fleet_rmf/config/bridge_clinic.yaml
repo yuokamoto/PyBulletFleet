@@ -34,38 +34,42 @@ entities:
     pose: [5, -5, 0.0]
     yaw: 0.0
     motion_mode: "differential"
-    max_linear_vel: 0.7
-    max_linear_accel: 0.5
-    navigation_2d: true
-
+    controller:
+      max_linear_vel: 0.7
+      max_linear_accel: 0.5
+      navigation_2d: true
+  
   - name: deliveryRobot_1
     sdf_path: "/rmf_demos_ws/install/rmf_demos_assets/share/rmf_demos_assets/models/DeliveryRobot/model.sdf"
     pose: [10, -5, 0.0]
     yaw: 0.0
     motion_mode: "differential"
-    max_linear_vel: 0.7
-    max_linear_accel: 0.5
-    navigation_2d: true
-
+    controller:
+      max_linear_vel: 0.7
+      max_linear_accel: 0.5
+      navigation_2d: true
+  
   # ── Fleet: tinyRobot (nav_graph 1) ─────────────────
   - name: tinyRobot_0
     sdf_path: "/rmf_demos_ws/install/rmf_demos_assets/share/rmf_demos_assets/models/TinyRobot/model.sdf"
     pose: [15, -5, 0.0]
     yaw: 0.0
     motion_mode: "differential"
-    max_linear_vel: 0.5
-    max_linear_accel: 0.75
-    navigation_2d: true
-
+    controller:
+      max_linear_vel: 0.5
+      max_linear_accel: 0.75
+      navigation_2d: true
+  
   - name: tinyRobot_1
     sdf_path: "/rmf_demos_ws/install/rmf_demos_assets/share/rmf_demos_assets/models/TinyRobot/model.sdf"
     pose: [20, -5, 0.0]
     yaw: 0.0
     motion_mode: "differential"
-    max_linear_vel: 0.5
-    max_linear_accel: 0.75
-    navigation_2d: true
-
+    controller:
+      max_linear_vel: 0.5
+      max_linear_accel: 0.75
+      navigation_2d: true
+  
   # ── Doors (Door) ─────────────────────────────
   - name: clinic_door_01
     type: door

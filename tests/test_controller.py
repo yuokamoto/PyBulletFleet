@@ -20,6 +20,7 @@ from pybullet_fleet.controller import (
     create_controller,
     register_controller,
 )
+from pybullet_fleet.controller_params import ControllerParams
 from pybullet_fleet.types import MotionMode, MovementDirection
 from tests.conftest import MockSimCore
 
@@ -39,7 +40,7 @@ def mobile_agent(sim_core):
         urdf_path="robots/mobile_robot.urdf",
         initial_pose=Pose.from_xyz(0, 0, 0.05),
         motion_mode=MotionMode.OMNIDIRECTIONAL,
-        max_linear_vel=2.0,
+        controller={"max_linear_vel": 2.0},
     )
     return Agent.from_params(params, sim_core)
 
@@ -251,7 +252,7 @@ class TestOmniController:
 
     def test_linear_speed_clamped(self, mobile_agent):
         """Linear velocity magnitude clamped to max_linear_vel, direction preserved."""
-        ctrl = OmniController(max_linear_vel=1.0)
+        ctrl = OmniController(ControllerParams(max_linear_vel=1.0))
         mobile_agent.set_controller(ctrl)
 
         ctrl.set_velocity(vx=3.0, vy=4.0)  # magnitude=5.0, clamped to 1.0
@@ -260,7 +261,7 @@ class TestOmniController:
 
     def test_angular_speed_clamped(self, mobile_agent):
         """Angular velocity magnitude clamped to max_angular_vel, direction preserved."""
-        ctrl = OmniController(max_angular_vel=1.0)
+        ctrl = OmniController(ControllerParams(max_angular_vel=1.0))
         mobile_agent.set_controller(ctrl)
 
         ctrl.set_velocity(wx=0.0, wy=0.0, wz=2.0)  # magnitude=2.0, clamped to 1.0
@@ -268,7 +269,7 @@ class TestOmniController:
 
     def test_below_limit_not_clamped(self, mobile_agent):
         """Velocity below limit passes through unchanged."""
-        ctrl = OmniController(max_linear_vel=10.0, max_angular_vel=5.0)
+        ctrl = OmniController(ControllerParams(max_linear_vel=10.0, max_angular_vel=5.0))
         mobile_agent.set_controller(ctrl)
 
         ctrl.set_velocity(vx=1.0, vy=2.0, wz=1.5)
@@ -276,7 +277,8 @@ class TestOmniController:
         np.testing.assert_allclose(ctrl._angular_velocity, [0.0, 0.0, 1.5], atol=1e-9)
 
     def test_default_no_limit(self, omni_agent):
-        """Default max_linear_vel/max_angular_vel = inf (no clamping)."""
+        """Explicit ControllerParams(inf) disables clamping."""
+        omni_agent.set_controller(OmniController(ControllerParams(max_linear_vel=math.inf, max_angular_vel=math.inf)))
         omni_agent._controller.set_velocity(vx=100.0, vy=200.0, wz=50.0)
         np.testing.assert_allclose(omni_agent._controller._linear_velocity, [100.0, 200.0, 0.0], atol=1e-9)
         np.testing.assert_allclose(omni_agent._controller._angular_velocity, [0.0, 0.0, 50.0], atol=1e-9)
@@ -284,8 +286,8 @@ class TestOmniController:
     def test_from_config_with_limits(self):
         """from_config parses max_linear_vel / max_angular_vel."""
         ctrl = OmniController.from_config({"max_linear_vel": 2.0, "max_angular_vel": 1.0})
-        assert ctrl._max_linear_vel == pytest.approx(2.0)  # type: ignore[reportAttributeAccessIssue]
-        assert ctrl._max_angular_vel == pytest.approx(1.0)  # type: ignore[reportAttributeAccessIssue]
+        assert ctrl.params.max_linear_vel == pytest.approx(2.0)  # type: ignore[reportAttributeAccessIssue]
+        assert ctrl.params.max_angular_vel == pytest.approx(1.0)  # type: ignore[reportAttributeAccessIssue]
 
 
 # -----------------------------------------------------------------------
@@ -340,6 +342,48 @@ class TestSetController:
 
 
 # -----------------------------------------------------------------------
+# Controller-instance form of ``controller=`` argument
+# -----------------------------------------------------------------------
+
+
+class TestControllerInstanceArg:
+    """``controller=<Controller instance>`` installs it verbatim."""
+
+    def test_preset_instance_installed_as_is(self, sim_core):
+        """A pre-built controller is installed without copy or reconstruction."""
+        preset_params = ControllerParams(max_linear_vel=4.2, max_angular_vel=1.7)
+        preset = DifferentialController(params=preset_params, wheel_separation=0.42)
+
+        params = AgentSpawnParams(
+            urdf_path="robots/mobile_robot.urdf",
+            initial_pose=Pose.from_xyz(0, 0, 0.05),
+            motion_mode=MotionMode.OMNIDIRECTIONAL,  # intentionally mismatched
+            controller=preset,
+        )
+        agent = Agent.from_params(params, sim_core)
+
+        # Identity: exact same instance, not a copy.
+        assert agent._controller is preset
+        # controller_params is taken from the preset's params (also identity).
+        assert agent.controller_params is preset_params
+        # Subclass-specific kwargs survive.
+        assert agent._controller._wheel_separation == pytest.approx(0.42)
+
+    def test_preset_instance_overrides_motion_mode(self, sim_core):
+        """When a Controller instance is passed, motion_mode does not pick a default."""
+        preset = DifferentialController(params=ControllerParams())
+        params = AgentSpawnParams(
+            urdf_path="robots/mobile_robot.urdf",
+            initial_pose=Pose.from_xyz(0, 0, 0.05),
+            motion_mode=MotionMode.OMNIDIRECTIONAL,
+            controller=preset,
+        )
+        agent = Agent.from_params(params, sim_core)
+        # The omnidirectional motion_mode did NOT install an OmniController.
+        assert isinstance(agent._controller, DifferentialController)
+
+
+# -----------------------------------------------------------------------
 # Controller ABC contract
 # -----------------------------------------------------------------------
 
@@ -385,8 +429,8 @@ class TestControllerRegistry:
         """create_controller passes config to from_config()."""
         ctrl = create_controller("differential", {"max_linear_vel": 3.0, "max_angular_vel": 2.0})
         assert isinstance(ctrl, DifferentialController)
-        assert ctrl._max_linear_vel == pytest.approx(3.0)
-        assert ctrl._max_angular_vel == pytest.approx(2.0)
+        assert ctrl.params.max_linear_vel == pytest.approx(3.0)
+        assert ctrl.params.max_angular_vel == pytest.approx(2.0)
 
     def test_unknown_name_raises(self):
         """create_controller with unknown name raises KeyError."""
@@ -501,7 +545,7 @@ class TestDifferentialController:
 
         Robots go backward, so limits are [-max, max], not [0, max].
         """
-        ctrl = DifferentialController(max_linear_vel=1.0, max_angular_vel=0.5)
+        ctrl = DifferentialController(ControllerParams(max_linear_vel=1.0, max_angular_vel=0.5))
         mobile_agent.set_controller(ctrl)
 
         # Positive overshoot
@@ -547,15 +591,18 @@ class TestDifferentialController:
     def test_from_config(self):
         """from_config parses params correctly."""
         ctrl = DifferentialController.from_config({"max_linear_vel": 5.0, "max_angular_vel": 3.0, "wheel_separation": 0.4})
-        assert ctrl._max_linear_vel == pytest.approx(5.0)  # type: ignore[reportAttributeAccessIssue]
-        assert ctrl._max_angular_vel == pytest.approx(3.0)  # type: ignore[reportAttributeAccessIssue]
+        assert ctrl.params.max_linear_vel == pytest.approx(5.0)  # type: ignore[reportAttributeAccessIssue]
+        assert ctrl.params.max_angular_vel == pytest.approx(3.0)  # type: ignore[reportAttributeAccessIssue]
         assert ctrl._wheel_separation == pytest.approx(0.4)  # type: ignore[reportAttributeAccessIssue]
 
     def test_from_config_defaults(self):
-        """from_config with empty dict uses defaults."""
+        """from_config with empty dict leaves params as None; _eff_* helpers resolve to framework defaults."""
+        from pybullet_fleet._defaults import CONTROLLER as _CTRL_D
+
         ctrl = DifferentialController.from_config({})
-        assert ctrl._max_linear_vel == pytest.approx(2.0)  # type: ignore[reportAttributeAccessIssue]
-        assert ctrl._max_angular_vel == pytest.approx(1.5)  # type: ignore[reportAttributeAccessIssue]
+        assert ctrl.params.max_linear_vel is None
+        assert ctrl.params.scalar_max_linear_vel() == _CTRL_D["max_linear_vel"]
+        assert ctrl.params.scalar_max_angular_vel() == _CTRL_D["max_angular_vel"]
 
 
 # -----------------------------------------------------------------------
@@ -593,7 +640,7 @@ class TestAutoDirection:
         """DifferentialController accepts default_direction=AUTO via constructor."""
         from pybullet_fleet.types import MovementDirection
 
-        ctrl = DifferentialController(default_direction=MovementDirection.AUTO)
+        ctrl = DifferentialController(ControllerParams(default_direction=MovementDirection.AUTO))
         assert ctrl.default_direction == MovementDirection.AUTO
 
     def test_set_path_none_uses_controller_default(self, sim_core):
@@ -606,7 +653,7 @@ class TestAutoDirection:
             motion_mode=MotionMode.DIFFERENTIAL,
         )
         agent = Agent.from_params(params, sim_core)
-        ctrl = DifferentialController(default_direction=MovementDirection.AUTO)
+        ctrl = DifferentialController(ControllerParams(default_direction=MovementDirection.AUTO))
         agent.set_controller(ctrl)
 
         # Goal behind — AUTO should resolve to BACKWARD
@@ -625,7 +672,7 @@ class TestAutoDirection:
             motion_mode=MotionMode.DIFFERENTIAL,
         )
         agent = Agent.from_params(params, sim_core)
-        ctrl = DifferentialController(default_direction=MovementDirection.AUTO)
+        ctrl = DifferentialController(ControllerParams(default_direction=MovementDirection.AUTO))
         agent.set_controller(ctrl)
 
         # Goal behind — but explicit FORWARD should override AUTO
@@ -644,7 +691,7 @@ class TestAutoDirection:
             motion_mode=MotionMode.DIFFERENTIAL,
         )
         agent = Agent.from_params(params, sim_core)
-        ctrl = DifferentialController(default_direction=MovementDirection.AUTO)
+        ctrl = DifferentialController(ControllerParams(default_direction=MovementDirection.AUTO))
         agent.set_controller(ctrl)
 
         # Goal behind — AUTO should resolve to BACKWARD via agent.set_path
@@ -662,7 +709,7 @@ class TestAutoDirection:
             urdf_path="robots/mobile_robot.urdf",
             initial_pose=Pose.from_yaw(0, 0, 0.05, 0.0),
             motion_mode=MotionMode.DIFFERENTIAL,
-            controller_config={"type": "differential", "default_direction": "auto"},
+            controller={"type": "differential", "default_direction": "auto"},
         )
         agent = Agent.from_params(params, sim_core)
         ctrl = agent._controllers[0]
@@ -670,7 +717,7 @@ class TestAutoDirection:
         assert ctrl.default_direction == MovementDirection.AUTO
 
     def test_controller_config_from_dict(self, sim_core):
-        """controller_config in from_dict sets controller default_direction."""
+        """controller in from_dict sets controller default_direction."""
         from pybullet_fleet.types import MovementDirection
 
         params = AgentSpawnParams.from_dict(
@@ -678,7 +725,7 @@ class TestAutoDirection:
                 "name": "test_robot",
                 "urdf_path": "robots/mobile_robot.urdf",
                 "motion_mode": "differential",
-                "controller_config": {"type": "differential", "default_direction": "auto"},
+                "controller": {"type": "differential", "default_direction": "auto"},
             }
         )
         agent = Agent.from_params(params, sim_core)
@@ -768,7 +815,7 @@ class TestAutoDirection:
             urdf_path="robots/mobile_robot.urdf",
             initial_pose=Pose.from_yaw(0, 0, 0.05, 0.0),
             motion_mode=MotionMode.DIFFERENTIAL,
-            max_linear_vel=2.0,
+            controller={"max_linear_vel": 2.0},
         )
         agent = Agent.from_params(params, sim_core)
         ctrl = DifferentialController()
@@ -788,7 +835,7 @@ class TestAutoDirection:
             urdf_path="robots/mobile_robot.urdf",
             initial_pose=Pose.from_yaw(0, 0, 0.05, 0.0),
             motion_mode=MotionMode.DIFFERENTIAL,
-            max_linear_vel=2.0,
+            controller={"max_linear_vel": 2.0},
         )
         agent = Agent.from_params(params, sim_core)
         ctrl = DifferentialController()
@@ -815,7 +862,7 @@ class TestAutoDirection:
             urdf_path="robots/mobile_robot.urdf",
             initial_pose=Pose.from_yaw(0, 0, 0.05, 0.0),  # Facing +X
             motion_mode=MotionMode.DIFFERENTIAL,
-            max_linear_vel=2.0,
+            controller={"max_linear_vel": 2.0},
         )
         agent = Agent.from_params(params, sim_core)
         ctrl = DifferentialController()
@@ -839,15 +886,15 @@ class TestAutoDirection:
 
 
 # -----------------------------------------------------------------------
-# AgentSpawnParams.controller_config
+# AgentSpawnParams.controller
 # -----------------------------------------------------------------------
 
 
 class TestSpawnParamsControllerConfig:
-    """AgentSpawnParams.controller_config auto-creates controller."""
+    """AgentSpawnParams.controller auto-creates controller."""
 
     def test_no_config_default_controller(self, sim_core):
-        """Default: no controller_config → DifferentialController auto-assigned."""
+        """Default: no controller → DifferentialController auto-assigned."""
         params = AgentSpawnParams(
             urdf_path="robots/mobile_robot.urdf",
             initial_pose=Pose.from_xyz(0, 0, 0.05),
@@ -856,25 +903,25 @@ class TestSpawnParamsControllerConfig:
         assert isinstance(agent._controller, DifferentialController)
 
     def test_velocity_config(self, sim_core):
-        """controller_config with type=omni_velocity creates OmniController."""
+        """controller with type=omni creates OmniController."""
         params = AgentSpawnParams(
             urdf_path="robots/mobile_robot.urdf",
             initial_pose=Pose.from_xyz(0, 0, 0.05),
-            controller_config={"type": "omni"},
+            controller={"type": "omni"},
         )
         agent = Agent.from_params(params, sim_core)
         assert isinstance(agent._controller, OmniController)
 
     def test_differential_config(self, sim_core):
-        """controller_config with type=differential_velocity creates DifferentialController."""
+        """controller with type=differential creates DifferentialController."""
         params = AgentSpawnParams(
             urdf_path="robots/mobile_robot.urdf",
             initial_pose=Pose.from_xyz(0, 0, 0.05),
-            controller_config={"type": "differential", "max_linear_vel": 1.5},
+            controller={"type": "differential", "max_linear_vel": 1.5},
         )
         agent = Agent.from_params(params, sim_core)
         assert isinstance(agent._controller, DifferentialController)
-        assert agent._controller._max_linear_vel == pytest.approx(1.5)
+        assert agent._controller.params.max_linear_vel == pytest.approx(1.5)
 
 
 # -----------------------------------------------------------------------
@@ -898,9 +945,9 @@ class TestNavigation2DFlag:
             agent.update(dt)
 
     def test_default_is_2d(self):
-        """KinematicController defaults to navigation_2d=False."""
+        """ControllerParams.navigation_2d defaults to None (no explicit override)."""
         ctrl = OmniController()
-        assert ctrl._navigation_2d is False
+        assert ctrl.params.navigation_2d is None
 
     def test_omni_2d_preserves_z(self, sim_core):
         """Omni with navigation_2d=True: Z stays at initial value (current behavior)."""
@@ -911,7 +958,7 @@ class TestNavigation2DFlag:
             motion_mode=MotionMode.OMNIDIRECTIONAL,
         )
         agent = Agent.from_params(params, sim_core)
-        ctrl = OmniController(navigation_2d=True)
+        ctrl = OmniController(ControllerParams(navigation_2d=True))
         agent.set_controller(ctrl)
 
         # Goal at z=5.0 — should be ignored in 2D mode
@@ -934,7 +981,7 @@ class TestNavigation2DFlag:
             motion_mode=MotionMode.OMNIDIRECTIONAL,
         )
         agent = Agent.from_params(params, sim_core)
-        ctrl = OmniController(navigation_2d=False)
+        ctrl = OmniController(ControllerParams(navigation_2d=False))
         agent.set_controller(ctrl)
 
         goal_z = 5.0
@@ -957,7 +1004,7 @@ class TestNavigation2DFlag:
             motion_mode=MotionMode.DIFFERENTIAL,
         )
         agent = Agent.from_params(params, sim_core)
-        ctrl = DifferentialController(navigation_2d=False)
+        ctrl = DifferentialController(ControllerParams(navigation_2d=False))
         agent.set_controller(ctrl)
 
         goal_z = 3.0
@@ -979,7 +1026,7 @@ class TestNavigation2DFlag:
             motion_mode=MotionMode.DIFFERENTIAL,
         )
         agent = Agent.from_params(params, sim_core)
-        ctrl = DifferentialController(navigation_2d=True)
+        ctrl = DifferentialController(ControllerParams(navigation_2d=True))
         agent.set_controller(ctrl)
 
         goal = Pose.from_xyz(5.0, 0.0, 10.0)
@@ -994,18 +1041,19 @@ class TestNavigation2DFlag:
     def test_from_config_navigation_2d(self):
         """from_config passes navigation_2d to controller."""
         ctrl = OmniController.from_config({"navigation_2d": True})
-        assert ctrl._navigation_2d is True  # type: ignore[reportAttributeAccessIssue]
+        assert ctrl.params.navigation_2d is True  # type: ignore[reportAttributeAccessIssue]
 
         ctrl2 = DifferentialController.from_config({"navigation_2d": True})
-        assert ctrl2._navigation_2d is True  # type: ignore[reportAttributeAccessIssue]
+        assert ctrl2.params.navigation_2d is True  # type: ignore[reportAttributeAccessIssue]
 
     def test_spawn_params_navigation_2d(self, sim_core):
-        """AgentSpawnParams.navigation_2d propagates to default controller."""
+        """AgentSpawnParams.controller navigation_2d propagates to default controller."""
         params = AgentSpawnParams(
             urdf_path="robots/mobile_robot.urdf",
             initial_pose=Pose.from_xyz(0, 0, 0.05),
             motion_mode=MotionMode.OMNIDIRECTIONAL,
-            navigation_2d=True,
+            controller={"navigation_2d": True},
         )
         agent = Agent.from_params(params, sim_core)
-        assert agent._controller._navigation_2d is True
+        assert agent._controller.params.navigation_2d is True
+

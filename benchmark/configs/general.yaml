@@ -30,8 +30,10 @@ agents:
   num_agents: 1000  # Default number of agents to spawn
   urdf_path: "../robots/simple_cube.urdf"  # Path to robot URDF (relative to benchmark/)
   motion_mode: "OMNIDIRECTIONAL"  # OMNIDIRECTIONAL, DIFFERENTIAL, ACKERMANN
-  max_linear_vel: 2.0  # Maximum linear velocity (m/s)
-  max_angular_vel: 3.0  # Maximum angular velocity (rad/s)
+  controller:
+    type: "omni"           # Controller registry name (recommended explicit form)
+    max_linear_vel: 2.0    # Maximum linear velocity (m/s)
+    max_angular_vel: 3.0   # Maximum angular velocity (rad/s)
   mass: 0.0  # Agent mass (0.0 = kinematic control, faster)
   moving_agents_ratio: 0.1  # Ratio of agents with random goals (0.0-1.0)
   max_moving_agents: 100  # Maximum number of agents with goals
@@ -88,6 +90,26 @@ scenarios:
       num_agents: 5000
     benchmark:
       repetitions: 1  # Single run for stress test
+
+  # Controller comparison: per-agent vs batch (omni, no collision)
+  # Uses duration=30 (300 steps at 0.1s timestep) for stable statistics.
+  # Usage: python benchmark/run_benchmark.py --compare per_agent batch_omni
+  #        python benchmark/run_benchmark.py --compare per_agent batch_omni --sweep 100 500 1000 2000
+  per_agent:
+    simulation:
+      collision_check_frequency: 0
+    agents:
+      batch_controller: null
+    benchmark:
+      repetitions: 3
+
+  batch_omni:
+    simulation:
+      collision_check_frequency: 0
+    agents:
+      batch_controller: batch_omni
+    benchmark:
+      repetitions: 3
 
 # Notes:
 # - collision_check_frequency: 0 to disable, null for every step, or Hz value (e.g., 10.0)

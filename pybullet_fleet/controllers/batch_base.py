@@ -28,11 +28,12 @@ sized with ``self._agents``.
 from __future__ import annotations
 
 from abc import abstractmethod
-from typing import TYPE_CHECKING, Dict, List, Optional
+from typing import TYPE_CHECKING, Dict, List, Optional, Type
 
 import numpy as np
 
 from pybullet_fleet.controller import Controller
+from pybullet_fleet.geometry import quat_angle_between, quat_slerp_batch
 from pybullet_fleet.logging_utils import get_lazy_logger
 
 if TYPE_CHECKING:
@@ -40,6 +41,12 @@ if TYPE_CHECKING:
     from pybullet_fleet.core_simulation import MultiRobotSimulationCore
 
 logger = get_lazy_logger(__name__)
+
+# Registry: registry-name string → BatchKinematicController subclass.
+# Keys match the ``_registry_name`` attribute (e.g. ``"batch_omni"``,
+# ``"batch_differential"``).  Populated automatically via __init_subclass__
+# when a concrete subclass sets ``_registry_name``.
+BATCH_CONTROLLER_REGISTRY: Dict[str, Type["BatchKinematicController"]] = {}
 
 
 class BatchKinematicController(Controller):
@@ -50,22 +57,32 @@ class BatchKinematicController(Controller):
     since batch controllers act through :meth:`batch_advance` during Phase 1
     of ``sim_core.step_once()``. Per-agent kinematic parameters (max_vel,
     accel, etc.) are read from each ``Agent`` at ``set_path`` time.
+
+    To register a custom batch controller, set ``_registry_name`` on the
+    subclass and import the module once::
+
+        class MyBatchController(BatchKinematicController):
+            _registry_name = "my_batch"
+
+            def batch_advance(self, dt): ...
+
+        # Usage:
+        #   AgentManager(sim_core=sim, batch_controller="my_batch")
     """
 
-    def __init__(
-        self,
-        navigation_2d: bool = False,
-    ) -> None:
-        self._navigation_2d: bool = navigation_2d
+    def __init_subclass__(cls, **kwargs: object) -> None:
+        super().__init_subclass__(**kwargs)
+        name = getattr(cls, "_registry_name", None)
+        if name:
+            BATCH_CONTROLLER_REGISTRY[name] = cls
 
+    def __init__(self) -> None:
         self._sim_core: Optional["MultiRobotSimulationCore"] = None
         self._agents: List["Agent"] = []
         # id(agent) -> row index. Stable for the lifetime of an agent in this
         # controller; on unregister we compact rows by swapping with the last
         # row, so other agents may see their index change.
         self._agent_index: Dict[int, int] = {}
-        # id(agent) -> prior _needs_update flag (so unregister can restore).
-        self._saved_needs_update: Dict[int, bool] = {}
 
         # Per-agent output buffers (filled by batch_advance, written to sim).
         self._object_ids: np.ndarray = np.zeros((0,), dtype=np.int64)
@@ -80,10 +97,12 @@ class BatchKinematicController(Controller):
     def register_agent(self, agent: "Agent") -> int:
         """Register *agent* with this batch controller.
 
-        On the first call, the controller auto-binds to ``agent.sim_core`` and
-        appends itself to ``sim_core._batch_controllers`` so the sim's
-        ``step_once()`` will drive it during Phase 1. Subsequent registrations
-        must use agents from the same sim_core.
+        On the first call the controller records ``agent.sim_core`` so that
+        :meth:`_apply_phase1` can call ``set_poses``.  The controller is
+        *not* attached to ``sim_core._batch_controllers`` directly;
+        ``step_once()`` discovers it through the owning
+        :class:`~pybullet_fleet.agent_manager.AgentManager` that is
+        registered with the sim.
 
         Returns:
             The agent's row index in this controller's state arrays.
@@ -101,8 +120,6 @@ class BatchKinematicController(Controller):
             raise ValueError(f"Agent {agent} has no sim_core; spawn it via Agent.from_params(..., sim_core) first.")
         if self._sim_core is None:
             self._sim_core = agent_sim
-            if self not in agent_sim._batch_controllers:
-                agent_sim._batch_controllers.append(self)
         elif agent_sim is not self._sim_core:
             raise ValueError("Agent belongs to a different sim_core than this batch controller's other agents.")
         idx = len(self._agents)
@@ -114,11 +131,10 @@ class BatchKinematicController(Controller):
         pose = agent.get_pose()
         self._pos_buf[idx] = pose.position
         self._orn_buf[idx] = pose.orientation
-        # Suppress the per-step Agent.update() loop for this agent — the batch
-        # controller drives it directly via batch_advance(). Save the prior
-        # value so unregister can restore it.
-        self._saved_needs_update[key] = getattr(agent, "_needs_update", True)
-        agent._needs_update = False
+        # Mark the agent as batch-driven: agent.update() will still run (so
+        # the action queue and event hooks are preserved), but ctrl.compute()
+        # is skipped — movement is driven exclusively by batch_advance().
+        agent._batch_controller = self
         self._on_agent_registered(idx, agent)
         return idx
 
@@ -132,8 +148,7 @@ class BatchKinematicController(Controller):
         if key not in self._agent_index:
             raise KeyError(f"Agent {agent} is not registered with this batch controller.")
         idx = self._agent_index.pop(key)
-        prior = self._saved_needs_update.pop(key, True)
-        agent._needs_update = prior
+        agent._batch_controller = None
         last = len(self._agents) - 1
         if idx != last:
             # Swap last row into the freed slot.
@@ -143,20 +158,9 @@ class BatchKinematicController(Controller):
         self._agents.pop()
         self._resize_base_buffers(len(self._agents))
         self._on_agent_unregistered(idx, agent)
-        # Auto-detach when no agents remain so sim_core stops driving this
-        # controller and a fresh `register_agent(other_sim_agent)` could bind
-        # it to a different sim_core.
-        if not self._agents and self._sim_core is not None:
-            sim = self._sim_core
-            self._sim_core = None
-            try:
-                sim._batch_controllers.remove(self)
-            except ValueError:
-                pass
 
     def reset(self) -> None:
-        """Unregister all agents and reset arrays. Auto-detaches from sim_core
-        once the last agent is removed (same behaviour as ``unregister_agent``)."""
+        """Unregister all agents and reset arrays."""
         # Snapshot before mutation
         agents = list(self._agents)
         for a in agents:
@@ -205,6 +209,13 @@ class BatchKinematicController(Controller):
     def _on_agent_unregistered(self, idx: int, agent: "Agent") -> None:
         """Hook for subclasses to clear their own per-agent state row."""
 
+    def _on_cancel_path(self, idx: int) -> None:
+        """Cancel in-progress path for agent at *idx* (called by agent.stop()).
+
+        Subclasses override to reset their phase/path arrays to IDLE so
+        batch_advance() stops updating that agent immediately.
+        """
+
     # ------------------------------------------------------------------ #
     # Phase 1 entry point (called by core_simulation.step_once)
     # ------------------------------------------------------------------ #
@@ -251,3 +262,26 @@ class BatchKinematicController(Controller):
 
     def compute(self, agent, dt: float) -> bool:
         return False
+
+    def set_velocity(self, **kwargs) -> None:
+        raise NotImplementedError(
+            "Velocity mode is not supported in batch controllers. "
+            "Use the per-agent OmniController / DifferentialController instead."
+        )
+
+
+def resolve_batch_controller_key(entry: str) -> Type["BatchKinematicController"]:
+    """Return the :class:`BatchKinematicController` subclass for *entry*.
+
+    Raises:
+        ValueError: If *entry* is not a recognised registry name.
+    """
+    key = entry.lower()
+    if key in BATCH_CONTROLLER_REGISTRY:
+        return BATCH_CONTROLLER_REGISTRY[key]
+    available = list(BATCH_CONTROLLER_REGISTRY)
+    raise ValueError(
+        f"Unknown batch controller {entry!r}. "
+        f"Available: {available}. "
+        "Make sure the batch controller module is imported."
+    )

@@ -23,7 +23,7 @@ class TestPatrolController:
             urdf_path="robots/mobile_robot.urdf",
             initial_pose=Pose.from_xyz(0, 0, 0.1),
             motion_mode=MotionMode.OMNIDIRECTIONAL,
-            max_linear_vel=5.0,
+            controller={"max_linear_vel": 5.0},
         )
         agent = Agent.from_params(params, sim_core)
         patrol = PatrolController(
@@ -43,7 +43,7 @@ class TestPatrolController:
             urdf_path="robots/mobile_robot.urdf",
             initial_pose=Pose.from_xyz(0, 0, 0.1),
             motion_mode=MotionMode.OMNIDIRECTIONAL,
-            max_linear_vel=5.0,
+            controller={"max_linear_vel": 5.0},
         )
         agent = Agent.from_params(params, sim_core)
         patrol = PatrolController(
@@ -83,7 +83,7 @@ class TestRandomWalkController:
             urdf_path="robots/mobile_robot.urdf",
             initial_pose=Pose.from_xyz(0, 0, 0.1),
             motion_mode=MotionMode.OMNIDIRECTIONAL,
-            max_linear_vel=5.0,
+            controller={"max_linear_vel": 5.0},
         )
         agent = Agent.from_params(params, sim_core)
         rw = RandomWalkController(radius=3.0)

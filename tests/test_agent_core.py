@@ -29,7 +29,6 @@ from pybullet_fleet.sim_object import SimObject, ShapeParams
 from pybullet_fleet.types import CollisionMode, MotionMode, PosePhase
 from tests.conftest import MockSimCore
 
-
 MESH_PATH = os.path.join(os.path.dirname(__file__), "../mesh/cube.obj")
 ARM_URDF = "robots/arm_robot.urdf"
 MOBILE_URDF = "robots/mobile_robot.urdf"
@@ -184,15 +183,19 @@ def create_mesh_agent(
 
     Reduces boilerplate for the common case of cube.obj visual + box collision.
     """
+    from pybullet_fleet.controller_params import ControllerParams
+
     return Agent.from_mesh(
         visual_shape=ShapeParams(shape_type="mesh", mesh_path=MESH_PATH, mesh_scale=[0.2, 0.2, 0.2]),
         collision_shape=ShapeParams(shape_type="box", half_extents=[0.1, 0.1, 0.1]),
         pose=pose,
         mass=mass,
-        max_linear_vel=max_linear_vel,
-        max_linear_accel=max_linear_accel,
-        max_angular_vel=max_angular_vel,
-        max_angular_accel=max_angular_accel,
+        controller=ControllerParams(
+            max_linear_vel=max_linear_vel,
+            max_linear_accel=max_linear_accel,
+            max_angular_vel=max_angular_vel,
+            max_angular_accel=max_angular_accel,
+        ),
         motion_mode=motion_mode,
         use_fixed_base=use_fixed_base,
         collision_mode=collision_mode,
@@ -419,11 +422,15 @@ class TestAgentCreationFromURDF:
 
     def test_from_urdf_with_custom_params(self, pybullet_env):
         """Test URDF agent with custom velocity/mode parameters (mass=None default)"""
+        from pybullet_fleet.controller_params import ControllerParams
+
         agent = Agent.from_urdf(
             urdf_path="robots/mobile_robot.urdf",
             pose=Pose.from_xyz(1, 1, 0.5),
-            max_linear_vel=1.5,
-            max_linear_accel=3.0,
+            controller=ControllerParams(
+                max_linear_vel=1.5,
+                max_linear_accel=3.0,
+            ),
             motion_mode=MotionMode.OMNIDIRECTIONAL,
         )
 
@@ -479,10 +486,9 @@ class TestAgentSpawnParams:
         assert params.mass == 0.0
         assert params.pickable is True  # SimObjectSpawnParams default
         assert params.name is None
-        assert params.max_linear_vel == 2.0
-        assert params.max_linear_accel == 5.0
-        assert params.max_angular_vel == 3.0
-        assert params.max_angular_accel == 10.0
+        # No controller dict provided → stays None; framework defaults are
+        # applied later at Agent construction time.
+        assert params.controller is None
         assert params.motion_mode == MotionMode.DIFFERENTIAL
         assert params.use_fixed_base is False
         assert params.urdf_path is None
@@ -494,14 +500,14 @@ class TestAgentSpawnParams:
         params = AgentSpawnParams(
             visual_shape=ShapeParams(shape_type="box", half_extents=[0.2, 0.2, 0.2]),
             mass=1.5,
-            max_linear_vel=2.0,
+            controller={"max_linear_vel": 2.0},
             name="Robot_A",
             motion_mode=MotionMode.DIFFERENTIAL,
             user_data={"team": "blue"},
         )
 
         assert params.mass == 1.5
-        assert params.max_linear_vel == 2.0
+        assert params.controller == {"max_linear_vel": 2.0}
         assert params.name == "Robot_A"
         assert params.motion_mode == MotionMode.DIFFERENTIAL
         assert params.user_data == {"team": "blue"}
@@ -513,7 +519,7 @@ class TestAgentSpawnParams:
             collision_shape=ShapeParams(shape_type="box", half_extents=[0.1, 0.1, 0.1]),
             initial_pose=Pose.from_xyz(0, 0, 0.5),
             mass=2.0,
-            max_linear_vel=1.0,
+            controller={"max_linear_vel": 1.0},
             motion_mode=MotionMode.DIFFERENTIAL,
             name="ParamsAgent",
             user_data={"source": "params"},
@@ -538,7 +544,7 @@ class TestAgentSpawnParams:
         params = AgentSpawnParams(
             urdf_path="robots/mobile_robot.urdf",
             initial_pose=Pose.from_xyz(1, 1, 0.5),
-            max_linear_vel=1.5,
+            controller={"max_linear_vel": 1.5},
             motion_mode=MotionMode.OMNIDIRECTIONAL,
         )
 
@@ -563,7 +569,9 @@ class TestAgentSpawnParamsFromDict:
         result = AgentSpawnParams.from_dict({"name": "r0", "urdf_path": "robots/mobile_robot.urdf"})
         assert result.name == "r0"
         assert result.urdf_path == "robots/mobile_robot.urdf"
-        assert result.max_linear_vel == 2.0
+        # No kinematic limits provided in dict → controller stays None and
+        # framework defaults are applied at Agent construction time.
+        assert result.controller is None
 
     def test_pose_and_yaw(self):
         """pose list + yaw are converted to Pose."""
@@ -575,19 +583,19 @@ class TestAgentSpawnParamsFromDict:
         assert result.initial_pose.z == pytest.approx(0.05)
         assert result.initial_pose.yaw == pytest.approx(1.57, abs=0.01)
 
-    def test_controller_config_string_shortcut(self):
-        """controller_config string is converted to dict."""
+    def test_controller_string_shortcut(self):
+        """controller string is preserved as-is; normalized later by ControllerParams.parse_config."""
         result = AgentSpawnParams.from_dict(
-            {"name": "r0", "urdf_path": "robots/mobile_robot.urdf", "controller_config": "differential"}
+            {"name": "r0", "urdf_path": "robots/mobile_robot.urdf", "controller": "differential"}
         )
-        assert result.controller_config == {"type": "differential"}
+        assert result.controller == "differential"
 
-    def test_controller_config_dict(self):
-        """controller_config dict is passed through."""
+    def test_controller_dict(self):
+        """controller dict is passed through."""
         result = AgentSpawnParams.from_dict(
-            {"name": "r0", "urdf_path": "robots/mobile_robot.urdf", "controller_config": {"type": "omni_velocity"}}
+            {"name": "r0", "urdf_path": "robots/mobile_robot.urdf", "controller": {"type": "omni_velocity"}}
         )
-        assert result.controller_config == {"type": "omni_velocity"}
+        assert result.controller == {"type": "omni_velocity"}
 
     def test_missing_name_raises(self):
         """Missing name raises ValueError (inherited from SimObjectSpawnParams)."""
@@ -767,16 +775,20 @@ class TestAgentMotionUpdate:
         motion_mode=MotionMode.OMNIDIRECTIONAL,
     ):
         """Helper: create mesh agent wired to a MockSimCore."""
+        from pybullet_fleet.controller_params import ControllerParams
+
         sim_core = MockSimCore()
         agent = Agent.from_mesh(
             visual_shape=ShapeParams(shape_type="mesh", mesh_path=MESH_PATH, mesh_scale=[0.2, 0.2, 0.2]),
             collision_shape=ShapeParams(shape_type="box", half_extents=[0.1, 0.1, 0.1]),
             pose=pose,
             mass=0.0,
-            max_linear_vel=max_linear_vel,
-            max_linear_accel=max_linear_accel,
-            max_angular_vel=max_angular_vel,
-            max_angular_accel=max_angular_accel,
+            controller=ControllerParams(
+                max_linear_vel=max_linear_vel,
+                max_linear_accel=max_linear_accel,
+                max_angular_vel=max_angular_vel,
+                max_angular_accel=max_angular_accel,
+            ),
             motion_mode=motion_mode,
             sim_core=sim_core,
         )
@@ -2276,16 +2288,20 @@ class TestAgentVelocityCapping:
         max_angular_accel=3.0,
         motion_mode=MotionMode.OMNIDIRECTIONAL,
     ):
+        from pybullet_fleet.controller_params import ControllerParams
+
         sim_core = MockSimCore()
         agent = Agent.from_mesh(
             visual_shape=ShapeParams(shape_type="mesh", mesh_path=MESH_PATH, mesh_scale=[0.2, 0.2, 0.2]),
             collision_shape=ShapeParams(shape_type="box", half_extents=[0.1, 0.1, 0.1]),
             pose=pose,
             mass=0.0,
-            max_linear_vel=max_linear_vel,
-            max_linear_accel=max_linear_accel,
-            max_angular_vel=max_angular_vel,
-            max_angular_accel=max_angular_accel,
+            controller=ControllerParams(
+                max_linear_vel=max_linear_vel,
+                max_linear_accel=max_linear_accel,
+                max_angular_vel=max_angular_vel,
+                max_angular_accel=max_angular_accel,
+            ),
             motion_mode=motion_mode,
             sim_core=sim_core,
         )

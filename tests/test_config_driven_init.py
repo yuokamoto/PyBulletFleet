@@ -519,25 +519,29 @@ class TestManagerSyncOnRemove:
         assert len(sim_core.agents) == 0
 
     def test_remove_only_syncs_registered_managers(self, sim_core):
-        """An unregistered manager is not synced on remove_object."""
+        """Managers with sim_core are auto-registered and synced; managers without are not."""
         from pybullet_fleet.agent_manager import AgentManager
 
-        mgr_registered = AgentManager()
-        mgr_unregistered = AgentManager(sim_core=sim_core)
-        sim_core.register_manager(mgr_registered)
+        # Auto-registered at construction (has sim_core)
+        mgr_auto = AgentManager(sim_core=sim_core)
+        # Never registered (no sim_core)
+        mgr_orphan = AgentManager()
 
         sp = _spawn_params()
-        # Spawn through both managers
-        agents_reg = mgr_registered.spawn_objects_batch([sp])
-        agents_unreg = mgr_unregistered.spawn_objects_batch([sp])
+        agents_auto = mgr_auto.spawn_objects_batch([sp])
 
-        # Remove the registered one's agent
-        sim_core.remove_object(agents_reg[0])
-        assert len(mgr_registered.objects) == 0
+        # Spawn directly and manually track in orphan manager (no auto-register)
+        agent_orphan = Agent.from_params(sp, sim_core=sim_core)
+        mgr_orphan.add_object(agent_orphan)
+        assert len(mgr_orphan.objects) == 1
 
-        # Remove the unregistered one's agent — manager NOT synced
-        sim_core.remove_object(agents_unreg[0])
-        assert len(mgr_unregistered.objects) == 1  # still tracked (stale)
+        # Auto-registered manager is synced on remove
+        sim_core.remove_object(agents_auto[0])
+        assert len(mgr_auto.objects) == 0
+
+        # Orphan manager (no sim_core, never registered) is NOT synced — stale
+        sim_core.remove_object(agent_orphan)
+        assert len(mgr_orphan.objects) == 1
 
     def test_remove_nonexistent_in_manager_is_safe(self, sim_core):
         """Removing an object not tracked by the manager doesn't crash."""

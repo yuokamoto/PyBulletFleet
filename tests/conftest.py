@@ -62,6 +62,14 @@ class MockSimCore:
         """No-op batch_spawn context for tests (mirrors MultiRobotSimulationCore)."""
         yield
 
+    def register_manager(self, manager) -> None:
+        """No-op stub — AgentManager registers itself on construction."""
+        if not hasattr(self, "_registered_managers"):
+            self._registered_managers: list = []
+        if manager not in self._registered_managers:
+            self._registered_managers.append(manager)
+            manager.sim_core = self
+
     def register_callback(self, callback, frequency=None):
         """Record registered callbacks (used by AgentManager tests)."""
         if not hasattr(self, "_registered_callbacks"):

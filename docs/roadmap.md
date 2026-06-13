@@ -14,7 +14,7 @@ New robot and infrastructure models:
 
 ## Features
 
-- **Snapshot, Event log & Replay** — Three-layer architecture sharing a single EventBus as data source. Enables replay, external synchronization ([USO](https://github.com/yuokamoto/Unified-Simulation-Orchestrator) integration), and downstream observability (see [Observability](#observability) below).
+- **Snapshot, Event log & Replay** *(EventBus steps 1–2 done ✅; steps 3–6 pending)* — Three-layer architecture sharing a single EventBus as data source. Enables replay, external synchronization ([USO](https://github.com/yuokamoto/Unified-Simulation-Orchestrator) integration), and downstream observability (see [Observability](#observability) below).
 
   **Layer overview:**
 
@@ -49,7 +49,7 @@ New robot and infrastructure models:
   Steps 3–6 are independent once 1–2 are in place.
 
 - **Behavior tree integration** — Create agent behavior from behavior trees
-- **`SimObject.from_sdf()` → `List[SimObject]`** — Factory method that loads an SDF file via `p.loadSDF()` and wraps each returned body_id in a `SimObject`. Collision detection and lifecycle management via `add_object()` are applied automatically. Required for Open-RMF SDF environment loading and official support for pybullet_data SDF models (kiva_shelf, wsg50_gripper, etc.). Currently the catalog demo calls raw `p.loadSDF()` directly.
+- **`SimObject.from_sdf()` → `List[SimObject]`** ✅ — Factory method that loads an SDF file via `p.loadSDF()` and wraps each returned body_id in a `SimObject`. Collision detection and lifecycle management via `add_object()` are applied automatically. Required for Open-RMF SDF environment loading and official support for pybullet_data SDF models (kiva_shelf, wsg50_gripper, etc.).
 
 ### Devices
 
@@ -61,6 +61,7 @@ External communication layers:
 
 - **ROS 2** — Topic / service / action bridge for ROS 2 ecosystem integration (see [ros2_bridge/README.md](../ros2_bridge/README.md))
 - **gRPC** — Language-agnostic RPC interface for orchestrators, WMS, and fleet managers
+- **Distributed co-simulation (Robot Proxy layer)** — Per-robot proxy processes that translate between simulated robots and real Robot Apps (Nav2, task assigners, BTs). Enables running 100+ unmodified single-robot software stacks against a centralized batched simulator. Sim Central stays single-process and batched; only a thin fixed-schema boundary (`StateSnapshot` + `CommandBuffer` + Events) crosses the IPC. **Shares schema with Snapshot/Replay** — same `StateSnapshot` dataclass feeds live IPC, replay log, and observability sinks (define schema once, fan out to multiple consumers). See [co-simulation/spec.md](design/co-simulation/spec.md) for full design including layer separation, transport options (shared memory / gRPC / DDS), lockstep vs async sync modes, and 6-phase implementation plan.
 
 ## Refactoring
 
@@ -108,6 +109,7 @@ Current state:
 - `sim.pause()` / `resume()` Python API ✅
 - `SPACE` keybinding for pause toggle ✅
 - `pause` / `resume` events on EventBus ✅
+- `CameraController` with right-drag pan, zoom, top-down view ✅
 
 Planned:
 
@@ -154,7 +156,7 @@ Collision at 10 Hz adds only ~0.2 ms at 500 agents — negligible compared to ag
 | TPI-like trapezoidal profile | (per-agent) | 33 μs | — |
 | Per-agent cost | 23 μs/agent | ~0.01 μs/agent | — |
 
-### Two-Phase Step: Decouple Computation from PyBullet C API
+### Two-Phase Step: Decouple Computation from PyBullet C API ✅ (batch controller path)
 
 Current `step_once()` iterates agents one-by-one, each calling `controller.compute()` (Python/NumPy) → `set_pose_raw()` (PyBullet C API + AABB update + spatial grid) interleaved. This prevents vectorization and adds per-agent Python↔C crossing overhead.
 
@@ -175,7 +177,7 @@ Key changes:
 - Movement detection stays pure Python (already cached-pose-based), unaffected
 - Attached-object propagation runs after Phase 2 using the buffered parent poses
 
-### Vectorized Agent Update (NumPy Batch)
+### Vectorized Agent Update (NumPy Batch) ✅
 
 For the common "N agents on straight-line TPI paths" case, Phase 1 can be further vectorized:
 

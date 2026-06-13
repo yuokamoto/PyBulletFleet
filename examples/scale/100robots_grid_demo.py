@@ -122,8 +122,7 @@ mobile_params = AgentSpawnParams(
     urdf_path=mobile_urdf,
     initial_pose=Pose.from_xyz(0, 0, mobile_robot_config.get("initial_z", 0.3)),
     use_fixed_base=mobile_robot_config.get("use_fixed_base", False),
-    max_linear_vel=mobile_robot_config.get("max_linear_vel", 2.0),
-    max_linear_accel=mobile_robot_config.get("max_linear_accel", 5.0),
+    controller=mobile_robot_config.get("controller"),
     user_data={"robot_type": "mobile_robot"},
 )
 
@@ -141,8 +140,7 @@ if mode == "mixed":
         urdf_path=arm_urdf,
         initial_pose=Pose.from_xyz(0, 0, arm_robot_config.get("initial_z", 0.0)),
         use_fixed_base=arm_robot_config.get("use_fixed_base", True),
-        max_linear_vel=arm_robot_config.get("max_linear_vel", 0.0),
-        max_linear_accel=arm_robot_config.get("max_linear_accel", 0.0),
+        controller=arm_robot_config.get("controller"),
         mass=arm_robot_config.get("mass", 1.0),  # Use URDF mass (1.0) for physics simulation
         user_data={"robot_type": "arm_robot"},
     )

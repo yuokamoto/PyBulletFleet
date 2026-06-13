@@ -1,0 +1,71 @@
+# ============================================================
+# Cube Patrol Fleet Config
+#
+# Two named fleets (omni + differential) with shared
+# fleet_controller defaults and batch controllers.
+# Each fleet spawns a 5-column grid.
+#
+# Usage:
+#   sim = MultiRobotSimulationCore.from_yaml("config/cube_patrol_config.yaml")
+#   omni_manager = sim.get_manager("omni_fleet")
+#   diff_manager = sim.get_manager("diff_fleet")
+#
+# Replace urdf_path values with your robot URDF or use
+# resolve_model() in Python for named models (e.g. "husky").
+# ============================================================
+
+simulation:
+  target_rtf: 5
+  gui: true
+  physics: false
+  monitor: true
+  log_level: info
+  enable_time_profiling: true
+  camera:
+    camera_mode: auto
+    camera_view_type: perspective
+    camera_auto_scale: 0.5
+
+managers:
+  - name: omni_fleet
+    batch_controller: batch_omni
+    fleet_controller:
+      max_linear_vel: 2.0
+      max_linear_accel: 1.0
+      max_angular_vel: 2.0
+      max_angular_accel: 5.0
+
+  - name: diff_fleet
+    batch_controller: batch_differential
+    fleet_controller:
+      max_linear_vel: 2.0
+      max_linear_accel: 1.0
+      max_angular_vel: 2.0
+      max_angular_accel: 5.0
+
+entities:
+  - urdf_path: "robots/mobile_robot.urdf"  # replace with your robot
+    mass: 0.0
+    use_fixed_base: false
+    motion_mode: omnidirectional
+    manager: omni_fleet
+    grid:
+      x_min: 0
+      x_max: 4
+      y_min: 0
+      y_max: 9
+      spacing: [10.0, 10.0, 0.0]
+      offset: [-15.0, -15.0, 0.3]
+
+  - urdf_path: "robots/mobile_robot.urdf"  # replace with your robot
+    mass: 0.0
+    use_fixed_base: false
+    motion_mode: differential
+    manager: diff_fleet
+    grid:
+      x_min: 5
+      x_max: 9
+      y_min: 0
+      y_max: 9
+      spacing: [10.0, 10.0, 0.0]
+      offset: [-15.0, -15.0, 0.3]

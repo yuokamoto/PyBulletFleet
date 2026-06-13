@@ -7,6 +7,7 @@ Practical guides for common tasks.
 | Guide | What It Covers |
 |-------|----------------|
 | [Collision Configuration](collision-config) | Detection method, per-object modes, margin, cell size, multi-cell threshold |
+| [Controller Configuration](controller-config) | `controller` argument forms, `motion_mode` vs `controller.type`, batch controllers (auto-registration, coexistence, direction, action system), custom controllers |
 | [Custom Profiling](custom-profiling) | Adding your own profiling metrics via Agent/SimulationCore subclasses |
 | [Capturing Demos](capturing-demos) | Recording demo videos, `demos.yaml` format, centralized defaults (`_defaults.py`) |
 
@@ -26,6 +27,7 @@ Practical guides for common tasks.
 :caption: For Simulation Users
 
 collision-config
+controller-config
 custom-profiling
 capturing-demos
 ```

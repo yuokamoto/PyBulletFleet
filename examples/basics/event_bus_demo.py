@@ -101,7 +101,7 @@ def main():
             urdf_path="robots/mobile_robot.urdf",
             initial_pose=Pose.from_xyz(0, 0, 0.1),
             motion_mode=MotionMode.OMNIDIRECTIONAL,
-            max_linear_vel=2.0,
+            controller={"max_linear_vel": 2.0},
             collision_mode=CollisionMode.NORMAL_2D,
             name="robot_1",
         ),

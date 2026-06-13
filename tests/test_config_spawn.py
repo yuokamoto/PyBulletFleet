@@ -288,7 +288,7 @@ class TestSpawnFromConfig:
                 "name": "robot0",
                 "urdf_path": "robots/mobile_robot.urdf",
                 "pose": [0, 0, 0.05],
-                "controller_config": "omni",
+                "controller": "omni",
             },
         ]
         agents = manager.spawn_from_config(robots_yaml)
@@ -646,4 +646,202 @@ class TestEntitiesKey:
         finally:
             import pybullet as p
 
+            p.disconnect(sim.client)
+
+
+# =====================================================================
+# managers: config section + batch routing
+# =====================================================================
+
+_SIM_BASE = {
+    "simulation": {
+        "gui": False,
+        "monitor": False,
+        "physics": False,
+        "timestep": 0.016,
+        "collision_check_frequency": 0,
+        "log_level": "warning",
+    }
+}
+
+_GRID_10 = {"count": 10, "spacing": [2.0, 2.0], "offset": [0.0, 0.0, 0.1]}
+_SPAWN_OMNI = {
+    "urdf_path": "robots/simple_cube.urdf",
+    "motion_mode": "omnidirectional",
+}
+_SPAWN_DIFF = {
+    "urdf_path": "robots/simple_cube.urdf",
+    "motion_mode": "differential",
+}
+
+
+class TestManagersConfigSection:
+    """managers: section creates named AgentManagers with optional batch_controller."""
+
+    def test_get_manager_returns_none_when_not_declared(self):
+        import pybullet as p
+        from pybullet_fleet import MultiRobotSimulationCore, SimulationParams
+
+        sim = MultiRobotSimulationCore(SimulationParams(gui=False, monitor=False, physics=False, log_level="warning"))
+        try:
+            assert sim.get_manager("missing") is None
+        finally:
+            p.disconnect(sim.client)
+
+    def test_named_manager_created_and_retrievable(self):
+        import pybullet as p
+        from pybullet_fleet import MultiRobotSimulationCore
+        from pybullet_fleet.agent_manager import AgentManager
+        from pybullet_fleet.controllers.batch_omni import BatchOmniController
+
+        cfg = {**_SIM_BASE, "managers": [{"name": "fleet_a", "batch_controller": "batch_omni"}]}
+        sim = MultiRobotSimulationCore.from_dict(cfg)
+        try:
+            mgr = sim.get_manager("fleet_a")
+            assert mgr is not None
+            assert isinstance(mgr, AgentManager)
+            assert mgr.name == "fleet_a"
+            assert isinstance(mgr.batch_controller, BatchOmniController)
+        finally:
+            p.disconnect(sim.client)
+
+    def test_multiple_named_managers(self):
+        import pybullet as p
+        from pybullet_fleet import MultiRobotSimulationCore
+        from pybullet_fleet.agent_manager import AgentManager
+        from pybullet_fleet.controllers.batch_omni import BatchOmniController
+        from pybullet_fleet.controllers.batch_differential import BatchDifferentialController
+
+        cfg = {
+            **_SIM_BASE,
+            "managers": [
+                {"name": "omni_fleet", "batch_controller": "batch_omni"},
+                {"name": "diff_fleet", "batch_controller": "batch_differential"},
+            ],
+        }
+        sim = MultiRobotSimulationCore.from_dict(cfg)
+        try:
+            omni = sim.get_manager("omni_fleet")
+            diff = sim.get_manager("diff_fleet")
+            assert isinstance(omni, AgentManager)
+            assert isinstance(diff, AgentManager)
+            assert omni.name == "omni_fleet"
+            assert diff.name == "diff_fleet"
+            assert omni is not diff
+            assert isinstance(omni.batch_controller, BatchOmniController)
+            assert isinstance(diff.batch_controller, BatchDifferentialController)
+        finally:
+            p.disconnect(sim.client)
+
+    def test_entity_group_routed_to_named_manager(self):
+        import pybullet as p
+        from pybullet_fleet import MultiRobotSimulationCore
+
+        cfg = {
+            **_SIM_BASE,
+            "managers": [{"name": "delivery", "batch_controller": "batch_omni"}],
+            "entities": [{**_SPAWN_OMNI, "manager": "delivery", "grid": _GRID_10}],
+        }
+        sim = MultiRobotSimulationCore.from_dict(cfg)
+        try:
+            mgr = sim.get_manager("delivery")
+            assert len(mgr.objects) == 10
+            bc = mgr.batch_controller
+            for agent in mgr.objects:
+                assert agent._batch_controller is bc
+        finally:
+            p.disconnect(sim.client)
+
+    def test_batch_mode_shorthand_on_entity_group(self):
+        import pybullet as p
+        from pybullet_fleet import MultiRobotSimulationCore
+
+        cfg = {
+            **_SIM_BASE,
+            "entities": [{**_SPAWN_DIFF, "batch_controller": "batch_differential", "grid": _GRID_10}],
+        }
+        sim = MultiRobotSimulationCore.from_dict(cfg)
+        try:
+            agents = sim.agents
+            assert len(agents) == 10
+            # All should be batch-controlled
+            for agent in agents:
+                assert agent._batch_controller is not None
+            # All share the same BC
+            bcs = {id(a._batch_controller) for a in agents}
+            assert len(bcs) == 1
+        finally:
+            p.disconnect(sim.client)
+
+    def test_unknown_manager_name_raises(self):
+        import pybullet as p
+        from pybullet_fleet import MultiRobotSimulationCore
+
+        cfg = {
+            **_SIM_BASE,
+            "entities": [{**_SPAWN_OMNI, "manager": "no_such_manager", "grid": _GRID_10}],
+        }
+        sim = MultiRobotSimulationCore(
+            __import__("pybullet_fleet").SimulationParams(gui=False, monitor=False, physics=False, log_level="warning")
+        )
+        try:
+            with pytest.raises(KeyError, match="no_such_manager"):
+                sim.spawn_robots_from_config(cfg["entities"])
+        finally:
+            p.disconnect(sim.client)
+
+    def test_two_omni_fleets_independent(self):
+        """Two managers with the same batch_controller run independently."""
+        import pybullet as p
+        from pybullet_fleet import MultiRobotSimulationCore
+
+        cfg = {
+            **_SIM_BASE,
+            "managers": [
+                {"name": "fleet_a", "batch_controller": "batch_omni"},
+                {"name": "fleet_b", "batch_controller": "batch_omni"},
+            ],
+            "entities": [
+                {**_SPAWN_OMNI, "manager": "fleet_a", "grid": {"count": 5, "spacing": [2, 2], "offset": [0, 0, 0.1]}},
+                {**_SPAWN_OMNI, "manager": "fleet_b", "grid": {"count": 5, "spacing": [2, 2], "offset": [20, 0, 0.1]}},
+            ],
+        }
+        sim = MultiRobotSimulationCore.from_dict(cfg)
+        try:
+            a = sim.get_manager("fleet_a")
+            b = sim.get_manager("fleet_b")
+            assert a is not b
+            assert a.batch_controller is not b.batch_controller
+            assert len(a.objects) == 5
+            assert len(b.objects) == 5
+        finally:
+            p.disconnect(sim.client)
+
+    def test_named_manager_batch_drives_step_once(self):
+        """Agents in a named batch manager actually move during step_once."""
+        import numpy as np
+        import pybullet as p
+        from pybullet_fleet import MultiRobotSimulationCore, Pose
+
+        cfg = {
+            **_SIM_BASE,
+            "managers": [{"name": "fleet", "batch_controller": "batch_omni"}],
+            "entities": [
+                {**_SPAWN_OMNI, "manager": "fleet", "grid": {"count": 3, "spacing": [3, 0], "offset": [0, 0, 0.1]}}
+            ],
+        }
+        sim = MultiRobotSimulationCore.from_dict(cfg)
+        try:
+            mgr = sim.get_manager("fleet")
+            bc = mgr.batch_controller
+            for agent in mgr.objects:
+                bc.set_path(agent, [Pose.from_xyz(agent.get_pose().x + 2.0, agent.get_pose().y, 0.1)])
+            for _ in range(200):
+                sim.step_once()
+            for agent in mgr.objects:
+                pos = agent.get_pose().position
+                assert np.linalg.norm(np.array(pos) - np.array([pos[0], pos[1], 0.1])) < 0.5
+                # Moved at least 1 m from start
+                assert pos[0] > 1.0
+        finally:
             p.disconnect(sim.client)

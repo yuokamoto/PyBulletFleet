@@ -45,7 +45,7 @@ def _make_agent(sim, x=0.0, y=0.0, z=0.1):
             initial_pose=Pose.from_xyz(x, y, z),
             motion_mode=MotionMode.OMNIDIRECTIONAL,
             collision_mode=CollisionMode.NORMAL_3D,
-            max_linear_vel=1.0,
+            controller={"max_linear_vel": 1.0},
         ),
         sim_core=sim,
     )
@@ -250,8 +250,9 @@ class TestDeferredAABBAndGrid:
         # The pair (a, b) must have been considered (both share the same grid cell).
         collisions = sim.check_collisions()[0]
         pair = {a.object_id, b.object_id}
-        assert any({c[0], c[1]} == pair for c in collisions), \
-            f"Expected collision between agents at same position; got {collisions}"
+        assert any(
+            {c[0], c[1]} == pair for c in collisions
+        ), f"Expected collision between agents at same position; got {collisions}"
 
 
 def _make_box(sim, x, y, z, half=0.1):

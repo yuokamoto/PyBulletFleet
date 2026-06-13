@@ -14,7 +14,7 @@ import time
 import tracemalloc  # Memory profiling (imported once at module level)
 from collections import deque
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Sequence, Set, Tuple, Union, cast
 
 import numpy as np
@@ -254,6 +254,12 @@ class MultiRobotSimulationCore:
         params = SimulationParams.from_dict(sim_config)
         sim = cls(params)
 
+        # managers: must be processed before entities: so that entity groups
+        # can reference them by name via the ``manager:`` key.
+        managers_config = list(config.get("managers", []))
+        if managers_config:
+            sim._init_named_managers(managers_config)
+
         if world_config:
             entity_names = [e.get("name", "") for e in entities_config if e.get("name")]
             skip = list(set(world_config.get("skip_models", []) + entity_names))
@@ -397,17 +403,13 @@ class MultiRobotSimulationCore:
         self._in_step: bool = False
         self._pending_pose_ids: Set[int] = set()
 
-        # --- Batch controllers (Phase B opt-in) ---
-        # Vectorised controllers managing many agents per instance. Each is
-        # invoked once in step_once Phase 1 via batch_advance(dt). See
-        # docs/architecture/two-phase-step.md.
-        self._batch_controllers: List[Any] = []  # List["BatchKinematicController"]
 
         # --- Plugins ---
         self._plugins: List["SimPlugin"] = []
 
         self.setup_pybullet()
         self.setup_monitor()
+
 
     def setup_monitor(self) -> None:
         # If monitor: true and console_monitor: false, start DataMonitor
@@ -611,6 +613,65 @@ class MultiRobotSimulationCore:
             return True
         except ValueError:
             return False
+
+    def get_manager(self, name: str) -> Optional[Any]:
+        """Return the registered :class:`~pybullet_fleet.agent_manager.AgentManager`
+        with the given name, or ``None``.
+
+        Args:
+            name: The name assigned to the manager (``name:`` field in YAML, or
+                the ``name=`` argument passed to :class:`AgentManager`).
+
+        Example::
+
+            sim = MultiRobotSimulationCore.from_yaml("config.yaml")
+            fleet = sim.get_manager("delivery_fleet")
+            for agent in fleet.objects:
+                agent.set_path([goal])
+        """
+        for mgr in self._registered_managers:
+            if getattr(mgr, "name", None) == name:
+                return mgr
+        return None
+
+    def _init_named_managers(self, managers_config: List[Dict[str, Any]]) -> None:
+        """Create :class:`~pybullet_fleet.agent_manager.AgentManager` instances
+        from the ``managers:`` config section and register them.
+
+        Each entry must have a ``name:`` field.  Optional fields:
+
+        * ``batch_controller`` — batch controller registry name (``"batch_differential"``,
+          ``"batch_omni"``); enables batch processing for all agents in this manager.
+        * ``controller`` — fleet-wide :class:`~pybullet_fleet.controller_params
+          .ControllerParams` defaults (e.g. ``{"max_linear_vel": 2.0,
+          "navigation_2d": true}``).  Applied to every agent that has no explicit
+          ``controller:`` block of its own.  Per-agent ``controller:`` always wins.
+        * ``update_frequency`` — callback Hz (default ``10.0``).
+        """
+        from pybullet_fleet.agent_manager import AgentManager
+
+        for cfg in managers_config:
+            name = cfg.get("name")
+            if not name:
+                logger.warning("managers: entry missing required 'name' field, skipping")
+                continue
+            if self.get_manager(name) is not None:
+                logger.warning("managers: duplicate name %r, skipping second entry", name)
+                continue
+            batch_controller = cfg.get("batch_controller")
+            fleet_controller = cfg.get("controller") or None
+            update_frequency = float(cfg.get("update_frequency", 10.0))
+            mgr = AgentManager(
+                sim_core=self,
+                name=name,
+                update_frequency=update_frequency,
+                batch_controller=batch_controller,
+                fleet_controller=fleet_controller,
+            )
+            logger.info(
+                "Created manager %r (batch_controller=%r, fleet_controller=%r, update_frequency=%s Hz)",
+                name, batch_controller, fleet_controller, update_frequency,
+            )
 
     def unregister_callback(self, callback_func: Callable) -> bool:
         """Remove a registered callback by function reference.
@@ -2862,10 +2923,32 @@ class MultiRobotSimulationCore:
                 },
             }
 
-        Grid entries create a :class:`~pybullet_fleet.agent_manager.SimObjectManager`
-        internally and register it with this simulation, so objects are
-        automatically synchronised on :meth:`remove_object` and
-        :meth:`reset`.
+        Grid entries create a manager internally and register it with this
+        simulation, so objects are automatically synchronised on
+        :meth:`remove_object` and :meth:`reset`.
+
+        **Batch processing**: Grid entries accept two keys for batch control:
+
+        * ``batch_controller`` — batch controller registry name
+          (``"batch_differential"``, ``"batch_omni"``).  Shorthand: creates
+          an unnamed :class:`~pybullet_fleet.agent_manager.AgentManager` with
+          a batch controller for this group::
+
+              {
+                  "urdf_path": "robots/simple_cube.urdf",
+                  "motion_mode": "differential",
+                  "batch_controller": "batch_differential",
+                  "grid": {"count": 100, "spacing": [2, 2]},
+              }
+
+        * ``manager`` — name of a manager declared in the ``managers:`` config
+          section.  All entities in this group are added to that manager::
+
+              {
+                  "urdf_path": "robots/simple_cube.urdf",
+                  "manager": "delivery_fleet",
+                  "grid": {"count": 50, "spacing": [2, 2]},
+              }
 
         **Entity type dispatch**: If an entry contains a ``type`` key
         (e.g. ``"agent"``, ``"sim_object"``, or a custom registered
@@ -2883,17 +2966,18 @@ class MultiRobotSimulationCore:
             sim.spawn_robots_from_config([
                 # Individual robot
                 {"urdf_path": "robots/mobile_robot.urdf", "pose": [0, 0, 0.05]},
-                # Grid of 20 robots (count-based)
+                # Grid with batch controller (shorthand)
                 {
                     "urdf_path": "robots/mobile_robot.urdf",
                     "motion_mode": "omnidirectional",
+                    "batch_controller": "batch_omni",
                     "grid": {"count": 20, "spacing": [3, 3]},
                 },
-                # Grid with explicit ranges
+                # Grid assigned to a named manager
                 {
                     "urdf_path": "robots/mobile_robot.urdf",
-                    "grid": {"x_min": 0, "x_max": 4, "y_min": 0, "y_max": 3,
-                             "spacing": [3, 3, 0], "offset": [0, 0, 0.05]},
+                    "manager": "delivery_fleet",
+                    "grid": {"count": 50, "spacing": [2, 2]},
                 },
                 # Custom entity type
                 {"type": "forklift", "urdf_path": "robots/forklift.urdf", "pose": [10, 0, 0]},
@@ -2933,6 +3017,11 @@ class MultiRobotSimulationCore:
 
             _resolve_paths(d)
 
+            # Pop manager-routing keys before building SpawnParams.
+            batch_controller = d.pop("batch_controller", None)
+            fleet_controller = d.pop("fleet_controller", None) or None
+            manager_name = d.pop("manager", None)
+
             if grid_cfg is None:
                 # --- Individual entity ----------------------------------
                 if "name" not in d:
@@ -2941,30 +3030,54 @@ class MultiRobotSimulationCore:
 
                 with self.batch_spawn():
                     obj = entity_cls.from_dict(d, sim_core=self)
+
+                # Route individual entity into a named manager if requested.
+                if manager_name is not None:
+                    named_mgr = self.get_manager(manager_name)
+                    if named_mgr is None:
+                        raise KeyError(
+                            f"manager {manager_name!r} not found. "
+                            "Declare it in the 'managers:' section before 'entities:'."
+                        )
+                    named_mgr.add_object(obj)
                 spawned.append(obj)
             else:
-                # --- Grid spawn via SimObjectManager --------------------
+                # --- Grid spawn -----------------------------------------
+                from pybullet_fleet.agent_manager import AgentManager
+
                 grid_params = GridSpawnParams.from_dict(grid_cfg)
                 count = grid_cfg.get("count", grid_params.total_cells)
 
                 name_base = d.get("name", d.get("urdf_path", "robot"))
-                # Remove pose from template — grid sets position per-entity.
-                # Set a placeholder name (will be overwritten per-entity below).
                 d.pop("pose", None)
                 d["name"] = name_base
 
-                # Build SpawnParams from the template dict
                 spawn_params = entity_cls._spawn_params_cls.from_dict(d)
 
-                # Create manager and spawn (deterministic X→Y→Z order)
-                mgr = SimObjectManager(sim_core=self, object_class=entity_cls)
+                # Resolve manager: explicit named > batch_controller shorthand > plain
+                if manager_name is not None:
+                    mgr = self.get_manager(manager_name)
+                    if mgr is None:
+                        raise KeyError(
+                            f"manager {manager_name!r} not found. "
+                            "Declare it in the 'managers:' section before 'entities:'."
+                        )
+                elif batch_controller is not None and issubclass(entity_cls, Agent):
+                    mgr = AgentManager(
+                        sim_core=self,
+                        batch_controller=batch_controller,
+                        fleet_controller=fleet_controller,
+                    )
+                    self.register_manager(mgr)
+                else:
+                    mgr = SimObjectManager(sim_core=self, object_class=entity_cls)
+                    self.register_manager(mgr)
+
                 grid_objects = mgr.spawn_grid_mixed(count, grid_params, [(spawn_params, 1.0)])
 
-                # Assign sequential names
                 for i, obj in enumerate(grid_objects):
                     obj.name = f"{name_base}_{i}"
 
-                self.register_manager(mgr)
                 spawned.extend(grid_objects)
 
                 logger.info(
@@ -3183,18 +3296,23 @@ class MultiRobotSimulationCore:
             If return_profiling=True, returns dict with timing breakdown in milliseconds::
 
                 {
-                    'agent_update': float,
+                    'phase1_update': float,        # agent.update + callbacks + plugin on_step
+                    'phase2_pose_flush': float,    # flush buffered poses to PyBullet
+                    'phase3_aabb_grid_flush': float, # kinematic AABB + spatial-grid refresh
+                    'agent_update': float,         # per-object update loop (subset of phase1; compat)
                     'callbacks': float,
-                    'step_simulation': float,
+                    'step_simulation': float,      # p.stepSimulation(); non-zero only if physics=True
                     'collision_check': float,
-                    'collision_breakdown': {       # per-phase detail (present when collision ran)
+                    'collision_breakdown': {       # present only when collision ran
                         'get_aabbs': float,
                         'spatial_hashing': float,
                         'aabb_filtering': float,
-                        'contact_points': float,
+                        'contact_points': float,   # narrow phase; non-zero only if physics=True
                         'total': float,
                     },
-                    '<custom_field>': float,       # present when custom fields registered
+                    'events_pre_step': float,
+                    'events_post_step': float,
+                    'events_collision': float,
                     'monitor_update': float,
                     'total': float,
                 }
@@ -3264,8 +3382,11 @@ class MultiRobotSimulationCore:
             # batch controller still appear in self._sim_objects and have
             # _needs_update=True, but their own controller is IDLE so the
             # per-object loop is a cheap no-op for them.
-            for bc in self._batch_controllers:
-                bc.batch_advance(self._params.timestep)
+            # BCs are owned by AgentManagers registered with this sim_core.
+            for mgr in self._registered_managers:
+                bc = getattr(mgr, "batch_controller", None)
+                if bc is not None:
+                    bc.batch_advance(self._params.timestep)
 
             for obj in self._sim_objects:
                 if obj._needs_update:
@@ -3341,6 +3462,12 @@ class MultiRobotSimulationCore:
                 if self._cached_cell_size is not None:
                     self._update_object_spatial_grid(obj_id)
 
+            # step_simulation covers p.stepSimulation() + physics-object AABB loop only.
+            # Phase 3 (kinematic AABB flush) is measured separately to avoid double-counting.
+            if measure_timing:
+                t_sim1 = time.perf_counter()
+                self._profiling_stats["step_simulation"][-1] = (t_sim1 - t_sim0) * 1000
+
             # --- Two-phase step Phase 3: flush AABB + spatial grid for buffered kinematic objects ---
             # Uses the snapshot captured at Phase 2 — no dependency on _pending_pose_ids,
             # so the two flush helpers can be reordered or invoked independently if needed.
@@ -3349,10 +3476,6 @@ class MultiRobotSimulationCore:
             self._flush_aabb_and_grid(flushed_ids)
             if measure_timing:
                 self._profiling_stats["phase3_aabb_grid_flush"][-1] = (time.perf_counter() - t_phase3) * 1000
-
-            if measure_timing:
-                t_sim1 = time.perf_counter()
-                self._profiling_stats["step_simulation"][-1] = (t_sim1 - t_sim0) * 1000
 
             # Collision check frequency control
             if measure_timing:
@@ -3378,6 +3501,11 @@ class MultiRobotSimulationCore:
             if measure_timing:
                 t_col1 = time.perf_counter()
                 self._profiling_stats["collision_check"][-1] = (t_col1 - t_col0) * 1000
+
+            # Clear _in_step before POST_STEP so that set_pose() calls made by
+            # POST_STEP subscribers are written directly to PyBullet in this step
+            # rather than being buffered for the next step.
+            self._in_step = False
 
             # --- post_step event ---
             if measure_timing:

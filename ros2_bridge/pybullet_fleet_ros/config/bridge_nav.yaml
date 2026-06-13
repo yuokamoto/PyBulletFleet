@@ -22,7 +22,9 @@ entities:
     pose: [0.0, 0.0, 0.05]
     yaw: 0.0
     motion_mode: "differential"
-    max_linear_vel: 2.0
-    max_linear_accel: 5.0
-    max_angular_vel: 3.0
-    max_angular_accel: 10.0
+    controller:
+      type: "differential"
+      max_linear_vel: 2.0
+      max_linear_accel: 5.0
+      max_angular_vel: 3.0
+      max_angular_accel: 10.0

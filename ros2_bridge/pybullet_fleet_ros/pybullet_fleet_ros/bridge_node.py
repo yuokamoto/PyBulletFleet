@@ -219,7 +219,7 @@ class BridgeNode(Node):
         """Create a RobotHandler for *agent* and register it.
 
         If the agent already has a KinematicController (e.g. from
-        ``controller_config``), it is passed to RobotHandler so that
+        ``controller``), it is passed to RobotHandler so that
         ``cmd_vel`` messages drive the controller.
         If no controller is present, an :class:`OmniController`
         is attached **only for omnidirectional agents**. Differential-drive

@@ -54,7 +54,8 @@ flowchart TD
 
 ### Tool Categories
 
-- 🎯 **Benchmarking:** `run_benchmark.py`, `mobile_benchmark.py`, `arm_benchmark.py` — measure overall performance
+- 🎯 **Benchmarking:** `run_benchmark.py`, `mobile_benchmark.py`, `arm_benchmark.py` — measure overall performance (RTF, step time, memory)
+- ⚡ **Controller comparison:** `batch_perf.py` — batch vs per-agent step-time with phase breakdown
 - 🔍 **Profiling:** `profiling/` — identify *what is slow* (see `profiling/README.md`)
 - 🧪 **Experiments:** `experiments/` — compare *which is faster* (see `experiments/README.md`)
 
@@ -77,6 +78,10 @@ python benchmark/run_benchmark.py --sweep 100 500 1000 2000 5000
 
 # Mobile: scenario comparison
 python benchmark/run_benchmark.py --compare no_collision collision_10hz collision_3d_full --agents 1000
+
+# Batch vs per-agent controller comparison (use --duration 30 for ≥300 steps)
+python benchmark/run_benchmark.py --compare per_agent batch_omni --sweep 100 500 1000 2000 --duration 30
+python benchmark/batch_perf.py --n 1000 --mode omni   # quick in-process version with phase breakdown
 
 # Arm: single benchmark (10 arms, physics mode)
 python benchmark/run_benchmark.py --type arm --agents 10 --duration 5 --scenario physics
@@ -281,6 +286,25 @@ log_level: error            # Suppress logs
 | `collision_hybrid.yaml` | ON | `hybrid` | 0.02 (2 cm) | 0.00417 (240 Hz) |
 
 **Recommendation:** Use `collision_physics_off.yaml` for production workloads (fastest, deterministic).
+
+### Scenarios (`general.yaml`)
+
+Each config file can define named scenarios under a `scenarios:` key.  A scenario
+overrides only the fields it specifies; everything else falls back to the top-level
+defaults.  Pass a scenario name with `--scenario` or `--compare`:
+
+| Scenario | Description |
+|----------|-------------|
+| `no_collision` | Collision disabled — isolates controller overhead |
+| `collision_3d_full` | Full 3D collision every step |
+| `collision_10hz` | 3D collision at 10 Hz |
+| `stress_5k_agents` | 5 000 agents, single run |
+| `per_agent` | Per-agent controllers, no collision — for batch comparison |
+| `batch_omni` | BatchOmniController, no collision — for batch comparison |
+
+> **Minimum step count:** `general.yaml` uses `timestep=0.1 s`.  With `--duration 5`
+> only 50 steps are measured — a single GC pause can skew the mean 10×.  Use
+> `--duration 30` (300 steps) or longer for stable results.
 
 ---
 

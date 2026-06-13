@@ -70,8 +70,10 @@ def main():
         collision_shape=ShapeParams(shape_type="box", half_extents=[0.25, 0.125, 0.15]),
         initial_pose=Pose.from_xyz(-4.0, 0.0, 0.5),  # Larger circle
         mass=0.0,  # Kinematic control (no physics simulation)
-        max_linear_vel=2.0,  # Faster max speed
-        max_linear_accel=0.5,  # MUCH slower acceleration for visible effect
+        controller={
+            "max_linear_vel": 2.0,  # Faster max speed
+            "max_linear_accel": 0.5,  # MUCH slower acceleration for visible effect
+        },
         motion_mode=MotionMode.OMNIDIRECTIONAL,
     )
     robot_omni = Agent.from_params(omnidirectional_params, sim_core=sim)
@@ -84,9 +86,11 @@ def main():
         initial_pose=Pose.from_xyz(4.0, 0.0, 0.3),  # Larger square
         use_fixed_base=False,
         mass=0.0,  # Kinematic control (no physics simulation)
-        max_linear_vel=2.0,  # Faster max speed
-        max_linear_accel=0.5,  # MUCH slower acceleration for visible effect
-        max_angular_vel=1.0,  # Slower rotation
+        controller={
+            "max_linear_vel": 2.0,  # Faster max speed
+            "max_linear_accel": 0.5,  # MUCH slower acceleration for visible effect
+            "max_angular_vel": 1.0,  # Slower rotation
+        },
         motion_mode=MotionMode.DIFFERENTIAL,
     )
     robot_diff = Agent.from_params(differential_params, sim_core=sim)
@@ -99,8 +103,10 @@ def main():
         collision_shape=ShapeParams(shape_type="box", half_extents=[0.2, 0.1, 0.125]),
         initial_pose=Pose.from_xyz(0.0, -6.0, 2.0),
         mass=0.0,  # Kinematic control (no physics simulation)
-        max_linear_vel=2.0,
-        max_linear_accel=0.5,
+        controller={
+            "max_linear_vel": 2.0,
+            "max_linear_accel": 0.5,
+        },
         motion_mode=MotionMode.OMNIDIRECTIONAL,
     )
     robot_omni_3d = Agent.from_params(omni3d_params, sim_core=sim)
@@ -112,9 +118,11 @@ def main():
         initial_pose=Pose.from_xyz(0.0, 6.0, 0.3),
         use_fixed_base=False,
         mass=0.0,  # Kinematic control (no physics simulation)
-        max_linear_vel=2.0,
-        max_linear_accel=0.5,
-        max_angular_vel=1.0,
+        controller={
+            "max_linear_vel": 2.0,
+            "max_linear_accel": 0.5,
+            "max_angular_vel": 1.0,
+        },
         motion_mode=MotionMode.DIFFERENTIAL,
     )
     robot_diff_full3d = Agent.from_params(diff_full3d_params, sim_core=sim)
@@ -126,10 +134,12 @@ def main():
         initial_pose=Pose.from_xyz(-10.0, -10.0, 0.3),  # Far from path start
         use_fixed_base=False,
         mass=0.0,  # Kinematic control
-        max_linear_vel=2.0,
-        max_linear_accel=0.5,
-        max_angular_vel=1.0,
-        max_angular_accel=5.0,
+        controller={
+            "max_linear_vel": 2.0,
+            "max_linear_accel": 0.5,
+            "max_angular_vel": 1.0,
+            "max_angular_accel": 5.0,
+        },
         motion_mode=MotionMode.DIFFERENTIAL,
     )
     robot_climb = Agent.from_params(climb_params, sim_core=sim)

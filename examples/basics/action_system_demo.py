@@ -67,10 +67,12 @@ def main():
         urdf_path=urdf_path,
         initial_pose=Pose.from_xyz(0, 0, 0.3),
         motion_mode=MotionMode.DIFFERENTIAL,
-        max_linear_vel=2.0,
-        max_linear_accel=5.0,
-        max_angular_vel=2.0,
-        max_angular_accel=5.0,
+        controller={
+            "max_linear_vel": 2.0,
+            "max_linear_accel": 5.0,
+            "max_angular_vel": 2.0,
+            "max_angular_accel": 5.0,
+        },
         mass=0.0,  # Kinematic control (no physics)
     )
     agent = Agent.from_params(agent_params, sim_core=sim)

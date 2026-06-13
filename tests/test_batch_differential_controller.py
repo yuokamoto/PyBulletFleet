@@ -56,13 +56,21 @@ def _spawn_diff(sim, x=0.0, y=0.0, z=0.1, yaw=0.0, max_vel=1.0, max_ang_vel=2.0)
             initial_pose=Pose.from_yaw(x, y, z, yaw),
             motion_mode=MotionMode.DIFFERENTIAL,
             collision_mode=CollisionMode.NORMAL_3D,
-            max_linear_vel=max_vel,
-            max_linear_accel=2.0,
-            max_angular_vel=max_ang_vel,
-            max_angular_accel=4.0,
+            controller={
+                "max_linear_vel": max_vel,
+                "max_linear_accel": 2.0,
+                "max_angular_vel": max_ang_vel,
+                "max_angular_accel": 4.0,
+            },
         ),
         sim_core=sim,
     )
+
+
+def _make_diff_manager(sim):
+    from pybullet_fleet.agent_manager import AgentManager
+
+    return AgentManager(sim_core=sim, batch_controller="batch_differential")
 
 
 # ----------------------------------------------------------------------
@@ -72,11 +80,10 @@ def _spawn_diff(sim, x=0.0, y=0.0, z=0.1, yaw=0.0, max_vel=1.0, max_ang_vel=2.0)
 
 class TestBatchDiffBasics:
     def test_set_path_requires_registered_agent(self, sim):
-        bc = BatchDifferentialController()
-        # Register a sentinel so the controller is attached to sim_core,
-        # then verify set_path() rejects an agent that isn't in the set.
+        mgr = _make_diff_manager(sim)
+        bc = mgr.batch_controller
         sentinel = _spawn_diff(sim, x=-1.0)
-        bc.register_agent(sentinel)
+        mgr.add_object(sentinel)
         a = _spawn_diff(sim)
         with pytest.raises(KeyError):
             bc.set_path(a, [Pose.from_xyz(1.0, 0.0, 0.1)])
@@ -87,19 +94,20 @@ class TestBatchDiffBasics:
             bc.set_path(None, [Pose.from_xyz(1.0, 0.0, 0.1)])  # type: ignore[arg-type]
 
     def test_inactive_agent_does_not_move(self, sim):
-        bc = BatchDifferentialController()
+        mgr = _make_diff_manager(sim)
+        bc = mgr.batch_controller
         a = _spawn_diff(sim)
-        bc.register_agent(a)
+        mgr.add_object(a)
         start = a.get_pose().position[:]
         for _ in range(30):
             sim.step_once()
         assert np.allclose(a.get_pose().position, start)
 
     def test_reaches_goal_with_rotation(self, sim):
-        # Start facing +x, goal at +y so a 90deg ROTATE happens first.
-        bc = BatchDifferentialController()
+        mgr = _make_diff_manager(sim)
+        bc = mgr.batch_controller
         a = _spawn_diff(sim, x=0.0, y=0.0, yaw=0.0, max_vel=1.5, max_ang_vel=2.0)
-        bc.register_agent(a)
+        mgr.add_object(a)
         bc.set_path(a, [Pose.from_xyz(0.0, 2.0, 0.1)])
         for _ in range(600):
             sim.step_once()
@@ -108,9 +116,10 @@ class TestBatchDiffBasics:
         assert pos[1] == pytest.approx(2.0, abs=1e-2)
 
     def test_multi_waypoint_path(self, sim):
-        bc = BatchDifferentialController()
+        mgr = _make_diff_manager(sim)
+        bc = mgr.batch_controller
         a = _spawn_diff(sim, max_vel=1.5, max_ang_vel=2.0)
-        bc.register_agent(a)
+        mgr.add_object(a)
         bc.set_path(
             a,
             [
@@ -155,11 +164,12 @@ class TestBatchDiffEquivalence:
             direction=MovementDirection.FORWARD,
         )
 
-        # Target agent uses the batch controller.
+        # Target agent uses the batch controller (disable final-orient to match ref).
+        mgr = _make_diff_manager(sim)
+        bc = mgr.batch_controller
         tgt = _spawn_diff(sim, x=0.0, y=0.0, yaw=0.0, max_vel=1.2, max_ang_vel=1.5)
-        bc = BatchDifferentialController()
-        bc.register_agent(tgt)
-        bc.set_path(tgt, [Pose.from_xyz(*goal_xyz)])
+        mgr.add_object(tgt)
+        bc.set_path(tgt, [Pose.from_xyz(*goal_xyz)], final_orientation_align=False)
 
         max_pos_err = 0.0
         max_ang_err = 0.0
@@ -185,15 +195,15 @@ class TestBatchDiffEquivalence:
 
 class TestBatchDiffIntegration:
     def test_uses_buffered_pose_write(self, sim):
-        bc = BatchDifferentialController()
+        mgr = _make_diff_manager(sim)
+        bc = mgr.batch_controller
         a = _spawn_diff(sim, x=0.0, y=0.0, yaw=0.0, max_vel=1.5, max_ang_vel=2.0)
-        bc.register_agent(a)
-        bc.set_path(a, [Pose.from_xyz(0.0, 1.0, 0.1)])  # forces a rotation first
+        mgr.add_object(a)
+        bc.set_path(a, [Pose.from_xyz(0.0, 1.0, 0.1)])
 
         sim.step_once()
         pb_pos, pb_orn = p.getBasePositionAndOrientation(a.object_id, physicsClientId=sim.client)
         cache_pose = a.get_pose()
-        # After step_once, PyBullet and cache must agree (Phase 2 flushed).
         assert pb_pos[0] == pytest.approx(cache_pose.position[0], abs=1e-9)
         assert pb_pos[1] == pytest.approx(cache_pose.position[1], abs=1e-9)
         for i in range(4):

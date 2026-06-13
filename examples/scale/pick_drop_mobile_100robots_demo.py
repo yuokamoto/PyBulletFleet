@@ -32,6 +32,12 @@ parser = argparse.ArgumentParser(description="100 mobile robots pick & drop shut
 parser.add_argument("--robot", default="husky", help="Robot name (e.g. husky, mobile_robot, racecar) or URDF path")
 parser.add_argument("--duration", type=float, default=None, help="Simulation duration in seconds (default: run forever)")
 parser.add_argument("--rtf", type=float, default=None, help="Target real-time factor override")
+parser.add_argument(
+    "--controller",
+    choices=["batch", "per_agent"],
+    default="per_agent",
+    help="Controller type: 'per_agent' (default) or 'batch' (faster at scale)",
+)
 args = parser.parse_args()
 
 # Simulation setup — base config + demo-specific overrides (no separate YAML needed)
@@ -46,8 +52,10 @@ sim_core = MultiRobotSimulationCore.from_dict(config)
 if args.rtf is not None:
     sim_core.params.target_rtf = args.rtf
 
-# Create AgentManager
-agent_manager = AgentManager(sim_core=sim_core, update_frequency=10.0)
+# Create AgentManager — pass batch_controller when --controller batch is selected so
+# all differential agents are auto-registered with the vectorised controller.
+_batch_controller = "batch_differential" if args.controller == "batch" else None
+agent_manager = AgentManager(sim_core=sim_core, update_frequency=10.0, batch_controller=_batch_mode)
 
 # Create SimObjectManager for pallets
 pallet_manager = SimObjectManager(sim_core=sim_core)
@@ -98,10 +106,12 @@ mobile_urdf = resolve_model(args.robot)
 agent_spawn_params = AgentSpawnParams(
     urdf_path=mobile_urdf,
     motion_mode=MotionMode.DIFFERENTIAL,
-    max_linear_vel=3.0,
-    max_linear_accel=5.0,
-    max_angular_vel=2.0,
-    max_angular_accel=5.0,
+    controller={
+        "max_linear_vel": 3.0,
+        "max_linear_accel": 5.0,
+        "max_angular_vel": 2.0,
+        "max_angular_accel": 5.0,
+    },
     mass=0.0,  # Kinematic control
     use_fixed_base=False,
 )
@@ -113,7 +123,10 @@ mobile_agents = agent_manager.spawn_agents_grid(
 
 print(f"✓ Successfully spawned {len(mobile_agents)} robots in Area A")
 print(f"  Area A center: {AREA_A_CENTER}")
-print(f"  Area B center: {AREA_B_CENTER}\n")
+print(f"  Area B center: {AREA_B_CENTER}")
+ctrl_info = "BatchDifferentialController (via AgentManager batch_controller)" if args.controller == "batch" else "DifferentialController (per-agent)"
+print(f"[INFO] Controller: {ctrl_info}")
+print()
 
 # Spawn pallets for each robot using SimObjectManager
 print("=== Spawning Pallets for Each Robot ===")

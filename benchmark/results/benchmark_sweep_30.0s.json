@@ -1,0 +1,366 @@
+[
+  {
+    "num_agents": 100,
+    "benchmark_type": "mobile",
+    "duration_s": 30.0,
+    "scenario": "per_agent",
+    "num_reps": 3,
+    "gui": false,
+    "spawn_time_s": {
+      "median": 0.031665780930779874,
+      "mean": 0.0319916873316591,
+      "stdev": 0.0009049798852886623,
+      "min": 0.03129479906056076,
+      "max": 0.03301448200363666
+    },
+    "spawn_cpu_s": {
+      "median": 0.03000000000000025,
+      "mean": 0.033333333333333215,
+      "stdev": 0.0057735026918960064,
+      "min": 0.029999999999999805,
+      "max": 0.03999999999999959
+    },
+    "spawn_cpu_percent": {
+      "median": 94.73949202635819,
+      "mean": 104.475156945347,
+      "stdev": 20.306840969621227,
+      "min": 90.8692130825957,
+      "max": 127.81676572708707
+    },
+    "simulation_wall_s": {
+      "median": 0.09665144293103367,
+      "mean": 0.09788825863506645,
+      "stdev": 0.0033552719980420626,
+      "min": 0.09532695496454835,
+      "max": 0.10168637800961733
+    },
+    "simulation_cpu_s": {
+      "median": 0.0900000000000003,
+      "mean": 0.09333333333333371,
+      "stdev": 0.005773502691896391,
+      "min": 0.0900000000000003,
+      "max": 0.10000000000000053
+    },
+    "simulation_cpu_percent": {
+      "median": 94.41191112573655,
+      "mean": 95.290537784708,
+      "stdev": 2.7203241979483783,
+      "min": 93.11811316073207,
+      "max": 98.34158906765535
+    },
+    "real_time_factor": {
+      "median": 310.39371053577247,
+      "mean": 306.70828271928593,
+      "stdev": 10.345441504955367,
+      "min": 295.0247672029645,
+      "max": 314.7063704191208
+    },
+    "avg_step_time_ms": {
+      "median": 0.3221714764367789,
+      "mean": 0.3262941954502215,
+      "stdev": 0.011184239993473526,
+      "min": 0.3177565165484945,
+      "max": 0.3389545933653911
+    },
+    "system_info": {
+      "platform": "Linux",
+      "platform_release": "6.6.114.1-microsoft-standard-WSL2",
+      "platform_version": "#1 SMP PREEMPT_DYNAMIC Mon Dec  1 20:46:23 UTC 2025",
+      "architecture": "x86_64",
+      "processor": "x86_64",
+      "python_version": "3.10.12",
+      "cpu_count": 8,
+      "cpu_count_logical": 16,
+      "total_memory_gb": 29.2,
+      "cpu_model": "AMD Ryzen AI 7 PRO 350 w/ Radeon 860M"
+    },
+    "mem_spawn_rss_mb": {
+      "median": 1.96484375,
+      "mean": 1.9661458333333333,
+      "stdev": 0.005966895436140417,
+      "min": 1.9609375,
+      "max": 1.97265625
+    },
+    "mem_total_rss_mb": {
+      "median": -24.96875,
+      "mean": -24.971354166666668,
+      "stdev": 0.00813150781041458,
+      "min": -24.98046875,
+      "max": -24.96484375
+    },
+    "expected_steps": 300
+  },
+  {
+    "num_agents": 500,
+    "benchmark_type": "mobile",
+    "duration_s": 30.0,
+    "scenario": "per_agent",
+    "num_reps": 3,
+    "gui": false,
+    "spawn_time_s": {
+      "median": 0.14625324006192386,
+      "mean": 0.1449458576971665,
+      "stdev": 0.006464934002868355,
+      "min": 0.13792715000454336,
+      "max": 0.15065718302503228
+    },
+    "spawn_cpu_s": {
+      "median": 0.13999999999999968,
+      "mean": 0.13999999999999999,
+      "stdev": 0.010000000000000231,
+      "min": 0.1299999999999999,
+      "max": 0.15000000000000036
+    },
+    "spawn_cpu_percent": {
+      "median": 94.25265438727448,
+      "mean": 96.58022931562604,
+      "stdev": 5.222502435386736,
+      "min": 92.92620317793818,
+      "max": 102.56183038166546
+    },
+    "simulation_wall_s": {
+      "median": 0.734096834086813,
+      "mean": 0.6739991727129867,
+      "stdev": 0.11315355636786588,
+      "min": 0.5434768099803478,
+      "max": 0.7444238740717992
+    },
+    "simulation_cpu_s": {
+      "median": 0.7000000000000002,
+      "mean": 0.6466666666666668,
+      "stdev": 0.09237604307034021,
+      "min": 0.54,
+      "max": 0.7000000000000002
+    },
+    "simulation_cpu_percent": {
+      "median": 95.35526752009113,
+      "mean": 96.24932727068853,
+      "stdev": 2.774150959397477,
+      "min": 94.03244903621744,
+      "max": 99.36026525575701
+    },
+    "real_time_factor": {
+      "median": 40.86654322289619,
+      "mean": 45.45543720090913,
+      "stdev": 8.443925764939653,
+      "min": 40.29962101552175,
+      "max": 55.20014736430945
+    },
+    "avg_step_time_ms": {
+      "median": 2.4469894469560436,
+      "mean": 2.246663909043289,
+      "stdev": 0.3771785212262198,
+      "min": 1.811589366601159,
+      "max": 2.4814129135726644
+    },
+    "system_info": {
+      "platform": "Linux",
+      "platform_release": "6.6.114.1-microsoft-standard-WSL2",
+      "platform_version": "#1 SMP PREEMPT_DYNAMIC Mon Dec  1 20:46:23 UTC 2025",
+      "architecture": "x86_64",
+      "processor": "x86_64",
+      "python_version": "3.10.12",
+      "cpu_count": 8,
+      "cpu_count_logical": 16,
+      "total_memory_gb": 29.2,
+      "cpu_model": "AMD Ryzen AI 7 PRO 350 w/ Radeon 860M"
+    },
+    "mem_spawn_rss_mb": {
+      "median": 10.5703125,
+      "mean": 10.569010416666666,
+      "stdev": 0.005966895436140417,
+      "min": 10.5625,
+      "max": 10.57421875
+    },
+    "mem_total_rss_mb": {
+      "median": -15.43359375,
+      "mean": -15.430989583333334,
+      "stdev": 0.011933790872280834,
+      "min": -15.44140625,
+      "max": -15.41796875
+    },
+    "expected_steps": 300
+  },
+  {
+    "num_agents": 1000,
+    "benchmark_type": "mobile",
+    "duration_s": 30.0,
+    "scenario": "per_agent",
+    "num_reps": 3,
+    "gui": false,
+    "spawn_time_s": {
+      "median": 0.3293242671061307,
+      "mean": 0.31952490471303463,
+      "stdev": 0.017535021903301355,
+      "min": 0.29928063601255417,
+      "max": 0.329969811020419
+    },
+    "spawn_cpu_s": {
+      "median": 0.3099999999999996,
+      "mean": 0.3033333333333328,
+      "stdev": 0.020816659994661382,
+      "min": 0.27999999999999936,
+      "max": 0.3199999999999994
+    },
+    "spawn_cpu_percent": {
+      "median": 93.94798846638015,
+      "mean": 94.89144291055808,
+      "stdev": 1.981766423117515,
+      "min": 93.55767340331835,
+      "max": 97.16866686197577
+    },
+    "simulation_wall_s": {
+      "median": 1.8113641859963536,
+      "mean": 1.7873329136443015,
+      "stdev": 0.060026449740173,
+      "min": 1.7190140970051289,
+      "max": 1.8316204579314217
+    },
+    "simulation_cpu_s": {
+      "median": 1.6999999999999993,
+      "mean": 1.6933333333333334,
+      "stdev": 0.011547005383792013,
+      "min": 1.6800000000000006,
+      "max": 1.7000000000000002
+    },
+    "simulation_cpu_percent": {
+      "median": 93.85191631493494,
+      "mean": 94.7987807948199,
+      "stdev": 2.5913862004097417,
+      "min": 92.81398843513297,
+      "max": 97.73043763439179
+    },
+    "real_time_factor": {
+      "median": 16.562102879106163,
+      "mean": 16.79763529266737,
+      "stdev": 0.5739324927125767,
+      "min": 16.378939135611706,
+      "max": 17.45186386328424
+    },
+    "avg_step_time_ms": {
+      "median": 6.037880619987845,
+      "mean": 5.957776378814338,
+      "stdev": 0.200088165800577,
+      "min": 5.730046990017096,
+      "max": 6.105401526438072
+    },
+    "system_info": {
+      "platform": "Linux",
+      "platform_release": "6.6.114.1-microsoft-standard-WSL2",
+      "platform_version": "#1 SMP PREEMPT_DYNAMIC Mon Dec  1 20:46:23 UTC 2025",
+      "architecture": "x86_64",
+      "processor": "x86_64",
+      "python_version": "3.10.12",
+      "cpu_count": 8,
+      "cpu_count_logical": 16,
+      "total_memory_gb": 29.2,
+      "cpu_model": "AMD Ryzen AI 7 PRO 350 w/ Radeon 860M"
+    },
+    "mem_spawn_rss_mb": {
+      "median": 21.19921875,
+      "mean": 21.197916666666668,
+      "stdev": 0.005966895436140417,
+      "min": 21.19140625,
+      "max": 21.203125
+    },
+    "mem_total_rss_mb": {
+      "median": -3.34765625,
+      "mean": -3.3515625,
+      "stdev": 0.01790068630842125,
+      "min": -3.37109375,
+      "max": -3.3359375
+    },
+    "expected_steps": 300
+  },
+  {
+    "num_agents": 2000,
+    "benchmark_type": "mobile",
+    "duration_s": 30.0,
+    "scenario": "per_agent",
+    "num_reps": 3,
+    "gui": false,
+    "spawn_time_s": {
+      "median": 0.5196819710545242,
+      "mean": 0.558182600652799,
+      "stdev": 0.08211643098641506,
+      "min": 0.5023903649998829,
+      "max": 0.65247546590399
+    },
+    "spawn_cpu_s": {
+      "median": 0.5599999999999996,
+      "mean": 0.5733333333333338,
+      "stdev": 0.032145502536643694,
+      "min": 0.5500000000000007,
+      "max": 0.6100000000000012
+    },
+    "spawn_cpu_percent": {
+      "median": 107.75821198177478,
+      "mean": 103.57497969718321,
+      "stdev": 8.775918875464075,
+      "min": 93.49010528002918,
+      "max": 109.47662182974567
+    },
+    "simulation_wall_s": {
+      "median": 4.418703226023354,
+      "mean": 4.267315591685474,
+      "stdev": 0.43867870543738147,
+      "min": 3.7729926489992067,
+      "max": 4.610250900033861
+    },
+    "simulation_cpu_s": {
+      "median": 4.679999999999998,
+      "mean": 4.539999999999999,
+      "stdev": 0.37986839826445035,
+      "min": 4.11,
+      "max": 4.829999999999998
+    },
+    "simulation_cpu_percent": {
+      "median": 108.93209667636606,
+      "mean": 106.58436591771716,
+      "stdev": 4.396028424489887,
+      "min": 101.51291332030594,
+      "max": 109.30808775647951
+    },
+    "real_time_factor": {
+      "median": 6.789322220899351,
+      "mean": 7.082602728944587,
+      "stdev": 0.7653765345024246,
+      "min": 6.507238033352947,
+      "max": 7.951247932581463
+    },
+    "avg_step_time_ms": {
+      "median": 14.72901075341118,
+      "mean": 14.224385305618247,
+      "stdev": 1.462262351457938,
+      "min": 12.576642163330689,
+      "max": 15.36750300011287
+    },
+    "system_info": {
+      "platform": "Linux",
+      "platform_release": "6.6.114.1-microsoft-standard-WSL2",
+      "platform_version": "#1 SMP PREEMPT_DYNAMIC Mon Dec  1 20:46:23 UTC 2025",
+      "architecture": "x86_64",
+      "processor": "x86_64",
+      "python_version": "3.10.12",
+      "cpu_count": 8,
+      "cpu_count_logical": 16,
+      "total_memory_gb": 29.2,
+      "cpu_model": "AMD Ryzen AI 7 PRO 350 w/ Radeon 860M"
+    },
+    "mem_spawn_rss_mb": {
+      "median": 42.75,
+      "mean": 42.748697916666664,
+      "stdev": 0.0022552744890219755,
+      "min": 42.74609375,
+      "max": 42.75
+    },
+    "mem_total_rss_mb": {
+      "median": 20.9375,
+      "mean": 20.938802083333332,
+      "stdev": 0.0022552744890219755,
+      "min": 20.9375,
+      "max": 20.94140625
+    },
+    "expected_steps": 300
+  }
+]
