@@ -669,6 +669,8 @@ class AgentManager(SimObjectManager[Agent]):
     - Pose goal assignment to individual agents
     - Callback system for custom update logic (goals, state tracking, etc.)
     - Query moving/stopped agents
+    - Optional batch controller for vectorized kinematic updates (use
+      ``batch_controller=`` or :meth:`enable_batch`)
 
     Key Features:
     - Auto-registers update callback to simulation loop
@@ -685,24 +687,133 @@ class AgentManager(SimObjectManager[Agent]):
     def __init__(
         self,
         sim_core=None,
+        name: Optional[str] = None,
         update_frequency: float = 10.0,
         object_class: type = Agent,
         enable_profiling: bool = False,
+        batch_controller: Optional[str] = None,
+        fleet_controller: Optional[Dict[str, Any]] = None,
     ):
         """
         Initialize AgentManager.
 
         Args:
             sim_core: Reference to simulation core (optional)
+            name: Optional name for this manager.  When set, the manager can be
+                retrieved later via :meth:`~pybullet_fleet.core_simulation
+                .MultiRobotSimulationCore.get_manager`.
             update_frequency: Default update callback frequency in Hz (default: 10.0)
             object_class: Class to instantiate when spawning (default: Agent).
                           Pass an Agent subclass to manage custom agent types.
             enable_profiling: If ``True``, spawn methods log elapsed time.
                 Default ``False``.
+            batch_controller: Batch controller registry name
+                (e.g. ``"batch_omni"``, ``"batch_differential"``).  When set,
+                every agent spawned through this manager is automatically
+                registered with the batch controller so movement is driven by
+                vectorized :meth:`batch_advance` rather than per-agent
+                ``compute()``.  Equivalent to calling
+                ``manager.enable_batch(batch_controller)`` after construction.
+            fleet_controller: Default ``controller:`` config applied to agents
+                that do not specify their own controller params at spawn time.
+                Accepts the same dict format as ``AgentSpawnParams.controller``
+                (e.g. ``{"max_linear_vel": 2.0, "max_angular_vel": 3.0}``).
+                Per-agent ``controller:`` values always take precedence.
         """
         super().__init__(sim_core, object_class=object_class, enable_profiling=enable_profiling)
+        self.name: Optional[str] = name
         self._callbacks: List[Dict[str, Any]] = []  # List of registered callbacks
         self._update_frequency: float = update_frequency  # Default callback frequency in Hz
+        self._batch_controller: Optional[Any] = None
+        self._fleet_controller: Optional[Dict[str, Any]] = fleet_controller
+
+        # Always register so sim_core.remove_object() and sim_core.reset() keep
+        # the manager's tracking lists in sync, regardless of batch mode.
+        if self.sim_core is not None:
+            self.sim_core.register_manager(self)
+
+        if batch_controller is not None:
+            self.enable_batch(batch_controller)
+
+    # ------------------------------------------------------------------
+    # Batch controller lifecycle
+    # ------------------------------------------------------------------
+
+    @property
+    def batch_controller(self) -> Optional[Any]:
+        """The fleet-wide :class:`BatchKinematicController`, or ``None``."""
+        return self._batch_controller
+
+    def enable_batch(self, mode: str) -> Any:
+        """Create and attach a batch controller for *mode*, replacing any existing one.
+
+        Any agents already managed by this instance that are not yet
+        batch-controlled are registered immediately.  Agents spawned
+        afterwards are registered automatically via :meth:`add_object`.
+
+        Args:
+            mode: Batch controller registry name (e.g. ``"batch_omni"``,
+                ``"batch_differential"``).
+
+        Returns:
+            The newly-created :class:`BatchKinematicController`.
+
+        Raises:
+            ValueError: If *mode* is not recognised.
+        """
+        from pybullet_fleet.controllers.batch_base import resolve_batch_controller_key
+
+        cls = resolve_batch_controller_key(mode)  # raises ValueError before any state change
+        if self._batch_controller is not None:
+            self.disable_batch()
+        bc = cls()
+        self._batch_controller = bc
+        # Register agents already in the manager
+        for agent in self.objects:
+            if agent._batch_controller is None:
+                bc.register_agent(agent)
+        return bc
+
+    def disable_batch(self) -> None:
+        """Unregister all managed agents from the batch controller and detach it."""
+        bc = self._batch_controller
+        if bc is None:
+            return
+        for agent in list(self.objects):
+            if agent._batch_controller is bc:
+                bc.unregister_agent(agent)
+        self._batch_controller = None
+
+    # ------------------------------------------------------------------
+    # add/remove_object overrides — keep batch registration in sync
+    # ------------------------------------------------------------------
+
+    def add_object(self, obj: Agent) -> None:
+        super().add_object(obj)
+        if self._fleet_controller:
+            from dataclasses import fields as dc_fields
+            from pybullet_fleet.controller_params import ControllerParams
+            fleet_params = ControllerParams.from_dict(self._fleet_controller)
+            for f in dc_fields(ControllerParams):
+                if getattr(obj.controller_params, f.name) is None:
+                    val = getattr(fleet_params, f.name)
+                    if val is not None:
+                        setattr(obj.controller_params, f.name, val)
+        if self._batch_controller is not None:
+            if obj._batch_controller is not None:
+                logger.warning(
+                    "Agent %r is already registered with batch controller %r; "
+                    "skipping registration with %r.",
+                    obj, obj._batch_controller, self._batch_controller,
+                )
+            else:
+                self._batch_controller.register_agent(obj)
+
+    def remove_object(self, obj: Agent) -> bool:
+        result = super().remove_object(obj)
+        if result and self._batch_controller is not None and obj._batch_controller is self._batch_controller:
+            self._batch_controller.unregister_agent(obj)
+        return result
 
     # ------------------------------------------------------------------
     # Convenience aliases (delegate to SimObjectManager methods)

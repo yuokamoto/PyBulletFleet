@@ -47,18 +47,18 @@ entities:
     pose: [23.54, -27.42, 0.0]
     yaw: 1.566
     motion_mode: "differential"
-    max_linear_vel: 0.5
-    max_linear_accel: 0.75
-    navigation_2d: true
-    controller_config:
+    controller:
       type: differential
-      config:
-        default_direction: auto
+      max_linear_vel: 0.5
+      max_linear_accel: 0.75
+      navigation_2d: true
+      default_direction: auto
     plugins:
       - type: battery
         config:
           discharge_rate: 0.001
           charge_rate: 0.005
+
 
   # ── Fleet: deliveryRobot (nav_graph 1) ──────────────
   - name: deliveryBot_1
@@ -66,18 +66,18 @@ entities:
     pose: [14.56, -38.98, 0.0]
     yaw: 1.690
     motion_mode: "differential"
-    max_linear_vel: 0.7
-    max_linear_accel: 0.5
-    navigation_2d: true
-    controller_config:
+    controller:
       type: differential
-      config:
-        default_direction: auto
+      max_linear_vel: 0.7
+      max_linear_accel: 0.5
+      navigation_2d: true
+      default_direction: auto
     plugins:
       - type: battery
         config:
           discharge_rate: 0.001
           charge_rate: 0.005
+
 
   # ── Fleet: cleanerBotA (nav_graph 2) ────────────────
   - name: cleanerBotA_1
@@ -85,36 +85,36 @@ entities:
     pose: [26.36, -27.75, 0.0]
     yaw: -1.194
     motion_mode: "differential"
-    max_linear_vel: 0.7
-    max_linear_accel: 0.5
-    navigation_2d: true
-    controller_config:
+    controller:
       type: differential
-      config:
-        default_direction: auto
+      max_linear_vel: 0.7
+      max_linear_accel: 0.5
+      navigation_2d: true
+      default_direction: auto
     plugins:
       - type: battery
         config:
           discharge_rate: 0.001
           charge_rate: 0.005
 
+
   - name: cleanerBotA_2
     sdf_path: "/rmf_demos_ws/install/rmf_demos_assets/share/rmf_demos_assets/models/CleanerBotA/model.sdf"
     pose: [29.24, -27.66, 0.0]
     yaw: 1.344
     motion_mode: "differential"
-    max_linear_vel: 0.7
-    max_linear_accel: 0.5
-    navigation_2d: true
-    controller_config:
+    controller:
       type: differential
-      config:
-        default_direction: auto
+      max_linear_vel: 0.7
+      max_linear_accel: 0.5
+      navigation_2d: true
+      default_direction: auto
     plugins:
       - type: battery
         config:
           discharge_rate: 0.001
           charge_rate: 0.005
+
 
   # ── Doors (Door) ─────────────────────────────
   # L1 doors — hinge positions from hotel.building.yaml vertices

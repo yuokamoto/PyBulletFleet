@@ -22,49 +22,41 @@ entities:
     pose: [5.676, -2.043, 0.0]
     yaw: -1.5708
     motion_mode: "differential"
-    max_linear_vel: 0.5
-    max_linear_accel: 0.75
-    navigation_2d: true
-    controller_config:
-      type: differential
-      config:
-        default_direction: auto
-
-  - name: tinyRobotB
+    controller:
+      type: "differential"
+      max_linear_vel: 0.5
+      max_linear_accel: 0.75
+      navigation_2d: true
+  
+  - name: tinyRobot_1
     sdf_path: "/rmf_demos_ws/install/rmf_demos_assets/share/rmf_demos_assets/models/TinyRobot/model.sdf"
     pose: [2.038, -5.676, 0.0]
     yaw: 0.0
     motion_mode: "differential"
-    max_linear_vel: 0.5
-    max_linear_accel: 0.75
-    navigation_2d: true
-    controller_config:
-      type: differential
-      config:
-        default_direction: auto
-
-  - name: tinyRobotC
+    controller:
+      type: "differential"
+      max_linear_vel: 0.5
+      max_linear_accel: 0.75
+      navigation_2d: true
+  
+  - name: tinyRobot_2
     sdf_path: "/rmf_demos_ws/install/rmf_demos_assets/share/rmf_demos_assets/models/TinyRobot/model.sdf"
     pose: [16.966, -2.033, 0.0]
     yaw: -1.5708
     motion_mode: "differential"
-    max_linear_vel: 0.5
-    max_linear_accel: 0.75
-    navigation_2d: true
-    controller_config:
-      type: differential
-      config:
-        default_direction: auto
-
-  - name: tinyRobotD
+    controller:
+      type: "differential"
+      max_linear_vel: 0.5
+      max_linear_accel: 0.75
+      navigation_2d: true
+  
+  - name: tinyRobot_3
     sdf_path: "/rmf_demos_ws/install/rmf_demos_assets/share/rmf_demos_assets/models/TinyRobot/model.sdf"
     pose: [2.029, -16.979, 0.0]
     yaw: -3.1393
     motion_mode: "differential"
-    max_linear_vel: 0.5
-    max_linear_accel: 0.75
-    navigation_2d: true
-    controller_config:
-      type: differential
-      config:
-        default_direction: auto
+    controller:
+      type: "differential"
+      max_linear_vel: 0.5
+      max_linear_accel: 0.75
+      navigation_2d: true

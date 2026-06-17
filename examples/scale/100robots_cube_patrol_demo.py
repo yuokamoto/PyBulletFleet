@@ -10,94 +10,84 @@ robot patrols around its own 5m × 5m × 5m cube centered at its spawn position:
 4. Descent (Z-)
 
 Features:
-- 100 robots spawned in a 10×10 grid (3m spacing)
+- 100 robots spawned in a 10×10 grid (10m spacing)
 - Each robot patrols a 5m×5m×5m cube around its spawn position
 - Random mix of omnidirectional and differential drive (50/50)
-- Random forward/backward direction for differential drive only (50/50) - tests both orientations
+- Random forward/backward direction for differential drive (50/50)
 - All robots move in parallel, creating synchronized swarm behavior
+
+Spawn is config-driven: two named managers (omni_fleet / diff_fleet) are declared
+with shared fleet_controller defaults and batch controllers, then entity grids are
+routed to each manager by name.  Path assignment is done in Python after spawn.
+
+Controller options:
+  --controller batch      (default) vectorised batch controllers, auto-registered
+  --controller per_agent  legacy per-agent controllers
+
+Performance comparison::
+
+    python3 benchmark/batch_perf.py --mode diff --n 300
 """
 
 import argparse
 import os
 import sys
 
-# Add parent directory to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 import numpy as np
 import pybullet as p
 import random
 
-from pybullet_fleet.agent import AgentSpawnParams, MotionMode, MovementDirection
-from pybullet_fleet.agent_manager import AgentManager, GridSpawnParams
+from pybullet_fleet.agent import MotionMode, MovementDirection
 from pybullet_fleet.config_utils import load_yaml_config, merge_configs
 from pybullet_fleet.core_simulation import MultiRobotSimulationCore
 from pybullet_fleet.geometry import Path, Pose
 from pybullet_fleet.robot_models import resolve_model
 
+
 parser = argparse.ArgumentParser(description="100 Robots Cube Patrol Demo")
-parser.add_argument("--robot", default="husky", help="Robot name (e.g. husky, racecar) or URDF path")
+parser.add_argument("--robot", default="husky", help="Robot name or URDF path")
 parser.add_argument("--duration", type=float, default=None, help="Simulation duration in seconds (default: run forever)")
+parser.add_argument(
+    "--controller",
+    choices=["batch", "per_agent"],
+    default="batch",
+    help="Controller type: 'batch' (default) or 'per_agent'",
+)
 _args = parser.parse_args()
 
 
-def create_cube_patrol_path(
-    cube_center: list = [0.0, 0.0, 2.5],
-    cube_size: float = 5.0,
-) -> Path:
-    """
-    Create a patrol path around a cube (corners only):
-    1. Bottom XY circuit (4 corners: TR → TL → BL → BR)
-    2. Vertical climb from bottom BR corner directly to top BR corner
-    3. Top XY circuit (4 corners: TR → TL → BL → BR)
-    4. Vertical descent from top BR corner directly to bottom BR corner (loops back to start)
-
-    Args:
-        cube_center: Center of the cube [x, y, z]
-        cube_size: Size of the cube (meters)
-
-    Returns:
-        Path object with 8 waypoints (4 bottom + 4 top corners only)
-    """
-    half_size = cube_size / 2.0
+def create_cube_patrol_path(cube_center: list, cube_size: float = 5.0) -> Path:
+    """9-waypoint patrol: bottom XY circuit → climb → top XY circuit → descend."""
+    half = cube_size / 2.0
     cx, cy, cz = cube_center
-
-    # Bottom level Z coordinate
-    z_bottom = cz - half_size + 0.3  # offset
-    # Top level Z coordinate
-    z_top = cz + half_size
-
-    waypoints = []
-
-    # 1. Bottom XY circuit (4 corners, counterclockwise from top-right)
-    bottom_corners = [
-        [cx + half_size, cy + half_size, z_bottom],  # Top-right
-        [cx - half_size, cy + half_size, z_bottom],  # Top-left
-        [cx - half_size, cy - half_size, z_bottom],  # Bottom-left
-        [cx + half_size, cy - half_size, z_bottom],  # Bottom-right
-        [cx + half_size, cy - half_size, z_top],  # Bottom-right
-        [cx + half_size, cy + half_size, z_top],  # Top-right
-        [cx - half_size, cy + half_size, z_top],  # Top-left
-        [cx - half_size, cy - half_size, z_top],  # Bottom-left
-        [cx + half_size, cy - half_size, z_bottom],  # Bottom-right
+    z_bot = cz - half + 0.3
+    z_top = cz + half
+    corners = [
+        [cx + half, cy + half, z_bot],
+        [cx - half, cy + half, z_bot],
+        [cx - half, cy - half, z_bot],
+        [cx + half, cy - half, z_bot],
+        [cx + half, cy - half, z_top],
+        [cx + half, cy + half, z_top],
+        [cx - half, cy + half, z_top],
+        [cx - half, cy - half, z_top],
+        [cx + half, cy - half, z_bot],
     ]
-
-    for corner in bottom_corners:
-        # Bottom level: Z+ points up (roll=0, pitch=0, yaw=0)
-        waypoints.append(Pose.from_euler(corner[0], corner[1], corner[2], roll=0, pitch=0, yaw=0))
-
-    return Path(waypoints=waypoints)
+    return Path(waypoints=[Pose.from_euler(x, y, z, 0, 0, 0) for x, y, z in corners])
 
 
 def main():
-    # Seed for reproducibility
-    np.random.seed(42)
+    random.seed(42)
 
-    # Create simulation from base config + scale demo overrides
+    urdf_path = resolve_model(_args.robot)
+    print(f"Using robot: {_args.robot} -> {urdf_path}")
+
     _BASE_CONFIG = os.path.join(os.path.dirname(__file__), "..", "..", "config", "config.yaml")
     _OVERRIDES = {
         "simulation": {
-            "target_rtf": 0,
+            "target_rtf": 5,
             "enable_time_profiling": True,
             "camera": {
                 "camera_mode": "auto",
@@ -106,197 +96,122 @@ def main():
             },
         }
     }
-    sim = MultiRobotSimulationCore.from_dict(merge_configs(load_yaml_config(_BASE_CONFIG), _OVERRIDES))
 
-    # Get absolute path to URDF
-    urdf_path = resolve_model(_args.robot)
-    print(f"Using robot: {_args.robot} -> {urdf_path}")
+    # Shared controller params applied to every agent in each fleet via
+    # fleet_controller.  Per-agent overrides (if any) take precedence.
+    _fleet_ctrl = {
+        "max_linear_vel": 2.0,
+        "max_linear_accel": 1.0,
+        "max_angular_vel": 2.0,
+        "max_angular_accel": 5.0,
+    }
+    use_batch = _args.controller == "batch"
+
+    # Config-driven setup: declare two named managers, each with a shared
+    # fleet_controller and (optionally) a batch controller, then route entity
+    # grids to each manager by name.
+    cfg = merge_configs(load_yaml_config(_BASE_CONFIG), _OVERRIDES)
+    cfg["managers"] = [
+        {
+            "name": "omni_fleet",
+            "fleet_controller": _fleet_ctrl,
+            **({"batch_controller": "batch_omni"} if use_batch else {}),
+        },
+        {
+            "name": "diff_fleet",
+            "fleet_controller": _fleet_ctrl,
+            **({"batch_controller": "batch_differential"} if use_batch else {}),
+        },
+    ]
+    cfg["entities"] = [
+        {
+            "urdf_path": urdf_path,
+            "mass": 0.0,
+            "use_fixed_base": False,
+            "motion_mode": "omnidirectional",
+            "manager": "omni_fleet",
+            "grid": {
+                "x_min": 0, "x_max": 4, "y_min": 0, "y_max": 9,
+                "spacing": [10.0, 10.0, 0.0],
+                "offset": [-15.0, -15.0, 0.3],
+            },
+        },
+        {
+            "urdf_path": urdf_path,
+            "mass": 0.0,
+            "use_fixed_base": False,
+            "motion_mode": "differential",
+            "manager": "diff_fleet",
+            "grid": {
+                "x_min": 5, "x_max": 9, "y_min": 0, "y_max": 9,
+                "spacing": [10.0, 10.0, 0.0],
+                "offset": [-15.0, -15.0, 0.3],
+            },
+        },
+    ]
+
+    sim = MultiRobotSimulationCore.from_dict(cfg)
+    omni_manager = sim.get_manager("omni_fleet")
+    diff_manager = sim.get_manager("diff_fleet")
 
     print("=" * 70)
     print("100 Robots Cube Patrol Demo")
     print("=" * 70)
-    print("Features:")
-    print("  - 100 robots in 10×10 grid (3m spacing)")
-    print("  - Each robot patrols 5m×5m×5m cube around its spawn position")
-    print("  - Random mix: 50% omnidirectional, 50% differential drive")
-    print("  - Random direction for differential only: 50% forward, 50% backward")
-    print("  - Patrol: bottom XY → climb → top XY → descend → repeat")
-    print("=" * 70)
+    if use_batch:
+        print("[INFO] Batch controllers active (via AgentManager batch_controller)")
+    else:
+        print("[INFO] Per-agent controllers")
 
-    # Create cube patrol path (corners only, no intermediate points)
-    cube_center = [0.0, 0.0, 2.5]
-    cube_size = 5.0
-    patrol_path = create_cube_patrol_path(
-        cube_center=cube_center,
-        cube_size=cube_size,
-    )
+    all_robots = omni_manager.objects + diff_manager.objects
+    num_omni = len(omni_manager.objects)
+    num_diff = len(diff_manager.objects)
+    print(f"✓ Spawned {len(all_robots)} robots: omni={num_omni}, diff={num_diff}")
 
-    print("\nReference patrol path specs:")
-    print(f"  - Waypoints per path: {len(patrol_path)} (corners only)")
-    print(f"  - Distance per path: {patrol_path.get_total_distance():.2f} m")
-    print(f"  - Cube size: {cube_size}m × {cube_size}m × {cube_size}m")
-    print("  - Each robot will patrol around its spawn position")
-
-    # Create agent manager
-    manager = AgentManager(sim_core=sim)
-
-    # Spawn 100 robots in 10×10 grid using AgentManager
-    print("\nSpawning 100 robots...")
-
-    # Grid configuration (10x10 grid, 3m spacing)
-    grid_params = GridSpawnParams(
-        x_min=0,
-        x_max=9,  # 10 cells (0-9)
-        y_min=0,
-        y_max=9,  # 10 cells (0-9)
-        spacing=[10.0, 10.0, 0.0],  # 10m spacing in X and Y
-        offset=[-15.0, -15.0, 0.3],  # Start position
-    )
-
-    # Define two robot types with equal probability (50/50 split)
-    spawn_params_omni = AgentSpawnParams(
-        urdf_path=urdf_path,
-        mass=0.0,  # Kinematic control
-        max_linear_vel=2.0,
-        max_linear_accel=1.0,
-        max_angular_vel=2.0,
-        max_angular_accel=5.0,
-        motion_mode=MotionMode.OMNIDIRECTIONAL,
-        use_fixed_base=False,
-    )
-
-    spawn_params_diff = AgentSpawnParams(
-        urdf_path=urdf_path,
-        mass=0.0,  # Kinematic control
-        max_linear_vel=2.0,
-        max_linear_accel=1.0,
-        max_angular_vel=2.0,
-        max_angular_accel=5.0,
-        motion_mode=MotionMode.DIFFERENTIAL,
-        use_fixed_base=False,
-    )
-
-    # Spawn with 50/50 probability
-    spawn_params_list = [
-        (spawn_params_omni, 0.5),  # 50% omnidirectional
-        (spawn_params_diff, 0.5),  # 50% differential
-    ]
-
-    manager.spawn_agents_grid_mixed(
-        num_agents=100,
-        grid_params=grid_params,
-        spawn_params_list=spawn_params_list,
-    )
-
-    # Count spawned robot types
-    num_omni = sum(1 for robot in manager.objects if robot.motion_mode == MotionMode.OMNIDIRECTIONAL)
-    num_diff = sum(1 for robot in manager.objects if robot.motion_mode == MotionMode.DIFFERENTIAL)
-
-    print(f"✓ Spawned {len(manager.objects)} robots:")
-    print(f"  - Omnidirectional: {num_omni} ")
-    print(f"  - Differential: {num_diff} ")
-
-    # Set patrol path for each robot (centered at their spawn position)
-    print("\nSetting patrol paths (each robot patrols 5m×5m×5m cube, corners only)...")
-    num_forward = 0
-    num_backward = 0
-    num_omni_skipped = 0
-    for robot in manager.objects:
-        # Get robot's spawn position
+    num_fwd = num_bwd = num_omni_count = 0
+    for robot in all_robots:
         spawn_pos = robot.get_pose().position
-
-        # Create individual patrol path centered at spawn position
-        robot_patrol_path = create_cube_patrol_path(
-            cube_center=[spawn_pos[0], spawn_pos[1], spawn_pos[2] + 2.5],  # Center cube above spawn
-            cube_size=5.0,
+        path = create_cube_patrol_path(
+            cube_center=[spawn_pos[0], spawn_pos[1], spawn_pos[2] + 2.5]
         )
-
-        # Randomly choose FORWARD or BACKWARD movement direction (only for differential drive)
+        path.visualize(show_lines=True, line_color=[0.5, 0.5, 0.5], line_width=1.0,
+                       show_waypoints=True, show_axes=False, show_points=False, lifetime=0)
         if robot.motion_mode == MotionMode.DIFFERENTIAL:
-            direction = random.choice([MovementDirection.FORWARD, MovementDirection.BACKWARD])
-            if direction == MovementDirection.FORWARD:
-                num_forward += 1
+            d = random.choice([MovementDirection.FORWARD, MovementDirection.BACKWARD])
+            robot.set_path(path.waypoints, direction=d)
+            if d == MovementDirection.FORWARD:
+                num_fwd += 1
             else:
-                num_backward += 1
-            robot.set_path(robot_patrol_path.waypoints, direction=direction)
+                num_bwd += 1
         else:
-            # Omnidirectional: direction parameter is ignored, use default
-            num_omni_skipped += 1
-            robot.set_path(robot_patrol_path.waypoints)
+            robot.set_path(path.waypoints)
+            num_omni_count += 1
 
-        # Visualize the path for each robot
-        robot_patrol_path.visualize(
-            show_lines=True,
-            line_color=[0.5, 0.5, 0.5],  # Gray lines
-            line_width=1.0,
-            show_waypoints=True,
-            show_axes=False,
-            show_points=False,
-            lifetime=0,  # Persistent visualization
-        )
+    print("✓ Patrol paths assigned")
+    print(f"  omni={num_omni_count}  diff fwd={num_fwd}  diff bwd={num_bwd}")
 
-    print("✓ All robots assigned to individual patrol paths (with visualization)")
-    print(f"  - Differential drive - Forward: {num_forward} robots")
-    print(f"  - Differential drive - Backward: {num_backward} robots")
-    print(f"  - Omnidirectional (direction N/A): {num_omni_skipped} robots")
-
-    # Camera setup using config file settings
-    # setup_camera() automatically uses params.camera_config if camera_config is None
-    # and calculates entity_positions from all objects if entity_positions is None
     sim.setup_camera()
 
-    if sim.params.camera_config:
-        print(f"✓ Camera configured from config file: {sim.params.camera_config.get('camera_mode', 'auto')} mode")
-        if "camera_auto_scale" in sim.params.camera_config:
-            print(f"  Camera auto scale: {sim.params.camera_config['camera_auto_scale']}")
-    else:
-        print("✓ Camera setup completed (no camera_config in config file)")
-
-    # Add labels
-    # Calculate grid center for label positioning
-    grid_center = [
-        grid_params.offset[0] + (grid_params.x_max - grid_params.x_min) * grid_params.spacing[0] / 2,
-        grid_params.offset[1] + (grid_params.y_max - grid_params.y_min) * grid_params.spacing[1] / 2,
-        2.5,
-    ]
     p.addUserDebugText(
         "100 Robots Parallel Patrol",
-        [grid_center[0], grid_center[1], grid_center[2] + 5.0],
+        [-15.0 + 45.0, -15.0 + 45.0, 7.5],
         textColorRGB=[1.0, 1.0, 0.0],
         textSize=2.0,
     )
 
-    print("\n" + "=" * 70)
-    print("Simulation started!")
-    print("=" * 70)
-
-    # Velocity monitoring callback
     step_counter = [0]
 
     def monitoring_callback(sim_core, dt):
-        """Monitor and display statistics every 5 seconds"""
         step_counter[0] += 1
-
-        # Print statistics every 300 steps (5 seconds at 60Hz)
         if step_counter[0] % 300 == 0:
-            moving_count = sum(1 for robot in manager.objects if robot.is_moving)
-
-            # Calculate average speed
-            speeds = [np.linalg.norm(robot.velocity) for robot in manager.objects if robot.is_moving]
-            avg_speed = np.mean(speeds) if speeds else 0.0
-            max_speed = np.max(speeds) if speeds else 0.0
-
+            moving = sum(1 for r in all_robots if r.is_moving)
+            speeds = [np.linalg.norm(r.velocity) for r in all_robots if r.is_moving]
+            avg = np.mean(speeds) if speeds else 0.0
             print(
                 f"[t={step_counter[0]*dt:.1f}s] "
-                f"Moving: {moving_count}/100 | "
-                f"Avg speed: {avg_speed:.2f} m/s | "
-                f"Max speed: {max_speed:.2f} m/s"
+                f"moving={moving}/100  avg_speed={avg:.2f}m/s"
             )
 
-    # Register callback
     sim.register_callback(monitoring_callback, frequency=None)
-
-    # Run simulation
     sim.run_simulation(duration=_args.duration)
 
 

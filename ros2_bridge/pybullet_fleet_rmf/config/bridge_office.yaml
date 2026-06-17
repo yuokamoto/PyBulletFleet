@@ -77,36 +77,36 @@ entities:
     pose: [10.433, -5.575, 0.0]
     yaw: 0.0
     motion_mode: "differential"
-    max_linear_vel: 0.5
-    max_linear_accel: 0.75
-    navigation_2d: true
-    controller_config:
+    controller:
       type: differential
-      config:
-        default_direction: auto
+      max_linear_vel: 0.5
+      max_linear_accel: 0.75
+      navigation_2d: true
+      default_direction: auto
     plugins:
       - type: battery
         config:
           discharge_rate: 0.001
           charge_rate: 0.005
 
+
   - name: tinyRobot2
     sdf_path: "/rmf_demos_ws/install/rmf_demos_assets/share/rmf_demos_assets/models/TinyRobot/model.sdf"
     pose: [20.422, -5.312, 0.0]
     yaw: 0.0
     motion_mode: "differential"
-    max_linear_vel: 0.5
-    max_linear_accel: 0.75
-    navigation_2d: true
-    controller_config:
+    controller:
       type: differential
-      config:
-        default_direction: auto
+      max_linear_vel: 0.5
+      max_linear_accel: 0.75
+      navigation_2d: true
+      default_direction: auto
     plugins:
       - type: battery
         config:
           discharge_rate: 0.001
           charge_rate: 0.005
+
 
   # ── Doors (Door) ─────────────────────────────
   # Positions are at hinge vertex (v1) from office.building.yaml.

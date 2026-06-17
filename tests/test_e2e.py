@@ -812,8 +812,10 @@ class TestMobileManipulatorE2E:
                 urdf_path=MOBILE_MANIPULATOR_URDF,
                 initial_pose=Pose.from_xyz(0, 0, 0.3),
                 motion_mode=MotionMode.OMNIDIRECTIONAL,
-                max_linear_vel=2.0,
-                max_angular_vel=1.5,
+                controller={
+                    "max_linear_vel": 2.0,
+                    "max_angular_vel": 1.5,
+                },
                 mass=0.0,
                 use_fixed_base=False,
                 collision_mode=CollisionMode.DISABLED,

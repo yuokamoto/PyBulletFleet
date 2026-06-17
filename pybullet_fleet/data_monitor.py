@@ -8,11 +8,24 @@ import json
 import os
 import threading
 import time
-import tkinter as tk
-from tkinter import ttk
-from typing import Dict, Optional
+from typing import Any, Dict, Optional
 
 from pybullet_fleet._defaults import SIMULATION as _SIM_D
+from pybullet_fleet.logging_utils import get_lazy_logger
+
+logger = get_lazy_logger(__name__)
+
+try:
+    import tkinter as tk
+    from tkinter import ttk
+except ModuleNotFoundError:
+    tk = None
+    ttk = None
+    logger.warning(
+        "tkinter is not installed; DataMonitor GUI will be disabled. "
+        "Install it (Debian/Ubuntu: `sudo apt-get install python3-tk`, "
+        "or the matching `python3.X-tk` package for your interpreter) to enable the monitor window."
+    )
 
 
 class DataMonitor:
@@ -30,12 +43,19 @@ class DataMonitor:
         self.title: str = title
         self.enable_gui: bool = enable_gui
         self.running: bool = False
-        self.window: Optional[tk.Tk] = None
-        self.labels: Dict[str, ttk.Label] = {}
+        self.window: Optional[Any] = None
+        self.labels: Dict[str, Any] = {}
         self.data_file: str = "/tmp/pybullet_sim_data.json"
         self.update_interval: float = 0.5  # Update every 500ms
-        self.status_label: Optional[ttk.Label] = None
+        self.status_label: Optional[Any] = None
         self.monitor_thread: Optional[threading.Thread] = None
+        if tk is None and self.enable_gui:
+            logger.warning(
+                "DataMonitor GUI was requested but tkinter is unavailable; "
+                "falling back to file-only mode (data still written to %s).",
+                self.data_file,
+            )
+            self.enable_gui = False
         # If x/y are -1, omit position so the window manager places the window
         # on the primary display. Explicit x/y use absolute virtual-screen coords.
         if x >= 0 and y >= 0:
@@ -67,6 +87,10 @@ class DataMonitor:
 
     def _run_monitor(self) -> None:
         """Run the tkinter monitor window"""
+        if tk is None or ttk is None:
+            self.running = False
+            return
+
         self.window = tk.Tk()
         self.window.title(self.title)
         self.window.geometry(self.geometry_string)

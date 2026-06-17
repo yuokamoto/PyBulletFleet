@@ -38,6 +38,10 @@ class MockSimCore:
         self._client: int = 0
         self._params = SimpleNamespace(physics=physics)
         self.events: EventBus = EventBus()
+        # Two-phase step state — mock stays in "outside step_once" mode so all
+        # set_pose calls take the immediate path (legacy behaviour for tests).
+        self._in_step: bool = False
+        self._pending_pose_ids: set = set()
 
     @property
     def client(self) -> int:
@@ -57,6 +61,14 @@ class MockSimCore:
     def batch_spawn(self):
         """No-op batch_spawn context for tests (mirrors MultiRobotSimulationCore)."""
         yield
+
+    def register_manager(self, manager) -> None:
+        """No-op stub — AgentManager registers itself on construction."""
+        if not hasattr(self, "_registered_managers"):
+            self._registered_managers: list = []
+        if manager not in self._registered_managers:
+            self._registered_managers.append(manager)
+            manager.sim_core = self
 
     def register_callback(self, callback, frequency=None):
         """Record registered callbacks (used by AgentManager tests)."""

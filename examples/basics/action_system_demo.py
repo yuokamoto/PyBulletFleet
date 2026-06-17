@@ -11,9 +11,13 @@ Demonstrates:
 """
 
 import os
+import sys
 import argparse
 import numpy as np
 import pybullet as p
+
+# Add parent directory to path so the in-repo package is used during development
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from pybullet_fleet.agent import Agent, AgentSpawnParams, MotionMode
 from pybullet_fleet.core_simulation import MultiRobotSimulationCore
@@ -63,10 +67,12 @@ def main():
         urdf_path=urdf_path,
         initial_pose=Pose.from_xyz(0, 0, 0.3),
         motion_mode=MotionMode.DIFFERENTIAL,
-        max_linear_vel=2.0,
-        max_linear_accel=5.0,
-        max_angular_vel=2.0,
-        max_angular_accel=5.0,
+        controller={
+            "max_linear_vel": 2.0,
+            "max_linear_accel": 5.0,
+            "max_angular_vel": 2.0,
+            "max_angular_accel": 5.0,
+        },
         mass=0.0,  # Kinematic control (no physics)
     )
     agent = Agent.from_params(agent_params, sim_core=sim)

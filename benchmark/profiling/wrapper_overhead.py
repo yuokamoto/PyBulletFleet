@@ -417,8 +417,10 @@ def test_agent_wrapper(num_objects: int) -> dict:
             urdf_path=robot_urdf,
             initial_pose=Pose.from_xyz(x, y, 0.1),
             motion_mode=MotionMode.DIFFERENTIAL,
-            max_linear_vel=1.0,
-            max_angular_vel=1.0,
+            controller={
+                "max_linear_vel": 1.0,
+                "max_angular_vel": 1.0,
+            },
             mass=0.0,
         )
         agent = Agent.from_params(spawn_params, sim_core=sim_core)
@@ -518,8 +520,10 @@ def test_agent_manager(num_objects: int) -> dict:
     agent_spawn_params = AgentSpawnParams(
         urdf_path=robot_urdf,
         motion_mode=MotionMode.DIFFERENTIAL,
-        max_linear_vel=1.0,
-        max_angular_vel=1.0,
+        controller={
+            "max_linear_vel": 1.0,
+            "max_angular_vel": 1.0,
+        },
         mass=0.0,
     )
 

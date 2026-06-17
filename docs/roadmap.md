@@ -14,9 +14,42 @@ New robot and infrastructure models:
 
 ## Features
 
-- **Snapshot & Replay** — Full and delta snapshot serialization for logging, replay, and external synchronization ([USO](https://github.com/yuokamoto/Unified-Simulation-Orchestrator) integration)
+- **Snapshot, Event log & Replay** *(EventBus steps 1–2 done ✅; steps 3–6 pending)* — Three-layer architecture sharing a single EventBus as data source. Enables replay, external synchronization ([USO](https://github.com/yuokamoto/Unified-Simulation-Orchestrator) integration), and downstream observability (see [Observability](#observability) below).
+
+  **Layer overview:**
+
+  | Layer | Purpose | Granularity | Lossless? | Replayable? |
+  |---|---|---|---|---|
+  | **Snapshot** | State checkpoint for seek / restore | Low frequency (e.g. 1 Hz) | Yes | Yes (state restore) |
+  | **Event log** | Causal record of state transitions (input replay, audit) | Per state-change | Yes (must) | Yes (input replay) |
+  | **Trace** | Operational observability (Grafana/Tempo) | Action-level spans | Sampling allowed | No (view only) |
+
+  **Design principle: same source, separate sinks.** All three are derived from the [EventBus](design/eventbus/spec.md) — emit once, fan out to multiple subscribers. Snapshot ≠ Event (different schemas, separate files), but share common header keys (`sim_time`, `step`, `wall_time`, `run_id`) so they can be merged on the time axis.
+
+  **Why trace alone cannot replay:** trace is sampled, coarse-grained (Action-level spans), drops non-deterministic inputs (RNG seed, callback returns), and has attribute-size limits unsuitable for `Path` waypoints / IK results. Replay needs Event log (input) + Snapshot (checkpoint).
+
+  **Output layout:**
+
+  ```
+  run_<timestamp>/
+    snapshots.jsonl   # low-frequency full+delta state
+    events.jsonl      # lossless state-change events
+    # OTel spans → Tempo (separate, optional, sampled)
+  ```
+
+  **Implementation order:**
+
+  1. EventBus core + `SimEvent` dataclass (see [eventbus/spec.md](design/eventbus/spec.md))
+  2. Publish from `Action` state transitions, `add_object` / `remove_object`, collision Enter/Exit
+  3. JSONL event writer subscriber (lossless input log)
+  4. `SimulationSnapshot` + `MultiRobotSimulationCore.snapshot()` / `restore()` (see [snapshot-replay/spec.md](design/snapshot-replay/spec.md))
+  5. `replay.py`: snapshot + event log → re-execution
+  6. OTel exporter subscriber (covered in Observability section, independent of replay)
+
+  Steps 3–6 are independent once 1–2 are in place.
+
 - **Behavior tree integration** — Create agent behavior from behavior trees
-- **`SimObject.from_sdf()` → `List[SimObject]`** — Factory method that loads an SDF file via `p.loadSDF()` and wraps each returned body_id in a `SimObject`. Collision detection and lifecycle management via `add_object()` are applied automatically. Required for Open-RMF SDF environment loading and official support for pybullet_data SDF models (kiva_shelf, wsg50_gripper, etc.). Currently the catalog demo calls raw `p.loadSDF()` directly.
+- **`SimObject.from_sdf()` → `List[SimObject]`** ✅ — Factory method that loads an SDF file via `p.loadSDF()` and wraps each returned body_id in a `SimObject`. Collision detection and lifecycle management via `add_object()` are applied automatically. Required for Open-RMF SDF environment loading and official support for pybullet_data SDF models (kiva_shelf, wsg50_gripper, etc.).
 
 ### Crowd Simulation (lightweight)
 
@@ -52,6 +85,7 @@ External communication layers:
 
 - **ROS 2** — Topic / service / action bridge for ROS 2 ecosystem integration (see [ros2_bridge/README.md](../ros2_bridge/README.md))
 - **gRPC** — Language-agnostic RPC interface for orchestrators, WMS, and fleet managers
+- **Distributed co-simulation (Robot Proxy layer)** — Per-robot proxy processes that translate between simulated robots and real Robot Apps (Nav2, task assigners, BTs). Enables running 100+ unmodified single-robot software stacks against a centralized batched simulator. Sim Central stays single-process and batched; only a thin fixed-schema boundary (`StateSnapshot` + `CommandBuffer` + Events) crosses the IPC. **Shares schema with Snapshot/Replay** — same `StateSnapshot` dataclass feeds live IPC, replay log, and observability sinks (define schema once, fan out to multiple consumers). See [co-simulation/spec.md](design/co-simulation/spec.md) for full design including layer separation, transport options (shared memory / gRPC / DDS), lockstep vs async sync modes, and 6-phase implementation plan.
 
 ## Refactoring
 
@@ -90,6 +124,31 @@ External communication layers:
   - Apply incrementally after profiling confirms bottleneck (YAGNI)
   - Full scipy removal in a separate PR after all call sites are replaced
 
+## GUI / Interactive Tools
+
+Improve `p.GUI` interactivity for development and debugging.
+Long-term plan is to replace `p.GUI` with Rerun (see [Long-Term Phase 1](#long-term-backend-abstraction--beyond-pybullet)) where many of these capabilities come built-in. These items are the **interim layer** until that migration lands, and naturally collect under the planned `VisualizerController` (see Refactoring).
+
+Current state:
+- `sim.pause()` / `resume()` Python API ✅
+- `SPACE` keybinding for pause toggle ✅
+- `pause` / `resume` events on EventBus ✅
+- `CameraController` with right-drag pan, zoom, top-down view ✅
+
+Planned:
+
+- **Pause / Step / Speed control panel** — In-window UI for pause/resume, single-step, and real-time multiplier. Short-term: `p.addUserDebugParameter` sliders/buttons. Mid-term: tkinter side panel composed with `DataMonitor`.
+- **SimObject inspector panel** — Live list of all `_agents` / `_sim_objects` with `object_id`, `name`, current `Pose`, action queue length, and status. Click-to-select with viewport highlight.
+- **Camera focus on selection** — Selected entity becomes camera target; auto-follow toggle; distance / yaw / pitch sliders. Replaces the current static `setup_camera`.
+- **Object manipulation** — Drag selected `SimObject` in XY plane, edit pose via numeric input, delete via UI (calls `remove_object()` properly so collision/EventBus stay consistent). Respects `pickable` flag.
+- **Action queue inspector** — Per-Agent visualization of pending and active actions (type, status, target). Right-click to cancel an action.
+- **Keyboard shortcut overlay** — Help panel listing all bound keys (`SPACE`, future shortcuts), surfaced via a `?` key.
+
+Implementation notes:
+- All new GUI affordances must be **opt-out via `SimulationParams(gui=False)`** so headless / CI paths stay zero-cost.
+- UI state changes must publish through the EventBus (`gui.select`, `gui.manipulate`, `gui.action_cancel`) so plugins / recordings see them.
+- Avoid per-step UI redraws — throttle to ≤30 Hz independent of sim FPS.
+
 ## Performance
 
 Near-term optimizations within the current PyBullet-backed architecture.
@@ -121,7 +180,7 @@ Collision at 10 Hz adds only ~0.2 ms at 500 agents — negligible compared to ag
 | TPI-like trapezoidal profile | (per-agent) | 33 μs | — |
 | Per-agent cost | 23 μs/agent | ~0.01 μs/agent | — |
 
-### Two-Phase Step: Decouple Computation from PyBullet C API
+### Two-Phase Step: Decouple Computation from PyBullet C API ✅ (batch controller path)
 
 Current `step_once()` iterates agents one-by-one, each calling `controller.compute()` (Python/NumPy) → `set_pose_raw()` (PyBullet C API + AABB update + spatial grid) interleaved. This prevents vectorization and adds per-agent Python↔C crossing overhead.
 
@@ -142,7 +201,7 @@ Key changes:
 - Movement detection stays pure Python (already cached-pose-based), unaffected
 - Attached-object propagation runs after Phase 2 using the buffered parent poses
 
-### Vectorized Agent Update (NumPy Batch)
+### Vectorized Agent Update (NumPy Batch) ✅
 
 For the common "N agents on straight-line TPI paths" case, Phase 1 can be further vectorized:
 
@@ -279,6 +338,18 @@ Simulation environment assets (warehouse floors, factory layouts, etc.):
 
 - **GitHub Actions refactoring** — Streamlined CI pipeline
 - **Automated performance tracking** — Run time / memory benchmarks in CI, auto-update results in documentation, and alert on significant performance regressions
+
+## Observability
+
+Operational visibility for long benchmark runs and production deployments.
+**Shares the EventBus with Snapshot/Replay** — same emission point, different sinks.
+See [observability/spec.md](design/observability/spec.md) for full design.
+
+- **Structured logging (JSON)** — Replace prefix-string `NamedLazyLogger` with `extra={...}` dict fields (`agent_id`, `object_id`, `sim_time`, `step`). Enables Loki/Grafana label queries.
+- **`sim_time` injection filter** — `logging.Filter` registered by `MultiRobotSimulationCore` auto-attaches `sim_time` and `step` to every record. Removes per-call boilerplate on hot paths.
+- **Prometheus / OTLP metrics** — Promote `DataMonitor` internals (`pbf_step_duration_seconds`, `pbf_active_agents`, `pbf_actions_total{type,status}`, `pbf_collision_pairs`) to scrapable metrics. Opt-in to keep default cost zero.
+- **OpenTelemetry trace exporter** — EventBus subscriber that converts `action.start` / `action.complete` event pairs into spans. Sampling allowed. `causation_id` aligned with OTel `span_id` so Tempo "Trace to Logs" jumps to the matching JSONL event in Loki.
+- **Hot-path safety** — All exporters use batch / async processors. Per-step spans are forbidden; Action-level granularity only. `LazyLogger.isEnabledFor()` semantics preserved.
 
 ## Long-Term: Backend Abstraction & Beyond PyBullet
 

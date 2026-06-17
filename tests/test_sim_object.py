@@ -406,6 +406,11 @@ class TestSimObjectPose:
         obj = create_mesh_object(pose=Pose.from_xyz(1, 2, 3), mass=1.0)
         assert_object_properties(obj, mass=1.0, position=(1, 2, 3), is_kinematic=False)
 
+    def test_pending_preserve_velocity_default(self, pybullet_env):
+        """Two-phase step: _pending_preserve_velocity defaults to True before any buffered write."""
+        obj = create_mesh_object(pose=Pose.from_xyz(0, 0, 1), mass=1.0)
+        assert obj._pending_preserve_velocity is True
+
     def test_set_pose(self, pybullet_env):
         """Test setting object pose"""
         obj = create_mesh_object(pose=Pose.from_xyz(0, 0, 1), mass=1.0)

@@ -37,59 +37,55 @@ world:
     - TeleportIngestor
 
 entities:
-  # ── Fleet: deliveryRobot (nav_graph 0, L1) ─────────
+  # ── Fleet: deliveryRobot (nav_graph 0) ──────────────
+  - name: deliveryRobot_0
+    sdf_path: "/rmf_demos_ws/install/rmf_demos_assets/share/rmf_demos_assets/models/DeliveryRobot/model.sdf"
+    pose: [5, -5, 0.0]
+    yaw: 0.0
+    motion_mode: "differential"
+    controller:
+      max_linear_vel: 0.7
+      max_linear_accel: 0.5
+      navigation_2d: true
   - name: deliveryRobot_1
     sdf_path: "/rmf_demos_ws/install/rmf_demos_assets/share/rmf_demos_assets/models/DeliveryRobot/model.sdf"
     pose: [8.007, -31.734, 0.0]
     yaw: -3.1398
     motion_mode: "differential"
-    max_linear_vel: 0.7
-    max_linear_accel: 0.5
-    navigation_2d: true
-    controller_config:
-      type: differential
-      config:
-        default_direction: auto
-
-  - name: deliveryRobot_2
-    sdf_path: "/rmf_demos_ws/install/rmf_demos_assets/share/rmf_demos_assets/models/DeliveryRobot/model.sdf"
-    pose: [12.832, -38.547, 0.0]
-    yaw: 0.1635
+    controller:
+      max_linear_vel: 0.7
+      max_linear_accel: 0.5
+      navigation_2d: true
+  
+  # ── Fleet: tinyRobot (nav_graph 1) ─────────────────
+  - name: tinyRobot_0
+    sdf_path: "/rmf_demos_ws/install/rmf_demos_assets/share/rmf_demos_assets/models/TinyRobot/model.sdf"
+    pose: [15, -5, 0.0]
+    yaw: 0.0
     motion_mode: "differential"
-    max_linear_vel: 0.7
-    max_linear_accel: 0.5
-    navigation_2d: true
-    controller_config:
-      type: differential
-      config:
-        default_direction: auto
-
-  # ── Fleet: tinyRobot (nav_graph 1, L2) ─────────────
+    controller:
+      max_linear_vel: 0.5
+      max_linear_accel: 0.75
+      navigation_2d: true
   - name: tinyRobot_1
     sdf_path: "/rmf_demos_ws/install/rmf_demos_assets/share/rmf_demos_assets/models/TinyRobot/model.sdf"
     pose: [54.763, -10.800, 10.0]
     yaw: 3.1343
     motion_mode: "differential"
-    max_linear_vel: 0.5
-    max_linear_accel: 0.75
-    navigation_2d: true
-    controller_config:
-      type: differential
-      config:
-        default_direction: auto
-
-  - name: tinyRobot_2
-    sdf_path: "/rmf_demos_ws/install/rmf_demos_assets/share/rmf_demos_assets/models/TinyRobot/model.sdf"
-    pose: [54.789, -12.921, 10.0]
-    yaw: 3.1416
-    motion_mode: "differential"
-    max_linear_vel: 0.5
-    max_linear_accel: 0.75
-    navigation_2d: true
-    controller_config:
-      type: differential
-      config:
-        default_direction: auto
+    controller:
+      max_linear_vel: 0.5
+      max_linear_accel: 0.75
+      navigation_2d: true
+  
+  # ── Doors (Door) ─────────────────────────────
+  - name: clinic_door_01
+    type: door
+    urdf_path: "robots/door_hinge.urdf"
+    pose: [8, -3, 0.0]
+    yaw: 0.0
+    use_fixed_base: true
+    open_positions: {hinge: 1.57}
+    close_positions: {hinge: 0.0}
 
   # ── L1 Doors ─────────────────────────────────────────
   - name: L1_clinic_a

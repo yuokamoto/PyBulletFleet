@@ -21,9 +21,11 @@ class RandomWalkController(Controller):
 
     def __init__(
         self,
+        params=None,
         radius: float = 5.0,
         wait_range: tuple | list = (1.0, 5.0),
     ):
+        super().__init__(params)
         self._radius = radius
         self._wait_range = tuple(wait_range)
         self._origin: list | None = None

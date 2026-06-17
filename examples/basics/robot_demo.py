@@ -51,7 +51,7 @@ cube_agent = Agent.from_mesh(
     ),
     collision_shape=ShapeParams(shape_type="box", half_extents=[0.3, 0.3, 0.3]),
     pose=Pose.from_xyz(0, 0, 0.5),
-    max_linear_vel=1.5,
+    controller={"max_linear_vel": 1.5},
     sim_core=sim_core,
 )
 

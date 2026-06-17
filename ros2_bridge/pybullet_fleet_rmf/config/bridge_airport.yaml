@@ -61,72 +61,64 @@ entities:
     pose: [28.72, -51.19, 0.0]
     yaw: -1.568
     motion_mode: "differential"
-    max_linear_vel: 0.5
-    max_linear_accel: 0.75
-    navigation_2d: true
-    controller_config:
-      type: differential
-      config:
-        default_direction: auto
+    controller:
+      max_linear_vel: 0.5
+      max_linear_accel: 0.75
+      navigation_2d: true
     plugins:
       - type: battery
         config:
           discharge_rate: 0.001
           charge_rate: 0.005
+
 
   - name: tinyRobot_1
     sdf_path: "/rmf_demos_ws/install/rmf_demos_assets/share/rmf_demos_assets/models/TinyRobot/model.sdf"
     pose: [67.97, -49.36, 0.0]
     yaw: -1.598
     motion_mode: "differential"
-    max_linear_vel: 0.5
-    max_linear_accel: 0.75
-    navigation_2d: true
-    controller_config:
-      type: differential
-      config:
-        default_direction: auto
+    controller:
+      max_linear_vel: 0.5
+      max_linear_accel: 0.75
+      navigation_2d: true
     plugins:
       - type: battery
         config:
           discharge_rate: 0.001
           charge_rate: 0.005
+
 
   - name: tinyRobot_2
     sdf_path: "/rmf_demos_ws/install/rmf_demos_assets/share/rmf_demos_assets/models/TinyRobot/model.sdf"
     pose: [86.50, -9.63, 0.0]
     yaw: -0.002
     motion_mode: "differential"
-    max_linear_vel: 0.5
-    max_linear_accel: 0.75
-    navigation_2d: true
-    controller_config:
-      type: differential
-      config:
-        default_direction: auto
+    controller:
+      max_linear_vel: 0.5
+      max_linear_accel: 0.75
+      navigation_2d: true
     plugins:
       - type: battery
         config:
           discharge_rate: 0.001
           charge_rate: 0.005
 
+
   - name: tinyRobot_3
     sdf_path: "/rmf_demos_ws/install/rmf_demos_assets/share/rmf_demos_assets/models/TinyRobot/model.sdf"
     pose: [21.78, -27.45, 0.0]
     yaw: 1.582
     motion_mode: "differential"
-    max_linear_vel: 0.5
-    max_linear_accel: 0.75
-    navigation_2d: true
-    controller_config:
-      type: differential
-      config:
-        default_direction: auto
+    controller:
+      max_linear_vel: 0.5
+      max_linear_accel: 0.75
+      navigation_2d: true
     plugins:
       - type: battery
         config:
           discharge_rate: 0.001
           charge_rate: 0.005
+
 
   # ── Fleet: deliveryRobot (nav_graph 1) ───────────────────────────
   # Spawn positions from airport_terminal.world (charger waypoints)
@@ -135,54 +127,48 @@ entities:
     pose: [96.60, -51.96, 0.0]
     yaw: -0.016
     motion_mode: "differential"
-    max_linear_vel: 0.7
-    max_linear_accel: 0.5
-    navigation_2d: true
-    controller_config:
-      type: differential
-      config:
-        default_direction: auto
+    controller:
+      max_linear_vel: 0.7
+      max_linear_accel: 0.5
+      navigation_2d: true
     plugins:
       - type: battery
         config:
           discharge_rate: 0.001
           charge_rate: 0.005
+
 
   - name: deliveryRobot_1
     sdf_path: "/rmf_demos_ws/install/rmf_demos_assets/share/rmf_demos_assets/models/DeliveryRobot/model.sdf"
     pose: [152.35, -44.32, 0.0]
     yaw: 0.031
     motion_mode: "differential"
-    max_linear_vel: 0.7
-    max_linear_accel: 0.5
-    navigation_2d: true
-    controller_config:
-      type: differential
-      config:
-        default_direction: auto
+    controller:
+      max_linear_vel: 0.7
+      max_linear_accel: 0.5
+      navigation_2d: true
     plugins:
       - type: battery
         config:
           discharge_rate: 0.001
           charge_rate: 0.005
 
+
   - name: deliveryRobot_2
     sdf_path: "/rmf_demos_ws/install/rmf_demos_assets/share/rmf_demos_assets/models/DeliveryRobot/model.sdf"
     pose: [14.78, -9.28, 0.0]
     yaw: 0.005
     motion_mode: "differential"
-    max_linear_vel: 0.7
-    max_linear_accel: 0.5
-    navigation_2d: true
-    controller_config:
-      type: differential
-      config:
-        default_direction: auto
+    controller:
+      max_linear_vel: 0.7
+      max_linear_accel: 0.5
+      navigation_2d: true
     plugins:
       - type: battery
         config:
           discharge_rate: 0.001
           charge_rate: 0.005
+
 
   # ── Fleet: cleanerBotA (nav_graph 0) ─────────────────────────────
   - name: cleanerBotA_0
@@ -190,18 +176,16 @@ entities:
     pose: [117.41, -49.48, 0.0]
     yaw: -1.573
     motion_mode: "differential"
-    max_linear_vel: 0.7
-    max_linear_accel: 0.5
-    navigation_2d: true
-    controller_config:
-      type: differential
-      config:
-        default_direction: auto
+    controller:
+      max_linear_vel: 0.7
+      max_linear_accel: 0.5
+      navigation_2d: true
     plugins:
       - type: battery
         config:
           discharge_rate: 0.001
           charge_rate: 0.005
+
 
   # ── Fleet: cleanerBotE (nav_graph 4) ─────────────────────────────
   - name: cleanerBotE_0
@@ -209,36 +193,32 @@ entities:
     pose: [159.70, -55.56, 0.0]
     yaw: 1.571
     motion_mode: "differential"
-    max_linear_vel: 0.7
-    max_linear_accel: 0.5
-    navigation_2d: true
-    controller_config:
-      type: differential
-      config:
-        default_direction: auto
+    controller:
+      max_linear_vel: 0.7
+      max_linear_accel: 0.5
+      navigation_2d: true
     plugins:
       - type: battery
         config:
           discharge_rate: 0.001
           charge_rate: 0.005
 
+
   - name: cleanerBotE_1
     sdf_path: "/rmf_demos_ws/install/rmf_demos_assets/share/rmf_demos_assets/models/CleanerBotE/model.sdf"
     pose: [163.42, -55.63, 0.0]
     yaw: 1.563
     motion_mode: "differential"
-    max_linear_vel: 0.7
-    max_linear_accel: 0.5
-    navigation_2d: true
-    controller_config:
-      type: differential
-      config:
-        default_direction: auto
+    controller:
+      max_linear_vel: 0.7
+      max_linear_accel: 0.5
+      navigation_2d: true
     plugins:
       - type: battery
         config:
           discharge_rate: 0.001
           charge_rate: 0.005
+
 
   # ── Doors (Door) ─────────────────────────────
   - name: n02_door

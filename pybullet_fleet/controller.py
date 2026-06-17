@@ -40,7 +40,6 @@ from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Type
 
 import numpy as np
-from scipy.spatial.transform import Rotation as R  # used only in DifferentialController init
 
 from pybullet_fleet.geometry import (
     Pose,
@@ -56,6 +55,10 @@ from pybullet_fleet.plugin_utils import PluginRegistry, from_config_introspect
 from pybullet_fleet.types import ControllerMode, MovementDirection, PosePhase
 
 from two_point_interpolation import TwoPointInterpolation
+
+from pybullet_fleet._tpi import build_tpi, extract_phase_params
+from pybullet_fleet._motion_planning import align_x_axis_quat
+from pybullet_fleet.controller_params import ControllerParams
 
 if TYPE_CHECKING:
     from pybullet_fleet.agent import Agent
@@ -143,10 +146,33 @@ class Controller(ABC):
         """
         ...
 
+    def __init__(self, params: Optional["ControllerParams"] = None) -> None:
+        from pybullet_fleet.controller_params import ControllerParams
+
+        self.params: ControllerParams = params if params is not None else ControllerParams()
+
     @classmethod
     def from_config(cls, config: dict) -> "Controller":
-        """Create from config dict, matching keys to ``__init__`` parameters."""
-        return from_config_introspect(cls, (), config)
+        """Create from a config dict.
+
+        The dict may contain:
+
+        * Any field of :class:`~pybullet_fleet.controller_params.ControllerParams`
+          (e.g. ``max_linear_vel``, ``navigation_2d``, …). Unknown keys are
+          dropped silently by ``ControllerParams.from_dict``.
+        * Subclass-specific keys that match the subclass ``__init__`` signature
+          (e.g. ``wheel_separation`` for ``DifferentialController``).
+        * A ``type`` key naming the controller; ignored here (consumed by
+          :func:`create_controller`).
+        """
+        from pybullet_fleet.controller_params import ControllerParams
+
+        sig = inspect.signature(cls.__init__)
+        param_names = {p for p in sig.parameters if p != "self"}
+        kwargs: dict = {"params": ControllerParams.from_dict(config)}
+        extra_keys = param_names - {"params"}
+        kwargs.update({k: v for k, v in config.items() if k in extra_keys})
+        return cls(**kwargs)
 
     def on_stop(self, agent: "Agent") -> None:
         """Called when ``stop()`` is invoked on the agent."""
@@ -175,21 +201,8 @@ class KinematicController(Controller):
         - Trajectory complete → IDLE
     """
 
-    def __init__(
-        self,
-        max_linear_vel: float = math.inf,
-        max_angular_vel: float = math.inf,
-        cmd_vel_timeout: float = 0.0,
-        navigation_2d: bool = False,
-        default_direction: MovementDirection = MovementDirection.FORWARD,
-    ) -> None:
-        self._max_linear_vel: float = max_linear_vel
-        self._max_angular_vel: float = max_angular_vel
-        self._cmd_vel_timeout: float = cmd_vel_timeout
-        self._navigation_2d: bool = navigation_2d
-        if isinstance(default_direction, str):
-            default_direction = MovementDirection(default_direction)
-        self._default_direction: MovementDirection = default_direction
+    def __init__(self, params: Optional[ControllerParams] = None) -> None:
+        super().__init__(params)
         self._time_since_last_set_velocity: float = 0.0
         self._velocity_ever_set: bool = False
         self._linear_velocity = np.zeros(3)  # body-frame [vx, vy, vz]
@@ -217,6 +230,12 @@ class KinematicController(Controller):
         self._forward_start_pos: Optional[np.ndarray] = None
         self._forward_direction_3d: Optional[np.ndarray] = None
         self._forward_direction_unit: Optional[np.ndarray] = None
+        # Body-frame copy of ``_forward_direction_unit`` used only for
+        # direction-projected kinematic cap computation in
+        # ``_init_forward_trajectory``. ``max_linear_vel`` / ``max_linear_accel``
+        # per-axis limits are defined in body frame, so the projection must
+        # use the body-frame direction (not world).
+        self._forward_direction_unit_body: Optional[np.ndarray] = None
         self._forward_total_distance_3d: float = 0.0
 
         # Pose phase state machine: ROTATE → FORWARD
@@ -225,13 +244,13 @@ class KinematicController(Controller):
     @property
     def default_direction(self) -> MovementDirection:
         """Default movement direction used when ``set_path`` is called without explicit direction."""
-        return self._default_direction
+        return self.params.default_direction
 
     @default_direction.setter
     def default_direction(self, value: MovementDirection) -> None:
         if isinstance(value, str):
             value = MovementDirection(value)
-        self._default_direction = value
+        self.params.default_direction = value
 
     @property
     def mode(self) -> ControllerMode:
@@ -322,10 +341,11 @@ class KinematicController(Controller):
 
     def _check_velocity_timeout(self, dt: float) -> bool:
         """Check if velocity command has timed out."""
-        if self._cmd_vel_timeout <= 0.0 or not self._velocity_ever_set:
+        timeout = self.params._eff_cmd_vel_timeout()
+        if timeout <= 0.0 or not self._velocity_ever_set:
             return False
         self._time_since_last_set_velocity += dt
-        return self._time_since_last_set_velocity > self._cmd_vel_timeout
+        return self._time_since_last_set_velocity > timeout
 
     # -- Pose interface ------------------------------------------------
 
@@ -363,6 +383,7 @@ class KinematicController(Controller):
         self._forward_start_pos = None
         self._forward_direction_3d = None
         self._forward_direction_unit = None
+        self._forward_direction_unit_body = None
         self._forward_total_distance_3d = 0.0
 
     def set_path(
@@ -386,7 +407,7 @@ class KinematicController(Controller):
             direction: ``None`` (use ``default_direction``), ``FORWARD``, ``AUTO``,
                 or ``BACKWARD`` (differential only).
         """
-        effective_direction = direction if direction is not None else self._default_direction
+        effective_direction = direction if direction is not None else self.params.default_direction
         self._path = list(path)
         self._current_waypoint_index = 0
         self._goal_pose = path[0]
@@ -410,42 +431,29 @@ class KinematicController(Controller):
     def _init_forward_trajectory(self, agent: "Agent", distance: float) -> None:
         """Initialize a single distance TPI for straight-line forward motion.
 
-        Uses averaged max velocity / acceleration across all axes.
+        Uses direction-projected scalar limits derived from
+        :attr:`ControllerParams.max_linear_vel` / ``max_linear_accel``. When
+        the limit is scalar (uniform magnitude clamp), it is used directly;
+        when per-axis, the largest scalar speed compatible with every axis
+        along ``self._forward_direction_unit_body`` (body frame) is used.
+        Per-axis caps are defined in body frame, so the projection must use
+        the body-frame direction, not the world-frame travel direction.
         After calling this, ``_apply_forward()`` can interpolate position
-        along the cached direction vector.
+        along the cached world-frame direction vector.
         """
         t0 = agent.sim_core.sim_time if agent.sim_core is not None else 0.0
 
-        avg_vel = float(np.mean(agent.max_linear_vel))
-        avg_accel = float(np.mean(agent.max_linear_accel))
+        direction_unit_body = self._forward_direction_unit_body
+        if direction_unit_body is None or not np.any(direction_unit_body):
+            # Zero-length trajectory or no cached direction — fall back to a
+            # safe scalar form (forward-axis limits).
+            vmax = self.params.scalar_max_linear_vel()
+            amax = self.params.scalar_max_linear_accel()
+        else:
+            vmax = self.params.linear_vel_along_direction(direction_unit_body)
+            amax = self.params.linear_accel_along_direction(direction_unit_body)
 
-        try:
-            self._tpi_forward = TwoPointInterpolation()
-            self._tpi_forward.init(
-                p0=0.0,
-                pe=distance,
-                acc_max=avg_accel,
-                vmax=avg_vel,
-                t0=t0,
-                v0=0.0,
-                ve=0.0,
-                dec_max=avg_accel,
-            )
-            self._tpi_forward.calc_trajectory()
-        except ValueError:
-            # Fallback: zero-distance trajectory (already at goal)
-            self._tpi_forward = TwoPointInterpolation()
-            self._tpi_forward.init(
-                p0=0.0,
-                pe=0.0,
-                acc_max=avg_accel,
-                vmax=avg_vel,
-                t0=t0,
-                v0=0.0,
-                ve=0.0,
-                dec_max=avg_accel,
-            )
-            self._tpi_forward.calc_trajectory()
+        self._tpi_forward = build_tpi(p0=0.0, pe=distance, vmax=vmax, accel=amax, t0=t0)
 
     def _init_rotation_tpi(
         self,
@@ -475,27 +483,19 @@ class KinematicController(Controller):
         self._rotation_target_quat = np.asarray(target_quat)
         self._rotation_total_angle = float(rotation_angle)
 
-        angular_vel = agent.max_angular_vel[0]
-        angular_accel = agent.max_angular_accel[0]
+        angular_vel = self.params.scalar_max_angular_vel()
+        angular_accel = self.params.scalar_max_angular_accel()
 
-        try:
-            self._tpi_rotation_angle = TwoPointInterpolation()
-            self._tpi_rotation_angle.init(
-                p0=0.0,
-                pe=rotation_angle,
-                acc_max=angular_accel,
-                vmax=angular_vel,
-                t0=t0,
-                v0=0.0,
-                ve=0.0,
-                dec_max=angular_accel,
-            )
-            self._tpi_rotation_angle.calc_trajectory()
-            self._slerp_precomp = quat_slerp_precompute(self._rotation_start_quat, self._rotation_target_quat)
-            return True
-        except ValueError:
+        self._tpi_rotation_angle = build_tpi(p0=0.0, pe=rotation_angle, vmax=angular_vel, accel=angular_accel, t0=t0)
+        _, _, t_tot, _ = extract_phase_params(self._tpi_rotation_angle)
+        if t_tot <= 0.0:
+            # build_tpi produced a degenerate zero-duration trajectory (velocity or
+            # accel limits are too small to plan the rotation). Treat as failure so
+            # the caller can fall back gracefully instead of silently snapping.
             self._reset_rotation_state()
             return False
+        self._slerp_precomp = quat_slerp_precompute(self._rotation_start_quat, self._rotation_target_quat)
+        return True
 
     def _apply_pose(self, agent: "Agent", dt: float) -> bool:
         """Unified TPI pose control: ROTATE phase → FORWARD phase.
@@ -627,7 +627,7 @@ class KinematicController(Controller):
         """
         # Snap to exact goal position
         snap_position = list(self._goal_pose.position)
-        if self._navigation_2d:
+        if self.params.navigation_2d:
             snap_position[2] = current_pose.position[2]
         agent.set_pose_raw(snap_position, current_pose.orientation, preserve_velocity=False)
 
@@ -702,8 +702,8 @@ class KinematicController(Controller):
         self._path = []
         self._current_waypoint_index = 0
         self._goal_pose = None
-        self._movement_direction = self._default_direction
-        self._original_direction = self._default_direction
+        self._movement_direction = self.params.default_direction
+        self._original_direction = self.params.default_direction
         self._align_final_orientation = False
         self._final_target_orientation = None
         self._is_final_orientation_aligning = False
@@ -728,19 +728,8 @@ class OmniController(KinematicController):
 
     _registry_name = "omni"
 
-    def __init__(
-        self,
-        max_linear_vel: float = math.inf,
-        max_angular_vel: float = math.inf,
-        cmd_vel_timeout: float = 0.0,
-        navigation_2d: bool = False,
-    ) -> None:
-        super().__init__(
-            max_linear_vel=max_linear_vel,
-            max_angular_vel=max_angular_vel,
-            cmd_vel_timeout=cmd_vel_timeout,
-            navigation_2d=navigation_2d,
-        )
+    def __init__(self, params: Optional[ControllerParams] = None) -> None:
+        super().__init__(params)
 
     # -- Velocity kinematics -------------------------------------------
 
@@ -753,18 +742,16 @@ class OmniController(KinematicController):
         wy: float = 0.0,
         wz: float = 0.0,
     ) -> None:
-        """Set velocity in **body frame** (6-DoF) with magnitude clamping."""
-        lin = np.array([vx, vy, vz])
-        ang = np.array([wx, wy, wz])
+        """Set velocity in **body frame** (6-DoF) with kinematic clamping.
 
-        # Magnitude clamping — preserves direction
-        lin_mag = float(np.linalg.norm(lin))
-        if lin_mag > self._max_linear_vel:
-            lin = lin * (self._max_linear_vel / lin_mag)
+        Scalar limits ⇒ magnitude clamp (preserves direction).
+        Per-axis limits ⇒ per-component clamp.
+        """
+        lin = np.array([vx, vy, vz], dtype=float)
+        ang = np.array([wx, wy, wz], dtype=float)
 
-        ang_mag = float(np.linalg.norm(ang))
-        if ang_mag > self._max_angular_vel:
-            ang = ang * (self._max_angular_vel / ang_mag)
+        lin = self.params.clamp_linear_vec(lin)
+        ang = self.params.clamp_angular_vec(ang)
 
         super().set_velocity(vx=lin[0], vy=lin[1], vz=lin[2], wx=ang[0], wy=ang[1], wz=ang[2])
 
@@ -813,7 +800,7 @@ class OmniController(KinematicController):
         current_pose = agent.get_pose()
         current_pos = np.array(current_pose.position)
         goal_pos = np.array(goal.position)
-        if self._navigation_2d:
+        if self.params.navigation_2d:
             goal_pos[2] = current_pos[2]
 
         # Reset rotation state (position-only trajectory)
@@ -831,9 +818,17 @@ class OmniController(KinematicController):
         if total_dist > 1e-9:
             self._forward_direction_3d = displacement.copy()
             self._forward_direction_unit = displacement / total_dist
+            # Body-frame direction for cap projection: rotate world unit
+            # vector by the conjugate (= inverse for unit quat) of the
+            # current orientation.  ``max_linear_vel`` per-axis caps are
+            # body-frame, so projection must happen in body frame.
+            qx, qy, qz, qw = current_pose.orientation
+            dir_body = rotate_vector(tuple(self._forward_direction_unit), (-qx, -qy, -qz, qw))
+            self._forward_direction_unit_body = np.array(dir_body)
         else:
             self._forward_direction_3d = np.zeros(3)
             self._forward_direction_unit = np.zeros(3)
+            self._forward_direction_unit_body = np.zeros(3)
 
         self._init_forward_trajectory(agent, total_dist)
 
@@ -882,20 +877,10 @@ class DifferentialController(KinematicController):
 
     def __init__(
         self,
-        max_linear_vel: float = 2.0,
-        max_angular_vel: float = 1.5,
+        params: Optional[ControllerParams] = None,
         wheel_separation: float = 0.0,
-        cmd_vel_timeout: float = 0.0,
-        navigation_2d: bool = False,
-        default_direction: MovementDirection = MovementDirection.FORWARD,
     ) -> None:
-        super().__init__(
-            max_linear_vel=max_linear_vel,
-            max_angular_vel=max_angular_vel,
-            cmd_vel_timeout=cmd_vel_timeout,
-            navigation_2d=navigation_2d,
-            default_direction=default_direction,
-        )
+        super().__init__(params)
         self._wheel_separation = wheel_separation
 
     def set_velocity(
@@ -907,9 +892,14 @@ class DifferentialController(KinematicController):
         wy: float = 0.0,
         wz: float = 0.0,
     ) -> None:
-        """Set velocity (body frame). Only ``vx`` and ``wz`` are used."""
-        clamped_vx = max(-self._max_linear_vel, min(vx, self._max_linear_vel))
-        clamped_wz = max(-self._max_angular_vel, min(wz, self._max_angular_vel))
+        """Set velocity (body frame). Only ``vx`` and ``wz`` are used.
+
+        Per-axis limits are reduced to scalars via X (forward) / yaw axes.
+        """
+        vmax = self.params.scalar_max_linear_vel()
+        wmax = self.params.scalar_max_angular_vel()
+        clamped_vx = max(-vmax, min(vx, vmax))
+        clamped_wz = max(-wmax, min(wz, wmax))
         super().set_velocity(vx=clamped_vx, wz=clamped_wz)
 
     # -- Velocity kinematics (unicycle) --------------------------------
@@ -946,7 +936,7 @@ class DifferentialController(KinematicController):
         current_pose = agent.get_pose()
         current_pos = np.array(current_pose.position)
         goal_pos = np.array(goal.position)
-        if self._navigation_2d:
+        if self.params.navigation_2d:
             goal_pos[2] = current_pos[2]
 
         direction_vec = goal_pos - current_pos
@@ -977,47 +967,29 @@ class DifferentialController(KinematicController):
             self._forward_direction_3d = np.zeros(3)
             self._forward_direction_unit = np.zeros(3)
 
+        # Differential drive always rotates to face the target before the
+        # FORWARD phase, so by construction the travel direction is body +X
+        # (or -X for BACKWARD). No need for a world→body rotation.
+        if self._forward_total_distance_3d > 1e-6:
+            sign = -1.0 if self._movement_direction == MovementDirection.BACKWARD else 1.0
+            self._forward_direction_unit_body = np.array([sign, 0.0, 0.0])
+        else:
+            self._forward_direction_unit_body = np.zeros(3)
+
         t0 = agent.sim_core.sim_time if agent.sim_core is not None else 0.0
 
         self._pose_phase = PosePhase.ROTATE
 
         start_quat = np.array(current_pose.orientation)
 
-        # Calculate target orientation
+        # Calculate target orientation via shared helper
         if self._forward_total_distance_3d > 1e-6:
             movement_direction_vec = direction_vec / self._forward_total_distance_3d
-
             if self._movement_direction == MovementDirection.BACKWARD:
                 x_axis_target = -movement_direction_vec
             else:
                 x_axis_target = movement_direction_vec
-
-            goal_rotation = R.from_quat(goal.orientation)
-            goal_rot_matrix = goal_rotation.as_matrix()
-            x_axis_goal = goal_rot_matrix[:, 0]
-            z_axis_goal = goal_rot_matrix[:, 2]
-
-            alignment = np.dot(x_axis_goal, x_axis_target)
-
-            if alignment > 0.95:
-                target_quat = np.array(goal.orientation)
-            else:
-                y_axis = np.cross(z_axis_goal, x_axis_target)
-                y_norm_magnitude = np.linalg.norm(y_axis)
-
-                if y_norm_magnitude < 1e-6:
-                    if abs(x_axis_target[2]) < 0.9:
-                        y_axis = np.cross(np.array([0, 0, 1]), x_axis_target)
-                    else:
-                        y_axis = np.cross(np.array([0, 1, 0]), x_axis_target)
-                    y_axis = y_axis / np.linalg.norm(y_axis)
-                else:
-                    y_axis = y_axis / y_norm_magnitude
-
-                z_axis_final = np.cross(x_axis_target, y_axis)
-                rotation_matrix = np.column_stack([x_axis_target, y_axis, z_axis_final])
-                r = R.from_matrix(rotation_matrix)
-                target_quat = np.array(r.as_quat())
+            target_quat = align_x_axis_quat(start_quat, np.array(goal.orientation), x_axis_target)
         else:
             target_quat = np.array(goal.orientation)
 

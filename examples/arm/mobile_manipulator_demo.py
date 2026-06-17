@@ -76,10 +76,12 @@ spawn_params = AgentSpawnParams(
     urdf_path=mobile_manipulator_urdf,
     initial_pose=Pose.from_euler(0, 0, 0.3, yaw=0),
     motion_mode=MotionMode.DIFFERENTIAL,
-    max_linear_vel=2.0,
-    max_linear_accel=3.0,
-    max_angular_vel=1.5,
-    max_angular_accel=3.0,
+    controller={
+        "max_linear_vel": 2.0,
+        "max_linear_accel": 3.0,
+        "max_angular_vel": 1.5,
+        "max_angular_accel": 3.0,
+    },
     mass=0.0,  # kinematic mode
     use_fixed_base=False,
     ik_params=IKParams(ik_joint_names=ARM_JOINT_NAMES),

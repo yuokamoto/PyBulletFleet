@@ -49,7 +49,7 @@ The central orchestrator for PyBullet simulations.
 **Key Methods:**
 - `from_dict(config)` / `from_yaml(path)`: Factory methods for initialization
 - `run_simulation(update_callback, final_callback)`: Main simulation loop
-- `step_once()`: Single simulation step
+- `step_once()`: Single simulation step. Runs a **two-phase step** internally — Phase 1 (agent.update + callbacks + plugin on_step) buffers all kinematic pose writes; Phase 2 flushes them to PyBullet; `stepSimulation()` runs (when physics is on); Phase 3 refreshes AABBs + spatial grid for the flushed objects; collision detection then sees the new poses. See {doc}`two-phase-step` for details.
 - `setup_camera()`: Camera positioning
 - `configure_visualizer()`: Visual settings configuration
 - `register_static_body(body_id)`: Track static structure elements

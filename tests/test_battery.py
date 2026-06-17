@@ -49,8 +49,7 @@ def _make_agent(sim_core, **battery_kwargs):
     params = AgentSpawnParams(
         urdf_path=MOBILE_URDF,
         initial_pose=Pose.from_xyz(0, 0, 0.1),
-        motion_mode=MotionMode.OMNIDIRECTIONAL,
-        max_linear_vel=2.0,
+        controller={"type": "omni", "max_linear_vel": 2.0},
     )
     agent = Agent.from_params(params, sim_core)
     if battery_kwargs:

@@ -61,6 +61,7 @@ from pybullet_fleet.geometry import (  # noqa: F401,F811
     quat_angle_between,
     quat_from_rotvec,
     quat_multiply,
+    quat_slerp_batch,
     quat_to_rot_matrix,
     rotate_vector,
 )
@@ -163,6 +164,7 @@ __all__ = [
     "quat_angle_between",
     "quat_from_rotvec",
     "quat_multiply",
+    "quat_slerp_batch",
     "rotate_vector",
     # Config utilities
     "load_yaml_config",

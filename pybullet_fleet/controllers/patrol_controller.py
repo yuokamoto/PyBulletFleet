@@ -23,10 +23,12 @@ class PatrolController(Controller):
 
     def __init__(
         self,
+        params=None,
         waypoints: list | None = None,
         wait_time: float = 0.0,
         loop: bool = True,
     ):
+        super().__init__(params)
         self._waypoints = waypoints or []
         self._current_idx = 0
         self._wait_time = wait_time

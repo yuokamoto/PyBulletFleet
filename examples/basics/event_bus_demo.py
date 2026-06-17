@@ -12,6 +12,10 @@ Usage:
 """
 
 import os
+import sys
+
+# Add parent directory to path so the in-repo package is used during development
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from pybullet_fleet import (
     MultiRobotSimulationCore,
@@ -97,7 +101,7 @@ def main():
             urdf_path="robots/mobile_robot.urdf",
             initial_pose=Pose.from_xyz(0, 0, 0.1),
             motion_mode=MotionMode.OMNIDIRECTIONAL,
-            max_linear_vel=2.0,
+            controller={"max_linear_vel": 2.0},
             collision_mode=CollisionMode.NORMAL_2D,
             name="robot_1",
         ),
