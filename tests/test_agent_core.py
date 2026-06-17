@@ -584,7 +584,7 @@ class TestAgentSpawnParamsFromDict:
         assert result.initial_pose.yaw == pytest.approx(1.57, abs=0.01)
 
     def test_controller_string_shortcut(self):
-        """controller string is preserved as-is; normalized later by ControllerParams.parse_config."""
+        """controller string is preserved as-is; wired later by Agent._init_controller_chain."""
         result = AgentSpawnParams.from_dict(
             {"name": "r0", "urdf_path": "robots/mobile_robot.urdf", "controller": "differential"}
         )

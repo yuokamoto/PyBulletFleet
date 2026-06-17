@@ -274,20 +274,19 @@ entities:
     pose: [40.0, -35.0, 0.0]
     yaw: 0.0
     motion_mode: "differential"
-    max_linear_vel: 0.3
-    max_linear_accel: 0.5
-    navigation_2d: true
-    controller_config:
+    controller:
       type: patrol
-      config:
-        waypoints:
-          - [40.0, -35.0, 0.0]   # near n01_door
-          - [70.0, -35.0, 0.0]   # mid-corridor
-          - [100.0, -35.0, 0.0]  # near s04_door
-          - [130.0, -35.0, 0.0]  # near s08_door
-          - [155.0, -35.0, 0.0]  # near zone_4_door
-        wait_time: 3.0
-        loop: true
+      max_linear_vel: 0.3
+      max_linear_accel: 0.5
+      navigation_2d: true
+      waypoints:
+        - [40.0, -35.0, 0.0]   # near n01_door
+        - [70.0, -35.0, 0.0]   # mid-corridor
+        - [100.0, -35.0, 0.0]  # near s04_door
+        - [130.0, -35.0, 0.0]  # near s08_door
+        - [155.0, -35.0, 0.0]  # near zone_4_door
+      wait_time: 3.0
+      loop: true
 
   # ── NPC: Pedestrians (autonomous random walk — no fleet adapter) ─
   # Simulated crowd wandering in the terminal concourse area.
@@ -296,39 +295,36 @@ entities:
     pose: [60.0, -30.0, 0.0]
     yaw: 0.0
     motion_mode: "omnidirectional"
-    max_linear_vel: 0.8
-    max_linear_accel: 1.0
-    navigation_2d: true
-    controller_config:
+    controller:
       type: random_walk
-      config:
-        radius: 8.0
-        wait_range: [1.0, 4.0]
+      max_linear_vel: 0.8
+      max_linear_accel: 1.0
+      navigation_2d: true
+      radius: 8.0
+      wait_range: [1.0, 4.0]
 
   - name: pedestrian_1
     urdf_path: "robots/simple_cube.urdf"
     pose: [90.0, -25.0, 0.0]
     yaw: 0.0
     motion_mode: "omnidirectional"
-    max_linear_vel: 0.8
-    max_linear_accel: 1.0
-    navigation_2d: true
-    controller_config:
+    controller:
       type: random_walk
-      config:
-        radius: 8.0
-        wait_range: [1.0, 4.0]
+      max_linear_vel: 0.8
+      max_linear_accel: 1.0
+      navigation_2d: true
+      radius: 8.0
+      wait_range: [1.0, 4.0]
 
   - name: pedestrian_2
     urdf_path: "robots/simple_cube.urdf"
     pose: [120.0, -30.0, 0.0]
     yaw: 0.0
     motion_mode: "omnidirectional"
-    max_linear_vel: 0.8
-    max_linear_accel: 1.0
-    navigation_2d: true
-    controller_config:
+    controller:
       type: random_walk
-      config:
-        radius: 8.0
-        wait_range: [1.0, 4.0]
+      max_linear_vel: 0.8
+      max_linear_accel: 1.0
+      navigation_2d: true
+      radius: 8.0
+      wait_range: [1.0, 4.0]

@@ -26,7 +26,7 @@ Design rationale
 from __future__ import annotations
 
 from dataclasses import dataclass, fields
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional
 
 import numpy as np
 
@@ -95,41 +95,6 @@ class ControllerParams:
         if isinstance(kwargs.get("default_direction"), str):
             kwargs["default_direction"] = MovementDirection(kwargs["default_direction"])
         return cls(**kwargs)
-
-    @classmethod
-    def parse_config(
-        cls,
-        config: Optional[Union[str, Dict[str, Any]]],
-    ) -> Tuple[Optional[str], Dict[str, Any]]:
-        """Parse a user-facing ``controller`` config block.
-
-        Accepts the three forms used by :class:`AgentSpawnParams.controller`
-        and YAML:
-
-        * ``None``                  → ``(None, {})``
-        * ``"omni"`` (string)       → ``("omni", {"type": "omni"})``
-        * ``{"type": "differential", "max_linear_vel": 1.5,
-             "wheel_separation": 0.3}``
-          → ``("differential",
-              {"type": "differential", "max_linear_vel": 1.5,
-               "wheel_separation": 0.3})``
-
-        Returns:
-            ctrl_type: Registry name (e.g. ``"omni"``) or ``None`` if not
-                specified.  Used as the dispatch key for
-                :func:`pybullet_fleet.controller.create_controller`.
-            raw_config: The (shallow-copied) source dict — pass it to
-                :meth:`from_dict` to build a :class:`ControllerParams`,
-                or forward it to ``create_controller`` (impl-specific
-                kwargs such as ``wheel_separation`` are routed via
-                :func:`inspect.signature` in :meth:`Controller.from_config`).
-        """
-        if config is None:
-            return None, {}
-        if isinstance(config, str):
-            return config, {"type": config}
-        raw = dict(config)
-        return raw.get("type"), raw
 
     # ------------------------------------------------------------------
     # per-axis helpers

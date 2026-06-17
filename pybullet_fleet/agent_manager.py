@@ -708,7 +708,9 @@ class AgentManager(SimObjectManager[Agent]):
             enable_profiling: If ``True``, spawn methods log elapsed time.
                 Default ``False``.
             batch_controller: Batch controller registry name
-                (e.g. ``"batch_omni"``, ``"batch_differential"``).  When set,
+                (e.g. ``"batch_omni"``, ``"batch_differential"``) or a dotted
+                import path to a custom ``BatchKinematicController`` subclass
+                (e.g. ``"my_pkg.MyBatchController"``).  When set,
                 every agent spawned through this manager is automatically
                 registered with the batch controller so movement is driven by
                 vectorized :meth:`batch_advance` rather than per-agent
@@ -753,7 +755,9 @@ class AgentManager(SimObjectManager[Agent]):
 
         Args:
             mode: Batch controller registry name (e.g. ``"batch_omni"``,
-                ``"batch_differential"``).
+                ``"batch_differential"``) or a dotted import path to a custom
+                :class:`BatchKinematicController` subclass
+                (e.g. ``"my_pkg.MyBatchController"``).
 
         Returns:
             The newly-created :class:`BatchKinematicController`.

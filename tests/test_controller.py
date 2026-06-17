@@ -33,6 +33,20 @@ def sim_core(pybullet_env):
     return sc
 
 
+# Module-level custom controllers used by the ``controller={"class": ...}``
+# dotted-path tests.  They have no ``_registry_name`` so they are reachable
+# *only* via dotted import path, exercising the resolve_class branch.
+class CustomKinematicController(OmniController):
+    """A custom KinematicController loadable via dotted path (replaces base)."""
+
+
+class CustomHighLevelController(Controller):
+    """A custom non-kinematic Controller loadable via dotted path (chained)."""
+
+    def compute(self, agent, dt: float) -> bool:
+        return False
+
+
 @pytest.fixture
 def mobile_agent(sim_core):
     """Spawn a simple omnidirectional mobile agent."""
@@ -1269,7 +1283,6 @@ class TestRandomWalkController:
         assert len(agent.goals) == n_goals, "Should not set target while agent moving"
 
 
-@pytest.mark.xfail(reason="Chain controller wiring for high-level controllers not yet implemented in unified controller= API")
 class TestControllerChainWiring:
     """Verify that from_params correctly wires high-level controllers
     (patrol, random_walk) as chain entries while keeping the base
@@ -1339,6 +1352,38 @@ class TestControllerChainWiring:
         assert len(agent._controllers) == 2
         assert isinstance(agent._controllers[0], DifferentialController)
         assert isinstance(agent._controllers[1], PatrolController)
+
+    def test_dotted_path_kinematic_replaces_base(self, sim_core):
+        """controller={"class": "...KinematicController..."} replaces the base."""
+        params = AgentSpawnParams(
+            urdf_path="robots/mobile_robot.urdf",
+            initial_pose=Pose.from_xyz(0, 0, 0.05),
+            motion_mode=MotionMode.DIFFERENTIAL,
+            controller={
+                "class": "tests.test_controller.CustomKinematicController",
+                "max_linear_vel": 1.5,
+            },
+        )
+        agent = Agent.from_params(params, sim_core)
+
+        assert len(agent._controllers) == 1
+        assert isinstance(agent._controllers[0], CustomKinematicController)
+        # Inline config reaches controller_params (the kinematic-limit source).
+        assert float(np.max(agent.max_linear_vel)) == pytest.approx(1.5)
+
+    def test_dotted_path_high_level_creates_chain(self, sim_core):
+        """A custom non-kinematic controller via class: is appended on the base."""
+        params = AgentSpawnParams(
+            urdf_path="robots/mobile_robot.urdf",
+            initial_pose=Pose.from_xyz(0, 0, 0.05),
+            motion_mode=MotionMode.OMNIDIRECTIONAL,
+            controller={"class": "tests.test_controller.CustomHighLevelController"},
+        )
+        agent = Agent.from_params(params, sim_core)
+
+        assert len(agent._controllers) == 2
+        assert isinstance(agent._controllers[0], OmniController)
+        assert isinstance(agent._controllers[1], CustomHighLevelController)
 
     def test_patrol_chain_actually_moves_agent(self, sim_core):
         """End-to-end: patrol sets goal, base controller drives toward it."""

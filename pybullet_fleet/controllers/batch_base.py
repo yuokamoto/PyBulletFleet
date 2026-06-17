@@ -271,17 +271,42 @@ class BatchKinematicController(Controller):
 
 
 def resolve_batch_controller_key(entry: str) -> Type["BatchKinematicController"]:
-    """Return the :class:`BatchKinematicController` subclass for *entry*.
+    """Resolve a batch controller from a registry name or a dotted import path.
+
+    Mirrors the ``type:`` / ``class:`` resolution used by per-agent controllers
+    and plugins:
+
+    * **Registry name** (e.g. ``"batch_omni"``) — looked up case-insensitively
+      in :data:`BATCH_CONTROLLER_REGISTRY` (populated when a subclass sets
+      ``_registry_name``).
+    * **Dotted path** (e.g. ``"my_pkg.MyBatchController"``) — imported
+      dynamically and validated to be a :class:`BatchKinematicController`
+      subclass. Lets custom batch controllers be selected from YAML without
+      pre-importing their module.
 
     Raises:
-        ValueError: If *entry* is not a recognised registry name.
+        ValueError: If *entry* is neither a known registry name nor a dotted
+            path resolving to a ``BatchKinematicController`` subclass.
     """
     key = entry.lower()
     if key in BATCH_CONTROLLER_REGISTRY:
         return BATCH_CONTROLLER_REGISTRY[key]
+
+    if "." in entry:
+        from pybullet_fleet.config_utils import resolve_class
+
+        cls = resolve_class(entry)
+        if not (isinstance(cls, type) and issubclass(cls, BatchKinematicController)):
+            raise ValueError(
+                f"Batch controller class {entry!r} must be a "
+                f"BatchKinematicController subclass, got {cls!r}"
+            )
+        return cls
+
     available = list(BATCH_CONTROLLER_REGISTRY)
     raise ValueError(
         f"Unknown batch controller {entry!r}. "
         f"Available: {available}. "
-        "Make sure the batch controller module is imported."
+        "Use a registry name (after importing its module) or a dotted "
+        "'module.ClassName' path."
     )

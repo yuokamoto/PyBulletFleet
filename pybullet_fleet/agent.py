@@ -56,14 +56,21 @@ class AgentSpawnParams(SimObjectSpawnParams):
         plugins: List of plugin config dicts for per-agent plugins.
             Each entry is ``{"type": "battery", "config": {...}}``
             or ``{"class": "my.Module", "config": {...}}``.
-        controller_config: Controller config — single dict or list of dicts.
-            KinematicController entries (omni, differential) replace the base controller.
-            High-level entries (patrol, random_walk) are appended after the base.
-            Example single: ``{"type": "patrol", "config": {"waypoints": [...]}}``
+        controller: Movement controller selector / configuration. Accepts a
+            registry-name string (``"omni"``), a flat dict, a list of dicts, a
+            :class:`ControllerParams`, or a pre-built :class:`Controller`.
+            Each dict entry uses either ``type:`` (registry name) or ``class:``
+            (dotted import path), plus controller-specific config inline.
+            KinematicController entries (omni, differential) replace the base
+            controller; high-level entries (patrol, random_walk) are appended on
+            top of it. A lone high-level entry auto-creates the base from
+            ``motion_mode``.
+            Example single: ``{"type": "patrol", "waypoints": [...], "loop": True}``
+            Example custom: ``{"class": "my_pkg.MyController", "max_linear_vel": 1.5}``
             Example list: ``[{"type": "differential", ...}, {"type": "patrol", ...}]``
 
     See ``Agent.__init__`` for the ``controller`` argument (selector / configuration for the
-    Agent's movement controller; supports str / dict / Controller / ControllerParams).
+    Agent's movement controller; supports str / dict / list / Controller / ControllerParams).
 
     Inherited from SimObjectSpawnParams:
         name: Optional string name for human-readable identification.
@@ -78,7 +85,9 @@ class AgentSpawnParams(SimObjectSpawnParams):
     motion_mode: Union[MotionMode, str] = MotionMode(_AGT_D["motion_mode"])
     use_fixed_base: bool = _AGT_D["use_fixed_base"]
     ik_params: Optional["IKParams"] = None
-    controller: Optional[Union[str, Dict[str, Any], "ControllerParams", "Controller"]] = None
+    controller: Optional[
+        Union[str, Dict[str, Any], List[Dict[str, Any]], "ControllerParams", "Controller"]
+    ] = None
     plugins: Optional[List[Dict[str, Any]]] = None
 
     def __post_init__(self):
@@ -155,10 +164,9 @@ class AgentSpawnParams(SimObjectSpawnParams):
         if isinstance(ik_params_value, dict):
             ik_params_value = IKParams(**ik_params_value)
 
-        # ``controller`` is passed through as-is; both string ("omni") and
-        # dict ({"type": "omni", ...}) forms are accepted and normalized
-        # downstream by :meth:`ControllerParams.parse_config` in
-        # :meth:`from_params`.
+        # ``controller`` is passed through as-is; string ("omni"), dict
+        # ({"type": "omni", ...} or {"class": "...", ...}) and list-of-dicts
+        # forms are all accepted and wired by :meth:`Agent._init_controller_chain`.
         controller_value = config.get("controller")
 
         # Parse plugins list (pass through as-is; resolved in from_params)
@@ -424,7 +432,7 @@ class Agent(SimObject):
 
         self._motion_mode = motion_mode if isinstance(motion_mode, MotionMode) else MotionMode(motion_mode)
 
-        from pybullet_fleet.controller import Controller, create_controller
+        from pybullet_fleet.controller import Controller
         from pybullet_fleet.controller_params import ControllerParams
 
         if isinstance(controller, Controller):
@@ -437,19 +445,7 @@ class Agent(SimObject):
             self.controller_params = controller
             self.set_controller(self._make_default_controller())
         else:
-            ctrl_type, ctrl_cfg = ControllerParams.parse_config(controller)
-            self.controller_params = ControllerParams.from_dict(ctrl_cfg)
-            if ctrl_type:
-                from pybullet_fleet.controllers.batch_base import BATCH_CONTROLLER_REGISTRY
-                if ctrl_type.lower() in BATCH_CONTROLLER_REGISTRY:
-                    raise ValueError(
-                        f"controller.type={ctrl_type!r} is a batch controller type. "
-                        "Batch controllers must be used through AgentManager: "
-                        "AgentManager(sim_core=sim, batch_controller='batch_differential')."
-                    )
-                self.set_controller(create_controller(ctrl_type, ctrl_cfg))
-            else:
-                self.set_controller(self._make_default_controller())
+            self._init_controller_chain(controller)
 
         # Update log prefix to include Agent class name (SimObject sets it initially)
         self._update_log_prefix()
@@ -1015,6 +1011,108 @@ class Agent(SimObject):
             return OmniController(self.controller_params)
         if self._motion_mode == MotionMode.DIFFERENTIAL:
             return DifferentialController(self.controller_params)
+        return None
+
+    def _init_controller_chain(self, controller) -> None:
+        """Wire the controller chain from the unified ``controller=`` value.
+
+        Handles the ``str`` / ``dict`` / ``list`` forms of
+        :attr:`AgentSpawnParams.controller`:
+
+        * :class:`KinematicController` entries (``omni``, ``differential``, or a
+          custom kinematic controller via ``class:``) **replace** the base
+          controller at index 0.
+        * High-level entries (``patrol``, ``random_walk``, or any non-kinematic
+          :class:`Controller` via ``class:``) are **appended** on top of the
+          base — matching :meth:`add_controller`, so they set goals that the
+          base navigation controller then executes.
+        * If no base controller is supplied, one is auto-created from
+          ``motion_mode`` (so a lone ``patrol`` entry still moves).
+
+        Every entry accepts both a registry name (``type:``) and a dotted import
+        path (``class:``).
+        """
+        from pybullet_fleet.controller import KinematicController
+        from pybullet_fleet.controller_params import ControllerParams
+
+        # Normalize to a list of entries (each a str or dict).
+        if controller is None:
+            entries: List[Any] = []
+        elif isinstance(controller, (list, tuple)):
+            entries = list(controller)
+        else:
+            entries = [controller]
+
+        base_ctrl = None
+        high_level: List[Any] = []
+        seed_cfg: Dict[str, Any] = {}
+
+        for entry in entries:
+            ctrl = self._make_controller_from_entry(entry)
+            entry_cfg = {} if isinstance(entry, str) else dict(entry)
+            if ctrl is None:
+                # Entry names neither type nor class — treat its keys as base
+                # ControllerParams (e.g. ``controller={"max_linear_vel": 0.5}``).
+                if not seed_cfg:
+                    seed_cfg = entry_cfg
+                continue
+            if isinstance(ctrl, KinematicController):
+                base_ctrl = ctrl
+                seed_cfg = entry_cfg
+            elif not seed_cfg:
+                # First high-level entry seeds the base's kinematic limits
+                # (e.g. a patrol entry's ``max_linear_vel``).
+                seed_cfg = entry_cfg
+
+            if not isinstance(ctrl, KinematicController):
+                high_level.append(ctrl)
+
+        # controller_params is the single source of truth for kinematic limits.
+        # Prefer the base controller's own params; otherwise derive from the
+        # seed config so the auto-created base picks up any limits given on a
+        # high-level entry.
+        base_params = getattr(base_ctrl, "params", None)
+        if base_ctrl is not None and isinstance(base_params, ControllerParams):
+            self.controller_params = base_params
+        else:
+            self.controller_params = ControllerParams.from_dict(seed_cfg)
+
+        self.set_controller(base_ctrl if base_ctrl is not None else self._make_default_controller())
+        for hlc in high_level:
+            self.add_controller(hlc)
+
+    def _make_controller_from_entry(self, entry):
+        """Resolve one ``controller=`` entry to a :class:`Controller` instance.
+
+        *entry* is a registry-name string, or a flat dict carrying either a
+        ``type:`` (registry name) or ``class:`` (dotted import path) key plus
+        controller-specific config.  Returns ``None`` when the entry names
+        neither — the caller then falls back to the motion-mode default.
+
+        Raises:
+            ValueError: If ``type`` names a batch controller (those must be
+                driven through :class:`~pybullet_fleet.agent_manager.AgentManager`).
+        """
+        from pybullet_fleet.controller import create_controller, create_controller_from_entry
+        from pybullet_fleet.controllers.batch_base import BATCH_CONTROLLER_REGISTRY
+
+        if isinstance(entry, str):
+            entry = {"type": entry}
+        cfg = dict(entry)
+
+        dotted = cfg.pop("class", None)
+        if dotted is not None:
+            return create_controller_from_entry({"class": dotted, "config": cfg})
+
+        ctrl_type = cfg.get("type")
+        if ctrl_type:
+            if ctrl_type.lower() in BATCH_CONTROLLER_REGISTRY:
+                raise ValueError(
+                    f"controller.type={ctrl_type!r} is a batch controller type. "
+                    "Batch controllers must be used through AgentManager: "
+                    "AgentManager(sim_core=sim, batch_controller='batch_differential')."
+                )
+            return create_controller(ctrl_type, cfg)
         return None
 
     def set_motion_mode(self, mode: Union[MotionMode, str]) -> bool:

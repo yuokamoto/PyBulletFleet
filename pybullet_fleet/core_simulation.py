@@ -641,7 +641,8 @@ class MultiRobotSimulationCore:
         Each entry must have a ``name:`` field.  Optional fields:
 
         * ``batch_controller`` — batch controller registry name (``"batch_differential"``,
-          ``"batch_omni"``); enables batch processing for all agents in this manager.
+          ``"batch_omni"``) or a dotted ``"module.ClassName"`` path to a custom
+          ``BatchKinematicController``; enables batch processing for all agents in this manager.
         * ``controller`` — fleet-wide :class:`~pybullet_fleet.controller_params
           .ControllerParams` defaults (e.g. ``{"max_linear_vel": 2.0,
           "navigation_2d": true}``).  Applied to every agent that has no explicit
@@ -2930,7 +2931,8 @@ class MultiRobotSimulationCore:
         **Batch processing**: Grid entries accept two keys for batch control:
 
         * ``batch_controller`` — batch controller registry name
-          (``"batch_differential"``, ``"batch_omni"``).  Shorthand: creates
+          (``"batch_differential"``, ``"batch_omni"``) or a dotted
+          ``"module.ClassName"`` path to a custom batch controller.  Shorthand: creates
           an unnamed :class:`~pybullet_fleet.agent_manager.AgentManager` with
           a batch controller for this group::
 

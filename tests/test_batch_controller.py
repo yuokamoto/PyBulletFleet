@@ -344,6 +344,26 @@ class TestAgentManagerBatch:
         with pytest.raises(ValueError, match="Unknown batch controller"):
             mgr.enable_batch("nonexistent_mode")
 
+    def test_dotted_path_resolves_custom_batch_controller(self, sim):
+        """A custom batch controller can be selected via dotted import path."""
+        from pybullet_fleet.agent_manager import AgentManager
+
+        # _NoopBatchController has no _registry_name, so it is reachable only
+        # via dotted path — exercising the resolve_class branch.
+        mgr = AgentManager(
+            sim_core=sim,
+            batch_controller="tests.test_batch_controller._NoopBatchController",
+        )
+        assert isinstance(mgr.batch_controller, _NoopBatchController)
+
+    def test_dotted_path_rejects_non_batch_class(self, sim):
+        """A dotted path to a non-BatchKinematicController class is rejected."""
+        from pybullet_fleet.agent_manager import AgentManager
+
+        mgr = AgentManager(sim_core=sim)
+        with pytest.raises(ValueError, match="must be a BatchKinematicController subclass"):
+            mgr.enable_batch("pybullet_fleet.controller.OmniController")
+
     def test_agents_move_via_manager_batch(self, sim):
         """End-to-end: agents registered via AgentManager actually move."""
         from pybullet_fleet.agent_manager import AgentManager
