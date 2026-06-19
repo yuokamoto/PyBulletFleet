@@ -21,6 +21,7 @@ Backward-compatible aliases:
 """
 
 import glob
+import hashlib
 import logging
 import math
 import os
@@ -103,6 +104,157 @@ def _resolve_model_uri(uri: str, model_dir: str, model_name: str) -> str:
         return os.path.join(model_dir, parts[1])
     # Fallback: try relative to model_dir's parent (co-located models)
     return os.path.join(os.path.dirname(model_dir), rest)
+
+
+# ---------------------------------------------------------------------------
+# <submesh> extraction
+# ---------------------------------------------------------------------------
+#
+# Gazebo's ``<mesh><submesh><name>X</name></submesh></mesh>`` renders only the
+# named part of a multi-part mesh file (e.g. the Caddy's ``polaris.dae`` packs
+# the chassis + 4 wheels + pedals + steering wheel in a single DAE, and each
+# link selects its own submesh). PyBullet cannot select a submesh, so without
+# this every link would load the *whole* model and the parts would overlap.
+#
+# We extract the requested geometry (with its scene-node transform baked in, to
+# match Gazebo/assimp) into a standalone OBJ, cached on disk, and reference that
+# instead. Requires the optional ``sdf`` extra (``pip install
+# 'pybullet-fleet[sdf]'`` → trimesh + pycollada); without it we fall back to the
+# full mesh and warn once.
+
+_SUBMESH_CACHE_DIR = os.path.join(tempfile.gettempdir(), "pybullet_fleet_submesh")
+_submesh_lib_warned = False
+
+
+def _collada_unit_meter(path: str) -> float:
+    """Return a COLLADA file's ``<unit meter="X">`` scale (metres per unit).
+
+    COLLADA assets are often authored in non-metre units (the Caddy's
+    ``polaris.dae`` is in inches → ``meter="0.0254"``). PyBullet applies this
+    unit when it loads a ``.dae`` directly, but trimesh exports raw coordinates
+    to a unit-less OBJ, so we must bake the conversion in ourselves to keep the
+    extracted submesh in metres. Returns ``1.0`` for non-COLLADA files or when
+    no ``<unit>`` is present.
+    """
+    if not path.lower().endswith(".dae"):
+        return 1.0
+    try:
+        root = ET.parse(path).getroot()
+        unit_el = root.find(".//{*}unit")  # COLLADA is namespaced
+        if unit_el is not None and unit_el.get("meter"):
+            return float(unit_el.get("meter"))
+    except Exception:  # noqa: B902
+        pass
+    return 1.0
+
+
+def _select_submesh_geometry(scene, name: str):
+    """Return a ``Trimesh`` for the submesh *name*, node transform baked in.
+
+    Matches *name* against scene node and geometry names, preferring an exact
+    (case-insensitive) match before falling back to suffix / substring. Returns
+    ``None`` if nothing matches.
+    """
+    want = name.strip().lower()
+    loose = None  # (transform, geometry) for a non-exact match, used as fallback
+    for node in scene.graph.nodes_geometry:
+        transform, geom_name = scene.graph[node]
+        for cand in (str(node).lower(), str(geom_name).lower()):
+            if cand == want:
+                mesh = scene.geometry[geom_name].copy()
+                mesh.apply_transform(transform)
+                return mesh
+            if loose is None and (cand.endswith(want) or want in cand):
+                loose = (transform, geom_name)
+    if loose is not None:
+        transform, geom_name = loose
+        mesh = scene.geometry[geom_name].copy()
+        mesh.apply_transform(transform)
+        return mesh
+    # Last resort: direct geometry-key match without node transform.
+    for gname, geom in scene.geometry.items():
+        if gname.lower() == want or gname.lower().endswith(want) or want in gname.lower():
+            return geom.copy()
+    return None
+
+
+def _extract_submesh(mesh_path: str, submesh_name: str, center: bool) -> Optional[str]:
+    """Extract a named submesh from *mesh_path* into a cached standalone OBJ.
+
+    Args:
+        mesh_path: Absolute path to the combined mesh file (e.g. a ``.dae``).
+        submesh_name: Name of the geometry/node to extract.
+        center: If ``True``, recenter the extracted mesh on its AABB centre
+            (Gazebo ``<center>true</center>``; used e.g. for wheels so they
+            pivot about their own centre and the link pose positions them).
+
+    Returns:
+        Absolute path to the cached OBJ, or ``None`` if the optional ``sdf``
+        extra is unavailable or extraction fails (caller falls back to the
+        full mesh).
+    """
+    global _submesh_lib_warned
+    try:
+        import trimesh
+    except ImportError:
+        if not _submesh_lib_warned:
+            logger.warning(
+                "SDF <submesh> '%s' in %s needs the 'sdf' extra "
+                "(pip install 'pybullet-fleet[sdf]'); loading the full mesh "
+                "instead — multi-part models (e.g. Caddy) may overlap.",
+                submesh_name,
+                os.path.basename(mesh_path),
+            )
+            _submesh_lib_warned = True
+        return None
+
+    if not os.path.isfile(mesh_path):
+        return None
+    try:
+        mtime = os.path.getmtime(mesh_path)
+    except OSError:
+        return None
+
+    unit_m = _collada_unit_meter(mesh_path)
+    # ``v2`` salts the cache key so meshes cached before the unit-scaling fix
+    # are not reused.
+    key = hashlib.md5(f"v2|{mesh_path}|{mtime}|{submesh_name}|{center}|{unit_m}".encode()).hexdigest()[:16]
+    safe_name = "".join(c if c.isalnum() else "_" for c in submesh_name)
+    out_path = os.path.join(_SUBMESH_CACHE_DIR, f"{safe_name}_{key}.obj")
+    if os.path.isfile(out_path):
+        return out_path
+
+    try:
+        scene = trimesh.load(mesh_path, force="scene")
+        mesh = _select_submesh_geometry(scene, submesh_name)
+        if mesh is None:
+            logger.warning("Submesh '%s' not found in %s", submesh_name, mesh_path)
+            return None
+        # Convert authored units (e.g. inches) to metres so the unit-less OBJ
+        # is metric — PyBullet would otherwise treat raw coords as metres.
+        if unit_m != 1.0:
+            mesh.apply_scale(unit_m)
+        if center:
+            mesh.apply_translation(-mesh.bounding_box.centroid)
+        os.makedirs(_SUBMESH_CACHE_DIR, exist_ok=True)
+        mesh.export(out_path)
+        return out_path
+    except Exception as exc:  # noqa: B902
+        logger.warning("Failed to extract submesh '%s' from %s: %s", submesh_name, mesh_path, exc)
+        return None
+
+
+def _resolve_submesh(mesh_el: ET.Element, abs_path: str) -> Optional[str]:
+    """If *mesh_el* has a ``<submesh>``, return the extracted OBJ path, else ``None``."""
+    sub = mesh_el.find("submesh")
+    if sub is None:
+        return None
+    name_el = sub.find("name")
+    if name_el is None or not name_el.text:
+        return None
+    center_el = sub.find("center")
+    center = center_el is not None and (center_el.text or "").strip().lower() in ("true", "1")
+    return _extract_submesh(abs_path, name_el.text.strip(), center)
 
 
 def _parse_pose(
@@ -906,13 +1058,21 @@ def resolve_sdf_to_urdf(sdf_path: str, model_yaw_offset: float = 0.0) -> str:
                 if uri_el is not None and uri_el.text:
                     abs_path = _resolve_model_uri(uri_el.text, model_dir, model_name)
                     scale = scale_el.text.strip() if scale_el is not None else "1 1 1"
-                    # If no SDF <material>, try extracting color from DAE mesh
-                    if not mat_color and abs_path.lower().endswith(".dae") and os.path.isfile(abs_path):
+                    # Honour <submesh>: extract just the named part so multi-part
+                    # DAEs (e.g. Caddy's polaris.dae) don't load the whole model
+                    # per link. Falls back to the full mesh if the 'sdf' extra
+                    # is missing.
+                    submesh_path = _resolve_submesh(mesh_el, abs_path)
+                    use_path = submesh_path or abs_path
+                    # If no SDF <material>, try extracting color from DAE mesh.
+                    # Skip for submeshes — the extracted OBJ carries its own
+                    # material, and the whole-DAE diffuse would mis-color parts.
+                    if submesh_path is None and not mat_color and abs_path.lower().endswith(".dae") and os.path.isfile(abs_path):
                         mat_color = _extract_dae_diffuse_color(abs_path)
                     lines.append(f'    <visual name="{vis_name}">')
                     lines.append(f'      <origin xyz="{origin_xyz}" rpy="{origin_rpy}"/>')
-                    lines.append(f'      <geometry><mesh filename="{abs_path}" scale="{scale}"/></geometry>')
-                    if mat_color:
+                    lines.append(f'      <geometry><mesh filename="{use_path}" scale="{scale}"/></geometry>')
+                    if mat_color and submesh_path is None:
                         lines.append(f'      <material name="{vis_name}_mat"><color rgba="{mat_color}"/></material>')
                     lines.append("    </visual>")
             else:
@@ -1200,6 +1360,9 @@ def _sdf_geometry_to_urdf(
             abs_path = _resolve_model_uri(uri_el.text, model_dir, model_name)
             scale_el = mesh.find("scale")
             scale = scale_el.text.strip() if scale_el is not None else "1 1 1"
-            return f'<geometry><mesh filename="{abs_path}" scale="{scale}"/></geometry>'
+            # Honour <submesh> (see _resolve_submesh) so multi-part meshes
+            # don't load the whole model for every link.
+            use_path = _resolve_submesh(mesh, abs_path) or abs_path
+            return f'<geometry><mesh filename="{use_path}" scale="{scale}"/></geometry>'
 
     return ""

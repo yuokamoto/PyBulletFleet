@@ -35,6 +35,14 @@ dependencies = [
 recording = [
     "imageio[pyav]>=2.9.0",
 ]
+# SDF/COLLADA interop: extract <submesh> parts from multi-part meshes (e.g. the
+# RMF Caddy's polaris.dae) so PyBullet renders one assembled model instead of
+# overlapping full meshes. Only needed when loading such SDF models (ROS bridge
+# / rmf_demos). Lazy-imported in sdf_loader with a full-mesh fallback if absent.
+sdf = [
+    "trimesh>=4.0",
+    "pycollada>=0.8",
+]
 dev = [
     "black>=23.0.0",
     "isort>=5.12.0",

@@ -1173,3 +1173,131 @@ class TestStaticAutoDetection:
         assert len(objects) == 1
         assert objects[0].mass == 1.5
         assert objects[0].pickable is True
+
+
+# ---------------------------------------------------------------------------
+# <submesh> extraction (multi-part meshes, e.g. Caddy's polaris.dae)
+# ---------------------------------------------------------------------------
+
+
+class TestSubmeshResolution:
+    """Wiring/parsing tests for <submesh> — no mesh library required."""
+
+    def _mesh_el(self, xml):
+        import xml.etree.ElementTree as ET
+
+        return ET.fromstring(xml)
+
+    def test_no_submesh_element_returns_none(self):
+        from pybullet_fleet.sdf_loader import _resolve_submesh
+
+        m = self._mesh_el("<mesh><uri>model://X/x.dae</uri></mesh>")
+        assert _resolve_submesh(m, "/abs/x.dae") is None
+
+    def test_submesh_name_and_center_forwarded(self, monkeypatch):
+        """_resolve_submesh parses <name>/<center> and calls _extract_submesh."""
+        import pybullet_fleet.sdf_loader as s
+
+        calls = []
+        monkeypatch.setattr(s, "_extract_submesh", lambda path, name, center: calls.append((path, name, center)) or "/cache/out.obj")
+
+        m = self._mesh_el(
+            "<mesh><uri>model://Caddy/meshes/polaris.dae</uri>"
+            "<submesh><name>Rear_Wheel_Right</name><center>true</center></submesh></mesh>"
+        )
+        out = s._resolve_submesh(m, "/abs/polaris.dae")
+        assert out == "/cache/out.obj"
+        assert calls == [("/abs/polaris.dae", "Rear_Wheel_Right", True)]
+
+    def test_center_defaults_false(self, monkeypatch):
+        import pybullet_fleet.sdf_loader as s
+
+        captured = {}
+        monkeypatch.setattr(s, "_extract_submesh", lambda path, name, center: captured.update(center=center))
+
+        m = self._mesh_el(
+            "<mesh><uri>model://Caddy/meshes/polaris.dae</uri>"
+            "<submesh><name>Ranger</name></submesh></mesh>"
+        )
+        s._resolve_submesh(m, "/abs/polaris.dae")
+        assert captured["center"] is False
+
+    def test_extract_submesh_missing_file_returns_none(self):
+        """Graceful fallback when the mesh file does not exist."""
+        from pybullet_fleet.sdf_loader import _extract_submesh
+
+        assert _extract_submesh("/no/such/mesh.dae", "Ranger", False) is None
+
+    def test_collada_unit_meter_parsed(self, tmp_path):
+        """COLLADA <unit meter> (e.g. inches) is read so OBJ export stays metric."""
+        from pybullet_fleet.sdf_loader import _collada_unit_meter
+
+        dae = tmp_path / "inch.dae"
+        dae.write_text(
+            '<?xml version="1.0"?>'
+            '<COLLADA xmlns="http://www.collada.org/2005/11/COLLADASchema" version="1.4.1">'
+            '<asset><unit name="inch" meter="0.0254"/><up_axis>Z_UP</up_axis></asset>'
+            "</COLLADA>"
+        )
+        assert _collada_unit_meter(str(dae)) == 0.0254
+
+    def test_collada_unit_meter_defaults_to_one(self, tmp_path):
+        """Non-COLLADA files and unit-less DAEs default to 1.0 (no scaling)."""
+        from pybullet_fleet.sdf_loader import _collada_unit_meter
+
+        assert _collada_unit_meter("/x/model.obj") == 1.0
+        dae = tmp_path / "nounit.dae"
+        dae.write_text('<?xml version="1.0"?><COLLADA><asset/></COLLADA>')
+        assert _collada_unit_meter(str(dae)) == 1.0
+
+
+class TestSubmeshExtraction:
+    """End-to-end extraction — requires the optional 'sdf' extra (trimesh)."""
+
+    def test_extracts_single_named_part(self, tmp_path):
+        trimesh = pytest.importorskip("trimesh")
+
+        import numpy as np
+
+        from pybullet_fleet.sdf_loader import _extract_submesh
+
+        # Two distinct named boxes packed into one multi-part scene. We export
+        # GLB (trimesh can't *write* DAE); _extract_submesh loads any
+        # trimesh-readable scene, so this exercises the same select/bake/export
+        # path used on real .dae files (validated separately against polaris.dae).
+        body = trimesh.creation.box(extents=[2.0, 1.0, 0.5])
+        wheel = trimesh.creation.box(extents=[0.4, 0.4, 0.4])
+        wheel.apply_translation([1.0, 0.0, 0.0])
+        scene = trimesh.Scene()
+        scene.add_geometry(body, geom_name="Ranger", node_name="Ranger")
+        scene.add_geometry(wheel, geom_name="Rear_Wheel_Right", node_name="Rear_Wheel_Right")
+        mesh_file = tmp_path / "combined.glb"
+        scene.export(str(mesh_file))
+
+        out = _extract_submesh(str(mesh_file), "Rear_Wheel_Right", center=False)
+        assert out is not None and out.endswith(".obj")
+
+        part = trimesh.load(out, force="mesh")
+        # Just the wheel (0.4³ box at x=1), not the combined scene which also
+        # spans the 2×1×0.5 body. Compare AABB extents (robust to OBJ re-meshing).
+        assert np.allclose(sorted(part.bounding_box.extents), [0.4, 0.4, 0.4], atol=1e-5)
+        # Caching: same args -> same path, no re-export needed.
+        assert _extract_submesh(str(mesh_file), "Rear_Wheel_Right", center=False) == out
+
+    def test_center_recenters_on_origin(self, tmp_path):
+        trimesh = pytest.importorskip("trimesh")
+
+        import numpy as np
+
+        from pybullet_fleet.sdf_loader import _extract_submesh
+
+        wheel = trimesh.creation.box(extents=[0.4, 0.4, 0.4])
+        wheel.apply_translation([5.0, 3.0, 0.0])  # far from origin
+        scene = trimesh.Scene()
+        scene.add_geometry(wheel, geom_name="Wheel", node_name="Wheel")
+        mesh_file = tmp_path / "wheel.glb"
+        scene.export(str(mesh_file))
+
+        out = _extract_submesh(str(mesh_file), "Wheel", center=True)
+        centered = trimesh.load(out, force="mesh")
+        assert np.allclose(centered.bounding_box.centroid, [0, 0, 0], atol=1e-6)

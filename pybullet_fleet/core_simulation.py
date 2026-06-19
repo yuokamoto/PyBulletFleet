@@ -2994,9 +2994,15 @@ class MultiRobotSimulationCore:
 
         # --- Helper: resolve SDF→URDF and model paths on a dict --------
         def _resolve_paths(d: Dict[str, Any]) -> None:
+            # Optional mesh yaw correction (radians) baked into the URDF visual/
+            # collision origins — use when a model's mesh "front" is not aligned
+            # with the body +X axis (e.g. a human mesh that walks sideways under
+            # a differential controller). Popped so it is not forwarded to
+            # SpawnParams.from_dict.
+            yaw_off = float(d.pop("model_yaw_offset", 0.0))
             if "sdf_path" in d and "urdf_path" not in d:
                 try:
-                    d["urdf_path"] = resolve_sdf_to_urdf(d["sdf_path"])
+                    d["urdf_path"] = resolve_sdf_to_urdf(d["sdf_path"], model_yaw_offset=yaw_off)
                     logger.info("Converted SDF %s → %s", d["sdf_path"], d["urdf_path"])
                 except Exception as exc:
                     logger.error("Failed to convert SDF %s: %s", d.get("sdf_path"), exc)
