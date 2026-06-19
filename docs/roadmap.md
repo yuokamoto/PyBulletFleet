@@ -75,9 +75,48 @@ Lightweight crowd simulation for NPC pedestrians in RMF demo environments. Provi
 
 **Priority:** Low — current `RandomWalkController` is functional for demo purposes. This is primarily for RMF demo visual fidelity (再現度).
 
+#### Crowd-as-dynamic-obstacle throughput benchmark
+
+The higher-value use of a crowd is not visual fidelity but **turning crowd density into a benchmark variable**: measure how much a fleet's *task* throughput degrades when robots must contend with pedestrians. Pure visual pedestrians (a human mesh wandering) have little functional value here, because the fleet is RMF-path-driven and does not avoid arbitrary dynamic obstacles — the NPCs are currently just eye-candy. Making them *dynamic obstacles the fleet reacts to* is what aligns with PyBulletFleet's strength (throughput/scale benchmarking at hundreds of robots, a regime too heavy for Gazebo).
+
+**Three pieces:**
+1. **Crowd as dynamic obstacles** — the lightweight `CrowdController` above, with pedestrian positions known to the sim.
+2. **Robot reaction** —
+   - *Minimal:* "pedestrian within X m ahead → slow/stop" via PyBullet `rayTest` / collision checks. No RMF changes; measures stop-and-wait delay.
+   - *Full:* publish detected pedestrians as `rmf_obstacle_msgs/Obstacles` so RMF reroutes / closes lanes (heavier; integrates with `rmf_visualization_obstacles` and the obstacle pipeline).
+3. **Task-throughput harness** — dispatch N patrol/delivery tasks and measure completion time / completions-per-hour. This is a **new metric** distinct from the existing RTF/step-time benchmarks (which measure sim performance, not fleet task throughput).
+
+**Experiment:** sweep crowd density × avoidance{off, stop, reroute} → task throughput, at 100–1000 robots. Reuses existing collision detection, `rayTest`, EventBus, and the benchmark harness scaffolding.
+
+**Priority:** Low / research — schedule after the ROSCon minimum (working demos + packaging). Start with the minimal reaction (stop-on-detect, no RMF changes).
+
 ### Devices
 
 See [ros2_bridge/README.md](../ros2_bridge/README.md) for device enhancements (elevator doors, double-hinge doors, xacro-parameterised URDFs).
+
+## RMF Demo Feature Coverage
+
+Gaps between the standard Gazebo `rmf_demos` and the PyBulletFleet bridge. Core
+flows (navigation, doors, **lifts**, delivery pick/drop, battery/charging) are
+implemented. Outstanding:
+
+**Demos not yet ported** (Gazebo has them; no bridge config):
+- `office_mock_traffic_light` — `EasyTrafficLight` adapter (signal-gated traffic, no full fleet adapter). Small + showcases a core RMF mode → worth porting.
+- `campus` — outdoor multi-building deliveryRobot demo. Large, low priority.
+- `triple_H` — multi-floor / multi-building (heavy lift usage). Large, low priority.
+
+**RMF tasks/actions — stubbed or partial** (`fleet_adapter.execute_action`):
+- **`clean`** — task completes but there is *no cleaning simulation* (cleanerBot navigates, no coverage motion). Add a simple coverage/zone motion to make it visible.
+- **dock** — treated as a plain navigate (no dedicated docking maneuver).
+- Other custom performable actions — logged and finished, not executed.
+
+**Substituted** (works, but differs from Gazebo):
+- Crowd — Menge/ORCA `crowd_simulator` → lightweight `RandomWalkController` (no avoidance). See [Crowd Simulation](#crowd-simulation-lightweight).
+- Caddy — Gazebo keyboard teleop (`diff_drive` plugin) → autonomous `PatrolController`.
+
+**Not modeled by design** (kinematic focus):
+- Robot sensors (lidar/camera), physics dynamics (wheel torque/contact).
+- `rmf_obstacle` detection pipeline (also unused in stock Gazebo demos; see [crowd-as-dynamic-obstacle benchmark](#crowd-as-dynamic-obstacle-throughput-benchmark)).
 
 ## Interfaces
 
