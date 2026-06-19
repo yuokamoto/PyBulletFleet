@@ -97,17 +97,15 @@ See [ros2_bridge/README.md](../ros2_bridge/README.md) for device enhancements (e
 ## RMF Demo Feature Coverage
 
 Gaps between the standard Gazebo `rmf_demos` and the PyBulletFleet bridge. Core
-flows (navigation, doors, **lifts**, delivery pick/drop, battery/charging) are
-implemented. Outstanding:
+flows (navigation, doors, **lifts**, delivery pick/drop, battery/charging,
+**cleaning coverage**, **georeferenced maps**) are implemented. Ported demos:
+office, clinic, hotel, airport_terminal, battle_royale, **campus**. Outstanding:
 
-**Demos not yet ported** (Gazebo has them; no bridge config):
-- `office_mock_traffic_light` — `EasyTrafficLight` adapter (signal-gated traffic, no full fleet adapter). Small + showcases a core RMF mode → worth porting.
-- `campus` — outdoor multi-building deliveryRobot demo. Large, low priority.
-- `triple_H` — multi-floor / multi-building (heavy lift usage). Large, low priority.
+**Demos not ported — require an RMF mode the bridge doesn't implement:**
+- `office_mock_traffic_light` and `triple_H` — both use the **`EasyTrafficLight`** adapter (the robot owns navigation; RMF only gates it with go/stop). This inverts the bridge's full-control model and is a poor fit for the kinematic, RMF-planned sim — see the [TrafficLight discussion]. Relevant only once a co-simulation/robot-proxy layer exists. Run them in Gazebo for now.
 
-**RMF tasks/actions — stubbed or partial** (`fleet_adapter.execute_action`):
-- **`clean`** — task completes but there is *no cleaning simulation* (cleanerBot navigates, no coverage motion). Add a simple coverage/zone motion to make it visible.
-- **dock** — treated as a plain navigate (no dedicated docking maneuver).
+**RMF tasks/actions — partial** (`fleet_adapter.execute_action`):
+- **dock** — treated as a plain navigate (no dedicated dock-path approach; endpoint is reached, only the precise approach trajectory is skipped — negligible in a kinematic sim).
 - Other custom performable actions — logged and finished, not executed.
 
 **Substituted** (works, but differs from Gazebo):
