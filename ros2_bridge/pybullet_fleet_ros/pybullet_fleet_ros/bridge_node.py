@@ -111,6 +111,14 @@ class BridgeNode(Node):
         full_config["simulation"] = sim_overrides
         self.sim = MultiRobotSimulationCore.from_dict(full_config)
 
+        # Offset between the sim (world/local) frame and the RMF (nav-graph/map)
+        # frame. Georeferenced maps (e.g. campus) place the nav graph far from
+        # the world origin, so robots spawn in local coords but RMF expects map
+        # coords. RobotHandler shifts published poses by +offset (sim→RMF) and
+        # incoming nav goals by -offset (RMF→sim). Default (0, 0) = same frame.
+        off = bridge_config.get("rmf_frame_offset", [0.0, 0.0])
+        self.rmf_frame_offset = (float(off[0]), float(off[1]))
+
         # Resolve publish_rate: 0 (default) = every simulation step
         timestep = self.sim.params.timestep
         publish_rate = publish_rate_param if publish_rate_param > 0 else 1.0 / timestep

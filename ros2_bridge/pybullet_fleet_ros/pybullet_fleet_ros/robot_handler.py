@@ -89,6 +89,11 @@ class RobotHandler(RobotHandlerBase):
         ns = self.ns
         self._ns = ns
 
+        # sim↔RMF frame offset, set on the bridge node from config.
+        # (0, 0) = sim and RMF share a frame (the usual case).
+        off = getattr(node, "rmf_frame_offset", (0.0, 0.0))
+        self._rmf_offset = (float(off[0]), float(off[1]))
+
         # --- Publishers (existing) ---
         self._odom_pub = node.create_publisher(Odometry, f"/{ns}/odom", 10)
         self._joint_pub = node.create_publisher(JointState, f"/{ns}/joint_states", 10)
@@ -535,6 +540,8 @@ class RobotHandler(RobotHandlerBase):
         The controller switches to POSE mode automatically when
         ``set_goal_pose()`` is called.
         """
+        gp = msg.pose.position
+        gp.x, gp.y = self._shift_xy(gp.x, gp.y, -1)  # RMF→sim frame
         pose = ros_pose_stamped_to_pbf(msg)
         self.agent.set_goal_pose(pose)
         logger.info("'%s': goal_pose received → navigating to (%.2f, %.2f)", self._ns, pose.x, pose.y)
@@ -598,6 +605,15 @@ class RobotHandler(RobotHandlerBase):
             wz=twist.angular.z,
         )
 
+    def _shift_xy(self, x: float, y: float, sign: int) -> tuple:
+        """Apply the sim↔RMF frame offset to a planar position.
+
+        ``sign=+1`` converts sim→RMF (for poses published to RMF); ``sign=-1``
+        converts RMF→sim (for goals received from RMF). A (0, 0) offset is a
+        no-op.
+        """
+        return x + sign * self._rmf_offset[0], y + sign * self._rmf_offset[1]
+
     def post_step(self, dt: float = 0.0, stamp: Optional[TimeMsg] = None) -> None:
         """Publish odom, joint_states, TF, and status after each step."""
         if stamp is None:
@@ -606,7 +622,7 @@ class RobotHandler(RobotHandlerBase):
         velocity = list(self.agent.velocity)
         angular_vel = self.agent.angular_velocity
 
-        # Odometry
+        # Odometry — shift sim→RMF frame so RMF places the robot on the graph.
         odom_msg = make_odom_msg(
             pose,
             velocity,
@@ -615,9 +631,11 @@ class RobotHandler(RobotHandlerBase):
             child_frame_id=f"{self._ns}/base_link",
             stamp=stamp,
         )
+        op = odom_msg.pose.pose.position
+        op.x, op.y = self._shift_xy(op.x, op.y, +1)
         self._odom_pub.publish(odom_msg)
 
-        # TF: odom → {ns}/base_link
+        # TF: odom → {ns}/base_link (kept consistent with the published odom)
         if self._tf_broadcaster is not None:
             tf_msg = make_transform_stamped(
                 pose,
@@ -625,6 +643,8 @@ class RobotHandler(RobotHandlerBase):
                 child_frame=f"{self._ns}/base_link",
                 stamp=stamp,
             )
+            tt = tf_msg.transform.translation
+            tt.x, tt.y = self._shift_xy(tt.x, tt.y, +1)
             self._tf_broadcaster.sendTransform(tf_msg)
 
         # Joint states (only if robot has joints)
@@ -712,6 +732,8 @@ class RobotHandler(RobotHandlerBase):
             # else:
             # Very close — use the goal's own orientation
             goal_msg = pbf_pose_to_pose_stamped(goal, stamp=stamp)
+            ggp = goal_msg.pose.position
+            ggp.x, ggp.y = self._shift_xy(ggp.x, ggp.y, +1)  # sim→RMF frame
             self._goal_pub.publish(goal_msg)
             dist = float(np.linalg.norm(np.array(pose.position) - np.array(goal.position)))
         else:
@@ -723,6 +745,10 @@ class RobotHandler(RobotHandlerBase):
         if waypoints and current_idx < len(waypoints):
             remaining = waypoints[current_idx:]
             plan_msg = pbf_path_to_ros(remaining, stamp=stamp)
+            for ps in plan_msg.poses:  # sim→RMF frame
+                ps.pose.position.x, ps.pose.position.y = self._shift_xy(
+                    ps.pose.position.x, ps.pose.position.y, +1
+                )
             self._plan_pub.publish(plan_msg)
 
         # Diagnostics
@@ -761,6 +787,8 @@ class RobotHandler(RobotHandlerBase):
         """Execute NavigateToPose action — set goal and poll until arrival."""
         from nav2_msgs.action import NavigateToPose
 
+        gp = goal_handle.request.pose.pose.position
+        gp.x, gp.y = self._shift_xy(gp.x, gp.y, -1)  # RMF→sim frame
         goal_pose = ros_pose_to_pbf(goal_handle.request.pose.pose)
         self.agent.set_goal_pose(goal_pose)
         self._node.get_logger().info(f"'{self._ns}': NavigateToPose started → ({goal_pose.x:.2f}, {goal_pose.y:.2f})")
