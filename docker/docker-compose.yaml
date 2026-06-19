@@ -100,7 +100,11 @@ services:
 
   # ---------- RMF-Web Dashboard ----------
   rmf-web-dashboard:
-    image: ghcr.io/open-rmf/rmf-web/demo-dashboard:jazzy-nightly
+    # NOTE: jazzy-nightly (2026-06-13) crashes on load — bundled react-router
+    # throws invariant(useInRouterContext()) -> blank page (frontend build
+    # regression, unrelated to the bridge). Pinned to :latest (2025-08-11),
+    # the last build that renders. Backend stack is verified working.
+    image: ghcr.io/open-rmf/rmf-web/demo-dashboard:latest
     container_name: rmf-web-dashboard
     network_mode: host
     depends_on:
