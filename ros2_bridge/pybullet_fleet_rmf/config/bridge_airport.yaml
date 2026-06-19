@@ -290,11 +290,15 @@ entities:
 
   # ── NPC: Pedestrians (autonomous random walk — no fleet adapter) ─
   # Simulated crowd wandering in the terminal concourse area.
+  # Visual-only human models from the Gazebo Fuel cache (the same assets the
+  # Gazebo crowd_simulator uses). PyBullet is kinematic, so there is no walking
+  # animation — the figures glide — but they read as people, not boxes.
   - name: pedestrian_0
-    urdf_path: "robots/simple_cube.urdf"
+    sdf_path: "/root/.gz/fuel/fuel.gazebosim.org/openrobotics/models/femalevisitor/2/model.sdf"
+    model_yaw_offset: 1.5708   # +90° so the human mesh faces its walking direction
     pose: [60.0, -30.0, 0.0]
     yaw: 0.0
-    motion_mode: "omnidirectional"
+    motion_mode: "differential"
     controller:
       type: random_walk
       max_linear_vel: 0.8
@@ -304,10 +308,11 @@ entities:
       wait_range: [1.0, 4.0]
 
   - name: pedestrian_1
-    urdf_path: "robots/simple_cube.urdf"
+    sdf_path: "/root/.gz/fuel/fuel.gazebosim.org/openrobotics/models/malevisitoronphone/2/model.sdf"
+    model_yaw_offset: 1.5708   # +90° so the human mesh faces its walking direction
     pose: [90.0, -25.0, 0.0]
     yaw: 0.0
-    motion_mode: "omnidirectional"
+    motion_mode: "differential"
     controller:
       type: random_walk
       max_linear_vel: 0.8
@@ -317,10 +322,11 @@ entities:
       wait_range: [1.0, 4.0]
 
   - name: pedestrian_2
-    urdf_path: "robots/simple_cube.urdf"
+    sdf_path: "/root/.gz/fuel/fuel.gazebosim.org/openrobotics/models/femalevisitor/2/model.sdf"
+    model_yaw_offset: 1.5708   # +90° so the human mesh faces its walking direction
     pose: [120.0, -30.0, 0.0]
     yaw: 0.0
-    motion_mode: "omnidirectional"
+    motion_mode: "differential"
     controller:
       type: random_walk
       max_linear_vel: 0.8
