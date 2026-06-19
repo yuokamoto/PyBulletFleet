@@ -163,7 +163,7 @@ entities:
   - name: L1_door5
     type: door
     urdf_path: "robots/door_slide.urdf"
-    pose: [28.079, -30.437, 0.0]
+    pose: [29.079, -30.437, 0.0]   # moved 1.0 m left (+X) from 28.079
     yaw: -0.002
     collision_mode: disabled
     use_fixed_base: true
