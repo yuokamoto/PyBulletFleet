@@ -121,6 +121,11 @@ def main(argv=sys.argv):
 
     fleet_name = config_yaml.get("rmf_fleet", {}).get("name", "pybullet_fleet")
 
+    # Coverage paths for performable actions (e.g. cleaning zones), authored in
+    # the rmf_demos fleet config under fleet_manager.action_paths — same data
+    # Gazebo's fleet_manager uses. Maps {activity: {label: {map_name, path}}}.
+    action_paths = config_yaml.get("fleet_manager", {}).get("action_paths", {})
+
     # ROS 2 node for the command handle
     node = rclpy.node.Node(f"{fleet_name}_command_handle")
 
@@ -192,6 +197,7 @@ def main(argv=sys.argv):
             api,
             fleet_handle,
             nav_graph=nav_graph,
+            action_paths=action_paths,
         )
 
     node.get_logger().info(f"EasyFullControl fleet adapter started: {len(robots)} robots")
@@ -281,6 +287,7 @@ class RobotAdapter:
         api,
         fleet_handle,
         nav_graph=None,
+        action_paths=None,
     ):
         self.name = name
         self.execution = None
@@ -295,15 +302,35 @@ class RobotAdapter:
         self.issue_cmd_thread = None
         self.cancel_cmd_event = threading.Event()
         self.nav_graph = nav_graph
+        # Authored coverage paths per action (e.g. cleaning zones).
+        self.action_paths = action_paths or {}
+        # Remaining coverage waypoints for an in-progress action (e.g. clean).
+        # While non-empty, update() drives the next waypoint instead of
+        # finishing the execution.
+        self._coverage_queue: list = []
+        self._coverage_map = None
+        self._coverage_override = None
 
     def update(self, state, data):
         """Update RMF with robot state and check command completion."""
         activity_identifier = None
         if self.execution:
             if data.is_command_completed(self.cmd_id):
-                self.execution.finished()
-                self.execution = None
-                self.teleoperation = None
+                if self._coverage_queue:
+                    # Coverage action (e.g. clean) in progress: drive the next
+                    # waypoint instead of finishing. Only advance once the
+                    # navigate command is accepted, so a transient failure
+                    # simply retries on the next tick.
+                    nxt = self._coverage_queue[0]
+                    new_cmd = self.cmd_id + 1
+                    if self.api.navigate(new_cmd, nxt, self._coverage_map, None):
+                        self.cmd_id = new_cmd
+                        self._coverage_queue.pop(0)
+                else:
+                    self.execution.finished()
+                    self.execution = None
+                    self.teleoperation = None
+                    self._coverage_override = None
             else:
                 activity_identifier = self.execution.identifier
 
@@ -396,6 +423,18 @@ class RobotAdapter:
                     args=(),
                 )
 
+    @staticmethod
+    def _estimate_path_duration(path, nominal_speed: float = 0.3) -> float:
+        """Rough seconds to traverse *path*, used for override_schedule.
+
+        Sums planar segment lengths at a conservative nominal speed and adds a
+        buffer so RMF's reservation comfortably covers the coverage motion.
+        """
+        dist = 0.0
+        for a, b in zip(path, path[1:]):
+            dist += ((b[0] - a[0]) ** 2 + (b[1] - a[1]) ** 2) ** 0.5
+        return dist / max(nominal_speed, 1e-3) + 60.0
+
     def execute_action(self, category: str, description: dict, execution):
         """Handle custom actions dispatched by RMF.
 
@@ -403,7 +442,9 @@ class RobotAdapter:
         - ``teleop``: Track robot position and override RMF schedule.
         - ``delivery_pickup``: Attach cart/item via toggle_attach(True).
         - ``delivery_dropoff``: Detach cart/item via toggle_attach(False).
-        - ``clean``: Log and finish (no cleaning simulation).
+        - ``clean``: Follow the zone's coverage path (from the fleet config's
+          ``fleet_manager.action_paths``); update() advances the waypoints and
+          finishes the action. No configured path → log and finish.
         - Others: Log warning and finish immediately.
         """
         self.cmd_id += 1
@@ -427,9 +468,37 @@ class RobotAdapter:
             )
         elif category == "clean":
             zone = description.get("zone", "unknown")
-            self.node.get_logger().info(f"[{self.name}] Clean zone '{zone}' requested " "(no cleaning simulation), finishing.")
-            execution.finished()
-            self.execution = None
+            spec = self.action_paths.get("clean", {}).get(zone)
+            path = list(spec["path"]) if spec and spec.get("path") else None
+            if path:
+                map_name = spec.get("map_name")
+                self._coverage_map = map_name
+                # Tell RMF the robot is following this custom coverage path so
+                # the traffic schedule reserves it.
+                try:
+                    self._coverage_override = execution.override_schedule(
+                        map_name, list(path), self._estimate_path_duration(path)
+                    )
+                except Exception as exc:  # noqa: B902
+                    self.node.get_logger().warn(f"[{self.name}] clean override_schedule failed: {exc}")
+                    self._coverage_override = None
+                self._coverage_queue = path
+                self.node.get_logger().info(
+                    f"[{self.name}] Cleaning zone '{zone}': following {len(path)} coverage waypoints"
+                )
+                # Drive the first waypoint; update() advances through the rest
+                # and finishes the action when the queue drains.
+                first = self._coverage_queue.pop(0)
+                self.attempt_cmd_until_success(
+                    cmd=self.api.navigate,
+                    args=(self.cmd_id, first, map_name, None),
+                )
+            else:
+                self.node.get_logger().info(
+                    f"[{self.name}] Clean zone '{zone}' has no coverage path configured, finishing."
+                )
+                execution.finished()
+                self.execution = None
         else:
             self.node.get_logger().warn(f"[{self.name}] Action '{category}' not supported, " "finishing.")
             execution.finished()
