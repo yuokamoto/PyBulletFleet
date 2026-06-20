@@ -1,5 +1,7 @@
 # Implementation Audit — 2026-05-31
 
+> **Superseded by [2026-06-20](2026-06-20-implementation-audit.md)** — kept as a point-in-time record. Several items here (velocity API, cleaning, cart-delivery connection, diagnostics) have since been implemented.
+
 Hands-on reference. Reflects actual code state as of this date.  
 Companion to [docs/roadmap.md](../roadmap.md) (design intent) — this document records *what is true now*, not *what we want*.
 
