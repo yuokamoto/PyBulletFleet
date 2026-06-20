@@ -72,13 +72,13 @@ def _omni_waypoints(start: Pose) -> list[Pose]:
     x, y, z = start.x, start.y, start.z
     leg = 0.5
     return [
-        Pose.from_xyz(x + leg * 4, y,           z),
+        Pose.from_xyz(x + leg * 4, y, z),
         Pose.from_xyz(x + leg * 4, y + leg * 4, z),
-        Pose.from_xyz(x,           y + leg * 4, z),
-        Pose.from_xyz(x,           y,           z),
+        Pose.from_xyz(x, y + leg * 4, z),
+        Pose.from_xyz(x, y, z),
         Pose.from_xyz(x + leg * 2, y + leg * 2, z),
-        Pose.from_xyz(x + leg * 4, y,           z),
-        Pose.from_xyz(x,           y,           z),
+        Pose.from_xyz(x + leg * 4, y, z),
+        Pose.from_xyz(x, y, z),
     ]
 
 
@@ -87,26 +87,24 @@ def _diff_waypoints(start: Pose) -> list[Pose]:
     x, y, z = start.x, start.y, start.z
     leg = 0.4
     return [
-        Pose.from_xyz(x + leg,     y + leg,     z),
-        Pose.from_xyz(x + leg * 2, y,           z),
-        Pose.from_xyz(x + leg * 3, y + leg,     z),
-        Pose.from_xyz(x + leg * 4, y,           z),
-        Pose.from_xyz(x + leg * 3, y - leg,     z),
-        Pose.from_xyz(x + leg * 2, y,           z),
-        Pose.from_xyz(x,           y,           z),
+        Pose.from_xyz(x + leg, y + leg, z),
+        Pose.from_xyz(x + leg * 2, y, z),
+        Pose.from_xyz(x + leg * 3, y + leg, z),
+        Pose.from_xyz(x + leg * 4, y, z),
+        Pose.from_xyz(x + leg * 3, y - leg, z),
+        Pose.from_xyz(x + leg * 2, y, z),
+        Pose.from_xyz(x, y, z),
     ]
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser(description=__doc__,
-                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--n", type=int, default=500, help="Number of robots (default: 500)")
-    ap.add_argument("--robot", default="simple_cube",
-                    help="Robot name or URDF path (default: simple_cube)")
-    ap.add_argument("--mode", choices=["omni", "diff"], default="omni",
-                    help="Batch controller type: omni (default) or diff")
-    ap.add_argument("--duration", type=float, default=None,
-                    help="Simulation duration in seconds (default: run until window closed)")
+    ap.add_argument("--robot", default="simple_cube", help="Robot name or URDF path (default: simple_cube)")
+    ap.add_argument("--mode", choices=["omni", "diff"], default="omni", help="Batch controller type: omni (default) or diff")
+    ap.add_argument(
+        "--duration", type=float, default=None, help="Simulation duration in seconds (default: run until window closed)"
+    )
     ap.add_argument("--no-gui", action="store_true", help="Disable the PyBullet GUI")
     args = ap.parse_args()
 
@@ -125,8 +123,10 @@ def main() -> None:
     agents = mgr.spawn_agents_grid(
         num_agents=args.n,
         grid_params=GridSpawnParams(
-            x_min=0, x_max=side - 1,
-            y_min=0, y_max=side - 1,
+            x_min=0,
+            x_max=side - 1,
+            y_min=0,
+            y_max=side - 1,
             spacing=[2.0, 2.0, 0.0],
             offset=[0.0, 0.0, 0.1],
         ),
@@ -147,10 +147,7 @@ def main() -> None:
     for a in agents:
         a.set_path(wp_fn(a.get_pose()))
 
-    print(
-        f"[{args.n} robots | mode={args.mode} | "
-        f"controller={type(mgr.batch_controller).__name__}]"
-    )
+    print(f"[{args.n} robots | mode={args.mode} | " f"controller={type(mgr.batch_controller).__name__}]")
 
     if gui:
         sim.setup_camera()

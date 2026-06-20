@@ -403,13 +403,11 @@ class MultiRobotSimulationCore:
         self._in_step: bool = False
         self._pending_pose_ids: Set[int] = set()
 
-
         # --- Plugins ---
         self._plugins: List["SimPlugin"] = []
 
         self.setup_pybullet()
         self.setup_monitor()
-
 
     def setup_monitor(self) -> None:
         # If monitor: true and console_monitor: false, start DataMonitor
@@ -671,7 +669,10 @@ class MultiRobotSimulationCore:
             )
             logger.info(
                 "Created manager %r (batch_controller=%r, fleet_controller=%r, update_frequency=%s Hz)",
-                name, batch_controller, fleet_controller, update_frequency,
+                name,
+                batch_controller,
+                fleet_controller,
+                update_frequency,
             )
 
     def unregister_callback(self, callback_func: Callable) -> bool:
@@ -3047,8 +3048,7 @@ class MultiRobotSimulationCore:
                     named_mgr = self.get_manager(manager_name)
                     if named_mgr is None:
                         raise KeyError(
-                            f"manager {manager_name!r} not found. "
-                            "Declare it in the 'managers:' section before 'entities:'."
+                            f"manager {manager_name!r} not found. " "Declare it in the 'managers:' section before 'entities:'."
                         )
                     named_mgr.add_object(obj)
                 spawned.append(obj)
@@ -3070,8 +3070,7 @@ class MultiRobotSimulationCore:
                     mgr = self.get_manager(manager_name)
                     if mgr is None:
                         raise KeyError(
-                            f"manager {manager_name!r} not found. "
-                            "Declare it in the 'managers:' section before 'entities:'."
+                            f"manager {manager_name!r} not found. " "Declare it in the 'managers:' section before 'entities:'."
                         )
                 elif batch_controller is not None and issubclass(entity_cls, Agent):
                     mgr = AgentManager(

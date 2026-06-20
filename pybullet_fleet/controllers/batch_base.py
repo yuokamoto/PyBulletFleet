@@ -297,10 +297,7 @@ def resolve_batch_controller_key(entry: str) -> Type["BatchKinematicController"]
 
         cls = resolve_class(entry)
         if not (isinstance(cls, type) and issubclass(cls, BatchKinematicController)):
-            raise ValueError(
-                f"Batch controller class {entry!r} must be a "
-                f"BatchKinematicController subclass, got {cls!r}"
-            )
+            raise ValueError(f"Batch controller class {entry!r} must be a " f"BatchKinematicController subclass, got {cls!r}")
         return cls
 
     available = list(BATCH_CONTROLLER_REGISTRY)

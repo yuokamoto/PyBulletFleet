@@ -314,11 +314,7 @@ class BatchDifferentialController(BatchKinematicController):
                 y_axis = np.cross(z_axis_goal, x_axis_target)
                 y_norm = float(np.linalg.norm(y_axis))
                 if y_norm < 1e-6:
-                    fallback_up = (
-                        np.array([0.0, 0.0, 1.0])
-                        if abs(x_axis_target[2]) < 0.9
-                        else np.array([0.0, 1.0, 0.0])
-                    )
+                    fallback_up = np.array([0.0, 0.0, 1.0]) if abs(x_axis_target[2]) < 0.9 else np.array([0.0, 1.0, 0.0])
                     y_axis = np.cross(fallback_up, x_axis_target)
                     y_axis = y_axis / np.linalg.norm(y_axis)
                 else:
@@ -358,7 +354,7 @@ class BatchDifferentialController(BatchKinematicController):
         self._rot_t_start[idx] = sim_time
         self._rot_start_quat[idx] = start_quat
         self._rot_target_quat[idx] = target_for_slerp
-        self._rot_snap_quat[idx] = target_quat          # un-flipped for snap
+        self._rot_snap_quat[idx] = target_quat  # un-flipped for snap
         self._rot_dot[idx] = dot
         self._rot_theta0[idx] = theta0
         self._rot_sin_theta0[idx] = sin_theta0
@@ -423,8 +419,8 @@ class BatchDifferentialController(BatchKinematicController):
         self._rot_t_start[idx] = sim_time
         self._rot_start_quat[idx] = start_quat
         self._rot_target_quat[idx] = target_for_slerp
-        self._rot_snap_quat[idx] = target_quat          # un-flipped for snap
-        self._fwd_target_quat[idx] = target_quat        # also store unflipped here
+        self._rot_snap_quat[idx] = target_quat  # un-flipped for snap
+        self._fwd_target_quat[idx] = target_quat  # also store unflipped here
         self._rot_dot[idx] = dot
         self._rot_theta0[idx] = theta0
         self._rot_sin_theta0[idx] = sin_theta0
@@ -453,9 +449,7 @@ class BatchDifferentialController(BatchKinematicController):
         self._wp_index[idx] += 1
         if self._wp_index[idx] < len(path):
             direction = self._original_direction[idx] if idx < len(self._original_direction) else None
-            self._begin_waypoint(
-                idx, self._agents[idx], path[self._wp_index[idx]], sim_time, direction=direction
-            )
+            self._begin_waypoint(idx, self._agents[idx], path[self._wp_index[idx]], sim_time, direction=direction)
         else:
             # End of path: optionally do a final in-place rotation.
             if self._align_final_orient[idx]:
@@ -580,5 +574,3 @@ class BatchDifferentialController(BatchKinematicController):
 # imported them directly from this module.  New code should import from
 # batch_base instead.
 # ---------------------------------------------------------------------------
-
-

@@ -1199,7 +1199,9 @@ class TestSubmeshResolution:
         import pybullet_fleet.sdf_loader as s
 
         calls = []
-        monkeypatch.setattr(s, "_extract_submesh", lambda path, name, center: calls.append((path, name, center)) or "/cache/out.obj")
+        monkeypatch.setattr(
+            s, "_extract_submesh", lambda path, name, center: calls.append((path, name, center)) or "/cache/out.obj"
+        )
 
         m = self._mesh_el(
             "<mesh><uri>model://Caddy/meshes/polaris.dae</uri>"
@@ -1215,10 +1217,7 @@ class TestSubmeshResolution:
         captured = {}
         monkeypatch.setattr(s, "_extract_submesh", lambda path, name, center: captured.update(center=center))
 
-        m = self._mesh_el(
-            "<mesh><uri>model://Caddy/meshes/polaris.dae</uri>"
-            "<submesh><name>Ranger</name></submesh></mesh>"
-        )
+        m = self._mesh_el("<mesh><uri>model://Caddy/meshes/polaris.dae</uri>" "<submesh><name>Ranger</name></submesh></mesh>")
         s._resolve_submesh(m, "/abs/polaris.dae")
         assert captured["center"] is False
 

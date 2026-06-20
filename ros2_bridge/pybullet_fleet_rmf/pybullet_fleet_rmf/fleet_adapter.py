@@ -483,9 +483,7 @@ class RobotAdapter:
                     self.node.get_logger().warn(f"[{self.name}] clean override_schedule failed: {exc}")
                     self._coverage_override = None
                 self._coverage_queue = path
-                self.node.get_logger().info(
-                    f"[{self.name}] Cleaning zone '{zone}': following {len(path)} coverage waypoints"
-                )
+                self.node.get_logger().info(f"[{self.name}] Cleaning zone '{zone}': following {len(path)} coverage waypoints")
                 # Drive the first waypoint; update() advances through the rest
                 # and finishes the action when the queue drains.
                 first = self._coverage_queue.pop(0)
@@ -494,9 +492,7 @@ class RobotAdapter:
                     args=(self.cmd_id, first, map_name, None),
                 )
             else:
-                self.node.get_logger().info(
-                    f"[{self.name}] Clean zone '{zone}' has no coverage path configured, finishing."
-                )
+                self.node.get_logger().info(f"[{self.name}] Clean zone '{zone}' has no coverage path configured, finishing.")
                 execution.finished()
                 self.execution = None
         else:

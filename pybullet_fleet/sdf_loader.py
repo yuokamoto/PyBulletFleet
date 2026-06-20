@@ -1113,7 +1113,12 @@ def resolve_sdf_to_urdf(sdf_path: str, model_yaw_offset: float = 0.0) -> str:
                     # If no SDF <material>, try extracting color from DAE mesh.
                     # Skip for submeshes — the extracted OBJ carries its own
                     # material, and the whole-DAE diffuse would mis-color parts.
-                    if submesh_path is None and not mat_color and abs_path.lower().endswith(".dae") and os.path.isfile(abs_path):
+                    if (
+                        submesh_path is None
+                        and not mat_color
+                        and abs_path.lower().endswith(".dae")
+                        and os.path.isfile(abs_path)
+                    ):
                         mat_color = _extract_dae_diffuse_color(abs_path)
                     lines.append(f'    <visual name="{vis_name}">')
                     lines.append(f'      <origin xyz="{origin_xyz}" rpy="{origin_rpy}"/>')

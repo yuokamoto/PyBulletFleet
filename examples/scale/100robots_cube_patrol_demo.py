@@ -131,7 +131,10 @@ def main():
             "motion_mode": "omnidirectional",
             "manager": "omni_fleet",
             "grid": {
-                "x_min": 0, "x_max": 4, "y_min": 0, "y_max": 9,
+                "x_min": 0,
+                "x_max": 4,
+                "y_min": 0,
+                "y_max": 9,
                 "spacing": [10.0, 10.0, 0.0],
                 "offset": [-15.0, -15.0, 0.3],
             },
@@ -143,7 +146,10 @@ def main():
             "motion_mode": "differential",
             "manager": "diff_fleet",
             "grid": {
-                "x_min": 5, "x_max": 9, "y_min": 0, "y_max": 9,
+                "x_min": 5,
+                "x_max": 9,
+                "y_min": 0,
+                "y_max": 9,
                 "spacing": [10.0, 10.0, 0.0],
                 "offset": [-15.0, -15.0, 0.3],
             },
@@ -170,11 +176,16 @@ def main():
     num_fwd = num_bwd = num_omni_count = 0
     for robot in all_robots:
         spawn_pos = robot.get_pose().position
-        path = create_cube_patrol_path(
-            cube_center=[spawn_pos[0], spawn_pos[1], spawn_pos[2] + 2.5]
+        path = create_cube_patrol_path(cube_center=[spawn_pos[0], spawn_pos[1], spawn_pos[2] + 2.5])
+        path.visualize(
+            show_lines=True,
+            line_color=[0.5, 0.5, 0.5],
+            line_width=1.0,
+            show_waypoints=True,
+            show_axes=False,
+            show_points=False,
+            lifetime=0,
         )
-        path.visualize(show_lines=True, line_color=[0.5, 0.5, 0.5], line_width=1.0,
-                       show_waypoints=True, show_axes=False, show_points=False, lifetime=0)
         if robot.motion_mode == MotionMode.DIFFERENTIAL:
             d = random.choice([MovementDirection.FORWARD, MovementDirection.BACKWARD])
             robot.set_path(path.waypoints, direction=d)
@@ -206,10 +217,7 @@ def main():
             moving = sum(1 for r in all_robots if r.is_moving)
             speeds = [np.linalg.norm(r.velocity) for r in all_robots if r.is_moving]
             avg = np.mean(speeds) if speeds else 0.0
-            print(
-                f"[t={step_counter[0]*dt:.1f}s] "
-                f"moving={moving}/100  avg_speed={avg:.2f}m/s"
-            )
+            print(f"[t={step_counter[0]*dt:.1f}s] " f"moving={moving}/100  avg_speed={avg:.2f}m/s")
 
     sim.register_callback(monitoring_callback, frequency=None)
     sim.run_simulation(duration=_args.duration)

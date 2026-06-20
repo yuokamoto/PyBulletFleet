@@ -65,12 +65,15 @@ def _make_sim(collision_freq: int, gui: bool = False) -> MultiRobotSimulationCor
     )
 
 
-
 def _make_grid_params(n: int, spacing: float = 2.0) -> GridSpawnParams:
     side = int(np.ceil(np.sqrt(n)))
     return GridSpawnParams(
-        x_min=0, x_max=side - 1, y_min=0, y_max=side - 1,
-        spacing=[spacing, spacing, 0.0], offset=[0.0, 0.0, 0.1],
+        x_min=0,
+        x_max=side - 1,
+        y_min=0,
+        y_max=side - 1,
+        spacing=[spacing, spacing, 0.0],
+        offset=[0.0, 0.0, 0.1],
     )
 
 
@@ -94,10 +97,7 @@ def _build_waypoints(start: Pose, mode: str) -> list[Pose]:
         return [Pose.from_xyz(start.x + i * 0.3, start.y, start.z) for i in range(1, 6)]
     # Diff: zigzag forces a ROTATE→FORWARD cycle at every waypoint.
     leg = 0.4
-    return [
-        Pose.from_xyz(start.x + leg * i, start.y + leg * (1 if i % 2 else -1), start.z)
-        for i in range(1, 4)
-    ]
+    return [Pose.from_xyz(start.x + leg * i, start.y + leg * (1 if i % 2 else -1), start.z) for i in range(1, 4)]
 
 
 def bench_per_agent(n: int, steps: int, collision_freq: int, mode: str) -> dict:

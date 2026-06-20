@@ -826,9 +826,7 @@ class TestManagersConfigSection:
         cfg = {
             **_SIM_BASE,
             "managers": [{"name": "fleet", "batch_controller": "batch_omni"}],
-            "entities": [
-                {**_SPAWN_OMNI, "manager": "fleet", "grid": {"count": 3, "spacing": [3, 0], "offset": [0, 0, 0.1]}}
-            ],
+            "entities": [{**_SPAWN_OMNI, "manager": "fleet", "grid": {"count": 3, "spacing": [3, 0], "offset": [0, 0, 0.1]}}],
         }
         sim = MultiRobotSimulationCore.from_dict(cfg)
         try:

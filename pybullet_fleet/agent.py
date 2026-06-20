@@ -34,8 +34,6 @@ logger = logging.getLogger(__name__)
 lazy_logger = get_lazy_logger(__name__)
 
 
-
-
 @dataclass
 class AgentSpawnParams(SimObjectSpawnParams):
     """
@@ -85,9 +83,7 @@ class AgentSpawnParams(SimObjectSpawnParams):
     motion_mode: Union[MotionMode, str] = MotionMode(_AGT_D["motion_mode"])
     use_fixed_base: bool = _AGT_D["use_fixed_base"]
     ik_params: Optional["IKParams"] = None
-    controller: Optional[
-        Union[str, Dict[str, Any], List[Dict[str, Any]], "ControllerParams", "Controller"]
-    ] = None
+    controller: Optional[Union[str, Dict[str, Any], List[Dict[str, Any]], "ControllerParams", "Controller"]] = None
     plugins: Optional[List[Dict[str, Any]]] = None
 
     def __post_init__(self):
@@ -782,7 +778,6 @@ class Agent(SimObject):
 
             for entry in spawn_params.plugins:
                 agent.add_plugin(create_agent_plugin_from_entry(entry, agent))
-
 
         return agent
 

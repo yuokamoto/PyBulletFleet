@@ -273,7 +273,7 @@ class BatchOmniController(BatchKinematicController):
         self._rot_t_start[idx] = sim_time
         self._rot_start_quat[idx] = start_quat
         self._rot_target_quat[idx] = target_for_slerp
-        self._rot_snap_quat[idx] = target_quat          # un-flipped for snap
+        self._rot_snap_quat[idx] = target_quat  # un-flipped for snap
         self._rot_dot[idx] = dot
         self._rot_theta0[idx] = theta0
         self._rot_sin_theta0[idx] = sin_theta0
@@ -353,9 +353,7 @@ class BatchOmniController(BatchKinematicController):
 
             completed_trans = active & (tau >= self._t_total)
             if completed_trans.any():
-                new_pos[completed_trans] = (
-                    self._p_start[completed_trans] + self._displacement[completed_trans]
-                )
+                new_pos[completed_trans] = self._p_start[completed_trans] + self._displacement[completed_trans]
                 completed[completed_trans] = True
 
             self._pos_buf[active] = new_pos[active]

@@ -124,7 +124,11 @@ mobile_agents = agent_manager.spawn_agents_grid(
 print(f"✓ Successfully spawned {len(mobile_agents)} robots in Area A")
 print(f"  Area A center: {AREA_A_CENTER}")
 print(f"  Area B center: {AREA_B_CENTER}")
-ctrl_info = "BatchDifferentialController (via AgentManager batch_controller)" if args.controller == "batch" else "DifferentialController (per-agent)"
+ctrl_info = (
+    "BatchDifferentialController (via AgentManager batch_controller)"
+    if args.controller == "batch"
+    else "DifferentialController (per-agent)"
+)
 print(f"[INFO] Controller: {ctrl_info}")
 print()
 

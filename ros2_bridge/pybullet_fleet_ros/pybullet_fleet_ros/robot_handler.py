@@ -746,9 +746,7 @@ class RobotHandler(RobotHandlerBase):
             remaining = waypoints[current_idx:]
             plan_msg = pbf_path_to_ros(remaining, stamp=stamp)
             for ps in plan_msg.poses:  # sim→RMF frame
-                ps.pose.position.x, ps.pose.position.y = self._shift_xy(
-                    ps.pose.position.x, ps.pose.position.y, +1
-                )
+                ps.pose.position.x, ps.pose.position.y = self._shift_xy(ps.pose.position.x, ps.pose.position.y, +1)
             self._plan_pub.publish(plan_msg)
 
         # Diagnostics

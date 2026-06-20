@@ -797,6 +797,7 @@ class AgentManager(SimObjectManager[Agent]):
         if self._fleet_controller:
             from dataclasses import fields as dc_fields
             from pybullet_fleet.controller_params import ControllerParams
+
             fleet_params = ControllerParams.from_dict(self._fleet_controller)
             for f in dc_fields(ControllerParams):
                 if getattr(obj.controller_params, f.name) is None:
@@ -806,9 +807,10 @@ class AgentManager(SimObjectManager[Agent]):
         if self._batch_controller is not None:
             if obj._batch_controller is not None:
                 logger.warning(
-                    "Agent %r is already registered with batch controller %r; "
-                    "skipping registration with %r.",
-                    obj, obj._batch_controller, self._batch_controller,
+                    "Agent %r is already registered with batch controller %r; " "skipping registration with %r.",
+                    obj,
+                    obj._batch_controller,
+                    self._batch_controller,
                 )
             else:
                 self._batch_controller.register_agent(obj)
