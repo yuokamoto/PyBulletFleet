@@ -103,6 +103,39 @@ def was_searched(spy_grid, sim_core, obj):
 
 
 # ============================================================================
+# SimulationParams configuration
+# ============================================================================
+
+
+class TestSimulationParamsCoercion:
+    """SimulationParams normalises config-derived values into proper types."""
+
+    def test_collision_detection_method_string_coerced_to_enum(self):
+        """A string (e.g. from YAML) is coerced to the CollisionDetectionMethod enum.
+
+        Regression: when left as a plain str, the ``== CollisionDetectionMethod.X``
+        checks in check_collisions() never match, silently disabling collision detection.
+        """
+        params = SimulationParams(physics=False, collision_detection_method="closest_points")
+        assert params.collision_detection_method is CollisionDetectionMethod.CLOSEST_POINTS
+
+    def test_collision_detection_method_enum_passthrough(self):
+        params = SimulationParams(collision_detection_method=CollisionDetectionMethod.CONTACT_POINTS)
+        assert params.collision_detection_method is CollisionDetectionMethod.CONTACT_POINTS
+
+    def test_collision_detection_method_none_auto_selected(self):
+        assert SimulationParams(physics=False).collision_detection_method is CollisionDetectionMethod.CLOSEST_POINTS
+        assert SimulationParams(physics=True).collision_detection_method is CollisionDetectionMethod.CONTACT_POINTS
+
+    def test_invalid_collision_detection_method_falls_back_to_default(self):
+        """An unknown string warns and falls back to the physics-based default."""
+        params = SimulationParams(physics=False, collision_detection_method="not_a_method")
+        assert params.collision_detection_method is CollisionDetectionMethod.CLOSEST_POINTS
+        params_phys = SimulationParams(physics=True, collision_detection_method="not_a_method")
+        assert params_phys.collision_detection_method is CollisionDetectionMethod.CONTACT_POINTS
+
+
+# ============================================================================
 # Object Lifecycle
 # ============================================================================
 

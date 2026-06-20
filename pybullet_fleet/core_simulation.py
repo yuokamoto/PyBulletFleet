@@ -15,7 +15,7 @@ import tracemalloc  # Memory profiling (imported once at module level)
 from collections import deque
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Sequence, Set, Tuple, Union, cast
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Sequence, Set, Tuple, Type, TypeVar, Union, cast
 
 import numpy as np
 
@@ -39,6 +39,9 @@ from pybullet_fleet._defaults import SIMULATION as _SIM_D
 
 if TYPE_CHECKING:
     from pybullet_fleet.sim_plugin import SimPlugin
+
+# Generic plugin type so register_plugin() returns the concrete subclass type.
+_SimPluginT = TypeVar("_SimPluginT", bound="SimPlugin")
 
 # Global log_level (default: 'info')
 GLOBAL_LOG_LEVEL = "INFO"
@@ -98,6 +101,20 @@ class SimulationParams:
     monitor_y: int = _SIM_D["monitor_y"]
 
     def __post_init__(self) -> None:
+        # Coerce a string (e.g. from YAML: collision_detection_method: "closest_points")
+        # into the CollisionDetectionMethod enum. Without this the value stays a plain
+        # str and the `== CollisionDetectionMethod.X` checks in check_collisions() never
+        # match, silently disabling all collision detection.
+        if isinstance(self.collision_detection_method, str):
+            try:
+                self.collision_detection_method = CollisionDetectionMethod(self.collision_detection_method)
+            except ValueError:
+                logger.warning(
+                    "Unknown collision_detection_method %r; falling back to physics-based default. Valid values: %s",
+                    self.collision_detection_method,
+                    [m.value for m in CollisionDetectionMethod],
+                )
+                self.collision_detection_method = None
         # Auto-select collision detection method based on physics mode if not explicitly set
         if self.collision_detection_method is None:
             # Physics ON: use CONTACT_POINTS (actual contact manifold)
@@ -468,10 +485,10 @@ class MultiRobotSimulationCore:
 
     def register_plugin(
         self,
-        plugin_or_cls,
+        plugin_or_cls: "Union[_SimPluginT, Type[_SimPluginT]]",
         config: Optional[Dict[str, Any]] = None,
         frequency: Optional[float] = None,
-    ):
+    ) -> "_SimPluginT":
         """Register a simulation plugin.
 
         Args:

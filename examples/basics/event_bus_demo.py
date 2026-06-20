@@ -48,6 +48,8 @@ def main():
 
     def on_pre_step(dt, sim_time, **_):
         step_count["pre"] += 1
+        if step_count["pre"] <= 3:
+            print(f"  [PRE_STEP]   step={step_count['pre']}  sim_time={sim_time:.3f}  dt={dt:.4f}")
 
     def on_post_step(dt, sim_time, **_):
         step_count["post"] += 1
@@ -89,7 +91,7 @@ def main():
         SimObjectSpawnParams(
             visual_shape=ShapeParams(shape_type="box", half_extents=[0.15, 0.15, 0.15]),
             collision_shape=ShapeParams(shape_type="box", half_extents=[0.15, 0.15, 0.15]),
-            initial_pose=Pose.from_xyz(2.0, 0.0, 0.15),
+            initial_pose=Pose.from_xyz(1.0, 1.0, 0.15),  # on the robot's (0,0)->(2,2) path → collision
             name="obstacle_box",
             collision_mode=CollisionMode.NORMAL_2D,
         ),
