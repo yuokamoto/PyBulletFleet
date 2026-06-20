@@ -60,6 +60,11 @@ sim_core = MultiRobotSimulationCore.from_yaml(_CONFIG)
 if _args.rtf is not None:
     sim_core.params.target_rtf = _args.rtf
 
+# The robot/work area sits near the origin (y up to ~1.3), so override the
+# fleet-scale default camera (distance 20, target [5,5,0]) for a close-up.
+# Tune distance/target as needed.
+sim_core.params.camera_config.update({"camera_distance": 3.0, "camera_target": [0.0, 0.7, 0.4]})
+
 # ---------------------------------------------------------------------------
 # Robot  (ik_joint_names tells IK to only solve arm joints, not wheels)
 # ---------------------------------------------------------------------------

@@ -84,7 +84,12 @@ from pybullet_fleet.core_simulation import MultiRobotSimulationCore
 from pybullet_fleet.geometry import Pose
 
 _BASE_CONFIG = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "config", "config.yaml")
-_OVERRIDES = {"simulation": {"target_rtf": 1.0}}
+_OVERRIDES = {
+    "simulation": {
+        "target_rtf": 1.0,
+        "camera": {"camera_distance": 2.5, "camera_target": [0.0, 0.0, 0.5]},
+    }
+}
 sim = MultiRobotSimulationCore.from_dict(merge_configs(load_yaml_config(_BASE_CONFIG), _OVERRIDES))
 
 # Auto-detect profile
