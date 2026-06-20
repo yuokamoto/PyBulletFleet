@@ -55,7 +55,7 @@ if args.rtf is not None:
 # Create AgentManager — pass batch_controller when --controller batch is selected so
 # all differential agents are auto-registered with the vectorised controller.
 _batch_controller = "batch_differential" if args.controller == "batch" else None
-agent_manager = AgentManager(sim_core=sim_core, update_frequency=10.0, batch_controller=_batch_mode)
+agent_manager = AgentManager(sim_core=sim_core, update_frequency=10.0, batch_controller=_batch_controller)
 
 # Create SimObjectManager for pallets
 pallet_manager = SimObjectManager(sim_core=sim_core)

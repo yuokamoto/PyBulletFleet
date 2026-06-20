@@ -10,8 +10,6 @@ Tests cover:
 - Battery SOC clamping [0.0, 1.0]
 """
 
-import os
-
 import pybullet as p
 import pybullet_data
 import pytest
@@ -19,7 +17,6 @@ import pytest
 from pybullet_fleet.agent import Agent, AgentSpawnParams
 from pybullet_fleet.plugins.battery_plugin import BatteryPlugin
 from pybullet_fleet.geometry import Pose
-from pybullet_fleet.types import MotionMode
 from tests.conftest import MockSimCore
 
 MOBILE_URDF = "robots/mobile_robot.urdf"

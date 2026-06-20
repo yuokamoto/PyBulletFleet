@@ -262,7 +262,6 @@ class TestAgentManagerBatch:
 
     def test_enable_batch_returns_controller(self, sim):
         from pybullet_fleet.agent_manager import AgentManager
-        from pybullet_fleet.controllers import BatchOmniController
 
         mgr = AgentManager(sim_core=sim)
         bc = mgr.enable_batch("batch_omni")
@@ -271,7 +270,6 @@ class TestAgentManagerBatch:
 
     def test_batch_mode_init_param(self, sim):
         from pybullet_fleet.agent_manager import AgentManager
-        from pybullet_fleet.controllers import BatchOmniController
 
         mgr = AgentManager(sim_core=sim, batch_controller="batch_omni")
         assert isinstance(mgr.batch_controller, BatchOmniController)

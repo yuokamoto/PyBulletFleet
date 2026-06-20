@@ -96,7 +96,6 @@ from pybullet_fleet.agent_plugin import (
     register_agent_plugin,
 )
 from pybullet_fleet.plugin_utils import PluginRegistry
-from pybullet_fleet.plugins.battery_plugin import BatteryPlugin
 
 # Device classes
 from pybullet_fleet.devices.door import Door, DoorParams

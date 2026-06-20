@@ -1,6 +1,5 @@
 """Tests for Elevator."""
 
-import pybullet as p
 import pytest
 from pybullet_fleet import Agent, AgentSpawnParams, Pose, SimObject
 from pybullet_fleet.sim_object import SimObjectSpawnParams, ShapeParams
@@ -97,7 +96,7 @@ class TestElevatorAutoAttach:
         elev.request_floor("L2")
         # Box should now be attached
         assert box.is_attached()
-        assert box in [p for p in elev.passengers]
+        assert box in elev.passengers
         assert elev.is_moving
 
     def test_detach_on_arrival(self, sim_core):

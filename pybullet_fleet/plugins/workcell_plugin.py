@@ -70,7 +70,7 @@ from pybullet_fleet.sim_plugin import SimPlugin
 if TYPE_CHECKING:
     from pybullet_fleet.agent import Agent
     from pybullet_fleet.core_simulation import MultiRobotSimulationCore
-    from pybullet_fleet.sim_object import SimObject
+    from pybullet_fleet.sim_object import ShapeParams, SimObject
 
 logger = get_lazy_logger(__name__)
 

@@ -2,7 +2,7 @@
 
 import pytest
 from pybullet_fleet import Agent, AgentSpawnParams, Pose
-from pybullet_fleet.types import DoorState, MotionMode
+from pybullet_fleet.types import DoorState
 from pybullet_fleet.devices.door import Door, DoorParams
 
 

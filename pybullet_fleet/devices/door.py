@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field, fields
-from typing import TYPE_CHECKING, Any, Dict, Optional
+from typing import TYPE_CHECKING, Any, Dict, Optional, cast
 
 from pybullet_fleet.action import JointAction
 from pybullet_fleet.agent import Agent, AgentSpawnParams
@@ -69,6 +69,10 @@ class Door(Agent):
     _spawn_params_cls = DoorParams
     _entity_type_name = "door"
 
+    # Instance attributes populated in from_params (declared for type checking).
+    _open_positions: Dict[str, float]
+    _close_positions: Dict[str, float]
+
     @classmethod
     def from_params(cls, spawn_params: "DoorParams", sim_core=None) -> "Door":
         """Create a Door from DoorParams.
@@ -79,9 +83,9 @@ class Door(Agent):
         """
         if not isinstance(spawn_params, DoorParams):
             raise TypeError(f"Door.from_params requires DoorParams, got {type(spawn_params).__name__}")
-        agent = super().from_params(spawn_params, sim_core)
-        agent._open_positions: Dict[str, float] = spawn_params.open_positions  # type: ignore[assignment]
-        agent._close_positions: Dict[str, float] = spawn_params.close_positions
+        agent = cast("Door", super().from_params(spawn_params, sim_core))
+        agent._open_positions = spawn_params.open_positions  # type: ignore[assignment]
+        agent._close_positions = spawn_params.close_positions
         return agent
 
     @property

@@ -37,7 +37,7 @@ Registry
 import inspect
 import math
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Type
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Type, TypeVar
 
 import numpy as np
 
@@ -122,6 +122,9 @@ def list_controllers() -> Dict[str, Type["Controller"]]:
 # ---------------------------------------------------------------------------
 
 
+_ControllerT = TypeVar("_ControllerT", bound="Controller")
+
+
 class Controller(ABC):
     """Agent movement control interface (Strategy pattern).
 
@@ -152,7 +155,7 @@ class Controller(ABC):
         self.params: ControllerParams = params if params is not None else ControllerParams()
 
     @classmethod
-    def from_config(cls, config: dict) -> "Controller":
+    def from_config(cls: Type[_ControllerT], config: dict) -> "_ControllerT":
         """Create from a config dict.
 
         The dict may contain:

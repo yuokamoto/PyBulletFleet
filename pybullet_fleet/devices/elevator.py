@@ -10,7 +10,7 @@ from __future__ import annotations
 import pybullet as p
 
 from dataclasses import dataclass, field, fields
-from typing import TYPE_CHECKING, Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, cast
 
 from pybullet_fleet.action import JointAction
 from pybullet_fleet.agent import Agent, AgentSpawnParams
@@ -89,6 +89,15 @@ class Elevator(Agent):
     _spawn_params_cls = ElevatorParams
     _entity_type_name = "elevator"
 
+    # Instance attributes populated in from_params (declared for type checking).
+    _floors: Dict[str, float]
+    _joint_name: str
+    _platform_link: str
+    _current_floor_name: str
+    _target_floor_name: str
+    _passengers: List["SimObject"]
+    _moving: bool
+
     @classmethod
     def from_params(cls, spawn_params: "ElevatorParams", sim_core=None) -> "Elevator":
         """Create an Elevator from ElevatorParams.
@@ -99,14 +108,14 @@ class Elevator(Agent):
         """
         if not isinstance(spawn_params, ElevatorParams):
             raise TypeError(f"Elevator.from_params requires ElevatorParams, got {type(spawn_params).__name__}")
-        agent = super().from_params(spawn_params, sim_core)
-        agent._floors: Dict[str, float] = spawn_params.floors  # type: ignore[assignment]
-        agent._joint_name: str = spawn_params.joint_name
-        agent._platform_link: str = spawn_params.platform_link
-        agent._current_floor_name: str = spawn_params.initial_floor
-        agent._target_floor_name: str = spawn_params.initial_floor
-        agent._passengers: List[SimObject] = []  # Currently attached passengers
-        agent._moving: bool = False
+        agent = cast("Elevator", super().from_params(spawn_params, sim_core))
+        agent._floors = spawn_params.floors  # type: ignore[assignment]
+        agent._joint_name = spawn_params.joint_name
+        agent._platform_link = spawn_params.platform_link
+        agent._current_floor_name = spawn_params.initial_floor
+        agent._target_floor_name = spawn_params.initial_floor
+        agent._passengers = []  # Currently attached passengers
+        agent._moving = False
         return agent
 
     # ------------------------------------------------------------------

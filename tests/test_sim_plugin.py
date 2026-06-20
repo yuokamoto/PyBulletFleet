@@ -7,7 +7,6 @@ and programmatic registration.
 import logging
 
 import pybullet as p
-import pybullet_data
 import pytest
 
 from pybullet_fleet.core_simulation import MultiRobotSimulationCore, SimulationParams

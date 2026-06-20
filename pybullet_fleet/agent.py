@@ -8,7 +8,7 @@ Supports both Mesh and URDF loading.
 import logging
 import math
 from dataclasses import dataclass, fields
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple, Union
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple, Type, TypeVar, Union
 
 import numpy as np
 import pybullet as p
@@ -32,6 +32,9 @@ if TYPE_CHECKING:
 # Create logger for this module
 logger = logging.getLogger(__name__)
 lazy_logger = get_lazy_logger(__name__)
+
+# Generic plugin type so get_plugin() returns the concrete subclass type.
+_PluginT = TypeVar("_PluginT", bound=AgentPlugin)
 
 
 @dataclass
@@ -607,18 +610,18 @@ class Agent(SimObject):
             plugin_or_cls: An :class:`AgentPlugin` instance or subclass.
         """
         if isinstance(plugin_or_cls, type):
-            for i, p in enumerate(self._plugins):
-                if isinstance(p, plugin_or_cls):
+            for i, plugin in enumerate(self._plugins):
+                if isinstance(plugin, plugin_or_cls):
                     self._plugins.pop(i)
                     return
         else:
             self._plugins.remove(plugin_or_cls)
 
-    def get_plugin(self, cls: type) -> Optional[AgentPlugin]:
+    def get_plugin(self, cls: Type[_PluginT]) -> Optional[_PluginT]:
         """Return the first plugin matching *cls*, or ``None``."""
-        for p in self._plugins:
-            if isinstance(p, cls):
-                return p
+        for plugin in self._plugins:
+            if isinstance(plugin, cls):
+                return plugin
         return None
 
     def _update_plugins(self, dt: float) -> None:
