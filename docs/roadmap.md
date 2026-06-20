@@ -353,9 +353,23 @@ Changes needed:
 
 The `is_fuel` flag would be replaced by a mesh-format check (e.g. "does an `.obj` file exist alongside the `.dae`?"), making the loader source-agnostic — any DAE model from any provider would be handled the same way.
 
+### Multi-material mesh textures (per-material visuals)
+
+`createVisualShape(GEOM_MESH)` applies a **single texture per mesh**, so a
+multi-material mesh (one OBJ/DAE packing many materials) renders with just one
+texture tiled over everything. The campus env is a single 50-material OBJ and
+showed one (a person) texture across the whole scene. Current workaround: the
+`world.force_color` config flat-shades such a mesh grey (strips its `mtllib`
+so no texture loads — see `_obj_without_materials`). Proper fix: split the mesh
+by material into per-material sub-visuals (reusing the trimesh `<submesh>`
+extraction path), one texture each. Moderate effort; helps any multi-material
+environment.
+
 ### Priority
 
-Low — the current SDF parser + DAE defensive fallbacks are functional for demo purposes. These improvements primarily affect:
+Low — SDF parsing, DAE handling, and multi-material textures are all functional
+enough for demos (with the flat-shade workaround for multi-material meshes).
+These improvements primarily affect:
 - **Visual fidelity** (DAE→OBJ: textures and materials render correctly)
 - **Maintainability** (gz sdf -p: delete ~150 lines of hand-rolled XML conversion)
 - **Robustness** (both: fewer edge-case failures with complex models)

@@ -257,6 +257,39 @@ def _resolve_submesh(mesh_el: ET.Element, abs_path: str) -> Optional[str]:
     return _extract_submesh(abs_path, name_el.text.strip(), center)
 
 
+def _obj_without_materials(obj_path: str) -> str:
+    """Return a cached copy of an OBJ with its material library stripped.
+
+    PyBullet applies ``rgbaColor`` only as a *tint over* a mesh's MTL textures,
+    so a flat colour can't override them. To truly flat-shade a multi-material
+    OBJ (e.g. the campus env, which PyBullet can't texture correctly), we drop
+    the ``mtllib``/``usemtl`` lines so no textures load and ``rgbaColor`` shows.
+    Returns the original path on any failure.
+    """
+    if not obj_path.lower().endswith(".obj"):
+        return obj_path
+    try:
+        mtime = os.path.getmtime(obj_path)
+    except OSError:
+        return obj_path
+    key = hashlib.md5(f"nomtl|{obj_path}|{mtime}".encode()).hexdigest()[:16]
+    out_path = os.path.join(_SUBMESH_CACHE_DIR, f"{os.path.basename(obj_path)[:-4]}_{key}.obj")
+    if os.path.isfile(out_path):
+        return out_path
+    try:
+        os.makedirs(_SUBMESH_CACHE_DIR, exist_ok=True)
+        with open(obj_path, "r", encoding="utf-8", errors="replace") as src, open(out_path, "w") as dst:
+            for line in src:
+                s = line.lstrip()
+                if s.startswith("mtllib") or s.startswith("usemtl"):
+                    continue
+                dst.write(line)
+        return out_path
+    except Exception as exc:  # noqa: B902
+        logger.warning("Failed to strip materials from %s: %s", obj_path, exc)
+        return obj_path
+
+
 def _parse_pose(
     pose_text: Optional[str],
 ) -> Tuple[float, float, float, float, float, float]:
@@ -382,6 +415,7 @@ def load_sdf_world(
     rgba_color: Optional[List[float]] = None,
     mass: float = 0.0,
     pickable: bool = False,
+    strip_materials: bool = False,
 ) -> List[SimObject]:
     """Load building/prop models from an SDF file.
 
@@ -476,6 +510,10 @@ def load_sdf_world(
                 if not os.path.isfile(mesh_path):
                     logger.warning("Mesh file not found: %s (from %s)", mesh_path, mesh_uri)
                     continue
+                # Flat-shade request: drop the OBJ's materials so rgba_color
+                # (not the bleeding texture) is what PyBullet renders.
+                if strip_materials:
+                    mesh_path = _obj_without_materials(mesh_path)
 
                 # Find collision mesh and scale (use visual mesh as fallback)
                 # Skip collision shape entirely when collision is disabled — many
@@ -682,6 +720,7 @@ def load_sdf_world_file(
     collision_mode: CollisionMode = CollisionMode.STATIC,
     skip_models: Optional[List[str]] = None,
     resource_paths: Optional[List[str]] = None,
+    force_color: Optional[List[float]] = None,
 ) -> List[SimObject]:
     """Load a Gazebo ``.world`` file with ``<include>`` elements.
 
@@ -844,7 +883,13 @@ def load_sdf_world_file(
         # Fuel models (.dae) have embedded materials → rgba_color=None lets
         # PyBullet read native colours.  Local building models (.obj from
         # rmf_building_map_tools) lack material info → use default grey.
-        model_color = None if info.is_fuel else list(DEFAULT_SCENERY_COLOR)
+        # force_color overrides everything: used to flat-shade a multi-material
+        # mesh that PyBullet can't texture correctly (e.g. the campus env, a
+        # single 50-material OBJ — PyBullet would tile one wrong texture).
+        if force_color is not None:
+            model_color = list(force_color)
+        else:
+            model_color = None if info.is_fuel else list(DEFAULT_SCENERY_COLOR)
 
         # Ensure texture symlinks exist for Fuel models so PyBullet can
         # resolve DAE <init_from> texture references (textures live in
@@ -878,6 +923,7 @@ def load_sdf_world_file(
                 rgba_color=model_color,
                 mass=obj_mass,
                 pickable=obj_pickable,
+                strip_materials=force_color is not None,
             )
         except Exception as e:
             logger.warning("Failed to load model SDF %s: %s", info.sdf_path, e)

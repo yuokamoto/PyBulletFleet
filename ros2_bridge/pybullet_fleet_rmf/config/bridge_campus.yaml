@@ -30,6 +30,10 @@ world:
   world_file: "/rmf_demos_ws/install/rmf_demos_maps/share/rmf_demos_maps/maps/campus/campus.world"
   skip_models:
     - DeliveryRobot
+  # The campus environment is a single 50-material OBJ; PyBullet can only apply
+  # one texture per mesh, so it tiles one (a person) over everything. Flat-shade
+  # it grey until multi-material OBJ support lands (see roadmap).
+  force_color: [0.6, 0.6, 0.6, 1.0]
 
 entities:
   # ── Fleet: deliveryRobot (nav_graph 0) ───────────────────────────

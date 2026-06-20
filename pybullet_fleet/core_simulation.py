@@ -2861,9 +2861,12 @@ class MultiRobotSimulationCore:
         world_sdf = world_config.get("sdf", "")
         world_mesh_dir = world_config.get("mesh_dir", "")
         skip = skip_models or world_config.get("skip_models", [])
+        # Optional flat colour for world meshes — flat-shades multi-material
+        # meshes PyBullet can't texture correctly (e.g. the campus env OBJ).
+        force_color = world_config.get("force_color")
 
         if world_file:
-            objs = load_sdf_world_file(world_file, sim_core=self, skip_models=skip)
+            objs = load_sdf_world_file(world_file, sim_core=self, skip_models=skip, force_color=force_color)
             logger.info("Loaded %d objects from world file %s", len(objs), world_file)
             return objs
 
