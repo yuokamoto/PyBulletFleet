@@ -34,7 +34,7 @@ def main():
 
     request = SpawnEntity.Request()
     request.name = args.name
-    request.entity_resource.uri = args.urdf
+    request.uri = args.urdf
     request.initial_pose.pose.position.x = args.x
     request.initial_pose.pose.position.y = args.y
     request.initial_pose.pose.position.z = args.z

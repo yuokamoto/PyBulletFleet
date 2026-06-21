@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 import pybullet as p
 
 from pybullet_fleet import AgentSpawnParams
+from pybullet_fleet.robot_models import resolve_model
 from pybullet_fleet.types import MotionMode
 
 from .constants import DEFAULT_SPAWN_URDF, FALLBACK_SPAWN_URDF, SUPPORTED_FEATURES, SUPPORTED_SPAWN_FORMATS
@@ -148,17 +149,25 @@ class SimServices:
         """
         try:
             name = request.name
-            urdf_path = DEFAULT_SPAWN_URDF
-            if request.entity_resource.uri:
-                urdf_path = request.entity_resource.uri
+            # simulation_interfaces 2.1.0 (Jazzy): flat `uri` field (older code
+            # targeted the unreleased main API's nested `entity_resource.uri`).
+            requested = request.uri or DEFAULT_SPAWN_URDF
 
-            # Resolve package:// URIs to filesystem paths
-            urdf_path = resolve_uri(urdf_path)
+            # Resolve to a filesystem path: package:// URIs first, then known model
+            # names (Tier 1/2/3, e.g. "ur5e" -> ur_description) via resolve_model.
+            # Without the model step a bare name like "ur5e" is not a file and would
+            # silently fall back to the placeholder URDF.
+            urdf_path = resolve_uri(requested)
+            if not os.path.isfile(urdf_path):
+                try:
+                    urdf_path = resolve_model(requested)
+                except FileNotFoundError:
+                    pass
 
             if not os.path.isfile(urdf_path):
                 logger.warning(
-                    "SpawnEntity: URDF '%s' not found, falling back to '%s'",
-                    urdf_path,
+                    "SpawnEntity: could not resolve '%s', falling back to '%s'",
+                    requested,
                     FALLBACK_SPAWN_URDF,
                 )
                 urdf_path = FALLBACK_SPAWN_URDF
@@ -343,7 +352,7 @@ class SimServices:
         # 2. Build spawnable list from deduplicated URIs
         for uri in sorted(seen_uris):
             spawnable = Spawnable()
-            spawnable.entity_resource.uri = uri
+            spawnable.uri = uri  # 2.1.0 flat field (not the main API's entity_resource)
             spawnable.description = os.path.basename(uri).replace(".urdf", "")
             response.spawnables.append(spawnable)
         response.result.result = _OK
