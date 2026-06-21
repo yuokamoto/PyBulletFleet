@@ -449,6 +449,15 @@ class Agent(SimObject):
         # Update log prefix to include Agent class name (SimObject sets it initially)
         self._update_log_prefix()
 
+        # Emit AGENT_SPAWNED now that the agent is fully constructed (controllers,
+        # action state, etc. are all set). add_object() runs mid-construction from
+        # super().__init__() and only emits OBJECT_SPAWNED there; emitting
+        # AGENT_SPAWNED from add_object would expose a half-built Agent (missing
+        # _controllers / _current_action) to subscribers — e.g. the ROS bridge's
+        # AGENT_SPAWNED handler, which crashed when spawning agents dynamically.
+        if self.sim_core is not None:
+            self.sim_core.events.emit(SimEvents.AGENT_SPAWNED, agent=self)
+
     # ------------------------------------------------------------------
     # Kinematic-limit read-only accessors.
     # These delegate to ``self.controller_params`` (the single source of

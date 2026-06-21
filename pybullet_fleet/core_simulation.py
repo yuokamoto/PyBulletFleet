@@ -1728,9 +1728,11 @@ class MultiRobotSimulationCore:
         logger.debug(f"Added object {obj.object_id} (body {obj.body_id}) to simulation")
 
         # --- Lifecycle events ---
+        # OBJECT_SPAWNED is safe here: the base SimObject is fully constructed by
+        # the time add_object() runs. AGENT_SPAWNED is emitted at the END of
+        # Agent.__init__ instead — add_object() runs mid-Agent-construction (from
+        # super().__init__()), so emitting it here would expose a half-built Agent.
         self.events.emit(SimEvents.OBJECT_SPAWNED, obj=obj)
-        if isinstance(obj, Agent):
-            self.events.emit(SimEvents.AGENT_SPAWNED, agent=obj)
 
     def remove_object(self, obj: SimObject) -> None:
         """

@@ -24,6 +24,7 @@ import pytest
 from scipy.spatial.transform import Rotation as R
 
 from pybullet_fleet.agent import Agent, AgentSpawnParams
+from pybullet_fleet.events import EventBus
 from pybullet_fleet.geometry import Pose, Path
 from pybullet_fleet.sim_object import SimObject, ShapeParams
 from pybullet_fleet.types import CollisionMode, MotionMode, PosePhase
@@ -319,6 +320,8 @@ class TestAgentCreationFromMesh:
                 self._client = 0
                 self.collision_mode_at_add: Optional[CollisionMode] = None
                 self.update_collision_mode_calls = []
+                # Agent.__init__ emits AGENT_SPAWNED at the end of construction.
+                self.events = EventBus()
 
             @property
             def client(self):
@@ -363,6 +366,8 @@ class TestAgentCreationFromMesh:
                 self._client = 0
                 self.collision_mode_at_add: Optional[CollisionMode] = None
                 self.update_collision_mode_calls = []
+                # Agent.__init__ emits AGENT_SPAWNED at the end of construction.
+                self.events = EventBus()
 
             @property
             def client(self):
