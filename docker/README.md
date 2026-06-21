@@ -26,7 +26,7 @@ Uses `ros-jazzy-turtlebot3-description` (installed in the Docker image).
 cd docker
 xhost +local:docker   # first time only
 
-GUI=true docker compose run --rm --name pbf_bridge bridge \
+docker compose run --rm --name pbf_bridge bridge \
   ros2 launch pybullet_fleet_ros tb3_demo.launch.py gui:=true
 ```
 
@@ -55,7 +55,7 @@ Uses `ros-jazzy-ur-description` (installed in the Docker image).
 cd docker
 xhost +local:docker
 
-GUI=true docker compose run --rm --name pbf_bridge bridge \
+docker compose run --rm --name pbf_bridge bridge \
   ros2 launch pybullet_fleet_ros ur5e_demo.launch.py gui:=true
 ```
 
@@ -69,13 +69,35 @@ docker exec pbf_bridge bash -c 'source /rmf_demos_ws/install/setup.bash && \
 
 RViz shows the UR5e arm model updating as all 6 joints move to target positions.
 
-### Headless (No GUI, No RViz)
+### Headless / No PyBullet GUI
+
+Pass `gui:=false` to any demo launch to skip the PyBullet GUI window. RViz is
+independent (`rviz:=true|false`), so you can keep the RViz view while PyBullet
+runs headless, or disable both for a server:
 
 ```bash
 cd docker
-docker compose up bridge                                        # 3 robots, headless
-NUM_ROBOTS=5 PUBLISH_RATE=50.0 docker compose up bridge         # custom
+# No PyBullet GUI, RViz on (default)
+docker compose run --rm --name pbf_bridge bridge \
+  ros2 launch pybullet_fleet_ros tb3_demo.launch.py gui:=false
+
+# Fully headless (no PyBullet GUI, no RViz)
+docker compose run --rm --name pbf_bridge bridge \
+  ros2 launch pybullet_fleet_ros tb3_demo.launch.py gui:=false rviz:=false
 ```
+
+To run a full **RMF demo** headless instead, disable GUI + RViz on the default
+`docker compose up` path:
+
+```bash
+GUI=false RVIZ=false docker compose up bridge                   # office, headless
+DEMO_WORLD=hotel GUI=false RVIZ=false docker compose up bridge  # another world
+```
+
+> **Monitor window:** the bridge also opens a small tkinter "Simulation Monitor"
+> window. It follows `gui` by default — `gui:=false` hides it too. Force it
+> on/off independently with `enable_monitor_gui:=true` / `enable_monitor_gui:=false`
+> (an explicit value, or YAML `simulation.enable_monitor_gui`, always wins).
 
 ### Launch Arguments
 
@@ -85,16 +107,17 @@ The `tb3_demo.launch.py` and `ur5e_demo.launch.py` accept:
 |----------|---------|-------------|
 | `gui` | `false` | Enable PyBullet GUI |
 | `rviz` | `true` | Launch RViz + robot_state_publisher |
+| `enable_monitor_gui` | _(follows `gui`)_ | Show the tkinter monitor window (`false` hides it even with `gui:=true`) |
 | `target_rtf` | `1.0` | Real-time factor |
 | `publish_rate` | `50.0` | odom / joint_states publish rate (Hz) |
 
 ```bash
 # GUI only, no RViz
-GUI=true docker compose run --rm --name pbf_bridge bridge \
+docker compose run --rm --name pbf_bridge bridge \
   ros2 launch pybullet_fleet_ros tb3_demo.launch.py gui:=true rviz:=false
 
 # Waffle variant
-GUI=true docker compose run --rm --name pbf_bridge bridge \
+docker compose run --rm --name pbf_bridge bridge \
   ros2 launch pybullet_fleet_ros tb3_demo.launch.py model:=waffle gui:=true
 ```
 
@@ -108,7 +131,7 @@ Spawns a TurtleBot3 + 3 pickable boxes. Navigate close to a box and attach it.
 cd docker
 xhost +local:docker
 
-GUI=true docker compose run --rm --name pbf_bridge bridge \
+docker compose run --rm --name pbf_bridge bridge \
   ros2 launch pybullet_fleet_ros attach_demo.launch.py gui:=true
 ```
 
@@ -134,16 +157,42 @@ docker exec pbf_bridge bash -c 'source /rmf_demos_ws/install/setup.bash && \
 
 ### Environment Variables (docker compose)
 
+These control the default `docker compose up bridge` path, which launches the
+RMF demo `${DEMO_WORLD}_pybullet.launch.py` (see [`.env.example`](.env.example)):
+
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `NUM_ROBOTS` | 3 | Number of robots (headless mode) |
-| `GUI` | false | Enable PyBullet GUI window |
-| `PUBLISH_RATE` | 10.0 | odom / joint_states publish rate (Hz) |
-| `PHYSICS` | false | Enable physics simulation |
-| `TARGET_RTF` | 1.0 | Real-time factor |
-| `ROS_DOMAIN_ID` | 42 | ROS 2 domain ID |
+| `DEMO_WORLD` | `office` | RMF demo world: `office`, `hotel`, `clinic`, `airport_terminal`, `battle_royale`, `campus` |
+| `GUI` | `true` | PyBullet GUI window (`false` = headless) |
+| `RVIZ` | `true` | Launch RViz (`false` = headless, saves CPU/GPU) |
+| `ROS_DOMAIN_ID` | `42` | ROS 2 domain ID (keep all containers on the same id) |
 
 > **Note:** Source code is volume-mounted, so local Python edits take effect on container restart.
+
+### Config files
+
+Each launch file picks up a **bridge config** (a PyBulletFleet world YAML that
+defines the robots, world, and meshes). Standalone ROS demos resolve theirs
+automatically; `bridge.launch.py` takes one via `config_yaml:=`.
+
+| Launch | Bridge config |
+|--------|---------------|
+| `bridge.launch.py` | `config_yaml:=` argument (required) — pass any path below |
+| `nav_demo.launch.py` | `pybullet_fleet_ros/config/bridge_nav.yaml` |
+| `tb3_demo.launch.py` | `bridge_tb3_burger.yaml` / `bridge_tb3_waffle.yaml` (by `model`) |
+| `ur5e_demo.launch.py` | `pybullet_fleet_ros/config/bridge_ur5e.yaml` |
+| `arm_demo.launch.py` | `pybullet_fleet_ros/config/bridge_arm.yaml` |
+| `attach_demo.launch.py` | `pybullet_fleet_ros/config/bridge_attach_demo.yaml` |
+| `${DEMO_WORLD}_pybullet.launch.py` (RMF) | `pybullet_fleet_rmf/config/bridge_<world>.yaml` + an `rmf_demos` fleet config |
+
+RMF worlds map to `bridge_<world>.yaml` as: `office`→`bridge_office`,
+`hotel`→`bridge_hotel`, `clinic`→`bridge_clinic`,
+`airport_terminal`→`bridge_airport`, `battle_royale`→`bridge_battle_royale`,
+`campus`→`bridge_campus`.
+
+Inside the container these live under
+`/rmf_demos_ws/install/<pkg>/share/<pkg>/config/` (volume-mounted from
+`ros2_bridge/<pkg>/config/`, so edits apply on restart).
 
 ## ROS Interface Reference
 
@@ -281,7 +330,7 @@ which spawns a robot + pickable boxes:
 
 ```bash
 # Terminal 1 — launch attach demo
-GUI=true docker compose run --rm --name pbf_bridge bridge \
+docker compose run --rm --name pbf_bridge bridge \
   ros2 launch pybullet_fleet_ros attach_demo.launch.py gui:=true
 ```
 
@@ -364,7 +413,7 @@ Use `config_yaml` to spawn heterogeneous robots:
 
 ```bash
 # Omni demo: 2 mobile robots + 1 floating cube (6-DoF)
-GUI=true docker compose run --rm --name pbf_bridge bridge \
+docker compose run --rm --name pbf_bridge bridge \
   ros2 run pybullet_fleet_ros bridge_node \
     --ros-args \
     -p config_yaml:=/rmf_demos_ws/src/pybullet_fleet_ros/config/bridge_omni_demo.yaml \
@@ -383,33 +432,39 @@ docker exec pbf_bridge bash -c 'source /rmf_demos_ws/install/setup.bash && \
 
 | File | Description |
 |------|-------------|
-| `config/bridge_tb3.yaml` | TurtleBot3 Burger navigation (used by `tb3_demo.launch.py`) |
+| `config/bridge_tb3_burger.yaml` / `config/bridge_tb3_waffle.yaml` | TurtleBot3 navigation (used by `tb3_demo.launch.py`, select via `model:=burger|waffle`) |
 | `config/bridge_ur5e.yaml` | UR5e arm joint control (used by `ur5e_demo.launch.py`) |
 | `config/bridge_nav.yaml` | Generic differential drive navigation (used by `nav_demo.launch.py`) |
 | `config/bridge_arm.yaml` | Generic arm robot joint control (used by `arm_demo.launch.py`) |
-| `config/bridge_omni_demo.yaml` | Omni + 6-DoF cube demo |
+| `config/bridge_omni_demo.yaml` | Omni + 6-DoF cube demo (2 mobile robots + 1 floating cube) |
 | `config/bridge_attach_demo.yaml` | Attach/detach demo — robot + pickable boxes (used by `attach_demo.launch.py`) |
+| `config/bridge_test.yaml` | 3 mobile robots for the integration smoke test |
 
-When `config_yaml` is not set, the bridge falls back to `num_robots` + `robot_urdf` parameters.
+The bridge is **`config_yaml`-driven**: pass a config to spawn robots (there is no
+`num_robots`/`robot_urdf` fallback). Without `config_yaml` it starts with no robots.
 
 ## All ROS Parameters
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `num_robots` | int | 1 | Number of robots to spawn |
-| `robot_urdf` | str | `robots/mobile_robot.urdf` | Default URDF path |
+| `config_yaml` | str | `""` | Path to a PyBulletFleet world YAML (defines the robots/world) |
 | `gui` | bool | false | Enable PyBullet GUI |
+| `enable_monitor_gui` | bool | _(follows `gui`)_ | Show the tkinter monitor window (explicit value or YAML wins) |
 | `physics` | bool | false | Enable physics simulation |
 | `publish_rate` | float | 50.0 | odom / joint_states publish rate (Hz) |
 | `target_rtf` | float | 1.0 | Real-time factor |
 | `enable_sim_services` | bool | true | Enable simulation_interfaces services |
-| `config_yaml` | str | `""` | YAML config (overrides `num_robots` / `robot_urdf`) |
 
 ## Automated Tests
 
 ```bash
-# Integration smoke test (headless)
-docker compose run --rm test
+cd docker
+
+# Integration smoke test (headless) — spawns 3 robots from bridge_test.yaml and
+# checks topics, services, cmd_vel, and the simulation_interfaces service calls.
+docker compose run --rm --no-deps \
+  -v "$(pwd)/test_integration.sh:/test_integration.sh:ro" \
+  bridge bash /test_integration.sh
 
 # colcon launch_testing
 docker compose run --rm bridge bash -c "\
@@ -427,7 +482,7 @@ cd docker
 xhost +local:docker
 docker compose build bridge
 
-GUI=true docker compose run --rm --name pbf_bridge bridge \
+docker compose run --rm --name pbf_bridge bridge \
   ros2 launch pybullet_fleet_ros tb3_demo.launch.py gui:=true
 ```
 
