@@ -370,9 +370,11 @@ class BatchDifferentialController(BatchKinematicController):
         self._orn_buf[idx] = target_quat
 
         distance = float(self._fwd_total_distance[idx])
-        avg_vel = float(np.mean(agent.max_linear_vel))
-        avg_accel = float(np.mean(agent.max_linear_accel))
-        tpi = build_tpi(p0=0.0, pe=distance, vmax=avg_vel, accel=avg_accel, t0=sim_time)
+        # Differential drive travels along its forward (body-x) axis — use the
+        # forward-axis limit (ControllerParams scalar helper), not the axis mean.
+        vmax = agent.controller_params.scalar_max_linear_vel()
+        amax = agent.controller_params.scalar_max_linear_accel()
+        tpi = build_tpi(p0=0.0, pe=distance, vmax=vmax, accel=amax, t0=sim_time)
         t_acc, t_cst, t_tot, accel_eff = extract_phase_params(tpi)
 
         self._phase[idx] = _PHASE_FORWARD
@@ -478,6 +480,10 @@ class BatchDifferentialController(BatchKinematicController):
         rotate_mask = (phase == _PHASE_ROTATE) | (phase == _PHASE_FINAL_ROTATE)
         forward_mask = phase == _PHASE_FORWARD
         if not (rotate_mask.any() or forward_mask.any()):
+            # Nothing active. Still flush once if agents moved last step, so
+            # _apply_phase1 can zero the velocity of any that just stopped.
+            if self._was_moved.any():
+                self._apply_phase1(dt)
             return self._moved_mask
 
         now = float(sim_core.sim_time)
@@ -558,8 +564,8 @@ class BatchDifferentialController(BatchKinematicController):
                     # Normal rotation done: start FORWARD phase.
                     self._begin_forward(ii, self._agents[ii], self._rot_snap_quat[ii], now)
 
-        # Write rows to sim.
-        self._apply_phase1()
+        # Write rows to sim (and refresh per-agent reported velocities).
+        self._apply_phase1(dt)
 
         # Handle waypoint advance for completed forwards.
         if completed_forward.any():

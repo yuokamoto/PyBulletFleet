@@ -27,7 +27,7 @@ import numpy as np
 
 from pybullet_fleet._tpi import build_tpi, extract_phase_params, trapezoid_distance
 from pybullet_fleet.controllers.batch_base import BatchKinematicController
-from pybullet_fleet.geometry import Pose, quat_angle_between, quat_slerp_batch
+from pybullet_fleet.geometry import Pose, quat_angle_between, quat_slerp_batch, rotate_vector
 from pybullet_fleet.logging_utils import get_lazy_logger
 
 if TYPE_CHECKING:
@@ -221,10 +221,20 @@ class BatchOmniController(BatchKinematicController):
         disp = goal_pos - start
         total = float(np.linalg.norm(disp))
 
-        avg_vel = float(np.mean(agent.max_linear_vel))
-        avg_accel = float(np.mean(agent.max_linear_accel))
+        # Project the per-axis linear limits onto the body-frame travel direction
+        # (the caps are body-frame), matching OmniController. Averaging the axes
+        # would ignore per-axis limits like max_linear_vel: [0.3, 3.0, 0.0].
+        params = agent.controller_params
+        if total > 1e-9:
+            qx, qy, qz, qw = current.orientation
+            dir_body = np.asarray(rotate_vector(tuple(disp / total), (-qx, -qy, -qz, qw)))
+            vmax = params.linear_vel_along_direction(dir_body)
+            amax = params.linear_accel_along_direction(dir_body)
+        else:
+            vmax = params.scalar_max_linear_vel()
+            amax = params.scalar_max_linear_accel()
 
-        tpi = build_tpi(p0=0.0, pe=total, vmax=avg_vel, accel=avg_accel, t0=sim_time)
+        tpi = build_tpi(p0=0.0, pe=total, vmax=vmax, accel=amax, t0=sim_time)
         t_accel, t_const, t_total_rel, accel_eff = extract_phase_params(tpi)
 
         self._phase[idx] = _PHASE_FORWARD
@@ -329,6 +339,10 @@ class BatchOmniController(BatchKinematicController):
         final_rotate_mask = phase == _PHASE_FINAL_ROTATE
 
         if not (translate_mask.any() or final_rotate_mask.any()):
+            # Nothing active. Still flush once if agents moved last step, so
+            # _apply_phase1 can zero the velocity of any that just stopped.
+            if self._was_moved.any():
+                self._apply_phase1(dt)
             return self._moved_mask
 
         # Match OmniController._apply_pose semantics: evaluates at sim_core.sim_time.
@@ -394,8 +408,8 @@ class BatchOmniController(BatchKinematicController):
                 self._orn_buf[done_rows] = self._rot_snap_quat[done_rows]
                 completed_rot[done_rows] = True
 
-        # Write to sim.
-        self._apply_phase1()
+        # Write to sim (and refresh per-agent reported velocities).
+        self._apply_phase1(dt)
 
         # Advance translate completions.
         if completed.any():

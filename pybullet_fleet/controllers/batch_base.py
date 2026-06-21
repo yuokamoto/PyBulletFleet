@@ -27,10 +27,12 @@ sized with ``self._agents``.
 
 from __future__ import annotations
 
+import math
 from abc import abstractmethod
 from typing import TYPE_CHECKING, Dict, List, Optional, Type
 
 import numpy as np
+import pybullet as p
 
 from pybullet_fleet.controller import Controller
 from pybullet_fleet.geometry import quat_angle_between, quat_slerp_batch
@@ -89,6 +91,9 @@ class BatchKinematicController(Controller):
         self._pos_buf: np.ndarray = np.zeros((0, 3), dtype=np.float64)
         self._orn_buf: np.ndarray = np.zeros((0, 4), dtype=np.float64)
         self._moved_mask: np.ndarray = np.zeros((0,), dtype=bool)
+        # True for rows that moved on the *previous* flush — lets _apply_phase1
+        # zero an agent's reported velocity on the step it stops.
+        self._was_moved: np.ndarray = np.zeros((0,), dtype=bool)
 
     # ------------------------------------------------------------------ #
     # Lifecycle: agent registration (sim_core attachment is implicit)
@@ -176,6 +181,7 @@ class BatchKinematicController(Controller):
         self._pos_buf = self._resize_rows(self._pos_buf, n)
         self._orn_buf = self._resize_rows(self._orn_buf, n)
         self._moved_mask = self._resize_rows(self._moved_mask, n)
+        self._was_moved = self._resize_rows(self._was_moved, n)
 
     @staticmethod
     def _resize_rows(arr: np.ndarray, n: int) -> np.ndarray:
@@ -202,6 +208,7 @@ class BatchKinematicController(Controller):
         self._pos_buf[[i, j]] = self._pos_buf[[j, i]]
         self._orn_buf[[i, j]] = self._orn_buf[[j, i]]
         self._moved_mask[[i, j]] = self._moved_mask[[j, i]]
+        self._was_moved[[i, j]] = self._was_moved[[j, i]]
 
     def _on_agent_registered(self, idx: int, agent: "Agent") -> None:
         """Hook for subclasses to initialise their own per-agent state row."""
@@ -235,21 +242,56 @@ class BatchKinematicController(Controller):
             ``self._moved_mask`` — a (N,) boolean array.
         """
 
-    def _apply_phase1(self) -> None:
+    def _apply_phase1(self, dt: float = 0.0) -> None:
         """Write the rows flagged in ``self._moved_mask`` back to sim via the
-        buffered batch API ``sim_core.set_poses``.
+        buffered batch API ``sim_core.set_poses``, and refresh each moved agent's
+        reported velocity.
 
-        No-op when no agents moved or no sim_core attached.
+        Batch controllers otherwise never set ``_current_velocity`` /
+        ``_current_angular_velocity``, so ``RobotHandler`` would publish zero
+        odometry/diagnostics velocity for moving robots (unlike the per-agent
+        controllers). When ``dt > 0`` we derive linear/yaw velocity from the
+        cached pre-update pose → new pose for the moved rows, and zero the
+        velocity of agents that stopped this step.
+
+        No-op when no agents moved (and none just stopped) or no sim_core attached.
         """
         if self._sim_core is None or len(self._agents) == 0:
             return
-        if not bool(self._moved_mask.any()):
+
+        mask = self._moved_mask
+        # Agents that were moving last flush but not this one have stopped — zero
+        # their reported velocity (matches the per-agent controllers going IDLE).
+        just_stopped = self._was_moved & ~mask
+        if just_stopped.any():
+            for i in np.flatnonzero(just_stopped):
+                ag = self._agents[i]
+                ag._current_velocity[:] = 0.0
+                ag._current_angular_velocity = 0.0
+        self._was_moved = mask.copy()
+
+        if not bool(mask.any()):
             return
+
+        # Per-agent velocity from the cached (pre-update) pose → new pose. The
+        # agent's pose cache still holds the old pose because set_poses() runs
+        # afterwards. get_pose() is cached for kinematic agents (no PyBullet call).
+        if dt > 0.0:
+            inv_dt = 1.0 / dt
+            for i in np.flatnonzero(mask):
+                ag = self._agents[i]
+                old = ag.get_pose()
+                np.subtract(self._pos_buf[i], old.position, out=ag._current_velocity)
+                ag._current_velocity *= inv_dt
+                new_yaw = p.getEulerFromQuaternion(tuple(self._orn_buf[i]))[2]
+                dyaw = (new_yaw - old.yaw + math.pi) % (2.0 * math.pi) - math.pi
+                ag._current_angular_velocity = dyaw * inv_dt
+
         # set_poses accepts a Sequence[int] for object_ids; passing a NumPy
         # boolean-indexed view of int64 ids is cheap (no Python loop).
-        ids = self._object_ids[self._moved_mask].tolist()
-        positions = self._pos_buf[self._moved_mask]
-        orientations = self._orn_buf[self._moved_mask]
+        ids = self._object_ids[mask].tolist()
+        positions = self._pos_buf[mask]
+        orientations = self._orn_buf[mask]
         self._sim_core.set_poses(ids, positions, orientations)
 
     # ------------------------------------------------------------------ #

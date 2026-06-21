@@ -62,9 +62,17 @@ def projected_axis_limit(limit: ScalarOrAxes, direction_unit: np.ndarray) -> flo
     if is_scalar(limit):
         return float(limit)  # type: ignore[arg-type]
     arr = as_axes(limit, dim=direction_unit.shape[0])
-    ratios = np.abs(direction_unit) / arr
+    abs_dir = np.abs(direction_unit)
+    # ratio_i = |d_i| / arr_i. Axes the direction does not touch (|d_i| == 0)
+    # never constrain — even when their cap is 0 (a 0/0 that must read as 0, not
+    # NaN; e.g. max_linear_vel [0.3, 3.0, 0.0] moving in the XY plane). An axis
+    # with |d_i| > 0 but a 0 cap forbids motion → inf ratio → 0 effective limit.
+    with np.errstate(divide="ignore", invalid="ignore"):
+        ratios = np.where(abs_dir == 0.0, 0.0, abs_dir / arr)
     max_ratio = float(np.max(ratios))
-    return math.inf if max_ratio == 0.0 else 1.0 / max_ratio
+    if max_ratio == 0.0:
+        return math.inf
+    return 0.0 if math.isinf(max_ratio) else 1.0 / max_ratio
 
 
 def clamp_vec_to_limit(vec: np.ndarray, limit: ScalarOrAxes) -> np.ndarray:
