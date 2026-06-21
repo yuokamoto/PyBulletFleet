@@ -565,8 +565,34 @@ class RobotHandler(RobotHandlerBase):
         if not targets:
             logger.warning("'%s': empty joint trajectory, ignoring", self._ns)
             return
+
+        # Sanity-check the incoming command against this robot. These two
+        # failure modes are easy to hit (wrong/short --joints) but otherwise
+        # produce a silently motionless arm: a length mismatch is dropped in
+        # joint_trajectory_to_targets, and unknown names are skipped in the
+        # core (whose plain logging.* warning lacks node/robot context and the
+        # list of valid names). We surface them on the rcl node logger so they
+        # appear with the "[bridge_node]" prefix like the rest of the bridge.
+        valid = set(self.agent.get_all_joints_state_by_name().keys())
+        unknown = [n for n in targets if n not in valid]
+        if msg.points and len(msg.points[-1].positions) != len(msg.joint_names):
+            self._node.get_logger().warning(
+                f"'{self._ns}': joint_trajectory length mismatch — {len(msg.joint_names)} joint_names "
+                f"but {len(msg.points[-1].positions)} positions; extra entries ignored"
+            )
+        if unknown:
+            self._node.get_logger().warning(
+                f"'{self._ns}': joint_trajectory has unknown joint(s) {unknown} — skipped. "
+                f"This robot's joints: {sorted(valid)}"
+            )
+
         self.agent.set_joints_targets_by_name(targets)
-        logger.info("'%s': joint_trajectory received (%d joints)", self._ns, len(targets))
+        logger.info(
+            "'%s': joint_trajectory received (%d joints, %d applied)",
+            self._ns,
+            len(targets),
+            len(targets) - len(unknown),
+        )
 
     def _joint_cmd_cb(self, msg: Float64MultiArray) -> None:
         """Receive raw joint positions → set all joints."""

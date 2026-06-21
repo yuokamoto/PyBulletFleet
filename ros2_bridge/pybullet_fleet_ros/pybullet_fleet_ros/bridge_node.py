@@ -82,6 +82,9 @@ class BridgeNode(Node):
         self.declare_parameter("physics", sim_cfg.get("physics", False), _dyn)
         self.declare_parameter("target_rtf", float(sim_cfg.get("target_rtf", 1.0)), _dyn)
         self.declare_parameter("enable_sim_services", True, _dyn)
+        # "" (empty) is a sentinel meaning "not set" — lets us tell an explicit
+        # enable_monitor_gui:=false from the unset case (so we can follow gui by default).
+        self.declare_parameter("enable_monitor_gui", "", _dyn)
 
         # -- Step 3: Read final resolved values --
         publish_rate_param = get_float_param(self, "publish_rate", 0.0)
@@ -90,11 +93,20 @@ class BridgeNode(Node):
         effective_physics = get_bool_param(self, "physics", sim_cfg.get("physics", False))
         effective_rtf = get_float_param(self, "target_rtf", float(sim_cfg.get("target_rtf", 1.0)))
 
+        # Monitor GUI (tkinter window). Precedence: explicit enable_monitor_gui
+        # param → YAML enable_monitor_gui → follow gui (headless gui:=false hides it).
+        monitor_gui_raw = self.get_parameter("enable_monitor_gui").value
+        if isinstance(monitor_gui_raw, str) and monitor_gui_raw == "":
+            effective_monitor_gui = bool(sim_cfg.get("enable_monitor_gui", effective_gui))
+        else:
+            effective_monitor_gui = get_bool_param(self, "enable_monitor_gui", effective_gui)
+
         # Apply resolved values into the config dict
         sim_overrides = dict(sim_cfg)
         sim_overrides["gui"] = effective_gui
         sim_overrides["physics"] = effective_physics
         sim_overrides["target_rtf"] = effective_rtf
+        sim_overrides["enable_monitor_gui"] = effective_monitor_gui
 
         # Load handler_map from config (if present) and merge with
         # programmatic handler_map.  Config entries have lower priority
@@ -167,7 +179,8 @@ class BridgeNode(Node):
         self.get_logger().info(
             f"BridgeNode started: {actual_count} robots, "
             f"dt={timestep:.4f}s, target_rtf={effective_rtf}, "
-            f"publish_rate={publish_rate:.1f}Hz, gui={effective_gui}, physics={effective_physics}"
+            f"publish_rate={publish_rate:.1f}Hz, gui={effective_gui}, "
+            f"enable_monitor_gui={effective_monitor_gui}, physics={effective_physics}"
         )
 
     # ------------------------------------------------------------------
@@ -247,7 +260,11 @@ class BridgeNode(Node):
     def spawn_robot(self, spawn_params: AgentSpawnParams) -> Agent:
         """Spawn a robot dynamically (e.g., via SpawnEntity service)."""
         agent = Agent.from_params(spawn_params, sim_core=self.sim)
-        self._register_robot_handler(agent)
+        # from_params emits AGENT_SPAWNED at the end of construction, which
+        # _on_agent_spawned already turns into a RobotHandler. Register here only
+        # if that didn't happen (idempotent — avoids a double registration).
+        if agent.object_id not in self._handlers:
+            self._register_robot_handler(agent)
         self.get_logger().info(f"Spawned robot '{agent.name}' (id={agent.object_id})")
         return agent
 

@@ -45,6 +45,9 @@ def _launch_setup(context: LaunchContext):
     }
     if gui:
         bridge_params["gui"] = gui.lower() in ("true", "1", "yes")
+    enable_monitor_gui = context.launch_configurations.get("enable_monitor_gui", "")
+    if enable_monitor_gui:
+        bridge_params["enable_monitor_gui"] = enable_monitor_gui.lower() in ("true", "1", "yes")
     if target_rtf:
         bridge_params["target_rtf"] = float(target_rtf)
 
@@ -63,6 +66,11 @@ def generate_launch_description():
     return LaunchDescription(
         [
             DeclareLaunchArgument("gui", default_value="", description="Enable PyBullet GUI"),
+            DeclareLaunchArgument(
+                "enable_monitor_gui",
+                default_value="",
+                description="Show the tkinter monitor window. Empty = follow gui (hidden when gui:=false).",
+            ),
             DeclareLaunchArgument("target_rtf", default_value="", description="Real-time factor"),
             OpaqueFunction(function=_launch_setup),
         ]
