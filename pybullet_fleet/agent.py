@@ -295,6 +295,7 @@ class Agent(SimObject):
         ik_params: Optional[IKParams] = None,
         joint_tolerance: Optional[Union[float, list, dict]] = None,
         controller: Optional[Union[str, Dict[str, Any], "ControllerParams", "Controller"]] = None,
+        notify_spawn: bool = True,
     ):
         """
         Initialize Agent.
@@ -449,12 +450,19 @@ class Agent(SimObject):
         # Update log prefix to include Agent class name (SimObject sets it initially)
         self._update_log_prefix()
 
-        # Emit AGENT_SPAWNED now that the agent is fully constructed (controllers,
-        # action state, etc. are all set). add_object() runs mid-construction from
-        # super().__init__() and only emits OBJECT_SPAWNED there; emitting
-        # AGENT_SPAWNED from add_object would expose a half-built Agent (missing
-        # _controllers / _current_action) to subscribers — e.g. the ROS bridge's
-        # AGENT_SPAWNED handler, which crashed when spawning agents dynamically.
+        # Notify observers that the agent spawned — but only once it is fully
+        # constructed. add_object() (called mid-construction from super().__init__)
+        # only emits OBJECT_SPAWNED; emitting AGENT_SPAWNED there would expose a
+        # half-built Agent (no _controllers / _current_action). from_params()
+        # attaches plugins AFTER __init__, so it constructs with notify_spawn=False
+        # and emits the event itself once plugins are attached — otherwise a
+        # dynamically spawned battery robot would be observed (and its RobotHandler
+        # built) before its BatteryPlugin exists.
+        if notify_spawn:
+            self._emit_agent_spawned()
+
+    def _emit_agent_spawned(self) -> None:
+        """Emit AGENT_SPAWNED for this fully-constructed agent."""
         if self.sim_core is not None:
             self.sim_core.events.emit(SimEvents.AGENT_SPAWNED, agent=self)
 
@@ -764,7 +772,9 @@ class Agent(SimObject):
         # Forward spawn_params.controller verbatim — Agent.__init__ does
         # the single canonical parse (type / ControllerParams / impl extras)
         # and the motion_mode-vs-controller.type mismatch warning.
-        extra: Dict[str, Any] = {"sim_core": sim_core, "controller": spawn_params.controller}
+        # notify_spawn=False: defer AGENT_SPAWNED until plugins are attached below,
+        # so observers (e.g. the ROS bridge) never see a plugin-less agent.
+        extra: Dict[str, Any] = {"sim_core": sim_core, "controller": spawn_params.controller, "notify_spawn": False}
         if spawn_params.urdf_path is not None:
             agent = cls.from_urdf(
                 **_forward_spawn_params(
@@ -791,6 +801,8 @@ class Agent(SimObject):
             for entry in spawn_params.plugins:
                 agent.add_plugin(create_agent_plugin_from_entry(entry, agent))
 
+        # Agent is now fully constructed (controllers + plugins) — notify observers.
+        agent._emit_agent_spawned()
         return agent
 
     @classmethod
@@ -825,6 +837,7 @@ class Agent(SimObject):
         name: Optional[str] = None,
         user_data: Optional[Dict[str, Any]] = None,
         controller: Optional[Union[str, Dict[str, Any], "ControllerParams", "Controller"]] = None,
+        notify_spawn: bool = True,
     ) -> "Agent":
         """
         Create a mesh-based Agent with flexible shape control.
@@ -875,6 +888,7 @@ class Agent(SimObject):
             user_data=user_data,
             mass=mass,
             controller=controller,
+            notify_spawn=notify_spawn,
         )
 
         return agent
@@ -894,6 +908,7 @@ class Agent(SimObject):
         ik_params: Optional[IKParams] = None,
         joint_tolerance: Optional[Union[float, list, dict]] = None,
         controller: Optional[Union[str, Dict[str, Any], "ControllerParams", "Controller"]] = None,
+        notify_spawn: bool = True,
     ) -> "Agent":
         """
         Create a URDF-based Agent (with joints).
@@ -984,6 +999,7 @@ class Agent(SimObject):
             ik_params=ik_params,
             joint_tolerance=joint_tolerance,
             controller=controller,
+            notify_spawn=notify_spawn,
         )
 
         return agent
