@@ -669,8 +669,7 @@ class AgentManager(SimObjectManager[Agent]):
     - Pose goal assignment to individual agents
     - Callback system for custom update logic (goals, state tracking, etc.)
     - Query moving/stopped agents
-    - Optional batch controller for vectorized kinematic updates (use
-      ``batch_controller=`` or :meth:`enable_batch`)
+    - Optional batch controller for vectorized kinematic updates (``batch_controller=`` or :meth:`enable_batch`)
 
     Key Features:
     - Auto-registers update callback to simulation loop

@@ -50,7 +50,7 @@ class AgentSpawnParams(SimObjectSpawnParams):
     2. URDF robots: Specify urdf_path (for robots with joints)
     3. Virtual agents: Specify neither (invisible, no collision, useful for tracking/planning)
 
-    Attributes (in addition to SimObjectSpawnParams):
+    Attributes:
         urdf_path: Path to robot URDF file (for URDF-based robots with joints)
         motion_mode: MotionMode.OMNIDIRECTIONAL (move in any direction) or MotionMode.DIFFERENTIAL (rotate then move forward)
         use_fixed_base: If True, robot base is fixed and doesn't move (default: False)
