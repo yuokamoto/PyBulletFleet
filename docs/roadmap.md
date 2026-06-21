@@ -24,7 +24,7 @@ New robot and infrastructure models:
   | **Event log** | Causal record of state transitions (input replay, audit) | Per state-change | Yes (must) | Yes (input replay) |
   | **Trace** | Operational observability (Grafana/Tempo) | Action-level spans | Sampling allowed | No (view only) |
 
-  **Design principle: same source, separate sinks.** All three are derived from the [EventBus](design/eventbus/spec.md) — emit once, fan out to multiple subscribers. Snapshot ≠ Event (different schemas, separate files), but share common header keys (`sim_time`, `step`, `wall_time`, `run_id`) so they can be merged on the time axis.
+  **Design principle: same source, separate sinks.** All three are derived from the EventBus (`docs/design/eventbus/spec.md`) — emit once, fan out to multiple subscribers. Snapshot ≠ Event (different schemas, separate files), but share common header keys (`sim_time`, `step`, `wall_time`, `run_id`) so they can be merged on the time axis.
 
   **Why trace alone cannot replay:** trace is sampled, coarse-grained (Action-level spans), drops non-deterministic inputs (RNG seed, callback returns), and has attribute-size limits unsuitable for `Path` waypoints / IK results. Replay needs Event log (input) + Snapshot (checkpoint).
 
@@ -39,10 +39,10 @@ New robot and infrastructure models:
 
   **Implementation order:**
 
-  1. EventBus core + `SimEvent` dataclass (see [eventbus/spec.md](design/eventbus/spec.md))
+  1. EventBus core + `SimEvent` dataclass (see `docs/design/eventbus/spec.md`)
   2. Publish from `Action` state transitions, `add_object` / `remove_object`, collision Enter/Exit
   3. JSONL event writer subscriber (lossless input log)
-  4. `SimulationSnapshot` + `MultiRobotSimulationCore.snapshot()` / `restore()` (see [snapshot-replay/spec.md](design/snapshot-replay/spec.md))
+  4. `SimulationSnapshot` + `MultiRobotSimulationCore.snapshot()` / `restore()` (see `docs/design/snapshot-replay/spec.md`)
   5. `replay.py`: snapshot + event log → re-execution
   6. OTel exporter subscriber (covered in Observability section, independent of replay)
 
@@ -92,7 +92,7 @@ The higher-value use of a crowd is not visual fidelity but **turning crowd densi
 
 ### Devices
 
-See [ros2_bridge/README.md](../ros2_bridge/README.md) for device enhancements (elevator doors, double-hinge doors, xacro-parameterised URDFs).
+See `ros2_bridge/README.md` for device enhancements (elevator doors, double-hinge doors, xacro-parameterised URDFs).
 
 ## RMF Demo Feature Coverage
 
@@ -114,15 +114,15 @@ office, clinic, hotel, airport_terminal, battle_royale, **campus**. Outstanding:
 
 **Not modeled by design** (kinematic focus):
 - Robot sensors (lidar/camera), physics dynamics (wheel torque/contact).
-- `rmf_obstacle` detection pipeline (also unused in stock Gazebo demos; see [crowd-as-dynamic-obstacle benchmark](#crowd-as-dynamic-obstacle-throughput-benchmark)).
+- `rmf_obstacle` detection pipeline (also unused in stock Gazebo demos; see the "Crowd-as-dynamic-obstacle throughput benchmark" section above).
 
 ## Interfaces
 
 External communication layers:
 
-- **ROS 2** — Topic / service / action bridge for ROS 2 ecosystem integration (see [ros2_bridge/README.md](../ros2_bridge/README.md))
+- **ROS 2** — Topic / service / action bridge for ROS 2 ecosystem integration (see `ros2_bridge/README.md`)
 - **gRPC** — Language-agnostic RPC interface for orchestrators, WMS, and fleet managers
-- **Distributed co-simulation (Robot Proxy layer)** — Per-robot proxy processes that translate between simulated robots and real Robot Apps (Nav2, task assigners, BTs). Enables running 100+ unmodified single-robot software stacks against a centralized batched simulator. Sim Central stays single-process and batched; only a thin fixed-schema boundary (`StateSnapshot` + `CommandBuffer` + Events) crosses the IPC. **Shares schema with Snapshot/Replay** — same `StateSnapshot` dataclass feeds live IPC, replay log, and observability sinks (define schema once, fan out to multiple consumers). See [co-simulation/spec.md](design/co-simulation/spec.md) for full design including layer separation, transport options (shared memory / gRPC / DDS), lockstep vs async sync modes, and 6-phase implementation plan.
+- **Distributed co-simulation (Robot Proxy layer)** — Per-robot proxy processes that translate between simulated robots and real Robot Apps (Nav2, task assigners, BTs). Enables running 100+ unmodified single-robot software stacks against a centralized batched simulator. Sim Central stays single-process and batched; only a thin fixed-schema boundary (`StateSnapshot` + `CommandBuffer` + Events) crosses the IPC. **Shares schema with Snapshot/Replay** — same `StateSnapshot` dataclass feeds live IPC, replay log, and observability sinks (define schema once, fan out to multiple consumers). See `docs/design/co-simulation/spec.md` for full design including layer separation, transport options (shared memory / gRPC / DDS), lockstep vs async sync modes, and 6-phase implementation plan.
 
 ## Refactoring
 
@@ -394,7 +394,7 @@ Simulation environment assets (warehouse floors, factory layouts, etc.):
 
 Operational visibility for long benchmark runs and production deployments.
 **Shares the EventBus with Snapshot/Replay** — same emission point, different sinks.
-See [observability/spec.md](design/observability/spec.md) for full design.
+See `docs/design/observability/spec.md` for full design.
 
 - **Structured logging (JSON)** — Replace prefix-string `NamedLazyLogger` with `extra={...}` dict fields (`agent_id`, `object_id`, `sim_time`, `step`). Enables Loki/Grafana label queries.
 - **`sim_time` injection filter** — `logging.Filter` registered by `MultiRobotSimulationCore` auto-attaches `sim_time` and `step` to every record. Removes per-call boilerplate on hot paths.

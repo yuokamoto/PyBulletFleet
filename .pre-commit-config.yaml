@@ -8,7 +8,9 @@ repos:
     rev: v4.5.0
     hooks:
       - id: trailing-whitespace          # Remove trailing whitespace
+        exclude: '^benchmark/results/'   # generated benchmark data — not formatted
       - id: end-of-file-fixer            # Ensure files end with a newline
+        exclude: '^benchmark/results/'   # generated benchmark data — not formatted
       - id: check-yaml                   # Validate YAML files
       - id: check-merge-conflict         # Detect merge conflict markers
       - id: check-toml                   # Validate TOML files (pyproject.toml)
