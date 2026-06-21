@@ -5,6 +5,9 @@ Body-frame → world-frame rotation (``twist_to_world_velocity``) delegates to
 :func:`pybullet_fleet.tools.body_to_world_velocity_2d` (pure math, no ROS deps).
 """
 
+import logging
+import math
+
 from typing import List, Optional, Tuple
 
 from builtin_interfaces.msg import Time as TimeMsg
@@ -25,6 +28,33 @@ from std_msgs.msg import Header
 from trajectory_msgs.msg import JointTrajectory
 
 from pybullet_fleet.geometry import Pose
+
+logger = logging.getLogger(__name__)
+
+# Quaternions with a norm below this are treated as degenerate (e.g. the
+# all-zero quaternion produced by an unset orientation field).
+_QUAT_NORM_EPS = 1e-6
+
+
+def _sanitize_quat(x: float, y: float, z: float, w: float) -> List[float]:
+    """Return a usable quaternion, defaulting a degenerate one to identity.
+
+    A goal such as ``orientation: {w: 0.0}`` arrives as the all-zero quaternion
+    ``(0, 0, 0, 0)``, which has zero norm and would otherwise raise deep inside
+    the controller (``_normalize_quat``), taking down the whole bridge node.
+    We default it to identity here at the ROS boundary and warn instead.
+    """
+    if math.sqrt(x * x + y * y + z * z + w * w) < _QUAT_NORM_EPS:
+        logger.warning(
+            "Received degenerate quaternion (x=%.3g, y=%.3g, z=%.3g, w=%.3g); "
+            "defaulting orientation to identity. Set w=1.0 for no rotation.",
+            x,
+            y,
+            z,
+            w,
+        )
+        return [0.0, 0.0, 0.0, 1.0]
+    return [x, y, z, w]
 
 
 def pbf_pose_to_ros(pbf_pose: Pose) -> PoseMsg:
@@ -48,12 +78,12 @@ def ros_pose_to_pbf(ros_pose: PoseMsg) -> Pose:
     """Convert geometry_msgs/Pose → PyBulletFleet Pose."""
     return Pose(
         position=[ros_pose.position.x, ros_pose.position.y, ros_pose.position.z],
-        orientation=[
+        orientation=_sanitize_quat(
             ros_pose.orientation.x,
             ros_pose.orientation.y,
             ros_pose.orientation.z,
             ros_pose.orientation.w,
-        ],
+        ),
     )
 
 
