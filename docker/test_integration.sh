@@ -12,9 +12,12 @@ source /rmf_demos_ws/install/setup.bash
 # URDF paths are relative to pybullet_fleet root
 cd /opt/pybullet_fleet
 
-# Start bridge in background
+# Start bridge in background.
+# The bridge is config_yaml-driven (num_robots/robot_urdf were removed); spawn
+# the three test robots (robot0/1/2) from bridge_test.yaml.
+TEST_CONFIG=/rmf_demos_ws/install/pybullet_fleet_ros/share/pybullet_fleet_ros/config/bridge_test.yaml
 ros2 run pybullet_fleet_ros bridge_node \
-    --ros-args -p num_robots:=3 -p gui:=false -p publish_rate:=10.0 &
+    --ros-args -p config_yaml:=$TEST_CONFIG -p gui:=false -p publish_rate:=10.0 &
 BRIDGE_PID=$!
 sleep 3
 
@@ -79,9 +82,11 @@ else
     exit 1
 fi
 
-# Cleanup
-kill $BRIDGE_PID 2>/dev/null
-wait $BRIDGE_PID 2>/dev/null
+# Cleanup. Force-kill and don't `wait` — bridge_node does not always exit on a
+# plain SIGTERM, and `wait` on it would hang the test after all checks passed.
+kill $BRIDGE_PID 2>/dev/null || true
+sleep 1
+kill -9 $BRIDGE_PID 2>/dev/null || true
 
 echo ""
 echo "=== All integration tests PASSED ==="

@@ -1,0 +1,40 @@
+# Bridge config for the integration smoke test (docker/test_integration.sh).
+#
+# Three differential-drive mobile robots (robot0, robot1, robot2) — matches the
+# topics the integration test checks (/robot0/odom, /robot1/odom, /robot2/odom).
+# Headless by default; the test overrides nothing else.
+
+simulation:
+  gui: false
+  physics: false
+
+entities:
+  - name: robot0
+    urdf_path: "robots/mobile_robot.urdf"
+    pose: [0.0, 0.0, 0.05]
+    yaw: 0.0
+    motion_mode: "differential"
+    controller:
+      type: "differential"
+      max_linear_vel: 2.0
+      max_angular_vel: 3.0
+
+  - name: robot1
+    urdf_path: "robots/mobile_robot.urdf"
+    pose: [2.0, 0.0, 0.05]
+    yaw: 0.0
+    motion_mode: "differential"
+    controller:
+      type: "differential"
+      max_linear_vel: 2.0
+      max_angular_vel: 3.0
+
+  - name: robot2
+    urdf_path: "robots/mobile_robot.urdf"
+    pose: [4.0, 0.0, 0.05]
+    yaw: 0.0
+    motion_mode: "differential"
+    controller:
+      type: "differential"
+      max_linear_vel: 2.0
+      max_angular_vel: 3.0
