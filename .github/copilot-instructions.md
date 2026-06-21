@@ -148,3 +148,9 @@ agent.move_end_effector([0.3, 0.0, 0.4])  # IK solves joint angles
 | `make bench-full` | Full benchmark sweep |
 | `make clean` | Remove caches and build artifacts |
 | `make help` | List all targets |
+
+## Shared skills
+
+Reusable skills live in `.copilot/skills/` (loaded by Copilot). `.claude/skills`
+is a symlink to it, so Claude Code discovers the same skills — edit a skill once
+and both tools pick it up.
