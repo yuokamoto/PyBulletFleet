@@ -9,10 +9,10 @@ see [Benchmark Suite](benchmark-suite) and [Profiling Guide](profiling-guide).
 
 | Item | Value |
 |------|-------|
-| OS | Ubuntu 20.04 (Linux 5.15.0) |
-| CPU | Intel Core i7-1185G7 @ 3.00 GHz (4 cores / 8 logical) |
-| RAM | 31 GB |
-| Python | 3.8.10 |
+| OS | Ubuntu (Linux 6.6 microsoft-standard-WSL2) |
+| CPU | AMD Ryzen AI 7 PRO 350 w/ Radeon 860M (8 cores / 16 logical) |
+| RAM | 29 GB |
+| Python | 3.10.12 |
 | Conditions | Headless (`gui=false`), `physics=false`, `timestep=0.1`, 3 repetitions |
 
 ---
@@ -21,14 +21,14 @@ see [Benchmark Suite](benchmark-suite) and [Profiling Guide](profiling-guide).
 
 **Script:** `make bench-full` → `benchmark/run_benchmark.py --sweep 100 500 1000`
 **Config:** `benchmark/configs/general.yaml` — `collision_check_frequency=null` (every step), 50% agents moving
-**Last measured:** 2026-04-08
+**Last measured:** 2026-06-22 (v0.4.0)
 
 | Agents | Step Time (ms) | RTF   | Spawn Time | Memory Delta |
 |--------|----------------|-------|------------|--------------|
-| 100    | 2.17 ± 0.10    | 46.1× | 26 ms      | −24.8 MB     |
+| 100    | 1.56 ± 0.13    | 64.2× | 33 ms      | −25.0 MB     |
 | 250    | 6.45 ± 0.30    | 16×   | 65 ms      | −19.7 MB †   |
-| 500    | 13.21 ± 0.21   | 7.6×  | 137 ms     | −15.3 MB     |
-| 1000   | 29.98 ± 0.39   | 3.3×  | 285 ms     | −3.2 MB      |
+| 500    | 9.84 ± 0.43    | 10.2× | 157 ms     | −14.3 MB     |
+| 1000   | 22.79 ± 1.61   | 4.4×  | 290 ms     | −1.5 MB      |
 | 2000   | 94.82 ± 5.81   | 1.1×  | 731 ms     | +29.6 MB †   |
 
 † Row from 2026-03-12; not included in `make bench-full` (100/500/1000 only).

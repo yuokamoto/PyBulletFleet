@@ -90,13 +90,13 @@ See [Tutorial 6 — Robot Models](https://pybulletfleet.readthedocs.io/en/latest
 ## Performance
 
 <!-- sync with docs/benchmarking/results.md -->
-> Results from a single test environment (Intel i7-1185G7, 32 GB RAM, Ubuntu 20.04). Your numbers will vary depending on hardware.
+> Results from a single test environment (AMD Ryzen AI 7 PRO 350, 29 GB RAM, Linux WSL2). Your numbers will vary depending on hardware.
 
 | Agents | Real-Time Factor | Step Time |
 |--------|-----------------|-----------|
-| 100    | 46× | 2.2 ms  |
-| 500    | 7.6×| 13.2 ms |
-| 1000   | 3.3×| 30.0 ms |
+| 100    | 64× | 1.6 ms  |
+| 500    | 10.2×| 9.8 ms |
+| 1000   | 4.4×| 22.8 ms |
 | 2000   | 1.1×| 94.8 ms |
 
 Kinematics mode (physics OFF), headless. See [Benchmark Results](benchmark/README.md#benchmark-results) for full data, component breakdown, and methodology.

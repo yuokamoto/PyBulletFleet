@@ -102,13 +102,13 @@ roadmap
 
 ## Performance at a Glance
 
-> Single test environment (Intel i7-1185G7, 32 GB RAM, Ubuntu 20.04). Results will vary by hardware.
+> Single test environment (AMD Ryzen AI 7 PRO 350, 29 GB RAM, Linux WSL2). Results will vary by hardware.
 
 | Agents | Real-Time Factor | Step Time |
 |--------|-----------------|-----------|
-| 100    | 46× | 2.2 ms  |
-| 500    | 7.6×| 13.2 ms |
-| 1000   | 3.3×| 30.0 ms |
+| 100    | 64× | 1.6 ms  |
+| 500    | 10.2×| 9.8 ms |
+| 1000   | 4.4×| 22.8 ms |
 | 2000   | 1.1×| 94.8 ms |
 
 Kinematics mode (physics OFF), headless. See {doc}`benchmarking/benchmark-suite` for full data, component breakdown, and methodology.
