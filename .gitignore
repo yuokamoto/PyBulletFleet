@@ -53,3 +53,11 @@ todo_summary.txt
 
 # ROSCon JP submission draft (personal)
 _roscon_jp_2026/
+
+# Local Claude Code config (the shared .claude/skills symlink IS tracked)
+.claude/settings.json
+.claude/settings.local.json
+.claude/worktrees/
+
+# Stray benchmark outputs at repo root (canonical results live in benchmark/results/)
+/benchmark_results_*.json
