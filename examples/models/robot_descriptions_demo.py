@@ -33,7 +33,7 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
-from pybullet_fleet.robot_models import auto_detect_profile, list_all_models, resolve_urdf
+from pybullet_fleet.robot_models import auto_detect_profile, list_all_models, resolve_model
 
 parser = argparse.ArgumentParser(description="Tier 3 robot_descriptions demo")
 parser.add_argument("--robot", default="tiago", help="Robot name (default: tiago)")
@@ -61,7 +61,7 @@ if args.list:
 #   - If cached → instant return
 print(f"Resolving '{args.robot}'...")
 try:
-    urdf_path = resolve_urdf(args.robot)
+    urdf_path = resolve_model(args.robot)
 except FileNotFoundError as e:
     print(f"\n  ERROR: {e}")
     print("\n  To fix, run:")
@@ -79,11 +79,18 @@ if not os.path.isfile(urdf_path):
 
 # --- Spawn and inspect ---
 from pybullet_fleet.agent import Agent, AgentSpawnParams
-from pybullet_fleet.core_simulation import MultiRobotSimulationCore, SimulationParams
+from pybullet_fleet.config_utils import load_yaml_config, merge_configs
+from pybullet_fleet.core_simulation import MultiRobotSimulationCore
 from pybullet_fleet.geometry import Pose
 
-params = SimulationParams(gui=True, timestep=0.1, physics=False, target_rtf=1.0)
-sim = MultiRobotSimulationCore(params)
+_BASE_CONFIG = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "config", "config.yaml")
+_OVERRIDES = {
+    "simulation": {
+        "target_rtf": 1.0,
+        "camera": {"camera_distance": 2.5, "camera_target": [0.0, 0.0, 0.5]},
+    }
+}
+sim = MultiRobotSimulationCore.from_dict(merge_configs(load_yaml_config(_BASE_CONFIG), _OVERRIDES))
 
 # Auto-detect profile
 profile = auto_detect_profile(urdf_path, sim.client)
@@ -108,8 +115,8 @@ print(f"\nSpawned '{agent.name}' with {agent.get_num_joints()} joints")
 
 # If the robot has movable joints, gently cycle them so it's not static
 if profile.movable_joint_names:
-    step: list[float] = [0.0] * len(profile.movable_joint_names)
-    directions: list[float] = [1.0] * len(profile.movable_joint_names)
+    step = [0.0] * len(profile.movable_joint_names)
+    directions = [1.0] * len(profile.movable_joint_names)
 
     def _wave_joints(sim_core, dt):
         """Slowly oscillate each joint within ±20% of its range."""

@@ -107,7 +107,7 @@ Merges current `DifferentialVelocityController._apply_velocity()` + Agent's diff
 - **VELOCITY mode**: Unicycle kinematics (v·cos(yaw), v·sin(yaw), wz)
 - **POSE mode**: Two-phase TPI (ROTATE → FORWARD) with slerp interpolation
   - Owns `_tpi_rotation_angle`, `_tpi_forward`, `_slerp_precomp`
-  - Phase state (`PosePhase`) moves from controller-internal, not Agent
+  - Phase state (`DifferentialPhase`) moves from controller-internal, not Agent
 
 ### OmniController
 

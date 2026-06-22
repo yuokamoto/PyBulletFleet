@@ -170,7 +170,7 @@ sim.run_simulation()
 
 - [ ] Controller ABCで `agent._` prefixの内部状態にアクセスする設計は許容するか、public APIを追加すべきか
 - [ ] World loaderでロボットも含めるか、ロボットは常に別定義にするか
-- [ ] YAML config の `robots:` セクション追加時の既存config後方互換性
+- [ ] YAML config の `entities:` セクション追加時の既存config後方互換性
 - [ ] entry_pointsの名前空間衝突（同名で別パッケージが登録した場合）の処理方針
 
 ## Success Criteria

@@ -21,7 +21,7 @@ extensions = [
 ]
 
 templates_path = ["_templates"]
-exclude_patterns = ["_build", "archive", "design", "Thumbs.db", ".DS_Store"]
+exclude_patterns = ["_build", "archive", "design", "audit", "Thumbs.db", ".DS_Store"]
 
 # -- MyST (Markdown) settings ------------------------------------------------
 myst_enable_extensions = [

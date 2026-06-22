@@ -4,9 +4,10 @@ General-purpose PyBullet simulation library for multi-robot fleets
 """
 
 # Type definitions
-from pybullet_fleet.types import (
+from pybullet_fleet.types import (  # noqa: F401
     ActionStatus,
     ControllerMode,
+    DoorState,
     MotionMode,
     MovementDirection,
     PosePhase,
@@ -18,6 +19,7 @@ from pybullet_fleet.geometry import Path, Pose
 
 # Robot/Agent management
 from pybullet_fleet.agent import Agent, AgentSpawnParams, IKParams
+from pybullet_fleet.plugins.battery_plugin import BatteryPlugin
 from pybullet_fleet.agent_manager import AgentManager, GridSpawnParams
 
 # Core simulation classes
@@ -25,6 +27,17 @@ from pybullet_fleet.core_simulation import (
     MultiRobotSimulationCore,
     SimulationParams,
 )
+
+# EventBus
+from pybullet_fleet.events import EventBus, SimEvents  # noqa: F401
+
+# World / SDF loading  (load_rmf_world kept as backward-compatible alias)
+from pybullet_fleet.sdf_loader import load_mesh_directory, load_rmf_world  # noqa: F401
+from pybullet_fleet.sdf_loader import load_sdf_world, load_sdf_world_file  # noqa: F401
+from pybullet_fleet.sdf_loader import resolve_sdf_to_urdf  # noqa: F401
+
+# Robot model resolution  (resolve_urdf kept as backward-compatible alias)
+from pybullet_fleet.robot_models import resolve_model  # noqa: F401
 
 # Recorder
 from pybullet_fleet.recorder import SimulationRecorder
@@ -39,6 +52,7 @@ from pybullet_fleet.controller import (
     DifferentialController,
     OmniController,
     create_controller,
+    create_controller_from_entry,
     register_controller,
 )
 
@@ -47,6 +61,7 @@ from pybullet_fleet.geometry import (  # noqa: F401,F811
     quat_angle_between,
     quat_from_rotvec,
     quat_multiply,
+    quat_slerp_batch,
     quat_to_rot_matrix,
     rotate_vector,
 )
@@ -65,6 +80,29 @@ from pybullet_fleet.config_utils import load_yaml_config
 
 # Entity registry
 from pybullet_fleet.entity_registry import register_entity_class
+
+# Plugin system
+from pybullet_fleet.sim_plugin import (
+    SimPlugin,
+    create_sim_plugin,
+    create_sim_plugin_from_entry,
+    list_sim_plugins,
+    register_sim_plugin,
+)
+from pybullet_fleet.agent_plugin import (
+    AgentPlugin,
+    create_agent_plugin,
+    list_agent_plugins,
+    register_agent_plugin,
+)
+from pybullet_fleet.plugin_utils import PluginRegistry
+
+# Device classes
+from pybullet_fleet.devices.door import Door, DoorParams
+from pybullet_fleet.devices.elevator import Elevator, ElevatorParams
+
+# High-level controllers
+from pybullet_fleet.controllers import PatrolController, RandomWalkController
 
 # Robot model resolution
 from pybullet_fleet.robot_models import (
@@ -97,9 +135,13 @@ __all__ = [
     "SpatialHashCellSizeMode",
     "SimulationRecorder",
     "SimObject",
+    # Events
+    "EventBus",
+    "SimEvents",
     # Agent management
     "Agent",
     "AgentSpawnParams",
+    "BatteryPlugin",
     "IKParams",
     "AgentManager",
     "GridSpawnParams",
@@ -121,12 +163,29 @@ __all__ = [
     "quat_angle_between",
     "quat_from_rotvec",
     "quat_multiply",
+    "quat_slerp_batch",
     "rotate_vector",
     # Config utilities
     "load_yaml_config",
     # Entity registry
     "register_entity_class",
+    # Plugin system
+    "SimPlugin",
+    "AgentPlugin",
+    "BatteryPlugin",
+    "create_agent_plugin",
+    "list_agent_plugins",
+    "register_agent_plugin",
+    # Device classes
+    "Door",
+    "DoorParams",
+    "Elevator",
+    "ElevatorParams",
+    # High-level controllers
+    "PatrolController",
+    "RandomWalkController",
     # Robot models
+    "resolve_model",
     "resolve_urdf",
     "list_all_models",
     "ModelEntry",

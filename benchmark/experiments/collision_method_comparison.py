@@ -141,8 +141,10 @@ def setup_simulation(num_agents: int, spacing: float = 0.08):
     agent_spawn_params = AgentSpawnParams(
         urdf_path=robot_urdf,
         motion_mode=MotionMode.OMNIDIRECTIONAL,
-        max_linear_vel=2.0,
-        max_angular_vel=3.0,
+        controller={
+            "max_linear_vel": 2.0,
+            "max_angular_vel": 3.0,
+        },
         mass=0.0,
     )
 

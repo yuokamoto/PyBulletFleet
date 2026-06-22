@@ -10,7 +10,7 @@
 - `MultiRobotSimulationCore.batch_spawn()` context manager: rendering off + deferred spatial grid
 - `AgentManager.spawn_from_config()` uses batch_spawn context
 - `AgentManager.spawn_entities_from_config(entities_yaml)` spawns mixed entities via registry
-- Backward-compat: `parse_agent_config()`, `robots:` key, all existing spawn methods unchanged
+- Backward-compat: `parse_agent_config()`, `entities:` key, all existing spawn methods unchanged
 
 ### Non-functional
 - All 815 existing tests pass

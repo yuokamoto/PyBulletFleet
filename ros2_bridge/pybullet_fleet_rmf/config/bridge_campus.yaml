@@ -1,0 +1,84 @@
+# Bridge config for the campus demo — single deliveryRobot fleet, outdoor.
+#
+# Fleet: deliveryRobot (nav_graph 0) — 3 robots, delivery.
+# No doors / lifts / workcells (campus.building.yaml has none).
+#
+# Robot spawn poses are taken from campus.world (the Gazebo include poses).
+#
+# campus is georeferenced: its nav graph is in a map frame offset ~ (22000,
+# 31500) from the local world origin (e.g. nav waypoint room_5 = (22119.4,
+# 31427.3) maps to world (119.4, -72.7)). Robots spawn in the local world
+# frame below; the bridge adds this offset to poses published to RMF and
+# subtracts it from incoming nav goals so RMF and the sim agree.
+rmf_frame_offset: [22000.0, 31500.0]
+
+simulation:
+  gui: true
+  physics: false
+  target_rtf: 3.0
+  enable_structure_transparency: true
+  camera:
+    camera_mode: manual
+    camera_distance: 130
+    camera_yaw: 0
+    camera_pitch: -70
+    camera_target: [150, -100, 0]
+
+# Outdoor campus environment — full .world from rmf_demos_maps.
+# Robot models are spawned separately as agents, so skip them in world loading.
+world:
+  world_file: "/rmf_demos_ws/install/rmf_demos_maps/share/rmf_demos_maps/maps/campus/campus.world"
+  skip_models:
+    - DeliveryRobot
+  # The campus environment is a single 50-material OBJ; PyBullet can only apply
+  # one texture per mesh, so it tiles one (a person) over everything. Flat-shade
+  # it grey until multi-material OBJ support lands (see roadmap).
+  force_color: [0.6, 0.6, 0.6, 1.0]
+
+entities:
+  # ── Fleet: deliveryRobot (nav_graph 0) ───────────────────────────
+  # Spawn positions from campus.world include poses.
+  - name: deliveryRobot_1
+    sdf_path: "/rmf_demos_ws/install/rmf_demos_assets/share/rmf_demos_assets/models/DeliveryRobot/model.sdf"
+    pose: [119.378, -72.659, 0.0]
+    yaw: 2.643
+    motion_mode: "differential"
+    controller:
+      max_linear_vel: 0.7
+      max_linear_accel: 0.5
+      navigation_2d: true
+    plugins:
+      - type: battery
+        config:
+          discharge_rate: 0.001
+          charge_rate: 0.005
+
+  - name: deliveryRobot_2
+    sdf_path: "/rmf_demos_ws/install/rmf_demos_assets/share/rmf_demos_assets/models/DeliveryRobot/model.sdf"
+    pose: [109.921, -86.530, 0.0]
+    yaw: 2.583
+    motion_mode: "differential"
+    controller:
+      max_linear_vel: 0.7
+      max_linear_accel: 0.5
+      navigation_2d: true
+    plugins:
+      - type: battery
+        config:
+          discharge_rate: 0.001
+          charge_rate: 0.005
+
+  - name: deliveryRobot_3
+    sdf_path: "/rmf_demos_ws/install/rmf_demos_assets/share/rmf_demos_assets/models/DeliveryRobot/model.sdf"
+    pose: [218.547, -134.264, 0.0]
+    yaw: -0.509
+    motion_mode: "differential"
+    controller:
+      max_linear_vel: 0.7
+      max_linear_accel: 0.5
+      navigation_2d: true
+    plugins:
+      - type: battery
+        config:
+          discharge_rate: 0.001
+          charge_rate: 0.005

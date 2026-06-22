@@ -16,37 +16,38 @@
 # ========================================
 
 # Simulation Parameters
-target_rtf: 100               # High-speed simulation (100x real-time)
-timestep: 0.1                # Coarse timestep OK for kinematics
-duration: 0                  # Unlimited
-gui: true
-physics: false               # 🔴 Physics OFF (kinematics mode)
-monitor: true
-ignore_static_collision: true
-enable_time_profiling: false
+simulation:
+  target_rtf: 100               # High-speed simulation (100x real-time)
+  timestep: 0.1                # Coarse timestep OK for kinematics
+  duration: 0                  # Unlimited
+  gui: true
+  physics: false               # 🔴 Physics OFF (kinematics mode)
+  monitor: true
+  ignore_static_collision: true
+  enable_time_profiling: false
 
-# Collision Detection - Kinematics Mode
-collision_detection_method: "closest_points"  # 🔴 Distance-based (kinematics-safe)
-collision_margin: 0.02                        # 🔴 2cm safety clearance
+  # Collision Detection - Kinematics Mode
+  collision_detection_method: "closest_points"  # 🔴 Distance-based (kinematics-safe)
+  collision_margin: 0.02                        # 🔴 2cm safety clearance
 
-# Performance Optimization
-enable_monitor_gui: true
+  # Performance Optimization
+  enable_monitor_gui: true
 
-# Logging
-log_level: info
+  # Logging
+  log_level: info
 
-# Camera
-camera:
-  camera_mode: manual
-  camera_view_type: perspective
-  camera_distance: 20.0
-  camera_yaw: 45
-  camera_pitch: -30
-  camera_target: [5, 5, 0]
+  # Camera
+  camera:
+    camera_mode: manual
+    camera_view_type: perspective
+    camera_distance: 20.0
+    camera_yaw: 45
+    camera_pitch: -30
+    camera_target: [5, 5, 0]
 
-# Visualizer
-enable_collision_shapes: false
-enable_structure_transparency: false
-enable_shadows: false
-enable_gui_panel: false
-enable_collision_color_change: false
+  # Visualizer
+  enable_collision_shapes: false
+  enable_structure_transparency: false
+  enable_shadows: false
+  enable_gui_panel: false
+  enable_collision_color_change: false

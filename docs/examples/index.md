@@ -31,12 +31,12 @@ robot-models
 | 3 | [Multi-Robot Fleet](multi-robot-fleet) | `scale/100robots_grid_demo.py` | AgentManager, grid spawn, 100+ robots |
 | 4 | [Arm Pick & Drop](arm-pick-drop) | `arm/pick_drop_arm_demo.py` | Joint-space IK, JointAction, tolerance tuning |
 | 5 | [Arm EE Control](arm-ee-control) | `arm/pick_drop_arm_ee_demo.py` | End-effector IK, PoseAction, mobile manipulators |
-| 6 | [Robot Models](robot-models) | `models/resolve_urdf_demo.py` | `resolve_urdf`, model registry, `robot_descriptions` |
+| 6 | [Robot Models](robot-models) | `models/resolve_model_demo.py` | `resolve_model`, model registry, `robot_descriptions` |
 
 ## Switching Robot Models with `--robot`
 
 Most demo scripts accept a `--robot` argument to swap the robot model at runtime.
-Pass a model name (resolved via `resolve_urdf()`) or a direct URDF path.
+Pass a model name (resolved via `resolve_model()`) or a direct URDF path.
 The model should be compatible with the demo category — arm models for arm demos,
 mobile models for mobile demos:
 
@@ -63,11 +63,11 @@ python examples/scale/100robots_grid_demo.py --robot racecar --arm-robot kuka_ii
 | Scale (arm) | `pick_drop_arm_100robots_demo.py` | `--robot` | `panda` | `kuka_iiwa`, `arm_robot` |
 | Grid demo | `100robots_grid_demo.py` | `--robot` | `husky` | `racecar`, `mobile_robot` |
 | Grid demo | `100robots_grid_demo.py` | `--arm-robot` | `panda` | `kuka_iiwa`, `arm_robot` |
-| Model demos | `resolve_urdf_demo.py` | `--robot` | `panda` | any registered model |
+| Model demos | `resolve_model_demo.py` | `--robot` | `panda` | any registered model |
 | Model demos | `robot_descriptions_demo.py` | `--robot` | `tiago` | any `robot_descriptions` model |
 
-Model names are resolved by `resolve_urdf()` — see [Tutorial 6 — Robot Models](robot-models)
-for the full resolution system and `python examples/models/resolve_urdf_demo.py --list`
+Model names are resolved by `resolve_model()` — see [Tutorial 6 — Robot Models](robot-models)
+for the full resolution system and `python examples/models/resolve_model_demo.py --list`
 for all available names.
 
 ## API Quick-Reference
@@ -76,7 +76,7 @@ for all available names.
 |-----|-----------|
 | `SimObject.from_mesh` / `from_params` | Tutorial 1 |
 | `Agent.from_mesh` / `from_urdf` / `from_params` | Tutorials 1, 4, 6 |
-| `resolve_urdf` / `list_all_models` / `discover_models` / `auto_detect_profile` | Tutorial 6 |
+| `resolve_model` / `list_all_models` / `discover_models` / `auto_detect_profile` | Tutorial 6 |
 | `register_model` / `unregister_model` / `add_search_path` | Tutorial 6 |
 | `Pose.from_xyz` / `from_euler` | Tutorials 1–4 |
 | `agent.get_pose()` / `set_pose()` | Tutorial 1 |

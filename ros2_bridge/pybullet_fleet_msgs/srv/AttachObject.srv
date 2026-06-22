@@ -1,0 +1,47 @@
+# Attach or detach a simulation object to/from a robot.
+#
+# More flexible than toggle_attach (SetBool), which is the
+# rmf_demos-compatible interface for cart delivery.
+# This service allows specifying exactly which object, which link,
+# and what offset to use.
+#
+# Usage examples:
+#
+#   # Attach nearest object (like toggle_attach but with search_radius)
+#   ros2 service call /{robot}/attach_object pybullet_fleet_msgs/srv/AttachObject
+#     "{attach: true, search_radius: 1.0}"
+#
+#   # Attach specific object by name
+#   ros2 service call /{robot}/attach_object pybullet_fleet_msgs/srv/AttachObject
+#     "{attach: true, object_name: 'pallet_01'}"
+#
+#   # Attach to a specific link with offset
+#   ros2 service call /{robot}/attach_object pybullet_fleet_msgs/srv/AttachObject
+#     "{attach: true, object_name: 'box_A', parent_link: 'end_effector',
+#       offset: {position: {x: 0, y: 0, z: 0.1}}}"
+#
+#   # Detach specific object
+#   ros2 service call /{robot}/attach_object pybullet_fleet_msgs/srv/AttachObject
+#     "{attach: false, object_name: 'pallet_01'}"
+
+# --- Request ---
+
+bool attach                          # true = attach, false = detach
+
+string object_name                   # Target object name (empty = nearest for attach,
+                                     # first attached for detach)
+
+string parent_link                   # Link name to attach to (empty = base_link)
+
+geometry_msgs/Pose offset            # Attachment offset in parent link frame
+                                     # (identity = no offset)
+
+float32 search_radius                # Search radius for nearest-object mode (default 0 = 0.5m)
+                                     # Only used when object_name is empty and attach=true
+
+---
+# --- Response ---
+
+bool success                         # Whether the operation completed successfully
+string message                       # Human-readable status message
+string attached_object_name          # Name of the object that was attached/detached

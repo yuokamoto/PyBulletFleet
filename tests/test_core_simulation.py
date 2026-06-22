@@ -103,6 +103,39 @@ def was_searched(spy_grid, sim_core, obj):
 
 
 # ============================================================================
+# SimulationParams configuration
+# ============================================================================
+
+
+class TestSimulationParamsCoercion:
+    """SimulationParams normalises config-derived values into proper types."""
+
+    def test_collision_detection_method_string_coerced_to_enum(self):
+        """A string (e.g. from YAML) is coerced to the CollisionDetectionMethod enum.
+
+        Regression: when left as a plain str, the ``== CollisionDetectionMethod.X``
+        checks in check_collisions() never match, silently disabling collision detection.
+        """
+        params = SimulationParams(physics=False, collision_detection_method="closest_points")
+        assert params.collision_detection_method is CollisionDetectionMethod.CLOSEST_POINTS
+
+    def test_collision_detection_method_enum_passthrough(self):
+        params = SimulationParams(collision_detection_method=CollisionDetectionMethod.CONTACT_POINTS)
+        assert params.collision_detection_method is CollisionDetectionMethod.CONTACT_POINTS
+
+    def test_collision_detection_method_none_auto_selected(self):
+        assert SimulationParams(physics=False).collision_detection_method is CollisionDetectionMethod.CLOSEST_POINTS
+        assert SimulationParams(physics=True).collision_detection_method is CollisionDetectionMethod.CONTACT_POINTS
+
+    def test_invalid_collision_detection_method_falls_back_to_default(self):
+        """An unknown string warns and falls back to the physics-based default."""
+        params = SimulationParams(physics=False, collision_detection_method="not_a_method")
+        assert params.collision_detection_method is CollisionDetectionMethod.CLOSEST_POINTS
+        params_phys = SimulationParams(physics=True, collision_detection_method="not_a_method")
+        assert params_phys.collision_detection_method is CollisionDetectionMethod.CONTACT_POINTS
+
+
+# ============================================================================
 # Object Lifecycle
 # ============================================================================
 
@@ -1037,19 +1070,27 @@ class TestSetStructureTransparencyRendering:
         sim_core._set_structure_transparency(True)
 
         # Rendering must be disabled (COV_ENABLE_RENDERING=0) before any changeVisualShape
-        # and re-enabled (COV_ENABLE_RENDERING=1) after all changeVisualShape calls
-        assert len(calls) >= 3, f"Expected at least 3 calls, got {len(calls)}"
+        # and re-enabled (COV_ENABLE_RENDERING=1) after all changeVisualShape calls.
+        # After re-enabling rendering, COV_ENABLE_GUI is reasserted to 0 to prevent
+        # the side panel from re-appearing.
+        assert len(calls) >= 4, f"Expected at least 4 calls, got {len(calls)}"
 
         # First call: disable rendering
         assert calls[0] == ("configDbgVis", pb.COV_ENABLE_RENDERING, 0), f"First call should disable rendering, got {calls[0]}"
-        # Last call: re-enable rendering
-        assert calls[-1] == (
+        # Second-to-last call: re-enable rendering
+        assert calls[-2] == (
             "configDbgVis",
             pb.COV_ENABLE_RENDERING,
             1,
-        ), f"Last call should re-enable rendering, got {calls[-1]}"
+        ), f"Second-to-last call should re-enable rendering, got {calls[-2]}"
+        # Last call: reassert GUI hidden
+        assert calls[-1] == (
+            "configDbgVis",
+            pb.COV_ENABLE_GUI,
+            0,
+        ), f"Last call should hide GUI panel, got {calls[-1]}"
         # All middle calls should be changeVisualShape
-        for c in calls[1:-1]:
+        for c in calls[1:-2]:
             assert c == ("changeVis",), f"Middle calls should be changeVisualShape, got {c}"
 
     def test_rendering_restored_on_exception(self, sim_core, monkeypatch):
@@ -1092,6 +1133,50 @@ class TestSetStructureTransparencyRendering:
         assert rendering_states[-1] == 1, f"Rendering should be re-enabled after exception, states: {rendering_states}"
 
 
+class TestConfigureVisualizerCameraGuard:
+    """configure_visualizer must not overwrite an explicit setup_camera call."""
+
+    def test_explicit_setup_camera_not_overwritten(self, sim_core, monkeypatch):
+        """If the user called setup_camera() before run_simulation, configure_visualizer must not re-call it."""
+        call_count = 0
+
+        def counting_setup_camera(camera_config=None, entity_positions=None):
+            nonlocal call_count
+            call_count += 1
+
+        sim_core._params.gui = True
+        # Populate camera_config so the guard `if self._params.camera_config:` is truthy
+        sim_core._params.camera_config = {"camera_mode": "manual", "camera_distance": 20.0}
+
+        # Simulate user explicitly calling setup_camera
+        sim_core.setup_camera(camera_config={"camera_mode": "manual", "camera_distance": 2.0})
+
+        # Now monkeypatch setup_camera to count re-calls
+        monkeypatch.setattr(sim_core, "setup_camera", counting_setup_camera)
+
+        # configure_visualizer should NOT call setup_camera again
+        sim_core.configure_visualizer()
+
+        assert call_count == 0, f"configure_visualizer should not re-call setup_camera, but called it {call_count} time(s)"
+
+    def test_no_explicit_setup_camera_allows_configure_visualizer(self, sim_core, monkeypatch):
+        """If user never called setup_camera, configure_visualizer should call it."""
+        call_count = 0
+
+        def counting_setup_camera(camera_config=None, entity_positions=None):
+            nonlocal call_count
+            call_count += 1
+
+        sim_core._params.gui = True
+        sim_core._params.camera_config = {"camera_mode": "manual", "camera_distance": 20.0}
+
+        monkeypatch.setattr(sim_core, "setup_camera", counting_setup_camera)
+
+        sim_core.configure_visualizer()
+
+        assert call_count == 1, f"configure_visualizer should call setup_camera once, but called it {call_count} time(s)"
+
+
 # ---------------------------------------------------------------------------
 # setup_camera
 # ---------------------------------------------------------------------------
@@ -1107,9 +1192,9 @@ class TestSetupCamera:
         sim_core._params.gui = True
 
         with caplog.at_level(logging.WARNING, logger="pybullet_fleet.core_simulation"):
-            sim_core.setup_camera(camera_config={"camera_mode": "autto"})
+            sim_core.setup_camera(camera_config={"camera_mode": "bogus"})
 
-        assert any("autto" in r.message for r in caplog.records), "Should warn about unknown camera_mode"
+        assert any("bogus" in r.message for r in caplog.records), "Should warn about unknown camera_mode"
 
     def test_auto_mode_minimum_distance(self, sim_core, monkeypatch):
         """auto mode should enforce a minimum distance when all objects are co-located."""

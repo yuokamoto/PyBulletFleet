@@ -15,9 +15,9 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 from pybullet_fleet.agent import Agent
-from pybullet_fleet.core_simulation import MultiRobotSimulationCore, SimulationParams
+from pybullet_fleet.core_simulation import MultiRobotSimulationCore
 from pybullet_fleet.sim_object import Pose, SimObject, ShapeParams
-from pybullet_fleet.robot_models import resolve_urdf, auto_detect_profile
+from pybullet_fleet.robot_models import resolve_model, auto_detect_profile
 
 parser = argparse.ArgumentParser(description="Robot arm pick & drop demo (joint control)")
 parser.add_argument("--robot", default="panda", help="Robot name (e.g. panda, kuka_iiwa, arm_robot) or URDF path")
@@ -57,15 +57,14 @@ JOINT_INIT = _P["init"]
 BOX_PICK_POSE = Pose.from_xyz(*_P["box_pick"])
 BOX_PLACE_POSE = Pose.from_xyz(*_P["box_place"])
 
-# Simulation setup
-params = SimulationParams(
-    gui=True, timestep=0.1, physics=False, target_rtf=args.rtf if args.rtf is not None else 3
-)  # for kinematics demo with faster execution (no physics means we can run faster than real-time)
-# params = SimulationParams(gui=True, timestep=0.01, physics=True) # for physics-based pick/drop with gravity and dynamics
-sim_core = MultiRobotSimulationCore(params)
+# Initialize simulation from YAML config
+_CONFIG = os.path.join(os.path.dirname(__file__), "..", "..", "config", "config.yaml")
+sim_core = MultiRobotSimulationCore.from_yaml(_CONFIG)
+if args.rtf is not None:
+    sim_core.params.target_rtf = args.rtf
 
 # Spawn robot arm (fixed base)
-arm_urdf = resolve_urdf(args.robot)
+arm_urdf = resolve_model(args.robot)
 arm_agent = Agent.from_urdf(
     urdf_path=arm_urdf,
     pose=Pose.from_xyz(0, 0, 0),

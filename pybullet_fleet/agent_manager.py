@@ -59,14 +59,39 @@ class GridSpawnParams:
     z_min: int = 0
     z_max: int = 0
 
+    @property
+    def total_cells(self) -> int:
+        """Total number of grid cells: (x range) * (y range) * (z range)."""
+        return (self.x_max - self.x_min + 1) * (self.y_max - self.y_min + 1) * (self.z_max - self.z_min + 1)
+
     @classmethod
     def from_dict(cls, config: Dict[str, Any]) -> "GridSpawnParams":
         """Create GridSpawnParams from a configuration dictionary.
 
-        Required keys: ``x_min``, ``x_max``, ``y_min``, ``y_max``,
-        ``spacing``, ``offset``.
+        Supports two formats:
 
-        Optional keys: ``z_min`` (default 0), ``z_max`` (default 0).
+        **Explicit ranges** (original) — requires ``x_min``, ``x_max``,
+        ``y_min``, ``y_max``, ``spacing``, ``offset``::
+
+            grid:
+              x_min: 0
+              x_max: 9
+              y_min: 0
+              y_max: 4
+              spacing: [3.0, 3.0, 0.0]
+              offset: [0, 0, 0.05]
+
+        **Count-based** (convenience) — requires ``count`` and
+        ``spacing``; ``columns`` and ``offset`` are optional::
+
+            grid:
+              count: 50
+              spacing: [3.0, 3.0]
+              offset: [0, 0, 0.05]
+              columns: 10
+
+        When ``count`` is present, :meth:`from_count` is used to
+        compute the grid ranges.
 
         Args:
             config: Configuration dictionary.
@@ -77,6 +102,16 @@ class GridSpawnParams:
         Raises:
             KeyError: If a required key is missing.
         """
+        if "count" in config:
+            import math
+
+            count = config["count"]
+            spacing_raw = config["spacing"]
+            spacing = [spacing_raw[0], spacing_raw[1], 0.0] if len(spacing_raw) == 2 else list(spacing_raw)
+            offset = list(config.get("offset", [0.0, 0.0, 0.0]))
+            columns = config.get("columns", math.ceil(math.sqrt(count)))
+            return cls.from_count(count=count, columns=columns, spacing=spacing, offset=offset)
+
         return cls(
             x_min=config["x_min"],
             x_max=config["x_max"],
@@ -86,6 +121,46 @@ class GridSpawnParams:
             offset=config["offset"],
             z_min=config.get("z_min", 0),
             z_max=config.get("z_max", 0),
+        )
+
+    @classmethod
+    def from_count(
+        cls,
+        count: int,
+        columns: Optional[int] = None,
+        spacing: Optional[List[float]] = None,
+        offset: Optional[List[float]] = None,
+    ) -> "GridSpawnParams":
+        """Create GridSpawnParams from a total entity count.
+
+        Computes ``x_max`` and ``y_max`` from *count* and *columns*
+        so that the grid has exactly enough cells.  Useful when you
+        know "I want 50 robots" rather than "x_max=9, y_max=4".
+
+        Args:
+            count: Total number of entities to place.
+            columns: Grid width (X cells) before wrapping to the next
+                row.  Defaults to ``ceil(sqrt(count))``.
+            spacing: ``[sx, sy, sz]`` in metres.  Default ``[1,1,0]``.
+            offset: ``[ox, oy, oz]`` origin offset.  Default ``[0,0,0]``.
+
+        Returns:
+            GridSpawnParams with ``x_min=0``, ``y_min=0``,
+            ``x_max=columns-1``, ``y_max=ceil(count/columns)-1``.
+        """
+        import math
+
+        if columns is None:
+            columns = math.ceil(math.sqrt(count))
+        rows = math.ceil(count / columns)
+
+        return cls(
+            x_min=0,
+            x_max=columns - 1,
+            y_min=0,
+            y_max=rows - 1,
+            spacing=spacing if spacing is not None else [1.0, 1.0, 0.0],
+            offset=offset if offset is not None else [0.0, 0.0, 0.0],
         )
 
 
@@ -149,6 +224,45 @@ class SimObjectManager(Generic[T]):
         self.objects.append(obj)
         self.body_ids[obj.body_id] = obj
         self.object_ids[obj.object_id] = obj
+
+    def remove_object(self, obj: T) -> bool:
+        """Remove an object from the manager's tracking lists.
+
+        This only removes the object from the *manager's* bookkeeping
+        (``objects``, ``body_ids``, ``object_ids``).  It does **not**
+        touch ``sim_core`` or PyBullet — that is handled by
+        :meth:`MultiRobotSimulationCore.remove_object`.
+
+        Called automatically by ``sim_core.remove_object()`` when this
+        manager is registered via ``sim_core.register_manager()``.
+
+        Args:
+            obj: The object to remove.
+
+        Returns:
+            True if the object was found and removed, False otherwise.
+        """
+        if obj.object_id not in self.object_ids:
+            return False
+        try:
+            self.objects.remove(obj)
+        except ValueError:
+            pass
+        self.body_ids.pop(obj.body_id, None)
+        self.object_ids.pop(obj.object_id, None)
+        return True
+
+    def clear(self) -> None:
+        """Remove all objects from the manager's tracking lists.
+
+        This is a manager-only operation — it does **not** remove objects
+        from ``sim_core`` or PyBullet.  Typically called by
+        ``sim_core.reset()`` to keep the manager in sync after a full
+        simulation reset.
+        """
+        self.objects.clear()
+        self.body_ids.clear()
+        self.object_ids.clear()
 
     def spawn_objects_grid(
         self, num_objects: int, grid_params: GridSpawnParams, spawn_params: SimObjectSpawnParams
@@ -459,16 +573,16 @@ class SimObjectManager(Generic[T]):
 
         return result
 
-    def spawn_from_yaml(self, yaml_path: str, key: str = "robots") -> List[T]:
+    def spawn_from_yaml(self, yaml_path: str, key: str = "entities") -> List[T]:
         """Load a YAML file and spawn entities from the specified section.
 
-        Reads *yaml_path*, extracts the *key* section (default ``"robots"``),
+        Reads *yaml_path*, extracts the *key* section (default ``"entities"``),
         and delegates to :meth:`spawn_from_config`.
 
         Args:
             yaml_path: Path to YAML config file.
             key: Top-level YAML key containing the entity list.
-                 Default ``"robots"``.
+                 Default ``"entities"``.
 
         Returns:
             List of spawned objects (empty if *key* is missing).
@@ -555,6 +669,7 @@ class AgentManager(SimObjectManager[Agent]):
     - Pose goal assignment to individual agents
     - Callback system for custom update logic (goals, state tracking, etc.)
     - Query moving/stopped agents
+    - Optional batch controller for vectorized kinematic updates (``batch_controller=`` or :meth:`enable_batch`)
 
     Key Features:
     - Auto-registers update callback to simulation loop
@@ -571,24 +686,139 @@ class AgentManager(SimObjectManager[Agent]):
     def __init__(
         self,
         sim_core=None,
+        name: Optional[str] = None,
         update_frequency: float = 10.0,
         object_class: type = Agent,
         enable_profiling: bool = False,
+        batch_controller: Optional[str] = None,
+        fleet_controller: Optional[Dict[str, Any]] = None,
     ):
         """
         Initialize AgentManager.
 
         Args:
             sim_core: Reference to simulation core (optional)
+            name: Optional name for this manager.  When set, the manager can be
+                retrieved later via :meth:`~pybullet_fleet.core_simulation
+                .MultiRobotSimulationCore.get_manager`.
             update_frequency: Default update callback frequency in Hz (default: 10.0)
             object_class: Class to instantiate when spawning (default: Agent).
                           Pass an Agent subclass to manage custom agent types.
             enable_profiling: If ``True``, spawn methods log elapsed time.
                 Default ``False``.
+            batch_controller: Batch controller registry name
+                (e.g. ``"batch_omni"``, ``"batch_differential"``) or a dotted
+                import path to a custom ``BatchKinematicController`` subclass
+                (e.g. ``"my_pkg.MyBatchController"``).  When set,
+                every agent spawned through this manager is automatically
+                registered with the batch controller so movement is driven by
+                vectorized :meth:`batch_advance` rather than per-agent
+                ``compute()``.  Equivalent to calling
+                ``manager.enable_batch(batch_controller)`` after construction.
+            fleet_controller: Default ``controller:`` config applied to agents
+                that do not specify their own controller params at spawn time.
+                Accepts the same dict format as ``AgentSpawnParams.controller``
+                (e.g. ``{"max_linear_vel": 2.0, "max_angular_vel": 3.0}``).
+                Per-agent ``controller:`` values always take precedence.
         """
         super().__init__(sim_core, object_class=object_class, enable_profiling=enable_profiling)
+        self.name: Optional[str] = name
         self._callbacks: List[Dict[str, Any]] = []  # List of registered callbacks
         self._update_frequency: float = update_frequency  # Default callback frequency in Hz
+        self._batch_controller: Optional[Any] = None
+        self._fleet_controller: Optional[Dict[str, Any]] = fleet_controller
+
+        # Always register so sim_core.remove_object() and sim_core.reset() keep
+        # the manager's tracking lists in sync, regardless of batch mode.
+        if self.sim_core is not None:
+            self.sim_core.register_manager(self)
+
+        if batch_controller is not None:
+            self.enable_batch(batch_controller)
+
+    # ------------------------------------------------------------------
+    # Batch controller lifecycle
+    # ------------------------------------------------------------------
+
+    @property
+    def batch_controller(self) -> Optional[Any]:
+        """The fleet-wide :class:`BatchKinematicController`, or ``None``."""
+        return self._batch_controller
+
+    def enable_batch(self, mode: str) -> Any:
+        """Create and attach a batch controller for *mode*, replacing any existing one.
+
+        Any agents already managed by this instance that are not yet
+        batch-controlled are registered immediately.  Agents spawned
+        afterwards are registered automatically via :meth:`add_object`.
+
+        Args:
+            mode: Batch controller registry name (e.g. ``"batch_omni"``,
+                ``"batch_differential"``) or a dotted import path to a custom
+                :class:`BatchKinematicController` subclass
+                (e.g. ``"my_pkg.MyBatchController"``).
+
+        Returns:
+            The newly-created :class:`BatchKinematicController`.
+
+        Raises:
+            ValueError: If *mode* is not recognised.
+        """
+        from pybullet_fleet.controllers.batch_base import resolve_batch_controller_key
+
+        cls = resolve_batch_controller_key(mode)  # raises ValueError before any state change
+        if self._batch_controller is not None:
+            self.disable_batch()
+        bc = cls()
+        self._batch_controller = bc
+        # Register agents already in the manager
+        for agent in self.objects:
+            if agent._batch_controller is None:
+                bc.register_agent(agent)
+        return bc
+
+    def disable_batch(self) -> None:
+        """Unregister all managed agents from the batch controller and detach it."""
+        bc = self._batch_controller
+        if bc is None:
+            return
+        for agent in list(self.objects):
+            if agent._batch_controller is bc:
+                bc.unregister_agent(agent)
+        self._batch_controller = None
+
+    # ------------------------------------------------------------------
+    # add/remove_object overrides — keep batch registration in sync
+    # ------------------------------------------------------------------
+
+    def add_object(self, obj: Agent) -> None:
+        super().add_object(obj)
+        if self._fleet_controller:
+            from dataclasses import fields as dc_fields
+            from pybullet_fleet.controller_params import ControllerParams
+
+            fleet_params = ControllerParams.from_dict(self._fleet_controller)
+            for f in dc_fields(ControllerParams):
+                if getattr(obj.controller_params, f.name) is None:
+                    val = getattr(fleet_params, f.name)
+                    if val is not None:
+                        setattr(obj.controller_params, f.name, val)
+        if self._batch_controller is not None:
+            if obj._batch_controller is not None:
+                logger.warning(
+                    "Agent %r is already registered with batch controller %r; " "skipping registration with %r.",
+                    obj,
+                    obj._batch_controller,
+                    self._batch_controller,
+                )
+            else:
+                self._batch_controller.register_agent(obj)
+
+    def remove_object(self, obj: Agent) -> bool:
+        result = super().remove_object(obj)
+        if result and self._batch_controller is not None and obj._batch_controller is self._batch_controller:
+            self._batch_controller.unregister_agent(obj)
+        return result
 
     # ------------------------------------------------------------------
     # Convenience aliases (delegate to SimObjectManager methods)

@@ -1,0 +1,248 @@
+# Bridge config for clinic demo — 2 fleets + doors + elevators
+# Multi-floor clinic with 9 L1 doors + 4 L2 doors, 4 elevators, 2 robot fleets
+#
+# Fleet 1: deliveryRobot  (nav_graph 0) — 2 robots (L1)
+# Fleet 2: tinyRobot      (nav_graph 1) — 2 robots (L2)
+#
+# Robot names/positions from clinic.world SDF <include> poses.
+# Door names/positions from clinic.world SDF <model> + register_component Door.
+# Lift positions from clinic.world SDF <model> poses.
+# Floor elevations from clinic.building.yaml: L1=0, L2=10.
+
+handler_map:
+  "L1_*": pybullet_fleet_rmf.door_handler.DoorHandler
+  "L2_*": pybullet_fleet_rmf.door_handler.DoorHandler
+  "m": pybullet_fleet_rmf.door_handler.DoorHandler
+  "lift_*": pybullet_fleet_rmf.lift_handler.LiftHandler
+
+simulation:
+  gui: true
+  physics: false
+  target_rtf: 3.0
+  publish_rate: 1  # Hz (sim-time) — at RTF=3 this is ~3 Hz wall-clock
+  enable_structure_transparency: true
+  camera:
+    camera_mode: manual
+    camera_distance: 50
+    camera_yaw: 0
+    camera_pitch: -70
+    camera_target: [30, -25, 0]
+
+world:
+  world_file: "/rmf_demos_ws/install/rmf_demos_maps/share/rmf_demos_maps/maps/clinic/clinic.world"
+  skip_models:
+    - DeliveryRobot
+    - TinyRobot
+    - TeleportDispenser
+    - TeleportIngestor
+
+entities:
+  # ── Fleet: deliveryRobot (nav_graph 0) ──────────────
+  - name: deliveryRobot_0
+    sdf_path: "/rmf_demos_ws/install/rmf_demos_assets/share/rmf_demos_assets/models/DeliveryRobot/model.sdf"
+    pose: [5, -5, 0.0]
+    yaw: 0.0
+    motion_mode: "differential"
+    controller:
+      max_linear_vel: 0.7
+      max_linear_accel: 0.5
+      navigation_2d: true
+  - name: deliveryRobot_1
+    sdf_path: "/rmf_demos_ws/install/rmf_demos_assets/share/rmf_demos_assets/models/DeliveryRobot/model.sdf"
+    pose: [8.007, -31.734, 0.0]
+    yaw: -3.1398
+    motion_mode: "differential"
+    controller:
+      max_linear_vel: 0.7
+      max_linear_accel: 0.5
+      navigation_2d: true
+
+  # ── Fleet: tinyRobot (nav_graph 1) ─────────────────
+  - name: tinyRobot_0
+    sdf_path: "/rmf_demos_ws/install/rmf_demos_assets/share/rmf_demos_assets/models/TinyRobot/model.sdf"
+    pose: [15, -5, 0.0]
+    yaw: 0.0
+    motion_mode: "differential"
+    controller:
+      max_linear_vel: 0.5
+      max_linear_accel: 0.75
+      navigation_2d: true
+  - name: tinyRobot_1
+    sdf_path: "/rmf_demos_ws/install/rmf_demos_assets/share/rmf_demos_assets/models/TinyRobot/model.sdf"
+    pose: [54.763, -10.800, 10.0]
+    yaw: 3.1343
+    motion_mode: "differential"
+    controller:
+      max_linear_vel: 0.5
+      max_linear_accel: 0.75
+      navigation_2d: true
+
+  # ── Doors (Door) ─────────────────────────────
+  - name: clinic_door_01
+    type: door
+    urdf_path: "robots/door_hinge.urdf"
+    pose: [8, -3, 0.0]
+    yaw: 0.0
+    use_fixed_base: true
+    open_positions: {hinge: 1.57}
+    close_positions: {hinge: 0.0}
+
+  # ── L1 Doors ─────────────────────────────────────────
+  - name: L1_clinic_a
+    type: door
+    urdf_path: "robots/door_slide.urdf"
+    pose: [17.011, -41.769, 0.0]
+    yaw: 3.1416
+    use_fixed_base: true
+    open_positions: {slide: 1.0}
+    close_positions: {slide: 0.0}
+
+  - name: L1_clinic_b
+    type: door
+    urdf_path: "robots/door_slide.urdf"
+    pose: [37.231, -43.367, 0.0]
+    yaw: 1.5708
+    use_fixed_base: true
+    open_positions: {slide: 1.0}
+    close_positions: {slide: 0.0}
+
+  - name: L1_left_treatment_1
+    type: door
+    urdf_path: "robots/door_slide.urdf"
+    pose: [11.806, -13.583, 0.0]
+    yaw: 1.5708
+    use_fixed_base: true
+    open_positions: {slide: 1.0}
+    close_positions: {slide: 0.0}
+
+  - name: L1_left_negative_air_pressure
+    type: door
+    urdf_path: "robots/door_slide.urdf"
+    pose: [11.838, -26.846, 0.0]
+    yaw: -1.5791
+    use_fixed_base: true
+    open_positions: {slide: 1.0}
+    close_positions: {slide: 0.0}
+
+  - name: L1_right_procedure
+    type: door
+    urdf_path: "robots/door_slide.urdf"
+    pose: [50.741, -13.554, 0.0]
+    yaw: 1.5708
+    use_fixed_base: true
+    open_positions: {slide: 1.0}
+    close_positions: {slide: 0.0}
+
+  - name: L1_right_treatment
+    type: door
+    urdf_path: "robots/door_slide.urdf"
+    pose: [50.291, -19.682, 0.0]
+    yaw: 1.5708
+    use_fixed_base: true
+    open_positions: {slide: 1.0}
+    close_positions: {slide: 0.0}
+
+  - name: L1_right_negative_air_pressure
+    type: door
+    urdf_path: "robots/door_slide.urdf"
+    pose: [50.204, -30.986, 0.0]
+    yaw: 1.5689
+    use_fixed_base: true
+    open_positions: {slide: 1.0}
+    close_positions: {slide: 0.0}
+
+  - name: L1_left_inner
+    type: door
+    urdf_path: "robots/door_slide.urdf"
+    pose: [21.332, -13.114, 0.0]
+    yaw: 0.0
+    use_fixed_base: true
+    open_positions: {slide: 1.0}
+    close_positions: {slide: 0.0}
+
+  - name: L1_right_inner
+    type: door
+    urdf_path: "robots/door_slide.urdf"
+    pose: [41.064, -13.267, 0.0]
+    yaw: 3.1412
+    use_fixed_base: true
+    open_positions: {slide: 1.0}
+    close_positions: {slide: 0.0}
+
+  # ── L2 Doors ─────────────────────────────────────────
+  - name: L2_clinic_a
+    type: door
+    urdf_path: "robots/door_slide.urdf"
+    pose: [17.011, -41.769, 10.0]
+    yaw: 3.1416
+    use_fixed_base: true
+    open_positions: {slide: 1.0}
+    close_positions: {slide: 0.0}
+
+  - name: L2_clinic_b
+    type: door
+    urdf_path: "robots/door_slide.urdf"
+    pose: [37.231, -43.367, 10.0]
+    yaw: 1.5708
+    use_fixed_base: true
+    open_positions: {slide: 1.0}
+    close_positions: {slide: 0.0}
+
+  - name: m
+    type: door
+    urdf_path: "robots/door_slide.urdf"
+    pose: [21.189, -13.114, 10.0]
+    yaw: 0.0
+    use_fixed_base: true
+    open_positions: {slide: 1.0}
+    close_positions: {slide: 0.0}
+
+  - name: L2_right_inner
+    type: door
+    urdf_path: "robots/door_slide.urdf"
+    pose: [40.886, -13.272, 10.0]
+    yaw: 3.1416
+    use_fixed_base: true
+    open_positions: {slide: 1.0}
+    close_positions: {slide: 0.0}
+
+  # ── Elevators ────────────────────────────────────────
+  - name: lift_1
+    type: elevator
+    urdf_path: "robots/elevator.urdf"
+    pose: [43.075, -7.430, 0.0]
+    yaw: 3.14
+    use_fixed_base: true
+    floors: {L1: 0.0, L2: 10.0}
+    initial_floor: L1
+    joint_name: lift
+
+  - name: lift_2
+    type: elevator
+    urdf_path: "robots/elevator.urdf"
+    pose: [46.710, -7.430, 0.0]
+    yaw: 3.14
+    use_fixed_base: true
+    floors: {L1: 0.0, L2: 10.0}
+    initial_floor: L1
+    joint_name: lift
+
+  - name: lift_24
+    type: elevator
+    urdf_path: "robots/elevator.urdf"
+    pose: [5.223, -41.379, 0.0]
+    yaw: -0.785
+    use_fixed_base: true
+    floors: {L1: 0.0, L2: 10.0}
+    initial_floor: L1
+    joint_name: lift
+
+  - name: lift_25
+    type: elevator
+    urdf_path: "robots/elevator.urdf"
+    pose: [7.538, -43.694, 0.0]
+    yaw: -0.785
+    use_fixed_base: true
+    floors: {L1: 0.0, L2: 10.0}
+    initial_floor: L1
+    joint_name: lift

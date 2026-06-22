@@ -16,37 +16,38 @@
 # ========================================
 
 # Simulation Parameters
-target_rtf: 1.0               # Real-time (physics requires fixed timestep)
-timestep: 0.00416666         # 1/240s (standard physics timestep)
-duration: 0                  # Unlimited
-gui: true
-physics: true                # 🔴 Physics ON (dynamics mode)
-monitor: true
-ignore_static_collision: true
-enable_time_profiling: false
+simulation:
+  target_rtf: 1.0               # Real-time (physics requires fixed timestep)
+  timestep: 0.00416666         # 1/240s (standard physics timestep)
+  duration: 0                  # Unlimited
+  gui: true
+  physics: true                # 🔴 Physics ON (dynamics mode)
+  monitor: true
+  ignore_static_collision: true
+  enable_time_profiling: false
 
-# Collision Detection - Physics Mode
-collision_detection_method: "contact_points"  # 🔴 Physics contact manifold
-collision_margin: 0.02                        # Only used in closest_points/hybrid mode
+  # Collision Detection - Physics Mode
+  collision_detection_method: "contact_points"  # 🔴 Physics contact manifold
+  collision_margin: 0.02                        # Only used in closest_points/hybrid mode
 
-# Performance Optimization
-enable_monitor_gui: true
+  # Performance Optimization
+  enable_monitor_gui: true
 
-# Logging
-log_level: info
+  # Logging
+  log_level: info
 
-# Camera
-camera:
-  camera_mode: manual
-  camera_view_type: perspective
-  camera_distance: 20.0
-  camera_yaw: 45
-  camera_pitch: -30
-  camera_target: [5, 5, 0]
+  # Camera
+  camera:
+    camera_mode: manual
+    camera_view_type: perspective
+    camera_distance: 20.0
+    camera_yaw: 45
+    camera_pitch: -30
+    camera_target: [5, 5, 0]
 
-# Visualizer
-enable_collision_shapes: false
-enable_structure_transparency: false
-enable_shadows: true         # Shadows enabled for realism
-enable_gui_panel: false
-enable_collision_color_change: true  # Show collisions visually
+  # Visualizer
+  enable_collision_shapes: false
+  enable_structure_transparency: false
+  enable_shadows: true         # Shadows enabled for realism
+  enable_gui_panel: false
+  enable_collision_color_change: true  # Show collisions visually

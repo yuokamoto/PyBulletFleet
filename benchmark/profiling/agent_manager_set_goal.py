@@ -98,8 +98,10 @@ def profile_set_goal_pose(num_agents=1000):
     agent_spawn_params = AgentSpawnParams(
         urdf_path=robot_urdf,
         motion_mode=MotionMode.DIFFERENTIAL,
-        max_linear_vel=1.0,
-        max_angular_vel=1.0,
+        controller={
+            "max_linear_vel": 1.0,
+            "max_angular_vel": 1.0,
+        },
         mass=0.0,
     )
 

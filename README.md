@@ -67,12 +67,12 @@ python examples/scale/100robots_grid_demo.py
 ```
 
 Most demo scripts accept a `--robot` argument to swap the robot model.
-Pass a model name (resolved via `resolve_urdf()`) or a direct URDF path:
+Pass a model name (resolved via `resolve_model()`) or a direct URDF path:
 
 ```bash
 python examples/scale/100robots_grid_demo.py --robot racecar
 python examples/arm/pick_drop_arm_demo.py --robot kuka_iiwa
-python examples/models/resolve_urdf_demo.py --list
+python examples/models/resolve_model_demo.py --list
 ```
 
 | Category | Scripts | `--robot` default | Alternatives |
@@ -81,7 +81,7 @@ python examples/models/resolve_urdf_demo.py --list
 | Mobile demos | `examples/mobile/path_following_demo.py` | `husky` | `racecar`, `mobile_robot` |
 | Scale demos (mobile) | `100robots_cube_patrol_demo.py`, `pick_drop_mobile_100robots_demo.py` | `husky` | `racecar`, `mobile_robot` |
 | Scale demos (arm) | `pick_drop_arm_100robots_demo.py` | `panda` | `kuka_iiwa`, `arm_robot` |
-| Model demos | `resolve_urdf_demo.py`, `robot_descriptions_demo.py` | `panda` / `tiago` | any registered model |
+| Model demos | `resolve_model_demo.py`, `robot_descriptions_demo.py` | `panda` / `tiago` | any registered model |
 
 `100robots_grid_demo.py` has two arguments: `--robot` for the mobile robot (default: `husky`) and `--arm-robot` for the arm (default: `panda`).
 
@@ -106,14 +106,14 @@ Kinematics mode (physics OFF), headless. See [Benchmark Results](benchmark/READM
 PyBulletFleet includes a model resolution system that loads robots **by name** from multiple sources:
 
 ```python
-from pybullet_fleet import MultiRobotSimulationCore, Agent, Pose, resolve_urdf
+from pybullet_fleet import MultiRobotSimulationCore, Agent, Pose, resolve_model
 
 sim = MultiRobotSimulationCore()
 
 # Resolve by name — searches local robots/, pybullet_data, robot_descriptions
-urdf = resolve_urdf("panda")
+urdf = resolve_model("panda")
 
-# Agent.from_urdf() calls resolve_urdf() internally
+# Agent.from_urdf() calls resolve_model() internally
 agent = Agent.from_urdf(urdf_path="panda", pose=Pose.from_xyz(0, 0, 0), sim_core=sim)
 ```
 
@@ -124,7 +124,7 @@ agent = Agent.from_urdf(urdf_path="panda", pose=Pose.from_xyz(0, 0, 0), sim_core
 | 2 — ROS | ROS install paths | (future) |
 | 3 — robot_descriptions | pip package | tiago, pr2 (`pip install robot_descriptions`) |
 
-Run `python examples/models/resolve_urdf_demo.py --list` to see all registered models and their availability.
+Run `python examples/models/resolve_model_demo.py --list` to see all registered models and their availability.
 
 ## Documentation
 

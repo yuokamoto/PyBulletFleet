@@ -30,11 +30,18 @@ if TYPE_CHECKING:
 # Create logger for this module (for module-level use only)
 logger = logging.getLogger(__name__)
 
-# Note: ActionStatus and MovementDirection have been moved to types.py
-
 # ---------------------------------------------------------------------------
 # Default constants shared across Action classes
 # ---------------------------------------------------------------------------
+DEFAULT_MOVE_SKIP_THRESHOLD: float = 0.05
+"""Default minimum distance (m) for MOVING_TO_PICK / MOVING_TO_DROP.
+
+When the robot is already closer than this to the pick/drop pose,
+the MoveAction sub-step is skipped entirely.  Prevents edge-case
+hangs with zero-distance paths."""
+
+# Note: ActionStatus and MovementDirection have been moved to types.py
+
 DEFAULT_MAX_FORCE: float = 500.0
 """Default maximum motor force (N) for joint/EE control."""
 
@@ -562,12 +569,14 @@ class PickAction(Action):
     target_object_id: Optional[int] = None
     target_position: Optional[List[float]] = None
     search_radius: float = 0.5
+    use_2d_search: bool = True  # XY-only distance for find_nearest (items on tables/shelves)
 
     # Approach configuration
     use_approach: bool = True  # Whether to use approach phase
     approach_pose: Optional[Pose] = None  # Explicit approach pose (if None, auto-calculated)
     approach_offset: float = 1.0  # Distance from target for approach pose (used if approach_pose is None)
     pick_offset: float = 0.0  # Distance from target where pick is executed (0 = at target position)
+    move_skip_threshold: float = DEFAULT_MOVE_SKIP_THRESHOLD  # Skip move when closer than this (m)
 
     # Attachment configuration
     attach_link: Union[int, str] = -1  # Link index or name to attach to (-1 or "base_link" for base link)
@@ -680,20 +689,29 @@ class PickAction(Action):
             else:
                 # Create forward action once to move from current position to pick pose
                 if self._forward_action is None:
-                    forward_path = Path([self._pick_pose])
-
-                    self._forward_action = MoveAction(
-                        path=forward_path,
-                        auto_approach=True,
-                        final_orientation_align=False,
-                        direction=MovementDirection.FORWARD,
-                    )
                     current_pos = agent.get_pose().position
                     pick_pos = self._pick_pose.position
                     distance = np.linalg.norm(np.array(pick_pos[:2]) - np.array(current_pos[:2]))
-                    self._log.info(f"Moving forward {distance:.3f}m to pick pose...")
 
-                if self._forward_action.execute(agent, dt):
+                    # Skip movement when already at pick pose (e.g. pick_offset == distance to item)
+                    if distance < self.move_skip_threshold:
+                        self._log.info(
+                            f"Already at pick pose (distance={distance:.4f}m < {self.move_skip_threshold}m), skipping movement"
+                        )
+                        self._phase = PickPhase.PICKING
+                        self._log_phase_transition(PickPhase.PICKING, agent)
+                    else:
+                        forward_path = Path([self._pick_pose])
+
+                        self._forward_action = MoveAction(
+                            path=forward_path,
+                            auto_approach=True,
+                            final_orientation_align=False,
+                            direction=MovementDirection.FORWARD,
+                        )
+                        self._log.info(f"Moving forward {distance:.3f}m to pick pose...")
+
+                if self._forward_action is not None and self._forward_action.execute(agent, dt):
                     self._phase = PickPhase.PICKING
                     self._log_phase_transition(PickPhase.PICKING, agent)
                     self._log.info("Reached pick position, picking...")
@@ -734,27 +752,9 @@ class PickAction(Action):
                 if not self._joint_action.execute(agent, dt):
                     return False
 
-            # Get attachment position in world coordinates
-            if self._attach_link_index == -1:
-                parent_pos, parent_orn = p.getBasePositionAndOrientation(agent.body_id, physicsClientId=agent._pid)
-            else:
-                link_state = p.getLinkState(
-                    agent.body_id,
-                    self._attach_link_index,
-                    computeForwardKinematics=1,
-                    physicsClientId=agent._pid,
-                )
-                parent_pos, parent_orn = link_state[0], link_state[1]
-
-            # Calculate world position for attached object
-            attach_world_pos, attach_world_orn = p.multiplyTransforms(
-                parent_pos, parent_orn, self.attach_relative_pose.position, self.attach_relative_pose.orientation
-            )
-
-            # Teleport object to attachment position
-            self._target_object.set_pose_raw(attach_world_pos, attach_world_orn)
-
-            # Attach object using relative_pose
+            # Attach object — attach_object() handles the teleport internally,
+            # placing the object at the correct world position derived from
+            # parent link + attach_relative_pose.
             success = agent.attach_object(
                 self._target_object, parent_link_index=self._attach_link_index, relative_pose=self.attach_relative_pose
             )
@@ -814,26 +814,18 @@ class PickAction(Action):
             return False
 
         elif self.target_position is not None:
-            # Find nearest pickable object within search radius
+            # Find nearest pickable object within search radius of target_position
             if agent.sim_core is None:
                 return False
 
-            target_pos = np.array(self.target_position)
-            min_distance = self.search_radius
-            nearest_obj = None
-
-            for obj in agent.sim_core.sim_objects:
-                if not obj.pickable or obj == agent:
-                    continue
-
-                obj_pose = obj.get_pose()
-                obj_pos = np.array(obj_pose.position)
-                distance = np.linalg.norm(obj_pos - target_pos)
-
-                if distance < min_distance:
-                    min_distance = distance
-                    nearest_obj = obj
-
+            nearest_obj = tools.find_nearest(
+                agent.sim_core.sim_objects,
+                position=self.target_position,
+                search_radius=self.search_radius,
+                predicate=lambda o: o.pickable and not o.is_attached(),
+                exclude=agent,
+                use_2d=self.use_2d_search,
+            )
             if nearest_obj is not None:
                 self._target_object = nearest_obj
                 return True
@@ -921,6 +913,7 @@ class DropAction(Action):
     approach_pose: Optional[Pose] = None  # Explicit approach pose (if None, auto-calculated)
     approach_offset: float = 1.0  # Distance from target for approach pose (used if approach_pose is None)
     drop_offset: float = 0.0  # Distance from drop_pose where drop is executed (0 = at drop_pose)
+    move_skip_threshold: float = DEFAULT_MOVE_SKIP_THRESHOLD  # Skip move when closer than this (m)
 
     # Drop behavior
     place_gently: bool = True
@@ -1031,19 +1024,28 @@ class DropAction(Action):
             else:
                 # Create forward action once to move from current position to drop pose
                 if self._forward_action is None:
-                    forward_path = Path([self._drop_pose])
-                    self._forward_action = MoveAction(
-                        path=forward_path,
-                        auto_approach=True,
-                        final_orientation_align=False,
-                        direction=MovementDirection.FORWARD,
-                    )
                     current_pos = agent.get_pose().position
                     drop_pos = self._drop_pose.position
                     distance = np.linalg.norm(np.array(drop_pos[:2]) - np.array(current_pos[:2]))
-                    self._log.info(f"Moving forward {distance:.3f}m to drop pose...")
 
-                if self._forward_action.execute(agent, dt):
+                    # Skip movement when already at drop pose (e.g. drop_offset == distance to ingestor)
+                    if distance < self.move_skip_threshold:
+                        self._log.info(
+                            f"Already at drop pose (distance={distance:.4f}m < {self.move_skip_threshold}m), skipping movement"
+                        )
+                        self._phase = DropPhase.DROPPING
+                        self._log_phase_transition(DropPhase.DROPPING, agent)
+                    else:
+                        forward_path = Path([self._drop_pose])
+                        self._forward_action = MoveAction(
+                            path=forward_path,
+                            auto_approach=True,
+                            final_orientation_align=False,
+                            direction=MovementDirection.FORWARD,
+                        )
+                        self._log.info(f"Moving forward {distance:.3f}m to drop pose...")
+
+                if self._forward_action is not None and self._forward_action.execute(agent, dt):
                     self._phase = DropPhase.DROPPING
                     self._log_phase_transition(DropPhase.DROPPING, agent)
                     self._log.info("Reached drop position, dropping...")
@@ -1084,8 +1086,22 @@ class DropAction(Action):
                 if not self._joint_action.execute(agent, dt):
                     return False
 
-            # Detach object
-            success = agent.detach_object(self._target_object)
+            # Detach object and teleport to final position.
+            # detach_object() supports both absolute (drop_pose) and relative
+            # (drop_relative_pose) modes internally.
+            if self.drop_relative_pose is not None:
+                success = agent.detach_object(self._target_object, drop_relative_pose=self.drop_relative_pose)
+            else:
+                # Absolute mode — apply drop_height adjustment if not placing gently
+                drop_pos = self.drop_pose.position
+                if self.place_gently:
+                    final_drop = self.drop_pose
+                else:
+                    final_drop = Pose(
+                        position=[drop_pos[0], drop_pos[1], drop_pos[2] + self.drop_height],
+                        orientation=list(self.drop_pose.orientation),
+                    )
+                success = agent.detach_object(self._target_object, drop_pose=final_drop)
 
             if not success:
                 self.status = ActionStatus.FAILED
@@ -1093,31 +1109,6 @@ class DropAction(Action):
                 self.end_time = agent.sim_core.sim_time if agent.sim_core else 0.0
                 self._log.info(f"Failed: {self.error_message}")
                 return True
-
-            # Calculate final drop position
-            if self.drop_relative_pose is not None:
-                # Relative mode: offset from current (pre-detach) object pose
-                cur_pos, cur_orn = self._target_object.get_pose().as_position_orientation()
-                final_position, final_orientation = p.multiplyTransforms(
-                    cur_pos,
-                    cur_orn,
-                    self.drop_relative_pose.position,
-                    self.drop_relative_pose.orientation,
-                )
-                final_position = list(final_position)
-                final_orientation = list(final_orientation)
-            else:
-                # Absolute mode: teleport to drop_pose
-                drop_pos = self.drop_pose.position
-                final_orientation = self.drop_pose.orientation
-                if self.place_gently:
-                    final_position = drop_pos
-                else:
-                    # Drop from height
-                    final_position = [drop_pos[0], drop_pos[1], drop_pos[2] + self.drop_height]
-
-            # Teleport object to drop position
-            self._target_object.set_pose_raw(final_position, final_orientation)
 
             # If not placing gently, give object a small downward velocity
             if not self.place_gently:

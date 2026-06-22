@@ -1,0 +1,137 @@
+<?xml version="1.0" ?>
+<!--
+  warehouse_layout.sdf — Multi-model SDF for demo purposes.
+  Contains a ground plane + 4 kiva-style shelves in a 2x2 grid.
+  PyBullet loads each <model> as a separate body, so loadSDF()
+  returns 5 body IDs from this single file.
+
+  Self-contained: uses only primitive shapes (boxes), no external meshes.
+  Each shelf has 4 legs + 4 shelf boards, resembling a kiva/Amazon pod.
+-->
+<sdf version="1.6">
+  <world name="warehouse">
+
+    <!-- ===== Ground plane ===== -->
+    <model name="ground_plane">
+      <static>1</static>
+      <pose>0 0 0 0 0 0</pose>
+      <link name="ground_link">
+        <inertial>
+          <mass>0</mass>
+          <inertia>
+            <ixx>1</ixx><ixy>0</ixy><ixz>0</ixz>
+            <iyy>1</iyy><iyz>0</iyz><izz>1</izz>
+          </inertia>
+        </inertial>
+        <visual name="ground_visual">
+          <geometry>
+            <box><size>20 20 0.01</size></box>
+          </geometry>
+          <material>
+            <diffuse>0.75 0.75 0.75 1</diffuse>
+          </material>
+        </visual>
+        <collision name="ground_collision">
+          <geometry>
+            <box><size>20 20 0.01</size></box>
+          </geometry>
+        </collision>
+      </link>
+    </model>
+
+    <!-- ===== Shelf A1 (front-left) ===== -->
+    <model name="shelf_A1">
+      <static>1</static>
+      <pose>-2 -2 0 0 0 0</pose>
+      <link name="pod_link">
+        <inertial>
+          <mass>0</mass>
+          <inertia>
+            <ixx>0</ixx><ixy>0</ixy><ixz>0</ixz>
+            <iyy>0</iyy><iyz>0</iyz><izz>0</izz>
+          </inertia>
+        </inertial>
+        <!-- 4 legs -->
+        <visual name="leg1"><pose> 0.38  0.38 0.9 0 0 0</pose><geometry><box><size>0.04 0.04 1.8</size></box></geometry><material><diffuse>0.35 0.35 0.35 1</diffuse></material></visual>
+        <visual name="leg2"><pose>-0.38  0.38 0.9 0 0 0</pose><geometry><box><size>0.04 0.04 1.8</size></box></geometry><material><diffuse>0.35 0.35 0.35 1</diffuse></material></visual>
+        <visual name="leg3"><pose> 0.38 -0.38 0.9 0 0 0</pose><geometry><box><size>0.04 0.04 1.8</size></box></geometry><material><diffuse>0.35 0.35 0.35 1</diffuse></material></visual>
+        <visual name="leg4"><pose>-0.38 -0.38 0.9 0 0 0</pose><geometry><box><size>0.04 0.04 1.8</size></box></geometry><material><diffuse>0.35 0.35 0.35 1</diffuse></material></visual>
+        <!-- 4 shelf boards -->
+        <visual name="board1"><pose>0 0 0.40 0 0 0</pose><geometry><box><size>0.84 0.84 0.02</size></box></geometry><material><diffuse>0.90 0.78 0.45 1</diffuse></material></visual>
+        <visual name="board2"><pose>0 0 0.85 0 0 0</pose><geometry><box><size>0.84 0.84 0.02</size></box></geometry><material><diffuse>0.90 0.78 0.45 1</diffuse></material></visual>
+        <visual name="board3"><pose>0 0 1.30 0 0 0</pose><geometry><box><size>0.84 0.84 0.02</size></box></geometry><material><diffuse>0.90 0.78 0.45 1</diffuse></material></visual>
+        <visual name="board4"><pose>0 0 1.75 0 0 0</pose><geometry><box><size>0.84 0.84 0.02</size></box></geometry><material><diffuse>0.90 0.78 0.45 1</diffuse></material></visual>
+      </link>
+    </model>
+
+    <!-- ===== Shelf A2 (front-right) ===== -->
+    <model name="shelf_A2">
+      <static>1</static>
+      <pose>2 -2 0 0 0 0</pose>
+      <link name="pod_link">
+        <inertial>
+          <mass>0</mass>
+          <inertia>
+            <ixx>0</ixx><ixy>0</ixy><ixz>0</ixz>
+            <iyy>0</iyy><iyz>0</iyz><izz>0</izz>
+          </inertia>
+        </inertial>
+        <visual name="leg1"><pose> 0.38  0.38 0.9 0 0 0</pose><geometry><box><size>0.04 0.04 1.8</size></box></geometry><material><diffuse>0.35 0.35 0.35 1</diffuse></material></visual>
+        <visual name="leg2"><pose>-0.38  0.38 0.9 0 0 0</pose><geometry><box><size>0.04 0.04 1.8</size></box></geometry><material><diffuse>0.35 0.35 0.35 1</diffuse></material></visual>
+        <visual name="leg3"><pose> 0.38 -0.38 0.9 0 0 0</pose><geometry><box><size>0.04 0.04 1.8</size></box></geometry><material><diffuse>0.35 0.35 0.35 1</diffuse></material></visual>
+        <visual name="leg4"><pose>-0.38 -0.38 0.9 0 0 0</pose><geometry><box><size>0.04 0.04 1.8</size></box></geometry><material><diffuse>0.35 0.35 0.35 1</diffuse></material></visual>
+        <visual name="board1"><pose>0 0 0.40 0 0 0</pose><geometry><box><size>0.84 0.84 0.02</size></box></geometry><material><diffuse>0.90 0.78 0.45 1</diffuse></material></visual>
+        <visual name="board2"><pose>0 0 0.85 0 0 0</pose><geometry><box><size>0.84 0.84 0.02</size></box></geometry><material><diffuse>0.90 0.78 0.45 1</diffuse></material></visual>
+        <visual name="board3"><pose>0 0 1.30 0 0 0</pose><geometry><box><size>0.84 0.84 0.02</size></box></geometry><material><diffuse>0.90 0.78 0.45 1</diffuse></material></visual>
+        <visual name="board4"><pose>0 0 1.75 0 0 0</pose><geometry><box><size>0.84 0.84 0.02</size></box></geometry><material><diffuse>0.90 0.78 0.45 1</diffuse></material></visual>
+      </link>
+    </model>
+
+    <!-- ===== Shelf B1 (rear-left) ===== -->
+    <model name="shelf_B1">
+      <static>1</static>
+      <pose>-2 2 0 0 0 0</pose>
+      <link name="pod_link">
+        <inertial>
+          <mass>0</mass>
+          <inertia>
+            <ixx>0</ixx><ixy>0</ixy><ixz>0</ixz>
+            <iyy>0</iyy><iyz>0</iyz><izz>0</izz>
+          </inertia>
+        </inertial>
+        <visual name="leg1"><pose> 0.38  0.38 0.9 0 0 0</pose><geometry><box><size>0.04 0.04 1.8</size></box></geometry><material><diffuse>0.35 0.35 0.35 1</diffuse></material></visual>
+        <visual name="leg2"><pose>-0.38  0.38 0.9 0 0 0</pose><geometry><box><size>0.04 0.04 1.8</size></box></geometry><material><diffuse>0.35 0.35 0.35 1</diffuse></material></visual>
+        <visual name="leg3"><pose> 0.38 -0.38 0.9 0 0 0</pose><geometry><box><size>0.04 0.04 1.8</size></box></geometry><material><diffuse>0.35 0.35 0.35 1</diffuse></material></visual>
+        <visual name="leg4"><pose>-0.38 -0.38 0.9 0 0 0</pose><geometry><box><size>0.04 0.04 1.8</size></box></geometry><material><diffuse>0.35 0.35 0.35 1</diffuse></material></visual>
+        <visual name="board1"><pose>0 0 0.40 0 0 0</pose><geometry><box><size>0.84 0.84 0.02</size></box></geometry><material><diffuse>0.90 0.78 0.45 1</diffuse></material></visual>
+        <visual name="board2"><pose>0 0 0.85 0 0 0</pose><geometry><box><size>0.84 0.84 0.02</size></box></geometry><material><diffuse>0.90 0.78 0.45 1</diffuse></material></visual>
+        <visual name="board3"><pose>0 0 1.30 0 0 0</pose><geometry><box><size>0.84 0.84 0.02</size></box></geometry><material><diffuse>0.90 0.78 0.45 1</diffuse></material></visual>
+        <visual name="board4"><pose>0 0 1.75 0 0 0</pose><geometry><box><size>0.84 0.84 0.02</size></box></geometry><material><diffuse>0.90 0.78 0.45 1</diffuse></material></visual>
+      </link>
+    </model>
+
+    <!-- ===== Shelf B2 (rear-right) ===== -->
+    <model name="shelf_B2">
+      <static>1</static>
+      <pose>2 2 0 0 0 0</pose>
+      <link name="pod_link">
+        <inertial>
+          <mass>0</mass>
+          <inertia>
+            <ixx>0</ixx><ixy>0</ixy><ixz>0</ixz>
+            <iyy>0</iyy><iyz>0</iyz><izz>0</izz>
+          </inertia>
+        </inertial>
+        <visual name="leg1"><pose> 0.38  0.38 0.9 0 0 0</pose><geometry><box><size>0.04 0.04 1.8</size></box></geometry><material><diffuse>0.35 0.35 0.35 1</diffuse></material></visual>
+        <visual name="leg2"><pose>-0.38  0.38 0.9 0 0 0</pose><geometry><box><size>0.04 0.04 1.8</size></box></geometry><material><diffuse>0.35 0.35 0.35 1</diffuse></material></visual>
+        <visual name="leg3"><pose> 0.38 -0.38 0.9 0 0 0</pose><geometry><box><size>0.04 0.04 1.8</size></box></geometry><material><diffuse>0.35 0.35 0.35 1</diffuse></material></visual>
+        <visual name="leg4"><pose>-0.38 -0.38 0.9 0 0 0</pose><geometry><box><size>0.04 0.04 1.8</size></box></geometry><material><diffuse>0.35 0.35 0.35 1</diffuse></material></visual>
+        <visual name="board1"><pose>0 0 0.40 0 0 0</pose><geometry><box><size>0.84 0.84 0.02</size></box></geometry><material><diffuse>0.90 0.78 0.45 1</diffuse></material></visual>
+        <visual name="board2"><pose>0 0 0.85 0 0 0</pose><geometry><box><size>0.84 0.84 0.02</size></box></geometry><material><diffuse>0.90 0.78 0.45 1</diffuse></material></visual>
+        <visual name="board3"><pose>0 0 1.30 0 0 0</pose><geometry><box><size>0.84 0.84 0.02</size></box></geometry><material><diffuse>0.90 0.78 0.45 1</diffuse></material></visual>
+        <visual name="board4"><pose>0 0 1.75 0 0 0</pose><geometry><box><size>0.84 0.84 0.02</size></box></geometry><material><diffuse>0.90 0.78 0.45 1</diffuse></material></visual>
+      </link>
+    </model>
+
+  </world>
+</sdf>

@@ -7,24 +7,34 @@ Supports both Mesh and URDF loading.
 
 import logging
 import math
-from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Tuple, Union
+from dataclasses import dataclass, fields
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple, Type, TypeVar, Union
 
 import numpy as np
 import pybullet as p
-from .geometry import Pose
+from .geometry import Pose, as_axes
 from .sim_object import SimObject, SimObjectSpawnParams, ShapeParams
 from .action import Action
 from .types import MotionMode, MovementDirection, ActionStatus, CollisionMode
-from .tools import normalize_vector_param
+from .tools import normalize_vector_param  # noqa: F401  (re-exported for legacy callers)
 from pybullet_fleet.tools import resolve_joint_index, resolve_link_index
 from .logging_utils import get_lazy_logger
-from .robot_models import resolve_urdf
+from .robot_models import resolve_model
+from pybullet_fleet.events import SimEvents
 from pybullet_fleet._defaults import AGENT as _AGT_D, IK as _IK_D
+from pybullet_fleet.config_utils import forward_spawn_params as _forward_spawn_params
+from pybullet_fleet.agent_plugin import AgentPlugin
+
+if TYPE_CHECKING:
+    from pybullet_fleet.controller import Controller
+    from pybullet_fleet.controller_params import ControllerParams
 
 # Create logger for this module
 logger = logging.getLogger(__name__)
 lazy_logger = get_lazy_logger(__name__)
+
+# Generic plugin type so get_plugin() returns the concrete subclass type.
+_PluginT = TypeVar("_PluginT", bound=AgentPlugin)
 
 
 @dataclass
@@ -40,14 +50,28 @@ class AgentSpawnParams(SimObjectSpawnParams):
     2. URDF robots: Specify urdf_path (for robots with joints)
     3. Virtual agents: Specify neither (invisible, no collision, useful for tracking/planning)
 
-    Attributes (in addition to SimObjectSpawnParams):
+    Attributes:
         urdf_path: Path to robot URDF file (for URDF-based robots with joints)
-        max_linear_vel: Maximum velocity in m/s - float or [vx, vy, vz] (ignored if use_fixed_base=True)
-        max_linear_accel: Maximum acceleration in m/s² - float or [ax, ay, az] (ignored if use_fixed_base=True)
-        max_angular_vel: Maximum angular velocity in rad/s (for differential drive)
-        max_angular_accel: Maximum angular acceleration in rad/s² (for differential drive, default: 10.0)
         motion_mode: MotionMode.OMNIDIRECTIONAL (move in any direction) or MotionMode.DIFFERENTIAL (rotate then move forward)
         use_fixed_base: If True, robot base is fixed and doesn't move (default: False)
+        plugins: List of plugin config dicts for per-agent plugins.
+            Each entry is ``{"type": "battery", "config": {...}}``
+            or ``{"class": "my.Module", "config": {...}}``.
+        controller: Movement controller selector / configuration. Accepts a
+            registry-name string (``"omni"``), a flat dict, a list of dicts, a
+            :class:`ControllerParams`, or a pre-built :class:`Controller`.
+            Each dict entry uses either ``type:`` (registry name) or ``class:``
+            (dotted import path), plus controller-specific config inline.
+            KinematicController entries (omni, differential) replace the base
+            controller; high-level entries (patrol, random_walk) are appended on
+            top of it. A lone high-level entry auto-creates the base from
+            ``motion_mode``.
+            Example single: ``{"type": "patrol", "waypoints": [...], "loop": True}``
+            Example custom: ``{"class": "my_pkg.MyController", "max_linear_vel": 1.5}``
+            Example list: ``[{"type": "differential", ...}, {"type": "patrol", ...}]``
+
+    See ``Agent.__init__`` for the ``controller`` argument (selector / configuration for the
+    Agent's movement controller; supports str / dict / list / Controller / ControllerParams).
 
     Inherited from SimObjectSpawnParams:
         name: Optional string name for human-readable identification.
@@ -59,14 +83,11 @@ class AgentSpawnParams(SimObjectSpawnParams):
     """
 
     urdf_path: Optional[str] = None
-    max_linear_vel: Union[float, List[float]] = _AGT_D["max_linear_vel"]
-    max_linear_accel: Union[float, List[float]] = _AGT_D["max_linear_accel"]
-    max_angular_vel: Union[float, List[float]] = _AGT_D["max_angular_vel"]
-    max_angular_accel: Union[float, List[float]] = _AGT_D["max_angular_accel"]
     motion_mode: Union[MotionMode, str] = MotionMode(_AGT_D["motion_mode"])
     use_fixed_base: bool = _AGT_D["use_fixed_base"]
     ik_params: Optional["IKParams"] = None
-    controller_config: Optional[Dict[str, Any]] = None
+    controller: Optional[Union[str, Dict[str, Any], List[Dict[str, Any]], "ControllerParams", "Controller"]] = None
+    plugins: Optional[List[Dict[str, Any]]] = None
 
     def __post_init__(self):
         """Validate agent spawn parameters."""
@@ -91,9 +112,12 @@ class AgentSpawnParams(SimObjectSpawnParams):
 
         Args:
             config: Dictionary with robot parameters including:
-                    - visual_shape/collision_shape or urdf_path
-                    - initial_pose: Pose object (optional)
-                    - max_linear_vel, max_linear_accel, use_fixed_base, etc. (optional)
+
+                - ``visual_shape`` / ``collision_shape`` or ``urdf_path``
+                - ``initial_pose``: ``Pose`` object (optional)
+                - ``controller``: dict / str / ``None`` — see :attr:`controller`
+                  and the *Controller Configuration* how-to
+                - ``use_fixed_base``, ``motion_mode``, ``ik_params`` (optional)
 
         Returns:
             AgentSpawnParams instance
@@ -112,8 +136,7 @@ class AgentSpawnParams(SimObjectSpawnParams):
                     half_extents=[0.2, 0.1, 0.2]
                 ),
                 'initial_pose': Pose.from_xyz(1.0, 2.0, 0.0),
-                'max_linear_vel': 2.0,
-                'max_linear_accel': 5.0,
+                'controller': {'max_linear_vel': 2.0, 'max_linear_accel': 5.0},
                 'use_fixed_base': False
             }
             params = AgentSpawnParams.from_dict(config)
@@ -126,42 +149,36 @@ class AgentSpawnParams(SimObjectSpawnParams):
             }
             params = AgentSpawnParams.from_dict(config)
         """
+        # Get base fields from parent
+        base = SimObjectSpawnParams.from_dict(config)
+        base_kwargs = {f.name: getattr(base, f.name) for f in fields(base)}
+
         # Get motion_mode and convert string to enum if needed
         motion_mode_value = config.get("motion_mode", _AGT_D["motion_mode"])
         if isinstance(motion_mode_value, str):
             motion_mode_value = MotionMode(motion_mode_value)
-
-        # Get base fields from parent
-        base = SimObjectSpawnParams.from_dict(config)
 
         # Parse ik_params from nested dict if provided
         ik_params_value = config.get("ik_params")
         if isinstance(ik_params_value, dict):
             ik_params_value = IKParams(**ik_params_value)
 
-        # Parse controller_config: string shortcut → {"type": string}
-        controller_config_value = config.get("controller_config")
-        if isinstance(controller_config_value, str):
-            controller_config_value = {"type": controller_config_value}
+        # ``controller`` is passed through as-is; string ("omni"), dict
+        # ({"type": "omni", ...} or {"class": "...", ...}) and list-of-dicts
+        # forms are all accepted and wired by :meth:`Agent._init_controller_chain`.
+        controller_value = config.get("controller")
+
+        # Parse plugins list (pass through as-is; resolved in from_params)
+        plugins_value = list(config.get("plugins") or [])
 
         return cls(
-            visual_shape=base.visual_shape,
-            collision_shape=base.collision_shape,
-            initial_pose=base.initial_pose,
-            mass=base.mass,
-            pickable=base.pickable,
-            name=base.name,
-            collision_mode=base.collision_mode,
-            user_data=base.user_data,
+            **base_kwargs,
             urdf_path=config.get("urdf_path"),
-            max_linear_vel=config.get("max_linear_vel", _AGT_D["max_linear_vel"]),
-            max_linear_accel=config.get("max_linear_accel", _AGT_D["max_linear_accel"]),
-            max_angular_vel=config.get("max_angular_vel", _AGT_D["max_angular_vel"]),
-            max_angular_accel=config.get("max_angular_accel", _AGT_D["max_angular_accel"]),
             motion_mode=motion_mode_value,
             use_fixed_base=config.get("use_fixed_base", _AGT_D["use_fixed_base"]),
             ik_params=ik_params_value,
-            controller_config=controller_config_value,
+            controller=controller_value,
+            plugins=plugins_value or None,
         )
 
 
@@ -221,6 +238,10 @@ class Agent(SimObject):
     Supports both mobile robots (use_fixed_base=False) and fixed robots (use_fixed_base=True).
     Supports both Mesh and URDF loading.
 
+    Class Attributes:
+        _spawn_params_cls: The SpawnParams dataclass used by config-driven
+            grid spawning (``AgentSpawnParams``).
+
     Class Constants:
         _KINEMATIC_JOINT_FALLBACK_VELOCITY: Default max joint velocity for
             revolute joints (rad/s) used when the URDF
@@ -248,19 +269,22 @@ class Agent(SimObject):
     so the API follows ROS message conventions.
     """
 
+    _needs_update = True  # Agents always participate in the step_once() update loop
+
+    _entity_type_name = "agent"  # Auto-registers in ENTITY_REGISTRY via SimObject.__init_subclass__
+
     _KINEMATIC_JOINT_FALLBACK_VELOCITY: float = 2.0  # rad/s (revolute)
     _KINEMATIC_PRISMATIC_FALLBACK_VELOCITY: float = 0.5  # m/s (prismatic)
     _DEFAULT_JOINT_TOLERANCE: float = 0.01  # rad (or m for prismatic)
+
+    # Override parent: use AgentSpawnParams for config-driven grid spawning
+    _spawn_params_cls = AgentSpawnParams
     _kinematic_joints_physics_off_logged: bool = False  # Log physics=False fallback only once
 
     def __init__(
         self,
         body_id: int,
         urdf_path: Optional[str] = None,
-        max_linear_vel: Union[float, List[float]] = _AGT_D["max_linear_vel"],
-        max_linear_accel: Union[float, List[float]] = _AGT_D["max_linear_accel"],
-        max_angular_vel: Union[float, List[float]] = _AGT_D["max_angular_vel"],
-        max_angular_accel: Union[float, List[float]] = _AGT_D["max_angular_accel"],
         motion_mode: Union[MotionMode, str] = MotionMode(_AGT_D["motion_mode"]),
         use_fixed_base: bool = _AGT_D["use_fixed_base"],
         collision_mode: CollisionMode = CollisionMode.NORMAL_3D,
@@ -270,6 +294,8 @@ class Agent(SimObject):
         mass: Optional[float] = None,
         ik_params: Optional[IKParams] = None,
         joint_tolerance: Optional[Union[float, list, dict]] = None,
+        controller: Optional[Union[str, Dict[str, Any], "ControllerParams", "Controller"]] = None,
+        notify_spawn: bool = True,
     ):
         """
         Initialize Agent.
@@ -277,11 +303,17 @@ class Agent(SimObject):
         Args:
             body_id: PyBullet body ID
             urdf_path: Path to robot URDF file (if URDF-based)
-            max_linear_vel: Maximum velocity (m/s) - float or [vx, vy, vz] for per-axis limits
-            max_linear_accel: Maximum acceleration (m/s²) - float or [ax, ay, az] for per-axis limits
-            max_angular_vel: Maximum angular velocity (rad/s) - float or [yaw, pitch, roll] for per-axis limits
-            max_angular_accel: Maximum angular acceleration (rad/s²) - float or [yaw, pitch, roll] for per-axis limits
-            motion_mode: MotionMode.OMNIDIRECTIONAL or MotionMode.DIFFERENTIAL drive
+            motion_mode: MotionMode.OMNIDIRECTIONAL or MotionMode.DIFFERENTIAL drive.
+                Used as the default controller selector when ``controller``
+                has no ``"type"`` key.  If ``controller={"type": ...}`` is
+                given and disagrees with ``motion_mode``, a warning is logged
+                and ``controller.type`` wins.
+
+                .. deprecated::
+                    Prefer ``controller="omni"`` / ``controller="differential"``
+                    (or a full ``controller={...}`` dict).  ``motion_mode`` is
+                    retained for backward compatibility and as a coarse
+                    "2D mobile base shape" hint for batched controllers.
             use_fixed_base: If True, robot base is fixed and doesn't move
             collision_mode: Collision detection mode (default: NORMAL_3D)
             sim_core: Reference to simulation core (optional)
@@ -293,6 +325,29 @@ class Agent(SimObject):
                 For mixed prismatic / revolute chains, a dict is
                 recommended so prismatic joints (metres) can use a
                 tighter tolerance than revolute joints (radians).
+            controller: Controller selector / configuration.  Accepts:
+
+                * ``None`` — framework defaults; ``motion_mode`` selects
+                  ``OmniController`` or ``DifferentialController``.
+                * ``str`` — registry name, e.g. ``"omni"``,
+                  ``"differential"``, ``"patrol"``.  Equivalent to
+                  ``{"type": <str>}``.
+                * ``dict`` — ``{"type": "...", "max_linear_vel": 1.5,
+                  "wheel_separation": 0.3, ...}``.  ``ControllerParams``
+                  fields populate :class:`ControllerParams`; impl-specific
+                  extras (e.g. ``wheel_separation``) flow through to the
+                  controller's ``__init__``.  **Recommended for YAML /
+                  config-file workflows.**
+                * :class:`~pybullet_fleet.controller.Controller` instance —
+                  any pre-built controller (built-in or custom).  Installed
+                  as-is; ``self.controller_params`` is taken from
+                  ``controller.params``.  **Recommended for Python
+                  workflows that need custom controllers or want
+                  type-safe construction.**
+                * :class:`~pybullet_fleet.controller_params.ControllerParams`
+                  instance — params only; ``motion_mode`` still picks the
+                  Omni/Diff class.  Use this only when you want to tweak
+                  shared params but keep the default class.
 
         Note:
             For spawning robots from AgentSpawnParams, use Agent.from_params() instead.
@@ -304,14 +359,6 @@ class Agent(SimObject):
         super().__init__(body_id, sim_core=sim_core, collision_mode=collision_mode, name=name, user_data=user_data, mass=mass)
 
         self.urdf_path = urdf_path
-
-        # Normalize max_linear_vel and max_linear_accel to numpy arrays [vx, vy, vz]
-        self.max_linear_vel = normalize_vector_param(max_linear_vel, "max_linear_vel", 3)
-        self.max_linear_accel = normalize_vector_param(max_linear_accel, "max_linear_accel", 3)
-
-        # Normalize max_angular_vel and max_angular_accel to numpy arrays [yaw, pitch, roll]
-        self.max_angular_vel = normalize_vector_param(max_angular_vel, "max_angular_vel", 3)
-        self.max_angular_accel = normalize_vector_param(max_angular_accel, "max_angular_accel", 3)
 
         self.use_fixed_base = use_fixed_base
 
@@ -337,10 +384,16 @@ class Agent(SimObject):
         self._current_angular_velocity = 0.0  # rad/s (for differential drive)
         self._is_moving = False  # Private: use property for read-only access
 
-        # Controller (Plugin Architecture Phase 2) — Strategy pattern
-        # When set, update() delegates to controller.compute() instead of legacy TPI.
-        # None = legacy goal-based mode (backward compatible).
-        self._controller: Optional[Any] = None
+        # Set by BatchKinematicController.register_agent(); cleared on unregister.
+        # When set, agent.update() skips ctrl.compute() (batch_advance handles
+        # movement) but still runs _update_actions() for action queue processing.
+        self._batch_controller = None  # type: Optional[Any]
+
+        # Controller chain — low-level controller at index 0, higher-level
+        # controllers appended via add_controller().  update() iterates in
+        # reversed order (high → low) so that patrol/random-walk controllers
+        # can set goals before the base navigation controller executes.
+        self._controllers: List[Any] = []
 
         # Action queue system for high-level task execution
         self._action_queue: List[Action] = []
@@ -368,19 +421,74 @@ class Agent(SimObject):
         # Override pickable default for Agent (robots are not pickable by default)
         self.pickable = False
 
+        # Per-agent plugin system (e.g. BatteryPlugin)
+        self._plugins: List[AgentPlugin] = []
+
         # Path visualization settings
         self.path_visualize: bool = False  # Enable/disable path visualization
         self.path_visualize_color: Optional[List[float]] = None  # RGB color (None = default [0, 1, 1])
         self.path_visualize_width: float = 2.0  # Line width
         self._path_debug_ids: List[int] = []  # Store debug line IDs for cleanup
 
-        # Initialize motion mode and TPI instances (must be after all attributes are set)
-        # Note: This will set _motion_mode and create TPI instances
-        self._motion_mode = None  # Temporary: will be set by set_motion_mode()
-        self.set_motion_mode(motion_mode)  # This normalizes mode and creates TPI instances
+        self._motion_mode = motion_mode if isinstance(motion_mode, MotionMode) else MotionMode(motion_mode)
+
+        from pybullet_fleet.controller import Controller
+        from pybullet_fleet.controller_params import ControllerParams
+
+        if isinstance(controller, Controller):
+            preset_params = getattr(controller, "params", None)
+            self.controller_params: ControllerParams = (
+                preset_params if isinstance(preset_params, ControllerParams) else ControllerParams()
+            )
+            self.set_controller(controller)
+        elif isinstance(controller, ControllerParams):
+            self.controller_params = controller
+            self.set_controller(self._make_default_controller())
+        else:
+            self._init_controller_chain(controller)
 
         # Update log prefix to include Agent class name (SimObject sets it initially)
         self._update_log_prefix()
+
+        # Notify observers that the agent spawned — but only once it is fully
+        # constructed. add_object() (called mid-construction from super().__init__)
+        # only emits OBJECT_SPAWNED; emitting AGENT_SPAWNED there would expose a
+        # half-built Agent (no _controllers / _current_action). from_params()
+        # attaches plugins AFTER __init__, so it constructs with notify_spawn=False
+        # and emits the event itself once plugins are attached — otherwise a
+        # dynamically spawned battery robot would be observed (and its RobotHandler
+        # built) before its BatteryPlugin exists.
+        if notify_spawn:
+            self._emit_agent_spawned()
+
+    def _emit_agent_spawned(self) -> None:
+        """Emit AGENT_SPAWNED for this fully-constructed agent."""
+        if self.sim_core is not None:
+            self.sim_core.events.emit(SimEvents.AGENT_SPAWNED, agent=self)
+
+    # ------------------------------------------------------------------
+    # Kinematic-limit read-only accessors.
+    # These delegate to ``self.controller_params`` (the single source of
+    # truth) and always return a normalised ``np.ndarray`` of shape ``(3,)``
+    # — matching the legacy ``Agent.max_*`` attribute shape so existing
+    # callers / tests can read without migration.  Writes must go through
+    # ``self.controller_params`` directly.
+    # ------------------------------------------------------------------
+    @property
+    def max_linear_vel(self) -> np.ndarray:
+        return as_axes(self.controller_params._eff_linear_vel())
+
+    @property
+    def max_linear_accel(self) -> np.ndarray:
+        return as_axes(self.controller_params._eff_linear_accel())
+
+    @property
+    def max_angular_vel(self) -> np.ndarray:
+        return as_axes(self.controller_params._eff_angular_vel())
+
+    @property
+    def max_angular_accel(self) -> np.ndarray:
+        return as_axes(self.controller_params._eff_angular_accel())
 
     @property
     def joint_tolerance(self) -> Union[float, list, dict]:
@@ -449,6 +557,97 @@ class Agent(SimObject):
         """
         return self._is_moving
 
+    # -- Battery properties (delegate to BatteryPlugin) ----------------------
+
+    def _get_battery_plugin(self):
+        """Return the BatteryPlugin instance, or None."""
+        from pybullet_fleet.plugins.battery_plugin import BatteryPlugin
+
+        return self.get_plugin(BatteryPlugin)
+
+    @property
+    def battery_soc(self) -> float:
+        """Current state of charge [0.0, 1.0].
+
+        Always returns ``1.0`` when no :class:`BatteryPlugin` is attached.
+        """
+        bp = self._get_battery_plugin()
+        return bp.soc if bp is not None else 1.0
+
+    @property
+    def is_charging(self) -> bool:
+        """Whether the agent is currently charging."""
+        bp = self._get_battery_plugin()
+        return bp.is_charging if bp is not None else False
+
+    @property
+    def battery_plugin(self):
+        """The :class:`~pybullet_fleet.plugins.battery_plugin.BatteryPlugin` instance, or ``None``."""
+        return self._get_battery_plugin()
+
+    def set_charging(self, charging: bool) -> None:
+        """Start or stop charging.
+
+        Args:
+            charging: ``True`` to start, ``False`` to stop.
+        """
+        bp = self._get_battery_plugin()
+        if bp is None:
+            return
+        bp.set_charging(charging)
+
+    # -- Agent plugin system -------------------------------------------------
+
+    @property
+    def plugins(self) -> List[AgentPlugin]:
+        """Read-only list of active per-agent plugins."""
+        return list(self._plugins)
+
+    def add_plugin(self, plugin: AgentPlugin) -> None:
+        """Attach a per-agent plugin.
+
+        Args:
+            plugin: An :class:`AgentPlugin` instance bound to this agent.
+
+        Raises:
+            ValueError: If *plugin* is not bound to this agent.
+        """
+        if plugin.agent is not self:
+            raise ValueError(f"Plugin {plugin!r} is bound to a different agent")
+        self._plugins.append(plugin)
+
+    def remove_plugin(self, plugin_or_cls) -> None:
+        """Remove a plugin by instance or class.
+
+        When a **class** is given, the first instance of that class is
+        removed.  When an **instance** is given, that exact instance is
+        removed.
+
+        Args:
+            plugin_or_cls: An :class:`AgentPlugin` instance or subclass.
+        """
+        if isinstance(plugin_or_cls, type):
+            for i, plugin in enumerate(self._plugins):
+                if isinstance(plugin, plugin_or_cls):
+                    self._plugins.pop(i)
+                    return
+        else:
+            self._plugins.remove(plugin_or_cls)
+
+    def get_plugin(self, cls: Type[_PluginT]) -> Optional[_PluginT]:
+        """Return the first plugin matching *cls*, or ``None``."""
+        for plugin in self._plugins:
+            if isinstance(plugin, cls):
+                return plugin
+        return None
+
+    def _update_plugins(self, dt: float) -> None:
+        """Run all per-agent plugins.  Called from :meth:`update`."""
+        for plugin in self._plugins:
+            plugin.on_update(dt)
+
+    # -- Motion properties --------------------------------------------------
+
     @property
     def motion_mode(self) -> MotionMode:
         """
@@ -491,8 +690,8 @@ class Agent(SimObject):
         Returns:
             Current goal Pose, or None if no goal is set
         """
-        if self._controller is not None:
-            return self._controller.goal_pose
+        if self._controllers:
+            return self._controllers[0].goal_pose
         return None
 
     @property
@@ -503,15 +702,15 @@ class Agent(SimObject):
         Returns:
             Current waypoint index (0-based), or 0 if no path is set
         """
-        if self._controller is not None:
-            return self._controller.current_waypoint_index
+        if self._controllers:
+            return self._controllers[0].current_waypoint_index
         return 0
 
     @property
     def path(self) -> List[Pose]:
         """Read-only property: Current waypoint path. Empty when idle."""
-        if self._controller is not None:
-            return self._controller.path
+        if self._controllers:
+            return self._controllers[0].path
         return []
 
     @classmethod
@@ -529,7 +728,13 @@ class Agent(SimObject):
         Returns:
             Agent instance
 
-        Example (Mesh)::
+        The **recommended** way to choose a controller is to set
+        ``controller={"type": "omni" | "differential" | ...}`` explicitly.
+        ``motion_mode`` still works as a shortcut and as the default when
+        ``controller.type`` is omitted, but if both are given,
+        ``controller.type`` wins and a warning is emitted on mismatch.
+
+        Example (Mesh, omni — recommended explicit form)::
 
             params = AgentSpawnParams(
                 visual_shape=ShapeParams(
@@ -543,7 +748,7 @@ class Agent(SimObject):
                     half_extents=[0.2, 0.1, 0.2]
                 ),
                 initial_pose=Pose.from_xyz(1.0, 2.0, 0.0),
-                max_linear_vel=3.0
+                controller={"type": "omni", "max_linear_vel": 3.0},
             )
             robot = Agent.from_params(spawn_params=params)
 
@@ -552,7 +757,7 @@ class Agent(SimObject):
             params = AgentSpawnParams(
                 urdf_path="arm_robot.urdf",
                 initial_pose=Pose.from_xyz(0.0, 0.0, 0.0),
-                use_fixed_base=True
+                use_fixed_base=True,
             )
             robot = Agent.from_params(spawn_params=params)
 
@@ -560,71 +765,44 @@ class Agent(SimObject):
 
             params = AgentSpawnParams(
                 initial_pose=Pose.from_xyz(0.0, 0.0, 0.0),
-                max_linear_vel=2.0
+                controller={"type": "omni", "max_linear_vel": 2.0},
             )
             virtual_agent = Agent.from_params(spawn_params=params)
         """
-        # Choose mesh or URDF path
+        # Forward spawn_params.controller verbatim — Agent.__init__ does
+        # the single canonical parse (type / ControllerParams / impl extras)
+        # and the motion_mode-vs-controller.type mismatch warning.
+        # notify_spawn=False: defer AGENT_SPAWNED until plugins are attached below,
+        # so observers (e.g. the ROS bridge) never see a plugin-less agent.
+        extra: Dict[str, Any] = {"sim_core": sim_core, "controller": spawn_params.controller, "notify_spawn": False}
         if spawn_params.urdf_path is not None:
-            # URDF robot
             agent = cls.from_urdf(
-                urdf_path=spawn_params.urdf_path,
-                pose=spawn_params.initial_pose,
-                mass=spawn_params.mass,
-                max_linear_vel=spawn_params.max_linear_vel,
-                max_linear_accel=spawn_params.max_linear_accel,
-                max_angular_vel=spawn_params.max_angular_vel,
-                max_angular_accel=spawn_params.max_angular_accel,
-                motion_mode=spawn_params.motion_mode,
-                use_fixed_base=spawn_params.use_fixed_base,
-                collision_mode=spawn_params.collision_mode,
-                sim_core=sim_core,
-                name=spawn_params.name,
-                user_data=spawn_params.user_data,
-                ik_params=spawn_params.ik_params,
+                **_forward_spawn_params(
+                    cls.from_urdf,
+                    spawn_params,
+                    aliases={"initial_pose": "pose"},
+                    extra_kwargs=extra,
+                )
             )
         else:
-            # Mesh robot
             agent = cls.from_mesh(
-                visual_shape=spawn_params.visual_shape,
-                collision_shape=spawn_params.collision_shape,
-                pose=spawn_params.initial_pose,
-                mass=spawn_params.mass,
-                max_linear_vel=spawn_params.max_linear_vel,
-                max_linear_accel=spawn_params.max_linear_accel,
-                max_angular_vel=spawn_params.max_angular_vel,
-                max_angular_accel=spawn_params.max_angular_accel,
-                motion_mode=spawn_params.motion_mode,
-                use_fixed_base=spawn_params.use_fixed_base,
-                collision_mode=spawn_params.collision_mode,
-                sim_core=sim_core,
-                name=spawn_params.name,
-                user_data=spawn_params.user_data,
+                **_forward_spawn_params(
+                    cls.from_mesh,
+                    spawn_params,
+                    aliases={"initial_pose": "pose"},
+                    extra_kwargs=extra,
+                )
             )
 
-        # Auto-create controller from config if specified
-        if spawn_params.controller_config:
-            from pybullet_fleet.controller import create_controller
+        # Load per-agent plugins from YAML config (if any)
+        if spawn_params.plugins:
+            from pybullet_fleet.agent_plugin import create_agent_plugin_from_entry
 
-            ctrl_config = spawn_params.controller_config
-            ctrl = create_controller(ctrl_config["type"], ctrl_config)
-            agent.set_controller(ctrl)
+            for entry in spawn_params.plugins:
+                agent.add_plugin(create_agent_plugin_from_entry(entry, agent))
 
-        # Default controller: if none specified, create one based on motion_mode
-        if agent._controller is None:
-            from pybullet_fleet.controller import DifferentialController, OmniController
-
-            if agent._motion_mode == MotionMode.OMNIDIRECTIONAL:
-                agent._controller = OmniController(
-                    max_linear_vel=float(np.max(agent.max_linear_vel)),
-                    max_angular_vel=float(np.max(agent.max_angular_vel)),
-                )
-            else:
-                agent._controller = DifferentialController(
-                    max_linear_vel=float(np.max(agent.max_linear_vel)),
-                    max_angular_vel=float(np.max(agent.max_angular_vel)),
-                )
-
+        # Agent is now fully constructed (controllers + plugins) — notify observers.
+        agent._emit_agent_spawned()
         return agent
 
     @classmethod
@@ -632,8 +810,8 @@ class Agent(SimObject):
         """Create an Agent from a raw config dict.
 
         Combines :meth:`AgentSpawnParams.from_dict` and :meth:`from_params`
-        in a single call.  Subclasses can override to use a custom
-        ``SpawnParams`` class.
+        in a single call.  Uses ``cls._spawn_params_cls`` so subclasses
+        (e.g. Door, Elevator) automatically use their own SpawnParams.
 
         Args:
             config: Entity definition dict (as parsed from YAML).
@@ -642,7 +820,7 @@ class Agent(SimObject):
         Returns:
             ``cls`` instance.
         """
-        params = AgentSpawnParams.from_dict(config)
+        params = cls._spawn_params_cls.from_dict(config)
         return cls.from_params(params, sim_core)
 
     @classmethod
@@ -652,16 +830,14 @@ class Agent(SimObject):
         collision_shape: Optional[ShapeParams] = None,
         pose: Pose = None,
         mass: float = 0.0,
-        max_linear_vel: Union[float, List[float]] = _AGT_D["max_linear_vel"],
-        max_linear_accel: Union[float, List[float]] = _AGT_D["max_linear_accel"],
-        max_angular_vel: Union[float, List[float]] = _AGT_D["max_angular_vel"],
-        max_angular_accel: Union[float, List[float]] = _AGT_D["max_angular_accel"],
         motion_mode: Union[MotionMode, str] = MotionMode(_AGT_D["motion_mode"]),
         use_fixed_base: bool = _AGT_D["use_fixed_base"],
         collision_mode: CollisionMode = CollisionMode.NORMAL_3D,
         sim_core=None,
         name: Optional[str] = None,
         user_data: Optional[Dict[str, Any]] = None,
+        controller: Optional[Union[str, Dict[str, Any], "ControllerParams", "Controller"]] = None,
+        notify_spawn: bool = True,
     ) -> "Agent":
         """
         Create a mesh-based Agent with flexible shape control.
@@ -671,36 +847,15 @@ class Agent(SimObject):
             collision_shape: ShapeParams for collision geometry
             pose: Initial Pose (position and orientation)
             mass: Robot mass (kg), 0.0 for kinematic control
-            max_linear_vel: Maximum velocity (m/s) - float or [vx, vy, vz]
-            max_linear_accel: Maximum acceleration (m/s²) - float or [ax, ay, az]
-            max_angular_vel: Maximum angular velocity (rad/s)
-            max_angular_accel: Maximum angular acceleration (rad/s²)
             motion_mode: MotionMode.OMNIDIRECTIONAL or MotionMode.DIFFERENTIAL
             use_fixed_base: If True, robot base is fixed and doesn't move
             sim_core: Reference to simulation core
+            controller: Controller selector / config.  See :meth:`Agent.__init__`
+                for accepted forms (``None`` / ``str`` / ``dict`` /
+                :class:`~pybullet_fleet.controller_params.ControllerParams`).
 
         Returns:
             Agent instance
-
-        Example::
-
-            # Mesh visual with rotated frame + box collision
-            agent = Agent.from_mesh(
-                visual_shape=ShapeParams(
-                    shape_type="mesh",
-                    mesh_path="robot.obj",
-                    mesh_scale=[1.0, 1.0, 1.0],
-                    rgba_color=[0.2, 0.2, 0.2, 1.0],
-                    frame_pose=Pose.from_euler(0, 0, 0, roll=np.pi/2, yaw=np.pi/2)
-                ),
-                collision_shape=ShapeParams(
-                    shape_type="box",
-                    half_extents=[0.2, 0.1, 0.2]
-                ),
-                pose=Pose.from_xyz(0, 0, 0.5),
-                max_linear_vel=2.0,
-                motion_mode=MotionMode.DIFFERENTIAL
-            )
         """
         if pose is None:
             pose = Pose.from_xyz(0.0, 0.0, 0.0)
@@ -725,10 +880,6 @@ class Agent(SimObject):
         # so the object is registered with the correct mode directly (no post-hoc transition)
         agent = cls(
             body_id=body_id,
-            max_linear_vel=max_linear_vel,
-            max_linear_accel=max_linear_accel,
-            max_angular_vel=max_angular_vel,
-            max_angular_accel=max_angular_accel,
             motion_mode=motion_mode,
             use_fixed_base=use_fixed_base,
             collision_mode=collision_mode,
@@ -736,6 +887,8 @@ class Agent(SimObject):
             name=name,
             user_data=user_data,
             mass=mass,
+            controller=controller,
+            notify_spawn=notify_spawn,
         )
 
         return agent
@@ -746,10 +899,6 @@ class Agent(SimObject):
         urdf_path: str,
         pose: Pose = None,
         mass: Optional[float] = None,
-        max_linear_vel: Union[float, List[float]] = _AGT_D["max_linear_vel"],
-        max_linear_accel: Union[float, List[float]] = _AGT_D["max_linear_accel"],
-        max_angular_vel: Union[float, List[float]] = _AGT_D["max_angular_vel"],
-        max_angular_accel: Union[float, List[float]] = _AGT_D["max_angular_accel"],
         motion_mode: Union[MotionMode, str] = MotionMode(_AGT_D["motion_mode"]),
         use_fixed_base: bool = _AGT_D["use_fixed_base"],
         collision_mode: CollisionMode = CollisionMode.NORMAL_3D,
@@ -758,27 +907,28 @@ class Agent(SimObject):
         user_data: Optional[Dict[str, Any]] = None,
         ik_params: Optional[IKParams] = None,
         joint_tolerance: Optional[Union[float, list, dict]] = None,
+        controller: Optional[Union[str, Dict[str, Any], "ControllerParams", "Controller"]] = None,
+        notify_spawn: bool = True,
     ) -> "Agent":
         """
         Create a URDF-based Agent (with joints).
 
         Args:
             urdf_path: Robot model name (e.g. ``"panda"``) or path to URDF file.
-                Names are resolved via :func:`~pybullet_fleet.robot_models.resolve_urdf`
+                Names are resolved via :func:`~pybullet_fleet.robot_models.resolve_model`
             pose: Initial Pose (position and orientation). Defaults to origin
             mass: Mass override.
                 - None (default): Use URDF file's mass values as-is
                 - 0.0: Override all links to mass=0 for kinematic control (no physics)
-            max_linear_vel: Maximum velocity (m/s) - float or [vx, vy, vz]
-            max_linear_accel: Maximum acceleration (m/s²) - float or [ax, ay, az]
-            max_angular_vel: Maximum angular velocity (rad/s)
-            max_angular_accel: Maximum angular acceleration (rad/s²)
             motion_mode: MotionMode.OMNIDIRECTIONAL or MotionMode.DIFFERENTIAL
             use_fixed_base: If True, robot base is fixed in space
             sim_core: Reference to simulation core
             ik_params: IK solver configuration (default: ``IKParams()``).
             joint_tolerance: Default joint tolerance for convergence.
                 See :attr:`joint_tolerance` property for details.
+            controller: Controller selector / config.  See :meth:`Agent.__init__`
+                for accepted forms (``None`` / ``str`` / ``dict`` /
+                :class:`~pybullet_fleet.controller_params.ControllerParams`).
 
         Returns:
             Agent instance
@@ -789,16 +939,11 @@ class Agent(SimObject):
 
         Example::
 
-            # Use URDF mass values (physics enabled) — mass defaults to None
             robot = Agent.from_urdf(urdf_path="arm_robot.urdf")
-
-            # Resolve by model name
             robot = Agent.from_urdf(urdf_path="panda", use_fixed_base=True)
-
-            # Kinematic control (no physics)
             robot = Agent.from_urdf(urdf_path="arm_robot.urdf", mass=0.0)
         """
-        urdf_path = resolve_urdf(urdf_path)
+        urdf_path = resolve_model(urdf_path)
 
         if pose is None:
             pose = Pose.from_xyz(0.0, 0.0, 0.0)
@@ -844,10 +989,6 @@ class Agent(SimObject):
         agent = cls(
             body_id=body_id,
             urdf_path=urdf_path,
-            max_linear_vel=max_linear_vel,
-            max_linear_accel=max_linear_accel,
-            max_angular_vel=max_angular_vel,
-            max_angular_accel=max_angular_accel,
             motion_mode=motion_mode,
             use_fixed_base=use_fixed_base,
             collision_mode=collision_mode,
@@ -857,11 +998,17 @@ class Agent(SimObject):
             mass=resolved_mass,
             ik_params=ik_params,
             joint_tolerance=joint_tolerance,
+            controller=controller,
+            notify_spawn=notify_spawn,
         )
 
         return agent
 
-    def set_goal_pose(self, goal: Pose):
+    def set_goal_pose(
+        self,
+        goal: Pose,
+        direction: Union[MovementDirection, str, None] = None,
+    ):
         """
         Set goal pose for the robot to move to.
 
@@ -869,19 +1016,143 @@ class Agent(SimObject):
 
         Args:
             goal: Target Pose (compatible with ROS2 geometry_msgs/Pose)
+            direction: Movement direction override, or ``None`` to use
+                the controller's ``default_direction``.
         """
         # Single goal is just a path with one waypoint
-        self.set_path([goal])
+        self.set_path([goal], direction=direction)
+
+    def _make_default_controller(self):
+        """Build the default Omni/Diff controller from ``self._motion_mode``.
+
+        Used by ``__init__`` and ``set_motion_mode`` so the mapping
+        ``motion_mode -> controller class`` lives in one place.
+        """
+        from pybullet_fleet.controller import DifferentialController, OmniController
+
+        if self._motion_mode == MotionMode.OMNIDIRECTIONAL:
+            return OmniController(self.controller_params)
+        if self._motion_mode == MotionMode.DIFFERENTIAL:
+            return DifferentialController(self.controller_params)
+        return None
+
+    def _init_controller_chain(self, controller) -> None:
+        """Wire the controller chain from the unified ``controller=`` value.
+
+        Handles the ``str`` / ``dict`` / ``list`` forms of
+        :attr:`AgentSpawnParams.controller`:
+
+        * :class:`KinematicController` entries (``omni``, ``differential``, or a
+          custom kinematic controller via ``class:``) **replace** the base
+          controller at index 0.
+        * High-level entries (``patrol``, ``random_walk``, or any non-kinematic
+          :class:`Controller` via ``class:``) are **appended** on top of the
+          base — matching :meth:`add_controller`, so they set goals that the
+          base navigation controller then executes.
+        * If no base controller is supplied, one is auto-created from
+          ``motion_mode`` (so a lone ``patrol`` entry still moves).
+
+        Every entry accepts both a registry name (``type:``) and a dotted import
+        path (``class:``).
+        """
+        from pybullet_fleet.controller import KinematicController
+        from pybullet_fleet.controller_params import ControllerParams
+
+        # Normalize to a list of entries (each a str or dict).
+        if controller is None:
+            entries: List[Any] = []
+        elif isinstance(controller, (list, tuple)):
+            entries = list(controller)
+        else:
+            entries = [controller]
+
+        base_ctrl = None
+        high_level: List[Any] = []
+        seed_cfg: Dict[str, Any] = {}
+
+        for entry in entries:
+            ctrl = self._make_controller_from_entry(entry)
+            entry_cfg = {} if isinstance(entry, str) else dict(entry)
+            if ctrl is None:
+                # Entry names neither type nor class — treat its keys as base
+                # ControllerParams (e.g. ``controller={"max_linear_vel": 0.5}``).
+                if not seed_cfg:
+                    seed_cfg = entry_cfg
+                continue
+            if isinstance(ctrl, KinematicController):
+                base_ctrl = ctrl
+                seed_cfg = entry_cfg
+            elif not seed_cfg:
+                # First high-level entry seeds the base's kinematic limits
+                # (e.g. a patrol entry's ``max_linear_vel``).
+                seed_cfg = entry_cfg
+
+            if not isinstance(ctrl, KinematicController):
+                high_level.append(ctrl)
+
+        # controller_params is the single source of truth for kinematic limits.
+        # Prefer the base controller's own params; otherwise derive from the
+        # seed config so the auto-created base picks up any limits given on a
+        # high-level entry.
+        base_params = getattr(base_ctrl, "params", None)
+        if base_ctrl is not None and isinstance(base_params, ControllerParams):
+            self.controller_params = base_params
+        else:
+            self.controller_params = ControllerParams.from_dict(seed_cfg)
+
+        self.set_controller(base_ctrl if base_ctrl is not None else self._make_default_controller())
+        for hlc in high_level:
+            self.add_controller(hlc)
+
+    def _make_controller_from_entry(self, entry):
+        """Resolve one ``controller=`` entry to a :class:`Controller` instance.
+
+        *entry* is a registry-name string, or a flat dict carrying either a
+        ``type:`` (registry name) or ``class:`` (dotted import path) key plus
+        controller-specific config.  Returns ``None`` when the entry names
+        neither — the caller then falls back to the motion-mode default.
+
+        Raises:
+            ValueError: If ``type`` names a batch controller (those must be
+                driven through :class:`~pybullet_fleet.agent_manager.AgentManager`).
+        """
+        from pybullet_fleet.controller import create_controller, create_controller_from_entry
+        from pybullet_fleet.controllers.batch_base import BATCH_CONTROLLER_REGISTRY
+
+        if isinstance(entry, str):
+            entry = {"type": entry}
+        cfg = dict(entry)
+
+        dotted = cfg.pop("class", None)
+        if dotted is not None:
+            return create_controller_from_entry({"class": dotted, "config": cfg})
+
+        ctrl_type = cfg.get("type")
+        if ctrl_type:
+            if ctrl_type.lower() in BATCH_CONTROLLER_REGISTRY:
+                raise ValueError(
+                    f"controller.type={ctrl_type!r} is a batch controller type. "
+                    "Batch controllers must be used through AgentManager: "
+                    "AgentManager(sim_core=sim, batch_controller='batch_differential')."
+                )
+            return create_controller(ctrl_type, cfg)
+        return None
 
     def set_motion_mode(self, mode: Union[MotionMode, str]) -> bool:
         """
         Set motion mode for the robot.
 
-        Creates and assigns the matching controller (OmniController or
-        DifferentialController).  Also initializes legacy TPI instances
-        for backward compatibility.
+        Replaces the active controller with the matching default
+        (OmniController or DifferentialController).  Any custom
+        controller previously installed via ``controller.type`` is lost.
 
         Note: Motion mode cannot be changed while the robot is moving.
+
+        .. deprecated::
+            Prefer ``agent.set_controller(create_controller(name, cfg))``
+            for runtime controller swaps.  ``set_motion_mode`` is kept for
+            backward compatibility and only handles the built-in
+            Omni / Differential defaults.
 
         Args:
             mode: MotionMode.OMNIDIRECTIONAL or MotionMode.DIFFERENTIAL (or string)
@@ -893,26 +1164,10 @@ class Agent(SimObject):
             self._log.warning("Cannot change motion mode while robot is moving. Call stop() first.")
             return False
 
-        # Normalize to enum
         if isinstance(mode, str):
             mode = MotionMode(mode)
-
         self._motion_mode = mode
-
-        # Create matching controller
-        from pybullet_fleet.controller import DifferentialController, OmniController
-
-        if mode == MotionMode.OMNIDIRECTIONAL:
-            self._controller = OmniController(
-                max_linear_vel=float(np.max(self.max_linear_vel)),
-                max_angular_vel=float(np.max(self.max_angular_vel)),
-            )
-        elif mode == MotionMode.DIFFERENTIAL:
-            self._controller = DifferentialController(
-                max_linear_vel=float(np.max(self.max_linear_vel)),
-                max_angular_vel=float(np.max(self.max_angular_vel)),
-            )
-
+        self.set_controller(self._make_default_controller())
         return True
 
     def _clear_path_visualization(self):
@@ -958,7 +1213,7 @@ class Agent(SimObject):
         path: List[Pose],
         auto_approach: bool = True,
         final_orientation_align: bool = True,
-        direction: Union[MovementDirection, str] = MovementDirection.FORWARD,
+        direction: Union[MovementDirection, str, None] = None,
     ):
         """
         Set a path (list of waypoints) for the robot to follow.
@@ -969,10 +1224,10 @@ class Agent(SimObject):
                           to first waypoint if distance > threshold (default: True)
             final_orientation_align: If True, add final rotation to match last waypoint's orientation
                                     after reaching the position (default: True)
-            direction: Movement direction - MovementDirection.FORWARD (face movement direction) or
-                      MovementDirection.BACKWARD (maintain current orientation, move backward).
-                      Can also accept string "forward" or "backward" for convenience.
-                      Note: Only used in differential drive mode (MotionMode.DIFFERENTIAL).
+            direction: Movement direction override, or ``None`` to use the controller's
+                      ``default_direction``.  Can be MovementDirection enum or string
+                      ("auto", "forward", "backward").
+                      Only used in differential drive mode (MotionMode.DIFFERENTIAL).
                       In omnidirectional mode, this parameter is ignored.
         """
         if self.use_fixed_base:
@@ -983,7 +1238,7 @@ class Agent(SimObject):
             self._log.warning("Empty path provided")
             return
 
-        # Normalize direction to enum
+        # Normalize direction string → enum (None passes through to controller)
         if isinstance(direction, str):
             direction = MovementDirection(direction)
 
@@ -1016,13 +1271,21 @@ class Agent(SimObject):
         self._clear_path_visualization()
         self._visualize_path(final_path)
 
-        # Delegate all path state and trajectory init to the controller
-        self._controller.set_path(
-            self,
-            final_path,
-            final_orientation_align=final_orientation_align,
-            direction=direction,
-        )
+        # Delegate to batch controller when registered, otherwise per-agent.
+        if self._batch_controller is not None:
+            self._batch_controller.set_path(
+                self,
+                final_path,
+                final_orientation_align=final_orientation_align,
+                direction=direction,
+            )
+        else:
+            self._controllers[0].set_path(
+                self,
+                final_path,
+                final_orientation_align=final_orientation_align,
+                direction=direction,
+            )
 
     def _reset_pybullet_velocity(self) -> None:
         """Zero residual physics velocity (prevents drift in kinematic mode)."""
@@ -1121,6 +1384,11 @@ class Agent(SimObject):
                 self._log.info(
                     f"Starting {self._current_action.__class__.__name__} " f"(remaining in queue: {len(self._action_queue)})"
                 )
+                # --- action_started event ---
+                if self.sim_core is not None:
+                    self.sim_core.events.emit(SimEvents.ACTION_STARTED, agent=self, action=self._current_action)
+                if self._has_entity_events():
+                    self.events.emit(SimEvents.ACTION_STARTED, action=self._current_action)
             else:
                 return  # No actions to execute
 
@@ -1137,6 +1405,13 @@ class Agent(SimObject):
                 self._log.error(f"{action_name} failed: {self._current_action.error_message}")
             elif status == ActionStatus.CANCELLED:
                 self._log.warning(f"{action_name} was cancelled")
+
+            # --- action_completed event ---
+            finished_action = self._current_action
+            if self.sim_core is not None:
+                self.sim_core.events.emit(SimEvents.ACTION_COMPLETED, agent=self, action=finished_action, status=status)
+            if self._has_entity_events():
+                self.events.emit(SimEvents.ACTION_COMPLETED, action=finished_action, status=status)
 
             # Move to next action
             self._current_action = None
@@ -1235,6 +1510,10 @@ class Agent(SimObject):
             True if the robot moved (position, orientation, or joint state changed),
             False otherwise
         """
+        # Per-entity pre_update event (inline check — ~30ns when no handlers)
+        if self._events is not None:
+            self._events.emit(SimEvents.PRE_UPDATE, dt=dt)
+
         # Process action queue first (actions may set goals/paths)
         self._update_actions(dt)
 
@@ -1246,9 +1525,15 @@ class Agent(SimObject):
 
         moved = False
         if not self.use_fixed_base:
-            if self._controller is not None:
-                # Unified controller handles both velocity and pose commands
-                moved = self._controller.compute(self, dt)
+            if self._batch_controller is not None:
+                # Movement is driven by batch_advance() in Phase 1; skip
+                # per-agent compute() to avoid double-updating pose.
+                pass
+            elif self._controllers:
+                # Execute controllers in reversed order (high-level first)
+                for ctrl in reversed(self._controllers):
+                    ctrl_moved = ctrl.compute(self, dt)
+                    moved = moved or ctrl_moved
             elif self._is_moving:
                 self._log.warning("No controller set — movement ignored. Use set_controller().")
                 moved = False
@@ -1259,9 +1544,18 @@ class Agent(SimObject):
         if self.is_urdf_robot() and self.attached_objects:
             self.update_attached_objects_kinematics()
 
+        result = moved or joints_moved
+
+        # Per-agent plugins (battery, sensors, etc.)
+        self._update_plugins(dt)
+
+        # Per-entity post_update event (inline check — ~30ns when no handlers)
+        if self._events is not None:
+            self._events.emit(SimEvents.POST_UPDATE, dt=dt, moved=result)
+
         # Return True if any geometry changed (base moved OR joints moved)
         # so that sim_core adds this agent to _moved_this_step for collision checks.
-        return moved or joints_moved
+        return result
 
     def get_velocity(self) -> np.ndarray:
         """
@@ -1273,7 +1567,7 @@ class Agent(SimObject):
         return self._current_velocity.copy()
 
     def set_controller(self, controller: Optional[Any] = None) -> None:
-        """Set or clear the movement controller (Strategy pattern).
+        """Set or replace the base (index-0) movement controller.
 
         When a controller is set, :meth:`update` delegates movement to
         ``controller.compute(agent, dt)``.
@@ -1285,7 +1579,81 @@ class Agent(SimObject):
             controller: A :class:`~pybullet_fleet.controller.Controller`
                 instance, or ``None`` to disable movement.
         """
-        self._controller = controller
+        if controller is None:
+            self._controllers.clear()
+        elif self._controllers:
+            self._controllers[0] = controller
+        else:
+            self._controllers.append(controller)
+
+    def add_controller(self, controller) -> None:
+        """Append a high-level controller to the chain.
+
+        High-level controllers (patrol, random walk) are executed *before*
+        the base navigation controller in :meth:`update`.
+
+        Args:
+            controller: A :class:`~pybullet_fleet.controller.Controller` instance.
+        """
+        self._controllers.append(controller)
+
+    def remove_controller(self, controller_or_cls) -> None:
+        """Remove a non-base controller by instance or class.
+
+        The base controller (index 0) cannot be removed via this method.
+        Use :meth:`set_controller` to replace it.
+
+        When a **class** is given, the first instance of that class
+        (excluding the base controller) is removed.  When an **instance**
+        is given, that exact instance is removed.
+
+        Args:
+            controller_or_cls: A Controller instance or subclass.
+        """
+        if isinstance(controller_or_cls, type):
+            for i, c in enumerate(self._controllers[1:], start=1):
+                if isinstance(c, controller_or_cls):
+                    self._controllers.pop(i)
+                    return
+        else:
+            if controller_or_cls in self._controllers[1:]:
+                self._controllers.remove(controller_or_cls)
+
+    def get_controller_by_type(self, cls: type) -> Optional[Any]:
+        """Return the first controller matching *cls*, or ``None``.
+
+        Searches the entire chain (including the base controller).
+
+        Args:
+            cls: Controller class to search for.
+
+        Returns:
+            The first matching controller instance, or ``None``.
+        """
+        for c in self._controllers:
+            if isinstance(c, cls):
+                return c
+        return None
+
+    @property
+    def controllers(self) -> List[Any]:
+        """Read-only list of active controllers (copy)."""
+        return list(self._controllers)
+
+    @property
+    def controller(self):
+        """Return the base (index-0) controller, or ``None`` if the chain is empty."""
+        return self._controllers[0] if self._controllers else None
+
+    @property
+    def _controller(self):
+        """Backward-compatible alias for the base controller."""
+        return self._controllers[0] if self._controllers else None
+
+    @_controller.setter
+    def _controller(self, value):
+        """Backward-compatible setter — delegates to set_controller()."""
+        self.set_controller(value)
 
     def stop(self):
         """Stop robot movement and clear goal and path."""
@@ -1294,9 +1662,14 @@ class Agent(SimObject):
         self._current_angular_velocity = 0.0
         self._reset_pybullet_velocity()
         self._clear_path_visualization()
-        # Notify controller to reset all internal state (velocity, pose, path)
-        if self._controller is not None:
-            self._controller.on_stop(self)
+        if self._batch_controller is not None:
+            # Cancel the in-progress batch path so batch_advance() goes IDLE.
+            idx = self._batch_controller._agent_index.get(id(self))
+            if idx is not None:
+                self._batch_controller._on_cancel_path(idx)
+        elif self._controllers:
+            # Notify base controller to reset all internal state (velocity, pose, path)
+            self._controllers[0].on_stop(self)
 
     # ========================================
     # URDF-specific methods (joint control)

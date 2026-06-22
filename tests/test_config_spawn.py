@@ -21,6 +21,9 @@ import yaml
 from pybullet_fleet import AgentSpawnParams, Pose
 from pybullet_fleet.agent import Agent
 from pybullet_fleet.agent_manager import AgentManager, GridSpawnParams
+from pybullet_fleet.config_utils import resolve_class
+from pybullet_fleet.core_simulation import MultiRobotSimulationCore
+from pybullet_fleet.sim_object import SimObject
 from tests.conftest import MockSimCore
 
 
@@ -51,12 +54,12 @@ class TestLoadYamlConfig:
         """load_yaml_config reads a YAML file and returns dict."""
         from pybullet_fleet.config_utils import load_yaml_config
 
-        config = {"robots": [{"name": "r0"}], "simulation": {"gui": False}}
+        config = {"entities": [{"name": "r0"}], "simulation": {"gui": False}}
         yaml_file = tmp_path / "test.yaml"
         yaml_file.write_text(yaml.dump(config))
 
         result = load_yaml_config(str(yaml_file))
-        assert "robots" in result
+        assert "entities" in result
         assert result["simulation"]["gui"] is False
 
     def test_missing_file_raises(self):
@@ -72,7 +75,7 @@ class TestLoadYamlConfig:
 
         config = {
             "simulation": {"gui": True, "physics": False},
-            "robots": [{"name": "robot0"}],
+            "entities": [{"name": "robot0"}],
         }
         yaml_file = tmp_path / "sim.yaml"
         yaml_file.write_text(yaml.dump(config))
@@ -80,8 +83,8 @@ class TestLoadYamlConfig:
         result = load_yaml_config(str(yaml_file))
         assert result.get("simulation", {}).get("gui") is True
 
-    def test_missing_robots_returns_empty_list(self, tmp_path):
-        """YAML without robots key returns empty when accessed with .get()."""
+    def test_missing_entities_returns_empty_list(self, tmp_path):
+        """YAML without entities key returns empty when accessed with .get()."""
         from pybullet_fleet.config_utils import load_yaml_config
 
         config = {"simulation": {"gui": False}}
@@ -89,7 +92,7 @@ class TestLoadYamlConfig:
         yaml_file.write_text(yaml.dump(config))
 
         result = load_yaml_config(str(yaml_file))
-        assert result.get("robots", []) == []
+        assert result.get("entities", []) == []
 
 
 # =====================================================================
@@ -285,7 +288,7 @@ class TestSpawnFromConfig:
                 "name": "robot0",
                 "urdf_path": "robots/mobile_robot.urdf",
                 "pose": [0, 0, 0.05],
-                "controller_config": "omni",
+                "controller": "omni",
             },
         ]
         agents = manager.spawn_from_config(robots_yaml)
@@ -317,9 +320,9 @@ class TestSpawnFromYaml:
     """SimObjectManager.spawn_from_yaml(yaml_path) loads YAML then spawns entities."""
 
     def test_spawns_from_yaml_file(self, manager, tmp_path):
-        """Loads YAML file and spawns robots from the 'robots' section."""
+        """Loads YAML file and spawns robots from the 'entities' section."""
         config = {
-            "robots": [
+            "entities": [
                 {"name": "robot0", "urdf_path": "robots/mobile_robot.urdf", "pose": [0, 0, 0.05]},
                 {"name": "robot1", "urdf_path": "robots/mobile_robot.urdf", "pose": [2, 0, 0.05]},
             ]
@@ -365,7 +368,7 @@ class TestSpawnFromYaml:
         """spawn_from_yaml only uses the robots section, ignores simulation."""
         config = {
             "simulation": {"gui": True, "physics": True},
-            "robots": [
+            "entities": [
                 {"name": "robot0", "urdf_path": "robots/mobile_robot.urdf", "pose": [0, 0, 0.05]},
             ],
         }
@@ -541,3 +544,302 @@ class TestGridSpawnBatchOptimization:
         grid = GridSpawnParams(x_min=0, x_max=1, y_min=0, y_max=0, spacing=[2, 2, 0], offset=[0, 0, 0.05])
         manager.spawn_grid_mixed(num_objects=2, grid_params=grid, spawn_params_list=[(params, 1.0)])
         assert len(entered) == 1
+
+
+# =====================================================================
+# resolve_class (unit)
+# =====================================================================
+class TestResolveClass:
+    """resolve_class imports a class from a dotted Python path."""
+
+    def test_resolves_known_class(self):
+        """Returns the class object for a valid dotted path."""
+        cls = resolve_class("pybullet_fleet.sim_plugin.SimPlugin")
+        from pybullet_fleet.sim_plugin import SimPlugin
+
+        assert cls is SimPlugin
+
+    def test_resolves_nested_module(self):
+        """Works for deeply nested modules."""
+        cls = resolve_class("pybullet_fleet.config_utils.load_yaml_config")
+        from pybullet_fleet.config_utils import load_yaml_config
+
+        assert cls is load_yaml_config
+
+    def test_invalid_path_no_dot(self):
+        """Raises ValueError when path has no dot separator."""
+        with pytest.raises(ValueError, match="dotted Python path"):
+            resolve_class("NoDotHere")
+
+    def test_invalid_path_empty_string(self):
+        """Raises ValueError for empty string."""
+        with pytest.raises(ValueError, match="dotted Python path"):
+            resolve_class("")
+
+    def test_invalid_path_not_string(self):
+        """Raises ValueError for non-string input."""
+        with pytest.raises(ValueError, match="dotted Python path"):
+            resolve_class(42)  # type: ignore[arg-type]
+
+    def test_missing_module(self):
+        """Raises ModuleNotFoundError for non-existent module."""
+        with pytest.raises(ModuleNotFoundError, match="package installed"):
+            resolve_class("totally_fake_module.FakeClass")
+
+    def test_missing_class_in_module(self):
+        """Raises AttributeError with available names when class doesn't exist."""
+        with pytest.raises(AttributeError, match="not found in module"):
+            resolve_class("pybullet_fleet.config_utils.ThisDoesNotExist")
+
+    def test_missing_class_lists_available(self):
+        """Error message includes available public names from the module."""
+        with pytest.raises(AttributeError, match="load_yaml_config"):
+            resolve_class("pybullet_fleet.config_utils.Bogus")
+
+
+# =====================================================================
+# entities: top-level key (alias for robots:)
+# =====================================================================
+
+
+class TestEntitiesKey:
+    """from_dict supports 'entities:' as alias for 'robots:'."""
+
+    def test_entities_key_spawns_agents(self):
+        """entities: key spawns agents just like robots:."""
+        config = {
+            "simulation": {"gui": False, "physics": False, "monitor": False},
+            "entities": [
+                {"name": "r0", "urdf_path": "robots/mobile_robot.urdf", "pose": [0, 0, 0.05]},
+            ],
+        }
+        sim = MultiRobotSimulationCore.from_dict(config)
+        try:
+            assert len(sim.agents) == 1
+            assert sim.agents[0].name == "r0"
+        finally:
+            import pybullet as p
+
+            p.disconnect(sim.client)
+
+    def test_entities_key_spawns_sim_objects(self):
+        """entities: key spawns SimObjects with type: sim_object."""
+        config = {
+            "simulation": {"gui": False, "physics": False, "monitor": False},
+            "entities": [
+                {
+                    "type": "sim_object",
+                    "name": "box0",
+                    "visual_shape": {"shape_type": "box", "half_extents": [0.2, 0.2, 0.1]},
+                    "collision_shape": {"shape_type": "box", "half_extents": [0.2, 0.2, 0.1]},
+                    "pose": [1, 0, 0.1],
+                },
+            ],
+        }
+        sim = MultiRobotSimulationCore.from_dict(config)
+        try:
+            assert len(sim.agents) == 0
+            assert len(sim.sim_objects) == 1
+            assert sim.sim_objects[0].name == "box0"
+            assert isinstance(sim.sim_objects[0], SimObject)
+            assert not isinstance(sim.sim_objects[0], Agent)
+        finally:
+            import pybullet as p
+
+            p.disconnect(sim.client)
+
+
+# =====================================================================
+# managers: config section + batch routing
+# =====================================================================
+
+_SIM_BASE = {
+    "simulation": {
+        "gui": False,
+        "monitor": False,
+        "physics": False,
+        "timestep": 0.016,
+        "collision_check_frequency": 0,
+        "log_level": "warning",
+    }
+}
+
+_GRID_10 = {"count": 10, "spacing": [2.0, 2.0], "offset": [0.0, 0.0, 0.1]}
+_SPAWN_OMNI = {
+    "urdf_path": "robots/simple_cube.urdf",
+    "motion_mode": "omnidirectional",
+}
+_SPAWN_DIFF = {
+    "urdf_path": "robots/simple_cube.urdf",
+    "motion_mode": "differential",
+}
+
+
+class TestManagersConfigSection:
+    """managers: section creates named AgentManagers with optional batch_controller."""
+
+    def test_get_manager_returns_none_when_not_declared(self):
+        import pybullet as p
+        from pybullet_fleet import MultiRobotSimulationCore, SimulationParams
+
+        sim = MultiRobotSimulationCore(SimulationParams(gui=False, monitor=False, physics=False, log_level="warning"))
+        try:
+            assert sim.get_manager("missing") is None
+        finally:
+            p.disconnect(sim.client)
+
+    def test_named_manager_created_and_retrievable(self):
+        import pybullet as p
+        from pybullet_fleet import MultiRobotSimulationCore
+        from pybullet_fleet.agent_manager import AgentManager
+        from pybullet_fleet.controllers.batch_omni import BatchOmniController
+
+        cfg = {**_SIM_BASE, "managers": [{"name": "fleet_a", "batch_controller": "batch_omni"}]}
+        sim = MultiRobotSimulationCore.from_dict(cfg)
+        try:
+            mgr = sim.get_manager("fleet_a")
+            assert mgr is not None
+            assert isinstance(mgr, AgentManager)
+            assert mgr.name == "fleet_a"
+            assert isinstance(mgr.batch_controller, BatchOmniController)
+        finally:
+            p.disconnect(sim.client)
+
+    def test_multiple_named_managers(self):
+        import pybullet as p
+        from pybullet_fleet import MultiRobotSimulationCore
+        from pybullet_fleet.agent_manager import AgentManager
+        from pybullet_fleet.controllers.batch_omni import BatchOmniController
+        from pybullet_fleet.controllers.batch_differential import BatchDifferentialController
+
+        cfg = {
+            **_SIM_BASE,
+            "managers": [
+                {"name": "omni_fleet", "batch_controller": "batch_omni"},
+                {"name": "diff_fleet", "batch_controller": "batch_differential"},
+            ],
+        }
+        sim = MultiRobotSimulationCore.from_dict(cfg)
+        try:
+            omni = sim.get_manager("omni_fleet")
+            diff = sim.get_manager("diff_fleet")
+            assert isinstance(omni, AgentManager)
+            assert isinstance(diff, AgentManager)
+            assert omni.name == "omni_fleet"
+            assert diff.name == "diff_fleet"
+            assert omni is not diff
+            assert isinstance(omni.batch_controller, BatchOmniController)
+            assert isinstance(diff.batch_controller, BatchDifferentialController)
+        finally:
+            p.disconnect(sim.client)
+
+    def test_entity_group_routed_to_named_manager(self):
+        import pybullet as p
+        from pybullet_fleet import MultiRobotSimulationCore
+
+        cfg = {
+            **_SIM_BASE,
+            "managers": [{"name": "delivery", "batch_controller": "batch_omni"}],
+            "entities": [{**_SPAWN_OMNI, "manager": "delivery", "grid": _GRID_10}],
+        }
+        sim = MultiRobotSimulationCore.from_dict(cfg)
+        try:
+            mgr = sim.get_manager("delivery")
+            assert len(mgr.objects) == 10
+            bc = mgr.batch_controller
+            for agent in mgr.objects:
+                assert agent._batch_controller is bc
+        finally:
+            p.disconnect(sim.client)
+
+    def test_batch_mode_shorthand_on_entity_group(self):
+        import pybullet as p
+        from pybullet_fleet import MultiRobotSimulationCore
+
+        cfg = {
+            **_SIM_BASE,
+            "entities": [{**_SPAWN_DIFF, "batch_controller": "batch_differential", "grid": _GRID_10}],
+        }
+        sim = MultiRobotSimulationCore.from_dict(cfg)
+        try:
+            agents = sim.agents
+            assert len(agents) == 10
+            # All should be batch-controlled
+            for agent in agents:
+                assert agent._batch_controller is not None
+            # All share the same BC
+            bcs = {id(a._batch_controller) for a in agents}
+            assert len(bcs) == 1
+        finally:
+            p.disconnect(sim.client)
+
+    def test_unknown_manager_name_raises(self):
+        import pybullet as p
+        from pybullet_fleet import MultiRobotSimulationCore
+
+        cfg = {
+            **_SIM_BASE,
+            "entities": [{**_SPAWN_OMNI, "manager": "no_such_manager", "grid": _GRID_10}],
+        }
+        sim = MultiRobotSimulationCore(
+            __import__("pybullet_fleet").SimulationParams(gui=False, monitor=False, physics=False, log_level="warning")
+        )
+        try:
+            with pytest.raises(KeyError, match="no_such_manager"):
+                sim.spawn_robots_from_config(cfg["entities"])
+        finally:
+            p.disconnect(sim.client)
+
+    def test_two_omni_fleets_independent(self):
+        """Two managers with the same batch_controller run independently."""
+        import pybullet as p
+        from pybullet_fleet import MultiRobotSimulationCore
+
+        cfg = {
+            **_SIM_BASE,
+            "managers": [
+                {"name": "fleet_a", "batch_controller": "batch_omni"},
+                {"name": "fleet_b", "batch_controller": "batch_omni"},
+            ],
+            "entities": [
+                {**_SPAWN_OMNI, "manager": "fleet_a", "grid": {"count": 5, "spacing": [2, 2], "offset": [0, 0, 0.1]}},
+                {**_SPAWN_OMNI, "manager": "fleet_b", "grid": {"count": 5, "spacing": [2, 2], "offset": [20, 0, 0.1]}},
+            ],
+        }
+        sim = MultiRobotSimulationCore.from_dict(cfg)
+        try:
+            a = sim.get_manager("fleet_a")
+            b = sim.get_manager("fleet_b")
+            assert a is not b
+            assert a.batch_controller is not b.batch_controller
+            assert len(a.objects) == 5
+            assert len(b.objects) == 5
+        finally:
+            p.disconnect(sim.client)
+
+    def test_named_manager_batch_drives_step_once(self):
+        """Agents in a named batch manager actually move during step_once."""
+        import numpy as np
+        import pybullet as p
+        from pybullet_fleet import MultiRobotSimulationCore, Pose
+
+        cfg = {
+            **_SIM_BASE,
+            "managers": [{"name": "fleet", "batch_controller": "batch_omni"}],
+            "entities": [{**_SPAWN_OMNI, "manager": "fleet", "grid": {"count": 3, "spacing": [3, 0], "offset": [0, 0, 0.1]}}],
+        }
+        sim = MultiRobotSimulationCore.from_dict(cfg)
+        try:
+            mgr = sim.get_manager("fleet")
+            bc = mgr.batch_controller
+            for agent in mgr.objects:
+                bc.set_path(agent, [Pose.from_xyz(agent.get_pose().x + 2.0, agent.get_pose().y, 0.1)])
+            for _ in range(200):
+                sim.step_once()
+            for agent in mgr.objects:
+                pos = agent.get_pose().position
+                assert np.linalg.norm(np.array(pos) - np.array([pos[0], pos[1], 0.1])) < 0.5
+                # Moved at least 1 m from start
+                assert pos[0] > 1.0
+        finally:
+            p.disconnect(sim.client)

@@ -22,7 +22,7 @@ import pybullet as p
 import math
 
 from pybullet_fleet.agent import Agent, AgentSpawnParams, IKParams, MotionMode
-from pybullet_fleet.core_simulation import MultiRobotSimulationCore, SimulationParams
+from pybullet_fleet.core_simulation import MultiRobotSimulationCore
 from pybullet_fleet.sim_object import Pose, SimObject, ShapeParams
 from pybullet_fleet.action import (
     MoveAction,
@@ -55,8 +55,15 @@ print("  ee_target_position solved by inverse kinematics\n")
 # ---------------------------------------------------------------------------
 # Simulation
 # ---------------------------------------------------------------------------
-params = SimulationParams(gui=True, timestep=0.1, physics=False, target_rtf=_args.rtf if _args.rtf is not None else 3)
-sim_core = MultiRobotSimulationCore(params)
+_CONFIG = os.path.join(os.path.dirname(__file__), "..", "..", "config", "config.yaml")
+sim_core = MultiRobotSimulationCore.from_yaml(_CONFIG)
+if _args.rtf is not None:
+    sim_core.params.target_rtf = _args.rtf
+
+# The robot/work area sits near the origin (y up to ~1.3), so override the
+# fleet-scale default camera (distance 20, target [5,5,0]) for a close-up.
+# Tune distance/target as needed.
+sim_core.params.camera_config.update({"camera_distance": 3.0, "camera_target": [0.0, 0.7, 0.4]})
 
 # ---------------------------------------------------------------------------
 # Robot  (ik_joint_names tells IK to only solve arm joints, not wheels)
@@ -74,10 +81,12 @@ spawn_params = AgentSpawnParams(
     urdf_path=mobile_manipulator_urdf,
     initial_pose=Pose.from_euler(0, 0, 0.3, yaw=0),
     motion_mode=MotionMode.DIFFERENTIAL,
-    max_linear_vel=2.0,
-    max_linear_accel=3.0,
-    max_angular_vel=1.5,
-    max_angular_accel=3.0,
+    controller={
+        "max_linear_vel": 2.0,
+        "max_linear_accel": 3.0,
+        "max_angular_vel": 1.5,
+        "max_angular_accel": 3.0,
+    },
     mass=0.0,  # kinematic mode
     use_fixed_base=False,
     ik_params=IKParams(ik_joint_names=ARM_JOINT_NAMES),

@@ -1,0 +1,62 @@
+# Bridge config for battle_royale demo
+simulation:
+  gui: true
+  physics: false
+  target_rtf: 10.0
+  camera:
+    camera_mode: auto
+    camera_auto_scale: 1.2
+
+world:
+  world_file: "/rmf_demos_ws/install/rmf_demos_maps/share/rmf_demos_maps/maps/battle_royale/battle_royale.world"
+  skip_models:
+    - TinyRobot
+    - TeleportDispenser
+    - TeleportIngestor
+
+# Robot names must match fleet adapter config (tinyRobot_config.yaml).
+# Positions from battle_royale.world SDF <include> poses.
+entities:
+  - name: tinyRobotA
+    sdf_path: "/rmf_demos_ws/install/rmf_demos_assets/share/rmf_demos_assets/models/TinyRobot/model.sdf"
+    pose: [5.676, -2.043, 0.0]
+    yaw: -1.5708
+    motion_mode: "differential"
+    controller:
+      type: "differential"
+      max_linear_vel: 0.5
+      max_linear_accel: 0.75
+      navigation_2d: true
+
+  - name: tinyRobot_1
+    sdf_path: "/rmf_demos_ws/install/rmf_demos_assets/share/rmf_demos_assets/models/TinyRobot/model.sdf"
+    pose: [2.038, -5.676, 0.0]
+    yaw: 0.0
+    motion_mode: "differential"
+    controller:
+      type: "differential"
+      max_linear_vel: 0.5
+      max_linear_accel: 0.75
+      navigation_2d: true
+
+  - name: tinyRobot_2
+    sdf_path: "/rmf_demos_ws/install/rmf_demos_assets/share/rmf_demos_assets/models/TinyRobot/model.sdf"
+    pose: [16.966, -2.033, 0.0]
+    yaw: -1.5708
+    motion_mode: "differential"
+    controller:
+      type: "differential"
+      max_linear_vel: 0.5
+      max_linear_accel: 0.75
+      navigation_2d: true
+
+  - name: tinyRobot_3
+    sdf_path: "/rmf_demos_ws/install/rmf_demos_assets/share/rmf_demos_assets/models/TinyRobot/model.sdf"
+    pose: [2.029, -16.979, 0.0]
+    yaw: -3.1393
+    motion_mode: "differential"
+    controller:
+      type: "differential"
+      max_linear_vel: 0.5
+      max_linear_accel: 0.75
+      navigation_2d: true

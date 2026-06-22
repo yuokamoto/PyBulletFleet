@@ -3,6 +3,11 @@
 
   <!-- Main body -->
   <link name="base_link">
+    <inertial>
+      <mass value="10.0"/>
+      <origin xyz="0 0 0"/>
+      <inertia ixx="0.1" ixy="0.0" ixz="0.0" iyy="0.15" iyz="0.0" izz="0.2"/>
+    </inertial>
     <visual>
       <geometry>
         <box size="0.8 0.5 0.2"/>
@@ -20,6 +25,11 @@
 
   <!-- Left wheel -->
   <link name="left_wheel">
+    <inertial>
+      <mass value="0.5"/>
+      <origin xyz="0 0 0"/>
+      <inertia ixx="0.001" ixy="0.0" ixz="0.0" iyy="0.001" iyz="0.0" izz="0.001"/>
+    </inertial>
     <visual>
       <geometry>
         <cylinder radius="0.15" length="0.05"/>
@@ -37,6 +47,11 @@
 
   <!-- Right wheel -->
   <link name="right_wheel">
+    <inertial>
+      <mass value="0.5"/>
+      <origin xyz="0 0 0"/>
+      <inertia ixx="0.001" ixy="0.0" ixz="0.0" iyy="0.001" iyz="0.0" izz="0.001"/>
+    </inertial>
     <visual>
       <geometry>
         <cylinder radius="0.15" length="0.05"/>
@@ -54,6 +69,11 @@
 
   <!-- Sensor mast -->
   <link name="sensor_mast">
+    <inertial>
+      <mass value="0.3"/>
+      <origin xyz="0 0 0"/>
+      <inertia ixx="0.001" ixy="0.0" ixz="0.0" iyy="0.001" iyz="0.0" izz="0.0002"/>
+    </inertial>
     <visual>
       <geometry>
         <cylinder radius="0.03" length="0.4"/>
@@ -71,6 +91,11 @@
 
   <!-- Camera/Sensor -->
   <link name="camera">
+    <inertial>
+      <mass value="0.1"/>
+      <origin xyz="0 0 0"/>
+      <inertia ixx="0.0001" ixy="0.0" ixz="0.0" iyy="0.0001" iyz="0.0" izz="0.0001"/>
+    </inertial>
     <visual>
       <geometry>
         <box size="0.1 0.08 0.05"/>

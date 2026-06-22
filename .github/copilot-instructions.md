@@ -56,6 +56,25 @@ MultiRobotSimulationCore  (core_simulation.py)
 - **MockSimCore** in conftest — lightweight sim_core with `tick(n)` for stepping.
 - **arm_sim fixture** — parametrized (physics / kinematic / physics_off) for arm tests.
 
+## Pre-push verification & git workflow
+
+- Work on a feature branch, never `main`. Commit and push **only when asked**.
+- Backward compatibility is not a concern for this repo.
+- `ros2_bridge/` is excluded from pre-commit and not covered by pytest, so bridge
+  bugs only surface on a manual Docker run. **Before pushing:**
+  1. **Core (always):** `make verify` (lint + test; baseline 1587 passed).
+  2. **Bridge integration smoke test** (when anything under `ros2_bridge/`,
+     `docker/`, `robots/`, or `config/` changed):
+     ```bash
+     cd docker
+     docker compose run --rm --no-deps \
+       -v "$(pwd)/test_integration.sh:/test_integration.sh:ro" \
+       bridge bash /test_integration.sh
+     # expect: "=== All integration tests PASSED ===" (exit 0)
+     ```
+  Do not push if either step fails. (Goal: replace the manual bridge step with a
+  CI Docker job.)
+
 ## Guard Rails — DO NOT
 
 1. **Never call `p.stepSimulation()` when `physics: false`** — kinematic mode teleports objects; physics stepping breaks positions.
@@ -129,3 +148,9 @@ agent.move_end_effector([0.3, 0.0, 0.4])  # IK solves joint angles
 | `make bench-full` | Full benchmark sweep |
 | `make clean` | Remove caches and build artifacts |
 | `make help` | List all targets |
+
+## Shared skills
+
+Reusable skills live in `.copilot/skills/` (loaded by Copilot). `.claude/skills`
+is a symlink to it, so Claude Code discovers the same skills — edit a skill once
+and both tools pick it up.

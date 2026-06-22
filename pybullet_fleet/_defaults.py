@@ -70,22 +70,32 @@ _DEFAULTS: Dict[str, Dict[str, Any]] = {
         "collision_detection_method": None,
         # None = auto-calculate from largest entity AABB
         "spatial_hash_cell_size": None,
-        # None = no camera configuration (use PyBullet defaults)
+        # Default: interactive camera (Shift+drag pan, +/- zoom, o top-down)
         "camera_config": None,
         # None = no additional model search paths
         "model_paths": None,
     },
     "agent": {
+        "motion_mode": "differential",
+        "use_fixed_base": False,
+        # Not centralized (complex / per-instance):
+        #   urdf_path   — str, per-robot URDF path
+        #   ik_params   — IKParams dataclass (see "ik" section for scalars)
+        #   controller  — dict, controller type + ControllerParams fields
+        #                 (kinematic limits, navigation_2d, default_direction, …)
+    },
+    "controller": {
+        # Kinematic limits — used as ControllerParams defaults.
+        # ``math.inf`` in an explicit ControllerParams instance still means
+        # "no limit"; only unspecified fields fall back to these values.
         "max_linear_vel": 2.0,
         "max_linear_accel": 5.0,
         "max_angular_vel": 3.0,
         "max_angular_accel": 10.0,
-        "motion_mode": "differential",
-        "use_fixed_base": False,
-        # Not centralized (complex / per-instance):
-        #   urdf_path          — str, per-robot URDF path
-        #   ik_params          — IKParams dataclass (see "ik" section for scalars)
-        #   controller_config  — dict, controller type + params
+        "cmd_vel_timeout": 0.0,
+        "navigation_2d": False,
+        # Not centralized (complex enum):
+        #   default_direction — MovementDirection enum (forward / backward / …)
     },
     "sim_object": {
         "mass": 0.0,
@@ -103,10 +113,10 @@ _DEFAULTS: Dict[str, Dict[str, Any]] = {
     "shape": {
         "radius": 0.5,
         "height": 1.0,
+        "rgba_color": (0.8, 0.8, 0.8, 1.0),
         # Not centralized (mutable list defaults — use field(default_factory)):
         #   mesh_scale    — [1.0, 1.0, 1.0]
         #   half_extents  — [0.5, 0.5, 0.5]
-        #   rgba_color    — [0.8, 0.8, 0.8, 1.0]
     },
     "ik": {
         "max_outer_iterations": 5,
@@ -193,6 +203,7 @@ def _restore(snapshot: Dict[str, Dict[str, Any]]) -> None:
 #: Convenience accessors — import these in consuming modules.
 SIMULATION: Dict[str, Any] = _DEFAULTS["simulation"]
 AGENT: Dict[str, Any] = _DEFAULTS["agent"]
+CONTROLLER: Dict[str, Any] = _DEFAULTS["controller"]
 SIM_OBJECT: Dict[str, Any] = _DEFAULTS["sim_object"]
 SHAPE: Dict[str, Any] = _DEFAULTS["shape"]
 IK: Dict[str, Any] = _DEFAULTS["ik"]

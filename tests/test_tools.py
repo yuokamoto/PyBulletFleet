@@ -560,3 +560,105 @@ class TestBodyToWorldVelocity3D:
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+# ---------------------------------------------------------------------------
+# find_nearest
+# ---------------------------------------------------------------------------
+
+
+class _FakeObj:
+    """Minimal object with position for find_nearest tests (no PyBullet)."""
+
+    def __init__(self, x, y, z=0.0, pickable=True, attached=False, name=""):
+        self._pos = [x, y, z]
+        self.pickable = pickable
+        self._attached = attached
+        self.name = name
+
+    def get_pose(self):
+        class _P:
+            def __init__(self, pos):
+                self.position = pos
+
+        return _P(self._pos)
+
+    def is_attached(self):
+        return self._attached
+
+
+class TestFindNearest:
+    """Test tools.find_nearest utility function."""
+
+    def test_finds_nearest(self):
+        from pybullet_fleet.tools import find_nearest
+
+        far = _FakeObj(10, 0)
+        near = _FakeObj(1, 0)
+        result = find_nearest([far, near], position=[0, 0, 0], search_radius=5.0)
+        assert result is near
+
+    def test_respects_radius(self):
+        from pybullet_fleet.tools import find_nearest
+
+        far = _FakeObj(10, 0)
+        result = find_nearest([far], position=[0, 0, 0], search_radius=5.0)
+        assert result is None
+
+    def test_exclude_single(self):
+        from pybullet_fleet.tools import find_nearest
+
+        me = _FakeObj(0, 0, name="me")
+        other = _FakeObj(1, 0, name="other")
+        result = find_nearest([me, other], position=[0, 0, 0], search_radius=5.0, exclude=me)
+        assert result is other
+
+    def test_predicate_filters(self):
+        from pybullet_fleet.tools import find_nearest
+
+        a = _FakeObj(1, 0, pickable=False)
+        b = _FakeObj(2, 0, pickable=True)
+        result = find_nearest(
+            [a, b],
+            position=[0, 0, 0],
+            search_radius=5.0,
+            predicate=lambda o: o.pickable,
+        )
+        assert result is b
+
+    def test_no_predicate_returns_any(self):
+        from pybullet_fleet.tools import find_nearest
+
+        a = _FakeObj(1, 0, pickable=False)
+        result = find_nearest([a], position=[0, 0, 0], search_radius=5.0)
+        assert result is a  # no predicate → no filtering
+
+    def test_empty_list(self):
+        from pybullet_fleet.tools import find_nearest
+
+        result = find_nearest([], position=[0, 0, 0], search_radius=5.0)
+        assert result is None
+
+    def test_3d_distance(self):
+        """Search radius is 3D Euclidean, not just XY."""
+        from pybullet_fleet.tools import find_nearest
+
+        high = _FakeObj(0, 0, z=10)
+        result = find_nearest([high], position=[0, 0, 0], search_radius=5.0)
+        assert result is None  # z=10 is beyond radius 5
+
+    def test_multiple_predicates_combined(self):
+        """Predicate can combine multiple conditions."""
+        from pybullet_fleet.tools import find_nearest
+
+        a = _FakeObj(1, 0, pickable=True, attached=True)
+        b = _FakeObj(2, 0, pickable=True, attached=False)
+        c = _FakeObj(3, 0, pickable=False, attached=False)
+
+        result = find_nearest(
+            [a, b, c],
+            position=[0, 0, 0],
+            search_radius=5.0,
+            predicate=lambda o: o.pickable and not o.is_attached(),
+        )
+        assert result is b

@@ -2,7 +2,7 @@
 
 import math
 from dataclasses import dataclass, field
-from typing import Iterable, List, NamedTuple, Optional, Tuple
+from typing import Iterable, List, NamedTuple, Optional, Sequence, Tuple, Union
 
 #: Quaternion in ``(x, y, z, w)`` convention — same as PyBullet.
 Quat = Tuple[float, float, float, float]
@@ -12,6 +12,102 @@ Vec3 = Tuple[float, float, float]
 import numpy as np
 import pybullet as p
 from scipy.spatial.transform import Rotation as R
+
+#: Scalar limit or per-axis sequence (used for kinematic limits and similar).
+ScalarOrAxes = Union[float, Sequence[float], np.ndarray]
+
+
+def is_scalar(v: ScalarOrAxes) -> bool:
+    """Return ``True`` if *v* should be treated as a scalar (broadcastable) value.
+
+    Accepts Python ``int``/``float`` or a 0-d numpy array. Anything else (list,
+    tuple, 1-d ndarray, …) is treated as per-axis.
+    """
+    return isinstance(v, (int, float)) or (isinstance(v, np.ndarray) and v.ndim == 0)
+
+
+def as_axes(v: ScalarOrAxes, dim: int = 3) -> np.ndarray:
+    """Coerce *v* to a ``(dim,)`` numpy array, broadcasting scalars.
+
+    Raises:
+        ValueError: If *v* is array-like but its shape is not ``(dim,)``.
+    """
+    if is_scalar(v):
+        return np.full(dim, float(v), dtype=float)  # type: ignore[arg-type]
+    arr = np.asarray(v, dtype=float)
+    if arr.shape != (dim,):
+        raise ValueError(f"Expected scalar or length-{dim} sequence; got shape {arr.shape}.")
+    return arr
+
+
+def projected_axis_limit(limit: ScalarOrAxes, direction_unit: np.ndarray) -> float:
+    """Direction-projected scalar limit from per-axis caps.
+
+    Given a per-axis cap ``arr`` and a unit direction ``d``, returns the
+    largest scalar ``v`` such that ``|d[i]| * v <= arr[i]`` for every axis::
+
+        v_max = 1 / max_i ( |d[i]| / arr[i] )
+
+    Used to convert per-axis kinematic limits (velocity or acceleration) into
+    the equivalent scalar bound along a given travel direction.
+
+    Args:
+        limit: Scalar (returned as-is) or per-axis cap ``(dim,)``.
+        direction_unit: Unit direction vector ``(dim,)``. A zero vector
+            (no constraining axis) returns ``math.inf``.
+
+    Returns:
+        Effective scalar limit along ``direction_unit``.
+    """
+    if is_scalar(limit):
+        return float(limit)  # type: ignore[arg-type]
+    arr = as_axes(limit, dim=direction_unit.shape[0])
+    abs_dir = np.abs(direction_unit)
+    # ratio_i = |d_i| / arr_i. Axes the direction does not touch (|d_i| == 0)
+    # never constrain — even when their cap is 0 (a 0/0 that must read as 0, not
+    # NaN; e.g. max_linear_vel [0.3, 3.0, 0.0] moving in the XY plane). An axis
+    # with |d_i| > 0 but a 0 cap forbids motion → inf ratio → 0 effective limit.
+    with np.errstate(divide="ignore", invalid="ignore"):
+        ratios = np.where(abs_dir == 0.0, 0.0, abs_dir / arr)
+    max_ratio = float(np.max(ratios))
+    if max_ratio == 0.0:
+        return math.inf
+    return 0.0 if math.isinf(max_ratio) else 1.0 / max_ratio
+
+
+def clamp_vec_to_limit(vec: np.ndarray, limit: ScalarOrAxes) -> np.ndarray:
+    """Clamp a vector against a scalar or per-axis cap.
+
+    Semantics depend on the shape of *limit*:
+
+    * **Scalar** ⇒ Euclidean magnitude clamp: if ``|vec| > limit``, the vector
+      is scaled down to length ``limit`` while preserving direction. Acts
+      as projection onto a sphere of radius ``limit``.
+    * **Per-axis** ⇒ component-wise clamp: each ``vec[i]`` is independently
+      clipped to ``[-limit[i], +limit[i]]``. Acts as projection onto an
+      axis-aligned box.
+
+    Non-finite scalar limits (``math.inf``) short-circuit and return *vec*
+    unchanged.
+
+    Args:
+        vec: Vector ``(dim,)`` to clamp (e.g. body-frame linear or angular
+            velocity).
+        limit: Scalar magnitude cap or per-axis cap ``(dim,)``.
+
+    Returns:
+        Clamped vector (may be *vec* itself when already within bounds).
+    """
+    if is_scalar(limit):
+        vmax = float(limit)  # type: ignore[arg-type]
+        if not math.isfinite(vmax):
+            return vec
+        mag = float(np.linalg.norm(vec))
+        if mag > vmax:
+            return vec * (vmax / mag)
+        return vec
+    arr = as_axes(limit, dim=vec.shape[0])
+    return np.clip(vec, -arr, arr)
 
 
 @dataclass
@@ -987,3 +1083,50 @@ def quat_slerp(
     s0 = math.cos(theta) - precomp.dot * sin_theta / precomp.sin_theta_0
     s1 = sin_theta / precomp.sin_theta_0
     return s0 * q0 + s1 * q1_effective
+
+
+def quat_slerp_batch(
+    q0: np.ndarray,
+    q1: np.ndarray,
+    t: np.ndarray,
+    dot: np.ndarray,
+    theta0: np.ndarray,
+    sin_theta0: np.ndarray,
+) -> np.ndarray:
+    """Vectorised SLERP for N quaternion pairs.
+
+    Evaluates slerp simultaneously for all N agents using NumPy — the
+    hot path for :class:`BatchDifferentialController` and
+    :class:`BatchOmniController`.
+
+    The caller is responsible for shortest-path correction: ``q1`` must
+    already have had its sign flipped where ``dot(q0, q1) < 0``, and
+    ``dot`` must be the corrected (non-negative) dot product.
+
+    Args:
+        q0: ``(N, 4)`` start quaternions.
+        q1: ``(N, 4)`` end quaternions (sign-corrected for shortest path).
+        t: ``(N,)`` interpolation parameters in ``[0, 1]``.
+        dot: ``(N,)`` dot products ``dot(q0, q1) >= 0``.
+        theta0: ``(N,)`` half-angles ``acos(dot)``.
+        sin_theta0: ``(N,)`` ``sin(theta0)``.
+
+    Returns:
+        ``(N, 4)`` interpolated unit quaternions.
+    """
+    sin_theta0_safe = np.where(sin_theta0 > 1e-8, sin_theta0, 1.0)
+    theta = theta0 * t
+    sin_theta = np.sin(theta)
+    s0 = np.cos(theta) - dot * sin_theta / sin_theta0_safe
+    s1 = sin_theta / sin_theta0_safe
+    result = s0[:, None] * q0 + s1[:, None] * q1
+
+    # Near-identical quaternions: fall back to normalized lerp.
+    use_lerp = sin_theta0 <= 1e-8
+    if use_lerp.any():
+        lerp = q0 + t[:, None] * (q1 - q0)
+        norms = np.linalg.norm(lerp, axis=1, keepdims=True)
+        norms_safe = np.where(norms > 1e-12, norms, 1.0)
+        result[use_lerp] = (lerp / norms_safe)[use_lerp]
+
+    return result

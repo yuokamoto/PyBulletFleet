@@ -24,8 +24,8 @@ import pybullet as p
 
 from pybullet_fleet.agent import Agent, AgentSpawnParams, Pose
 from pybullet_fleet.agent_manager import AgentManager, GridSpawnParams
-from pybullet_fleet.config_utils import load_config
-from pybullet_fleet.core_simulation import MultiRobotSimulationCore, SimulationParams
+from pybullet_fleet.config_utils import load_yaml_config, merge_configs
+from pybullet_fleet.core_simulation import MultiRobotSimulationCore
 
 # ========================================
 # Parse Arguments
@@ -55,7 +55,7 @@ base_config_path = os.path.join(config_dir, "config.yaml")
 robots_config_path = os.path.join(config_dir, "100robots_config.yaml")
 
 # Load both configs (100robots_config overrides config.yaml)
-config = load_config([base_config_path, robots_config_path])
+config = merge_configs(load_yaml_config(base_config_path), load_yaml_config(robots_config_path))
 
 # Extract parameters from config
 num_robots = config.get("num_robots", 100)
@@ -83,14 +83,13 @@ if mode == "mixed":
     print(f"Mobile robot probability: {mobile_robot_prob*100:.0f}%")
     print(f"Arm robot probability: {arm_robot_prob*100:.0f}%")
     if arm_robot_prob > 0:
-        config["physics"] = True
+        config.setdefault("simulation", {})["physics"] = True
         print("Mode: mixed (mobile + arm) - Physics enabled for robot arm")
 else:
-    config["physics"] = False
+    config.setdefault("simulation", {})["physics"] = False
     print("Mode: mixed (mobile + arm) - Physics disabled for maximum performance")
 
-params = SimulationParams.from_dict(config)
-sim_core = MultiRobotSimulationCore(params)
+sim_core = MultiRobotSimulationCore.from_dict(config)
 
 # ========================================
 # Setup Spawn Parameters
@@ -112,9 +111,9 @@ grid_params = GridSpawnParams(
 
 # Mobile robot spawn params (shared by both modes) - from config
 mobile_urdf_path = mobile_robot_config.get("urdf_path", "robots/mobile_robot.urdf")
-from pybullet_fleet.robot_models import resolve_urdf
+from pybullet_fleet.robot_models import resolve_model
 
-mobile_urdf = resolve_urdf(args.robot)
+mobile_urdf = resolve_model(args.robot)
 print(f"Using robot: {args.robot} -> {mobile_urdf}")
 if not os.path.exists(mobile_urdf):
     raise FileNotFoundError(f"Mobile robot URDF not found: {mobile_urdf}")
@@ -123,8 +122,7 @@ mobile_params = AgentSpawnParams(
     urdf_path=mobile_urdf,
     initial_pose=Pose.from_xyz(0, 0, mobile_robot_config.get("initial_z", 0.3)),
     use_fixed_base=mobile_robot_config.get("use_fixed_base", False),
-    max_linear_vel=mobile_robot_config.get("max_linear_vel", 2.0),
-    max_linear_accel=mobile_robot_config.get("max_linear_accel", 5.0),
+    controller=mobile_robot_config.get("controller"),
     user_data={"robot_type": "mobile_robot"},
 )
 
@@ -135,15 +133,14 @@ mobile_params = AgentSpawnParams(
 if mode == "mixed":
     # Mixed Mode: Spawn mixed robot types
     # Arm robot spawn params - resolve via robot_models
-    arm_urdf = resolve_urdf(args.arm_robot)
+    arm_urdf = resolve_model(args.arm_robot)
     print(f"Using arm robot: {args.arm_robot} -> {arm_urdf}")
 
     arm_params = AgentSpawnParams(
         urdf_path=arm_urdf,
         initial_pose=Pose.from_xyz(0, 0, arm_robot_config.get("initial_z", 0.0)),
         use_fixed_base=arm_robot_config.get("use_fixed_base", True),
-        max_linear_vel=arm_robot_config.get("max_linear_vel", 0.0),
-        max_linear_accel=arm_robot_config.get("max_linear_accel", 0.0),
+        controller=arm_robot_config.get("controller"),
         mass=arm_robot_config.get("mass", 1.0),  # Use URDF mass (1.0) for physics simulation
         user_data={"robot_type": "arm_robot"},
     )
@@ -182,7 +179,7 @@ print(agent_manager)
 # ========================================
 
 # Setup camera view using config file settings (auto mode with agent positions)
-camera_config = params.camera_config
+camera_config = sim_core.params.camera_config
 if camera_config:
     # Provide agent positions for auto mode
     agent_positions = [agent.get_pose().position for agent in agent_manager.objects]

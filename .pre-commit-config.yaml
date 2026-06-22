@@ -8,7 +8,9 @@ repos:
     rev: v4.5.0
     hooks:
       - id: trailing-whitespace          # Remove trailing whitespace
+        exclude: '^benchmark/results/'   # generated benchmark data — not formatted
       - id: end-of-file-fixer            # Ensure files end with a newline
+        exclude: '^benchmark/results/'   # generated benchmark data — not formatted
       - id: check-yaml                   # Validate YAML files
       - id: check-merge-conflict         # Detect merge conflict markers
       - id: check-toml                   # Validate TOML files (pyproject.toml)
@@ -49,6 +51,6 @@ repos:
       - id: flake8
         args: [
           '--max-line-length=127',
-          '--extend-ignore=E203,W503,D,Q,I,F841,W291,W293,E128,B902,E402,CNL100',
+          '--extend-ignore=E203,W503,D,Q,I,F401,F841,W291,W293,E128,B902,E402,CNL100',
         ]
         # exclude: '^benchmark/'

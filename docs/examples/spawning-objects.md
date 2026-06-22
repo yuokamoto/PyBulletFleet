@@ -22,13 +22,22 @@ After this tutorial you can move on to
 
 ## 1. Initialize the Simulation
 
-Every simulation starts with two objects: `SimulationParams` and `MultiRobotSimulationCore`.
+Every simulation starts by creating a `MultiRobotSimulationCore` — the recommended way is
+`from_yaml()`, which loads all parameters from a nested YAML config file in one call:
 
 ```python
-from pybullet_fleet.core_simulation import MultiRobotSimulationCore, SimulationParams
+from pybullet_fleet.core_simulation import MultiRobotSimulationCore
 
-params = SimulationParams(gui=True, timestep=0.01, physics=True)
-sim_core = MultiRobotSimulationCore(params)
+sim_core = MultiRobotSimulationCore.from_yaml("config/config.yaml")
+```
+
+The YAML file uses a nested format under the `simulation:` key:
+
+```yaml
+simulation:
+  gui: true
+  timestep: 0.01
+  physics: true
 ```
 
 **Key parameters:**
@@ -216,7 +225,7 @@ Use `Agent.from_urdf` for articulated robots (arms, mobile manipulators) whose j
 structure is defined in a URDF file.
 
 `from_urdf` accepts a **model name** (e.g., `"panda"`) or a **direct path**.
-Model names are resolved via `resolve_urdf()` — first from the curated `KNOWN_MODELS`
+Model names are resolved via `resolve_model()` — first from the curated `KNOWN_MODELS`
 registry, then by auto-scanning `pybullet_data` and `robot_descriptions` as a fallback.
 See [Tutorial 6 — Robot Models](robot-models) for details.
 

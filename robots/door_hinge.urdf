@@ -1,0 +1,36 @@
+<?xml version="1.0"?>
+<robot name="door_hinge">
+  <link name="frame">
+    <visual>
+      <origin xyz="0 0 1.0"/>
+      <geometry><box size="0.1 0.1 2.0"/></geometry>
+      <material name="gray"><color rgba="0.5 0.5 0.5 1.0"/></material>
+    </visual>
+    <inertial>
+      <mass value="0.0"/>
+      <inertia ixx="0" ixy="0" ixz="0" iyy="0" iyz="0" izz="0"/>
+    </inertial>
+  </link>
+  <joint name="hinge" type="revolute">
+    <parent link="frame"/>
+    <child link="panel"/>
+    <origin xyz="0 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-1.5708" upper="1.5708" effort="10" velocity="2.0"/>
+  </joint>
+  <link name="panel">
+    <visual>
+      <origin xyz="0.5 0 1.0"/>
+      <geometry><box size="1.0 0.05 2.0"/></geometry>
+      <material name="brown"><color rgba="0.6 0.3 0.1 1.0"/></material>
+    </visual>
+    <collision>
+      <origin xyz="0.5 0 1.0"/>
+      <geometry><box size="1.0 0.05 2.0"/></geometry>
+    </collision>
+    <inertial>
+      <mass value="0.0"/>
+      <inertia ixx="0" ixy="0" ixz="0" iyy="0" iyz="0" izz="0"/>
+    </inertial>
+  </link>
+</robot>

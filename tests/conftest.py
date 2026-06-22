@@ -8,6 +8,7 @@ import pybullet_data
 import pytest
 
 from pybullet_fleet.data_monitor import DataMonitor
+from pybullet_fleet.events import EventBus
 from pybullet_fleet.sim_object import SimObject
 
 
@@ -36,6 +37,11 @@ class MockSimCore:
         self._kinematic_objects: set = set()
         self._client: int = 0
         self._params = SimpleNamespace(physics=physics)
+        self.events: EventBus = EventBus()
+        # Two-phase step state — mock stays in "outside step_once" mode so all
+        # set_pose calls take the immediate path (legacy behaviour for tests).
+        self._in_step: bool = False
+        self._pending_pose_ids: set = set()
 
     @property
     def client(self) -> int:
@@ -56,6 +62,14 @@ class MockSimCore:
         """No-op batch_spawn context for tests (mirrors MultiRobotSimulationCore)."""
         yield
 
+    def register_manager(self, manager) -> None:
+        """No-op stub — AgentManager registers itself on construction."""
+        if not hasattr(self, "_registered_managers"):
+            self._registered_managers: list = []
+        if manager not in self._registered_managers:
+            self._registered_managers.append(manager)
+            manager.sim_core = self
+
     def register_callback(self, callback, frequency=None):
         """Record registered callbacks (used by AgentManager tests)."""
         if not hasattr(self, "_registered_callbacks"):
@@ -63,13 +77,19 @@ class MockSimCore:
         self._registered_callbacks.append({"func": callback, "frequency": frequency})
 
     def tick(self, n: int = 1):
-        """Advance sim_time by *n* time-steps, with physics stepping if enabled."""
-        if self._params.physics:
-            for _ in range(n):
+        """Advance sim_time by *n* time-steps, with physics stepping if enabled.
+
+        Also calls ``obj.update(dt)`` for every registered object that has
+        ``_needs_update = True``, mirroring the unified loop in
+        ``MultiRobotSimulationCore.step_once()``.
+        """
+        for _ in range(n):
+            if self._params.physics:
                 p.stepSimulation(physicsClientId=self._client)
-                self.sim_time += self._dt
-        else:
-            self.sim_time += self._dt * n
+            self.sim_time += self._dt
+            for obj in self.sim_objects:
+                if getattr(obj, "_needs_update", False):
+                    obj.update(self._dt)
 
 
 @pytest.fixture(autouse=True)

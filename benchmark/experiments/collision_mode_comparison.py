@@ -112,8 +112,10 @@ def benchmark_collision_mode(
     agent_spawn_params = AgentSpawnParams(
         urdf_path=robot_urdf,
         motion_mode=MotionMode.OMNIDIRECTIONAL,
-        max_linear_vel=2.0,
-        max_angular_vel=3.0,
+        controller={
+            "max_linear_vel": 2.0,
+            "max_angular_vel": 3.0,
+        },
         mass=0.0,
         collision_mode=collision_mode,
     )

@@ -62,6 +62,68 @@ PyBulletFleet provides multiple configuration files for different simulation mod
 - Physics ON + HYBRID
 - 10-second duration, maximum speed
 
+## Agent / Robot Spawn Schema
+
+Robot-spawn blocks (e.g. `mobile_robot:`, `arm_robot:` in
+[`config/100robots_config.yaml`](https://github.com/yuokamoto/PyBulletFleet/blob/main/config/100robots_config.yaml))
+are consumed by `AgentSpawnParams.from_dict` and then routed through
+`Agent.from_params`.  Controller-related fields live **only** under a
+nested `controller:` block — there is no top-level `max_linear_vel:` /
+`max_angular_vel:` shortcut.  This keeps a single source of truth for
+controller params across YAML, Python `dict`, and the Python kwarg API.
+
+### Canonical block
+
+```yaml
+mobile_robot:
+  urdf_path: "robots/mobile_robot.urdf"
+  initial_z: 0.3
+  use_fixed_base: false
+  motion_mode: omnidirectional        # optional; deprecated as selector
+  controller:                         # single source of truth
+    type: omni                        # registry name (omni / differential / batch_omni / ...)
+    max_linear_vel: 2.0               # scalar (magnitude) or [vx, vy, vz] per-axis cap
+    max_angular_vel: 2.0              # scalar or [wx, wy, wz]
+    max_linear_accel: 5.0
+    max_angular_accel: 5.0
+    navigation_2d: true               # preserve z during pose-mode trajectories
+    cmd_vel_timeout: 0.5              # velocity-command watchdog (s); 0.0 disables
+    default_direction: forward        # differential-drive only; forward / backward / auto
+    # impl extras (routed to the controller subclass __init__):
+    wheel_separation: 0.3             # DifferentialController
+```
+
+### Key routing rules
+
+| YAML key | Where it goes | Notes |
+|----------|---------------|-------|
+| `controller.type` | Registry lookup → `Controller` subclass | Required for non-default controllers (everything except the `motion_mode` fallback). |
+| `controller.max_*` | `ControllerParams` fields | Scalar or 3-element list.  Same value seen by per-agent and batched controllers. |
+| `controller.navigation_2d`, `cmd_vel_timeout`, `default_direction` | `ControllerParams` fields | Behaviour flags shared by every controller. |
+| `controller.<other>` | Subclass `__init__` kwarg | Routed via `inspect.signature` in `Controller.from_config`.  Unknown-to-`ControllerParams` keys are silently dropped from the params dict. |
+| `motion_mode` | Fallback selector | Deprecated as a controller selector.  Only used when `controller=None` (no `type` given).  A warning is logged when `motion_mode` and `controller.type` disagree. |
+
+### Equivalence with the Python API
+
+The same dict is accepted verbatim by the Python kwarg `controller=`:
+
+```python
+agent = Agent.from_urdf(
+    "robots/mobile_robot.urdf",
+    controller={
+        "type": "omni",
+        "max_linear_vel": 2.0,
+        "max_angular_vel": 2.0,
+    },
+)
+```
+
+See the [Controller Configuration how-to](../how-to/controller-config)
+for the full guide to all five accepted forms of `controller=` (None /
+string / dict / `Controller` instance / `ControllerParams` instance),
+custom controllers, and the `motion_mode` vs `controller.type`
+interaction rules.
+
 ## Centralized Default Management (`_defaults.py`)
 
 All simulation parameter defaults live in a single module:
@@ -100,16 +162,16 @@ max_vel  = get("agent", "max_linear_vel")  # 2.0
 ### Load Configuration in Python
 
 ```python
-from pybullet_fleet.core_simulation import SimulationParams
+from pybullet_fleet.core_simulation import MultiRobotSimulationCore
 
 # Load default config
-params = SimulationParams.from_config("config/config.yaml")
+sim = MultiRobotSimulationCore.from_yaml("config/config.yaml")
 
 # Load kinematics mode config
-params = SimulationParams.from_config("config/config_physics_off.yaml")
+sim = MultiRobotSimulationCore.from_yaml("config/config_physics_off.yaml")
 
 # Load physics mode config
-params = SimulationParams.from_config("config/config_physics_on.yaml")
+sim = MultiRobotSimulationCore.from_yaml("config/config_physics_on.yaml")
 ```
 
 ### Run Config-Based Benchmark

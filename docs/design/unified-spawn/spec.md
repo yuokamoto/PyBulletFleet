@@ -42,7 +42,7 @@ entities:
 - `type: agent` → parsed into `AgentSpawnParams`, spawned as `Agent`
 - `type: sim_object` → parsed into `SimObjectSpawnParams`, spawned as `SimObject`
 - `type` field defaults to ``"agent"`` when omitted (backward-compatible)
-- Backward-compat: old ``robots:`` section continues to work (agent-only, no ``type`` field needed)
+- Backward-compat: old ``entities:`` section continues to work (agent-only, no ``type`` field needed)
 
 ### 2. Batch Spawn Optimization
 
@@ -91,7 +91,7 @@ Users can freely create `List[Dict]` or `List[SpawnParams]` in Python and pass t
 - Built-in auto-registered: `"agent"` → `Agent`, `"sim_object"` → `SimObject`
 - `SimObjectManager.spawn_entities_batch(entities_yaml)` → spawns mixed entities from config dicts
 - Batch spawn context manager in `MultiRobotSimulationCore`: `batch_spawn()` context manager
-- Backward-compat: existing `robots:` key and `parse_agent_config()` unchanged
+- Backward-compat: existing `entities:` key and `parse_agent_config()` unchanged
 
 ### Non-functional
 

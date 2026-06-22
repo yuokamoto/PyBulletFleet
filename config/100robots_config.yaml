@@ -7,29 +7,27 @@
 #
 # ========================================
 
-
 # ========================================
 # Simulation Parameters (Override)
 # ========================================
+simulation:
+  # Override base config settings for 100robots demo
+  target_rtf: 0     # real-time cap (0 = uncapped/max speed, run as fast as possible)
+  gui: true         # Show GUI
+  timestep: 0.1     # 100ms timestep (10 Hz) for smooth movement
+  physics: false    # Kinematic control
+  monitor: true     # Enable monitor
+  log_level: info   # Show INFO level logs for profiling
 
-# Override base config settings for 100robots demo
-target_rtf: 0     # real-time cap (0 = uncapped/max speed, run as fast as possible)
-gui: true         # Show GUI
-timestep: 0.1     # 100ms timestep (10 Hz) for smooth movement
-physics: false    # Kinematic control
-monitor: true     # Enable monitor
-log_level: info   # Show INFO level logs for profiling
+  # Profiling configuration
+  enable_time_profiling: true
+  profiling_interval: 100  # Print average every 100 steps
 
-# Profiling configuration
-enable_time_profiling: true
-profiling_interval: 100  # Print average every 100 steps
-
-# Camera settings for 100 robots
-camera:
-  camera_mode: auto              # Use auto mode for automatic camera positioning
-  camera_view_type: perspective  # Perspective view for grid visualization
-  camera_auto_scale: 0.5         # Scale factor for camera distance (larger = farther away)
-
+  # Camera settings for 100 robots
+  camera:
+    camera_mode: auto              # Use auto mode for automatic camera positioning
+    camera_view_type: perspective  # Perspective view for grid visualization
+    camera_auto_scale: 0.5         # Scale factor for camera distance (larger = farther away)
 
 # ========================================
 # Robot Parameters
@@ -65,16 +63,19 @@ offset: [0.0, 0.0, 0.3]
 mobile_robot:
   urdf_path: "robots/mobile_robot.urdf"  # Robot URDF path (relative to PyBulletFleet root)
   initial_z: 0.3      # Initial Z position (m)
-  max_linear_vel: 2.0        # Maximum velocity (m/s)
-  max_linear_accel: 5.0      # Maximum acceleration (m/s²)
+  controller:
+    type: "omni"               # Controller registry name (recommended explicit form)
+    max_linear_vel: 2.0        # Maximum velocity (m/s)
+    max_linear_accel: 5.0      # Maximum acceleration (m/s²)
   use_fixed_base: false  # If true, robot base is fixed and doesn't move
 
 # Arm robot parameters (for mixed mode)
 arm_robot:
   urdf_path: "robots/arm_robot.urdf"  # Arm robot URDF path
   initial_z: 0.0      # Initial Z position (m)
-  max_linear_vel: 0.0        # Arm robots don't move
-  max_linear_accel: 0.0      # Arm robots don't accelerate
+  controller:
+    max_linear_vel: 0.0        # Arm robots don't move
+    max_linear_accel: 0.0      # Arm robots don't accelerate
   use_fixed_base: true  # Arm robots are fixed
 
 # Mixed mode probabilities

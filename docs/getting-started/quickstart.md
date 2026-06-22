@@ -69,10 +69,11 @@ Key settings you will want to tweak:
 Example — run headless at 10× real-time with physics enabled:
 
 ```yaml
-gui: false
-target_rtf: 10
-physics: true
-collision_detection_method: "contact_points"
+simulation:
+  gui: false
+  target_rtf: 10
+  physics: true
+  collision_detection_method: "contact_points"
 ```
 
 See [`config/config.yaml`](https://github.com/yuokamoto/PyBulletFleet/blob/main/config/config.yaml) for the full list of parameters — every key is documented with inline comments.
@@ -106,7 +107,6 @@ For step-by-step walkthroughs, see the **[Tutorials](../examples/index)** page.
 | `robot_demo.py` | Basic robot creation with `Agent.from_mesh()` / `Agent.from_urdf()` |
 | `action_system_demo.py` | High-level action system (MoveTo, Pick, Drop, Wait) |
 | `collision_features_demo.py` | Spatial-hash collision detection features and visualisation |
-| `memory_profiling_demo.py` | Memory usage tracking and profiling utilities |
 
 ### Arm (`examples/arm/`)
 
@@ -138,7 +138,7 @@ For step-by-step walkthroughs, see the **[Tutorials](../examples/index)** page.
 
 | Script | Description |
 |--------|-------------|
-| `resolve_urdf_demo.py` | URDF resolution patterns — by name, by path, and listing all models |
+| `resolve_model_demo.py` | URDF resolution patterns — by name, by path, and listing all models |
 | `model_catalog_demo.py` | Visual grid catalog of all registered models from `KNOWN_MODELS` |
 | `robot_descriptions_demo.py` | Using Tier 3 models from the `robot_descriptions` pip package |
 

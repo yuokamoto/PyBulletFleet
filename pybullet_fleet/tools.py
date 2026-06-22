@@ -1,4 +1,4 @@
-from typing import Callable, Dict, List, Optional, Tuple, Union, TYPE_CHECKING
+from typing import Callable, Dict, List, Optional, Sequence, Tuple, Union, Any, Iterable, TYPE_CHECKING
 import logging
 import math
 
@@ -358,3 +358,64 @@ def grid_execution(
                     func(grid_index, world_pos, **args)
                 else:
                     func(grid_index, world_pos)
+
+
+def find_nearest(
+    objects: Iterable[Any],
+    position: Sequence[float],
+    search_radius: float,
+    predicate: Optional[Callable[[Any], bool]] = None,
+    exclude: Optional[Any] = None,
+    use_2d: bool = False,
+) -> Optional[Any]:
+    """Find the nearest object from *position* within *search_radius*.
+
+    A generic spatial nearest-neighbour query over objects that expose
+    ``get_pose().position``.  Filtering is done via an optional
+    *predicate* callable and an *exclude* instance.
+
+    Args:
+        objects: Iterable of objects with ``get_pose().position`` attribute.
+        position: ``[x, y, z]`` reference position in world frame.
+        search_radius: Maximum search distance (metres).
+        predicate: Optional filter — called with each object, return
+                   ``True`` to include.  When ``None`` all objects are
+                   candidates.
+        exclude: Single object instance to skip (typically ``self``).
+        use_2d: When ``True``, compare only XY distance (ignore Z).
+                Useful for finding items on tables/shelves near a
+                floor-level waypoint.
+
+    Returns:
+        The nearest matching object, or ``None`` if nothing found.
+
+    Example::
+
+        # Find nearest pickable, unattached object from a world position
+        obj = find_nearest(
+            sim_core.sim_objects,
+            position=[5, 0, 0],
+            search_radius=2.0,
+            predicate=lambda o: o.pickable and not o.is_attached(),
+            exclude=agent,
+        )
+    """
+    ref = np.array(position, dtype=float)
+    min_dist = search_radius
+    nearest: Optional[Any] = None
+
+    for obj in objects:
+        if obj is exclude:
+            continue
+        if predicate is not None and not predicate(obj):
+            continue
+        obj_pos = np.array(obj.get_pose().position, dtype=float)
+        if use_2d:
+            dist = float(np.linalg.norm(obj_pos[:2] - ref[:2]))
+        else:
+            dist = float(np.linalg.norm(obj_pos - ref))
+        if dist < min_dist:
+            min_dist = dist
+            nearest = obj
+
+    return nearest

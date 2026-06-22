@@ -21,6 +21,13 @@ Usage:
     python benchmark/run_benchmark.py --type arm --agents 10 --duration 5
     python benchmark/run_benchmark.py --type arm --sweep 1 10 50 100
     python benchmark/run_benchmark.py --type arm --compare physics kinematic
+
+Scenarios:
+    Scenario names passed to --scenario / --compare are defined in
+    benchmark/configs/general.yaml under the ``scenarios:`` key.
+    Each scenario can override simulation, agents, and benchmark settings.
+    Built-in scenarios include: no_collision, collision_3d_full, collision_10hz,
+    per_agent, batch_omni.  Use --config to point at a different YAML file.
 """
 import os
 import sys
@@ -319,11 +326,17 @@ Examples:
   %(prog)s --sweep 100 500 1000 2000
   %(prog)s --compare no_collision collision_10hz
 
+  # Batch vs per-agent controller comparison (use duration>=30 for stable results)
+  %(prog)s --compare per_agent batch_omni --sweep 100 500 1000 2000 --duration 30
+
   # Arm
   %(prog)s --type arm --agents 10 --duration 5
   %(prog)s --type arm --sweep 1 10 50 100
   %(prog)s --type arm --compare physics kinematic
   %(prog)s --type arm --agents 50 --scenario kinematic
+
+Scenario names (--scenario / --compare) are defined in benchmark/configs/general.yaml.
+Use --config to point at a custom YAML file.
 """,
     )
 

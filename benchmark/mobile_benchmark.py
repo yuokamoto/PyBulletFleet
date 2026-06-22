@@ -58,6 +58,7 @@ def run_benchmark(
 
     config = load_config(config_path, scenario)
     sim_config = config.get("simulation", {})
+    agents_config = config.get("agents", {})
 
     # Setup simulation parameters from config
     params = SimulationParams(
@@ -79,8 +80,9 @@ def run_benchmark(
     # Memory before spawning
     mem_before = get_memory_info()
 
-    # Setup agent manager
-    agent_manager = AgentManager(sim_core=sim_core)
+    # Setup agent manager — batch_controller drives all agents via a single vectorised controller
+    batch_controller = agents_config.get("batch_controller", None)
+    agent_manager = AgentManager(sim_core=sim_core, batch_controller=batch_controller)
 
     # Calculate grid size
     grid_size = int(math.ceil(math.sqrt(num_agents)))
@@ -101,8 +103,10 @@ def run_benchmark(
     agent_spawn_params = AgentSpawnParams(
         urdf_path=robot_urdf,
         motion_mode=MotionMode.OMNIDIRECTIONAL,
-        max_linear_vel=2.0,
-        max_angular_vel=3.0,
+        controller={
+            "max_linear_vel": 2.0,
+            "max_angular_vel": 3.0,
+        },
         mass=0.0,  # Kinematic control
     )
 
@@ -169,6 +173,7 @@ def run_benchmark(
         "duration_s": duration,
         "gui": gui,
         "scenario": scenario,
+        "batch_controller": batch_controller,
         "spawn_time_s": wall_spawn_time,
         "spawn_cpu_s": cpu_spawn_time,
         "spawn_cpu_percent": (cpu_spawn_time / wall_spawn_time * 100.0) if wall_spawn_time > 0 else 0.0,

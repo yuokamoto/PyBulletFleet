@@ -20,9 +20,10 @@
 This tutorial scales up from a single agent to a fleet of 100 robots.
 You will learn how to:
 
-- Load simulation parameters from a YAML config file
-- Create and use `AgentManager` to manage many agents as a group
-- Batch-spawn 100 robots in a grid with mixed types using `GridSpawnParams`
+- Declare named managers with `managers:` config and route entity grids to them
+- Set fleet-wide controller defaults with `fleet_controller:`
+- Enable vectorised batch controllers via `batch_controller:`
+- Retrieve managers at runtime with `sim.get_manager()`
 - Build `Path` objects with waypoints and assign them with `set_path`
 - Iterate over all agents to read state or assign individual paths
 - Write an efficient monitoring callback for large fleets
@@ -54,95 +55,135 @@ so you can change settings (number of agents, speed limits, collision mode)
 without editing Python code:
 
 ```python
-from pybullet_fleet.core_simulation import MultiRobotSimulationCore, SimulationParams
+from pybullet_fleet.core_simulation import MultiRobotSimulationCore
 
-params = SimulationParams.from_config("config/100robots_config.yaml")
-sim = MultiRobotSimulationCore(params)
+sim = MultiRobotSimulationCore.from_yaml("config/100robots_config.yaml")
 ```
 
-`from_config` reads the YAML and maps every key to the corresponding `SimulationParams` field.
-Any parameter not present in the file gets its default value.
+`from_yaml` reads the nested YAML config (under the `simulation:` key) and creates the
+simulation core in one call. Any parameter not present in the file gets its default value.
 
 > The config files live in `config/`. See [Configuration Reference](../configuration/index)
 > for the full parameter list.
 
 ---
 
-## 3. Create an AgentManager
+## 3. Declare Named Managers in Config
+
+The recommended way to set up a multi-fleet simulation is a YAML config file with
+`managers:` and `entities:` sections.  The simulation core creates the managers,
+spawns the agents, and wires them together — no Python boilerplate required.
+
+A complete example lives at [`config/cube_patrol_config.yaml`](https://github.com/yuokamoto/PyBulletFleet/blob/main/config/cube_patrol_config.yaml):
+
+```yaml
+managers:
+  - name: omni_fleet
+    batch_controller: batch_omni       # vectorised batch controller
+    fleet_controller:                  # shared defaults for every agent in this fleet
+      max_linear_vel: 2.0
+      max_linear_accel: 1.0
+      max_angular_vel: 2.0
+      max_angular_accel: 5.0
+
+  - name: diff_fleet
+    batch_controller: batch_differential
+    fleet_controller:
+      max_linear_vel: 2.0
+      max_linear_accel: 1.0
+      max_angular_vel: 2.0
+      max_angular_accel: 5.0
+
+entities:
+  - urdf_path: "robots/mobile_robot.urdf"
+    mass: 0.0
+    use_fixed_base: false
+    motion_mode: omnidirectional
+    manager: omni_fleet          # route this group to omni_fleet
+    grid:
+      x_min: 0
+      x_max: 4
+      y_min: 0
+      y_max: 9
+      spacing: [10.0, 10.0, 0.0]
+      offset: [-15.0, -15.0, 0.3]
+
+  - urdf_path: "robots/mobile_robot.urdf"
+    mass: 0.0
+    use_fixed_base: false
+    motion_mode: differential
+    manager: diff_fleet          # route this group to diff_fleet
+    grid:
+      x_min: 5
+      x_max: 9
+      y_min: 0
+      y_max: 9
+      spacing: [10.0, 10.0, 0.0]
+      offset: [-15.0, -15.0, 0.3]
+```
+
+Load and retrieve managers:
 
 ```python
-from pybullet_fleet.agent_manager import AgentManager
+from pybullet_fleet.core_simulation import MultiRobotSimulationCore
 
-manager = AgentManager(sim_core=sim)
+sim = MultiRobotSimulationCore.from_yaml("config/cube_patrol_config.yaml")
+omni_manager = sim.get_manager("omni_fleet")
+diff_manager  = sim.get_manager("diff_fleet")
 ```
 
-`AgentManager` does not spawn any agents on its own — it manages agents that are
-added to it, either via `spawn_agents_grid` / `spawn_agents_grid_mixed`
-or by manually calling `manager.add_agent(agent)`.
+> **Note — demo uses Python dicts instead of `from_yaml`:**
+> `100robots_cube_patrol_demo.py` accepts a `--robot` argument that resolves the URDF
+> path at runtime via `resolve_model()`.  Because the path is dynamic, the demo merges
+> the base config with `managers:` / `entities:` programmatically (`from_dict`) rather
+> than reading a static YAML file.  The structure is identical to the YAML above.
 
----
+### fleet_controller — shared parameter defaults
 
-## 4. Define a Grid Layout with GridSpawnParams
+`fleet_controller` sets `ControllerParams` defaults for the whole fleet.
+When an agent spawns with no explicit `controller:` key, these values are used.
+Per-agent overrides (non-`None` fields) are never overwritten.
 
-`GridSpawnParams` describes a regular grid of positions:
+See [Controller Config](../how-to/controller-config) for the full list of
+`ControllerParams` fields.
+
+### batch_controller — vectorised movement
+
+`batch_controller` enables a shared `BatchKinematicController` for all agents in the
+manager.  Instead of calling `compute()` per agent, the batch controller advances every
+agent in one vectorised NumPy pass.  At 100 agents this is roughly equivalent to
+per-agent; at 500+ it is 3–5× faster.
+
+| Value | Controller |
+|---|---|
+| `"batch_omni"` | Omnidirectional (XY + Z) |
+| `"batch_differential"` | Unicycle (rotate-then-forward) |
+
+> Agents with different motion modes must be in separate managers, because each batch
+> controller supports one motion model.
+
+### Alternative: Python API
+
+If you prefer to construct managers imperatively (e.g. when URDF paths are resolved
+at runtime):
 
 ```python
-from pybullet_fleet.agent_manager import GridSpawnParams
-
-grid = GridSpawnParams(
-    x_min=0,
-    x_max=9,          # 10 columns: indices 0, 1, …, 9
-    y_min=0,
-    y_max=9,          # 10 rows:    indices 0, 1, …, 9
-    spacing=[10.0, 10.0, 0.0],   # 10 m between agents in X and Y
-    offset=[-15.0, -15.0, 0.3],  # world-frame offset of the grid origin
-)
-```
-
-Total spawned = `(x_max - x_min + 1) × (y_max - y_min + 1)`.
-With the above settings: 10 × 10 = 100 agents.
-
-The actual world position of grid cell `(i, j)` is:
-
-```
-x = offset[0] + i * spacing[0]
-y = offset[1] + j * spacing[1]
-z = offset[2]
-```
-
----
-
-## 5. Define Agent Types
-
-Define `AgentSpawnParams` for each robot type you want in the fleet.
-Here we use two: omnidirectional and differential drive.
-
-```python
+from pybullet_fleet.agent_manager import AgentManager, GridSpawnParams
 from pybullet_fleet.agent import AgentSpawnParams, MotionMode
-import os
 
-urdf_path = os.path.abspath("robots/mobile_robot.urdf")
-
-spawn_omni = AgentSpawnParams(
-    urdf_path=urdf_path,
-    mass=0.0,                            # kinematic (teleport-based, no physics)
-    max_linear_vel=2.0,                  # m/s
-    max_linear_accel=1.0,                # m/s²
-    max_angular_vel=2.0,                 # rad/s
-    max_angular_accel=5.0,
-    motion_mode=MotionMode.OMNIDIRECTIONAL,
-    use_fixed_base=False,
-)
-
-spawn_diff = AgentSpawnParams(
-    urdf_path=urdf_path,
-    mass=0.0,
-    max_linear_vel=2.0,
-    max_linear_accel=1.0,
-    max_angular_vel=2.0,
-    max_angular_accel=5.0,
-    motion_mode=MotionMode.DIFFERENTIAL,
-    use_fixed_base=False,
+omni_manager = AgentManager(sim_core=sim, batch_controller="batch_omni")
+omni_manager.spawn_agents_grid(
+    num_agents=50,
+    grid_params=GridSpawnParams(
+        x_min=0, x_max=4, y_min=0, y_max=9,
+        spacing=[10.0, 10.0, 0.0],
+        offset=[-15.0, -15.0, 0.3],
+    ),
+    spawn_params=AgentSpawnParams(
+        urdf_path=urdf_path, mass=0.0,
+        motion_mode=MotionMode.OMNIDIRECTIONAL, use_fixed_base=False,
+        controller={"max_linear_vel": 2.0, "max_linear_accel": 1.0},
+    ),
 )
 ```
 
@@ -151,53 +192,13 @@ teleports each robot to its next pose without calling `stepSimulation()` — thi
 why PyBulletFleet can run 100 robots at 40× real time. See the
 [Benchmark Results](../benchmarking/results) for measured throughput.
 
----
-
-## 6. Spawn 100 Agents in a Mixed Grid
-
-`spawn_agents_grid_mixed` takes a list of `(SpawnParams, probability)` tuples.
-Probabilities must sum to 1.0:
-
-```python
-manager.spawn_agents_grid_mixed(
-    num_agents=100,
-    grid_params=grid,
-    spawn_params_list=[
-        (spawn_omni, 0.5),   # 50% omnidirectional
-        (spawn_diff, 0.5),   # 50% differential
-    ],
-)
-
-print(f"Spawned: {len(manager.objects)} agents")
-```
-
-After spawning, each agent is accessible through `manager.objects`:
-
-> **Note:** The snippets below are not in the demo script. They show
-> additional usage patterns you can use in your own code.
-
-```python
-for agent in manager.objects:
-    print(agent.motion_mode, agent.get_pose().position)
-```
-
-For a uniform grid (one type only), use `spawn_agents_grid` instead:
-
-```python
-manager.spawn_agents_grid(
-    num_agents=100,
-    grid_params=grid,
-    spawn_params=spawn_omni,
-)
-```
-
 > `spawn_agents_grid` is used in
 > `examples/scale/pick_drop_mobile_100robots_demo.py`, which also demonstrates
 > `SimObjectManager` for batch-spawning pickable objects alongside agents.
 
 ---
 
-## 7. Build a Path and Assign it to an Agent
+## 4. Build a Path and Assign it to an Agent
 
 A `Path` is a sequence of `Pose` waypoints the agent follows in order,
 looping back to the start when it reaches the end.
@@ -246,7 +247,7 @@ useful for robots that should always face a particular way (e.g., a forklift mas
 
 ---
 
-## 8. Assign Individual Paths to All 100 Agents
+## 5. Assign Individual Paths to All 100 Agents
 
 Here each robot patrols a cube centred on its own spawn position.
 The key is getting each robot's spawn pose to build a per-robot path:
@@ -278,7 +279,7 @@ single-agent API — is the standard way to initialize heterogeneous fleets.
 
 ---
 
-## 9. Bulk Operations with the Manager
+## 6. Bulk Operations with the Manager
 
 `AgentManager` provides vectorised versions of the most common per-agent operations.
 These are more readable (and slightly faster) than manual loops:
@@ -312,7 +313,7 @@ once per agent.
 
 ---
 
-## 10. Write a Monitoring Callback
+## 7. Write a Monitoring Callback
 
 For large fleets, avoid per-step prints (they dominate step time).
 The `step_count` modulo pattern is efficient:
@@ -344,7 +345,7 @@ sim.register_callback(monitoring_callback, frequency=None)
 
 ---
 
-## 11. Camera Setup
+## 8. Camera Setup
 
 For large grids, let the simulation auto-fit the camera to all spawned agents:
 
@@ -367,7 +368,7 @@ sim.setup_camera(camera_config={
 
 ---
 
-## 12. Run
+## 9. Run
 
 ```python
 sim.run_simulation()
@@ -382,7 +383,7 @@ All four scale demo scripts live in `examples/scale/`:
 
 | Script | What it demonstrates |
 |--------|---------------------|
-| [`100robots_cube_patrol_demo.py`](https://github.com/yuokamoto/PyBulletFleet/blob/main/examples/scale/100robots_cube_patrol_demo.py) | 100 mobile robots patrolling cube paths (this tutorial) |
+| [`100robots_cube_patrol_demo.py`](https://github.com/yuokamoto/PyBulletFleet/blob/main/examples/scale/100robots_cube_patrol_demo.py) | 100 mobile robots patrolling cube paths — config-driven `managers:` + `fleet_controller:` (this tutorial) |
 | [`100robots_grid_demo.py`](https://github.com/yuokamoto/PyBulletFleet/blob/main/examples/scale/100robots_grid_demo.py) | Mixed fleet (mobile + arm) in a grid with `--mode mixed\|single` |
 | [`pick_drop_mobile_100robots_demo.py`](https://github.com/yuokamoto/PyBulletFleet/blob/main/examples/scale/pick_drop_mobile_100robots_demo.py) | 100 mobile robots with pick/drop action sequences and `SimObjectManager` |
 | [`pick_drop_arm_100robots_demo.py`](https://github.com/yuokamoto/PyBulletFleet/blob/main/examples/scale/pick_drop_arm_100robots_demo.py) | 100 fixed-base arms with `JointAction` pick/drop cycles |
@@ -397,7 +398,7 @@ python examples/scale/pick_drop_arm_100robots_demo.py
 ### Switching Robot Models
 
 All scale demos accept a `--robot` argument to swap the robot model at runtime.
-Pass a model name resolved by `resolve_urdf()` or a direct URDF path:
+Pass a model name resolved by `resolve_model()` or a direct URDF path:
 
 ```bash
 # Mobile demos — use mobile models
@@ -420,7 +421,7 @@ python examples/scale/100robots_grid_demo.py --robot racecar --arm-robot kuka_ii
 | `pick_drop_arm_100robots_demo.py` | `--robot` (arm) | `panda` | `kuka_iiwa`, `arm_robot` |
 
 See [Tutorial 6 — Robot Models](robot-models) for the full model resolution system
-and `python examples/models/resolve_urdf_demo.py --list` for all available names.
+and `python examples/models/resolve_model_demo.py --list` for all available names.
 
 ---
 

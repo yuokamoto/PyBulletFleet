@@ -18,7 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - **SimulationRecorder** — Headless and GUI video capture (GIF/MP4) via `start_recording()` API or `RECORD` environment variable
 - **Centralized defaults** — All parameter defaults in `_defaults.py` with `PBF_*` env-var overrides and `.env` file support
 - **Visual documentation** — Embedded demo videos across all doc pages, YAML-driven batch capture scripts
-- **Robot model resolution** — `resolve_urdf("panda")` finds URDFs by name across local, pybullet_data, and robot_descriptions sources
+- **Robot model resolution** — `resolve_model("panda")` finds URDFs/SDFs by name across local, pybullet_data, and robot_descriptions sources (`resolve_urdf` kept as deprecated alias)
 - **Controller refactor** — `Controller` extracted from `Agent` into `controller.py`, reducing `agent.py` by ~500 lines
 - **Entity registry** — `register_entity_class()` for custom spawn types via YAML config
 
@@ -27,7 +27,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - `SimulationRecorder` — camera modes (auto, gui, orbit, manual), time bases (sim, real), GIF/MP4 output
 - `start_recording()` / `stop_recording()` on `MultiRobotSimulationCore`; `RECORD` env-var enables auto-recording in `run_simulation()`
 - `_defaults.py` — single source of truth for all defaults; `PBF_{SECTION}_{KEY}` env-var overrides; `.env` auto-loading via python-dotenv
-- `robot_models.py` — `resolve_urdf()`, `auto_detect_profile()`, `register_model()`, `discover_models()`, `add_search_path()`
+- `robot_models.py` — `resolve_model()`, `auto_detect_profile()`, `register_model()`, `discover_models()`, `add_search_path()` (`resolve_urdf()` kept as deprecated alias)
 - `controller.py` — `OmnidirectionalController`, `DifferentialController` extracted from Agent
 - `entity_registry.py` — `register_entity_class()` for extensible YAML-driven spawning
 - `compute_scene_bounds()` — scene AABB for auto-framing cameras

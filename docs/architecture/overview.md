@@ -49,7 +49,7 @@ The central orchestrator for PyBullet simulations.
 **Key Methods:**
 - `from_dict(config)` / `from_yaml(path)`: Factory methods for initialization
 - `run_simulation(update_callback, final_callback)`: Main simulation loop
-- `step_once()`: Single simulation step
+- `step_once()`: Single simulation step. Runs a **two-phase step** internally — Phase 1 (agent.update + callbacks + plugin on_step) buffers all kinematic pose writes; Phase 2 flushes them to PyBullet; `stepSimulation()` runs (when physics is on); Phase 3 refreshes AABBs + spatial grid for the flushed objects; collision detection then sees the new poses. See {doc}`two-phase-step` for details.
 - `setup_camera()`: Camera positioning
 - `configure_visualizer()`: Visual settings configuration
 - `register_static_body(body_id)`: Track static structure elements
@@ -125,10 +125,10 @@ object attachment via `update_attached_objects_kinematics()`.
 - Object manipulation (supports link-level attachment for URDF robots)
 - Collision handling
 - URDF model loading with joint/link support
-- Model name resolution — `from_urdf()` calls `resolve_urdf()` internally, accepting both model names (e.g., `"panda"`) and direct file paths
+- Model name resolution — `from_urdf()` calls `resolve_model()` internally, accepting both model names (e.g., `"panda"`) and direct file paths
 
 **Key Methods:**
-- `from_urdf(urdf_path, ...)`: Factory method — accepts a model name (resolved via `resolve_urdf()`) or a direct URDF path
+- `from_urdf(urdf_path, ...)`: Factory method — accepts a model name (resolved via `resolve_model()`) or a direct URDF path
 - `set_goal(pose)`: Set target destination
 - `update(dt)`: Update agent state per timestep
 - `execute_action(action)`: Execute high-level action
@@ -331,7 +331,7 @@ proceeds even when the IK target is unreachable.
 
 #### Key Functions:
 
-##### resolve_urdf(name_or_path)
+##### resolve_model(name_or_path)
 Resolves a model name to an absolute URDF file path by searching through tiers in order:
 
 | Tier | Source | Example |
@@ -352,7 +352,7 @@ For name-based lookup, user search paths (registered via `add_search_path()`) ar
 Add or remove entries from `KNOWN_MODELS` at runtime. `path_or_entry` accepts an absolute path string (tier defaults to `"user"`) or a `ModelEntry` for full tier metadata. Prevents accidental overwrites by default (`force=True` to override).
 
 ##### discover_models(tier)
-Scan an entire tier (`"pybullet_data"` or `"robot_descriptions"`) and return all discoverable models as `{name: path}`. Unlike `KNOWN_MODELS`, this returns every model found in the installed package. Also used internally by `resolve_urdf()` as a fallback for unlisted models.
+Scan an entire tier (`"pybullet_data"` or `"robot_descriptions"`) and return all discoverable models as `{name: path}`. Unlike `KNOWN_MODELS`, this returns every model found in the installed package. Also used internally by `resolve_model()` as a fallback for unlisted models.
 
 ##### add_search_path(directory) / remove_search_path(directory) / get_search_paths()
 Register custom directories for name-based URDF lookup. User search paths take priority over `KNOWN_MODELS`, enabling users to shadow built-in models with custom versions. `add_search_path()` validates the directory exists and is idempotent.

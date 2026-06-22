@@ -4,7 +4,7 @@ Base class for simulation objects with attachment support.
 """
 
 from dataclasses import dataclass, field
-from typing import Any, Callable, List, Optional, Dict, Tuple, Union
+from typing import TYPE_CHECKING, Any, Callable, List, Optional, Dict, Tuple, Union
 import logging
 
 import pybullet as p
@@ -14,6 +14,10 @@ from .logging_utils import get_lazy_logger, get_named_lazy_logger
 from .types import CollisionMode
 from .tools import resolve_link_index
 from pybullet_fleet._defaults import SIM_OBJECT as _OBJ_D, SHAPE as _SHP_D
+from pybullet_fleet.config_utils import forward_spawn_params as _forward_spawn_params
+
+if TYPE_CHECKING:
+    from pybullet_fleet.events import EventBus
 
 # Standard logger for info/warning/error
 logger = logging.getLogger(__name__)
@@ -71,7 +75,7 @@ class ShapeParams:
     half_extents: List[float] = field(default_factory=lambda: [0.5, 0.5, 0.5])
     radius: float = _SHP_D["radius"]
     height: float = _SHP_D["height"]
-    rgba_color: List[float] = field(default_factory=lambda: [0.8, 0.8, 0.8, 1.0])
+    rgba_color: Optional[List[float]] = field(default_factory=lambda: list(_SHP_D["rgba_color"]))
     frame_pose: Optional[Pose] = None
 
     @classmethod
@@ -88,15 +92,9 @@ class ShapeParams:
         Returns:
             ShapeParams instance.
         """
-        return cls(
-            shape_type=d.get("shape_type"),
-            mesh_path=d.get("mesh_path"),
-            mesh_scale=d.get("mesh_scale", [1.0, 1.0, 1.0]),
-            half_extents=d.get("half_extents", [0.5, 0.5, 0.5]),
-            radius=d.get("radius", _SHP_D["radius"]),
-            height=d.get("height", _SHP_D["height"]),
-            rgba_color=d.get("rgba_color", [0.8, 0.8, 0.8, 1.0]),
-        )
+        from pybullet_fleet.config_utils import dataclass_from_dict
+
+        return dataclass_from_dict(cls, d)
 
 
 @dataclass
@@ -253,8 +251,29 @@ class SimObject:
         user_data: Dictionary for custom metadata (default: empty dict)
     """
 
+    # SpawnParams class used by config-driven grid spawning
+    _spawn_params_cls = SimObjectSpawnParams
+
+    # Subclasses override to True for per-step update() calls in step_once().
+    _needs_update: bool = False
+
     # Class-level shared shapes cache (for optimization)
     _shared_shapes: Dict[str, Tuple[int, int]] = {}
+
+    # --- Auto-registration via __init_subclass__ ---
+    # Subclasses that set ``_entity_type_name`` are automatically registered
+    # in :data:`~pybullet_fleet.entity_registry.ENTITY_REGISTRY`.
+    _entity_type_name: Optional[str] = None
+
+    def __init_subclass__(cls, **kwargs: Any) -> None:
+        super().__init_subclass__(**kwargs)
+        # Only register if _entity_type_name is defined directly on this class
+        # (not inherited from a parent).
+        name = cls.__dict__.get("_entity_type_name")
+        if name is not None:
+            from pybullet_fleet.entity_registry import register_entity_class
+
+            register_entity_class(name, cls)
 
     def __init__(
         self,
@@ -282,6 +301,9 @@ class SimObject:
         # For programmatic lookup/search, use object_id instead.
         # Examples: "LeftRobot_1", "Pallet_A", "Obstacle_Wall"
         self.name: Optional[str] = name
+
+        # Per-entity EventBus (lazy — created on first .events access)
+        self._events: Optional["EventBus"] = None
 
         # Assign unique ID from sim_core if available
         # Note: object_id is UNIQUE and should be used for programmatic object identification.
@@ -318,6 +340,14 @@ class SimObject:
         self._cached_pose: Pose = Pose.from_pybullet(initial_pos, initial_orn)
         self._cached_pose_sim_time: float = -1.0  # Simulation time when pose was cached
 
+        # Two-phase step buffer: when sim_core._in_step is True, _set_pose_internal()
+        # stores `preserve_velocity` here and registers this object's id with
+        # sim_core._pending_pose_ids. `_cached_pose` is the source of truth for the
+        # pending (pos, orn) write — Phase 2 flush reads it back. Default True so an
+        # accidental read before any buffered write still matches caller intent.
+        # See docs/design/two-phase-step/spec.md (D2/D3b).
+        self._pending_preserve_velocity: bool = True
+
         # Disable PyBullet physics collision if collision_mode is DISABLED
         if self.collision_mode == CollisionMode.DISABLED:
             # setCollisionFilterGroupMask: (bodyId, linkId, collisionFilterGroup, collisionFilterMask)
@@ -330,10 +360,52 @@ class SimObject:
             # Centralized registration via add_object() for consistency
             sim_core.add_object(self)
 
+    # ------------------------------------------------------------------
+    # Per-step update hook (overridden by Agent, Device subclasses)
+    # ------------------------------------------------------------------
+
+    def update(self, dt: float) -> bool:
+        """Called every simulation step for objects with ``_needs_update = True``.
+
+        Override in subclasses to implement per-step behavior (e.g. device
+        state machines, animated objects).
+
+        Args:
+            dt: Time step in seconds.
+
+        Returns:
+            ``True`` if the object moved or changed state, ``False`` otherwise.
+        """
+        return False
+
     @property
     def _pid(self) -> int:
         """PyBullet physicsClientId (falls back to 0 if no sim_core)."""
         return self.sim_core._client if self.sim_core is not None else 0
+
+    @property
+    def events(self) -> "EventBus":
+        """Per-entity EventBus. Created on first access (lazy).
+
+        Use in subclasses to hook into entity-specific events::
+
+            class WarehouseRobot(Agent):
+                def __init__(self, ...):
+                    super().__init__(...)
+                    from pybullet_fleet.events import SimEvents
+
+                    self.events.on(SimEvents.COLLISION_STARTED, self._on_bump)
+                    self.events.on(SimEvents.ACTION_COMPLETED, self._on_task_done)
+        """
+        if self._events is None:
+            from pybullet_fleet.events import EventBus
+
+            self._events = EventBus()
+        return self._events
+
+    def _has_entity_events(self) -> bool:
+        """Fast check: True if per-entity EventBus has been created."""
+        return self._events is not None
 
     def set_name(self, name: Optional[str]) -> None:
         """
@@ -423,12 +495,17 @@ class SimObject:
             cls._create_visual_shape(visual_shape, physics_client_id) if visual_shape and visual_shape.shape_type else -1
         )
 
-        # Create collision shape
-        collision_id = (
-            cls._create_collision_shape(collision_shape, physics_client_id)
-            if collision_shape and collision_shape.shape_type
-            else -1
-        )
+        # Create collision shape (fall back to -1 if mesh can't be loaded)
+        collision_id = -1
+        if collision_shape and collision_shape.shape_type:
+            try:
+                collision_id = cls._create_collision_shape(collision_shape, physics_client_id)
+            except Exception:
+                logger.warning(
+                    "Failed to create collision shape for %s — using visual-only body",
+                    collision_shape.mesh_path or collision_shape.shape_type,
+                )
+                collision_id = -1
 
         # Cache only if at least one is a mesh shape
         if visual_needs_cache or collision_needs_cache:
@@ -442,10 +519,11 @@ class SimObject:
         frame_pos = shape.frame_pose.position if shape.frame_pose else [0, 0, 0]
         frame_orn = shape.frame_pose.orientation if shape.frame_pose else [0, 0, 0, 1]
 
+        color_key = tuple(shape.rgba_color) if shape.rgba_color is not None else "native"
         return (
             f"{shape.shape_type}_{shape.mesh_path}_{tuple(shape.mesh_scale)}_"
             f"{tuple(shape.half_extents)}_{shape.radius}_{shape.height}_"
-            f"{tuple(shape.rgba_color)}_{tuple(frame_pos)}_{tuple(frame_orn)}"
+            f"{color_key}_{tuple(frame_pos)}_{tuple(frame_orn)}"
         )
 
     @staticmethod
@@ -460,20 +538,24 @@ class SimObject:
         if shape.shape_type == "mesh":
             if not shape.mesh_path:
                 raise ValueError("mesh_path is required for shape_type='mesh'")
-            return p.createVisualShape(
-                p.GEOM_MESH,
+            kwargs: dict = dict(
+                shapeType=p.GEOM_MESH,
                 fileName=shape.mesh_path,
                 meshScale=shape.mesh_scale,
-                rgbaColor=shape.rgba_color,
                 visualFramePosition=frame_position,
                 visualFrameOrientation=frame_orientation,
                 physicsClientId=physics_client_id,
             )
+            # Only pass rgbaColor if explicitly set — omitting it lets
+            # PyBullet read native colours from DAE/OBJ materials.
+            if shape.rgba_color is not None:
+                kwargs["rgbaColor"] = shape.rgba_color
+            return p.createVisualShape(**kwargs)
         elif shape.shape_type == "box":
             return p.createVisualShape(
                 p.GEOM_BOX,
                 halfExtents=shape.half_extents,
-                rgbaColor=shape.rgba_color,
+                rgbaColor=shape.rgba_color or list(_SHP_D["rgba_color"]),
                 visualFramePosition=frame_position,
                 visualFrameOrientation=frame_orientation,
                 physicsClientId=physics_client_id,
@@ -482,7 +564,7 @@ class SimObject:
             return p.createVisualShape(
                 p.GEOM_SPHERE,
                 radius=shape.radius,
-                rgbaColor=shape.rgba_color,
+                rgbaColor=shape.rgba_color or list(_SHP_D["rgba_color"]),
                 visualFramePosition=frame_position,
                 visualFrameOrientation=frame_orientation,
                 physicsClientId=physics_client_id,
@@ -492,7 +574,7 @@ class SimObject:
                 p.GEOM_CYLINDER,
                 radius=shape.radius,
                 length=shape.height,
-                rgbaColor=shape.rgba_color,
+                rgbaColor=shape.rgba_color or list(_SHP_D["rgba_color"]),
                 visualFramePosition=frame_position,
                 visualFrameOrientation=frame_orientation,
                 physicsClientId=physics_client_id,
@@ -662,6 +744,103 @@ class SimObject:
         )
 
     @classmethod
+    def from_sdf(
+        cls,
+        sdf_path: str,
+        sim_core=None,
+        collision_mode: CollisionMode = CollisionMode.NORMAL_3D,
+        global_scaling: float = 1.0,
+        name_prefix: Optional[str] = None,
+        pickable: bool = False,
+        use_fixed_base: bool = True,
+    ) -> List["SimObject"]:
+        """Load an SDF file and wrap each body in a SimObject.
+
+        Uses PyBullet's ``p.loadSDF()`` to load the file and creates a
+        SimObject for each body. All objects are auto-registered to
+        ``sim_core`` if provided.
+
+        Note:
+            PyBullet's SDF loader does NOT support ``<world>`` tags,
+            ``<include>`` tags, or ``model://`` URIs. Use for individual
+            SDF models (e.g., pybullet_data's kiva_shelf, wsg50_gripper).
+
+        Args:
+            sdf_path: Path to SDF file (resolved via resolve_model())
+            sim_core: Simulation core for registration
+            collision_mode: Collision detection mode for all loaded objects
+            global_scaling: Uniform scale factor
+            name_prefix: Prefix for names (default: SDF filename stem)
+            pickable: Whether objects can be picked up
+            use_fixed_base: If True, fix base (mass=0, kinematic)
+
+        Returns:
+            List of SimObject instances (one per body in the SDF)
+
+        Example::
+
+            shelves = SimObject.from_sdf(
+                'kiva_shelf/model.sdf', sim_core=sim
+            )
+            for shelf in shelves:
+                print(f'{shelf.name}: {shelf.get_pose()}')
+        """
+        from pathlib import Path as PathLib
+
+        from pybullet_fleet.robot_models import resolve_model
+
+        resolved_path = resolve_model(sdf_path)
+        pid = sim_core._client if sim_core is not None else 0
+
+        # Determine name prefix from filename if not provided
+        if name_prefix is None:
+            name_prefix = PathLib(resolved_path).stem
+
+        def _load_and_wrap() -> List["SimObject"]:
+            try:
+                body_ids = p.loadSDF(
+                    resolved_path,
+                    globalScaling=global_scaling,
+                    physicsClientId=pid,
+                )
+            except p.error as exc:
+                raise FileNotFoundError(f"Failed to load SDF: {resolved_path}") from exc
+
+            if not body_ids:
+                raise RuntimeError(f"SDF loaded 0 bodies from: {resolved_path}")
+
+            objs: List["SimObject"] = []
+            for i, bid in enumerate(body_ids):
+                # Try to get model name from PyBullet
+                body_info = p.getBodyInfo(bid, physicsClientId=pid)
+                body_name = body_info[1].decode("utf-8") if body_info[1] else f"{name_prefix}_{i}"
+
+                if use_fixed_base:
+                    # Set mass to 0 for static/kinematic behavior
+                    p.changeDynamics(bid, -1, mass=0.0, physicsClientId=pid)
+
+                obj = cls(
+                    body_id=bid,
+                    sim_core=sim_core,
+                    pickable=pickable,
+                    mass=0.0 if use_fixed_base else None,
+                    collision_mode=collision_mode,
+                    name=body_name,
+                )
+                objs.append(obj)
+            return objs
+
+        # Wrap loadSDF + registration in batch_spawn (disables rendering for GUI speedup)
+        if sim_core is not None:
+            with sim_core.batch_spawn():
+                objects = _load_and_wrap()
+        else:
+            objects = _load_and_wrap()
+
+        lazy_logger.info(lambda: f"Loaded {len(objects)} objects from SDF: " f"{resolved_path}")
+        return objects
+
+    @classmethod
     def from_params(cls, spawn_params: SimObjectSpawnParams, sim_core=None) -> "SimObject":
         """
         Create a SimObject from SimObjectSpawnParams.
@@ -692,15 +871,12 @@ class SimObject:
             obj = SimObject.from_params(params, sim_core)
         """
         obj = cls.from_mesh(
-            visual_shape=spawn_params.visual_shape,
-            collision_shape=spawn_params.collision_shape,
-            pose=spawn_params.initial_pose,
-            mass=spawn_params.mass,
-            pickable=spawn_params.pickable,
-            sim_core=sim_core,
-            collision_mode=spawn_params.collision_mode,
-            name=spawn_params.name,
-            user_data=spawn_params.user_data,
+            **_forward_spawn_params(
+                cls.from_mesh,
+                spawn_params,
+                aliases={"initial_pose": "pose"},
+                extra_kwargs={"sim_core": sim_core},
+            )
         )
 
         return obj
@@ -710,8 +886,8 @@ class SimObject:
         """Create a SimObject from a raw config dict.
 
         Combines :meth:`SimObjectSpawnParams.from_dict` and :meth:`from_params`
-        in a single call.  Subclasses can override to use a custom
-        ``SpawnParams`` class.
+        in a single call.  Uses ``cls._spawn_params_cls`` so subclasses
+        automatically use their own SpawnParams.
 
         Args:
             config: Entity definition dict (as parsed from YAML).
@@ -720,7 +896,7 @@ class SimObject:
         Returns:
             ``cls`` instance.
         """
-        params = SimObjectSpawnParams.from_dict(config)
+        params = cls._spawn_params_cls.from_dict(config)
         return cls.from_params(params, sim_core)
 
     @property
@@ -807,6 +983,23 @@ class SimObject:
     def set_pose(self, pose: Pose, preserve_velocity: bool = True) -> bool:
         """
         Set position and orientation from a Pose object.
+
+        Two-phase step behaviour (see ``docs/design/two-phase-step/spec.md``):
+
+        - **Outside ``step_once()``** (immediate path): writes to PyBullet via
+          ``resetBasePositionAndOrientation`` and, for kinematic objects, refreshes
+          the AABB + spatial grid immediately. Same behaviour as legacy callers.
+        - **Inside ``step_once()``** (buffered path, ``sim_core._in_step == True``):
+          updates only the internal pose cache and registers this object for the
+          Phase 2 / Phase 3 batch flush. ``get_pose()`` returns the new pose
+          immediately (cache is the source of truth), but PyBullet's view, AABBs,
+          and the spatial grid are not refreshed until the flush runs later in the
+          same ``step_once()`` invocation. A no-op set_pose (same pose as cache)
+          is skipped entirely with zero PyBullet cost.
+
+        Attached children (base-link attachments) are propagated recursively
+        through the same code path \u2014 so they take the buffered path inside the
+        step and the immediate path outside it.
 
         Args:
             pose: Pose object containing position and orientation
@@ -899,7 +1092,40 @@ class SimObject:
 
         moved = pos_diff_sq > 1e-12 or orn_diff_sq > 1e-12
 
-        # Optimization: Skip velocity operations for kinematic objects
+        # ----- Update pose cache (only when actually moved — saves ~70ns/call) -----
+        # The `moved` check is free because we already computed it above.
+        # Slice assignment is ~2x faster than 7 individual element writes (single C memcpy).
+        if moved:
+            self._cached_pose.position[:] = position
+            self._cached_pose.orientation[:] = orientation
+
+        # Timestamp is always refreshed so get_pose() cache validity (D2) stays correct,
+        # even when the new pose equals the old one.
+        self._cached_pose_sim_time = self.sim_core.sim_time if self.sim_core is not None else -1.0
+
+        # ----- Two-phase step buffered path -----
+        # Inside step_once(), defer PyBullet write + AABB/grid refresh to the
+        # Phase-2 flush. Kinematic agent updates (the hot path) take this branch.
+        # `_cached_pose` is the source of truth for the pending write — we only need
+        # to remember per-call `preserve_velocity`. See docs/design/two-phase-step/spec.md (D2/D3b).
+        #
+        # No-op set_pose (moved=False) is dropped entirely: nothing changed, so neither
+        # the PyBullet write nor the AABB/grid refresh is needed. Idle agents that keep
+        # calling set_pose every tick (post-goal hover, stationary fleet) get a clean
+        # zero-cost path. This matches the immediate path, which also gates the AABB/grid
+        # refresh on `moved` (the unconditional reset call there is a legacy artefact).
+        if self.sim_core is not None and self.sim_core._in_step:
+            if moved:
+                self._pending_preserve_velocity = preserve_velocity
+                self.sim_core._pending_pose_ids.add(self.object_id)
+                self.sim_core._mark_object_moved(self.object_id)
+                # Attached-object propagation still recurses through _set_pose_internal,
+                # so child writes also get buffered (each child sees _in_step True).
+                # Skipped when parent didn't move — children's relative pose is unchanged.
+                self._propagate_to_attached(position, orientation, preserve_velocity)
+            return moved
+
+        # ----- Immediate path (legacy / outside step_once) -----
         # Use cached is_kinematic flag to avoid PyBullet API calls
         if preserve_velocity and not self.is_kinematic:
             # Get current velocities to preserve them (for dynamic objects only)
@@ -923,24 +1149,22 @@ class SimObject:
                 if self.sim_core._cached_cell_size is not None:
                     self.sim_core._update_object_spatial_grid(self.object_id)
 
-        # Update pose cache (reuse existing Pose object to avoid allocation)
-        if self._cached_pose is not None:
-            # Reuse existing Pose object - just update its internal lists
-            self._cached_pose.position[0] = position[0]
-            self._cached_pose.position[1] = position[1]
-            self._cached_pose.position[2] = position[2]
-            self._cached_pose.orientation[0] = orientation[0]
-            self._cached_pose.orientation[1] = orientation[1]
-            self._cached_pose.orientation[2] = orientation[2]
-            self._cached_pose.orientation[3] = orientation[3]
-        else:
-            # Create new Pose object for cache
-            self._cached_pose = Pose.from_pybullet(position, orientation)
+        # Recursively apply the same coordinates and velocity to attached_objects.
+        # Skipped when the parent didn't move — children's relative pose is unchanged.
+        if moved:
+            self._propagate_to_attached(position, orientation, preserve_velocity)
 
-        # Update cache timestamp to current sim_time
-        self._cached_pose_sim_time = self.sim_core.sim_time if self.sim_core is not None else -1.0
+        return moved  # Return movement detection result
 
-        # Recursively apply the same coordinates and velocity to attached_objects
+    def _propagate_to_attached(self, position, orientation, preserve_velocity: bool) -> None:
+        """Recursively forward this object's pose to attached children (base-link attachments only).
+
+        Link-level attachments are handled by Agent.update_attached_objects_kinematics().
+        Each recursive set_pose_raw() naturally takes the same code path
+        (buffered inside step_once, immediate outside) as the parent call.
+        """
+        if not self.attached_objects:
+            return
         self._log.debug(lambda: f"set_pose: attached_objects(before)={[o.body_id for o in self.attached_objects]}")
         for obj in self.attached_objects:
             # Skip objects attached to a specific link (not base link).
@@ -959,14 +1183,13 @@ class SimObject:
                 f"position={obj._attach_offset.position} orientation={obj._attach_offset.orientation}"
             )
 
-        return moved  # Return movement detection result
-
     def attach_object(
         self,
         obj: "SimObject",
         parent_link_index: Union[int, str] = -1,
         relative_pose: Optional[Pose] = None,
         joint_type: int = p.JOINT_FIXED,
+        keep_world_pose: bool = False,
     ) -> bool:
         """
         Attach another SimObject to this object.
@@ -978,27 +1201,47 @@ class SimObject:
             relative_pose: Position and orientation offset in parent link's frame as Pose object
                           (default: None, which uses Pose(position=[0, 0, 0], orientation=[0, 0, 0, 1]))
             joint_type: PyBullet joint type (default: JOINT_FIXED)
+            keep_world_pose: If True, automatically compute ``relative_pose``
+                            so that the child keeps its current world position
+                            and orientation.  Cannot be combined with an
+                            explicit ``relative_pose``.
 
         Returns:
             True if attachment successful, False otherwise
+
+        Raises:
+            ValueError: If both ``relative_pose`` and ``keep_world_pose=True``
+                        are specified.
 
         Example::
 
             # Attach to base link at 0.5m in front
             agent.attach_object(pallet, relative_pose=Pose.from_xyz(0.5, 0, 0))
 
-            # Attach with position and orientation
-            agent.attach_object(pallet, relative_pose=Pose.from_euler(0.6, 0, -0.2,
-                                                                       roll=1.5708, pitch=0, yaw=0))
-
-            # Attach to specific link by index
-            agent.attach_object(box, parent_link_index=2)
+            # Keep the child where it currently is in the world
+            agent.attach_object(box, parent_link_index=2, keep_world_pose=True)
 
             # Attach to specific link by name
             agent.attach_object(box, parent_link_index="end_effector")
         """
         # Resolve link name to index
         parent_link_index = resolve_link_index(self.body_id, parent_link_index)
+
+        if keep_world_pose and relative_pose is not None:
+            raise ValueError("relative_pose and keep_world_pose=True cannot both be specified")
+
+        if keep_world_pose:
+            # Compute relative pose from current world positions
+            if parent_link_index == -1:
+                par_pos, par_orn = p.getBasePositionAndOrientation(self.body_id, physicsClientId=self._pid)
+            else:
+                ls = p.getLinkState(self.body_id, parent_link_index, computeForwardKinematics=1, physicsClientId=self._pid)
+                par_pos, par_orn = ls[0], ls[1]
+            inv_pos, inv_orn = p.invertTransform(par_pos, par_orn)
+            obj_pose = obj.get_pose()
+            obj_pos, obj_orn = obj_pose.as_position_orientation()
+            rel_pos, rel_orn = p.multiplyTransforms(inv_pos, inv_orn, obj_pos, obj_orn)
+            relative_pose = Pose.from_pybullet(rel_pos, rel_orn)
 
         # Default to zero offset if not specified
         if relative_pose is None:
@@ -1064,23 +1307,62 @@ class SimObject:
                 physicsClientId=self._pid,
             )
 
+        # Immediately teleport child to the correct world position so that
+        # callers never see a 1-frame lag where the object is still at its
+        # old location.  Uses the parent link pose already fetched above.
+        new_pos, new_orn = p.multiplyTransforms(parent_pos, parent_orn, relative_pose.position, relative_pose.orientation)
+        obj.set_pose_raw(new_pos, new_orn)
+
         self._log.info(f"Attached object {obj.body_id} to link {parent_link_index}")
         return True
 
-    def detach_object(self, obj: "SimObject") -> bool:
+    def detach_object(
+        self,
+        obj: "SimObject",
+        drop_pose: Optional[Pose] = None,
+        drop_relative_pose: Optional[Pose] = None,
+    ) -> bool:
         """
         Detach an object from this object.
 
+        After detaching, the object can optionally be teleported:
+
+        - ``drop_pose`` — absolute world pose.
+        - ``drop_relative_pose`` — offset applied to the object's current
+          (pre-detach) world pose (position **and** orientation are composed
+          via ``multiplyTransforms``).
+        - Neither — the object stays at its current world position.
+
+        These two parameters are mutually exclusive.
+
         Args:
             obj: Object to detach
+            drop_pose: Absolute world pose to teleport the object to after
+                      detaching.  Mutually exclusive with ``drop_relative_pose``.
+            drop_relative_pose: Pose offset relative to the object's current
+                      (pre-detach) world pose.  Mutually exclusive with
+                      ``drop_pose``.
 
         Returns:
             True if detachment successful, False otherwise
 
+        Raises:
+            ValueError: If both ``drop_pose`` and ``drop_relative_pose`` are
+                        specified.
+
         Example::
 
+            # Detach and leave in place
             agent.detach_object(pallet)
+
+            # Detach and place at absolute world position
+            agent.detach_object(pallet, drop_pose=Pose.from_xyz(10, 5, 0.1))
+
+            # Detach and offset from current position (e.g. lower by 0.5m)
+            agent.detach_object(pallet, drop_relative_pose=Pose.from_xyz(0, 0, -0.5))
         """
+        if drop_pose is not None and drop_relative_pose is not None:
+            raise ValueError("drop_pose and drop_relative_pose cannot both be specified")
 
         if obj not in self.attached_objects:
             self._log.info(f"Object {obj.body_id} is not attached")
@@ -1105,6 +1387,17 @@ class SimObject:
         obj._attached_to = None
         obj._attached_link_index = -1
 
+        # Teleport to final pose if requested
+        if drop_relative_pose is not None:
+            # Compute world pose from current position + relative offset
+            cur_pos, cur_orn = obj.get_pose().as_position_orientation()
+            final_pos, final_orn = p.multiplyTransforms(
+                cur_pos, cur_orn, drop_relative_pose.position, drop_relative_pose.orientation
+            )
+            obj.set_pose_raw(final_pos, final_orn)
+        elif drop_pose is not None:
+            obj.set_pose(drop_pose)
+
         self._log.info(f"Detached object {obj.body_id}")
         return True
 
@@ -1125,6 +1418,32 @@ class SimObject:
             True if attached to another object, False otherwise
         """
         return self._attached_to is not None
+
+    def find_nearest_pickable(self, search_radius: float = 1.0) -> Optional["SimObject"]:
+        """Find the nearest pickable, unattached SimObject within radius.
+
+        Convenience wrapper around :func:`tools.find_nearest` that
+        searches from this object's current position with the standard
+        ``pickable and not attached`` filter.
+
+        Args:
+            search_radius: Maximum search distance in metres (default: 1.0)
+
+        Returns:
+            Nearest SimObject or ``None`` if nothing found.
+        """
+        from . import tools
+
+        if self.sim_core is None:
+            return None
+
+        return tools.find_nearest(
+            self.sim_core.sim_objects,
+            position=self.get_pose().position,
+            search_radius=search_radius,
+            predicate=lambda o: o.pickable and not o.is_attached(),
+            exclude=self,
+        )
 
     def register_callback(self, callback: Callable, frequency: float = 0.25):
         """Register a callback function to be executed periodically."""

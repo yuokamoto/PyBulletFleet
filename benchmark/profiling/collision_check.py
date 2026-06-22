@@ -118,8 +118,10 @@ def profile_collision_check_builtin(num_agents: int, num_iterations: int = 100):
     agent_spawn_params = AgentSpawnParams(
         urdf_path=robot_urdf,
         motion_mode=MotionMode.OMNIDIRECTIONAL,
-        max_linear_vel=2.0,
-        max_angular_vel=3.0,
+        controller={
+            "max_linear_vel": 2.0,
+            "max_angular_vel": 3.0,
+        },
         mass=0.0,
     )
 
@@ -227,8 +229,10 @@ def profile_collision_check_with_cprofile(num_agents: int):
     agent_spawn_params = AgentSpawnParams(
         urdf_path=robot_urdf,
         motion_mode=MotionMode.OMNIDIRECTIONAL,
-        max_linear_vel=2.0,
-        max_angular_vel=3.0,
+        controller={
+            "max_linear_vel": 2.0,
+            "max_angular_vel": 3.0,
+        },
         mass=0.0,
     )
 
