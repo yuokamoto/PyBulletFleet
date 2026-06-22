@@ -58,7 +58,7 @@ BOX_PICK_POSE = Pose.from_xyz(*_P["box_pick"])
 BOX_PLACE_POSE = Pose.from_xyz(*_P["box_place"])
 
 # Initialize simulation from YAML config
-_CONFIG = os.path.join(os.path.dirname(__file__), "..", "..", "config", "config.yaml")
+_CONFIG = "config/config.yaml"
 sim_core = MultiRobotSimulationCore.from_yaml(_CONFIG)
 if args.rtf is not None:
     sim_core.params.target_rtf = args.rtf

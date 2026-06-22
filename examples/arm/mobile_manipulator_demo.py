@@ -55,7 +55,7 @@ print("  ee_target_position solved by inverse kinematics\n")
 # ---------------------------------------------------------------------------
 # Simulation
 # ---------------------------------------------------------------------------
-_CONFIG = os.path.join(os.path.dirname(__file__), "..", "..", "config", "config.yaml")
+_CONFIG = "config/config.yaml"
 sim_core = MultiRobotSimulationCore.from_yaml(_CONFIG)
 if _args.rtf is not None:
     sim_core.params.target_rtf = _args.rtf

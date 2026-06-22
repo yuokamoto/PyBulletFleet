@@ -31,7 +31,7 @@ _parser.add_argument("--rtf", type=float, default=None, help="Target real-time f
 _args = _parser.parse_args()
 
 
-_CONFIG = os.path.join(os.path.dirname(__file__), "..", "..", "config", "config.yaml")
+_CONFIG = "config/config.yaml"
 
 
 def main():

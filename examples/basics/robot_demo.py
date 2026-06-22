@@ -22,7 +22,7 @@ from pybullet_fleet.core_simulation import MultiRobotSimulationCore
 from pybullet_fleet.sim_object import Pose, SimObject, ShapeParams
 
 # Initialize simulation from base config + inline overrides
-_BASE_CONFIG = os.path.join(os.path.dirname(__file__), "..", "..", "config", "config.yaml")
+_BASE_CONFIG = "config/config.yaml"
 _OVERRIDES = {"simulation": {"timestep": 0.01, "physics": True}}
 sim_core = MultiRobotSimulationCore.from_dict(merge_configs(load_yaml_config(_BASE_CONFIG), _OVERRIDES))
 

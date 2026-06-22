@@ -49,9 +49,17 @@ class TestResolveModel:
         path = resolve_model("/tmp/some_robot.urdf")
         assert path == "/tmp/some_robot.urdf"
 
-    def test_relative_path_returned_as_is(self):
+    def test_bundled_relative_path_resolves_to_package(self):
+        # A bundled relative path resolves to the packaged asset, so it works for
+        # pip-installed users whose CWD is not the repo (not just returned as-is).
         path = resolve_model("robots/arm_robot.urdf")
-        assert path == "robots/arm_robot.urdf"
+        assert os.path.isabs(path)
+        assert path.endswith(os.path.join("robots", "arm_robot.urdf"))
+        assert os.path.isfile(path)
+
+    def test_unknown_relative_path_returned_as_is(self):
+        # A relative path not found in the CWD or the bundle is returned unchanged.
+        assert resolve_model("nowhere/custom_robot.urdf") == "nowhere/custom_robot.urdf"
 
     def test_unknown_name_raises_file_not_found(self):
         with pytest.raises(FileNotFoundError, match="nonexistent_robot"):

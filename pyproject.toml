@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=45", "wheel"]
+requires = ["setuptools>=61", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -68,6 +68,16 @@ docs = [
 
 [tool.setuptools.packages.find]
 include = ["pybullet_fleet", "pybullet_fleet.*"]
+
+# Bundled assets shipped inside the wheel (robots/, config/, mesh/ live under
+# pybullet_fleet/). Without this, a pip-installed package cannot resolve bundled
+# URDFs/configs/meshes.
+[tool.setuptools.package-data]
+pybullet_fleet = [
+    "robots/**/*",
+    "config/**/*",
+    "mesh/**/*",
+]
 
 [tool.black]
 line-length = 127

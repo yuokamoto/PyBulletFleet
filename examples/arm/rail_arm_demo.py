@@ -31,7 +31,7 @@ _args = _parser.parse_args()
 # ---------------------------------------------------------------------------
 
 # Base config + demo-specific overrides (no separate YAML needed)
-_BASE_CONFIG = os.path.join(os.path.dirname(__file__), "..", "..", "config", "config.yaml")
+_BASE_CONFIG = "config/config.yaml"
 _OVERRIDES = {"simulation": {"target_rtf": 1}}
 sim_core = MultiRobotSimulationCore.from_dict(merge_configs(load_yaml_config(_BASE_CONFIG), _OVERRIDES))
 if _args.rtf is not None:

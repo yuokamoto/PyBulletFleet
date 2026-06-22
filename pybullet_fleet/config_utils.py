@@ -10,6 +10,10 @@ import os
 from enum import Enum
 from typing import Any, Callable, Dict, List, Optional, Type, TypeVar, Union
 
+# Root for bundled assets (robots/, config/, mesh/), which ship inside the
+# package — so this is the package directory itself.
+_BUNDLED_ROOT = os.path.dirname(__file__)
+
 import yaml
 
 T = TypeVar("T")
@@ -30,6 +34,14 @@ def load_yaml_config(config_path: str) -> Dict[str, Any]:
     Raises:
         FileNotFoundError: If *config_path* does not exist.
     """
+    if not os.path.exists(config_path):
+        # Fall back to the packaged asset root for bundled relative paths
+        # (e.g. "config/config.yaml") so pip-installed users (CWD != repo) and
+        # repo users both resolve the same bundled configs.
+        if not os.path.isabs(config_path):
+            bundled = os.path.join(_BUNDLED_ROOT, config_path)
+            if os.path.exists(bundled):
+                config_path = bundled
     if not os.path.exists(config_path):
         raise FileNotFoundError(f"Config file not found: {config_path}")
 

@@ -84,7 +84,7 @@ def main():
     urdf_path = resolve_model(_args.robot)
     print(f"Using robot: {_args.robot} -> {urdf_path}")
 
-    _BASE_CONFIG = os.path.join(os.path.dirname(__file__), "..", "..", "config", "config.yaml")
+    _BASE_CONFIG = "config/config.yaml"
     _OVERRIDES = {
         "simulation": {
             "target_rtf": 5,

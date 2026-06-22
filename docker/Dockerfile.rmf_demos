@@ -63,10 +63,9 @@ COPY --from=fuel-cache /root/.gz/fuel /root/.gz/fuel
 # Install pybullet_fleet
 COPY requirements.txt /opt/pybullet_fleet/requirements.txt
 COPY pyproject.toml /opt/pybullet_fleet/pyproject.toml
+# robots/, config/, mesh/ now live under pybullet_fleet/ (bundled package data),
+# so they are copied with the package above — no separate COPY needed.
 COPY pybullet_fleet/ /opt/pybullet_fleet/pybullet_fleet/
-COPY robots/ /opt/pybullet_fleet/robots/
-COPY config/ /opt/pybullet_fleet/config/
-COPY mesh/ /opt/pybullet_fleet/mesh/
 WORKDIR /opt/pybullet_fleet
 # [sdf] extra pulls trimesh + pycollada so the SDF loader can extract <submesh>
 # parts (e.g. the Caddy's polaris.dae) instead of loading overlapping full meshes.
