@@ -24,6 +24,9 @@ test:  ## Run tests with coverage (CI test job equivalent)
 test-fast:  ## Quick test run (stop on first failure)
 	pytest tests/ -x -q --no-cov
 
+test-clean-install:  ## Build wheel + install in a clean venv + smoke test (catches packaging/data-file bugs)
+	bash scripts/test_clean_install.sh
+
 verify: lint test  ## Full verification (lint + test, CI subset)
 
 docs:  ## Build documentation (warnings as errors)

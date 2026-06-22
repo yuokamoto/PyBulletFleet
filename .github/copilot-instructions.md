@@ -74,6 +74,12 @@ MultiRobotSimulationCore  (core_simulation.py)
      ```
   Do not push if either step fails. (Goal: replace the manual bridge step with a
   CI Docker job.)
+- **Packaging (when bundled data or `pyproject.toml` packaging changes):**
+  `make test-clean-install` builds a wheel, installs it in a clean venv (no repo
+  mount), and runs a smoke test from a temp dir — catching missing bundled
+  `robots/`/`config/`/`mesh/` data that editable installs hide. To test a
+  *published* version instead: `scripts/test_clean_install.sh <version>` or the
+  docker `pip-test` image (`docker/Dockerfile.pip-test`).
 
 ## Guard Rails — DO NOT
 
