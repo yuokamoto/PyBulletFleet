@@ -7,6 +7,66 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## v0.4.0 (2026-06-22)
+
+First release with the **ROS 2 bridge and Open-RMF integration**, an event
+system, SDF world loading, vectorized batch controllers, and a plugin/device
+architecture.
+
+### Highlights
+
+- **ROS 2 bridge** (`ros2_bridge/`, ROS 2 Jazzy) — drive PyBulletFleet from ROS 2:
+  per-robot odom / TF / cmd_vel / goal_pose / joint topics; NavigateToPose,
+  FollowPath and FollowJointTrajectory actions; and `simulation_interfaces`
+  services (spawn / delete / get entities, step simulation, simulator features).
+  Dockerized with an integration smoke test.
+- **Open-RMF integration** — fleet adapter plus handlers for doors, lifts,
+  delivery, cleaning, and battery, with runnable demos: office, hotel, clinic,
+  airport_terminal, battle_royale, and campus.
+- **EventBus** — global and per-entity lifecycle events (object/agent spawn &
+  remove, pre/post step & update, action start/complete, collision enter/exit)
+  for plugins and external integrations.
+- **SDF loader** — load multi-model SDF worlds, with `<submesh>` extraction from
+  multi-part meshes, `model_yaw_offset`, and `force_color` flat-shading for
+  meshes PyBullet cannot texture.
+- **Batch controllers** — vectorized omnidirectional and differential controllers
+  (two-phase step) for efficiently simulating large fleets.
+- **Plugin & device architecture** — per-agent plugins (e.g. battery) and
+  simulation plugins (e.g. workcell delivery); `Door` and `Elevator` agent
+  subclasses with joint control and automatic passenger attachment.
+
+### Features
+
+- Unified `controller=` API: registry name, dict, list, `ControllerParams`, or a
+  prebuilt controller; `type:` (registry) / `class:` (dotted import path)
+  selection; patrol and random-walk high-level controllers; per-axis kinematic
+  limits and `navigation_2d`.
+- `resolve_model()` resolves Tier 1/2/3 model names (bundled, ROS description
+  packages, `robot_descriptions`) to URDF paths.
+- `CameraController` — interactive right-drag pan, zoom, and top-down view.
+- `pybullet_fleet_msgs` package (ExecuteAction action).
+
+### Bug Fixes
+
+_(Fixes to behaviour from v0.3.0; issues introduced and resolved within this
+release's new features are omitted.)_
+
+- Collision detection was silently disabled when the simulation was loaded from
+  YAML — the `collision_detection_method` string is now coerced to its enum.
+- Per-axis velocity/acceleration limits with a zero-capped axis (e.g.
+  `max_linear_vel: [0.3, 3.0, 0.0]`) no longer produce a NaN limit.
+
+### Documentation
+
+- ROS 2 bridge / Docker guide; corrected headless, env-var, and config-file docs;
+  2026-06-20 implementation audit; a single shared agent-instructions source for
+  GitHub Copilot and Claude Code.
+
+### Performance
+
+- Kinematics mode (headless, AMD Ryzen AI 7 PRO 350): ~64× real-time at 100
+  agents, ~10× at 500, ~4.4× at 1000. See `docs/benchmarking/results.md`.
+
 ## v0.3.0 (2026-04-08)
 
 ### Breaking Changes
