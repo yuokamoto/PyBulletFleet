@@ -99,7 +99,7 @@ def run_benchmark(
     )
 
     # Use simple cube URDF for performance testing
-    robot_urdf = os.path.join(os.path.dirname(__file__), "../robots/simple_cube.urdf")
+    robot_urdf = "simple_cube"
     agent_spawn_params = AgentSpawnParams(
         urdf_path=robot_urdf,
         motion_mode=MotionMode.OMNIDIRECTIONAL,

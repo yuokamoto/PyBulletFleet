@@ -28,7 +28,7 @@ simulation:
 # Agent Configuration
 agents:
   num_agents: 1000  # Default number of agents to spawn
-  urdf_path: "../robots/simple_cube.urdf"  # Path to robot URDF (relative to benchmark/)
+  urdf_path: "simple_cube"  # Path to robot URDF (relative to benchmark/)
   motion_mode: "OMNIDIRECTIONAL"  # OMNIDIRECTIONAL, DIFFERENTIAL, ACKERMANN
   controller:
     type: "omni"           # Controller registry name (recommended explicit form)

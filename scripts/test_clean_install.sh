@@ -34,7 +34,8 @@ python3 -m venv "$WORK/cleanenv"
 "$WORK/cleanenv/bin/pip" install -q -U pip
 "$WORK/cleanenv/bin/pip" install -q "$TARGET"
 
-# 3. Run the smoke test from a non-repo CWD.
+# 3. Run the smoke test from a non-repo CWD. Unset PYTHONPATH so a repo checkout
+#    on the path can't shadow the installed wheel and mask packaging bugs.
 cp "$REPO_ROOT/scripts/clean_install_smoke.py" "$WORK/smoke.py"
-( cd "$WORK" && "$WORK/cleanenv/bin/python" smoke.py )
+( cd "$WORK" && unset PYTHONPATH && "$WORK/cleanenv/bin/python" smoke.py )
 echo "=== clean-install test OK ==="

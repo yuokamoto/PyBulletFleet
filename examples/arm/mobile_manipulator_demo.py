@@ -68,7 +68,7 @@ sim_core.params.camera_config.update({"camera_distance": 3.0, "camera_target": [
 # ---------------------------------------------------------------------------
 # Robot  (ik_joint_names tells IK to only solve arm joints, not wheels)
 # ---------------------------------------------------------------------------
-mobile_manipulator_urdf = os.path.join(os.path.dirname(__file__), "../../robots/mobile_manipulator.urdf")
+mobile_manipulator_urdf = "mobile_manipulator"
 
 ARM_JOINT_NAMES = (
     "mount_to_shoulder",

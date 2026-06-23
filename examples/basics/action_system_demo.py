@@ -62,7 +62,7 @@ def main():
     print("=" * 70 + "\n")
 
     # Spawn differential drive agent (blue)
-    urdf_path = os.path.join(os.path.dirname(__file__), "../../robots/mobile_robot.urdf")
+    urdf_path = "mobile_robot"
     agent_params = AgentSpawnParams(
         urdf_path=urdf_path,
         initial_pose=Pose.from_xyz(0, 0, 0.3),

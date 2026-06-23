@@ -248,7 +248,10 @@ def resolve_model(name_or_path: str) -> str:
     Resolution order:
 
     1. If ``name_or_path`` contains ``/`` or ``\\`` or ends with
-       ``.urdf`` / ``.sdf``, treat as a direct file path and return as-is.
+       ``.urdf`` / ``.sdf``, treat as a direct file path: absolute paths and
+       paths that exist relative to the CWD are returned as-is; a bundled
+       relative path (e.g. ``"robots/mobile_robot.urdf"``) otherwise resolves to
+       the packaged asset (absolute), falling back to the raw value if not found.
     2. Search user-registered directories (see :func:`add_search_path`).
     3. Look up in :data:`KNOWN_MODELS` registry and resolve by tier.
     4. **Auto-discovery fallback:** scan ``pybullet_data`` files and

@@ -38,7 +38,7 @@ if _args.rtf is not None:
     sim_core.params.target_rtf = _args.rtf
 
 # Spawn rail arm (fixed base)
-rail_arm_urdf = os.path.join(os.path.dirname(__file__), "../../robots/rail_arm_robot.urdf")
+rail_arm_urdf = "rail_arm_robot"
 agent = Agent.from_urdf(
     urdf_path=rail_arm_urdf,
     pose=Pose.from_xyz(0, 0, 0),

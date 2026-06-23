@@ -49,7 +49,7 @@ from pybullet_fleet.agent import Agent
 from pybullet_fleet.geometry import Pose
 from pybullet_fleet.action import JointAction
 
-ARM_URDF = os.path.join(os.path.dirname(__file__), "../../robots/arm_robot.urdf")
+ARM_URDF = "arm_robot"
 
 JOINT_TARGETS_A = [1.0, 1.0, 1.0, 0.5]
 JOINT_TARGETS_B = [-1.0, -0.5, 0.5, -0.3]

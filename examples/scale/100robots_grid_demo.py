@@ -50,9 +50,9 @@ mode = args.mode
 # Load Configuration
 # ========================================
 
-config_dir = os.path.join(os.path.dirname(__file__), "../../config")
-base_config_path = os.path.join(config_dir, "config.yaml")
-robots_config_path = os.path.join(config_dir, "100robots_config.yaml")
+# Bundled configs — resolved against the packaged config root by load_yaml_config.
+base_config_path = "config/config.yaml"
+robots_config_path = "config/100robots_config.yaml"
 
 # Load both configs (100robots_config overrides config.yaml)
 config = merge_configs(load_yaml_config(base_config_path), load_yaml_config(robots_config_path))

@@ -21,7 +21,7 @@ from pybullet_fleet.geometry import Pose
 from pybullet_fleet.types import CollisionMode
 
 
-MESH_PATH = os.path.join(os.path.dirname(__file__), "../mesh/cube.obj")
+MESH_PATH = os.path.join(os.path.dirname(__file__), "..", "pybullet_fleet", "mesh", "cube.obj")
 
 
 _SKIP = object()  # Sentinel to indicate "skip this check"

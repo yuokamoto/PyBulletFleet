@@ -113,7 +113,7 @@ def create_test_agents(num_agents: int, motion_mode: MotionMode = MotionMode.DIF
 
     sim_core = MultiRobotSimulationCore(params)
 
-    robot_urdf = os.path.join(os.path.dirname(__file__), "../../robots/simple_cube.urdf")
+    robot_urdf = "simple_cube"
 
     agents = []
     for i in range(num_agents):
@@ -369,7 +369,7 @@ def analyze_stationary_vs_moving(num_agents: int = 1000):
     params = SimulationParams.from_config(config_path)
     sim_core = MultiRobotSimulationCore(params)
 
-    robot_urdf = os.path.join(os.path.dirname(__file__), "../../robots/simple_cube.urdf")
+    robot_urdf = "simple_cube"
 
     try:
         # Spawn stationary agents (no goal)
