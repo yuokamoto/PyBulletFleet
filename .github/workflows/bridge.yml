@@ -42,6 +42,17 @@ jobs:
       - name: Build bridge image
         run: docker compose -f docker/docker-compose.yaml build bridge
 
+      - name: Run unit tests (colcon test)
+        # In-package ros2_bridge tests (conversions, sim_services, handlers,
+        # bridge_node, launch). Need the ROS runtime, so they run in the image.
+        run: |
+          cd docker
+          docker compose run --rm --no-deps bridge bash -c '
+            source /rmf_demos_ws/install/setup.bash &&
+            cd /rmf_demos_ws &&
+            colcon test --packages-select pybullet_fleet_ros pybullet_fleet_rmf \
+              --event-handlers console_direct+ --return-code-on-test-failure'
+
       - name: Run integration smoke test
         # test_integration.sh spawns robot0/1/2 from bridge_test.yaml (gui:=false)
         # and checks topics, services, cmd_vel, and simulation_interfaces calls.
