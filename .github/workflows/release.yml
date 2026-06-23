@@ -88,6 +88,14 @@ jobs:
         run: python -m build
       - name: Verify package metadata
         run: twine check dist/*
+      - name: Smoke-test the built wheel in a clean venv
+        # Install the wheel (no repo on the path) and resolve/spawn bundled
+        # assets — gates the release on the wheel actually shipping robots/
+        # config/mesh data (which a 'twine check' cannot detect).
+        run: |
+          python -m venv /tmp/cleanenv
+          /tmp/cleanenv/bin/pip install "$(ls dist/*.whl)"
+          ( cd /tmp && unset PYTHONPATH && /tmp/cleanenv/bin/python "$GITHUB_WORKSPACE/scripts/clean_install_smoke.py" )
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:

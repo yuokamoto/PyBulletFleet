@@ -1,0 +1,52 @@
+name: Bridge Integration
+
+# ros2_bridge is excluded from pre-commit and pytest (it needs a ROS 2 runtime),
+# so this Docker job is its only automated coverage. Path-filtered: it runs only
+# when the bridge, its Docker setup, or bundled robot/world assets change, so
+# ordinary PRs stay fast.
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'ros2_bridge/**'
+      - 'docker/**'
+      - 'pybullet_fleet/robots/**'
+      - 'pybullet_fleet/config/**'
+      - 'pybullet_fleet/mesh/**'
+      - '.github/workflows/bridge.yml'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'ros2_bridge/**'
+      - 'docker/**'
+      - 'pybullet_fleet/robots/**'
+      - 'pybullet_fleet/config/**'
+      - 'pybullet_fleet/mesh/**'
+      - '.github/workflows/bridge.yml'
+
+concurrency:
+  group: bridge-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  integration:
+    name: ROS 2 Bridge Integration (Docker)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Build bridge image
+        run: docker compose -f docker/docker-compose.yaml build bridge
+
+      - name: Run integration smoke test
+        # test_integration.sh spawns robot0/1/2 from bridge_test.yaml (gui:=false)
+        # and checks topics, services, cmd_vel, and simulation_interfaces calls.
+        run: |
+          cd docker
+          docker compose run --rm --no-deps \
+            -v "$(pwd)/test_integration.sh:/test_integration.sh:ro" \
+            bridge bash /test_integration.sh

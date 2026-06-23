@@ -81,6 +81,23 @@ jobs:
             exit 1
           fi
 
+  clean-install:
+    name: Clean-install Packaging Test
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v5
+
+    - name: Set up Python 3.11
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+        cache: 'pip'
+
+    - name: Build wheel, install in a clean venv, smoke-test bundled assets
+      # Catches packaging bugs that editable/dev installs hide — e.g. bundled
+      # robots/config/mesh missing from the wheel.
+      run: bash scripts/test_clean_install.sh
+
   docs:
     name: Documentation Build
     runs-on: ubuntu-latest
