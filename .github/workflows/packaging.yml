@@ -1,0 +1,55 @@
+name: Packaging
+
+# Build the wheel and install it into a clean venv (no repo mount) to verify the
+# bundled robots/config/mesh data actually ships and resolves — the editable
+# install used by the main test job cannot catch this. Path-filtered: runs only
+# when packaging or bundled assets change, so ordinary code PRs stay fast. The
+# release workflow runs the same smoke as a final pre-publish gate.
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'pyproject.toml'
+      - 'MANIFEST.in'
+      - 'pybullet_fleet/robots/**'
+      - 'pybullet_fleet/config/**'
+      - 'pybullet_fleet/mesh/**'
+      - 'scripts/clean_install_smoke.py'
+      - 'scripts/test_clean_install.sh'
+      - '.github/workflows/packaging.yml'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'pyproject.toml'
+      - 'MANIFEST.in'
+      - 'pybullet_fleet/robots/**'
+      - 'pybullet_fleet/config/**'
+      - 'pybullet_fleet/mesh/**'
+      - 'scripts/clean_install_smoke.py'
+      - 'scripts/test_clean_install.sh'
+      - '.github/workflows/packaging.yml'
+
+concurrency:
+  group: packaging-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  clean-install:
+    name: Clean-install Packaging Test
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v5
+
+    - name: Set up Python 3.11
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+        cache: 'pip'
+
+    - name: Build wheel, install in a clean venv, smoke-test bundled assets
+      # Catches packaging bugs that editable/dev installs hide — e.g. bundled
+      # robots/config/mesh missing from the wheel.
+      run: bash scripts/test_clean_install.sh
