@@ -93,8 +93,14 @@ jobs:
         # assets — gates the release on the wheel actually shipping robots/
         # config/mesh data (which a 'twine check' cannot detect).
         run: |
+          shopt -s nullglob
+          wheels=(dist/*.whl)
+          if [ "${#wheels[@]}" -ne 1 ]; then
+            echo "::error::expected exactly one wheel in dist/, found ${#wheels[@]}: ${wheels[*]}"
+            exit 1
+          fi
           python -m venv /tmp/cleanenv
-          /tmp/cleanenv/bin/pip install "$(ls dist/*.whl)"
+          /tmp/cleanenv/bin/pip install "${wheels[0]}"
           ( cd /tmp && unset PYTHONPATH && /tmp/cleanenv/bin/python "$GITHUB_WORKSPACE/scripts/clean_install_smoke.py" )
       - name: Upload artifacts
         uses: actions/upload-artifact@v4

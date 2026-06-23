@@ -10,17 +10,22 @@ bundled assets ship in the wheel and resolve correctly:
   - ``load_yaml_config("config/config.yaml")`` — bundled config
   - ``Agent.from_params(urdf_path=...)``      — spawn a bundled robot end-to-end
 
-Exits non-zero on the first failure. Used by scripts/test_clean_install.sh and
-the docker `pip-test` service.
+Runs all checks and exits non-zero if any fail. Used by
+scripts/test_clean_install.sh and the docker `pip-test` service.
 """
+
 import os
 import sys
 
 
 def main() -> int:
-    # Guard: do not run from the repo checkout (would mask packaging bugs).
+    # Hard guard: refuse to run from the repo checkout — importing the source
+    # tree (instead of the installed wheel) would mask packaging bugs and let a
+    # broken wheel "pass". The callers (test_clean_install.sh / pip-test) run
+    # this from a temp dir, so this only trips on accidental manual runs.
     if os.path.isdir(os.path.join(os.getcwd(), "pybullet_fleet")):
-        print("WARNING: running from the repo root — run from elsewhere to test the installed wheel.")
+        print("ERROR: run this from outside the repo (e.g. /tmp) so it tests the installed wheel, not the source tree.")
+        return 2
 
     from pybullet_fleet.agent import Agent, AgentSpawnParams
     from pybullet_fleet.config_utils import load_yaml_config
