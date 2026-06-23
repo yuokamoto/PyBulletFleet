@@ -72,6 +72,11 @@ WORKDIR /opt/pybullet_fleet
 # [sdf] extras (trimesh/pycollada) would otherwise pull numpy 2.x — breaking the
 # C-extensions ("compiled using NumPy 1.x cannot run in NumPy 2.x"). Re-seat a
 # pip-managed numpy<2, then constrain every install in this stage to <2.
+#
+# Removal trigger: this pin tracks the Jazzy LTS runtime, not our own needs.
+# Drop these two lines once the base image (open-rmf/rmf_demos) ships numpy 2.x
+# — i.e. when adopting a post-Jazzy distro. Jazzy is LTS until 2029-05, so the
+# pin stays until then. (core pybullet_fleet already works on numpy 2.x.)
 RUN pip install --break-system-packages --ignore-installed "numpy<2" \
     && printf 'numpy<2\n' > /opt/pbf-constraints.txt
 ENV PIP_CONSTRAINT=/opt/pbf-constraints.txt
