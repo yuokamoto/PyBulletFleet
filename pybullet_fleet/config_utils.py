@@ -34,20 +34,12 @@ def load_yaml_config(config_path: str) -> Dict[str, Any]:
     Raises:
         FileNotFoundError: If *config_path* does not exist.
     """
-    if not os.path.exists(config_path):
+    if not os.path.isabs(config_path) and not os.path.exists(config_path):
         # Fall back to the packaged asset root so pip-installed users (CWD != repo)
-        # and repo users resolve the same bundled configs. Handles both a bundled
-        # relative path ("config/config.yaml") and a stale absolute path into a
-        # (now-moved) repo-root config/ dir — retry the trailing "config/..." tail.
-        candidate = None
-        if not os.path.isabs(config_path):
-            candidate = os.path.join(_BUNDLED_ROOT, config_path)
-        else:
-            norm = config_path.replace(os.sep, "/")
-            idx = norm.rfind("/config/")
-            if idx != -1:
-                candidate = os.path.join(_BUNDLED_ROOT, norm[idx + 1 :])
-        if candidate and os.path.exists(candidate):
+        # and repo users resolve the same bundled config from a relative path
+        # such as "config/config.yaml".
+        candidate = os.path.join(_BUNDLED_ROOT, config_path)
+        if os.path.exists(candidate):
             config_path = candidate
     if not os.path.exists(config_path):
         raise FileNotFoundError(f"Config file not found: {config_path}")
