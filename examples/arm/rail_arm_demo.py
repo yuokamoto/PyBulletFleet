@@ -31,14 +31,14 @@ _args = _parser.parse_args()
 # ---------------------------------------------------------------------------
 
 # Base config + demo-specific overrides (no separate YAML needed)
-_BASE_CONFIG = os.path.join(os.path.dirname(__file__), "..", "..", "config", "config.yaml")
+_BASE_CONFIG = "config/config.yaml"
 _OVERRIDES = {"simulation": {"target_rtf": 1}}
 sim_core = MultiRobotSimulationCore.from_dict(merge_configs(load_yaml_config(_BASE_CONFIG), _OVERRIDES))
 if _args.rtf is not None:
     sim_core.params.target_rtf = _args.rtf
 
 # Spawn rail arm (fixed base)
-rail_arm_urdf = os.path.join(os.path.dirname(__file__), "../../robots/rail_arm_robot.urdf")
+rail_arm_urdf = "rail_arm_robot"
 agent = Agent.from_urdf(
     urdf_path=rail_arm_urdf,
     pose=Pose.from_xyz(0, 0, 0),

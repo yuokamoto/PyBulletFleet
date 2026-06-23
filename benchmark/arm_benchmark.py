@@ -132,7 +132,7 @@ def run_benchmark(
     physics = sim_config.get("physics", True)
     mass_raw = arm_config.get("mass", None)
     mass: Optional[float] = None if mass_raw is None else float(mass_raw)
-    urdf_path = arm_config.get("urdf_path", "../robots/arm_robot.urdf")
+    urdf_path = arm_config.get("urdf_path", "arm_robot")
     spacing = arm_config.get("spacing", 1.5)
 
     # Resolve URDF path relative to benchmark/

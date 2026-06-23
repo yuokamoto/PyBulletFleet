@@ -29,7 +29,7 @@ from pybullet_fleet.sim_object import SimObject
 from pybullet_fleet.types import MotionMode, CollisionMode
 
 
-_BASE_CONFIG = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "config", "config.yaml")
+_BASE_CONFIG = "config/config.yaml"  # bundled config, resolved against the package by load_yaml_config
 _OVERRIDES = {"simulation": {"duration": 15.0, "enable_floor": False}}
 
 

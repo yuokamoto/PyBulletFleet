@@ -63,11 +63,23 @@ COPY --from=fuel-cache /root/.gz/fuel /root/.gz/fuel
 # Install pybullet_fleet
 COPY requirements.txt /opt/pybullet_fleet/requirements.txt
 COPY pyproject.toml /opt/pybullet_fleet/pyproject.toml
+# robots/, config/, mesh/ now live under pybullet_fleet/ (bundled package data),
+# so they are copied with the package above — no separate COPY needed.
 COPY pybullet_fleet/ /opt/pybullet_fleet/pybullet_fleet/
-COPY robots/ /opt/pybullet_fleet/robots/
-COPY config/ /opt/pybullet_fleet/config/
-COPY mesh/ /opt/pybullet_fleet/mesh/
 WORKDIR /opt/pybullet_fleet
+# Keep numpy on the 1.x line that ROS 2 Jazzy and pybullet are built against. The
+# RMF base ships numpy via apt (no pip RECORD, so pip can't uninstall it), and the
+# [sdf] extras (trimesh/pycollada) would otherwise pull numpy 2.x — breaking the
+# C-extensions ("compiled using NumPy 1.x cannot run in NumPy 2.x"). Re-seat a
+# pip-managed numpy<2, then constrain every install in this stage to <2.
+#
+# Removal trigger: this pin tracks the Jazzy LTS runtime, not our own needs.
+# Drop these two lines once the base image (open-rmf/rmf_demos) ships numpy 2.x
+# — i.e. when adopting a post-Jazzy distro. Jazzy is LTS until 2029-05, so the
+# pin stays until then. (core pybullet_fleet already works on numpy 2.x.)
+RUN pip install --break-system-packages --ignore-installed "numpy<2" \
+    && printf 'numpy<2\n' > /opt/pbf-constraints.txt
+ENV PIP_CONSTRAINT=/opt/pbf-constraints.txt
 # [sdf] extra pulls trimesh + pycollada so the SDF loader can extract <submesh>
 # parts (e.g. the Caddy's polaris.dae) instead of loading overlapping full meshes.
 RUN pip install --break-system-packages -e ".[sdf]"

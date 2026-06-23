@@ -114,7 +114,7 @@ def profile_collision_check_builtin(num_agents: int, num_iterations: int = 100):
         offset=[0.0, 0.0, 0.1],
     )
 
-    robot_urdf = os.path.join(os.path.dirname(__file__), "../../robots/simple_cube.urdf")
+    robot_urdf = "simple_cube"
     agent_spawn_params = AgentSpawnParams(
         urdf_path=robot_urdf,
         motion_mode=MotionMode.OMNIDIRECTIONAL,
@@ -225,7 +225,7 @@ def profile_collision_check_with_cprofile(num_agents: int):
         offset=[0.0, 0.0, 0.1],
     )
 
-    robot_urdf = os.path.join(os.path.dirname(__file__), "../../robots/simple_cube.urdf")
+    robot_urdf = "simple_cube"
     agent_spawn_params = AgentSpawnParams(
         urdf_path=robot_urdf,
         motion_mode=MotionMode.OMNIDIRECTIONAL,

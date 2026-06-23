@@ -91,7 +91,7 @@ def create_test_agents(
     num_agents: int, sim_core: MultiRobotSimulationCore, motion_mode: MotionMode = MotionMode.OMNIDIRECTIONAL
 ):
     """Generate test Agents directly (without using AgentManager)"""
-    robot_urdf = os.path.join(os.path.dirname(__file__), "../../robots/simple_cube.urdf")
+    robot_urdf = "simple_cube"
 
     agents = []
     grid_size = int(math.ceil(math.sqrt(num_agents)))

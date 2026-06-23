@@ -55,7 +55,7 @@ print("  ee_target_position solved by inverse kinematics\n")
 # ---------------------------------------------------------------------------
 # Simulation
 # ---------------------------------------------------------------------------
-_CONFIG = os.path.join(os.path.dirname(__file__), "..", "..", "config", "config.yaml")
+_CONFIG = "config/config.yaml"
 sim_core = MultiRobotSimulationCore.from_yaml(_CONFIG)
 if _args.rtf is not None:
     sim_core.params.target_rtf = _args.rtf
@@ -68,7 +68,7 @@ sim_core.params.camera_config.update({"camera_distance": 3.0, "camera_target": [
 # ---------------------------------------------------------------------------
 # Robot  (ik_joint_names tells IK to only solve arm joints, not wheels)
 # ---------------------------------------------------------------------------
-mobile_manipulator_urdf = os.path.join(os.path.dirname(__file__), "../../robots/mobile_manipulator.urdf")
+mobile_manipulator_urdf = "mobile_manipulator"
 
 ARM_JOINT_NAMES = (
     "mount_to_shoulder",

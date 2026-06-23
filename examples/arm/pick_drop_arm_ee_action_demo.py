@@ -67,7 +67,7 @@ BOX_DROP_XYZ = _P["box_drop"]
 EE_ORN = _P["orn"]  # None or quaternion tuple
 
 # Initialize simulation from YAML config
-_CONFIG = os.path.join(os.path.dirname(__file__), "..", "..", "config", "config.yaml")
+_CONFIG = "config/config.yaml"
 sim_core = MultiRobotSimulationCore.from_yaml(_CONFIG)
 if args.rtf is not None:
     sim_core.params.target_rtf = args.rtf

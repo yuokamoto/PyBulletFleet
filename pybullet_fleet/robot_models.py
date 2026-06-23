@@ -247,8 +247,11 @@ def resolve_model(name_or_path: str) -> str:
 
     Resolution order:
 
-    1. If ``name_or_path`` contains ``/`` or ``\\`` or ends with
-       ``.urdf`` / ``.sdf``, treat as a direct file path and return as-is.
+    1. If ``name_or_path`` contains a path separator (``os.sep`` or ``/``) or
+       ends with ``.urdf`` / ``.sdf``, treat as a direct file path: absolute paths and
+       paths that exist relative to the CWD are returned as-is; a bundled
+       relative path (e.g. ``"robots/mobile_robot.urdf"``) otherwise resolves to
+       the packaged asset (absolute), falling back to the raw value if not found.
     2. Search user-registered directories (see :func:`add_search_path`).
     3. Look up in :data:`KNOWN_MODELS` registry and resolve by tier.
     4. **Auto-discovery fallback:** scan ``pybullet_data`` files and
@@ -266,9 +269,15 @@ def resolve_model(name_or_path: str) -> str:
     Raises:
         FileNotFoundError: If the model cannot be resolved.
     """
-    # Direct path — return as-is
+    # Direct path. Absolute or found relative to the CWD → use as-is. Otherwise
+    # try resolving a bundled relative path (e.g. "robots/mobile_robot.urdf")
+    # against the packaged asset root so pip-installed users (CWD != repo) and
+    # repo users both work; fall back to the raw value if still not found.
     if os.sep in name_or_path or "/" in name_or_path or name_or_path.endswith((".urdf", ".sdf")):
-        return name_or_path
+        if os.path.isabs(name_or_path) or os.path.isfile(name_or_path):
+            return name_or_path
+        bundled = os.path.normpath(os.path.join(_PROJECT_ROOT, name_or_path))
+        return bundled if os.path.isfile(bundled) else name_or_path
 
     # User search paths (highest priority for name-based lookup)
     user_hit = _resolve_from_search_paths(name_or_path)
@@ -450,7 +459,10 @@ def list_all_models() -> Dict[str, dict]:
 # ---------------------------------------------------------------------------
 
 
-_PROJECT_ROOT = os.path.join(os.path.dirname(__file__), "..")
+# Root for bundled assets (robots/, config/, mesh/). These ship *inside* the
+# package, so this is the package directory itself — works both from a repo
+# checkout and from a pip-installed wheel.
+_PROJECT_ROOT = os.path.dirname(__file__)
 
 
 def _resolve_by_tier(name: str, entry: ModelEntry) -> str:

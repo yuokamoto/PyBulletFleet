@@ -1,0 +1,20 @@
+# Clean-room packaging test: install the PUBLISHED pybullet-fleet from PyPI in a
+# bare Python image (no repo, no mount) and run the bundled-asset smoke test.
+# Catches packaging regressions like missing robots/config/mesh in the wheel.
+#
+#   docker build -f docker/Dockerfile.pip-test -t pbf-pip-test \
+#     --build-arg PYBULLET_FLEET_VERSION=0.4.1 .
+#   docker run --rm pbf-pip-test
+FROM python:3.10-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libgl1 libglib2.0-0 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Empty = latest on PyPI; set to pin a version.
+ARG PYBULLET_FLEET_VERSION=
+RUN pip install --no-cache-dir "pybullet-fleet${PYBULLET_FLEET_VERSION:+==${PYBULLET_FLEET_VERSION}}"
+
+COPY scripts/clean_install_smoke.py /smoke.py
+WORKDIR /tmp
+CMD ["python", "/smoke.py"]

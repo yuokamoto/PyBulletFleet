@@ -83,7 +83,7 @@ from pybullet_fleet.config_utils import load_yaml_config, merge_configs
 from pybullet_fleet.core_simulation import MultiRobotSimulationCore
 from pybullet_fleet.geometry import Pose
 
-_BASE_CONFIG = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "config", "config.yaml")
+_BASE_CONFIG = "config/config.yaml"  # bundled config, resolved against the package by load_yaml_config
 _OVERRIDES = {
     "simulation": {
         "target_rtf": 1.0,

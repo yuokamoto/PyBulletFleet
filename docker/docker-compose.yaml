@@ -66,8 +66,7 @@ services:
       - ../pybullet_fleet:/opt/pybullet_fleet/pybullet_fleet:ro
       - ../ros2_bridge/pybullet_fleet_ros:/rmf_demos_ws/src/pybullet_fleet_ros:ro
       - ../ros2_bridge/pybullet_fleet_rmf:/rmf_demos_ws/src/pybullet_fleet_rmf:ro
-      - ../robots:/opt/pybullet_fleet/robots:ro
-      - ../config:/opt/pybullet_fleet/config:ro
+      # robots/, config/, mesh/ are bundled under pybullet_fleet/ (mounted above)
       - ../ros2_bridge/scripts:/opt/pybullet_fleet/scripts:ro
       - ../examples:/opt/pybullet_fleet/examples:ro
       # Overlay install paths so launch/config/python reflect local edits

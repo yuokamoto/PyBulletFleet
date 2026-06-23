@@ -22,12 +22,12 @@ from pybullet_fleet.core_simulation import MultiRobotSimulationCore
 from pybullet_fleet.sim_object import Pose, SimObject, ShapeParams
 
 # Initialize simulation from base config + inline overrides
-_BASE_CONFIG = os.path.join(os.path.dirname(__file__), "..", "..", "config", "config.yaml")
+_BASE_CONFIG = "config/config.yaml"
 _OVERRIDES = {"simulation": {"timestep": 0.01, "physics": True}}
 sim_core = MultiRobotSimulationCore.from_dict(merge_configs(load_yaml_config(_BASE_CONFIG), _OVERRIDES))
 
 # 1. SimObject with mesh (pallet visual)
-pallet_mesh_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../mesh/11pallet.obj"))
+pallet_mesh_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../pybullet_fleet/mesh/11pallet.obj"))
 pallet_sim = SimObject.from_mesh(
     visual_shape=ShapeParams(
         shape_type="mesh", mesh_path=pallet_mesh_path, mesh_scale=[0.5, 0.5, 0.5], rgba_color=[0.8, 0.6, 0.4, 1.0]
@@ -44,7 +44,7 @@ box_body = p.createMultiBody(0.0, box_collision, box_visual, [-2, 2, 0.3])
 box_sim = SimObject(body_id=box_body, sim_core=sim_core)
 
 # 3. Agent with mesh (mobile robot with cube visual)
-cube_mesh_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../mesh/cube.obj"))
+cube_mesh_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../pybullet_fleet/mesh/cube.obj"))
 cube_agent = Agent.from_mesh(
     visual_shape=ShapeParams(
         shape_type="mesh", mesh_path=cube_mesh_path, mesh_scale=[0.3, 0.3, 0.3], rgba_color=[0.0, 1.0, 0.0, 1.0]
@@ -57,7 +57,7 @@ cube_agent = Agent.from_mesh(
 
 # 4. Agent with URDF (fixed arm robot)
 arm_agent = Agent.from_urdf(
-    urdf_path=os.path.join(os.path.dirname(__file__), "../../robots/arm_robot.urdf"),
+    urdf_path="arm_robot",
     pose=Pose.from_xyz(3, 0, 0),
     use_fixed_base=True,
     sim_core=sim_core,

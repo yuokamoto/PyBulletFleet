@@ -37,7 +37,7 @@ from tests.conftest import MockSimCore
 # Paths
 # ---------------------------------------------------------------------------
 
-MESH_PATH = os.path.join(os.path.dirname(__file__), "../mesh/cube.obj")
+MESH_PATH = os.path.join(os.path.dirname(__file__), "..", "pybullet_fleet", "mesh", "cube.obj")
 ARM_URDF = "robots/arm_robot.urdf"
 RAIL_ARM_URDF = "robots/rail_arm_robot.urdf"
 

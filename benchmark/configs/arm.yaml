@@ -14,7 +14,7 @@ simulation:
 
 # Arm Configuration
 arm:
-  urdf_path: "../robots/arm_robot.urdf"
+  urdf_path: "arm_robot"
   mass: null             # null = use URDF mass values (physics); 0.0 = kinematic
   use_fixed_base: true
   spacing: 1.5           # meters between arms in grid

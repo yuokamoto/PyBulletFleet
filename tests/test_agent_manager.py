@@ -23,7 +23,7 @@ from pybullet_fleet.geometry import Pose
 from pybullet_fleet.sim_object import ShapeParams, SimObject, SimObjectSpawnParams
 from tests.conftest import MockSimCore
 
-MESH_PATH = os.path.join(os.path.dirname(__file__), "../mesh/cube.obj")
+MESH_PATH = os.path.join(os.path.dirname(__file__), "..", "pybullet_fleet", "mesh", "cube.obj")
 
 
 # =====================================================================

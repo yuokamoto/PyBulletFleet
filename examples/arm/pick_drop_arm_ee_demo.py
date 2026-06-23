@@ -63,7 +63,7 @@ BOX_PICK_XYZ = _P["box_pick"]
 EE_ORN = _P["orn"]  # None or quaternion tuple
 
 # Initialize simulation from YAML config
-_CONFIG = os.path.join(os.path.dirname(__file__), "..", "..", "config", "config.yaml")
+_CONFIG = "config/config.yaml"
 sim_core = MultiRobotSimulationCore.from_yaml(_CONFIG)
 
 # Spawn robot arm (fixed base)

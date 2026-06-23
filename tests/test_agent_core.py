@@ -30,7 +30,7 @@ from pybullet_fleet.sim_object import SimObject, ShapeParams
 from pybullet_fleet.types import CollisionMode, MotionMode, PosePhase
 from tests.conftest import MockSimCore
 
-MESH_PATH = os.path.join(os.path.dirname(__file__), "../mesh/cube.obj")
+MESH_PATH = os.path.join(os.path.dirname(__file__), "..", "pybullet_fleet", "mesh", "cube.obj")
 ARM_URDF = "robots/arm_robot.urdf"
 MOBILE_URDF = "robots/mobile_robot.urdf"
 MOBILE_MANIPULATOR_URDF = "robots/mobile_manipulator.urdf"

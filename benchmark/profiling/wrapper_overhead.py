@@ -403,7 +403,7 @@ def test_agent_wrapper(num_objects: int) -> dict:
     mem_before = get_memory_info()
 
     # Prepare URDF path (use simple cube for performance testing)
-    robot_urdf = os.path.join(os.path.dirname(__file__), "../../robots/simple_cube.urdf")
+    robot_urdf = "simple_cube"
 
     # Spawn (wall + CPU)
     cpu0 = cpu_time_s(proc)
@@ -516,7 +516,7 @@ def test_agent_manager(num_objects: int) -> dict:
     )
 
     # Use simple cube URDF for performance testing
-    robot_urdf = os.path.join(os.path.dirname(__file__), "../../robots/simple_cube.urdf")
+    robot_urdf = "simple_cube"
     agent_spawn_params = AgentSpawnParams(
         urdf_path=robot_urdf,
         motion_mode=MotionMode.DIFFERENTIAL,

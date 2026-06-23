@@ -108,7 +108,7 @@ def benchmark_collision_mode(
         offset=[0.0, 0.0, 0.1],
     )
 
-    robot_urdf = os.path.join(os.path.dirname(__file__), "../../robots/simple_cube.urdf")
+    robot_urdf = "simple_cube"
     agent_spawn_params = AgentSpawnParams(
         urdf_path=robot_urdf,
         motion_mode=MotionMode.OMNIDIRECTIONAL,
