@@ -1,0 +1,88 @@
+"""Tests for the pybullet-fleet command-line interface (examples subcommand)."""
+
+import os
+
+import pytest
+
+from pybullet_fleet import cli
+
+
+def test_examples_dir_exists_and_is_in_package():
+    root = cli._examples_dir()
+    assert os.path.isdir(root)
+    # Lives next to the installed package (so it ships in the wheel).
+    import pybullet_fleet
+
+    assert root == os.path.join(os.path.dirname(pybullet_fleet.__file__), "examples")
+
+
+def test_iter_examples_finds_known_demos():
+    root = cli._examples_dir()
+    rels = {rel for rel, _full in cli._iter_examples(root)}
+    stems = {os.path.splitext(os.path.basename(r))[0] for r in rels}
+    assert "path_following_demo" in stems
+    assert "robot_demo" in stems
+    assert all(r.endswith(".py") for r in rels)
+
+
+def test_find_example_by_stem_and_relpath():
+    root = cli._examples_dir()
+    by_stem = cli._find_example(root, "path_following_demo")
+    assert len(by_stem) == 1
+    by_rel = cli._find_example(root, os.path.join("mobile", "path_following_demo"))
+    assert by_rel == by_stem
+    assert cli._find_example(root, "does_not_exist") == []
+
+
+def test_main_path(capsys):
+    rc = cli.main(["examples", "--path"])
+    assert rc == 0
+    out = capsys.readouterr().out.strip()
+    assert out == cli._examples_dir()
+
+
+def test_main_list(capsys):
+    rc = cli.main(["examples", "--list"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "path_following_demo" in out
+    assert "[mobile]" in out
+
+
+def test_main_copy(tmp_path, capsys):
+    dest = tmp_path / "copied"
+    rc = cli.main(["examples", "--copy", str(dest)])
+    assert rc == 0
+    assert (dest / "mobile" / "path_following_demo.py").is_file()
+
+
+def test_main_run_unknown_returns_error(capsys):
+    rc = cli.main(["examples", "--run", "no_such_demo"])
+    assert rc == 1
+    assert "No example matching" in capsys.readouterr().err
+
+
+def test_main_no_command_prints_help(capsys):
+    rc = cli.main([])
+    assert rc == 0
+    assert "examples" in capsys.readouterr().out
+
+
+def test_main_run_executes_example(tmp_path, monkeypatch, capsys):
+    # Drop a throwaway example into a temp tree and point the CLI at it, so we
+    # exercise the --run/runpy path without launching a real GUI demo.
+    root = tmp_path / "examples" / "basics"
+    root.mkdir(parents=True)
+    script = root / "tiny_demo.py"
+    script.write_text("import sys\nprint('ran', sys.argv[1:])\n")
+    monkeypatch.setattr(cli, "_examples_dir", lambda: str(tmp_path / "examples"))
+    rc = cli.main(["examples", "--run", "tiny_demo", "--flag", "x"])
+    assert rc == 0
+    assert "ran ['--flag', 'x']" in capsys.readouterr().out
+
+
+def test_examples_missing_dir_errors(monkeypatch, tmp_path, capsys):
+    monkeypatch.setattr(cli, "_examples_dir", lambda: str(tmp_path / "nope"))
+    rc = cli.main(["examples", "--list"])
+    assert rc == 1
+    assert "not found" in capsys.readouterr().err

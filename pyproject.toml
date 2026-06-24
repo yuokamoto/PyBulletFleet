@@ -66,6 +66,9 @@ docs = [
     "sphinxcontrib-mermaid>=1.0",
 ]
 
+[project.scripts]
+pybullet-fleet = "pybullet_fleet.cli:main"
+
 [tool.setuptools.packages.find]
 include = ["pybullet_fleet", "pybullet_fleet.*"]
 
@@ -77,6 +80,7 @@ pybullet_fleet = [
     "robots/**/*",
     "config/**/*",
     "mesh/**/*",
+    "examples/**/*",
 ]
 
 [tool.black]
@@ -107,7 +111,7 @@ ignore_missing_imports = true
 no_strict_optional = true
 exclude = [
     "external/",
-    "examples/",
+    "pybullet_fleet/examples/",
 ]
 
 [[tool.mypy.overrides]]
@@ -134,6 +138,7 @@ source = ["pybullet_fleet"]
 omit = [
     "*/tests/*",
     "*/external/*",
+    "*/examples/*",
 ]
 
 [tool.coverage.report]

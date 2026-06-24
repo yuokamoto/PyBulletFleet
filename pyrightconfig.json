@@ -1,7 +1,6 @@
 {
   "include": [
     "pybullet_fleet",
-    "examples",
     "tests"
   ],
   "exclude": [

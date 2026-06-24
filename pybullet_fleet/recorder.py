@@ -22,7 +22,7 @@ Usage::
     sim.run_simulation(duration=5.0)
 
     # Via environment variable (zero code changes)
-    # RECORD=output.mp4 python examples/scale/100robots_grid_demo.py
+    # RECORD=output.mp4 python pybullet_fleet/examples/scale/100robots_grid_demo.py
 
     # Direct instantiation
     rec = SimulationRecorder(sim_core, output="output.mp4", duration=4.0)
