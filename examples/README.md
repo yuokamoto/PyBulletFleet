@@ -43,11 +43,15 @@ scripts/setup_example_venvs.sh            # install venv tracks latest PyPI
 scripts/setup_example_venvs.sh 0.4.1      # or pin a version
 
 # released package (what users get):
-.venvs/example-install/bin/python examples/mobile/path_following_demo.py
+PBF_USE_INSTALLED=1 .venvs/example-install/bin/python examples/mobile/path_following_demo.py
 
 # your working tree (editable install):
-.venvs/example-mount/bin/python examples/mobile/path_following_demo.py
+PBF_USE_INSTALLED=1 .venvs/example-mount/bin/python examples/mobile/path_following_demo.py
 ```
+
+The explicit `PBF_USE_INSTALLED=1` keeps each venv on its installed package even
+if you've exported `PBF_USE_INSTALLED=0` in your shell (it's the default, so you
+can omit it otherwise).
 
 Both venvs install the package, so each runs the right code with the default
 `PBF_USE_INSTALLED=1`: `example-install` runs the released wheel, `example-mount`
