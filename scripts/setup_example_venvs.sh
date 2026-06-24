@@ -36,13 +36,13 @@ fi
 mkdir -p "$VENV_DIR"
 
 echo "=== [1/2] install venv: ${INSTALL_TARGET} (released package) ==="
-python3 -m venv "$INSTALL_ENV"
+python3 -m venv --clear "$INSTALL_ENV"   # --clear: reproducible across re-runs (no stale site-packages)
 "$INSTALL_ENV/bin/pip" install -q -U pip
 "$INSTALL_ENV/bin/pip" install -q "$INSTALL_TARGET"
 echo "    installed pybullet-fleet $("$INSTALL_ENV/bin/pip" show pybullet-fleet | awk '/^Version:/{print $2}')"
 
 echo "=== [2/2] mount venv: editable install of this checkout ==="
-python3 -m venv "$MOUNT_ENV"
+python3 -m venv --clear "$MOUNT_ENV"   # --clear: reproducible across re-runs
 "$MOUNT_ENV/bin/pip" install -q -U pip
 "$MOUNT_ENV/bin/pip" install -q -e "$REPO_ROOT"
 echo "    installed pybullet-fleet $("$MOUNT_ENV/bin/pip" show pybullet-fleet | awk '/^Version:/{print $2}') (editable: this checkout)"
@@ -51,12 +51,13 @@ cat <<EOF
 
 === done ===
 Run an example against the RELEASED package (what users get):
-  $INSTALL_ENV/bin/python examples/mobile/path_following_demo.py
+  PBF_USE_INSTALLED=1 $INSTALL_ENV/bin/python examples/mobile/path_following_demo.py
 
 Run the same example against your WORKING TREE:
-  $MOUNT_ENV/bin/python examples/mobile/path_following_demo.py
+  PBF_USE_INSTALLED=1 $MOUNT_ENV/bin/python examples/mobile/path_following_demo.py
 
-Both default to the installed package (PBF_USE_INSTALLED=1). The mount venv's
-editable install points at this checkout, so it runs your local code. To force
-a bare checkout (no install) onto the path, export PBF_USE_INSTALLED=0.
+Both default to the installed package; the explicit PBF_USE_INSTALLED=1 above
+keeps that true even if you already exported PBF_USE_INSTALLED=0 in your shell.
+The mount venv's editable install points at this checkout, so it runs your local
+code. To run a bare checkout (no install) instead, export PBF_USE_INSTALLED=0.
 EOF

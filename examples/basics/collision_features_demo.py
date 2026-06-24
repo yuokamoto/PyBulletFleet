@@ -54,8 +54,10 @@ from pybullet_fleet.types import CollisionMode
 # Configuration
 # ========================================
 
-# Mesh file path (using cube.obj from PyBulletFleet/mesh)
-MESH_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../pybullet_fleet/mesh/cube.obj"))
+# Bundled mesh resolved from the installed package (works installed or from checkout).
+import pybullet_fleet
+
+MESH_PATH = os.path.join(os.path.dirname(pybullet_fleet.__file__), "mesh", "cube.obj")
 
 # Simulation area: 20m x 20m
 AREA_SIZE = 20.0

@@ -50,9 +50,11 @@ def main():
     if _args.rtf is not None:
         sim.params.target_rtf = _args.rtf
 
-    # Get absolute paths
-    current_dir = os.path.dirname(os.path.abspath(__file__))
-    mesh_path = os.path.join(current_dir, "..", "..", "mesh", "cube.obj")
+    # Resolve the bundled mesh from the installed package, so it works whether
+    # pybullet_fleet is pip-installed (released wheel) or run from the checkout.
+    import pybullet_fleet
+
+    mesh_path = os.path.join(os.path.dirname(pybullet_fleet.__file__), "mesh", "cube.obj")
     urdf_path = resolve_model(_args.robot)
     print(f"Using robot: {_args.robot} -> {urdf_path}")
 

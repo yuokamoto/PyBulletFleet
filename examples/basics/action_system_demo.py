@@ -83,8 +83,10 @@ def main():
     agent.path_visualize = True
     agent.path_visualize_width = 3.0
 
-    # Get mesh paths (absolute)
-    mesh_dir = os.path.join(os.path.dirname(__file__), "../../mesh")
+    # Bundled mesh dir resolved from the installed package (works installed or from checkout).
+    import pybullet_fleet
+
+    mesh_dir = os.path.join(os.path.dirname(pybullet_fleet.__file__), "mesh")
     pallet_mesh_path = os.path.join(mesh_dir, "11pallet.obj")
     cube_mesh_path = os.path.join(mesh_dir, "cube.obj")
 
