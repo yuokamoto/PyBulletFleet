@@ -11,28 +11,16 @@ import yaml
 ros_msgs = pytest.importorskip("rclpy", reason="ROS 2 (rclpy) not available")
 
 
-def test_ros_simulation_core_overrides_run_simulation():
-    """ROSSimulationCore.run_simulation() initializes but does not block."""
-    from pybullet_fleet import SimulationParams
-    from pybullet_fleet_ros.bridge_node import ROSSimulationCore
-
-    sim = ROSSimulationCore(SimulationParams(gui=False, monitor=False, target_rtf=0))
-    # run_simulation should NOT block (it just calls initialize_simulation)
-    sim.run_simulation(duration=0)
-    assert sim._step_count == 0
-
-
 def test_step_once_increments_sim_time():
-    """step_once() increments simulation step count.
+    """step_once() advances the step count and sim_time.
 
-    Note: sim_time is updated at the *start* of step_once() using the previous _step_count,
-    so after one call sim_time is still 0.0.  After two calls, sim_time > 0.
-    We verify via _step_count (incremented at end of each step).
+    BridgeNode drives the sim by calling ``step_once()`` once per ROS step
+    (its daemon thread runs ``run_simulation()`` on the same core), so verify
+    the stepping primitive the bridge depends on.
     """
-    from pybullet_fleet import SimulationParams
-    from pybullet_fleet_ros.bridge_node import ROSSimulationCore
+    from pybullet_fleet import MultiRobotSimulationCore, SimulationParams
 
-    sim = ROSSimulationCore(SimulationParams(gui=False, monitor=False, physics=False))
+    sim = MultiRobotSimulationCore(SimulationParams(gui=False, monitor=False, physics=False))
     sim.initialize_simulation()
     assert sim._step_count == 0
     sim.step_once()
