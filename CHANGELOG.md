@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## v0.4.1 (2026-06-24)
+
 Packaging patch: the v0.4.0 wheel shipped **without** its bundled data, so
 pip-installed users could not load the built-in robots, configs, or meshes.
 This release makes that data ship in the wheel and resolve correctly.
