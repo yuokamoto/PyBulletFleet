@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+Packaging patch: the v0.4.0 wheel shipped **without** its bundled data, so
+pip-installed users could not load the built-in robots, configs, or meshes.
+This release makes that data ship in the wheel and resolve correctly.
+
+### Bug Fixes
+
+- Bundle the built-in `robots/`, `config/`, and `mesh/` data in the wheel —
+  pip-installed users can now load the bundled URDFs, configs, and meshes that
+  were missing from the v0.4.0 wheel.
+- Resolve bundled assets from a relative path (e.g. `"config/config.yaml"`,
+  `"robots/arm_robot.urdf"`) whether you run from the repo or a pip install.
+
+### Internal
+
+- Add a clean-install packaging smoke test (`make test-clean-install`, a
+  standalone script, and a Docker image) plus a release-time wheel-verify gate,
+  so missing bundled data is caught before publishing.
+- Add CI coverage: path-filtered packaging (clean-venv install) and ROS 2
+  bridge (Docker integration) workflows.
+- Pin `numpy<2` in the bridge image to match the ROS 2 Jazzy runtime.
+
 ## v0.4.0 (2026-06-22)
 
 First release with the **ROS 2 bridge and Open-RMF integration**, an event
