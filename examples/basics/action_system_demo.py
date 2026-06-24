@@ -16,8 +16,10 @@ import argparse
 import numpy as np
 import pybullet as p
 
-# Add parent directory to path so the in-repo package is used during development
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
+# Examples default to the installed pybullet_fleet package; set
+# PBF_USE_INSTALLED=0 to run against this source checkout instead.
+if os.environ.get("PBF_USE_INSTALLED", "1") == "0":
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from pybullet_fleet.agent import Agent, AgentSpawnParams, MotionMode
 from pybullet_fleet.core_simulation import MultiRobotSimulationCore

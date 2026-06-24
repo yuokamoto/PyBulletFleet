@@ -31,7 +31,10 @@ import argparse
 import os
 import sys
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
+# Examples default to the installed pybullet_fleet package; set
+# PBF_USE_INSTALLED=0 to run against this source checkout instead.
+if os.environ.get("PBF_USE_INSTALLED", "1") == "0":
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from pybullet_fleet.robot_models import auto_detect_profile, list_all_models, resolve_model
 
