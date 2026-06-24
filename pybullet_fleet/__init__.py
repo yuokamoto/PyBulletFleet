@@ -3,6 +3,13 @@ pybullet_fleet package
 General-purpose PyBullet simulation library for multi-robot fleets
 """
 
+from importlib.metadata import PackageNotFoundError, version as _pkg_version
+
+try:
+    __version__ = _pkg_version("pybullet-fleet")
+except PackageNotFoundError:  # running from a source tree that was never installed
+    __version__ = "0.0.0+unknown"
+
 # Type definitions
 from pybullet_fleet.types import (  # noqa: F401
     ActionStatus,
@@ -121,6 +128,7 @@ from pybullet_fleet.robot_models import (
 )
 
 __all__ = [
+    "__version__",
     # Type definitions
     "ActionStatus",
     "MotionMode",
