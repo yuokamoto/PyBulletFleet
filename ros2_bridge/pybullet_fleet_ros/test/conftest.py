@@ -1,11 +1,31 @@
 """Test fixtures for pybullet_fleet_ros tests."""
 
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 from pybullet_fleet.geometry import Pose
 from pybullet_fleet.types import MotionMode
+
+
+@pytest.fixture(autouse=True)
+def _patch_action_server():
+    """Stub out rclpy's ActionServer for mock-node unit tests.
+
+    ``rclpy.action.ActionServer`` is a pybind11 C-binding that validates its
+    ``node`` argument and rejects a ``MagicMock`` (TypeError). Handlers
+    (RobotHandler, SimServices) import it lazily inside their setup methods, so
+    patching it at the source — ``rclpy.action.ActionServer`` — lets a handler
+    be constructed with a mock node. No-op when rclpy is unavailable (those
+    tests ``importorskip`` and are skipped anyway).
+    """
+    try:
+        import rclpy.action  # noqa: F401
+    except ImportError:
+        yield
+        return
+    with patch("rclpy.action.ActionServer"):
+        yield
 
 
 @pytest.fixture
@@ -56,4 +76,14 @@ def mock_agent():
     agent.spawn_params.use_fixed_base = False
     agent.ik_params = None
     agent._controller = None
+    # Idle state so post_step()/_publish_status() take the "no active goal" path
+    # instead of dereferencing auto-generated MagicMock attributes.
+    agent.goal_pose = None
+    agent.path = []
+    agent.current_waypoint_index = 0
+    agent.get_current_action.return_value = None
+    agent._action_queue = []
+    # No battery by default, so RobotHandler skips the battery publisher and
+    # post_step() doesn't dereference MagicMock battery_soc/is_charging.
+    agent.battery_plugin = None
     return agent

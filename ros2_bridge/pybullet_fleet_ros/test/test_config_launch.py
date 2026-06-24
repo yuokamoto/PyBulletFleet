@@ -21,8 +21,10 @@ from launch_ros.actions import Node
 
 
 TIMEOUT_SEC = 10.0
-ROBOT_URDF = "/opt/pybullet_fleet/robots/mobile_robot.urdf"
-CUBE_URDF = "/opt/pybullet_fleet/robots/simple_cube.urdf"
+# Bundled model names — resolved by resolve_model(), so this is independent of
+# where the package is installed (the data ships inside the package as of 0.4.1).
+ROBOT_URDF = "mobile_robot"
+CUBE_URDF = "simple_cube"
 
 
 def _write_test_config(tmp_dir: str) -> str:
@@ -31,7 +33,14 @@ def _write_test_config(tmp_dir: str) -> str:
         "simulation": {"gui": False, "physics": False},
         "entities": [
             {"name": "robot0", "urdf_path": ROBOT_URDF, "pose": [0.0, 0.0, 0.05]},
-            {"name": "cube0", "urdf_path": CUBE_URDF, "pose": [2.0, 0.0, 0.5]},
+            # cube0 is omnidirectional so the bridge attaches an OmniController
+            # and 6-DoF cmd_vel (angular.x roll, linear.z lift) takes effect.
+            {
+                "name": "cube0",
+                "urdf_path": CUBE_URDF,
+                "pose": [2.0, 0.0, 0.5],
+                "motion_mode": "omnidirectional",
+            },
         ],
     }
     config_path = f"{tmp_dir}/test_bridge_config.yaml"
