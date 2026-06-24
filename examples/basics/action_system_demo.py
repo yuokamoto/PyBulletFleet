@@ -16,8 +16,10 @@ import argparse
 import numpy as np
 import pybullet as p
 
-# Add parent directory to path so the in-repo package is used during development
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
+# Examples default to the installed pybullet_fleet package; set
+# PBF_USE_INSTALLED=0 to run against this source checkout instead.
+if os.environ.get("PBF_USE_INSTALLED", "1") == "0":
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from pybullet_fleet.agent import Agent, AgentSpawnParams, MotionMode
 from pybullet_fleet.core_simulation import MultiRobotSimulationCore
@@ -81,8 +83,10 @@ def main():
     agent.path_visualize = True
     agent.path_visualize_width = 3.0
 
-    # Get mesh paths (absolute)
-    mesh_dir = os.path.join(os.path.dirname(__file__), "../../mesh")
+    # Bundled mesh dir resolved from the installed package (works installed or from checkout).
+    import pybullet_fleet
+
+    mesh_dir = os.path.join(os.path.dirname(pybullet_fleet.__file__), "mesh")
     pallet_mesh_path = os.path.join(mesh_dir, "11pallet.obj")
     cube_mesh_path = os.path.join(mesh_dir, "cube.obj")
 

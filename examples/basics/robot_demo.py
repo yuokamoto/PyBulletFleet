@@ -10,8 +10,10 @@ Comprehensive demo showing SimObject and Agent classes with various configuratio
 import os
 import sys
 
-# Add parent directory to path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
+# Examples default to the installed pybullet_fleet package; set
+# PBF_USE_INSTALLED=0 to run against this source checkout instead.
+if os.environ.get("PBF_USE_INSTALLED", "1") == "0":
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 import numpy as np
 import pybullet as p
@@ -26,8 +28,13 @@ _BASE_CONFIG = "config/config.yaml"
 _OVERRIDES = {"simulation": {"timestep": 0.01, "physics": True}}
 sim_core = MultiRobotSimulationCore.from_dict(merge_configs(load_yaml_config(_BASE_CONFIG), _OVERRIDES))
 
+# Bundled mesh dir resolved from the installed package (works installed or from checkout).
+import pybullet_fleet
+
+_MESH_DIR = os.path.join(os.path.dirname(pybullet_fleet.__file__), "mesh")
+
 # 1. SimObject with mesh (pallet visual)
-pallet_mesh_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../pybullet_fleet/mesh/11pallet.obj"))
+pallet_mesh_path = os.path.join(_MESH_DIR, "11pallet.obj")
 pallet_sim = SimObject.from_mesh(
     visual_shape=ShapeParams(
         shape_type="mesh", mesh_path=pallet_mesh_path, mesh_scale=[0.5, 0.5, 0.5], rgba_color=[0.8, 0.6, 0.4, 1.0]
@@ -44,7 +51,7 @@ box_body = p.createMultiBody(0.0, box_collision, box_visual, [-2, 2, 0.3])
 box_sim = SimObject(body_id=box_body, sim_core=sim_core)
 
 # 3. Agent with mesh (mobile robot with cube visual)
-cube_mesh_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../pybullet_fleet/mesh/cube.obj"))
+cube_mesh_path = os.path.join(_MESH_DIR, "cube.obj")
 cube_agent = Agent.from_mesh(
     visual_shape=ShapeParams(
         shape_type="mesh", mesh_path=cube_mesh_path, mesh_scale=[0.3, 0.3, 0.3], rgba_color=[0.0, 1.0, 0.0, 1.0]

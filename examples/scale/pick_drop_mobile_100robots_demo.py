@@ -14,7 +14,10 @@ import argparse
 import os
 import sys
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
+# Examples default to the installed pybullet_fleet package; set
+# PBF_USE_INSTALLED=0 to run against this source checkout instead.
+if os.environ.get("PBF_USE_INSTALLED", "1") == "0":
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 import pybullet as p
 import numpy as np
@@ -134,7 +137,10 @@ print()
 
 # Spawn pallets for each robot using SimObjectManager
 print("=== Spawning Pallets for Each Robot ===")
-mesh_dir = os.path.join(os.path.dirname(__file__), "../../mesh")
+import pybullet_fleet
+
+# Bundled mesh dir resolved from the installed package (works installed or from checkout).
+mesh_dir = os.path.join(os.path.dirname(pybullet_fleet.__file__), "mesh")
 pallet_mesh_path = os.path.join(mesh_dir, "11pallet.obj")
 
 pallet_orientation_quat = p.getQuaternionFromEuler([np.pi / 2, 0, 0])  # Horizontal orientation
