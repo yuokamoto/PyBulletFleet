@@ -1,6 +1,7 @@
 """Tests for the pybullet-fleet command-line interface (examples subcommand)."""
 
 import os
+import sys
 
 import pytest
 
@@ -68,7 +69,7 @@ def test_main_no_command_prints_help(capsys):
     assert "examples" in capsys.readouterr().out
 
 
-def test_main_run_executes_example(tmp_path, monkeypatch, capsys):
+def test_main_run_executes_example_and_restores_argv(tmp_path, monkeypatch, capsys):
     # Drop a throwaway example into a temp tree and point the CLI at it, so we
     # exercise the --run/runpy path without launching a real GUI demo.
     root = tmp_path / "examples" / "basics"
@@ -76,9 +77,41 @@ def test_main_run_executes_example(tmp_path, monkeypatch, capsys):
     script = root / "tiny_demo.py"
     script.write_text("import sys\nprint('ran', sys.argv[1:])\n")
     monkeypatch.setattr(cli, "_examples_dir", lambda: str(tmp_path / "examples"))
+    saved = list(sys.argv)
     rc = cli.main(["examples", "--run", "tiny_demo", "--flag", "x"])
     assert rc == 0
     assert "ran ['--flag', 'x']" in capsys.readouterr().out
+    assert sys.argv == saved  # restored even though the example mutated it
+
+
+def test_main_run_restores_argv_on_error(tmp_path, monkeypatch):
+    root = tmp_path / "examples" / "basics"
+    root.mkdir(parents=True)
+    (root / "boom_demo.py").write_text("raise SystemExit(3)\n")
+    monkeypatch.setattr(cli, "_examples_dir", lambda: str(tmp_path / "examples"))
+    saved = list(sys.argv)
+    with pytest.raises(SystemExit):
+        cli.main(["examples", "--run", "boom_demo"])
+    assert sys.argv == saved
+
+
+def test_main_run_ambiguous_name_errors(tmp_path, monkeypatch, capsys):
+    # Two examples sharing a stem in different folders -> ambiguous.
+    for sub in ("a", "b"):
+        d = tmp_path / "examples" / sub
+        d.mkdir(parents=True)
+        (d / "dup_demo.py").write_text("pass\n")
+    monkeypatch.setattr(cli, "_examples_dir", lambda: str(tmp_path / "examples"))
+    rc = cli.main(["examples", "--run", "dup_demo"])
+    assert rc == 1
+    assert "Ambiguous" in capsys.readouterr().err
+
+
+def test_unknown_arg_rejected_without_run(capsys):
+    # Stray flags are a mistake for --list/--path/--copy (only --run forwards them).
+    with pytest.raises(SystemExit):
+        cli.main(["examples", "--list", "--bogus"])
+    assert "unrecognized arguments" in capsys.readouterr().err
 
 
 def test_examples_missing_dir_errors(monkeypatch, tmp_path, capsys):

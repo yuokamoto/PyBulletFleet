@@ -31,12 +31,17 @@ def _iter_examples(root: str):
 
 
 def _find_example(root: str, name: str) -> List[Tuple[str, str]]:
-    """Return ``(relpath, fullpath)`` matches for *name* (stem or relative path)."""
-    target = os.path.splitext(name)[0]
+    """Return ``(relpath, fullpath)`` matches for *name* (stem or relative path).
+
+    Relative paths are compared with ``/`` separators on every platform, so
+    ``--run mobile/path_following_demo`` works on Windows too.
+    """
+    target = os.path.splitext(name)[0].replace(os.sep, "/")
     matches = []
     for rel, full in _iter_examples(root):
         stem = os.path.splitext(os.path.basename(rel))[0]
-        if target in (stem, os.path.splitext(rel)[0]):
+        rel_no_ext = os.path.splitext(rel)[0].replace(os.sep, "/")
+        if target in (stem, rel_no_ext):
             matches.append((rel, full))
     return matches
 
@@ -74,8 +79,14 @@ def _cmd_examples(args: argparse.Namespace, extra: List[str]) -> int:
             return 1
         _rel, full = matches[0]
         # Forward trailing args to the example, mimicking `python <example> ...`.
+        # Restore sys.argv afterwards so a raising example (or SystemExit) can't
+        # leave it mutated for later calls in the same process.
+        saved_argv = sys.argv
         sys.argv = [full] + list(extra)
-        runpy.run_path(full, run_name="__main__")
+        try:
+            runpy.run_path(full, run_name="__main__")
+        finally:
+            sys.argv = saved_argv
         return 0
 
     # Default action: list.
@@ -108,6 +119,10 @@ def main(argv: Optional[List[str]] = None) -> int:
     # are forwarded to the example instead of rejected by this parser.
     args, extra = parser.parse_known_args(argv)
     if args.command == "examples":
+        # Only --run forwards extra args; for the other actions, unknown args are
+        # a user mistake (e.g. a typo) and should be reported, not silently dropped.
+        if extra and not args.run:
+            parser.error(f"unrecognized arguments: {' '.join(extra)}")
         return _cmd_examples(args, extra)
     parser.print_help()
     return 0
