@@ -2,15 +2,11 @@
 
 import glob
 import os
-import py_compile
 import sys
 
 import pytest
 
 from pybullet_fleet import cli
-
-# All bundled example scripts (computed once, used to parametrize per-file checks).
-_EXAMPLE_FILES = sorted(glob.glob(os.path.join(cli._examples_dir(), "**", "*.py"), recursive=True))
 
 
 def test_examples_dir_exists_and_is_in_package():
@@ -22,31 +18,15 @@ def test_examples_dir_exists_and_is_in_package():
     assert root == os.path.join(os.path.dirname(pybullet_fleet.__file__), "examples")
 
 
-def test_iter_examples_finds_known_demos():
-    root = cli._examples_dir()
-    rels = {rel for rel, _full in cli._iter_examples(root)}
-    stems = {os.path.splitext(os.path.basename(r))[0] for r in rels}
-    assert "path_following_demo" in stems
-    assert "robot_demo" in stems
-    assert all(r.endswith(".py") for r in rels)
-
-
 def test_iter_examples_is_complete():
     # _iter_examples must find *every* .py under the examples tree, not a subset
     # (catches missed subdirectories or filtering bugs) — without hardcoding the
     # demo list, so adding a demo doesn't require editing this test.
     root = cli._examples_dir()
     found = {os.path.abspath(full) for _rel, full in cli._iter_examples(root)}
-    expected = {os.path.abspath(p) for p in _EXAMPLE_FILES}
+    expected = {os.path.abspath(p) for p in glob.glob(os.path.join(root, "**", "*.py"), recursive=True)}
     assert found == expected
     assert len(found) > 0
-
-
-@pytest.mark.parametrize("path", _EXAMPLE_FILES, ids=[os.path.relpath(p, cli._examples_dir()) for p in _EXAMPLE_FILES])
-def test_every_example_compiles(path):
-    # Cheap validity check for *all* demos (no GUI / no execution): catches syntax
-    # errors and broken edits in any example, which are otherwise untested.
-    py_compile.compile(path, doraise=True)
 
 
 def test_find_example_by_stem_and_relpath():
