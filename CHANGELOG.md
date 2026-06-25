@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## v0.5.0 (2026-06-25)
+
+Try the examples straight from a `pip install` — no repo clone needed.
+
+### Features
+
+- **Examples ship in the wheel + a `pybullet-fleet` CLI.** After
+  `pip install pybullet-fleet`, list / locate / copy / run the bundled demos:
+  ```
+  pybullet-fleet examples --list
+  pybullet-fleet examples --path
+  pybullet-fleet examples --run path_following_demo.py [--robot racecar]
+  pybullet-fleet examples --copy ./my-examples
+  ```
+  `--run` forwards extra flags to the demo; `--copy` extracts them for editing.
+- Expose `pybullet_fleet.__version__`.
+
+### Internal
+
+- Bridge: fixed the previously-failing `pybullet_fleet_ros` tests and now run
+  `colcon test` in CI (the bridge unit tests were never gated before).
+- Added a clean-install CI check that the published wheel actually ships the
+  bundled examples, and per-demo compile tests so a broken example is caught.
+
 ## v0.4.1 (2026-06-24)
 
 Packaging patch: the v0.4.0 wheel shipped **without** its bundled data, so
