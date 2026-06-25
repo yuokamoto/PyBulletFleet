@@ -51,6 +51,13 @@ def main() -> int:
     )
     checks.append(("spawn bundled mobile_robot", agent is not None and agent.body_id >= 0))
 
+    # Bundled examples ship in the wheel and the CLI can locate them.
+    from pybullet_fleet import cli
+
+    ex_dir = cli._examples_dir()
+    ex_files = list(cli._iter_examples(ex_dir)) if os.path.isdir(ex_dir) else []
+    checks.append(("bundled examples present (CLI --path resolves)", len(ex_files) > 0))
+
     ok = True
     for name, passed in checks:
         print(f"  [{'PASS' if passed else 'FAIL'}] {name}")

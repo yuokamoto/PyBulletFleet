@@ -14,13 +14,17 @@ import argparse
 import os
 import sys
 
-# Examples default to the installed pybullet_fleet package; set
-# PBF_USE_INSTALLED=0 to run against this source checkout instead.
-if os.environ.get("PBF_USE_INSTALLED", "1") == "0":
-    sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 import pybullet as p
 import numpy as np
+
+# Run from a source checkout without installing: fall back to the repo root
+# so `import pybullet_fleet` resolves. Installed/editable users never hit this.
+try:
+    import pybullet_fleet  # noqa: F401
+except ModuleNotFoundError:
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+    import pybullet_fleet  # noqa: F401
 
 from pybullet_fleet.agent import AgentSpawnParams, MotionMode
 from pybullet_fleet.agent_manager import AgentManager, GridSpawnParams, SimObjectManager
@@ -137,7 +141,6 @@ print()
 
 # Spawn pallets for each robot using SimObjectManager
 print("=== Spawning Pallets for Each Robot ===")
-import pybullet_fleet
 
 # Bundled mesh dir resolved from the installed package (works installed or from checkout).
 mesh_dir = os.path.join(os.path.dirname(pybullet_fleet.__file__), "mesh")

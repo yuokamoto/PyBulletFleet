@@ -18,7 +18,7 @@ Records a PyBullet GUI window by name using ffmpeg (or kazam).
 
 ```bash
 # Basic usage
-bash scripts/screen_capture.sh -d 10 -o output.mp4 -- examples/scale/100robots_grid_demo.py
+bash scripts/screen_capture.sh -d 10 -o output.mp4 -- pybullet_fleet/examples/scale/100robots_grid_demo.py
 
 # With stabilize delay and custom FPS
 bash scripts/screen_capture.sh -d 10 -f 60 --delay 5 -o output.mp4 -- examples/basics/simple_demo.py

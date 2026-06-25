@@ -1,16 +1,12 @@
 #!/usr/bin/env bash
-# Set up two side-by-side virtualenvs for running the examples:
+# Set up two side-by-side virtualenvs for running the bundled examples:
 #
 #   .venvs/example-install  — the released package from PyPI (how end users run).
-#                             Examples use it by default (PBF_USE_INSTALLED=1).
-#   .venvs/example-mount    — this checkout via `pip install -e .` (for dev).
-#                             The editable install *is* the local source, so
-#                             examples run against your working tree.
+#   .venvs/example-mount    — this checkout via `pip install -e .` (for dev;
+#                             the editable install runs your working tree).
 #
-# Examples pick their package source from PBF_USE_INSTALLED (default "1"):
-#   - unset / "1" → use the installed pybullet_fleet (correct in BOTH venvs).
-#   - "0"         → prepend this checkout to sys.path (for a bare clone with no
-#                   install). You normally don't need this when using a venv.
+# Examples ship inside the wheel, so each venv exercises its own copy via the
+# `pybullet-fleet examples` CLI — no repo paths, no env vars.
 #
 # Usage:
 #   scripts/setup_example_venvs.sh            # install venv tracks latest PyPI
@@ -43,21 +39,23 @@ echo "    installed pybullet-fleet $("$INSTALL_ENV/bin/pip" show pybullet-fleet 
 
 echo "=== [2/2] mount venv: editable install of this checkout ==="
 python3 -m venv --clear "$MOUNT_ENV"   # --clear: reproducible across re-runs
-"$MOUNT_ENV/bin/pip" install -q -U pip
+# Editable installs (PEP 660) need setuptools>=64, so upgrade build tools first.
+"$MOUNT_ENV/bin/pip" install -q -U pip setuptools wheel
 "$MOUNT_ENV/bin/pip" install -q -e "$REPO_ROOT"
 echo "    installed pybullet-fleet $("$MOUNT_ENV/bin/pip" show pybullet-fleet | awk '/^Version:/{print $2}') (editable: this checkout)"
 
 cat <<EOF
 
 === done ===
-Run an example against the RELEASED package (what users get):
-  PBF_USE_INSTALLED=1 $INSTALL_ENV/bin/python examples/mobile/path_following_demo.py
+List / run examples against the RELEASED package (what users get):
+  $INSTALL_ENV/bin/pybullet-fleet examples --list
+  $INSTALL_ENV/bin/pybullet-fleet examples --run path_following_demo.py
 
-Run the same example against your WORKING TREE:
-  PBF_USE_INSTALLED=1 $MOUNT_ENV/bin/python examples/mobile/path_following_demo.py
+Run the same example against your WORKING TREE (editable install):
+  $MOUNT_ENV/bin/pybullet-fleet examples --run path_following_demo.py
 
-Both default to the installed package; the explicit PBF_USE_INSTALLED=1 above
-keeps that true even if you already exported PBF_USE_INSTALLED=0 in your shell.
-The mount venv's editable install points at this checkout, so it runs your local
-code. To run a bare checkout (no install) instead, export PBF_USE_INSTALLED=0.
+Each venv ships its own examples (inside the wheel / editable checkout), so the
+install venv exercises the released wheel — including its bundled robots/, config/,
+and mesh/ data — while the mount venv runs your local code. Print the install
+location with: <venv>/bin/pybullet-fleet examples --path
 EOF
