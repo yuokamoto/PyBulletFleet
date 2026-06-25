@@ -65,34 +65,36 @@ The examples ship inside the package, so after `pip install pybullet-fleet` you
 can list and run them with the `pybullet-fleet` CLI — no clone needed:
 
 ```bash
-pybullet-fleet examples --list                       # all demos
-pybullet-fleet examples --run 100robots_grid_demo     # launch one (GUI)
-pybullet-fleet examples --copy ./examples             # copy them out to read/edit
-pybullet-fleet examples --path                        # where they're installed
+pybullet-fleet examples --list                          # all demos
+pybullet-fleet examples --run 100robots_grid_demo.py     # launch one (GUI)
+pybullet-fleet examples --copy ./examples                # copy them out to read/edit
+pybullet-fleet examples --path                           # where they're installed
 ```
+
+`--run` takes the file name as shown by `--list` (the `.py` is optional).
 
 Most demo scripts accept a `--robot` argument to swap the robot model (forwarded
 through `--run`). Pass a model name (resolved via `resolve_model()`) or a direct
 URDF path:
 
 ```bash
-pybullet-fleet examples --run 100robots_grid_demo --robot racecar
-pybullet-fleet examples --run pick_drop_arm_demo --robot kuka_iiwa
+pybullet-fleet examples --run 100robots_grid_demo.py --robot racecar
+pybullet-fleet examples --run pick_drop_arm_demo.py --robot kuka_iiwa
 # (resolve_model_demo has its own --list; copy it out and run it directly)
 ```
 
 From a source checkout you can also run the files directly, e.g.
 `python pybullet_fleet/examples/scale/100robots_grid_demo.py`.
 
-| Category | Scripts | `--robot` default | Alternatives |
-|----------|---------|-------------------|-------------|
-| Arm demos | `pick_drop_arm_*`, `rail_arm_demo` | `panda` | `kuka_iiwa`, `arm_robot` |
-| Mobile demos | `path_following_demo` | `husky` | `racecar`, `mobile_robot` |
-| Scale demos (mobile) | `100robots_cube_patrol_demo`, `pick_drop_mobile_100robots_demo` | `husky` | `racecar`, `mobile_robot` |
-| Scale demos (arm) | `pick_drop_arm_100robots_demo` | `panda` | `kuka_iiwa`, `arm_robot` |
-| Model demos | `resolve_model_demo`, `robot_descriptions_demo` | `panda` / `tiago` | any registered model |
+| Category | Demo (pass to `--run`) | `--robot` default | Alternatives |
+|----------|------------------------|-------------------|-------------|
+| Arm demos | `pick_drop_arm_*.py`, `rail_arm_demo.py` | `panda` | `kuka_iiwa`, `arm_robot` |
+| Mobile demos | `path_following_demo.py` | `husky` | `racecar`, `mobile_robot` |
+| Scale demos (mobile) | `100robots_cube_patrol_demo.py`, `pick_drop_mobile_100robots_demo.py` | `husky` | `racecar`, `mobile_robot` |
+| Scale demos (arm) | `pick_drop_arm_100robots_demo.py` | `panda` | `kuka_iiwa`, `arm_robot` |
+| Model demos | `resolve_model_demo.py`, `robot_descriptions_demo.py` | `panda` / `tiago` | any registered model |
 
-`100robots_grid_demo` has two arguments: `--robot` for the mobile robot (default: `husky`) and `--arm-robot` for the arm (default: `panda`).
+`100robots_grid_demo.py` has two arguments: `--robot` for the mobile robot (default: `husky`) and `--arm-robot` for the arm (default: `panda`).
 
 See [Tutorial 6 — Robot Models](https://pybulletfleet.readthedocs.io/en/latest/examples/robot-models.html) for the full model resolution system.
 

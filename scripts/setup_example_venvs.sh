@@ -49,10 +49,10 @@ cat <<EOF
 === done ===
 List / run examples against the RELEASED package (what users get):
   $INSTALL_ENV/bin/pybullet-fleet examples --list
-  $INSTALL_ENV/bin/pybullet-fleet examples --run path_following_demo
+  $INSTALL_ENV/bin/pybullet-fleet examples --run path_following_demo.py
 
 Run the same example against your WORKING TREE (editable install):
-  $MOUNT_ENV/bin/pybullet-fleet examples --run path_following_demo
+  $MOUNT_ENV/bin/pybullet-fleet examples --run path_following_demo.py
 
 Each venv ships its own examples (inside the wheel / editable checkout), so the
 install venv exercises the released wheel — including its bundled robots/, config/,

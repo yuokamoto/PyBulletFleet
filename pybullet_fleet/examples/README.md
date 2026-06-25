@@ -24,12 +24,12 @@ pip install pybullet-fleet
 
 pybullet-fleet examples --list                 # what's available
 pybullet-fleet examples --path                 # where they're installed
-pybullet-fleet examples --run path_following_demo   # launch one (GUI)
+pybullet-fleet examples --run path_following_demo.py   # launch one (GUI)
 pybullet-fleet examples --copy ./my-examples    # copy them out to read/edit
 ```
 
 `--run` forwards trailing flags to the example
-(`pybullet-fleet examples --run path_following_demo --duration 5`). If an example
+(`pybullet-fleet examples --run path_following_demo.py --duration 5`). If an example
 flag clashes with a CLI option name (e.g. some demos have their own `--list`),
 use `--copy` and run the copied file directly instead.
 
@@ -56,10 +56,10 @@ scripts/setup_example_venvs.sh            # install venv tracks latest PyPI
 scripts/setup_example_venvs.sh 0.4.1      # or pin a version
 
 # released package (what users get):
-.venvs/example-install/bin/pybullet-fleet examples --run path_following_demo
+.venvs/example-install/bin/pybullet-fleet examples --run path_following_demo.py
 
 # your working tree (editable install):
-.venvs/example-mount/bin/pybullet-fleet examples --run path_following_demo
+.venvs/example-mount/bin/pybullet-fleet examples --run path_following_demo.py
 ```
 
 Both venvs install the package, so each runs its own bundled examples and library:

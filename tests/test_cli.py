@@ -30,8 +30,10 @@ def test_find_example_by_stem_and_relpath():
     root = cli._examples_dir()
     by_stem = cli._find_example(root, "path_following_demo")
     assert len(by_stem) == 1
-    by_rel = cli._find_example(root, os.path.join("mobile", "path_following_demo"))
-    assert by_rel == by_stem
+    # .py extension is optional, and a relative path (any separator) also matches.
+    assert cli._find_example(root, "path_following_demo.py") == by_stem
+    assert cli._find_example(root, "mobile/path_following_demo.py") == by_stem
+    assert cli._find_example(root, os.path.join("mobile", "path_following_demo")) == by_stem
     assert cli._find_example(root, "does_not_exist") == []
 
 

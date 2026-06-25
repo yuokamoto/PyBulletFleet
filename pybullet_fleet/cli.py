@@ -31,10 +31,12 @@ def _iter_examples(root: str):
 
 
 def _find_example(root: str, name: str) -> List[Tuple[str, str]]:
-    """Return ``(relpath, fullpath)`` matches for *name* (stem or relative path).
+    """Return ``(relpath, fullpath)`` matches for *name*.
 
-    Relative paths are compared with ``/`` separators on every platform, so
-    ``--run mobile/path_following_demo`` works on Windows too.
+    *name* may be the bare stem (``path_following_demo``), the file name
+    (``path_following_demo.py``), or a relative path (``mobile/path_following_demo.py``)
+    — the ``.py`` extension is optional. Relative paths are compared with ``/``
+    separators on every platform, so they work on Windows too.
     """
     target = os.path.splitext(name)[0].replace(os.sep, "/")
     matches = []
@@ -97,8 +99,8 @@ def _cmd_examples(args: argparse.Namespace, extra: List[str]) -> int:
         if category != current:
             current = category
             print(f"  [{category}]")
-        print(f"    {os.path.splitext(os.path.basename(rel))[0]}")
-    print("\n  pybullet-fleet examples --run <name>      run one (GUI)")
+        print(f"    {os.path.basename(rel)}")
+    print("\n  pybullet-fleet examples --run <name>      run one (GUI; .py optional)")
     print("  pybullet-fleet examples --copy ./examples  copy them out to edit")
     print("  pybullet-fleet examples --path             print the install directory")
     return 0
@@ -113,7 +115,11 @@ def main(argv: Optional[List[str]] = None) -> int:
     group.add_argument("--list", action="store_true", help="list available examples (default action)")
     group.add_argument("--path", action="store_true", help="print the directory where the examples are installed")
     group.add_argument("--copy", metavar="DEST", help="copy the examples into DEST so you can edit them")
-    group.add_argument("--run", metavar="NAME", help="run an example by name (e.g. path_following_demo)")
+    group.add_argument(
+        "--run",
+        metavar="NAME",
+        help="run an example by file name (e.g. path_following_demo.py; the .py and folder are optional)",
+    )
 
     # parse_known_args so trailing flags after `--run NAME` (e.g. --duration 5)
     # are forwarded to the example instead of rejected by this parser.
