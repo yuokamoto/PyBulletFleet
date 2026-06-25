@@ -24,6 +24,14 @@ import sys
 import numpy as np
 import pybullet as p
 
+# Run from a source checkout without installing: fall back to the repo root
+# so `import pybullet_fleet` resolves. Installed/editable users never hit this.
+try:
+    import pybullet_fleet  # noqa: F401
+except ModuleNotFoundError:
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+    import pybullet_fleet  # noqa: F401
+
 from pybullet_fleet.agent import Agent, AgentSpawnParams
 from pybullet_fleet.core_simulation import MultiRobotSimulationCore
 from pybullet_fleet.geometry import Path, Pose
@@ -48,7 +56,6 @@ def main():
 
     # Resolve the bundled mesh from the installed package, so it works whether
     # pybullet_fleet is pip-installed (released wheel) or run from the checkout.
-    import pybullet_fleet
 
     mesh_path = os.path.join(os.path.dirname(pybullet_fleet.__file__), "mesh", "cube.obj")
     urdf_path = resolve_model(_args.robot)

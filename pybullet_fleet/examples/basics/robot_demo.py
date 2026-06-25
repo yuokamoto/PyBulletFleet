@@ -14,6 +14,14 @@ import sys
 import numpy as np
 import pybullet as p
 
+# Run from a source checkout without installing: fall back to the repo root
+# so `import pybullet_fleet` resolves. Installed/editable users never hit this.
+try:
+    import pybullet_fleet  # noqa: F401
+except ModuleNotFoundError:
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+    import pybullet_fleet  # noqa: F401
+
 from pybullet_fleet.agent import Agent
 from pybullet_fleet.config_utils import load_yaml_config, merge_configs
 from pybullet_fleet.core_simulation import MultiRobotSimulationCore
@@ -25,7 +33,6 @@ _OVERRIDES = {"simulation": {"timestep": 0.01, "physics": True}}
 sim_core = MultiRobotSimulationCore.from_dict(merge_configs(load_yaml_config(_BASE_CONFIG), _OVERRIDES))
 
 # Bundled mesh dir resolved from the installed package (works installed or from checkout).
-import pybullet_fleet
 
 _MESH_DIR = os.path.join(os.path.dirname(pybullet_fleet.__file__), "mesh")
 

@@ -23,6 +23,14 @@ import sys
 
 import pybullet as p
 
+# Run from a source checkout without installing: fall back to the repo root
+# so `import pybullet_fleet` resolves. Installed/editable users never hit this.
+try:
+    import pybullet_fleet  # noqa: F401
+except ModuleNotFoundError:
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+    import pybullet_fleet  # noqa: F401
+
 from pybullet_fleet.agent import Agent
 from pybullet_fleet.core_simulation import MultiRobotSimulationCore
 from pybullet_fleet.geometry import Pose
