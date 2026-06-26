@@ -279,7 +279,9 @@ class WorkcellHandler(BridgePlugin):
             self._past_requests[dedup_key] = status
             info.mode = DispenserState.IDLE
             info.request_guid = ""
-            self._node.get_logger().error(
+            # error when we actually fail; warn when configured to report SUCCESS.
+            log = self._node.get_logger().error if self._fail_on_no_robot else self._node.get_logger().warn
+            log(
                 f"[WorkcellHandler] Dispenser '{target}': failed to create PickAction -> "
                 f"{'FAILED' if self._fail_on_no_robot else 'SUCCESS'}"
             )
@@ -383,7 +385,9 @@ class WorkcellHandler(BridgePlugin):
             self._past_requests[dedup_key] = status
             info.mode = IngestorState.IDLE
             info.request_guid = ""
-            self._node.get_logger().error(
+            # error when we actually fail; warn when configured to report SUCCESS.
+            log = self._node.get_logger().error if self._fail_on_no_robot else self._node.get_logger().warn
+            log(
                 f"[WorkcellHandler] Ingestor '{target}': failed to create DropAction -> "
                 f"{'FAILED' if self._fail_on_no_robot else 'SUCCESS'}"
             )
