@@ -24,22 +24,24 @@ This handler is the *thin ROS bridge*:
 - Delegates dispense/ingest operations to ``WorkcellPlugin``.
 - Translates plugin completion callbacks into ROS result messages.
 
-Config (bridge YAML)::
+Config (bridge YAML) — this handler is loaded as a bridge plugin, so its options
+live under that plugin's ``config:`` (not a top-level ``workcell:`` section)::
 
-    workcell:
-      enabled: true                # default: true
-      item_shape:                  # ShapeParams-compatible dict
-        shape_type: box
-        half_extents: [0.15, 0.15, 0.1]
-        rgba_color: [0.8, 0.5, 0.2, 1.0]
-      item_mass: 0.5
-      item_search_radius: 1.0
-      attach_offset: [0.0, 0.0, 0.15, 0.0, 0.0, 0.0]  # [dx, dy, dz, roll, pitch, yaw]
-      return_home_delay: 5.0
-      fail_on_no_robot: true       # default: true (Gazebo behaviour). When no
-                                   # robot/carrier is at the workcell, report
-                                   # FAILED; set false to report SUCCESS so an
-                                   # RMF task doesn't stall on a missing robot.
+    bridge_plugins:
+      - class: pybullet_fleet_rmf.workcell_handler.WorkcellHandler
+        config:
+          item_shape:                  # ShapeParams-compatible dict
+            shape_type: box
+            half_extents: [0.15, 0.15, 0.1]
+            rgba_color: [0.8, 0.5, 0.2, 1.0]
+          item_mass: 0.5
+          item_search_radius: 1.0
+          attach_offset: [0.0, 0.0, 0.15, 0.0, 0.0, 0.0]  # [dx, dy, dz, roll, pitch, yaw]
+          return_home_delay: 5.0
+          fail_on_no_robot: true     # default: true (Gazebo behaviour). When no
+                                     # robot/carrier is at the workcell, report
+                                     # FAILED; set false to report SUCCESS so an
+                                     # RMF task doesn't stall on a missing robot.
 
 The handler auto-discovers workcell names from incoming requests
 (no pre-configuration required).

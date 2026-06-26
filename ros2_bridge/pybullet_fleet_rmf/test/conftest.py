@@ -20,7 +20,9 @@ def _patch_action_client():
     """
     try:
         import pybullet_fleet_rmf.robot_client_api  # noqa: F401
-    except Exception:
+    except ImportError:
+        # Only swallow missing-dependency (ROS unavailable) cases; let other
+        # import-time errors surface instead of masquerading as "ROS missing".
         yield
         return
     with patch("pybullet_fleet_rmf.robot_client_api.ActionClient"):
