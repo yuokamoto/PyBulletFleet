@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## v0.6.0 (2026-06-26)
+
+### Bug Fixes
+
+- **Fixed intermittent multi-second freezes during `run_simulation()`.** The
+  real-time loop paced off the wall clock, so a wall-clock jump (NTP correction,
+  host suspend/resume, WSL2 drift) could desync it into a long `time.sleep()` —
+  the sim "froze" then "suddenly resumed". It now paces on the monotonic clock,
+  converts the catch-up sleep correctly for `target_rtf != 1` (it previously
+  over-slept ~`rtf`×), and clamps any residual sleep so it can never freeze.
+
+### Features
+
+- Added `SimulationParams.max_sleep_frames` (default 4.0) to bound the real-time
+  sleep, mirroring the existing `max_steps_per_frame` catch-up cap.
+
 ## v0.5.0 (2026-06-25)
 
 Try the examples straight from a `pip install` — no repo clone needed.
