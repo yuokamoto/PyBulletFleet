@@ -24,6 +24,16 @@ def _api(mock_node, name="tinyRobot1"):
     return RobotClientAPI(name, mock_node, map_name="L1")
 
 
+def _odom_at(api, x, y, yaw):
+    """Build an Odometry message at a pose (used to feed the API a first odom,
+    since get_data() returns None until one arrives)."""
+    msg = Odometry()
+    msg.pose.pose.position.x = x
+    msg.pose.pose.position.y = y
+    msg.pose.pose.orientation = api._yaw_to_quat(yaw)
+    return msg
+
+
 def test_update_data_is_command_completed():
     from pybullet_fleet_rmf.robot_client_api import RobotUpdateData
 
@@ -124,11 +134,3 @@ def test_on_nav_complete_failure_does_not_mark_completed(mock_node):
     future.result.return_value = MagicMock(status=GoalStatus.STATUS_ABORTED)
     api._on_nav_complete(future)
     assert api._last_completed_cmd_id == 0  # unchanged
-
-
-def _odom_at(api, x, y, yaw):
-    msg = Odometry()
-    msg.pose.pose.position.x = x
-    msg.pose.pose.position.y = y
-    msg.pose.pose.orientation = api._yaw_to_quat(yaw)
-    return msg
