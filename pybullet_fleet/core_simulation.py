@@ -3174,24 +3174,6 @@ class MultiRobotSimulationCore:
             while True:
                 current_sim_time = self._step_count * self._params.timestep
 
-                # --- Diagnostics: detect wall-clock jumps (informational) ---
-                # The loop now paces against the monotonic clock, so a wall-clock
-                # jump (NTP / host suspend / WSL2 drift) no longer freezes the sim.
-                # We still log it so the cause is visible if anything looks off.
-                now_wall, now_mono = time.time(), time.monotonic()
-                wall_d, mono_d = now_wall - diag_prev_wall, now_mono - diag_prev_mono
-                if abs(wall_d - mono_d) > 0.5:
-                    logger.warning(
-                        "run_simulation: wall clock jumped %.2fs while monotonic advanced %.2fs "
-                        "(delta %.2fs) at step %d — pacing uses the monotonic clock, so this no "
-                        "longer affects the simulation.",
-                        wall_d,
-                        mono_d,
-                        wall_d - mono_d,
-                        self._step_count,
-                    )
-                diag_prev_wall, diag_prev_mono = now_wall, now_mono
-
                 # Check duration based on simulation time (not real time)
                 if duration > 0 and current_sim_time >= duration:
                     break
@@ -3210,6 +3192,26 @@ class MultiRobotSimulationCore:
                     # Speed>0: Synchronize with real time using absolute time calculation
                     loop_start = time.monotonic()
                     current_time = time.monotonic()
+
+                    # Diagnostics (WARNING level): detect wall-clock jumps (NTP /
+                    # host suspend / WSL2 drift). Pacing uses the monotonic clock,
+                    # so a jump no longer affects the sim — we only log it so the
+                    # cause is visible. Guarded by isEnabledFor and confined to the
+                    # rtf>0 branch to keep the max-speed (rtf<=0) loop call-free.
+                    if logger.isEnabledFor(logging.WARNING):
+                        now_wall = time.time()
+                        wall_d, mono_d = now_wall - diag_prev_wall, current_time - diag_prev_mono
+                        if abs(wall_d - mono_d) > 0.5:
+                            logger.warning(
+                                "run_simulation: wall clock jumped %.2fs while monotonic advanced %.2fs "
+                                "(delta %.2fs) at step %d — pacing uses the monotonic clock, so this does "
+                                "not affect the simulation.",
+                                wall_d,
+                                mono_d,
+                                wall_d - mono_d,
+                                self._step_count,
+                            )
+                        diag_prev_wall, diag_prev_mono = now_wall, current_time
 
                     # Detect pause state change: reset start_time on resume
                     if last_pause_state and not self.is_paused:
