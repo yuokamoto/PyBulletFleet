@@ -2607,7 +2607,7 @@ class MultiRobotSimulationCore:
         Calculates actual simulation speed from a 10-second sliding window,
         logs monitor data via logger, and writes to DataMonitor if enabled.
         """
-        now = time.time()
+        now = time.monotonic()  # monotonic: RTF/elapsed stay correct across wall-clock jumps
         sim_time = self._step_count * self._params.timestep
         # --- Speed history buffer ---
         self._speed_history.append((now, sim_time))
@@ -2687,7 +2687,7 @@ class MultiRobotSimulationCore:
                 sim.step_once()
         """
         # Reset simulation state
-        self._start_time = time.time()
+        self._start_time = time.monotonic()  # monotonic: elapsed/RTF immune to wall-clock jumps
         self._step_count = 0
         self._collision_count = 0
         self.sim_time = 0.0
@@ -3161,12 +3161,36 @@ class MultiRobotSimulationCore:
         self.initialize_simulation()
 
         try:
-            start_time = time.time()
+            # Pace against the MONOTONIC clock: it never jumps backwards and is
+            # immune to NTP / host-suspend / WSL2 wall-clock corrections, which
+            # previously desynced this loop into multi-second freezes.
+            start_time = time.monotonic()
             last_step_process_time = 0.0  # Track processing time excluding sleep
             last_pause_state = False  # Track pause state to detect resume
+            # Diagnostics: previous wall/monotonic readings to spot clock jumps.
+            diag_prev_wall = time.time()
+            diag_prev_mono = time.monotonic()
 
             while True:
                 current_sim_time = self._step_count * self._params.timestep
+
+                # --- Diagnostics: detect wall-clock jumps (informational) ---
+                # The loop now paces against the monotonic clock, so a wall-clock
+                # jump (NTP / host suspend / WSL2 drift) no longer freezes the sim.
+                # We still log it so the cause is visible if anything looks off.
+                now_wall, now_mono = time.time(), time.monotonic()
+                wall_d, mono_d = now_wall - diag_prev_wall, now_mono - diag_prev_mono
+                if abs(wall_d - mono_d) > 0.5:
+                    logger.warning(
+                        "run_simulation: wall clock jumped %.2fs while monotonic advanced %.2fs "
+                        "(delta %.2fs) at step %d — pacing uses the monotonic clock, so this no "
+                        "longer affects the simulation.",
+                        wall_d,
+                        mono_d,
+                        wall_d - mono_d,
+                        self._step_count,
+                    )
+                diag_prev_wall, diag_prev_mono = now_wall, now_mono
 
                 # Check duration based on simulation time (not real time)
                 if duration > 0 and current_sim_time >= duration:
@@ -3184,8 +3208,8 @@ class MultiRobotSimulationCore:
                     self.step_once()
                 else:
                     # Speed>0: Synchronize with real time using absolute time calculation
-                    loop_start = time.time()
-                    current_time = time.time()
+                    loop_start = time.monotonic()
+                    current_time = time.monotonic()
 
                     # Detect pause state change: reset start_time on resume
                     if last_pause_state and not self.is_paused:
@@ -3205,12 +3229,26 @@ class MultiRobotSimulationCore:
                         # Behind target: execute multiple steps to catch up
                         steps_needed = int(time_diff / self._params.timestep)
                         steps_needed = max(1, min(steps_needed, self._params.max_steps_per_frame))
+                        # Diagnostics: a large saturated catch-up is the "sudden
+                        # fast-forward" symptom (often right after a clock jump/stall).
+                        if steps_needed >= self._params.max_steps_per_frame and time_diff > 1.0:
+                            logger.warning(
+                                "run_simulation: catching up %d steps (behind by %.2fs sim-time) at step %d "
+                                "— sudden fast-forward; often follows a clock jump or a stalled frame.",
+                                steps_needed,
+                                time_diff,
+                                self._step_count,
+                            )
                         for _ in range(steps_needed):
                             self.step_once()
                     else:
-                        # Ahead of or at target: sleep until next frame
-                        # Calculate sleep time: time_diff - last processing time
-                        sleep_time = abs(time_diff) - last_step_process_time
+                        # Ahead of schedule: wait in REAL time. We are
+                        # abs(time_diff) sim-seconds ahead; at target_rtf× speed
+                        # that is abs(time_diff) / target_rtf real-seconds (the
+                        # /target_rtf conversion the old code was missing — it
+                        # over-slept by a factor of rtf, e.g. 3× at rtf=3).
+                        real_ahead = abs(time_diff) / self._params.target_rtf
+                        sleep_time = real_ahead - last_step_process_time
 
                         # Determine minimum sleep for GUI responsiveness
                         if self._params.gui:
@@ -3226,10 +3264,38 @@ class MultiRobotSimulationCore:
                         elif sleep_time > -min_sleep:
                             # Ahead of target but less than min_sleep: sleep minimum for GUI responsiveness
                             actual_sleep = min_sleep
+
+                        # Safety clamp relative to the intended per-step real
+                        # interval, so a residual anomaly can never freeze the sim
+                        # while still allowing legitimate slow-motion (rtf < 1),
+                        # where each step is meant to take timestep/rtf seconds.
+                        sleep_cap = max(min_sleep, self._params.timestep / self._params.target_rtf) * 4.0
+                        if actual_sleep > sleep_cap:
+                            logger.warning(
+                                "run_simulation: clamping sleep %.2fs -> %.2fs at step %d "
+                                "(target_rtf=%s, time_diff=%.2f, last_step_process=%.2f) — "
+                                "unexpectedly large; the simulation will not freeze.",
+                                actual_sleep,
+                                sleep_cap,
+                                self._step_count,
+                                self._params.target_rtf,
+                                time_diff,
+                                last_step_process_time,
+                            )
+                            actual_sleep = sleep_cap
                         time.sleep(actual_sleep)
 
                     # Record processing time for this iteration (excluding sleep)
-                    last_step_process_time = time.time() - loop_start - actual_sleep
+                    last_step_process_time = time.monotonic() - loop_start - actual_sleep
+                    # Diagnostics: a slow frame (heavy step/callback/collision spike) can
+                    # itself stall the loop. If a clock jump fired above, expect this too.
+                    if last_step_process_time > 1.0:
+                        logger.warning(
+                            "run_simulation: frame processing took %.2fs (excluding sleep) at step %d "
+                            "— a slow step/callback/collision spike can stall the loop.",
+                            last_step_process_time,
+                            self._step_count,
+                        )
 
         except KeyboardInterrupt:
             logger.warning("Simulation interrupted by user")
