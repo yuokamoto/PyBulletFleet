@@ -85,6 +85,11 @@ class WorkcellHandler(BridgePlugin):
 
     _registry_name = "workcell"
 
+    # Prefixes for _past_requests keys so a dispenser and an ingestor sharing the
+    # same RMF request GUID don't collide in the dedup cache.
+    _DISPENSER_PREFIX = "d:"
+    _INGESTOR_PREFIX = "i:"
+
     def __init__(self, node, sim_core):
         super().__init__(node, sim_core)
         # Backward-compat aliases used internally
@@ -196,7 +201,7 @@ class WorkcellHandler(BridgePlugin):
         guid = msg.request_guid
         target = msg.target_guid
         fleet = msg.transporter_type
-        dedup_key = f"d:{guid}"  # prefix to separate from ingestor guids
+        dedup_key = f"{self._DISPENSER_PREFIX}{guid}"  # separate from ingestor guids
 
         # Duplicate detection
         if dedup_key in self._past_requests:
@@ -262,7 +267,7 @@ class WorkcellHandler(BridgePlugin):
         status = DispenserResult.SUCCESS if success else DispenserResult.FAILED
         if guid:
             self._publish_dispenser_result(guid, pending.workcell_name, status)
-            self._past_requests[f"d:{guid}"] = status
+            self._past_requests[f"{self._DISPENSER_PREFIX}{guid}"] = status
 
         info = self._dispensers.get(pending.workcell_name)
         if info:
@@ -296,7 +301,7 @@ class WorkcellHandler(BridgePlugin):
         guid = msg.request_guid
         target = msg.target_guid
         fleet = msg.transporter_type
-        dedup_key = f"i:{guid}"  # prefix to separate from dispenser guids
+        dedup_key = f"{self._INGESTOR_PREFIX}{guid}"  # separate from dispenser guids
 
         # Duplicate detection
         if dedup_key in self._past_requests:
@@ -359,7 +364,7 @@ class WorkcellHandler(BridgePlugin):
         status = IngestorResult.SUCCESS if success else IngestorResult.FAILED
         if guid:
             self._publish_ingestor_result(guid, pending.workcell_name, status)
-            self._past_requests[f"i:{guid}"] = status
+            self._past_requests[f"{self._INGESTOR_PREFIX}{guid}"] = status
 
         info = self._ingestors.get(pending.workcell_name)
         if info:
