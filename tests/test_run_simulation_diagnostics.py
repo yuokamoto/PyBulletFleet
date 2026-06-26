@@ -88,6 +88,35 @@ def test_max_sleep_frames_is_configurable(monkeypatch, caplog):
     assert "clamping sleep" not in default_msgs
 
 
+def test_negative_max_sleep_frames_does_not_crash(monkeypatch):
+    # A misconfigured negative max_sleep_frames clamps sleep_cap to 0, so the sim
+    # never sleeps — time.sleep() must not receive a negative value (no ValueError).
+    # Use a self-advancing monotonic clock so the loop still progresses with no sleep.
+    clock = {"mono": 0.0}
+    sleeps = []
+
+    def fake_mono():
+        clock["mono"] += 0.001  # advances on its own → loop progresses even with no sleep
+        return clock["mono"]
+
+    def fake_sleep(seconds):
+        sleeps.append(seconds)
+        clock["mono"] += max(0.0, seconds)
+
+    monkeypatch.setattr(cs.time, "monotonic", fake_mono)
+    monkeypatch.setattr(cs.time, "sleep", fake_sleep)
+    monkeypatch.setattr(cs.time, "time", lambda: 1000.0 + clock["mono"])
+
+    sim = MultiRobotSimulationCore(
+        SimulationParams(
+            gui=False, monitor=False, physics=False, target_rtf=1.0, duration=0.15, timestep=0.05, max_sleep_frames=-1.0
+        )
+    )
+    sim.run_simulation()  # must not raise ValueError from time.sleep(negative)
+    assert all(s >= 0.0 for s in sleeps)
+    assert sim.step_count > 0
+
+
 def test_steady_clock_no_warnings(monkeypatch, caplog):
     with caplog.at_level(logging.WARNING, logger="pybullet_fleet.core_simulation"):
         _sleeps, _sim = _run(monkeypatch, lambda mono: 1000.0 + mono, target_rtf=1.0, duration=0.15)

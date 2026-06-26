@@ -3273,8 +3273,11 @@ class MultiRobotSimulationCore:
                         # interval, so a residual anomaly can never freeze the sim
                         # while still allowing legitimate slow-motion (rtf < 1),
                         # where each step is meant to take timestep/rtf seconds.
-                        sleep_cap = (
-                            max(min_sleep, self._params.timestep / self._params.target_rtf) * self._params.max_sleep_frames
+                        # max(0.0, ...) guards against a negative (misconfigured)
+                        # max_sleep_frames, which would otherwise make time.sleep raise.
+                        sleep_cap = max(
+                            0.0,
+                            max(min_sleep, self._params.timestep / self._params.target_rtf) * self._params.max_sleep_frames,
                         )
                         if actual_sleep > sleep_cap:
                             logger.warning(
