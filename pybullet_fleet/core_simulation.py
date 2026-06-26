@@ -3179,8 +3179,9 @@ class MultiRobotSimulationCore:
             last_step_process_time = 0.0  # Track processing time excluding sleep
             last_pause_state = False  # Track pause state to detect resume
             # Diagnostics: previous wall/monotonic readings to spot clock jumps.
+            # Reuse start_time as the monotonic baseline (no extra read; same origin).
             diag_prev_wall = time.time()
-            diag_prev_mono = time.monotonic()
+            diag_prev_mono = start_time
 
             while True:
                 current_sim_time = self._step_count * self._params.timestep
