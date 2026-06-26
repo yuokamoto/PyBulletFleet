@@ -73,10 +73,11 @@ def test_registers_instance_and_shared_resources(make_lift):
 
 def test_request_to_other_floor_drives_elevator(make_lift):
     h = make_lift(_elevator(current="L1"))
+    h._door_state = LiftState.DOOR_OPEN  # start open so closing-before-move is observable
     h._handle_request(_request("Lift1", "L3"))
     h._elevator.request_floor.assert_called_once_with("L3")
     assert h._session_id == "s1"
-    assert h._door_state == LiftState.DOOR_CLOSED
+    assert h._door_state == LiftState.DOOR_CLOSED  # doors closed before moving
 
 
 def test_request_to_same_floor_opens_doors_without_moving(make_lift):
