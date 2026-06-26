@@ -29,9 +29,22 @@ def _patch_action_client():
 
 @pytest.fixture
 def mock_node():
-    """Mock rclpy.node.Node with the factory methods the handlers call."""
+    """Mock rclpy.node.Node with the factory methods the handlers call.
+
+    A real Node needs ``rclpy.init()`` and a running context; the handlers only
+    touch the node's factory methods + logger during construction, so a mock is
+    enough for fast, runtime-free unit tests.
+
+    Note ``side_effect=lambda ...: MagicMock()`` rather than ``return_value``:
+    - ``return_value = MagicMock()`` would hand back the *same* object every call,
+      so every publisher/subscription/client would be one shared mock.
+    - ``side_effect`` runs the lambda *per call*, returning a *fresh* mock each
+      time — mirroring a real node (each pub/sub is its own object). Tests rely on
+      this to assert against a specific resource (e.g. DoorHandler._shared_pub,
+      RobotClientAPI's separate odom vs battery subscriptions).
+    """
     node = MagicMock()
-    node.get_logger.return_value = MagicMock()
+    node.get_logger.return_value = MagicMock()  # so get_logger().info(...) is a no-op
     node.create_subscription.side_effect = lambda *a, **k: MagicMock()
     node.create_publisher.side_effect = lambda *a, **k: MagicMock()
     node.create_client.side_effect = lambda *a, **k: MagicMock()
