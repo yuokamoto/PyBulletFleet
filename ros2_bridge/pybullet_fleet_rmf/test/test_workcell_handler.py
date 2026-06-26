@@ -14,6 +14,7 @@ pytest.importorskip("pybullet_fleet_rmf.workcell_handler", reason="ROS 2 / RMF n
 
 from rmf_dispenser_msgs.msg import DispenserRequest, DispenserResult, DispenserState
 from rmf_fleet_msgs.msg import FleetState, RobotState
+from rmf_ingestor_msgs.msg import IngestorRequest, IngestorResult, IngestorState
 
 
 def _agent(name):
@@ -44,6 +45,14 @@ def make_handler(node_with_clock):
 
 def _disp_request(guid="g1", target="dispenser1", fleet="tinyRobot"):
     req = DispenserRequest()
+    req.request_guid = guid
+    req.target_guid = target
+    req.transporter_type = fleet
+    return req
+
+
+def _ing_request(guid="g1", target="ingestor1", fleet="tinyRobot"):
+    req = IngestorRequest()
     req.request_guid = guid
     req.target_guid = target
     req.transporter_type = fleet
@@ -111,10 +120,45 @@ def test_dispenser_request_no_robot_instant_success(make_handler):
     h._plugin.dispense.assert_not_called()
 
 
+def test_ingestor_request_delegates_to_plugin(make_handler):
+    robot = _agent("tinyRobot1")
+    h = make_handler(agents=[robot])
+    h._fleet_robots["tinyRobot"] = ["tinyRobot1"]
+    h._plugin.find_nearest_carrier.return_value = robot  # ingestor uses find_nearest_carrier
+    h._plugin.ingest.return_value = "drop_action"
+
+    h._on_ingestor_request(_ing_request())
+
+    h._plugin.ingest.assert_called_once()
+    assert "ingestor1" in h._ingestors
+    statuses = [c[0][0].status for c in h._ingestor_result_pub.publish.call_args_list]
+    assert IngestorResult.ACKNOWLEDGED in statuses
+
+
+def test_ingestor_request_dedup_replays_cached_result(make_handler):
+    h = make_handler()
+    h._past_requests["i:g1"] = IngestorResult.SUCCESS  # note the "i:" prefix
+    h._on_ingestor_request(_ing_request(guid="g1"))
+    h._plugin.ingest.assert_not_called()
+    assert h._ingestor_result_pub.publish.call_args[0][0].status == IngestorResult.SUCCESS
+
+
+def test_ingestor_request_no_carrier_instant_success(make_handler):
+    h = make_handler(agents=[])
+    h._plugin.find_nearest_carrier.return_value = None
+    h._on_ingestor_request(_ing_request())
+    statuses = [c[0][0].status for c in h._ingestor_result_pub.publish.call_args_list]
+    assert IngestorResult.SUCCESS in statuses
+    assert h._ingestors["ingestor1"].mode == IngestorState.IDLE
+    h._plugin.ingest.assert_not_called()
+
+
 def test_post_step_publishes_states_after_interval(make_handler):
     from pybullet_fleet_rmf.workcell_handler import _WorkcellInfo
 
     h = make_handler()
     h._dispensers["d1"] = _WorkcellInfo("d1")
+    h._ingestors["i1"] = _WorkcellInfo("i1")
     h.post_step(sim_time=10.0)  # first call (>interval from -1.0)
     assert h._dispenser_state_pub.publish.called
+    assert h._ingestor_state_pub.publish.called
