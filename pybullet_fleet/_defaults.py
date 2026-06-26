@@ -34,6 +34,7 @@ _DEFAULTS: Dict[str, Dict[str, Any]] = {
         "enable_monitor_gui": True,
         "log_level": "warn",
         "max_steps_per_frame": 10,
+        "max_sleep_frames": 4.0,  # real-time sleep clamp: at most this many normal frame intervals
         "gui_min_fps": 30,
         # Visualizer settings
         "enable_collision_shapes": False,

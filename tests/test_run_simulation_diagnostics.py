@@ -13,11 +13,12 @@ import pybullet_fleet.core_simulation as cs
 from pybullet_fleet import MultiRobotSimulationCore, SimulationParams
 
 
-def _run(monkeypatch, wall_fn, *, target_rtf=3.0, duration=0.3, timestep=0.05):
+def _run(monkeypatch, wall_fn, *, target_rtf=3.0, duration=0.3, timestep=0.05, **params):
     """Run a short headless sim with mocked clocks; return (sleeps, sim).
 
     ``wall_fn(mono)`` maps the current monotonic time to a wall-clock reading,
-    letting a test inject a wall-clock jump without touching pacing.
+    letting a test inject a wall-clock jump without touching pacing. Extra
+    keyword args (e.g. max_sleep_frames) are forwarded to SimulationParams.
     """
     clock = {"mono": 0.0}
     sleeps = []
@@ -34,7 +35,9 @@ def _run(monkeypatch, wall_fn, *, target_rtf=3.0, duration=0.3, timestep=0.05):
     monkeypatch.setattr(cs.time, "time", lambda: wall_fn(clock["mono"]))
 
     sim = MultiRobotSimulationCore(
-        SimulationParams(gui=False, monitor=False, physics=False, target_rtf=target_rtf, duration=duration, timestep=timestep)
+        SimulationParams(
+            gui=False, monitor=False, physics=False, target_rtf=target_rtf, duration=duration, timestep=timestep, **params
+        )
     )
     sim.run_simulation()
     return sleeps, sim
@@ -68,6 +71,21 @@ def test_rtf3_does_not_clamp_under_normal_pacing(monkeypatch, caplog):
     msgs = "\n".join(r.getMessage() for r in caplog.records)
     assert "clamping sleep" not in msgs, msgs
     assert all(s < 1.0 for s in sleeps)
+
+
+def test_max_sleep_frames_is_configurable(monkeypatch, caplog):
+    # A tiny max_sleep_frames makes the clamp bite on normal sleeps (proves the
+    # SimulationParams value is wired through); the default does not clamp.
+    with caplog.at_level(logging.WARNING, logger="pybullet_fleet.core_simulation"):
+        _run(monkeypatch, lambda mono: 1000.0 + mono, target_rtf=1.0, duration=0.15, max_sleep_frames=0.01)
+    tiny_msgs = "\n".join(r.getMessage() for r in caplog.records)
+    assert "clamping sleep" in tiny_msgs, tiny_msgs
+
+    caplog.clear()
+    with caplog.at_level(logging.WARNING, logger="pybullet_fleet.core_simulation"):
+        _run(monkeypatch, lambda mono: 1000.0 + mono, target_rtf=1.0, duration=0.15, max_sleep_frames=4.0)
+    default_msgs = "\n".join(r.getMessage() for r in caplog.records)
+    assert "clamping sleep" not in default_msgs
 
 
 def test_steady_clock_no_warnings(monkeypatch, caplog):

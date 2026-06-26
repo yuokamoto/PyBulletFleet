@@ -53,6 +53,13 @@ logging.basicConfig(level=logging.getLevelName(GLOBAL_LOG_LEVEL), format="%(asct
 # Create module logger (LazyLogger: avoids expensive f-string evaluation when log level is disabled)
 logger = get_lazy_logger(__name__)
 
+# --- run_simulation real-time-loop diagnostics ----------------------------
+# (The sleep clamp is configurable via SimulationParams.max_sleep_frames.)
+# Diagnostic thresholds (WARNING logs only; do not affect pacing):
+_CLOCK_JUMP_LOG_THRESHOLD_S = 0.5  # wall-vs-monotonic divergence worth flagging
+_CATCHUP_LOG_THRESHOLD_S = 1.0  # sim-seconds behind before logging a fast-forward
+_SLOW_FRAME_LOG_THRESHOLD_S = 1.0  # per-frame processing time (excl. sleep) before flagging
+
 
 @dataclass
 class SimulationParams:
@@ -72,6 +79,11 @@ class SimulationParams:
     collision_check_frequency: Optional[float] = None
     log_level: str = _SIM_D["log_level"]
     max_steps_per_frame: int = _SIM_D["max_steps_per_frame"]
+    # Real-time pacing: when the loop runs ahead of schedule, never sleep more
+    # than this many "normal" frame intervals (max(min_sleep, timestep/target_rtf)).
+    # Bounds a residual anomaly so the sim cannot freeze; raise for slower-than-1
+    # rtf if needed. The catch-up counterpart is max_steps_per_frame.
+    max_sleep_frames: float = _SIM_D["max_sleep_frames"]
     gui_min_fps: int = _SIM_D["gui_min_fps"]
     # Visualizer settings
     enable_collision_shapes: bool = _SIM_D["enable_collision_shapes"]
@@ -3201,7 +3213,7 @@ class MultiRobotSimulationCore:
                     if logger.isEnabledFor(logging.WARNING):
                         now_wall = time.time()
                         wall_d, mono_d = now_wall - diag_prev_wall, current_time - diag_prev_mono
-                        if abs(wall_d - mono_d) > 0.5:
+                        if abs(wall_d - mono_d) > _CLOCK_JUMP_LOG_THRESHOLD_S:
                             logger.warning(
                                 "run_simulation: wall clock jumped %.2fs while monotonic advanced %.2fs "
                                 "(delta %.2fs) at step %d — pacing uses the monotonic clock, so this does "
@@ -3233,7 +3245,7 @@ class MultiRobotSimulationCore:
                         steps_needed = max(1, min(steps_needed, self._params.max_steps_per_frame))
                         # Diagnostics: a large saturated catch-up is the "sudden
                         # fast-forward" symptom (often right after a clock jump/stall).
-                        if steps_needed >= self._params.max_steps_per_frame and time_diff > 1.0:
+                        if steps_needed >= self._params.max_steps_per_frame and time_diff > _CATCHUP_LOG_THRESHOLD_S:
                             logger.warning(
                                 "run_simulation: catching up %d steps (behind by %.2fs sim-time) at step %d "
                                 "— sudden fast-forward; often follows a clock jump or a stalled frame.",
@@ -3271,7 +3283,9 @@ class MultiRobotSimulationCore:
                         # interval, so a residual anomaly can never freeze the sim
                         # while still allowing legitimate slow-motion (rtf < 1),
                         # where each step is meant to take timestep/rtf seconds.
-                        sleep_cap = max(min_sleep, self._params.timestep / self._params.target_rtf) * 4.0
+                        sleep_cap = (
+                            max(min_sleep, self._params.timestep / self._params.target_rtf) * self._params.max_sleep_frames
+                        )
                         if actual_sleep > sleep_cap:
                             logger.warning(
                                 "run_simulation: clamping sleep %.2fs -> %.2fs at step %d "
@@ -3291,7 +3305,7 @@ class MultiRobotSimulationCore:
                     last_step_process_time = time.monotonic() - loop_start - actual_sleep
                     # Diagnostics: a slow frame (heavy step/callback/collision spike) can
                     # itself stall the loop. If a clock jump fired above, expect this too.
-                    if last_step_process_time > 1.0:
+                    if last_step_process_time > _SLOW_FRAME_LOG_THRESHOLD_S:
                         logger.warning(
                             "run_simulation: frame processing took %.2fs (excluding sleep) at step %d "
                             "— a slow step/callback/collision spike can stall the loop.",
