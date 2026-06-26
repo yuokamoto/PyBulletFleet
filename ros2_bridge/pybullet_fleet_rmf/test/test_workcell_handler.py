@@ -178,6 +178,30 @@ def test_ingestor_request_no_carrier_success_when_configured(make_handler):
     assert IngestorResult.FAILED not in statuses
 
 
+def test_dispenser_pending_uses_prefixed_key(make_handler):
+    # An in-flight dispenser action is keyed "d:<guid>"; a re-sent dispenser
+    # request with the same guid is treated as pending (ACK, no re-dispense).
+    h = make_handler()
+    h._plugin.pending_actions = {"d:g1": object()}
+    h._on_dispenser_request(_disp_request(guid="g1"))
+    h._plugin.dispense.assert_not_called()
+    statuses = [c[0][0].status for c in h._dispenser_result_pub.publish.call_args_list]
+    assert DispenserResult.ACKNOWLEDGED in statuses
+
+
+def test_ingestor_not_blocked_by_dispenser_with_same_guid(make_handler):
+    # Same raw guid across dispenser+ingestor must not collide: a pending
+    # dispenser ("d:g1") must not make an ingestor request ("i:g1") look pending.
+    robot = _agent("tinyRobot1")
+    h = make_handler(agents=[robot])
+    h._fleet_robots["tinyRobot"] = ["tinyRobot1"]
+    h._plugin.pending_actions = {"d:g1": object()}  # dispenser g1 in flight
+    h._plugin.find_nearest_carrier.return_value = robot
+    h._plugin.ingest.return_value = "drop_action"
+    h._on_ingestor_request(_ing_request(guid="g1"))
+    h._plugin.ingest.assert_called_once()  # not blocked by the dispenser's pending entry
+
+
 def test_post_step_publishes_states_after_interval(make_handler):
     from pybullet_fleet_rmf.workcell_handler import _WorkcellInfo
 

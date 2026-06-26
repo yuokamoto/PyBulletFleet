@@ -227,7 +227,7 @@ class WorkcellHandler(BridgePlugin):
             return
 
         # Already pending (RMF retransmits requests)
-        if guid in self._plugin.pending_actions:
+        if dedup_key in self._plugin.pending_actions:
             self._publish_dispenser_result(guid, target, DispenserResult.ACKNOWLEDGED)
             return
 
@@ -269,7 +269,7 @@ class WorkcellHandler(BridgePlugin):
         item, pick_action = self._plugin.dispense(
             target,
             robot,
-            key=guid,
+            key=dedup_key,  # prefixed: keeps dispenser/ingestor in-flight tracking disjoint
             on_complete=self._on_dispenser_complete,
         )
         if pick_action is None:
@@ -336,7 +336,7 @@ class WorkcellHandler(BridgePlugin):
             return
 
         # Already pending
-        if guid in self._plugin.pending_actions:
+        if dedup_key in self._plugin.pending_actions:
             self._publish_ingestor_result(guid, target, IngestorResult.ACKNOWLEDGED)
             return
 
@@ -374,7 +374,7 @@ class WorkcellHandler(BridgePlugin):
         drop_action = self._plugin.ingest(
             target,
             robot,
-            key=guid,
+            key=dedup_key,  # prefixed: keeps dispenser/ingestor in-flight tracking disjoint
             on_complete=self._on_ingestor_complete,
         )
         if drop_action is None:
