@@ -24,18 +24,24 @@ This handler is the *thin ROS bridge*:
 - Delegates dispense/ingest operations to ``WorkcellPlugin``.
 - Translates plugin completion callbacks into ROS result messages.
 
-Config (bridge YAML)::
+Config (bridge YAML) — this handler is loaded as a bridge plugin, so its options
+live under that plugin's ``config:`` (not a top-level ``workcell:`` section)::
 
-    workcell:
-      enabled: true                # default: true
-      item_shape:                  # ShapeParams-compatible dict
-        shape_type: box
-        half_extents: [0.15, 0.15, 0.1]
-        rgba_color: [0.8, 0.5, 0.2, 1.0]
-      item_mass: 0.5
-      item_search_radius: 1.0
-      attach_offset: [0.0, 0.0, 0.15, 0.0, 0.0, 0.0]  # [dx, dy, dz, roll, pitch, yaw]
-      return_home_delay: 5.0
+    bridge_plugins:
+      - class: pybullet_fleet_rmf.workcell_handler.WorkcellHandler
+        config:
+          item_shape:                  # ShapeParams-compatible dict
+            shape_type: box
+            half_extents: [0.15, 0.15, 0.1]
+            rgba_color: [0.8, 0.5, 0.2, 1.0]
+          item_mass: 0.5
+          item_search_radius: 1.0
+          attach_offset: [0.0, 0.0, 0.15, 0.0, 0.0, 0.0]  # [dx, dy, dz, roll, pitch, yaw]
+          return_home_delay: 5.0
+          fail_on_no_robot: true     # default: true (Gazebo behaviour). When no
+                                     # robot/carrier is at the workcell, report
+                                     # FAILED; set false to report SUCCESS so an
+                                     # RMF task doesn't stall on a missing robot.
 
 The handler auto-discovers workcell names from incoming requests
 (no pre-configuration required).
@@ -85,6 +91,11 @@ class WorkcellHandler(BridgePlugin):
 
     _registry_name = "workcell"
 
+    # Prefixes for _past_requests keys so a dispenser and an ingestor sharing the
+    # same RMF request GUID don't collide in the dedup cache.
+    _DISPENSER_PREFIX = "d:"
+    _INGESTOR_PREFIX = "i:"
+
     def __init__(self, node, sim_core):
         super().__init__(node, sim_core)
         # Backward-compat aliases used internally
@@ -120,6 +131,13 @@ class WorkcellHandler(BridgePlugin):
         self._last_state_publish: float = -1.0
         self._state_publish_interval: float = 2.0
 
+        # When a request can't be fulfilled (no robot/carrier nearby, or the
+        # action can't be created), publish FAILED — matching Gazebo's
+        # TeleportDispenser/Ingestor. Set workcell.fail_on_no_robot: false to
+        # instead report SUCCESS so an RMF task never stalls on a missing robot
+        # (the legacy kinematic-bridge behaviour). Overridden in on_init().
+        self._fail_on_no_robot: bool = True
+
     def on_init(self) -> None:
         """Register WorkcellPlugin and pre-register workcells from config.
 
@@ -133,7 +151,14 @@ class WorkcellHandler(BridgePlugin):
         # Pre-register workcells from overrides so RMF publishes requests
         self._pre_register_workcells(self.config)
 
-        logger.info("WorkcellHandler started (plugin=%s)", type(self._plugin).__name__)
+        # Gazebo-faithful FAILED on no-robot by default; opt out via config.
+        self._fail_on_no_robot = bool(self.config.get("fail_on_no_robot", True))
+
+        logger.info(
+            "WorkcellHandler started (plugin=%s, fail_on_no_robot=%s)",
+            type(self._plugin).__name__,
+            self._fail_on_no_robot,
+        )
 
     # ------------------------------------------------------------------
     # Fleet states tracking
@@ -196,7 +221,7 @@ class WorkcellHandler(BridgePlugin):
         guid = msg.request_guid
         target = msg.target_guid
         fleet = msg.transporter_type
-        dedup_key = f"d:{guid}"  # prefix to separate from ingestor guids
+        dedup_key = f"{self._DISPENSER_PREFIX}{guid}"  # separate from ingestor guids
 
         # Duplicate detection
         if dedup_key in self._past_requests:
@@ -204,7 +229,7 @@ class WorkcellHandler(BridgePlugin):
             return
 
         # Already pending (RMF retransmits requests)
-        if guid in self._plugin.pending_actions:
+        if dedup_key in self._plugin.pending_actions:
             self._publish_dispenser_result(guid, target, DispenserResult.ACKNOWLEDGED)
             return
 
@@ -228,29 +253,40 @@ class WorkcellHandler(BridgePlugin):
         )
         robot = self._plugin.find_nearest_robot(target, candidates)
         if robot is None:
-            # No robot found — instant success (RMF will retry if needed)
-            self._publish_dispenser_result(guid, target, DispenserResult.SUCCESS)
-            self._past_requests[dedup_key] = DispenserResult.SUCCESS
+            # No robot at the workcell. Gazebo's TeleportDispenser reports FAILED
+            # here (default); workcell.fail_on_no_robot: false reports SUCCESS so
+            # the RMF task doesn't stall.
+            status = DispenserResult.FAILED if self._fail_on_no_robot else DispenserResult.SUCCESS
+            self._publish_dispenser_result(guid, target, status)
+            self._past_requests[dedup_key] = status
             info.mode = DispenserState.IDLE
             info.request_guid = ""
-            self._node.get_logger().warn(f"[WorkcellHandler] Dispenser '{target}': no robot found, instant SUCCESS")
+            self._node.get_logger().warn(
+                f"[WorkcellHandler] Dispenser '{target}': no robot found -> "
+                f"{'FAILED' if self._fail_on_no_robot else 'SUCCESS'}"
+            )
             return
 
         # Delegate to plugin — dispense item + queue PickAction
         item, pick_action = self._plugin.dispense(
             target,
             robot,
-            key=guid,
+            key=dedup_key,  # prefixed: keeps dispenser/ingestor in-flight tracking disjoint
             on_complete=self._on_dispenser_complete,
         )
         if pick_action is None:
-            # Failed to resolve workcell position or spawn fallback —
-            # instant success so RMF isn't stuck
-            self._publish_dispenser_result(guid, target, DispenserResult.SUCCESS)
-            self._past_requests[dedup_key] = DispenserResult.SUCCESS
+            # Couldn't create the PickAction (no workcell position / fallback).
+            status = DispenserResult.FAILED if self._fail_on_no_robot else DispenserResult.SUCCESS
+            self._publish_dispenser_result(guid, target, status)
+            self._past_requests[dedup_key] = status
             info.mode = DispenserState.IDLE
             info.request_guid = ""
-            self._node.get_logger().error(f"[WorkcellHandler] Dispenser '{target}': failed to create PickAction")
+            # error when we actually fail; warn when configured to report SUCCESS.
+            log = self._node.get_logger().error if self._fail_on_no_robot else self._node.get_logger().warn
+            log(
+                f"[WorkcellHandler] Dispenser '{target}': failed to create PickAction -> "
+                f"{'FAILED' if self._fail_on_no_robot else 'SUCCESS'}"
+            )
             return
 
         self._node.get_logger().info(f"[WorkcellHandler] Dispenser '{target}': PickAction queued for robot '{robot.name}'")
@@ -262,7 +298,7 @@ class WorkcellHandler(BridgePlugin):
         status = DispenserResult.SUCCESS if success else DispenserResult.FAILED
         if guid:
             self._publish_dispenser_result(guid, pending.workcell_name, status)
-            self._past_requests[f"d:{guid}"] = status
+            self._past_requests[f"{self._DISPENSER_PREFIX}{guid}"] = status
 
         info = self._dispensers.get(pending.workcell_name)
         if info:
@@ -296,7 +332,7 @@ class WorkcellHandler(BridgePlugin):
         guid = msg.request_guid
         target = msg.target_guid
         fleet = msg.transporter_type
-        dedup_key = f"i:{guid}"  # prefix to separate from dispenser guids
+        dedup_key = f"{self._INGESTOR_PREFIX}{guid}"  # separate from dispenser guids
 
         # Duplicate detection
         if dedup_key in self._past_requests:
@@ -304,7 +340,7 @@ class WorkcellHandler(BridgePlugin):
             return
 
         # Already pending
-        if guid in self._plugin.pending_actions:
+        if dedup_key in self._plugin.pending_actions:
             self._publish_ingestor_result(guid, target, IngestorResult.ACKNOWLEDGED)
             return
 
@@ -325,26 +361,38 @@ class WorkcellHandler(BridgePlugin):
         candidates = self._get_fleet_candidates(fleet)
         robot = self._plugin.find_nearest_carrier(target, candidates)
         if robot is None:
-            self._publish_ingestor_result(guid, target, IngestorResult.SUCCESS)
-            self._past_requests[dedup_key] = IngestorResult.SUCCESS
+            # No carrier robot. Gazebo's TeleportIngestor reports FAILED (default);
+            # workcell.fail_on_no_robot: false reports SUCCESS to avoid stalling.
+            status = IngestorResult.FAILED if self._fail_on_no_robot else IngestorResult.SUCCESS
+            self._publish_ingestor_result(guid, target, status)
+            self._past_requests[dedup_key] = status
             info.mode = IngestorState.IDLE
             info.request_guid = ""
-            self._node.get_logger().warn(f"[WorkcellHandler] Ingestor '{target}': no carrier robot found, instant SUCCESS")
+            self._node.get_logger().warn(
+                f"[WorkcellHandler] Ingestor '{target}': no carrier robot found -> "
+                f"{'FAILED' if self._fail_on_no_robot else 'SUCCESS'}"
+            )
             return
 
         # Delegate to plugin — queue DropAction
         drop_action = self._plugin.ingest(
             target,
             robot,
-            key=guid,
+            key=dedup_key,  # prefixed: keeps dispenser/ingestor in-flight tracking disjoint
             on_complete=self._on_ingestor_complete,
         )
         if drop_action is None:
-            self._publish_ingestor_result(guid, target, IngestorResult.SUCCESS)
-            self._past_requests[dedup_key] = IngestorResult.SUCCESS
+            status = IngestorResult.FAILED if self._fail_on_no_robot else IngestorResult.SUCCESS
+            self._publish_ingestor_result(guid, target, status)
+            self._past_requests[dedup_key] = status
             info.mode = IngestorState.IDLE
             info.request_guid = ""
-            self._node.get_logger().error(f"[WorkcellHandler] Ingestor '{target}': failed to create DropAction")
+            # error when we actually fail; warn when configured to report SUCCESS.
+            log = self._node.get_logger().error if self._fail_on_no_robot else self._node.get_logger().warn
+            log(
+                f"[WorkcellHandler] Ingestor '{target}': failed to create DropAction -> "
+                f"{'FAILED' if self._fail_on_no_robot else 'SUCCESS'}"
+            )
             return
 
         self._node.get_logger().info(
@@ -359,7 +407,7 @@ class WorkcellHandler(BridgePlugin):
         status = IngestorResult.SUCCESS if success else IngestorResult.FAILED
         if guid:
             self._publish_ingestor_result(guid, pending.workcell_name, status)
-            self._past_requests[f"i:{guid}"] = status
+            self._past_requests[f"{self._INGESTOR_PREFIX}{guid}"] = status
 
         info = self._ingestors.get(pending.workcell_name)
         if info:

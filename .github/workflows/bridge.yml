@@ -43,19 +43,19 @@ jobs:
         run: docker compose -f docker/docker-compose.yaml build bridge
 
       - name: Run bridge unit tests (colcon)
-        # In-package pytest unit tests for pybullet_fleet_ros, run inside the
-        # built image so rclpy and the message types are available. The two
-        # @pytest.mark.launch_test files are excluded here: launch_testing's
-        # TestCases each call rclpy.init() in setUpClass and conflict when
-        # co-run in one pytest process ("Context.init() must only be called
-        # once"). The running-bridge behaviour they cover is exercised by the
+        # In-package pytest unit tests for pybullet_fleet_ros and pybullet_fleet_rmf,
+        # run inside the built image so rclpy and the message types (incl. RMF) are
+        # available. The two @pytest.mark.launch_test files are excluded here:
+        # launch_testing's TestCases each call rclpy.init() in setUpClass and
+        # conflict when co-run in one pytest process ("Context.init() must only be
+        # called once"). The running-bridge behaviour they cover is exercised by the
         # integration smoke below; run them standalone with `launch_test`.
         run: |
           docker compose -f docker/docker-compose.yaml run --rm --no-deps bridge bash -c '
             source /opt/ros/jazzy/setup.bash
             source /rmf_demos_ws/install/setup.bash
             cd /rmf_demos_ws
-            colcon test --packages-select pybullet_fleet_ros \
+            colcon test --packages-select pybullet_fleet_ros pybullet_fleet_rmf \
               --return-code-on-test-failure --event-handlers console_direct+ \
               --pytest-args -m "not launch_test"
           '
