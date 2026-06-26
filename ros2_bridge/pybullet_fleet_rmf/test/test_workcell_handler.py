@@ -110,14 +110,27 @@ def test_dispenser_request_dedup_replays_cached_result(make_handler):
     assert published.status == DispenserResult.SUCCESS
 
 
-def test_dispenser_request_no_robot_instant_success(make_handler):
+def test_dispenser_request_no_robot_fails_by_default(make_handler):
+    # Gazebo TeleportDispenser behaviour: no robot at the workcell -> FAILED.
     h = make_handler(agents=[])  # no candidates
     h._plugin.find_nearest_robot.return_value = None
     h._on_dispenser_request(_disp_request())
     statuses = [c[0][0].status for c in h._dispenser_result_pub.publish.call_args_list]
-    assert DispenserResult.SUCCESS in statuses
-    assert h._dispensers["dispenser1"].mode == DispenserState.IDLE  # reset after instant success
+    assert DispenserResult.FAILED in statuses
+    assert DispenserResult.SUCCESS not in statuses
+    assert h._dispensers["dispenser1"].mode == DispenserState.IDLE  # reset after the failure
     h._plugin.dispense.assert_not_called()
+
+
+def test_dispenser_request_no_robot_success_when_configured(make_handler):
+    # workcell.fail_on_no_robot: false -> report SUCCESS so RMF doesn't stall.
+    h = make_handler(agents=[])
+    h._fail_on_no_robot = False
+    h._plugin.find_nearest_robot.return_value = None
+    h._on_dispenser_request(_disp_request())
+    statuses = [c[0][0].status for c in h._dispenser_result_pub.publish.call_args_list]
+    assert DispenserResult.SUCCESS in statuses
+    assert DispenserResult.FAILED not in statuses
 
 
 def test_ingestor_request_delegates_to_plugin(make_handler):
@@ -143,14 +156,26 @@ def test_ingestor_request_dedup_replays_cached_result(make_handler):
     assert h._ingestor_result_pub.publish.call_args[0][0].status == IngestorResult.SUCCESS
 
 
-def test_ingestor_request_no_carrier_instant_success(make_handler):
+def test_ingestor_request_no_carrier_fails_by_default(make_handler):
+    # Gazebo TeleportIngestor behaviour: no carrier robot -> FAILED.
     h = make_handler(agents=[])
     h._plugin.find_nearest_carrier.return_value = None
     h._on_ingestor_request(_ing_request())
     statuses = [c[0][0].status for c in h._ingestor_result_pub.publish.call_args_list]
-    assert IngestorResult.SUCCESS in statuses
+    assert IngestorResult.FAILED in statuses
+    assert IngestorResult.SUCCESS not in statuses
     assert h._ingestors["ingestor1"].mode == IngestorState.IDLE
     h._plugin.ingest.assert_not_called()
+
+
+def test_ingestor_request_no_carrier_success_when_configured(make_handler):
+    h = make_handler(agents=[])
+    h._fail_on_no_robot = False
+    h._plugin.find_nearest_carrier.return_value = None
+    h._on_ingestor_request(_ing_request())
+    statuses = [c[0][0].status for c in h._ingestor_result_pub.publish.call_args_list]
+    assert IngestorResult.SUCCESS in statuses
+    assert IngestorResult.FAILED not in statuses
 
 
 def test_post_step_publishes_states_after_interval(make_handler):
