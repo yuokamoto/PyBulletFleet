@@ -1581,6 +1581,7 @@ class TestRunSimulation:
                     clock += seconds
 
                 monkeypatch.setattr(time, "time", fake_time)
+                monkeypatch.setattr(time, "monotonic", fake_time)  # loop paces on monotonic
                 monkeypatch.setattr(time, "sleep", fake_sleep)
                 sc.run_simulation(duration=0.5)
                 # clock - base == total sleep accumulated (computation is zero-cost)
@@ -1649,6 +1650,7 @@ class TestRunSimulation:
 
             monkeypatch.setattr(sc, "step_once", spy_step_once)
             monkeypatch.setattr(time, "time", fake_time)
+            monkeypatch.setattr(time, "monotonic", fake_time)  # loop paces on monotonic
             monkeypatch.setattr(time, "sleep", fake_sleep)
             sc.run_simulation(duration=0.5)
             # Flush the last batch
@@ -1713,6 +1715,7 @@ class TestRunSimulation:
 
             monkeypatch.setattr(sc, "step_once", spy_step_once)
             monkeypatch.setattr(time, "time", fake_time)
+            monkeypatch.setattr(time, "monotonic", fake_time)  # loop paces on monotonic
             monkeypatch.setattr(time, "sleep", fake_sleep)
             sc.run_simulation(duration=0.5)
             if batch_counter > 0:
@@ -1766,6 +1769,7 @@ class TestRunSimulation:
                 clock += seconds
 
             monkeypatch.setattr(time, "time", fake_time)
+            monkeypatch.setattr(time, "monotonic", fake_time)  # loop paces on monotonic
             monkeypatch.setattr(time, "sleep", fake_sleep)
             sc.run_simulation(duration=0.02)
 
@@ -1830,6 +1834,7 @@ class TestRunSimulation:
                 return base + wall_clock
 
             monkeypatch.setattr(time, "time", fake_time)
+            monkeypatch.setattr(time, "monotonic", fake_time)  # loop paces on monotonic
             monkeypatch.setattr(time, "sleep", lambda s: None)
 
             sc.initialize_simulation()

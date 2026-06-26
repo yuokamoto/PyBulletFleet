@@ -53,6 +53,12 @@ logging.basicConfig(level=logging.getLevelName(GLOBAL_LOG_LEVEL), format="%(asct
 # Create module logger (LazyLogger: avoids expensive f-string evaluation when log level is disabled)
 logger = get_lazy_logger(__name__)
 
+# --- run_simulation real-time-loop diagnostics ----------------------------
+# (The sleep clamp is configurable via SimulationParams.max_sleep_frames.)
+# Wall-vs-monotonic divergence (seconds) worth flagging as a clock jump. WARNING
+# log only; does not affect pacing.
+_CLOCK_JUMP_LOG_THRESHOLD_S = 0.5
+
 
 @dataclass
 class SimulationParams:
@@ -72,6 +78,11 @@ class SimulationParams:
     collision_check_frequency: Optional[float] = None
     log_level: str = _SIM_D["log_level"]
     max_steps_per_frame: int = _SIM_D["max_steps_per_frame"]
+    # Real-time pacing: when the loop runs ahead of schedule, never sleep more
+    # than this many "normal" frame intervals (max(min_sleep, timestep/target_rtf)).
+    # Bounds a residual anomaly so the sim cannot freeze; raise for slower-than-1
+    # rtf if needed. The catch-up counterpart is max_steps_per_frame.
+    max_sleep_frames: float = _SIM_D["max_sleep_frames"]
     gui_min_fps: int = _SIM_D["gui_min_fps"]
     # Visualizer settings
     enable_collision_shapes: bool = _SIM_D["enable_collision_shapes"]
@@ -2607,7 +2618,7 @@ class MultiRobotSimulationCore:
         Calculates actual simulation speed from a 10-second sliding window,
         logs monitor data via logger, and writes to DataMonitor if enabled.
         """
-        now = time.time()
+        now = time.monotonic()  # monotonic: RTF/elapsed stay correct across wall-clock jumps
         sim_time = self._step_count * self._params.timestep
         # --- Speed history buffer ---
         self._speed_history.append((now, sim_time))
@@ -2687,7 +2698,7 @@ class MultiRobotSimulationCore:
                 sim.step_once()
         """
         # Reset simulation state
-        self._start_time = time.time()
+        self._start_time = time.monotonic()  # monotonic: elapsed/RTF immune to wall-clock jumps
         self._step_count = 0
         self._collision_count = 0
         self.sim_time = 0.0
@@ -3161,9 +3172,16 @@ class MultiRobotSimulationCore:
         self.initialize_simulation()
 
         try:
-            start_time = time.time()
+            # Pace against the MONOTONIC clock: it never jumps backwards and is
+            # immune to NTP / host-suspend / WSL2 wall-clock corrections, which
+            # previously desynced this loop into multi-second freezes.
+            start_time = time.monotonic()
             last_step_process_time = 0.0  # Track processing time excluding sleep
             last_pause_state = False  # Track pause state to detect resume
+            # Diagnostics: previous wall/monotonic readings to spot clock jumps.
+            # Reuse start_time as the monotonic baseline (no extra read; same origin).
+            diag_prev_wall = time.time()
+            diag_prev_mono = start_time
 
             while True:
                 current_sim_time = self._step_count * self._params.timestep
@@ -3183,9 +3201,29 @@ class MultiRobotSimulationCore:
                 if self._params.target_rtf <= 0:
                     self.step_once()
                 else:
-                    # Speed>0: Synchronize with real time using absolute time calculation
-                    loop_start = time.time()
-                    current_time = time.time()
+                    # Speed>0: Synchronize with real time using absolute time calculation.
+                    # One monotonic read serves as both the iteration start and "now".
+                    loop_start = current_time = time.monotonic()
+
+                    # Diagnostics (WARNING level): detect wall-clock jumps (NTP /
+                    # host suspend / WSL2 drift). Pacing uses the monotonic clock,
+                    # so a jump no longer affects the sim — we only log it so the
+                    # cause is visible. Guarded by isEnabledFor and confined to the
+                    # rtf>0 branch to keep the max-speed (rtf<=0) loop call-free.
+                    if logger.isEnabledFor(logging.WARNING):
+                        now_wall = time.time()
+                        wall_d, mono_d = now_wall - diag_prev_wall, current_time - diag_prev_mono
+                        if abs(wall_d - mono_d) > _CLOCK_JUMP_LOG_THRESHOLD_S:
+                            logger.warning(
+                                "run_simulation: wall clock jumped %.2fs while monotonic advanced %.2fs "
+                                "(delta %.2fs) at step %d — pacing uses the monotonic clock, so this does "
+                                "not affect the simulation.",
+                                wall_d,
+                                mono_d,
+                                wall_d - mono_d,
+                                self._step_count,
+                            )
+                        diag_prev_wall, diag_prev_mono = now_wall, current_time
 
                     # Detect pause state change: reset start_time on resume
                     if last_pause_state and not self.is_paused:
@@ -3208,9 +3246,13 @@ class MultiRobotSimulationCore:
                         for _ in range(steps_needed):
                             self.step_once()
                     else:
-                        # Ahead of or at target: sleep until next frame
-                        # Calculate sleep time: time_diff - last processing time
-                        sleep_time = abs(time_diff) - last_step_process_time
+                        # Ahead of schedule: wait in REAL time. We are
+                        # abs(time_diff) sim-seconds ahead; at target_rtf× speed
+                        # that is abs(time_diff) / target_rtf real-seconds (the
+                        # /target_rtf conversion the old code was missing — it
+                        # over-slept by a factor of rtf, e.g. 3× at rtf=3).
+                        real_ahead = abs(time_diff) / self._params.target_rtf
+                        sleep_time = real_ahead - last_step_process_time
 
                         # Determine minimum sleep for GUI responsiveness
                         if self._params.gui:
@@ -3226,10 +3268,34 @@ class MultiRobotSimulationCore:
                         elif sleep_time > -min_sleep:
                             # Ahead of target but less than min_sleep: sleep minimum for GUI responsiveness
                             actual_sleep = min_sleep
+
+                        # Safety clamp relative to the intended per-step real
+                        # interval, so a residual anomaly can never freeze the sim
+                        # while still allowing legitimate slow-motion (rtf < 1),
+                        # where each step is meant to take timestep/rtf seconds.
+                        # max(0.0, ...) guards against a negative (misconfigured)
+                        # max_sleep_frames, which would otherwise make time.sleep raise.
+                        sleep_cap = max(
+                            0.0,
+                            max(min_sleep, self._params.timestep / self._params.target_rtf) * self._params.max_sleep_frames,
+                        )
+                        if actual_sleep > sleep_cap:
+                            logger.warning(
+                                "run_simulation: clamping sleep %.2fs -> %.2fs at step %d "
+                                "(target_rtf=%s, time_diff=%.2f, last_step_process=%.2f) — "
+                                "unexpectedly large; the simulation will not freeze.",
+                                actual_sleep,
+                                sleep_cap,
+                                self._step_count,
+                                self._params.target_rtf,
+                                time_diff,
+                                last_step_process_time,
+                            )
+                            actual_sleep = sleep_cap
                         time.sleep(actual_sleep)
 
                     # Record processing time for this iteration (excluding sleep)
-                    last_step_process_time = time.time() - loop_start - actual_sleep
+                    last_step_process_time = time.monotonic() - loop_start - actual_sleep
 
         except KeyboardInterrupt:
             logger.warning("Simulation interrupted by user")
