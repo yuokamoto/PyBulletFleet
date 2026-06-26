@@ -8,7 +8,9 @@ from unittest.mock import MagicMock
 
 import pytest
 
-pytest.importorskip("rmf_dispenser_msgs.msg", reason="ROS 2 / RMF messages not available")
+# importorskip the module under test: it pulls all the RMF message deps used
+# below, so a single guard covers them all (skips outside a ROS env).
+pytest.importorskip("pybullet_fleet_rmf.workcell_handler", reason="ROS 2 / RMF not available")
 
 from builtin_interfaces.msg import Time as TimeMsg
 from rmf_dispenser_msgs.msg import DispenserRequest, DispenserResult, DispenserState

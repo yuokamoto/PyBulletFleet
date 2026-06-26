@@ -9,7 +9,9 @@ from unittest.mock import MagicMock
 
 import pytest
 
-pytest.importorskip("nav_msgs.msg", reason="ROS 2 messages not available")
+# importorskip the module under test: it pulls rclpy + all the ROS/RMF message
+# deps used below, so a single guard covers them all (skips outside a ROS env).
+pytest.importorskip("pybullet_fleet_rmf.robot_client_api", reason="ROS 2 / RMF not available")
 
 from action_msgs.msg import GoalStatus
 from nav_msgs.msg import Odometry
