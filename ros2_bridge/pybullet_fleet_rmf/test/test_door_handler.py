@@ -80,6 +80,7 @@ def test_close_request_calls_request_close(make_door):
     req.requested_mode = DoorMode(value=DoorMode.MODE_CLOSED)
     h._handle_request(req)
     h._door.request_close.assert_called_once()
+    h._door.request_open.assert_not_called()
 
 
 def test_on_request_dispatches_by_name(make_door):
