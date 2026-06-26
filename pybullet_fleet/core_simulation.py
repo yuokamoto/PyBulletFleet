@@ -3201,9 +3201,9 @@ class MultiRobotSimulationCore:
                 if self._params.target_rtf <= 0:
                     self.step_once()
                 else:
-                    # Speed>0: Synchronize with real time using absolute time calculation
-                    loop_start = time.monotonic()
-                    current_time = time.monotonic()
+                    # Speed>0: Synchronize with real time using absolute time calculation.
+                    # One monotonic read serves as both the iteration start and "now".
+                    loop_start = current_time = time.monotonic()
 
                     # Diagnostics (WARNING level): detect wall-clock jumps (NTP /
                     # host suspend / WSL2 drift). Pacing uses the monotonic clock,

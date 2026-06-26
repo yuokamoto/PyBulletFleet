@@ -57,7 +57,7 @@ def test_backward_wall_clock_jump_does_not_freeze(monkeypatch, caplog):
         sleeps, sim = _run(monkeypatch, wall_fn)
 
     msgs = "\n".join(r.getMessage() for r in caplog.records)
-    assert "wall clock jumped" in msgs, msgs  # detected + logged (informational)
+    assert "wall clock jumped" in msgs, msgs  # detected + logged at WARNING (informational only)
     assert all(s < 1.0 for s in sleeps), f"unexpectedly long sleep: {max(sleeps, default=0)}"
     assert sim.step_count > 0  # made progress, did not hang/freeze
 
