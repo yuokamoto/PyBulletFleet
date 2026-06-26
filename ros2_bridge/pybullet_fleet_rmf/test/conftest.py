@@ -50,3 +50,25 @@ def mock_node():
     node.create_client.side_effect = lambda *a, **k: MagicMock()
     node.create_service.side_effect = lambda *a, **k: MagicMock()
     return node
+
+
+@pytest.fixture
+def node_with_clock():
+    """``mock_node`` whose ``get_clock().now().to_msg()`` returns a real ``Time``.
+
+    Handlers that stamp typed ROS messages (DoorState / LiftState / Dispenser-
+    Result …) assign ``node.get_clock().now().to_msg()`` to a ``builtin_interfaces/
+    Time`` field, and rosidl validates the field type — a bare MagicMock would
+    raise. We import Time lazily so this conftest stays importable without ROS
+    (the tests ``importorskip`` and are skipped there anyway).
+    """
+    from builtin_interfaces.msg import Time as TimeMsg
+
+    node = MagicMock()
+    node.get_logger.return_value = MagicMock()
+    node.create_subscription.side_effect = lambda *a, **k: MagicMock()
+    node.create_publisher.side_effect = lambda *a, **k: MagicMock()
+    node.create_client.side_effect = lambda *a, **k: MagicMock()
+    node.create_service.side_effect = lambda *a, **k: MagicMock()
+    node.get_clock.return_value.now.return_value.to_msg.return_value = TimeMsg()
+    return node

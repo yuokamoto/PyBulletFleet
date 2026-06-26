@@ -4,9 +4,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-pytest.importorskip("rmf_door_msgs.msg", reason="ROS 2 / RMF messages not available")
+pytest.importorskip("pybullet_fleet_rmf.door_handler", reason="ROS 2 / RMF not available")
 
-from builtin_interfaces.msg import Time as TimeMsg
 from rmf_door_msgs.msg import DoorMode, DoorRequest
 
 from pybullet_fleet.types import DoorState as SimDoorState
@@ -37,38 +36,35 @@ def _door_agent(name="L1_door1", state=SimDoorState.CLOSED):
     return agent
 
 
-def _node_with_clock():
-    node = MagicMock()
-    node.create_publisher.side_effect = lambda *a, **k: MagicMock()
-    node.create_subscription.side_effect = lambda *a, **k: MagicMock()
-    node.get_clock.return_value.now.return_value.to_msg.return_value = TimeMsg()
-    return node
-
-
-def _make(name="L1_door1", state=SimDoorState.CLOSED):
+@pytest.fixture
+def make_door(node_with_clock):
+    """Factory: build a DoorHandler on the shared clock-equipped mock node."""
     from pybullet_fleet_rmf.door_handler import DoorHandler
 
-    return DoorHandler(_node_with_clock(), _door_agent(name, state))
+    def _make(name="L1_door1", state=SimDoorState.CLOSED):
+        return DoorHandler(node_with_clock, _door_agent(name, state))
+
+    return _make
 
 
-def test_rejects_non_door_agent():
+def test_rejects_non_door_agent(node_with_clock):
     from pybullet_fleet_rmf.door_handler import DoorHandler
 
     with pytest.raises(TypeError):
-        DoorHandler(_node_with_clock(), MagicMock(name="not_a_door"))
+        DoorHandler(node_with_clock, MagicMock(name="not_a_door"))
 
 
-def test_registers_instance_and_shared_resources():
+def test_registers_instance_and_shared_resources(make_door):
     from pybullet_fleet_rmf.door_handler import DoorHandler
 
-    h = _make("L1_door1")
+    h = make_door("L1_door1")
     assert DoorHandler._instances["L1_door1"] is h
     assert DoorHandler._shared_pub is not None
     assert DoorHandler._shared_sub is not None
 
 
-def test_open_request_calls_request_open():
-    h = _make("L1_door1")
+def test_open_request_calls_request_open(make_door):
+    h = make_door("L1_door1")
     req = DoorRequest()
     req.door_name = "L1_door1"
     req.requested_mode = DoorMode(value=DoorMode.MODE_OPEN)
@@ -77,8 +73,8 @@ def test_open_request_calls_request_open():
     h._door.request_close.assert_not_called()
 
 
-def test_close_request_calls_request_close():
-    h = _make("L1_door1")
+def test_close_request_calls_request_close(make_door):
+    h = make_door("L1_door1")
     req = DoorRequest()
     req.door_name = "L1_door1"
     req.requested_mode = DoorMode(value=DoorMode.MODE_CLOSED)
@@ -86,11 +82,11 @@ def test_close_request_calls_request_close():
     h._door.request_close.assert_called_once()
 
 
-def test_on_request_dispatches_by_name():
+def test_on_request_dispatches_by_name(make_door):
     from pybullet_fleet_rmf.door_handler import DoorHandler
 
-    a = _make("L1_door1")
-    b = _make("L1_door2")
+    a = make_door("L1_door1")
+    b = make_door("L1_door2")
     req = DoorRequest()
     req.door_name = "L1_door2"
     req.requested_mode = DoorMode(value=DoorMode.MODE_OPEN)
@@ -99,10 +95,10 @@ def test_on_request_dispatches_by_name():
     a._door.request_open.assert_not_called()
 
 
-def test_on_request_unknown_door_is_noop():
+def test_on_request_unknown_door_is_noop(make_door):
     from pybullet_fleet_rmf.door_handler import DoorHandler
 
-    h = _make("L1_door1")
+    h = make_door("L1_door1")
     req = DoorRequest()
     req.door_name = "ghost_door"
     req.requested_mode = DoorMode(value=DoorMode.MODE_OPEN)
@@ -110,10 +106,10 @@ def test_on_request_unknown_door_is_noop():
     h._door.request_open.assert_not_called()
 
 
-def test_publish_state_maps_open_and_closed():
+def test_publish_state_maps_open_and_closed(make_door):
     from pybullet_fleet_rmf.door_handler import DoorHandler
 
-    h = _make("L1_door1", state=SimDoorState.OPEN)
+    h = make_door("L1_door1", state=SimDoorState.OPEN)
     h._publish_state()
     published = DoorHandler._shared_pub.publish.call_args[0][0]
     assert published.current_mode.value == DoorMode.MODE_OPEN
@@ -124,11 +120,11 @@ def test_publish_state_maps_open_and_closed():
     assert DoorHandler._shared_pub.publish.call_args[0][0].current_mode.value == DoorMode.MODE_CLOSED
 
 
-def test_destroy_tears_down_shared_when_last():
+def test_destroy_tears_down_shared_when_last(make_door):
     from pybullet_fleet_rmf.door_handler import DoorHandler
 
-    a = _make("L1_door1")
-    b = _make("L1_door2")
+    a = make_door("L1_door1")
+    b = make_door("L1_door2")
     a.destroy()
     assert "L1_door1" not in DoorHandler._instances
     assert DoorHandler._shared_pub is not None  # b still alive
