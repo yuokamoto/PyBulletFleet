@@ -34,8 +34,9 @@ repos:
     hooks:
       - id: pyright
         # Note: Exclusions are managed in pyrightconfig.json
-        # ros2_bridge requires ROS 2 deps only available inside Docker
-        exclude: '^ros2_bridge/'
+        # ros2_bridge and the docker/ RMF test scripts require ROS 2 deps only
+        # available inside the container, so they can't be type-checked here.
+        exclude: '^(ros2_bridge/|docker/.*\.py$)'
         additional_dependencies:
           - pybullet
           - numpy

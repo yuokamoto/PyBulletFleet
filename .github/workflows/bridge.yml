@@ -68,3 +68,29 @@ jobs:
           docker compose run --rm --no-deps \
             -v "$(pwd)/test_integration.sh:/test_integration.sh:ro" \
             bridge bash /test_integration.sh
+
+      - name: Run RMF integration smoke test
+        # Launches the headless office RMF demo and asserts the RMF stack stands
+        # up (fleet/door/lift/dispenser/ingestor topics) and the bridge executes
+        # a direct NavigateToPose (deterministic: no dispatcher/traffic-schedule
+        # dependency). This is the blocking RMF gate.
+        run: |
+          cd docker
+          docker compose run --rm --no-deps \
+            -v "$(pwd)/test_rmf_smoke.sh:/test_rmf_smoke.sh:ro" \
+            -v "$(pwd)/rmf_smoke_check.py:/rmf_smoke_check.py:ro" \
+            bridge bash /test_rmf_smoke.sh
+
+      - name: Run RMF dispatch E2E
+        # Full dispatch->patrol chain through RMF's dispatcher + traffic schedule:
+        # dispatch_patrol --use_sim_time -> bidding -> fleet adapter -> NavigateToPose
+        # -> bridge -> PyBullet, asserting the task reaches `underway` and a robot
+        # moves. --use_sim_time is essential (the office runs RMF on /clock; without
+        # it the task's earliest-start is stamped from the wall clock, lands in the
+        # sim-time future, and sits in `queued` forever). Verified ~5s end-to-end.
+        run: |
+          cd docker
+          docker compose run --rm --no-deps \
+            -v "$(pwd)/test_rmf_dispatch_e2e.sh:/test_rmf_dispatch_e2e.sh:ro" \
+            -v "$(pwd)/rmf_dispatch_check.py:/rmf_dispatch_check.py:ro" \
+            bridge bash /test_rmf_dispatch_e2e.sh
