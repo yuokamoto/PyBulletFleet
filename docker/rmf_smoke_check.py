@@ -3,8 +3,8 @@
 
 Verifies the RMF stack stands up on the bridge and that the bridge executes RMF
 navigation commands — WITHOUT depending on RMF's dispatcher or traffic schedule
-(whose distributed coordination is sensitive to host clock jumps and DDS
-delivery, and so is covered separately by the non-blocking dispatch E2E test).
+(the full dispatch->patrol path is covered separately by test_rmf_dispatch_e2e.sh).
+Keeping this gate dispatcher-free makes it a fast, deterministic signal.
 
 Gates (all required):
   1. FLEET: /fleet_states reports every expected robot -> the tinyRobot fleet

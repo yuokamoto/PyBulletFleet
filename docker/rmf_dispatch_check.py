@@ -60,9 +60,9 @@ SETTLE_WINDOW = 6.0  # contiguous quiet span that counts as "settled"
 SETTLE_EPS = 0.05  # metres of jitter tolerated while "quiet"
 
 
-class SmokeChecker(Node):
+class DispatchChecker(Node):
     def __init__(self):
-        super().__init__("rmf_smoke_check")
+        super().__init__("rmf_dispatch_check")
         self._pos = {r: None for r in ROBOTS}  # latest (x, y)
         self._start = {r: None for r in ROBOTS}  # pose at dispatch time
         self._task_status = {}  # task_id -> latest status string
@@ -190,7 +190,7 @@ def dispatch_patrol(logger):
 
 def main() -> int:
     rclpy.init()
-    node = SmokeChecker()
+    node = DispatchChecker()
     log = node.get_logger()
 
     log.info("waiting for demo stack + robot odom ...")
@@ -243,11 +243,18 @@ def main() -> int:
         f"robot_moved={move_ok} (max displacement {node.max_displacement():.3f} m). "
         f"task states seen: {node._task_status}"
     )
-    if task_ok and not move_ok:
+    if not task_ok:
         log.error(
-            "Task was accepted by RMF but no robot motion was observed — on WSL2 "
-            "this is usually a wall-clock-jump stall in RMF's scheduler, not a "
-            "bridge fault. Expect this to pass on a stable-clock CI runner."
+            "Task never reached `underway` (stuck in `queued`/bidding). Most likely "
+            "the dispatch's earliest-start time is in the sim clock's future — verify "
+            "dispatch_patrol is invoked with --use_sim_time (the office runs RMF on "
+            "/clock)."
+        )
+    elif not move_ok:
+        log.error(
+            "Task went `underway` but no robot moved — the bridge's NavigateToPose "
+            "execution leg is the suspect (test_rmf_smoke.sh isolates exactly that "
+            "leg with a direct goal)."
         )
     return 1
 

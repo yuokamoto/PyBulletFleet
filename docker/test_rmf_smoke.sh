@@ -8,8 +8,8 @@
 #     direct NavigateToPose goal drives a robot (bridge execution contract).
 #
 # This is deterministic (no RMF dispatcher / traffic-schedule dependency), so it
-# is the BLOCKING CI gate. The full dispatch->patrol chain is covered separately
-# by test_rmf_dispatch_e2e.sh (non-blocking; needs a stable host clock + DDS).
+# is the fast blocking RMF gate. The full dispatch->patrol chain is covered
+# separately by test_rmf_dispatch_e2e.sh (also a blocking gate).
 #
 # Mounted into the container (cf. test_integration.sh):
 #   docker compose run --rm --no-deps \
@@ -50,15 +50,16 @@ for i in $(seq 1 60); do
     sleep 2
     TOPICS=$(ros2 topic list 2>/dev/null)
     all_present=1
+    # -x: exact full-line match, so /fleet_states doesn't match /fleet_states_visualizer
     for t in $REQUIRED_TOPICS; do
-        echo "$TOPICS" | grep -q "$t" || all_present=0
+        echo "$TOPICS" | grep -qxF "$t" || all_present=0
     done
     [ "$all_present" -eq 1 ] && break
 done
 
 echo "--- Checking RMF protocol topics (handlers up) ---"
 for topic in $REQUIRED_TOPICS; do
-    if echo "$TOPICS" | grep -q "$topic"; then
+    if echo "$TOPICS" | grep -qxF "$topic"; then
         echo "  ✓ $topic"
     else
         echo "  ✗ $topic MISSING"
