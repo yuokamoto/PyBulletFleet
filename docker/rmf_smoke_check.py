@@ -21,6 +21,7 @@ wrapper, test_rmf_smoke.sh, via `ros2 topic list`.)
 Exit 0 on pass, 1 on failure.
 """
 
+import math
 import sys
 import time
 
@@ -82,8 +83,10 @@ def main() -> int:
     # Gate 1: fleet adapter up and reporting both robots.
     log.info("waiting for /fleet_states to report all robots ...")
     if not node.wait_for_fleet(FLEET_TIMEOUT):
-        log.error(f"FAIL: fleet not ready. saw robots={sorted(node._fleet_robots)}, "
-                  f"{NAV_ROBOT} odom={'yes' if node._pos else 'no'}")
+        log.error(
+            f"FAIL: fleet not ready. saw robots={sorted(node._fleet_robots)}, "
+            f"{NAV_ROBOT} odom={'yes' if node._pos else 'no'}"
+        )
         return 1
     log.info(f"FLEET gate: /fleet_states reports {sorted(node._fleet_robots)}")
 
@@ -98,19 +101,34 @@ def main() -> int:
     goal.pose.pose.position.y = float(NAV_GOAL_XY[1])
     goal.pose.pose.orientation.w = 1.0
     log.info(f"sending direct NavigateToPose {NAV_GOAL_XY} to {NAV_ROBOT} (start={start})")
-    node._nav.send_goal_async(goal)
+    send_future = node._nav.send_goal_async(goal)
+
+    # Wait for the server to accept/reject the goal, so a rejection fails fast and
+    # clearly instead of silently timing out on "no motion".
+    accept_deadline = time.monotonic() + 15.0
+    while time.monotonic() < accept_deadline and rclpy.ok() and not send_future.done():
+        rclpy.spin_once(node, timeout_sec=0.2)
+    if not send_future.done():
+        log.error("FAIL: NavigateToPose goal was not acknowledged by the action server")
+        return 1
+    goal_handle = send_future.result()
+    if goal_handle is None or not goal_handle.accepted:
+        log.error("FAIL: NavigateToPose goal was rejected by the action server")
+        return 1
 
     deadline = time.monotonic() + MOVE_TIMEOUT
     while time.monotonic() < deadline and rclpy.ok():
         node.spin_for(1.0)
-        moved = abs(node._pos[0] - start[0]) + abs(node._pos[1] - start[1])
+        moved = math.hypot(node._pos[0] - start[0], node._pos[1] - start[1])
         if moved >= MOVE_THRESHOLD:
             log.info(f"NAV gate: {NAV_ROBOT} moved {moved:.2f} m on a direct NavigateToPose")
             log.info("PASS: RMF stack is up and the bridge executes nav commands")
             return 0
 
-    log.error(f"FAIL: {NAV_ROBOT} did not move >= {MOVE_THRESHOLD} m within "
-              f"{MOVE_TIMEOUT:.0f}s of a direct NavigateToPose (pos={node._pos})")
+    log.error(
+        f"FAIL: {NAV_ROBOT} did not move >= {MOVE_THRESHOLD} m within "
+        f"{MOVE_TIMEOUT:.0f}s of a direct NavigateToPose (pos={node._pos})"
+    )
     return 1
 
 

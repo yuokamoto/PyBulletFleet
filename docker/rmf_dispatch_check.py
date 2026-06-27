@@ -10,19 +10,17 @@ dispatch chain end-to-end:
 
 Two pass gates, both required:
 
-  1. TASK gate (robust, fast): the dispatched patrol task reaches ``underway``
-     or ``completed`` on ``/task_state_update``. This proves dispatch -> bidding
-     -> fleet-adapter acceptance, and is insensitive to the WSL2 wall-clock jitter
-     that can briefly stall RMF's scheduler. Healthy latency is a few seconds.
+  1. TASK gate: the dispatched patrol reaches ``underway``/``completed`` on
+     ``/task_state_update`` -> proves dispatch -> bidding -> fleet-adapter
+     acceptance -> execution started.
   2. MOTION gate (proves the bridge actually drives the robot): a fleet robot's
      odom moves more than ``MOVE_THRESHOLD`` m from where it sat at dispatch time.
      We settle the fleet to quiet *before* dispatching so the motion is
      attributable to our patrol, not pre-existing drift (e.g. a robot parking).
 
-Requiring both makes the smoke meaningful (full chain, including the bridge's
-PyBullet execution leg) while the task gate keeps the common path quick. On a
-stable-clock CI runner both gates clear in seconds; the long timeout only
-absorbs the occasional WSL2 clock-jump stall observed locally.
+The dispatch MUST use --use_sim_time (see ``dispatch_patrol`` below): the office
+runs RMF on the simulated /clock, so a wall-clock earliest-start would sit in the
+sim future and never run. With it, both gates clear in a few seconds.
 
 Exit 0 on pass, 1 on failure (with which gate(s) failed).
 """
@@ -46,14 +44,12 @@ UNDERWAY_STATES = ("underway", "completed")
 TASK_ID_RE = re.compile(r"patrol\.dispatch-[0-9a-fA-F]+")
 
 READY_TIMEOUT = 150.0  # wait for the demo stack + first odom
-DEADLINE = 240.0  # overall wait for both gates after dispatch
-# If the task is still `queued` (never awarded) after this long, re-dispatch: on
-# WSL2 a wall-clock jump can land in RMF's ~2s bidding window and stall the award
-# (the task never leaves `queued`). Each dispatch is an independent bidding round,
-# so a fresh one usually misses the jump. On a stable-clock CI runner the first
-# dispatch is awarded in ~2.5s, so this never fires (no behaviour masked).
+DEADLINE = 120.0  # overall wait for both gates (healthy is a few seconds)
+# Safety net only: if the task hasn't gone underway after this long, kick a fresh
+# bidding round. With --use_sim_time the first dispatch goes underway in ~3s, so
+# this normally never fires.
 REDISPATCH_AFTER = 50.0
-MAX_DISPATCHES = 4
+MAX_DISPATCHES = 3
 
 # Robots may already be in motion at startup (e.g. RMF sends a not-quite-full
 # robot to park). We wait for everything to go quiet *before* dispatching, so
@@ -121,8 +117,11 @@ class SmokeChecker(Node):
         while time.monotonic() < deadline and rclpy.ok():
             rclpy.spin_once(self, timeout_sec=0.2)
             moved = max(
-                (math.hypot(self._pos[r][0] - ref[r][0], self._pos[r][1] - ref[r][1])
-                 for r in ROBOTS if self._pos[r] and ref[r]),
+                (
+                    math.hypot(self._pos[r][0] - ref[r][0], self._pos[r][1] - ref[r][1])
+                    for r in ROBOTS
+                    if self._pos[r] and ref[r]
+                ),
                 default=0.0,
             )
             if moved > eps:
@@ -145,18 +144,35 @@ class SmokeChecker(Node):
             best = max(best, math.hypot(p[0] - s[0], p[1] - s[1]))
         return best
 
-    def task_underway(self, task_id) -> bool:
-        """True if our task (or, if its id is unknown, any task) is underway."""
-        if task_id is not None:
-            return self._task_status.get(task_id) in UNDERWAY_STATES
+    def any_underway(self, task_ids) -> bool:
+        """True if one of OUR dispatched tasks is underway/completed.
+
+        Checks only the ids we dispatched (not any task globally) so the gate
+        can't pass on an unrelated task. Falls back to "any task" only if we
+        never managed to parse an id from the CLI.
+        """
+        if task_ids:
+            return any(self._task_status.get(i) in UNDERWAY_STATES for i in task_ids)
         return any(s in UNDERWAY_STATES for s in self._task_status.values())
 
 
 def dispatch_patrol(logger):
     """Dispatch a patrol; return the task id parsed from the CLI output (or None)."""
     cmd = [
-        "ros2", "run", "rmf_demos_tasks", "dispatch_patrol",
-        "-p", *PATROL_WAYPOINTS, "-n", "1",
+        "ros2",
+        "run",
+        "rmf_demos_tasks",
+        "dispatch_patrol",
+        "-p",
+        *PATROL_WAYPOINTS,
+        "-n",
+        "1",
+        # The office launch runs RMF with use_sim_time=true (clock = /clock). Without
+        # this flag dispatch_patrol stamps unix_millis_earliest_start_time from the
+        # WALL clock, which is years ahead of the sim clock, so the task sits in
+        # `queued` forever and never goes underway. --use_sim_time stamps it from
+        # /clock so it can start immediately.
+        "--use_sim_time",
     ]
     logger.info(f"dispatching: {' '.join(cmd)}")
     try:
@@ -189,7 +205,10 @@ def main() -> int:
         log.warn(f"robots still moving after {SETTLE_MAX:.0f}s; dispatching anyway")
 
     node.snapshot_start()
-    dispatch_patrol(log)  # task ids are tracked via /task_state_update
+    our_ids = []  # task ids we dispatched (statuses arrive via /task_state_update)
+    tid = dispatch_patrol(log)
+    if tid:
+        our_ids.append(tid)
     dispatches = 1
     last_dispatch = time.monotonic()
 
@@ -198,8 +217,7 @@ def main() -> int:
     move_ok = False
     while time.monotonic() < deadline and rclpy.ok():
         node.spin_for(1.0)
-        # Pass on ANY task reaching underway (re-dispatch may create several).
-        if not task_ok and node.task_underway(None):
+        if not task_ok and node.any_underway(our_ids):
             task_ok = True
             log.info("TASK gate: a dispatched patrol reached underway/completed")
         disp = node.max_displacement()
@@ -209,11 +227,14 @@ def main() -> int:
         if task_ok and move_ok:
             log.info("PASS: task is underway and the bridge drove a robot")
             return 0
-        # Still stuck in `queued` (no award)? Kick a fresh bidding round.
+        # Still stuck in `queued` (no award)? Kick a fresh bidding round and track
+        # its new id so the gate reflects the latest dispatch.
         stuck = not task_ok and (time.monotonic() - last_dispatch) >= REDISPATCH_AFTER
         if stuck and dispatches < MAX_DISPATCHES:
             log.warn(f"task still not underway after {REDISPATCH_AFTER:.0f}s; re-dispatching")
-            dispatch_patrol(log)
+            tid = dispatch_patrol(log)
+            if tid:
+                our_ids.append(tid)
             dispatches += 1
             last_dispatch = time.monotonic()
 

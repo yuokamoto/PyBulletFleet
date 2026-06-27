@@ -41,16 +41,23 @@ trap cleanup EXIT
 
 echo "--- Office demo launched (pid $LAUNCH_PID); waiting for topics ---"
 
-# Wait for the stack to advertise topics (up to ~100s), then assert the RMF
-# protocol topics each handler owns are present.
-for i in $(seq 1 50); do
+# Wait until ALL the RMF protocol topics each handler owns are advertised (up to
+# ~120s). Waiting on /fleet_states alone would race the door/lift/workcell
+# handlers, which advertise slightly later — the presence check below could then
+# spuriously fail before they came up.
+REQUIRED_TOPICS="/fleet_states /door_states /lift_states /dispenser_states /ingestor_states"
+for i in $(seq 1 60); do
     sleep 2
-    ros2 topic list 2>/dev/null | grep -q /fleet_states && break
+    TOPICS=$(ros2 topic list 2>/dev/null)
+    all_present=1
+    for t in $REQUIRED_TOPICS; do
+        echo "$TOPICS" | grep -q "$t" || all_present=0
+    done
+    [ "$all_present" -eq 1 ] && break
 done
 
-TOPICS=$(ros2 topic list 2>/dev/null)
 echo "--- Checking RMF protocol topics (handlers up) ---"
-for topic in /fleet_states /door_states /lift_states /dispenser_states /ingestor_states; do
+for topic in $REQUIRED_TOPICS; do
     if echo "$TOPICS" | grep -q "$topic"; then
         echo "  ✓ $topic"
     else

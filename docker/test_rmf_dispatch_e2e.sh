@@ -6,13 +6,13 @@
 # -> bridge -> PyBullet -> odom, plus the task reaching `underway` on
 # /task_state_update.
 #
-# NOTE ON RELIABILITY: this exercises RMF's dispatcher + traffic-schedule, which
-# depend on a stable host clock and reliable DDS delivery. On a WSL2 host the
-# default clock makes ~2.5s backward jumps (`timedatectl set-ntp false` stops
-# them), and host-network DDS can drop the traffic-schedule mirror's large
-# transient-local snapshots — both stall the dispatch. So this is wired into CI
-# as NON-blocking (continue-on-error) and is primarily a manual/stable-env check.
-# The deterministic gate is test_rmf_smoke.sh (no dispatcher/traffic dependency).
+# KEY: the dispatch is sent with --use_sim_time (see rmf_dispatch_check.py). The
+# office launch runs RMF on the simulated /clock; without that flag dispatch_patrol
+# stamps the task's earliest-start from the WALL clock, which lands far in the sim
+# clock's future, so the task sits in `queued` forever and never moves. With it,
+# the task goes `underway` and a robot drives within a few seconds.
+# (The recurring "schedule update timed out" lines from RMF are benign — they also
+# appear in healthy runs and are not the blocker.)
 #
 # Mounted into the container (cf. test_integration.sh):
 #   docker compose run --rm --no-deps \
