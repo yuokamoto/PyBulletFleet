@@ -213,11 +213,21 @@ def dispatch(node, log, scenario):
 
 
 def _zrise_req(assert_spec: str):
-    """Parse an optional ``zrise=<metres>`` assertion clause (else None)."""
+    """Parse an optional ``zrise=<metres>`` assertion clause (else None).
+
+    Raises ValueError on a malformed value or an unknown clause so callers can
+    validate tokens up front.
+    """
     spec = assert_spec.strip()
+    if not spec:
+        return None
     if spec.startswith("zrise="):
-        return float(spec.split("=", 1)[1])
-    return None
+        value = spec.split("=", 1)[1]
+        try:
+            return float(value)
+        except ValueError:
+            raise ValueError(f"zrise= needs a number, got {value!r}")
+    raise ValueError(f"unknown assertion clause {spec!r} (supported: zrise=<m>)")
 
 
 def _check_extras(node, log, scenario, kind, zrise_req, max_zrise, disp0, ing0) -> bool:
@@ -320,11 +330,14 @@ if __name__ == "__main__":
     if not scenario_args:
         print("usage: rmf_dispatch_check.py <type:args[;assert]> [...]", file=sys.stderr)
         sys.exit(2)
-    # Validate every scenario token up front so a typo in bridge.yml fails fast
-    # with a clear message instead of crashing mid-run (after launching a demo).
+    # Validate every scenario token up front (both the dispatch part and any
+    # ;assertion clause) so a typo in bridge.yml fails fast with a clear message
+    # instead of crashing mid-run after launching a demo.
     for _s in scenario_args:
+        _main, _, _assert = _s.partition(";")
         try:
-            build_dispatch(_s.partition(";")[0])
+            build_dispatch(_main)
+            _zrise_req(_assert)
         except ValueError as _e:
             print(f"invalid scenario {_s!r}: {_e}", file=sys.stderr)
             sys.exit(2)
