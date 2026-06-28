@@ -66,8 +66,12 @@ def build_dispatch(scenario: str):
     kind, _, rest = scenario.partition(":")
     args = [a for a in rest.split(",") if a]
     if kind == "patrol":
+        if not args:
+            raise ValueError("patrol needs >=1 waypoint: patrol:wp1[,wp2,...]")
         return ["ros2", "run", "rmf_demos_tasks", "dispatch_patrol", "-p", *args, "-n", "1", "--use_sim_time"]
     if kind == "delivery":
+        if len(args) != 4:
+            raise ValueError("delivery needs 4 args: delivery:pickup,pickup_handler,dropoff,dropoff_handler")
         pickup, pick_h, dropoff, drop_h = args
         return [
             "ros2",
@@ -85,6 +89,8 @@ def build_dispatch(scenario: str):
             "--use_sim_time",
         ]
     if kind == "clean":
+        if len(args) != 1:
+            raise ValueError("clean needs 1 arg: clean:zone")
         return ["ros2", "run", "rmf_demos_tasks", "dispatch_clean", "-cs", args[0], "--use_sim_time"]
     raise ValueError(f"unknown scenario kind: {kind!r}")
 
@@ -144,7 +150,7 @@ class DispatchChecker(Node):
             rclpy.spin_once(self, timeout_sec=0.1)
 
     def wait_for_fleet(self, timeout: float) -> bool:
-        """Return True once at least one robot is known and reporting odom."""
+        """Return True once every discovered robot is reporting odom (>=1 robot)."""
         end = time.monotonic() + timeout
         while time.monotonic() < end and rclpy.ok():
             rclpy.spin_once(self, timeout_sec=0.2)
@@ -196,10 +202,10 @@ def dispatch(node, log, scenario):
     try:
         out = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
     except subprocess.TimeoutExpired:
-        log.warn("dispatch command timed out (continuing to watch)")
+        log.warning("dispatch command timed out (continuing to watch)")
         return None
     if out.returncode != 0:
-        log.warn(f"dispatch returned {out.returncode}: {out.stderr.strip()}")
+        log.warning(f"dispatch returned {out.returncode}: {out.stderr.strip()}")
     m = TASK_ID_RE.search(out.stdout) or TASK_ID_RE.search(out.stderr)
     task_id = m.group(0) if m else None
     log.info(f"dispatch acknowledged; task_id={task_id}")
@@ -255,11 +261,16 @@ def run_scenario(node, log, scenario) -> bool:
     if node.wait_until_settled(SETTLE_MAX, SETTLE_WINDOW, SETTLE_EPS):
         log.info("robots quiet; dispatching")
     else:
-        log.warn("robots still moving; dispatching anyway")
+        log.warning("robots still moving; dispatching anyway")
     start = dict(node._pos)
     start_z = dict(node._z)
     disp0, ing0 = node._disp_success, node._ing_success
     task_id = dispatch(node, log, main)
+    if task_id is None:
+        # No id parsed -> the dispatch CLI failed or its output format changed.
+        # Fail fast instead of waiting the full SCENARIO_TIMEOUT on status=None.
+        log.error(f"[{scenario}] FAIL: dispatch produced no task id (CLI failed or unparsed output)")
+        return False
 
     deadline = time.monotonic() + SCENARIO_TIMEOUT
     seen_underway = False
@@ -268,7 +279,7 @@ def run_scenario(node, log, scenario) -> bool:
     while time.monotonic() < deadline and rclpy.ok():
         node.spin_for(1.0)
         max_zrise = max(max_zrise, node.max_zrise(start_z))
-        status = node._task_status.get(task_id) if task_id else None
+        status = node._task_status.get(task_id)
         if not seen_underway and (status == "underway" or status in TERMINAL_OK):
             seen_underway = True
             log.info(f"[{scenario}] task underway")
@@ -307,8 +318,16 @@ def main(scenarios) -> int:
 if __name__ == "__main__":
     scenario_args = sys.argv[1:]
     if not scenario_args:
-        print("usage: rmf_dispatch_check.py <type:args> [<type:args> ...]", file=sys.stderr)
+        print("usage: rmf_dispatch_check.py <type:args[;assert]> [...]", file=sys.stderr)
         sys.exit(2)
+    # Validate every scenario token up front so a typo in bridge.yml fails fast
+    # with a clear message instead of crashing mid-run (after launching a demo).
+    for _s in scenario_args:
+        try:
+            build_dispatch(_s.partition(";")[0])
+        except ValueError as _e:
+            print(f"invalid scenario {_s!r}: {_e}", file=sys.stderr)
+            sys.exit(2)
     rc = 1
     try:
         rc = main(scenario_args)

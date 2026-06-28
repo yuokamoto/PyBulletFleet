@@ -22,14 +22,15 @@
 # keeps RMF in lockstep (what GUI runs do implicitly).
 set -e
 
-LAUNCH="$1"
-shift
-SCENARIOS=("$@")
-
-if [ -z "$LAUNCH" ] || [ "${#SCENARIOS[@]}" -eq 0 ]; then
+# Validate arg count before `shift` — under `set -e`, `shift` with no args would
+# abort with "shift count out of range" before we could print usage.
+if [ "$#" -lt 2 ]; then
     echo "usage: test_rmf_e2e.sh <launch_stem> <scenario> [<scenario> ...]" >&2
     exit 2
 fi
+LAUNCH="$1"
+shift
+SCENARIOS=("$@")
 
 echo "=== RMF dispatch E2E: ${LAUNCH} — ${SCENARIOS[*]} ==="
 
