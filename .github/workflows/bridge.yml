@@ -69,6 +69,18 @@ jobs:
             -v "$(pwd)/test_integration.sh:/test_integration.sh:ro" \
             bridge bash /test_integration.sh
 
+      - name: Run Pattern 2 batch API smoke test
+        # fleet_interface: batch — one aggregated /fleet/states topic and a
+        # /fleet/navigate service+topic for the whole fleet (O(1) endpoints).
+        # test_batch.sh rebuilds the fleet msgs, launches a 3-robot batch bridge,
+        # and checks states + service/topic navigate move the fleet.
+        run: |
+          cd docker
+          docker compose run --rm --no-deps \
+            -v "$(pwd)/test_batch.sh:/test_batch.sh:ro" \
+            -v "$(pwd)/batch_check.py:/batch_check.py:ro" \
+            bridge bash /test_batch.sh
+
       - name: Run RMF integration smoke test
         # Launches the headless office RMF demo and asserts the RMF stack stands
         # up (fleet/door/lift/dispenser/ingestor topics) and the bridge executes

@@ -95,6 +95,25 @@ See **[docker/README.md](../docker/README.md)** for build instructions and demo 
 
 ---
 
+### Fleet API (Pattern 2 — batch, O(1) endpoints)
+
+Set `fleet_interface: batch` in the bridge config to expose the whole fleet
+through two endpoints instead of O(N) per-robot topics — scales to 100s–1000s of
+robots. (Default is `per_robot`, the per-robot interface above.)
+
+| Endpoint | Type | Description |
+|----------|------|-------------|
+| `/fleet/states` | `pybullet_fleet_msgs/FleetState` (topic) | One aggregated message — `RobotState[]` (name, x/y/yaw, vx/vy/vyaw, moving) for every robot |
+| `/fleet/navigate` | `pybullet_fleet_msgs/FleetNavigate` (service) | Batch goals (`RobotGoal[]`); returns how many matched |
+| `/fleet/navigate` | `pybullet_fleet_msgs/FleetGoal` (topic) | Same batch goals, fire-and-forget |
+
+Pair with a core `batch_controller` (`batch_omni` / `batch_differential`) for
+vectorized kinematics. A 500-robot example config (grid spawn + `batch_omni` +
+`fleet_interface: batch`) lives at
+[`config/bridge_batch500.yaml`](pybullet_fleet_ros/config/bridge_batch500.yaml).
+
+---
+
 ## pybullet_fleet_rmf — Open-RMF Integration
 
 Fleet adapter and infrastructure handlers for [Open-RMF](https://www.open-rmf.org/).
@@ -148,24 +167,6 @@ Future improvements. Items already implemented have been removed — see git log
 
 ---
 
-### Near-Term
-
-#### Batch API ROS Wrapper (Pattern 2)
-
-`AgentManager` batch API に numpy flat array 一括取得を追加し、ROS ラッパーで O(1) endpoint 化。
-
-```
-fleet_adapter ↔ 1×/fleet/states + 1×/fleet/navigate ↔ bridge_node ↔ sim_core
-```
-
-- `/fleet/states` publisher (FleetStates.msg) — N 台分を1メッセージ
-- `/fleet/navigate` service — batch navigation
-- 100 robots: 200 endpoints → 2–3 endpoints
-
-**Depends on:** `pybullet_fleet_msgs` に FleetStates.msg 定義
-
----
-
 ### Mid-Term
 
 #### Direct Python Connection (no ROS)
@@ -180,8 +181,8 @@ ROS 2 topic/service 層をバイパスし、低レイテンシ・シンプルデ
 
 | # | Name | 通信 | bridge | ROS endpoints | 用途 |
 |---|---|---|---|---|---|
-| 1 | Per-Robot ROS 2 | ROS topics | ✅ | O(N) | **現行 (v1)** |
-| 2 | Batch ROS 2 | ROS topics (batch) | ✅ | O(1) | Scalable |
+| 1 | Per-Robot ROS 2 | ROS topics | ✅ | O(N) | **実装済** (default) |
+| 2 | Batch ROS 2 | ROS topics (batch) | ✅ | O(1) | **実装済** (`fleet_interface: batch`) |
 | 3 | Plugin Only | Direct Python | ❌ | 0 | CI / headless |
 | 4 | Plugin + Bridge | Direct Python | ✅ | 0 | Dev/Debug |
 

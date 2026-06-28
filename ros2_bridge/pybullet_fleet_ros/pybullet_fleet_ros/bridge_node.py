@@ -146,9 +146,18 @@ class BridgeNode(Node):
         self._last_clock_time: float = -1.0
         self._clock_min_interval: float = 1.0 / publish_rate  # throttle /clock
 
-        # Register ROS handlers for all agents already in the sim
-        for agent in self.sim.agents:
-            self._register_robot_handler(agent)
+        # Interface selection: Pattern 1 (per-robot RobotHandler, default) vs
+        # Pattern 2 (one fleet-level FleetHandler with O(1) /fleet/* endpoints).
+        self._fleet_handler = None
+        self._batch_mode = str(bridge_config.get("fleet_interface", "per_robot")).lower() == "batch"
+        if self._batch_mode:
+            from .fleet_handler import FleetHandler
+
+            self._fleet_handler = FleetHandler(self, self.sim, publish_rate)
+        else:
+            # Register per-robot ROS handlers for all agents already in the sim
+            for agent in self.sim.agents:
+                self._register_robot_handler(agent)
         actual_count = len(self.sim.agents)
 
         # Bridge plugins (singleton handlers loaded from config)
@@ -282,6 +291,8 @@ class BridgeNode(Node):
 
     def _on_agent_spawned(self, agent, **kwargs):
         """Auto-register RobotHandler when a new agent spawns."""
+        if self._batch_mode:
+            return  # Pattern 2: the FleetHandler picks up new agents automatically
         if agent.object_id not in self._handlers:
             self._register_robot_handler(agent)
             n = len(self._handlers[agent.object_id])
@@ -329,6 +340,10 @@ class BridgeNode(Node):
                 for h in handlers:
                     h.post_step(dt=dt, stamp=stamp)
 
+            # Fleet-level update (Pattern 2): aggregated /fleet/states
+            if self._fleet_handler is not None:
+                self._fleet_handler.post_step(dt=dt, stamp=stamp)
+
             # Bridge plugins (workcell handler, etc.)
             for bp in self._bridge_plugins:
                 bp.post_step(sim_time)
@@ -343,6 +358,9 @@ class BridgeNode(Node):
             for h in handlers:
                 h.destroy()
         self._handlers.clear()
+        if self._fleet_handler is not None:
+            self._fleet_handler.destroy()
+            self._fleet_handler = None
         for bp in self._bridge_plugins:
             bp.on_reset()
             bp.destroy()
