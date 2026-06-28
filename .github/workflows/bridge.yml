@@ -99,12 +99,14 @@ jobs:
 
       - name: Run RMF dispatch E2E (hotel — cross-lift patrol + clean)
         # Hotel adds the lift/door handlers (a lobby->L2 patrol rides the elevator)
-        # and the clean coverage-path action. Each task asserted to reach `completed`.
+        # and the clean coverage-path action. Each task asserted to reach `completed`;
+        # the patrol additionally asserts the robot's odom z rose >= 2 m (the lift
+        # physically carried it — observed ~8 m for one floor here).
         run: |
           cd docker
           docker compose run --rm --no-deps \
             -v "$(pwd)/test_rmf_e2e.sh:/test_rmf_e2e.sh:ro" \
             -v "$(pwd)/rmf_dispatch_check.py:/rmf_dispatch_check.py:ro" \
             bridge bash /test_rmf_e2e.sh hotel_pybullet \
-              "patrol:lobby,L2_room1" \
+              "patrol:lobby,L2_room1;zrise=2.0" \
               "clean:clean_lobby"

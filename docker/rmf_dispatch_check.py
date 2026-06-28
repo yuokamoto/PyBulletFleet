@@ -8,17 +8,24 @@ the full chain for each:
     dispatch_*  ->  RMF bidding  ->  fleet adapter  ->  NavigateToPose / actions
         ->  pybullet_fleet bridge  ->  PyBullet  ->  the task reaches `completed`
 
-Scenarios are given as argv tokens ``type:arg1,arg2,...``:
+Scenarios are given as argv tokens ``type:arg1,arg2,...`` with an optional
+``;assertion`` clause:
     patrol:lounge,coe
+    patrol:lobby,L2_room1;zrise=1.0     # also assert the robot rose >= 1.0 m (lift)
     delivery:pantry,coke_dispenser,hardware_2,coke_ingestor
     clean:clean_lobby
 
 Each scenario PASSES when its dispatched task reaches ``completed`` on
-``/task_state_update`` within ``SCENARIO_TIMEOUT`` (we also log `underway` and
-robot motion as progress). Reaching `completed` is the meaningful assertion: for
-delivery it proves the dispenser dispensed + ingestor ingested; for a cross-floor
-patrol it proves the robot rode the lift; for clean it proves the coverage path
-ran. All scenarios must pass for exit 0.
+``/task_state_update`` within ``SCENARIO_TIMEOUT``. Reaching `completed` is the
+primary (and largely sufficient) assertion — RMF won't complete unless the
+function ran (the robot reached an upper-floor waypoint; the dispenser/ingestor
+finished; the coverage path ran). On top of it we add cheap *direct* checks that
+catch a "false completed" and localize failures:
+  - delivery: a DispenserResult.SUCCESS and an IngestorResult.SUCCESS must be seen
+    on /dispenser_results + /ingestor_results during the scenario;
+  - any scenario tagged ``;zrise=<m>``: the robot's odom z must rise that far (the
+    elevator physically carried it).
+All scenarios must pass for exit 0.
 
 Every dispatch is sent with --use_sim_time: the demos run RMF on the simulated
 /clock, so a wall-clock earliest-start would sit in the sim future and the task
@@ -35,7 +42,9 @@ import time
 import rclpy
 from nav_msgs.msg import Odometry
 from rclpy.node import Node
+from rmf_dispenser_msgs.msg import DispenserResult
 from rmf_fleet_msgs.msg import FleetState
+from rmf_ingestor_msgs.msg import IngestorResult
 from std_msgs.msg import String
 
 MOVE_THRESHOLD = 0.3  # metres; comfortably above odom noise
@@ -84,10 +93,15 @@ class DispatchChecker(Node):
     def __init__(self):
         super().__init__("rmf_dispatch_check")
         self._pos = {}  # robot name -> latest (x, y)
+        self._z = {}  # robot name -> latest z (for lift checks)
         self._subs = {}  # robot name -> odom subscription
         self._task_status = {}  # task_id -> latest status string
+        self._disp_success = 0  # count of DispenserResult.SUCCESS seen
+        self._ing_success = 0  # count of IngestorResult.SUCCESS seen
         self.create_subscription(FleetState, "/fleet_states", self._on_fleet, 10)
         self.create_subscription(String, "/task_state_update", self._on_task_state, 10)
+        self.create_subscription(DispenserResult, "/dispenser_results", self._on_disp_result, 10)
+        self.create_subscription(IngestorResult, "/ingestor_results", self._on_ing_result, 10)
 
     def _on_fleet(self, msg: FleetState):
         # Discover robots across all fleets and subscribe to each one's odom once.
@@ -100,8 +114,17 @@ class DispatchChecker(Node):
         def _cb(msg: Odometry):
             p = msg.pose.pose.position
             self._pos[robot] = (p.x, p.y)
+            self._z[robot] = p.z
 
         return _cb
+
+    def _on_disp_result(self, msg: DispenserResult):
+        if msg.status == DispenserResult.SUCCESS:
+            self._disp_success += 1
+
+    def _on_ing_result(self, msg: IngestorResult):
+        if msg.status == IngestorResult.SUCCESS:
+            self._ing_success += 1
 
     def _on_task_state(self, msg: String):
         try:
@@ -157,6 +180,15 @@ class DispatchChecker(Node):
                 best = max(best, math.hypot(p[0] - s[0], p[1] - s[1]))
         return best
 
+    def max_zrise(self, start_z) -> float:
+        """Largest z increase (metres) of any robot vs its scenario-start z."""
+        best = 0.0
+        for r, z0 in start_z.items():
+            z = self._z.get(r)
+            if z0 is not None and z is not None:
+                best = max(best, z - z0)
+        return best
+
 
 def dispatch(node, log, scenario):
     cmd = build_dispatch(scenario)
@@ -174,31 +206,77 @@ def dispatch(node, log, scenario):
     return task_id
 
 
+def _zrise_req(assert_spec: str):
+    """Parse an optional ``zrise=<metres>`` assertion clause (else None)."""
+    spec = assert_spec.strip()
+    if spec.startswith("zrise="):
+        return float(spec.split("=", 1)[1])
+    return None
+
+
+def _check_extras(node, log, scenario, kind, zrise_req, max_zrise, disp0, ing0) -> bool:
+    """Beyond `completed`, verify the physical signals for delivery / lift.
+
+    Largely redundant with `completed` (RMF won't complete unless the function
+    ran), but catches a "false completed" and localizes failures.
+    """
+    ok = True
+    log.info(f"[{scenario}] max z-rise during scenario: {max_zrise:.2f} m")
+    if kind == "delivery":
+        dn, inn = node._disp_success - disp0, node._ing_success - ing0
+        if dn > 0 and inn > 0:
+            log.info(f"[{scenario}] workcell: dispenser+ingestor SUCCESS observed")
+        else:
+            log.error(f"[{scenario}] FAIL: completed but workcell SUCCESS missing (dispenser +{dn}, ingestor +{inn})")
+            ok = False
+    if zrise_req is not None:
+        if max_zrise >= zrise_req:
+            log.info(f"[{scenario}] lift: robot rose {max_zrise:.2f} m (>= {zrise_req} m)")
+        else:
+            log.error(f"[{scenario}] FAIL: completed but max z-rise {max_zrise:.2f} m < {zrise_req} m (lift?)")
+            ok = False
+    if ok:
+        log.info(f"[{scenario}] PASS: task reached `completed`")
+    return ok
+
+
 def run_scenario(node, log, scenario) -> bool:
-    """Dispatch one scenario and wait for its task to reach `completed`."""
+    """Dispatch one scenario, wait for `completed`, then assert any extra signals.
+
+    Scenario may carry an assertion clause after ``;``, e.g.
+    ``patrol:lobby,L2_room1;zrise=1.0`` requires the robot to rise >= 1.0 m
+    (the elevator carried it). Delivery scenarios always additionally require a
+    dispenser + ingestor SUCCESS.
+    """
+    main, _, assert_spec = scenario.partition(";")
+    kind = main.partition(":")[0]
+    zrise_req = _zrise_req(assert_spec)
+
     if node.wait_until_settled(SETTLE_MAX, SETTLE_WINDOW, SETTLE_EPS):
         log.info("robots quiet; dispatching")
     else:
         log.warn("robots still moving; dispatching anyway")
     start = dict(node._pos)
-    task_id = dispatch(node, log, scenario)
+    start_z = dict(node._z)
+    disp0, ing0 = node._disp_success, node._ing_success
+    task_id = dispatch(node, log, main)
 
     deadline = time.monotonic() + SCENARIO_TIMEOUT
     seen_underway = False
     seen_motion = False
+    max_zrise = 0.0
     while time.monotonic() < deadline and rclpy.ok():
         node.spin_for(1.0)
+        max_zrise = max(max_zrise, node.max_zrise(start_z))
         status = node._task_status.get(task_id) if task_id else None
-        if not seen_underway and (status in ("underway",) or status in TERMINAL_OK):
+        if not seen_underway and (status == "underway" or status in TERMINAL_OK):
             seen_underway = True
             log.info(f"[{scenario}] task underway")
-        disp = node.max_displacement(start)
-        if not seen_motion and disp >= MOVE_THRESHOLD:
+        if not seen_motion and node.max_displacement(start) >= MOVE_THRESHOLD:
             seen_motion = True
-            log.info(f"[{scenario}] a robot moved {disp:.2f} m")
+            log.info(f"[{scenario}] a robot moved")
         if status in TERMINAL_OK:
-            log.info(f"[{scenario}] PASS: task reached `{status}`")
-            return True
+            return _check_extras(node, log, scenario, kind, zrise_req, max_zrise, disp0, ing0)
         if status in TERMINAL_BAD:
             log.error(f"[{scenario}] FAIL: task reached terminal `{status}`")
             return False
