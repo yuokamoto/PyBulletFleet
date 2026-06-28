@@ -3,20 +3,22 @@
 
 Verifies the RMF stack stands up on the bridge and that the bridge executes RMF
 navigation commands — WITHOUT depending on RMF's dispatcher or traffic schedule
-(whose distributed coordination is sensitive to host clock jumps and DDS
-delivery, and so is covered separately by the non-blocking dispatch E2E test).
+(the full dispatch path is covered separately by test_rmf_e2e.sh).
+Keeping this gate dispatcher-free makes it a fast, deterministic signal.
 
 Gates (all required):
-  1. FLEET: /fleet_states reports every expected robot -> the tinyRobot fleet
-     adapter is up and publishing.
+  1. STACK: every RMF protocol topic (fleet/door/lift/dispenser/ingestor) is
+     advertised -> all handlers loaded; and /fleet_states reports every expected
+     robot -> the fleet adapter is up.
   2. NAV: a DIRECT NavigateToPose goal to a robot's own
-     ``/<robot>/navigate_to_pose`` action server moves it >= MOVE_THRESHOLD m.
-     This exercises the bridge's RMF-facing action server, controller, PyBullet
-     execution and odom feedback — deterministically (no bidding / no traffic
-     negotiation), so it is stable on both WSL2 and CI.
+     ``/<robot>/navigate_to_pose`` action server completes with SUCCEEDED and the
+     robot ends within GOAL_TOLERANCE of the goal. This exercises the bridge's
+     RMF-facing action server, controller, PyBullet execution and odom feedback —
+     deterministically (no bidding / no traffic negotiation), so it is stable on
+     both WSL2 and CI.
 
-(Topic presence for the door/lift/dispenser/ingestor handlers is checked in the
-wrapper, test_rmf_smoke.sh, via `ros2 topic list`.)
+The wrapper (test_rmf_smoke.sh) only launches the demo and runs this checker; all
+readiness waiting lives here.
 
 Exit 0 on pass, 1 on failure.
 """
@@ -26,6 +28,7 @@ import sys
 import time
 
 import rclpy
+from action_msgs.msg import GoalStatus
 from nav_msgs.msg import Odometry
 from nav2_msgs.action import NavigateToPose
 from rclpy.action import ActionClient
@@ -33,13 +36,21 @@ from rclpy.node import Node
 from rmf_fleet_msgs.msg import FleetState
 
 EXPECTED_ROBOTS = ["tinyRobot1", "tinyRobot2"]
+# One topic per RMF protocol handler; their presence means the handlers loaded.
+REQUIRED_TOPICS = [
+    "/fleet_states",
+    "/door_states",
+    "/lift_states",
+    "/dispenser_states",
+    "/ingestor_states",
+]
 NAV_ROBOT = "tinyRobot2"  # idle at its charger -> motion is unambiguous
 # ~1.5 m off tinyRobot2_charger (20.42, -5.31) toward the room interior (the
 # robot already faces ~pi), comfortably reachable and collision-free.
 NAV_GOAL_XY = (18.9, -5.31)
-MOVE_THRESHOLD = 0.3  # metres; comfortably above odom noise
+GOAL_TOLERANCE = 0.5  # metres; how close to NAV_GOAL_XY counts as "arrived"
 
-FLEET_TIMEOUT = 150.0  # wait for the demo stack + fleet adapter
+READY_TIMEOUT = 150.0  # wait for the demo stack (topics + fleet adapter + odom)
 SERVER_TIMEOUT = 30.0  # wait for the bridge's nav action server
 MOVE_TIMEOUT = 60.0  # wait for the robot to drive after the goal is sent
 
@@ -66,11 +77,20 @@ class SmokeChecker(Node):
         while time.monotonic() < end and rclpy.ok():
             rclpy.spin_once(self, timeout_sec=0.1)
 
-    def wait_for_fleet(self, timeout: float) -> bool:
+    def present_topics(self) -> set:
+        return {name for name, _ in self.get_topic_names_and_types()}
+
+    def missing_topics(self) -> list:
+        present = self.present_topics()
+        return [t for t in REQUIRED_TOPICS if t not in present]
+
+    def wait_until_ready(self, timeout: float) -> bool:
+        """Wait for the whole RMF stack: every REQUIRED_TOPICS advertised, both
+        expected robots reported on /fleet_states, and NAV_ROBOT odom flowing."""
         end = time.monotonic() + timeout
         while time.monotonic() < end and rclpy.ok():
             rclpy.spin_once(self, timeout_sec=0.2)
-            if set(EXPECTED_ROBOTS).issubset(self._fleet_robots) and self._pos is not None:
+            if not self.missing_topics() and set(EXPECTED_ROBOTS).issubset(self._fleet_robots) and self._pos is not None:
                 return True
         return False
 
@@ -80,15 +100,24 @@ def main() -> int:
     node = SmokeChecker()
     log = node.get_logger()
 
-    # Gate 1: fleet adapter up and reporting both robots.
-    log.info("waiting for /fleet_states to report all robots ...")
-    if not node.wait_for_fleet(FLEET_TIMEOUT):
-        log.error(
-            f"FAIL: fleet not ready. saw robots={sorted(node._fleet_robots)}, "
-            f"{NAV_ROBOT} odom={'yes' if node._pos else 'no'}"
-        )
+    # Gate 1: every handler topic advertised + fleet adapter reporting both robots.
+    log.info("waiting for the RMF stack (handler topics + fleet + odom) ...")
+    ready = node.wait_until_ready(READY_TIMEOUT)
+    present = node.present_topics()
+    for t in REQUIRED_TOPICS:
+        log.info(f"  {'✓' if t in present else '✗'} {t}")
+    if not ready:
+        reasons = []
+        miss = node.missing_topics()
+        if miss:
+            reasons.append(f"missing topics={miss}")
+        if not set(EXPECTED_ROBOTS).issubset(node._fleet_robots):
+            reasons.append(f"fleet robots={sorted(node._fleet_robots)}")
+        if node._pos is None:
+            reasons.append(f"{NAV_ROBOT} odom not received")
+        log.error(f"FAIL: stack not ready after {READY_TIMEOUT:.0f}s ({'; '.join(reasons) or 'unknown'})")
         return 1
-    log.info(f"FLEET gate: /fleet_states reports {sorted(node._fleet_robots)}")
+    log.info(f"STACK gate: handler topics present; /fleet_states reports {sorted(node._fleet_robots)}")
 
     # Gate 2: direct NavigateToPose drives the robot (bridge execution contract).
     if not node._nav.wait_for_server(timeout_sec=SERVER_TIMEOUT):
@@ -116,20 +145,33 @@ def main() -> int:
         log.error("FAIL: NavigateToPose goal was rejected by the action server")
         return 1
 
+    # Wait for the action to FINISH (not just for the robot to start moving), so we
+    # assert the bridge actually drove the robot to the goal.
+    result_future = goal_handle.get_result_async()
     deadline = time.monotonic() + MOVE_TIMEOUT
-    while time.monotonic() < deadline and rclpy.ok():
-        node.spin_for(1.0)
-        moved = math.hypot(node._pos[0] - start[0], node._pos[1] - start[1])
-        if moved >= MOVE_THRESHOLD:
-            log.info(f"NAV gate: {NAV_ROBOT} moved {moved:.2f} m on a direct NavigateToPose")
-            log.info("PASS: RMF stack is up and the bridge executes nav commands")
-            return 0
+    while time.monotonic() < deadline and rclpy.ok() and not result_future.done():
+        rclpy.spin_once(node, timeout_sec=0.2)
 
-    log.error(
-        f"FAIL: {NAV_ROBOT} did not move >= {MOVE_THRESHOLD} m within "
-        f"{MOVE_TIMEOUT:.0f}s of a direct NavigateToPose (pos={node._pos})"
-    )
-    return 1
+    moved = math.hypot(node._pos[0] - start[0], node._pos[1] - start[1])
+    if not result_future.done():
+        log.error(f"FAIL: NavigateToPose did not finish within {MOVE_TIMEOUT:.0f}s " f"(pos={node._pos}, moved {moved:.2f} m)")
+        return 1
+
+    status = result_future.result().status
+    dist = math.hypot(node._pos[0] - NAV_GOAL_XY[0], node._pos[1] - NAV_GOAL_XY[1])
+    if status != GoalStatus.STATUS_SUCCEEDED:
+        log.error(f"FAIL: NavigateToPose ended with status {status} (not SUCCEEDED); pos={node._pos}")
+        return 1
+    if dist > GOAL_TOLERANCE:
+        log.error(
+            f"FAIL: NavigateToPose reported SUCCEEDED but {NAV_ROBOT} is {dist:.2f} m "
+            f"from goal {NAV_GOAL_XY} (> {GOAL_TOLERANCE} m)"
+        )
+        return 1
+
+    log.info(f"NAV gate: {NAV_ROBOT} reached goal (dist {dist:.2f} m, moved {moved:.2f} m), action SUCCEEDED")
+    log.info("PASS: RMF stack is up and the bridge executes nav commands")
+    return 0
 
 
 if __name__ == "__main__":
