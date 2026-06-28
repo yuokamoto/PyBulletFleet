@@ -56,7 +56,7 @@ class FleetHandler:
         for g in goals:
             agent = by_name.get(g.name)
             if agent is None:
-                logger.warn("fleet navigate: unknown robot %r — skipped", g.name)
+                logger.warning("fleet navigate: unknown robot %r — skipped", g.name)
                 continue
             agent.set_goal_pose(Pose.from_yaw(g.x, g.y, 0.0, g.yaw))
             applied += 1
