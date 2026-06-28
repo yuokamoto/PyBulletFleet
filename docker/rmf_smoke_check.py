@@ -105,10 +105,15 @@ def main() -> int:
     for t in REQUIRED_TOPICS:
         log.info(f"  {'✓' if t in present else '✗'} {t}")
     if not ready:
-        log.error(
-            f"FAIL: stack not ready. missing topics={node.missing_topics()}, "
-            f"robots={sorted(node._fleet_robots)}, {NAV_ROBOT} odom={'yes' if node._pos else 'no'}"
-        )
+        reasons = []
+        miss = node.missing_topics()
+        if miss:
+            reasons.append(f"missing topics={miss}")
+        if not set(EXPECTED_ROBOTS).issubset(node._fleet_robots):
+            reasons.append(f"fleet robots={sorted(node._fleet_robots)}")
+        if node._pos is None:
+            reasons.append(f"{NAV_ROBOT} odom not received")
+        log.error(f"FAIL: stack not ready after {READY_TIMEOUT:.0f}s ({'; '.join(reasons) or 'unknown'})")
         return 1
     log.info(f"STACK gate: handler topics present; /fleet_states reports {sorted(node._fleet_robots)}")
 
