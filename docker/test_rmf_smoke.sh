@@ -1,15 +1,16 @@
 #!/bin/bash
 # docker/test_rmf_smoke.sh
 # Reliable RMF integration smoke test. Run inside the bridge container (image
-# pybullet-fleet-rmf:jazzy). Launches the office demo fully headless and asserts:
+# pybullet-fleet-rmf:jazzy). Thin wrapper: launches the office demo fully headless
+# and runs rmf_smoke_check.py, which does all the asserting —
 #   - the RMF protocol topics for every handler are present (door/lift/dispenser/
-#     ingestor/fleet) -> the handlers loaded and are publishing;
-#   - rmf_smoke_check.py passes: the fleet adapter reports all robots, and a
-#     direct NavigateToPose goal drives a robot (bridge execution contract).
+#     ingestor/fleet) -> the handlers loaded;
+#   - the fleet adapter reports all robots, and a direct NavigateToPose goal drives
+#     a robot (bridge execution contract).
 #
 # This is deterministic (no RMF dispatcher / traffic-schedule dependency), so it
-# is the fast blocking RMF gate. The full dispatch->patrol chain is covered
-# separately by test_rmf_dispatch_e2e.sh (also a blocking gate).
+# is the fast blocking RMF gate. The full dispatch chain is covered separately by
+# test_rmf_e2e.sh (also blocking).
 #
 # Mounted into the container (cf. test_integration.sh):
 #   docker compose run --rm --no-deps \
@@ -39,37 +40,11 @@ cleanup() {
 }
 trap cleanup EXIT
 
-echo "--- Office demo launched (pid $LAUNCH_PID); waiting for topics ---"
+echo "--- Office demo launched (pid $LAUNCH_PID); running smoke checker ---"
 
-# Wait until ALL the RMF protocol topics each handler owns are advertised (up to
-# ~120s). Waiting on /fleet_states alone would race the door/lift/workcell
-# handlers, which advertise slightly later — the presence check below could then
-# spuriously fail before they came up.
-REQUIRED_TOPICS="/fleet_states /door_states /lift_states /dispenser_states /ingestor_states"
-for i in $(seq 1 60); do
-    sleep 2
-    TOPICS=$(ros2 topic list 2>/dev/null)
-    all_present=1
-    # -x: exact full-line match, so /fleet_states doesn't match /fleet_states_visualizer
-    for t in $REQUIRED_TOPICS; do
-        echo "$TOPICS" | grep -qxF "$t" || all_present=0
-    done
-    [ "$all_present" -eq 1 ] && break
-done
-
-echo "--- Checking RMF protocol topics (handlers up) ---"
-for topic in $REQUIRED_TOPICS; do
-    if echo "$TOPICS" | grep -qxF "$topic"; then
-        echo "  ✓ $topic"
-    else
-        echo "  ✗ $topic MISSING"
-        echo "--- launch log tail: ---"; tail -n 40 "$LAUNCH_LOG" || true
-        echo "=== RMF integration smoke FAILED ==="
-        exit 1
-    fi
-done
-
-echo "--- Running smoke checker (fleet up + direct NavigateToPose) ---"
+# rmf_smoke_check.py does all readiness waiting itself: it waits for the RMF
+# protocol topics (fleet/door/lift/dispenser/ingestor), the fleet adapter, and
+# odom, then drives a direct NavigateToPose.
 set +e
 python3 /rmf_smoke_check.py
 RC=$?
