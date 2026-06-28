@@ -11,10 +11,11 @@ Gates (all required):
      advertised -> all handlers loaded; and /fleet_states reports every expected
      robot -> the fleet adapter is up.
   2. NAV: a DIRECT NavigateToPose goal to a robot's own
-     ``/<robot>/navigate_to_pose`` action server moves it >= MOVE_THRESHOLD m.
-     This exercises the bridge's RMF-facing action server, controller, PyBullet
-     execution and odom feedback — deterministically (no bidding / no traffic
-     negotiation), so it is stable on both WSL2 and CI.
+     ``/<robot>/navigate_to_pose`` action server completes with SUCCEEDED and the
+     robot ends within GOAL_TOLERANCE of the goal. This exercises the bridge's
+     RMF-facing action server, controller, PyBullet execution and odom feedback —
+     deterministically (no bidding / no traffic negotiation), so it is stable on
+     both WSL2 and CI.
 
 The wrapper (test_rmf_smoke.sh) only launches the demo and runs this checker; all
 readiness waiting lives here.
@@ -27,6 +28,7 @@ import sys
 import time
 
 import rclpy
+from action_msgs.msg import GoalStatus
 from nav_msgs.msg import Odometry
 from nav2_msgs.action import NavigateToPose
 from rclpy.action import ActionClient
@@ -46,7 +48,7 @@ NAV_ROBOT = "tinyRobot2"  # idle at its charger -> motion is unambiguous
 # ~1.5 m off tinyRobot2_charger (20.42, -5.31) toward the room interior (the
 # robot already faces ~pi), comfortably reachable and collision-free.
 NAV_GOAL_XY = (18.9, -5.31)
-MOVE_THRESHOLD = 0.3  # metres; comfortably above odom noise
+GOAL_TOLERANCE = 0.5  # metres; how close to NAV_GOAL_XY counts as "arrived"
 
 READY_TIMEOUT = 150.0  # wait for the demo stack (topics + fleet adapter + odom)
 SERVER_TIMEOUT = 30.0  # wait for the bridge's nav action server
@@ -143,20 +145,33 @@ def main() -> int:
         log.error("FAIL: NavigateToPose goal was rejected by the action server")
         return 1
 
+    # Wait for the action to FINISH (not just for the robot to start moving), so we
+    # assert the bridge actually drove the robot to the goal.
+    result_future = goal_handle.get_result_async()
     deadline = time.monotonic() + MOVE_TIMEOUT
-    while time.monotonic() < deadline and rclpy.ok():
-        node.spin_for(1.0)
-        moved = math.hypot(node._pos[0] - start[0], node._pos[1] - start[1])
-        if moved >= MOVE_THRESHOLD:
-            log.info(f"NAV gate: {NAV_ROBOT} moved {moved:.2f} m on a direct NavigateToPose")
-            log.info("PASS: RMF stack is up and the bridge executes nav commands")
-            return 0
+    while time.monotonic() < deadline and rclpy.ok() and not result_future.done():
+        rclpy.spin_once(node, timeout_sec=0.2)
 
-    log.error(
-        f"FAIL: {NAV_ROBOT} did not move >= {MOVE_THRESHOLD} m within "
-        f"{MOVE_TIMEOUT:.0f}s of a direct NavigateToPose (pos={node._pos})"
-    )
-    return 1
+    moved = math.hypot(node._pos[0] - start[0], node._pos[1] - start[1])
+    if not result_future.done():
+        log.error(f"FAIL: NavigateToPose did not finish within {MOVE_TIMEOUT:.0f}s " f"(pos={node._pos}, moved {moved:.2f} m)")
+        return 1
+
+    status = result_future.result().status
+    dist = math.hypot(node._pos[0] - NAV_GOAL_XY[0], node._pos[1] - NAV_GOAL_XY[1])
+    if status != GoalStatus.STATUS_SUCCEEDED:
+        log.error(f"FAIL: NavigateToPose ended with status {status} (not SUCCEEDED); pos={node._pos}")
+        return 1
+    if dist > GOAL_TOLERANCE:
+        log.error(
+            f"FAIL: NavigateToPose reported SUCCEEDED but {NAV_ROBOT} is {dist:.2f} m "
+            f"from goal {NAV_GOAL_XY} (> {GOAL_TOLERANCE} m)"
+        )
+        return 1
+
+    log.info(f"NAV gate: {NAV_ROBOT} reached goal (dist {dist:.2f} m, moved {moved:.2f} m), action SUCCEEDED")
+    log.info("PASS: RMF stack is up and the bridge executes nav commands")
+    return 0
 
 
 if __name__ == "__main__":
