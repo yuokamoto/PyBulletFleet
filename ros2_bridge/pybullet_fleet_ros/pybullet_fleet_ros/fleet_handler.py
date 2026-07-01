@@ -36,11 +36,9 @@ logger = get_lazy_logger(__name__)
 class FleetHandler:
     """Fleet-wide ROS interface (Pattern 2). One per bridge, not per robot."""
 
-    def __init__(self, node: "Node", sim_core: "MultiRobotSimulationCore", publish_rate: float):
+    def __init__(self, node: "Node", sim_core: "MultiRobotSimulationCore"):
         self._node = node
         self._sim = sim_core
-        self._interval = 1.0 / publish_rate if publish_rate > 0 else 0.0
-        self._since_pub = 0.0
 
         self._states_pub = node.create_publisher(FleetState, "/fleet/states", 10)
         self._goal_sub = node.create_subscription(FleetGoal, "/fleet/navigate", self._on_fleet_goal, 10)
@@ -77,12 +75,8 @@ class FleetHandler:
     # -- state aggregation ----------------------------------------------------
 
     def post_step(self, dt: float, stamp) -> None:
-        """Publish /fleet/states (throttled to the bridge publish rate)."""
-        self._since_pub += dt
-        if self._since_pub < self._interval:
-            return
-        self._since_pub = 0.0
-
+        """Publish /fleet/states — one aggregated message, every post_step (like
+        the per-robot handlers; the sim step rate is already the publish rate)."""
         msg = FleetState(header=Header(stamp=stamp, frame_id="map"))
         for agent in self._sim.agents:
             pose = agent.get_pose()
@@ -97,6 +91,8 @@ class FleetHandler:
                     vy=float(vel[1]),
                     vyaw=float(agent.angular_velocity),
                     moving=bool(agent.is_moving),
+                    battery_soc=float(agent.battery_soc),  # 1.0 when no battery plugin
+                    charging=bool(agent.is_charging),
                 )
             )
         self._states_pub.publish(msg)

@@ -11,6 +11,7 @@ Usage::
 
 import logging
 import threading
+from enum import Enum
 from typing import Any, Dict, List, Type
 
 import rclpy
@@ -36,6 +37,13 @@ from .robot_handler import RobotHandler
 from .robot_handler_base import RobotHandlerBase
 
 logger = logging.getLogger(__name__)
+
+
+class FleetInterface(str, Enum):
+    """How the bridge exposes robots over ROS (config key ``fleet_interface``)."""
+
+    PER_ROBOT = "per_robot"  # O(N) per-robot topics/services (default; RMF, teleop)
+    BATCH = "batch"  # O(1) fleet-level /fleet/states + /fleet/navigate
 
 
 class BridgeNode(Node):
@@ -149,11 +157,23 @@ class BridgeNode(Node):
         # Interface selection: Pattern 1 (per-robot RobotHandler, default) vs
         # Pattern 2 (one fleet-level FleetHandler with O(1) /fleet/* endpoints).
         self._fleet_handler = None
-        self._batch_mode = str(bridge_config.get("fleet_interface", "per_robot")).lower() == "batch"
-        if self._batch_mode:
+        raw_iface = str(bridge_config.get("fleet_interface", FleetInterface.PER_ROBOT.value)).lower()
+        try:
+            self._fleet_interface = FleetInterface(raw_iface)
+        except ValueError:
+            self.get_logger().warning("unknown fleet_interface=%r; falling back to per_robot", raw_iface)
+            self._fleet_interface = FleetInterface.PER_ROBOT
+
+        if self._fleet_interface is FleetInterface.BATCH:
             from .fleet_handler import FleetHandler
 
-            self._fleet_handler = FleetHandler(self, self.sim, publish_rate)
+            self._fleet_handler = FleetHandler(self, self.sim)
+            self.get_logger().warning(
+                "fleet_interface=batch: per-robot ROS interfaces are DISABLED "
+                "(no per-robot odom / cmd_vel / joint_states / navigate_to_pose / attach / "
+                "battery). RMF and per-robot teleop require fleet_interface=per_robot. "
+                "The fleet is exposed via /fleet/states + /fleet/navigate."
+            )
         else:
             # Register per-robot ROS handlers for all agents already in the sim
             for agent in self.sim.agents:
@@ -291,7 +311,7 @@ class BridgeNode(Node):
 
     def _on_agent_spawned(self, agent, **kwargs):
         """Auto-register RobotHandler when a new agent spawns."""
-        if self._batch_mode:
+        if self._fleet_interface is FleetInterface.BATCH:
             return  # Pattern 2: the FleetHandler picks up new agents automatically
         if agent.object_id not in self._handlers:
             self._register_robot_handler(agent)

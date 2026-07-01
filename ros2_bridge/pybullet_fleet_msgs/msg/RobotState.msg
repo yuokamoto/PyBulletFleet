@@ -8,3 +8,5 @@ float64 vx     # world-frame linear velocity (m/s)
 float64 vy
 float64 vyaw   # angular velocity (rad/s)
 bool moving
+float64 battery_soc  # state of charge [0..1] (1.0 when no battery plugin)
+bool charging

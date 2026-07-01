@@ -103,7 +103,7 @@ robots. (Default is `per_robot`, the per-robot interface above.)
 
 | Endpoint | Type | Description |
 |----------|------|-------------|
-| `/fleet/states` | `pybullet_fleet_msgs/FleetState` (topic) | One aggregated message — `RobotState[]` (name, x/y/yaw, vx/vy/vyaw, moving) for every robot |
+| `/fleet/states` | `pybullet_fleet_msgs/FleetState` (topic) | One aggregated message — `RobotState[]` (name, x/y/yaw, vx/vy/vyaw, moving, battery_soc, charging) for every robot |
 | `/fleet/navigate` | `pybullet_fleet_msgs/FleetNavigate` (service) | Batch goals (`RobotGoal[]`); returns how many matched |
 | `/fleet/navigate` | `pybullet_fleet_msgs/FleetGoal` (topic) | Same batch goals, fire-and-forget |
 
@@ -111,6 +111,15 @@ Pair with a core `batch_controller` (`batch_omni` / `batch_differential`) for
 vectorized kinematics. A 500-robot example config (grid spawn + `batch_omni` +
 `fleet_interface: batch`) lives at
 [`config/bridge_batch500.yaml`](pybullet_fleet_ros/config/bridge_batch500.yaml).
+
+> **Batch mode replaces the per-robot interface — it does not add to it.** With
+> `fleet_interface: batch` the bridge creates **no** per-robot topics/services
+> (no per-robot odom, cmd_vel, joint_states, navigate_to_pose, attach, or
+> battery), because keeping O(N) publishers alive would defeat the O(1) goal.
+> **RMF and per-robot teleop therefore require `fleet_interface: per_robot`**
+> (the default). The bridge logs a warning at startup when batch mode is active.
+> A future hybrid (batch state publishers + per-robot command subscribers) is
+> tracked with the Handler Decomposition work.
 
 ---
 
