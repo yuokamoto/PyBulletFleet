@@ -39,6 +39,8 @@ class FleetHandler:
     def __init__(self, node: "Node", sim_core: "MultiRobotSimulationCore"):
         self._node = node
         self._sim = sim_core
+        off = getattr(node, "rmf_frame_offset", (0.0, 0.0))
+        self._rmf_offset = (float(off[0]), float(off[1]))
 
         self._states_pub = node.create_publisher(FleetState, "/fleet/states", 10)
         self._goal_sub = node.create_subscription(FleetGoal, "/fleet/navigate", self._on_fleet_goal, 10)
@@ -46,6 +48,14 @@ class FleetHandler:
         logger.info("FleetHandler up: /fleet/states publisher + /fleet/navigate service & topic")
 
     # -- goal injection (shared by the service and the topic) -----------------
+
+    def _shift_xy(self, x: float, y: float, sign: int) -> tuple:
+        """Apply the sim/RMF frame offset to a planar position.
+
+        ``sign=+1`` converts sim->RMF for published state, while ``sign=-1``
+        converts RMF->sim for received goals.
+        """
+        return x + sign * self._rmf_offset[0], y + sign * self._rmf_offset[1]
 
     def _set_fleet_goals(self, goals) -> int:
         """Apply each goal to the robot whose name matches; return #applied."""
@@ -56,7 +66,9 @@ class FleetHandler:
             if agent is None:
                 logger.warning("fleet navigate: unknown robot %r — skipped", g.name)
                 continue
-            agent.set_goal_pose(Pose.from_yaw(g.x, g.y, 0.0, g.yaw))
+            sim_x, sim_y = self._shift_xy(float(g.x), float(g.y), -1)
+            current_pose = agent.get_pose()
+            agent.set_goal_pose(Pose.from_yaw(sim_x, sim_y, current_pose.z, float(g.yaw)))
             applied += 1
         return applied
 
@@ -81,11 +93,12 @@ class FleetHandler:
         for agent in self._sim.agents:
             pose = agent.get_pose()
             vel = agent.velocity  # world-frame [vx, vy, vz]
+            rmf_x, rmf_y = self._shift_xy(float(pose.x), float(pose.y), +1)
             msg.robots.append(
                 RobotState(
                     name=agent.name,
-                    x=float(pose.x),
-                    y=float(pose.y),
+                    x=rmf_x,
+                    y=rmf_y,
                     yaw=float(pose.yaw),
                     vx=float(vel[0]),
                     vy=float(vel[1]),
