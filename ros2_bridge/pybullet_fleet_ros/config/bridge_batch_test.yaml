@@ -1,0 +1,38 @@
+# Bridge config for the Pattern 2 (batch API) smoke test (docker/test_batch.sh).
+#
+# fleet_interface: batch -> the bridge exposes the whole fleet via /fleet/states
+# and /fleet/navigate instead of per-robot topics. Three omnidirectional robots.
+
+simulation:
+  gui: false
+  physics: false
+
+fleet_interface: batch
+
+entities:
+  - name: robot0
+    urdf_path: "robots/mobile_robot.urdf"
+    pose: [0.0, 0.0, 0.05]
+    yaw: 0.0
+    motion_mode: "omnidirectional"
+    controller:
+      type: "omni"
+      max_linear_vel: 2.0
+
+  - name: robot1
+    urdf_path: "robots/mobile_robot.urdf"
+    pose: [2.0, 0.0, 0.05]
+    yaw: 0.0
+    motion_mode: "omnidirectional"
+    controller:
+      type: "omni"
+      max_linear_vel: 2.0
+
+  - name: robot2
+    urdf_path: "robots/mobile_robot.urdf"
+    pose: [4.0, 0.0, 0.05]
+    yaw: 0.0
+    motion_mode: "omnidirectional"
+    controller:
+      type: "omni"
+      max_linear_vel: 2.0

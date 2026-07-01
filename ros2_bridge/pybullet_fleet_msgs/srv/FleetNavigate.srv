@@ -1,0 +1,7 @@
+# Batch navigation request (Pattern 2). Sets a goal pose for each named robot.
+# Same effect as publishing FleetGoal to /fleet/navigate, but with an ack.
+RobotGoal[] goals
+---
+bool accepted
+uint32 num_set    # number of goals applied (names that matched a fleet robot)
+string message

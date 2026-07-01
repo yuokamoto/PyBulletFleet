@@ -1,0 +1,33 @@
+# Pattern 2 scale demo: 500 robots over ROS via the batch API.
+#
+# Combines three pieces so the fleet stays O(1) on both the sim and ROS sides:
+#   - grid: count=500           -> compact 500-robot spawn (no 500 YAML entries)
+#   - batch_controller: batch_omni  -> vectorized kinematics in the core
+#   - fleet_interface: batch    -> one /fleet/states topic + /fleet/navigate
+#                                  (service & topic), instead of 500x per-robot.
+#
+# Run (headless):
+#   ros2 run pybullet_fleet_ros bridge_node --ros-args \
+#     -p config_yaml:=.../config/bridge_batch500.yaml -p gui:=false
+# Then: ros2 topic echo /fleet/states  (one message lists all 500 robots)
+#       ros2 service call /fleet/navigate pybullet_fleet_msgs/srv/FleetNavigate ...
+
+simulation:
+  gui: false
+  physics: false
+
+fleet_interface: batch
+
+entities:
+  - name: bot
+    urdf_path: "robots/mobile_robot.urdf"
+    motion_mode: "omnidirectional"
+    batch_controller: "batch_omni"
+    controller:
+      type: "omni"
+      max_linear_vel: 2.0
+    grid:
+      count: 500
+      spacing: [2.0, 2.0]
+      columns: 25
+      offset: [0.0, 0.0, 0.05]
