@@ -4,7 +4,7 @@ A single, simulation-level handler that exposes the whole fleet through O(1) ROS
 endpoints instead of O(N) per-robot topics:
 
 - ``/fleet/states`` (FleetState) — one aggregated message with every robot's
-  pose/velocity/moving flag, published at the bridge's publish rate.
+  pose/velocity/moving flag, published on every simulation POST_STEP event.
 - ``/fleet/navigate`` — batch navigation goals, offered both ways over the same
   shared logic:
     * service  (FleetNavigate)  — apply goals, return how many matched (with ack);
@@ -74,7 +74,10 @@ class FleetHandler:
 
     def _on_fleet_goal(self, msg: FleetGoal) -> None:
         n = self._set_fleet_goals(msg.goals)
-        logger.info("fleet navigate (topic): %d/%d goals applied", n, len(msg.goals))
+        if n == len(msg.goals):
+            logger.debug("fleet navigate (topic): %d/%d goals applied", n, len(msg.goals))
+        else:
+            logger.warning("fleet navigate (topic): only %d/%d goals applied", n, len(msg.goals))
 
     def _on_fleet_navigate(self, request, response):
         n = self._set_fleet_goals(request.goals)
@@ -88,7 +91,7 @@ class FleetHandler:
 
     def post_step(self, dt: float, stamp) -> None:
         """Publish /fleet/states — one aggregated message, every post_step (like
-        the per-robot handlers; the sim step rate is already the publish rate)."""
+        the per-robot handlers)."""
         msg = FleetState(header=Header(stamp=stamp, frame_id="map"))
         for agent in self._sim.agents:
             pose = agent.get_pose()
