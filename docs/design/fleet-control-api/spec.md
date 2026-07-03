@@ -119,7 +119,8 @@ fleet_api:
 
 per_robot_api:
   enabled: true
-  state_publishers: false   # odom, TF, joint_states, diagnostics, battery_state
+  state_publishers: false   # odom, joint_states, diagnostics, battery_state
+  tf: true                  # per-robot TF broadcast
   command_topics: true      # cmd_vel, goal_pose, path, joint commands
   services: true            # toggle_attach, attach_object, set_charging
   actions: false            # NavigateToPose, FollowPath, FollowJointTrajectory, ExecuteAction

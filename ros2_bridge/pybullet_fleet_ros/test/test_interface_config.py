@@ -77,11 +77,25 @@ def test_invalid_api_sections_raise_clear_errors():
         raise AssertionError("invalid fleet_api section was accepted")
 
     try:
+        resolve_bridge_api_config({"fleet_api": None})
+    except ValueError as exc:
+        assert "Expected 'fleet_api' to be a mapping" in str(exc)
+    else:
+        raise AssertionError("null fleet_api section was accepted")
+
+    try:
         resolve_bridge_api_config({"per_robot_api": ["robot0"]})
     except ValueError as exc:
         assert "Expected 'per_robot_api' to be a mapping" in str(exc)
     else:
         raise AssertionError("invalid per_robot_api section was accepted")
+
+    try:
+        resolve_bridge_api_config({"per_robot_api": None})
+    except ValueError as exc:
+        assert "Expected 'per_robot_api' to be a mapping" in str(exc)
+    else:
+        raise AssertionError("null per_robot_api section was accepted")
 
 
 def test_robot_include_exclude_filters():

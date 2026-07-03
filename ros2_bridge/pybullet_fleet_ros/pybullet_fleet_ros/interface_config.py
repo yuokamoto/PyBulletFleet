@@ -100,9 +100,9 @@ def _per_robot_api_from_dict(config: Mapping[str, Any], base: PerRobotApiConfig)
 
 
 def _optional_mapping_section(config: Mapping[str, Any], key: str) -> Mapping[str, Any] | None:
-    value = config.get(key)
-    if value is None:
+    if key not in config:
         return None
+    value = config[key]
     if not isinstance(value, Mapping):
         raise ValueError(f"Expected '{key}' to be a mapping, got {type(value).__name__}")
     return value
