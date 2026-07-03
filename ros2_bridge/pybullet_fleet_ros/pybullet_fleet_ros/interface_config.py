@@ -7,8 +7,9 @@ ROS workspace. BridgeNode can use it to translate explicit ``fleet_api`` /
 
 from __future__ import annotations
 
+from collections.abc import Mapping as MappingABC
 from dataclasses import dataclass, field
-from typing import Any, List, Mapping
+from typing import Any, Mapping
 
 from pybullet_fleet.config_utils import config_get_bool, config_get_str_list
 
@@ -37,8 +38,8 @@ class PerRobotApiConfig:
     command_topics: bool = True
     services: bool = True
     actions: bool = True
-    include_robots: List[str] = field(default_factory=list)
-    exclude_robots: List[str] = field(default_factory=list)
+    include_robots: tuple[str, ...] = field(default_factory=tuple)
+    exclude_robots: tuple[str, ...] = field(default_factory=tuple)
 
     def robot_enabled(self, name: str) -> bool:
         """Return whether any per-robot API may be created for *name*."""
@@ -93,8 +94,8 @@ def _per_robot_api_from_dict(config: Mapping[str, Any], base: PerRobotApiConfig)
         command_topics=config_get_bool(config, "command_topics", base.command_topics),
         services=config_get_bool(config, "services", base.services),
         actions=config_get_bool(config, "actions", base.actions),
-        include_robots=config_get_str_list(config, "include_robots", base.include_robots),
-        exclude_robots=config_get_str_list(config, "exclude_robots", base.exclude_robots),
+        include_robots=tuple(config_get_str_list(config, "include_robots", list(base.include_robots))),
+        exclude_robots=tuple(config_get_str_list(config, "exclude_robots", list(base.exclude_robots))),
     )
 
 
@@ -102,7 +103,7 @@ def _optional_mapping_section(config: Mapping[str, Any], key: str) -> Mapping[st
     value = config.get(key)
     if value is None:
         return None
-    if not isinstance(value, Mapping):
+    if not isinstance(value, MappingABC):
         raise ValueError(f"Expected '{key}' to be a mapping, got {type(value).__name__}")
     return value
 

@@ -8,6 +8,7 @@ import importlib
 import inspect
 import os
 from collections.abc import Iterable as IterableABC
+from collections.abc import Mapping as MappingABC
 from enum import Enum
 from typing import Any, Callable, Dict, List, Mapping, Optional, Type, TypeVar, Union
 
@@ -112,7 +113,7 @@ def config_get_str_list(config: Mapping[str, Any], key: str, default: Optional[L
         return fallback
     if isinstance(value, str):
         return [value]
-    if isinstance(value, Mapping) or not isinstance(value, IterableABC):
+    if isinstance(value, MappingABC) or not isinstance(value, IterableABC):
         raise ValueError(f"Expected config key '{key}' to be a string or sequence of strings, " f"got {type(value).__name__}")
     return [str(v) for v in value]
 

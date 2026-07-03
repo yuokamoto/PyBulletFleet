@@ -94,6 +94,8 @@ def test_robot_include_exclude_filters():
         }
     )
 
+    assert cfg.per_robot_api.include_robots == ("robot0", "robot1")
+    assert cfg.per_robot_api.exclude_robots == ("robot1",)
     assert cfg.per_robot_api.robot_enabled("robot0") is True
     assert cfg.per_robot_api.robot_enabled("robot1") is False
     assert cfg.per_robot_api.robot_enabled("robot2") is False
