@@ -7,9 +7,9 @@ ROS workspace. BridgeNode can use it to translate explicit ``fleet_api`` /
 
 from __future__ import annotations
 
-from collections.abc import Mapping as MappingABC
+from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import Any, Mapping
+from typing import Any
 
 from pybullet_fleet.config_utils import config_get_bool, config_get_str_list
 
@@ -103,7 +103,7 @@ def _optional_mapping_section(config: Mapping[str, Any], key: str) -> Mapping[st
     value = config.get(key)
     if value is None:
         return None
-    if not isinstance(value, MappingABC):
+    if not isinstance(value, Mapping):
         raise ValueError(f"Expected '{key}' to be a mapping, got {type(value).__name__}")
     return value
 
