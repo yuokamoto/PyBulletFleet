@@ -7,8 +7,9 @@ import dataclasses
 import importlib
 import inspect
 import os
+from collections.abc import Iterable as IterableABC
 from enum import Enum
-from typing import Any, Callable, Dict, List, Optional, Type, TypeVar, Union
+from typing import Any, Callable, Dict, List, Mapping, Optional, Type, TypeVar, Union
 
 # Root for bundled assets (robots/, config/, mesh/), which ship inside the
 # package — so this is the package directory itself.
@@ -74,6 +75,46 @@ def merge_configs(base_config: Dict[str, Any], override_config: Dict[str, Any]) 
             merged[key] = value
 
     return merged
+
+
+def config_get_bool(config: Mapping[str, Any], key: str, default: bool) -> bool:
+    """Read a bool-like value from a config mapping.
+
+    Accepts YAML-native booleans and common string forms such as ``"true"``,
+    ``"false"``, ``"yes"``, ``"no"``, ``"1"``, and ``"0"``. YAML integer
+    values ``0`` and ``1`` are also accepted. Unknown values raise
+    ``ValueError`` so typos do not silently enable a feature.
+    """
+    value = config.get(key, default)
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        lowered = value.strip().lower()
+        if lowered in {"true", "1", "yes", "on"}:
+            return True
+        if lowered in {"false", "0", "no", "off"}:
+            return False
+        raise ValueError(f"Expected config key '{key}' to be a boolean string, got {value!r}")
+    if isinstance(value, int) and value in (0, 1):
+        return bool(value)
+    raise ValueError(f"Expected config key '{key}' to be a boolean value, got {type(value).__name__}")
+
+
+def config_get_str_list(config: Mapping[str, Any], key: str, default: Optional[List[str]] = None) -> List[str]:
+    """Read a string list from a config mapping.
+
+    A single string becomes a one-element list. ``None`` and missing keys return
+    ``default`` when provided, otherwise an empty list.
+    """
+    fallback = [] if default is None else list(default)
+    value = config.get(key, fallback)
+    if value is None:
+        return fallback
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, Mapping) or not isinstance(value, IterableABC):
+        raise ValueError(f"Expected config key '{key}' to be a string or sequence of strings, " f"got {type(value).__name__}")
+    return [str(v) for v in value]
 
 
 def load_config(config_paths: Union[str, List[str]]) -> Dict[str, Any]:

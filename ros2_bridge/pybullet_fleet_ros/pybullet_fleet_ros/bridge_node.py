@@ -31,6 +31,7 @@ from pybullet_fleet.types import MotionMode
 from .bridge_plugin import BridgePlugin
 from .conversions import sim_time_to_ros_time
 from .handler_registry import HandlerMap, load_handler_map_from_config, resolve_handler_classes
+from .interface_config import BridgeApiConfig, resolve_bridge_api_config
 from .param_utils import get_bool_param, get_float_param
 from .robot_handler import RobotHandler
 from .robot_handler_base import RobotHandlerBase
@@ -146,9 +147,21 @@ class BridgeNode(Node):
         self._last_clock_time: float = -1.0
         self._clock_min_interval: float = 1.0 / publish_rate  # throttle /clock
 
-        # Register ROS handlers for all agents already in the sim
+        # Interface selection from explicit fleet_api/per_robot_api sections.
+        self._api_config: BridgeApiConfig = resolve_bridge_api_config(bridge_config)
+        if not self._api_config.per_robot_api.enabled:
+            self.get_logger().warning("per_robot_api disabled: no per-robot ROS handlers will be created")
+        elif self._api_config.per_robot_api.any_group_enabled:
+            self._warn_if_partial_per_robot_groups()
+        else:
+            self.get_logger().warning(
+                "per_robot_api enabled but all per-robot groups are disabled: " "no per-robot ROS handlers will be created"
+            )
+
+        # Register ROS handlers for all enabled agents already in the sim.
         for agent in self.sim.agents:
-            self._register_robot_handler(agent)
+            if self._should_create_per_robot_handler(agent):
+                self._register_robot_handler(agent)
         actual_count = len(self.sim.agents)
 
         # Bridge plugins (singleton handlers loaded from config)
@@ -229,6 +242,32 @@ class BridgeNode(Node):
     # Robot handler registration
     # ------------------------------------------------------------------
 
+    def _should_create_per_robot_handler(self, agent: Agent) -> bool:
+        """Return whether the current config allows a per-robot handler."""
+        return self._api_config.per_robot_api.robot_enabled(agent.name)
+
+    def _warn_if_partial_per_robot_groups(self) -> None:
+        """Warn when config asks for group-level control before decomposition.
+
+        RobotHandler currently creates all per-robot ROS resources as one unit.
+        The config is parsed now so future profiles are stable, but group-level
+        resource suppression requires the Handler Decomposition work.
+        """
+        per_robot = self._api_config.per_robot_api
+        groups = (
+            per_robot.state_publishers,
+            per_robot.tf,
+            per_robot.command_topics,
+            per_robot.services,
+            per_robot.actions,
+        )
+        if all(groups) or not any(groups):
+            return
+        self.get_logger().warning(
+            "partial per_robot_api groups are configured, but RobotHandler still "
+            "creates all per-robot interfaces until handler decomposition is implemented"
+        )
+
     def _register_robot_handler(self, agent: Agent) -> None:
         """Create a RobotHandler for *agent* and register it.
 
@@ -263,7 +302,7 @@ class BridgeNode(Node):
         # from_params emits AGENT_SPAWNED at the end of construction, which
         # _on_agent_spawned already turns into a RobotHandler. Register here only
         # if that didn't happen (idempotent — avoids a double registration).
-        if agent.object_id not in self._handlers:
+        if agent.object_id not in self._handlers and self._should_create_per_robot_handler(agent):
             self._register_robot_handler(agent)
         self.get_logger().info(f"Spawned robot '{agent.name}' (id={agent.object_id})")
         return agent
@@ -271,17 +310,23 @@ class BridgeNode(Node):
     def remove_robot(self, object_id: int) -> bool:
         """Remove a robot and its ROS interfaces."""
         handlers = self._handlers.pop(object_id, None)
-        if handlers is None:
+        if handlers:
+            agent = handlers[0].agent
+        else:
+            agent = next((a for a in self.sim.agents if a.object_id == object_id), None)
+        if agent is None:
             return False
-        agent = handlers[0].agent
-        for h in handlers:
-            h.destroy()
+        if handlers:
+            for h in handlers:
+                h.destroy()
         self.sim.remove_object(agent)
         self.get_logger().info(f"Removed robot '{agent.name}' (id={object_id})")
         return True
 
     def _on_agent_spawned(self, agent, **kwargs):
         """Auto-register RobotHandler when a new agent spawns."""
+        if not self._should_create_per_robot_handler(agent):
+            return
         if agent.object_id not in self._handlers:
             self._register_robot_handler(agent)
             n = len(self._handlers[agent.object_id])
