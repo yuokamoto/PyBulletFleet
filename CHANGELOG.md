@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Breaking Changes
+
+- ROS 2 bridge internals: `RobotHandler` is now a facade over dedicated
+  interface groups. Private callback overrides such as `_cmd_vel_cb`,
+  `_navigate_execute`, `_execute_action_execute`, and service callbacks are not
+  treated as extension points. Custom integrations should use the public ROS
+  topics/actions/services or compose/replace the relevant interface group
+  instead.
+
 ## v0.6.0 (2026-06-26)
 
 ### Bug Fixes

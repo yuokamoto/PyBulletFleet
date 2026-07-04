@@ -15,21 +15,40 @@ def test_robot_handler_creates_publishers(mock_node, mock_agent):
     """RobotHandler creates odom, joint_states publishers for a mobile robot."""
     from pybullet_fleet_ros.robot_handler import RobotHandler
 
-    RobotHandler(mock_node, mock_agent)
+    handler = RobotHandler(mock_node, mock_agent)
 
     topic_names = [call[0][1] for call in mock_node.create_publisher.call_args_list]
     assert "/test_robot/odom" in topic_names
     assert "/test_robot/joint_states" in topic_names
+    assert any(group.__class__.__name__ == "StatePublisherHandler" for group in handler._interface_groups)
 
 
 def test_robot_handler_creates_cmd_vel_sub(mock_node, mock_agent):
     """RobotHandler subscribes to cmd_vel."""
     from pybullet_fleet_ros.robot_handler import RobotHandler
 
-    RobotHandler(mock_node, mock_agent)
+    handler = RobotHandler(mock_node, mock_agent)
 
     sub_topics = [call[0][1] for call in mock_node.create_subscription.call_args_list]
     assert "/test_robot/cmd_vel" in sub_topics
+    assert any(group.__class__.__name__ == "CommandTopicHandler" for group in handler._interface_groups)
+
+
+def test_robot_handler_creates_all_interface_groups(mock_node, mock_agent):
+    """RobotHandler remains a facade over all per-robot interface groups."""
+    from pybullet_fleet_ros.robot_handler import RobotHandler
+
+    handler = RobotHandler(mock_node, mock_agent)
+
+    group_names = [group.__class__.__name__ for group in handler._interface_groups]
+    assert group_names == [
+        "StatePublisherHandler",
+        "TfPublisherHandler",
+        "CommandTopicHandler",
+        "NavigationActionHandler",
+        "ExecuteActionHandler",
+        "ServiceHandler",
+    ]
 
 
 def test_cmd_vel_calls_velocity_controller(mock_node, mock_agent):
