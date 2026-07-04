@@ -34,8 +34,8 @@ from pybullet_fleet.fleet_api import (
     RobotGoalCommand2D,
     RobotGoalCommand3D,
     RobotJointCommand,
-    RobotStateSnapshot2D,
-    RobotStateSnapshot3D,
+    RobotState2D,
+    RobotState3D,
 )
 
 # Robot/Agent management
@@ -153,8 +153,8 @@ __all__ = [
     "Path",
     # Fleet API
     "FLEET_COMMAND_EVENT",
-    "RobotStateSnapshot2D",
-    "RobotStateSnapshot3D",
+    "RobotState2D",
+    "RobotState3D",
     "RobotGoalCommand2D",
     "RobotGoalCommand3D",
     "RobotJointCommand",

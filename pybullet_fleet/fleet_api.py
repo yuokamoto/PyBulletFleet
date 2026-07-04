@@ -26,7 +26,7 @@ Quat = tuple[float, float, float, float]
 
 
 @dataclass(frozen=True)
-class RobotStateSnapshot2D:
+class RobotState2D:
     """Minimal planar state for one robot."""
 
     name: str
@@ -41,7 +41,7 @@ class RobotStateSnapshot2D:
 
 
 @dataclass(frozen=True)
-class RobotStateSnapshot3D:
+class RobotState3D:
     """Minimal 3D state for one robot."""
 
     name: str
@@ -137,21 +137,21 @@ class CommandEvent:
 
 
 class FleetStateProvider:
-    """Generate deterministic fleet state snapshots from a simulation core."""
+    """Generate deterministic fleet state values from a simulation core."""
 
     def __init__(self, sim_core: Any) -> None:
         self.sim_core = sim_core
 
-    def get_states(self) -> list[RobotStateSnapshot3D]:
-        """Return 3D snapshots for all agents.
+    def get_states(self) -> list[RobotState3D]:
+        """Return 3D states for all agents.
 
         ``get_states()`` uses the more general 3D representation by default.
         Call ``get_states_2d()`` when a planar transport wants a smaller model.
         """
         return self.get_states_3d()
 
-    def get_states_2d(self, names: Iterable[str] | None = None) -> list[RobotStateSnapshot2D]:
-        """Return planar snapshots for all or selected agents."""
+    def get_states_2d(self, names: Iterable[str] | None = None) -> list[RobotState2D]:
+        """Return planar states for all or selected agents."""
         selected = _normalize_names(names)
         states = []
         for agent in _iter_agents(self.sim_core):
@@ -161,7 +161,7 @@ class FleetStateProvider:
             pose = agent.get_pose()
             velocity = _vec3(getattr(agent, "velocity", (0.0, 0.0, 0.0)))
             states.append(
-                RobotStateSnapshot2D(
+                RobotState2D(
                     name=name,
                     object_id=_agent_object_id(agent),
                     position=(float(pose.x), float(pose.y)),
@@ -175,8 +175,8 @@ class FleetStateProvider:
             )
         return states
 
-    def get_states_3d(self, names: Iterable[str] | None = None) -> list[RobotStateSnapshot3D]:
-        """Return 3D snapshots for all or selected agents."""
+    def get_states_3d(self, names: Iterable[str] | None = None) -> list[RobotState3D]:
+        """Return 3D states for all or selected agents."""
         selected = _normalize_names(names)
         states = []
         for agent in _iter_agents(self.sim_core):
@@ -185,7 +185,7 @@ class FleetStateProvider:
                 continue
             pose = agent.get_pose()
             states.append(
-                RobotStateSnapshot3D(
+                RobotState3D(
                     name=name,
                     object_id=_agent_object_id(agent),
                     position=_vec3(pose.position),

@@ -103,8 +103,8 @@ Purpose: define the transport-independent API used by ROS, plugins, and replay.
 Tasks:
 
 - Add Python data structures:
-  - `RobotStateSnapshot2D`
-  - `RobotStateSnapshot3D`
+  - `RobotState2D`
+  - `RobotState3D`
   - `RobotGoalCommand2D`
   - `RobotGoalCommand3D`
   - `RobotJointCommand`
