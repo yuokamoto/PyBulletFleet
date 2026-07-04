@@ -97,3 +97,40 @@ def test_register_robot_handler_passes_interface_config_to_robot_handler_subclas
     assert isinstance(handler, CustomRobotHandler)
     assert handler.interface_config is cfg
     assert handler.tf_broadcaster is bridge._tf_broadcaster
+
+
+def test_register_robot_handler_skips_interface_config_for_legacy_subclass():
+    """Legacy RobotHandler subclasses without the new kwarg still construct."""
+    from pybullet_fleet.types import MotionMode
+    from pybullet_fleet_ros.bridge_node import BridgeNode
+    from pybullet_fleet_ros.interface_config import PerRobotApiConfig
+    from pybullet_fleet_ros.robot_handler import RobotHandler
+
+    class LegacyRobotHandler(RobotHandler):
+        def __init__(self, node, agent, tf_broadcaster=None):
+            self.node = node
+            self.agent = agent
+            self.tf_broadcaster = tf_broadcaster
+
+        def destroy(self):
+            pass
+
+    cfg = PerRobotApiConfig(command_topics=False)
+    bridge = BridgeNode.__new__(BridgeNode)
+    bridge._api_config = SimpleNamespace(per_robot_api=cfg)
+    bridge._handler_map = {}
+    bridge._handlers = {}
+    bridge._tf_broadcaster = object()
+    bridge.handler_class = LegacyRobotHandler
+
+    agent = MagicMock()
+    agent.name = "robot0"
+    agent.object_id = 1
+    agent._controller = object()
+    agent._motion_mode = MotionMode.DIFFERENTIAL
+
+    BridgeNode._register_robot_handler(bridge, agent)
+
+    handler = bridge._handlers[agent.object_id][0]
+    assert isinstance(handler, LegacyRobotHandler)
+    assert handler.tf_broadcaster is bridge._tf_broadcaster

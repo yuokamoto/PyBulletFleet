@@ -9,6 +9,7 @@ Usage::
         --ros-args -p config_yaml:=/path/to/config.yaml
 """
 
+import inspect
 import logging
 import threading
 from typing import Any, Dict, List, Type
@@ -37,6 +38,15 @@ from .robot_handler import RobotHandler
 from .robot_handler_base import RobotHandlerBase
 
 logger = logging.getLogger(__name__)
+
+
+def _handler_accepts_interface_config(handler_cls: Type[RobotHandlerBase]) -> bool:
+    """Return whether *handler_cls* can accept ``interface_config``."""
+    try:
+        params = inspect.signature(handler_cls).parameters.values()
+    except (TypeError, ValueError):
+        return False
+    return any(param.name == "interface_config" or param.kind is inspect.Parameter.VAR_KEYWORD for param in params)
 
 
 class BridgeNode(Node):
@@ -263,7 +273,7 @@ class BridgeNode(Node):
         handlers = []
         for cls in classes:
             kwargs = {"tf_broadcaster": self._tf_broadcaster}
-            if issubclass(cls, RobotHandler):
+            if issubclass(cls, RobotHandler) and _handler_accepts_interface_config(cls):
                 kwargs["interface_config"] = self._api_config.per_robot_api
             handler = cls(self, agent, **kwargs)
             handlers.append(handler)
