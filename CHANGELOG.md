@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- Added transport-neutral fleet API primitives in `pybullet_fleet.fleet_api`,
+  including fleet state snapshots, navigation and joint command dataclasses,
+  `FleetStateProvider`, and `FleetCommandDispatcher`.
+
 ### Changed
 
 - ROS 2 bridge `per_robot_api` group switches now control which per-robot
