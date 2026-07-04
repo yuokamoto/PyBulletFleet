@@ -263,7 +263,7 @@ class BridgeNode(Node):
         handlers = []
         for cls in classes:
             kwargs = {"tf_broadcaster": self._tf_broadcaster}
-            if cls is RobotHandler:
+            if issubclass(cls, RobotHandler):
                 kwargs["interface_config"] = self._api_config.per_robot_api
             handler = cls(self, agent, **kwargs)
             handlers.append(handler)

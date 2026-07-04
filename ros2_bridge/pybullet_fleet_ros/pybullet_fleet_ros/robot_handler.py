@@ -85,7 +85,7 @@ class RobotHandler(RobotHandlerBase):
         off = getattr(node, "rmf_frame_offset", (0.0, 0.0))
         self._rmf_offset = (float(off[0]), float(off[1]))
 
-        api = interface_config or PerRobotApiConfig()
+        api = interface_config if interface_config is not None else PerRobotApiConfig()
         self._interface_groups = []
         self._state_publishers = None
         self._tf_publisher = None

@@ -3,6 +3,9 @@
 These tests require ROS 2.  Run inside Docker or with a sourced ROS workspace.
 """
 
+from types import SimpleNamespace
+from unittest.mock import MagicMock
+
 import tempfile
 
 import pytest
@@ -55,3 +58,42 @@ def test_load_yaml_config_with_robots():
 
     result = load_yaml_config(config_path)
     assert len(result["entities"]) == 2
+
+
+def test_register_robot_handler_passes_interface_config_to_robot_handler_subclass():
+    """RobotHandler subclasses receive the standard per-robot group config."""
+    from pybullet_fleet.types import MotionMode
+    from pybullet_fleet_ros.bridge_node import BridgeNode
+    from pybullet_fleet_ros.interface_config import PerRobotApiConfig
+    from pybullet_fleet_ros.robot_handler import RobotHandler
+
+    class CustomRobotHandler(RobotHandler):
+        def __init__(self, node, agent, tf_broadcaster=None, interface_config=None):
+            self.node = node
+            self.agent = agent
+            self.tf_broadcaster = tf_broadcaster
+            self.interface_config = interface_config
+
+        def destroy(self):
+            pass
+
+    cfg = PerRobotApiConfig(command_topics=False)
+    bridge = BridgeNode.__new__(BridgeNode)
+    bridge._api_config = SimpleNamespace(per_robot_api=cfg)
+    bridge._handler_map = {}
+    bridge._handlers = {}
+    bridge._tf_broadcaster = object()
+    bridge.handler_class = CustomRobotHandler
+
+    agent = MagicMock()
+    agent.name = "robot0"
+    agent.object_id = 1
+    agent._controller = object()
+    agent._motion_mode = MotionMode.DIFFERENTIAL
+
+    BridgeNode._register_robot_handler(bridge, agent)
+
+    handler = bridge._handlers[agent.object_id][0]
+    assert isinstance(handler, CustomRobotHandler)
+    assert handler.interface_config is cfg
+    assert handler.tf_broadcaster is bridge._tf_broadcaster
