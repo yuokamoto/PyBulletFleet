@@ -158,6 +158,65 @@ class TestLoadConfig:
         assert result == {}
 
 
+class TestConfigValueHelpers:
+    """Typed config value helpers."""
+
+    def test_config_get_bool_accepts_native_and_string_values(self):
+        from pybullet_fleet.config_utils import config_get_bool
+
+        config = {
+            "native_true": True,
+            "native_false": False,
+            "yes": "yes",
+            "no": "no",
+            "one": "1",
+            "zero": "0",
+            "int_one": 1,
+            "int_zero": 0,
+        }
+
+        assert config_get_bool(config, "native_true", False) is True
+        assert config_get_bool(config, "native_false", True) is False
+        assert config_get_bool(config, "yes", False) is True
+        assert config_get_bool(config, "no", True) is False
+        assert config_get_bool(config, "one", False) is True
+        assert config_get_bool(config, "zero", True) is False
+        assert config_get_bool(config, "int_one", False) is True
+        assert config_get_bool(config, "int_zero", True) is False
+        assert config_get_bool(config, "missing", True) is True
+
+    def test_config_get_bool_rejects_invalid_values(self):
+        from pybullet_fleet.config_utils import config_get_bool
+
+        with pytest.raises(ValueError, match="Expected config key 'enabled'"):
+            config_get_bool({"enabled": "flase"}, "enabled", False)
+
+        for value in (None, [], {}, 2):
+            with pytest.raises(ValueError, match="Expected config key 'enabled'"):
+                config_get_bool({"enabled": value}, "enabled", False)
+
+    def test_config_get_str_list_accepts_missing_none_string_and_sequence(self):
+        from pybullet_fleet.config_utils import config_get_str_list
+
+        assert config_get_str_list({}, "missing") == []
+        assert config_get_str_list({}, "missing", ["robot0"]) == ["robot0"]
+        assert config_get_str_list({"names": None}, "names", ["robot0"]) == ["robot0"]
+        assert config_get_str_list({"names": "robot1"}, "names") == ["robot1"]
+        assert config_get_str_list({"names": ["robot1", 2]}, "names") == ["robot1", "2"]
+
+    def test_config_get_str_list_rejects_invalid_scalar_and_mapping(self):
+        from pybullet_fleet.config_utils import config_get_str_list
+
+        with pytest.raises(ValueError, match="Expected config key 'names'"):
+            config_get_str_list({"names": 0}, "names")
+
+        with pytest.raises(ValueError, match="Expected config key 'names'"):
+            config_get_str_list({"names": False}, "names")
+
+        with pytest.raises(ValueError, match="Expected config key 'names'"):
+            config_get_str_list({"names": {"robot0": True}}, "names")
+
+
 # =====================================================================
 # GridSpawnParams.from_dict (unit)
 # =====================================================================
