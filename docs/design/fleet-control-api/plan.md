@@ -107,7 +107,8 @@ Tasks:
   - `RobotState3D`
   - `RobotGoalCommand2D`
   - `RobotGoalCommand3D`
-  - `RobotJointCommand`
+  - `RobotJointPositionsCommand`
+  - `RobotNamedJointPositionsCommand`
   - `CommandAck`
   - `CommandEvent`
 - Add `FleetStateProvider`.

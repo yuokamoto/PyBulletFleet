@@ -13,7 +13,8 @@ from pybullet_fleet.fleet_api import (
     FleetStateProvider,
     RobotGoalCommand2D,
     RobotGoalCommand3D,
-    RobotJointCommand,
+    RobotJointPositionsCommand,
+    RobotNamedJointPositionsCommand,
 )
 from pybullet_fleet.geometry import Pose
 
@@ -185,8 +186,8 @@ def test_dispatcher_joint_command_and_stop():
 
     joint_ack = dispatcher.joint_command(
         [
-            RobotJointCommand("robot0", positions=(0.1, 0.2)),
-            RobotJointCommand("robot1", positions_by_name={"joint": 1.5}),
+            RobotJointPositionsCommand("robot0", positions=(0.1, 0.2)),
+            RobotNamedJointPositionsCommand("robot1", positions={"joint": 1.5}),
         ],
         command_id="cmd-3",
     )
@@ -214,9 +215,9 @@ def test_command_ack_and_event_rejected_maps_are_immutable():
         cast(dict[str, str], event.rejected)["other"] = "mutated"
 
 
-def test_robot_joint_command_requires_one_target_form():
-    with pytest.raises(ValueError, match="requires positions"):
-        RobotJointCommand("robot0")
+def test_named_joint_command_positions_are_immutable():
+    command = RobotNamedJointPositionsCommand("robot0", positions={"joint": 1.5})
 
-    with pytest.raises(ValueError, match="either positions or positions_by_name"):
-        RobotJointCommand("robot0", positions=(0.1,), positions_by_name={"joint": 0.1})
+    assert command.positions == {"joint": 1.5}
+    with pytest.raises(TypeError):
+        cast(dict[str, float], command.positions)["other"] = 0.1

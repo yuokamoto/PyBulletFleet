@@ -85,19 +85,22 @@ class RobotGoalCommand3D:
 
 
 @dataclass(frozen=True)
-class RobotJointCommand:
-    """Joint target command for one robot."""
+class RobotJointPositionsCommand:
+    """Ordered joint target command for one robot."""
 
     name: str
-    positions: tuple[float, ...] | None = None
-    positions_by_name: Mapping[str, float] | None = None
-    command_id: str | None = None
+    positions: tuple[float, ...]
+
+
+@dataclass(frozen=True)
+class RobotNamedJointPositionsCommand:
+    """Named joint target command for one robot."""
+
+    name: str
+    positions: Mapping[str, float]
 
     def __post_init__(self) -> None:
-        if self.positions is None and self.positions_by_name is None:
-            raise ValueError("RobotJointCommand requires positions or positions_by_name")
-        if self.positions is not None and self.positions_by_name is not None:
-            raise ValueError("RobotJointCommand accepts either positions or positions_by_name, not both")
+        object.__setattr__(self, "positions", MappingProxyType(dict(self.positions)))
 
 
 @dataclass(frozen=True)
@@ -237,7 +240,7 @@ class FleetCommandDispatcher:
 
     def joint_command(
         self,
-        commands: Iterable[RobotJointCommand],
+        commands: Iterable[RobotJointPositionsCommand | RobotNamedJointPositionsCommand],
         *,
         source: str = "python",
         command_id: str | None = None,
@@ -258,10 +261,10 @@ class FleetCommandDispatcher:
         for name in ack.accepted_names:
             command = by_name[name]
             agent = accepted[name]
-            if command.positions_by_name is not None:
-                agent.set_joints_targets_by_name(dict(command.positions_by_name))
+            if isinstance(command, RobotJointPositionsCommand):
+                agent.set_all_joints_targets(list(command.positions))
             else:
-                agent.set_all_joints_targets(list(command.positions or ()))
+                agent.set_joints_targets_by_name(dict(command.positions))
         return ack
 
     def stop(

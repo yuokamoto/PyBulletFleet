@@ -359,16 +359,17 @@ Candidate APIs:
 /fleet/set_joint_targets     # service, acknowledgement
 ```
 
-Candidate command shape:
+Candidate command shapes:
 
 ```text
-RobotJointCommand
+RobotJointPositionsCommand
+  string name
+  float64[] positions
+
+RobotNamedJointPositionsCommand
   string name
   string[] joint_names
   float64[] positions
-  float64[] velocities   # optional / empty
-  float64[] efforts      # optional / empty
-  builtin_interfaces/Duration time_from_start
 ```
 
 As with navigation, provide both topic and service forms where useful:
