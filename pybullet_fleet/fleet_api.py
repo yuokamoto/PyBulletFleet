@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from collections import Counter
 from dataclasses import dataclass, field
+from numbers import Real
 from types import MappingProxyType
 from typing import Any, Iterable, Mapping, Sequence
 from uuid import uuid4
@@ -359,7 +360,7 @@ def _normalize_names(names: Iterable[str] | None) -> set[str] | None:
 
 
 def _vec3(value: Any) -> Vec3:
-    if isinstance(value, (int, float)):
+    if isinstance(value, Real):
         return (float(value), 0.0, 0.0)
     seq = tuple(value)
     if len(seq) == 0:
@@ -379,7 +380,7 @@ def _quat(value: Any) -> Quat:
 
 
 def _yaw_rate(value: Any) -> float:
-    if isinstance(value, (int, float)):
+    if isinstance(value, Real):
         return float(value)
     seq = tuple(value)
     if len(seq) == 0:
@@ -388,7 +389,7 @@ def _yaw_rate(value: Any) -> float:
 
 
 def _angular_velocity_vec3(value: Any) -> Vec3:
-    if isinstance(value, (int, float)):
+    if isinstance(value, Real):
         return (0.0, 0.0, float(value))
     return _vec3(value)
 

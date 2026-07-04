@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import cast
 
+import numpy as np
 import pytest
 
 from pybullet_fleet.events import EventBus
@@ -23,7 +24,7 @@ class FakeAgent:
     object_id: int
     pose: Pose = field(default_factory=lambda: Pose.from_xyz(0.0, 0.0, 0.0))
     velocity: tuple[float, float, float] = (0.0, 0.0, 0.0)
-    angular_velocity: tuple[float, float, float] = (0.0, 0.0, 0.0)
+    angular_velocity: float | tuple[float, float, float] = (0.0, 0.0, 0.0)
     is_moving: bool = False
     battery_soc: float | None = None
     is_charging: bool = False
@@ -88,6 +89,26 @@ def test_fleet_state_provider_returns_3d_and_2d_snapshots():
     assert states_2d[0].y == 2.0
     assert states_2d[0].linear_velocity == (0.4, 0.5)
     assert states_2d[0].angular_velocity == 0.2
+
+
+def test_fleet_state_provider_accepts_numpy_scalar_velocities():
+    sim = FakeSim(
+        [
+            FakeAgent(
+                "robot0",
+                7,
+                velocity=np.float64(0.4),
+                angular_velocity=np.float64(0.2),
+            )
+        ]
+    )
+
+    state_3d = FleetStateProvider(sim).get_states()[0]
+    state_2d = FleetStateProvider(sim).get_states_2d()[0]
+
+    assert state_3d.linear_velocity == (0.4, 0.0, 0.0)
+    assert state_3d.angular_velocity == (0.0, 0.0, 0.2)
+    assert state_2d.angular_velocity == 0.2
 
 
 def test_dispatcher_navigate_accepts_many_and_emits_before_mutation():
