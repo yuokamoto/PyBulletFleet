@@ -85,8 +85,8 @@ def test_fleet_state_provider_returns_3d_and_2d_snapshots():
 
     states_2d = provider.get_states_2d(names=["robot0"])
     assert len(states_2d) == 1
-    assert states_2d[0].x == 1.0
-    assert states_2d[0].y == 2.0
+    assert states_2d[0].position == (1.0, 2.0)
+    assert states_2d[0].yaw == pytest.approx(1.57)
     assert states_2d[0].linear_velocity == (0.4, 0.5)
     assert states_2d[0].angular_velocity == 0.2
 
@@ -121,7 +121,7 @@ def test_dispatcher_navigate_accepts_many_and_emits_before_mutation():
     dispatcher = FleetCommandDispatcher(sim)
     ack = dispatcher.navigate(
         [
-            RobotGoalCommand2D("robot0", x=1.0, y=2.0, yaw=0.5),
+            RobotGoalCommand2D("robot0", position=(1.0, 2.0), yaw=0.5),
             RobotGoalCommand3D("robot1", position=(3.0, 4.0, 0.0)),
         ],
         source="test",
@@ -148,10 +148,10 @@ def test_dispatcher_rejects_unknown_duplicate_and_ambiguous_names():
     dispatcher = FleetCommandDispatcher(sim)
     ack = dispatcher.navigate(
         [
-            RobotGoalCommand2D("robot0", x=1.0, y=0.0),
-            RobotGoalCommand2D("robot0", x=2.0, y=0.0),
-            RobotGoalCommand2D("missing", x=3.0, y=0.0),
-            RobotGoalCommand2D("dup", x=4.0, y=0.0),
+            RobotGoalCommand2D("robot0", position=(1.0, 0.0)),
+            RobotGoalCommand2D("robot0", position=(2.0, 0.0)),
+            RobotGoalCommand2D("missing", position=(3.0, 0.0)),
+            RobotGoalCommand2D("dup", position=(4.0, 0.0)),
         ],
         command_id="cmd-2",
     )

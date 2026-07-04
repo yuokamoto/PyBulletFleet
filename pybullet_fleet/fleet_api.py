@@ -20,6 +20,7 @@ from pybullet_fleet.geometry import Pose
 FLEET_COMMAND_EVENT = "fleet_command"
 
 
+Vec2 = tuple[float, float]
 Vec3 = tuple[float, float, float]
 Quat = tuple[float, float, float, float]
 
@@ -30,10 +31,9 @@ class RobotStateSnapshot2D:
 
     name: str
     object_id: int
-    x: float
-    y: float
+    position: Vec2
     yaw: float
-    linear_velocity: tuple[float, float] = (0.0, 0.0)
+    linear_velocity: Vec2 = (0.0, 0.0)
     angular_velocity: float = 0.0
     is_moving: bool = False
     battery_soc: float | None = None
@@ -60,15 +60,14 @@ class RobotGoalCommand2D:
     """Planar navigation command for one robot."""
 
     name: str
-    x: float
-    y: float
+    position: Vec2
     yaw: float = 0.0
     z: float = 0.0
     command_id: str | None = None
 
     def to_pose(self) -> Pose:
         """Convert this command to a simulation ``Pose``."""
-        return Pose.from_yaw(self.x, self.y, self.z, self.yaw)
+        return Pose.from_yaw(self.position[0], self.position[1], self.z, self.yaw)
 
 
 @dataclass(frozen=True)
@@ -165,8 +164,7 @@ class FleetStateProvider:
                 RobotStateSnapshot2D(
                     name=name,
                     object_id=_agent_object_id(agent),
-                    x=float(pose.x),
-                    y=float(pose.y),
+                    position=(float(pose.x), float(pose.y)),
                     yaw=float(pose.yaw),
                     linear_velocity=(velocity[0], velocity[1]),
                     angular_velocity=_yaw_rate(getattr(agent, "angular_velocity", 0.0)),
