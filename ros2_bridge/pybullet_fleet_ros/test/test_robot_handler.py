@@ -51,6 +51,55 @@ def test_robot_handler_creates_all_interface_groups(mock_node, mock_agent):
     ]
 
 
+def test_robot_handler_honors_state_and_tf_only_config(mock_node, mock_agent):
+    """RobotHandler can create only publish-side per-robot groups."""
+    from pybullet_fleet_ros.interface_config import PerRobotApiConfig
+    from pybullet_fleet_ros.robot_handler import RobotHandler
+
+    handler = RobotHandler(
+        mock_node,
+        mock_agent,
+        interface_config=PerRobotApiConfig(
+            state_publishers=True,
+            tf=True,
+            command_topics=False,
+            services=False,
+            actions=False,
+        ),
+    )
+
+    group_names = [group.__class__.__name__ for group in handler._interface_groups]
+    assert group_names == ["StatePublisherHandler", "TfPublisherHandler"]
+    assert mock_node.create_publisher.called
+    assert not mock_node.create_subscription.called
+    assert not mock_node.create_service.called
+
+
+def test_robot_handler_honors_command_only_config(mock_node, mock_agent):
+    """RobotHandler can create only command topic subscriptions."""
+    from pybullet_fleet_ros.interface_config import PerRobotApiConfig
+    from pybullet_fleet_ros.robot_handler import RobotHandler
+
+    handler = RobotHandler(
+        mock_node,
+        mock_agent,
+        interface_config=PerRobotApiConfig(
+            state_publishers=False,
+            tf=False,
+            command_topics=True,
+            services=False,
+            actions=False,
+        ),
+    )
+
+    group_names = [group.__class__.__name__ for group in handler._interface_groups]
+    sub_topics = [call[0][1] for call in mock_node.create_subscription.call_args_list]
+    assert group_names == ["CommandTopicHandler"]
+    assert "/test_robot/cmd_vel" in sub_topics
+    assert not mock_node.create_publisher.called
+    assert not mock_node.create_service.called
+
+
 def test_cmd_vel_calls_velocity_controller(mock_node, mock_agent):
     """cmd_vel message calls OmniController.set_velocity() (not agent directly)."""
     from unittest.mock import MagicMock

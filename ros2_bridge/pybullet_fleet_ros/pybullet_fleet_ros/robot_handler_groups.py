@@ -1,8 +1,8 @@
 """Composable per-robot ROS interface groups.
 
 ``RobotHandler`` remains the compatibility facade, while each group owns one
-resource family and its callbacks. Later phases can make ``BridgeNode`` compose
-these groups directly from config.
+resource family and its callbacks. The facade can compose only the groups enabled
+by bridge configuration.
 """
 
 from __future__ import annotations

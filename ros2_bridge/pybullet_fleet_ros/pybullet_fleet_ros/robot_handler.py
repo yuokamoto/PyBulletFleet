@@ -19,6 +19,7 @@ from nav_msgs.msg import Path as PathMsg
 from std_msgs.msg import Float64MultiArray
 from trajectory_msgs.msg import JointTrajectory
 
+from .interface_config import PerRobotApiConfig
 from .robot_handler_base import RobotHandlerBase
 from .robot_handler_groups import (
     CommandTopicHandler,
@@ -68,6 +69,7 @@ class RobotHandler(RobotHandlerBase):
         node: "Node",
         agent: "Agent",
         tf_broadcaster: Optional["TransformBroadcaster"] = None,
+        interface_config: Optional[PerRobotApiConfig] = None,
     ):
         super().__init__(node, agent, tf_broadcaster)
         # Backward-compat aliases for internal use
@@ -83,45 +85,68 @@ class RobotHandler(RobotHandlerBase):
         off = getattr(node, "rmf_frame_offset", (0.0, 0.0))
         self._rmf_offset = (float(off[0]), float(off[1]))
 
-        self._state_publishers = StatePublisherHandler(self)
-        self._tf_publisher = TfPublisherHandler(self)
-        self._command_topics = CommandTopicHandler(self)
-        self._navigation_actions = NavigationActionHandler(self)
-        self._execute_actions = ExecuteActionHandler(self)
-        self._services = ServiceHandler(self)
-        self._interface_groups = [
-            self._state_publishers,
-            self._tf_publisher,
-            self._command_topics,
-            self._navigation_actions,
-            self._execute_actions,
-            self._services,
-        ]
+        api = interface_config or PerRobotApiConfig()
+        self._interface_groups = []
+        self._state_publishers = None
+        self._tf_publisher = None
+        self._command_topics = None
+        self._navigation_actions = None
+        self._execute_actions = None
+        self._services = None
+
+        if api.state_publishers:
+            self._state_publishers = StatePublisherHandler(self)
+            self._interface_groups.append(self._state_publishers)
+        if api.tf:
+            self._tf_publisher = TfPublisherHandler(self)
+            self._interface_groups.append(self._tf_publisher)
+        if api.command_topics:
+            self._command_topics = CommandTopicHandler(self)
+            self._interface_groups.append(self._command_topics)
+        if api.actions:
+            self._navigation_actions = NavigationActionHandler(self)
+            self._execute_actions = ExecuteActionHandler(self)
+            self._interface_groups.extend([self._navigation_actions, self._execute_actions])
+        if api.services:
+            self._services = ServiceHandler(self)
+            self._interface_groups.append(self._services)
 
         logger.info("RobotHandler created for '%s' (object_id=%d)", ns, agent.object_id)
 
     def _cmd_vel_cb(self, msg: Twist) -> None:
         """Compatibility forwarding for older tests/custom users."""
+        if self._command_topics is None:
+            return
         self._command_topics.cmd_vel_cb(msg)
 
     def _goal_pose_cb(self, msg: PoseStamped) -> None:
         """Compatibility forwarding for older tests/custom users."""
+        if self._command_topics is None:
+            return
         self._command_topics.goal_pose_cb(msg)
 
     def _path_cb(self, msg: PathMsg) -> None:
         """Compatibility forwarding for older tests/custom users."""
+        if self._command_topics is None:
+            return
         self._command_topics.path_cb(msg)
 
     def _joint_traj_cb(self, msg: JointTrajectory) -> None:
         """Compatibility forwarding for older tests/custom users."""
+        if self._command_topics is None:
+            return
         self._command_topics.joint_traj_cb(msg)
 
     def _joint_cmd_cb(self, msg: Float64MultiArray) -> None:
         """Compatibility forwarding for older tests/custom users."""
+        if self._command_topics is None:
+            return
         self._command_topics.joint_cmd_cb(msg)
 
     def pre_step(self, dt: float = 0.0, stamp: Optional[TimeMsg] = None) -> None:
         """Apply stored command topics before the simulation step."""
+        if self._command_topics is None:
+            return
         self._command_topics.pre_step(dt=dt, stamp=stamp)
 
     def _shift_xy(self, x: float, y: float, sign: int) -> tuple:
@@ -135,8 +160,10 @@ class RobotHandler(RobotHandlerBase):
 
     def post_step(self, dt: float = 0.0, stamp: Optional[TimeMsg] = None) -> None:
         """Publish state and TF after each step."""
-        self._state_publishers.post_step(dt=dt, stamp=stamp)
-        self._tf_publisher.post_step(dt=dt, stamp=stamp)
+        if self._state_publishers is not None:
+            self._state_publishers.post_step(dt=dt, stamp=stamp)
+        if self._tf_publisher is not None:
+            self._tf_publisher.post_step(dt=dt, stamp=stamp)
 
     def destroy(self) -> None:
         """Clean up ROS interfaces."""

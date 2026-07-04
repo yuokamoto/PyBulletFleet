@@ -151,9 +151,7 @@ class BridgeNode(Node):
         self._api_config: BridgeApiConfig = resolve_bridge_api_config(bridge_config)
         if not self._api_config.per_robot_api.enabled:
             self.get_logger().warning("per_robot_api disabled: no per-robot ROS handlers will be created")
-        elif self._api_config.per_robot_api.any_group_enabled:
-            self._warn_if_partial_per_robot_groups()
-        else:
+        elif not self._api_config.per_robot_api.any_group_enabled:
             self.get_logger().warning(
                 "per_robot_api enabled but all per-robot groups are disabled: " "no per-robot ROS handlers will be created"
             )
@@ -246,28 +244,6 @@ class BridgeNode(Node):
         """Return whether the current config allows a per-robot handler."""
         return self._api_config.per_robot_api.robot_enabled(agent.name)
 
-    def _warn_if_partial_per_robot_groups(self) -> None:
-        """Warn when config asks for group-level control before decomposition.
-
-        RobotHandler currently creates all per-robot ROS resources as one unit.
-        The config is parsed now so future profiles are stable, but group-level
-        resource suppression requires the Handler Decomposition work.
-        """
-        per_robot = self._api_config.per_robot_api
-        groups = (
-            per_robot.state_publishers,
-            per_robot.tf,
-            per_robot.command_topics,
-            per_robot.services,
-            per_robot.actions,
-        )
-        if all(groups) or not any(groups):
-            return
-        self.get_logger().warning(
-            "partial per_robot_api groups are configured, but RobotHandler still "
-            "creates all per-robot interfaces until handler decomposition is implemented"
-        )
-
     def _register_robot_handler(self, agent: Agent) -> None:
         """Create a RobotHandler for *agent* and register it.
 
@@ -286,11 +262,10 @@ class BridgeNode(Node):
         classes = resolve_handler_classes(agent, self._handler_map, [self.handler_class])
         handlers = []
         for cls in classes:
-            handler = cls(
-                self,
-                agent,
-                tf_broadcaster=self._tf_broadcaster,
-            )
+            kwargs = {"tf_broadcaster": self._tf_broadcaster}
+            if cls is RobotHandler:
+                kwargs["interface_config"] = self._api_config.per_robot_api
+            handler = cls(self, agent, **kwargs)
             handlers.append(handler)
             if cls is not RobotHandler:
                 logger.info("Using custom handler %s for '%s'", cls.__name__, agent.name)
