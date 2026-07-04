@@ -215,10 +215,10 @@ class FleetCommandDispatcher:
         """Rebuild the robot-name index used for command dispatch."""
         index: dict[str, Any | None] = {}
         for agent in _iter_agents(self.sim_core):
-            name = _agent_name(agent)
-            if not name:
+            explicit_name = _explicit_agent_name(agent)
+            if explicit_name is None:
                 continue
-            index[name] = None if name in index else agent
+            index[explicit_name] = None if explicit_name in index else agent
         self._name_index = index
 
     def navigate(
@@ -343,10 +343,17 @@ def _iter_agents(sim_core: Any) -> Sequence[Any]:
 
 
 def _agent_name(agent: Any) -> str:
+    name = _explicit_agent_name(agent)
+    if name is not None:
+        return name
+    return f"agent_{getattr(agent, 'object_id', 'unknown')}"
+
+
+def _explicit_agent_name(agent: Any) -> str | None:
     name = getattr(agent, "name", None)
     if name:
         return str(name)
-    return f"agent_{getattr(agent, 'object_id', 'unknown')}"
+    return None
 
 
 def _agent_object_id(agent: Any) -> int:

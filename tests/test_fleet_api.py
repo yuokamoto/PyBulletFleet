@@ -179,6 +179,27 @@ def test_state_provider_handles_minimal_unnamed_agent_stub():
     assert states[0].object_id == -1
 
 
+def test_dispatcher_skips_unnamed_agents():
+    class MinimalAgent:
+        def __init__(self):
+            self.goal_calls = []
+
+        def get_pose(self):
+            return Pose.from_xyz(0.0, 0.0, 0.0)
+
+        def set_goal_pose(self, pose):
+            self.goal_calls.append(pose)
+
+    agent = MinimalAgent()
+    dispatcher = FleetCommandDispatcher(FakeSim([agent]))
+
+    ack = dispatcher.navigate([RobotGoalCommand2D("agent_unknown", position=(1.0, 0.0))])
+
+    assert ack.accepted_names == ()
+    assert ack.rejected == {"agent_unknown": "unknown robot"}
+    assert agent.goal_calls == []
+
+
 def test_dispatcher_joint_command_and_stop():
     robot0 = FakeAgent("robot0", 1)
     robot1 = FakeAgent("robot1", 2)
