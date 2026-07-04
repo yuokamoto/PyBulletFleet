@@ -19,6 +19,7 @@ import numpy as np
 from builtin_interfaces.msg import Time as TimeMsg
 from geometry_msgs.msg import PoseStamped, Twist
 from nav_msgs.msg import Path as PathMsg
+from sensor_msgs.msg import BatteryState
 from std_msgs.msg import Float64MultiArray
 from trajectory_msgs.msg import JointTrajectory
 
