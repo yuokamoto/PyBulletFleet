@@ -91,7 +91,6 @@ class RobotJointCommand:
     name: str
     positions: tuple[float, ...] | None = None
     positions_by_name: Mapping[str, float] | None = None
-    max_force: float = 500.0
     command_id: str | None = None
 
     def __post_init__(self) -> None:
@@ -260,9 +259,9 @@ class FleetCommandDispatcher:
             command = by_name[name]
             agent = accepted[name]
             if command.positions_by_name is not None:
-                agent.set_joints_targets_by_name(dict(command.positions_by_name), max_force=command.max_force)
+                agent.set_joints_targets_by_name(dict(command.positions_by_name))
             else:
-                agent.set_all_joints_targets(list(command.positions or ()), max_force=command.max_force)
+                agent.set_all_joints_targets(list(command.positions or ()))
         return ack
 
     def stop(

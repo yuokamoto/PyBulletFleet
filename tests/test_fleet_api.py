@@ -185,7 +185,7 @@ def test_dispatcher_joint_command_and_stop():
 
     joint_ack = dispatcher.joint_command(
         [
-            RobotJointCommand("robot0", positions=(0.1, 0.2), max_force=10.0),
+            RobotJointCommand("robot0", positions=(0.1, 0.2)),
             RobotJointCommand("robot1", positions_by_name={"joint": 1.5}),
         ],
         command_id="cmd-3",
@@ -193,7 +193,7 @@ def test_dispatcher_joint_command_and_stop():
     stop_ack = dispatcher.stop(["robot0", "missing"], command_id="cmd-4")
 
     assert joint_ack.ok
-    assert robot0.joint_calls == [("all", [0.1, 0.2], 10.0)]
+    assert robot0.joint_calls == [("all", [0.1, 0.2], 500.0)]
     assert robot1.joint_calls == [("named", {"joint": 1.5}, 500.0)]
     assert stop_ack.accepted_names == ("robot0",)
     assert stop_ack.rejected == {"missing": "unknown robot"}
