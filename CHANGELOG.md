@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- ROS 2 bridge `per_robot_api` group switches now control which per-robot
+  interface groups `RobotHandler` creates. Disabling all per-robot groups skips
+  per-robot handler creation; disabling individual groups suppresses only those
+  publishers, subscribers, services, or actions.
+
 ### Breaking Changes
 
 - ROS 2 bridge internals: `RobotHandler` is now a facade over dedicated

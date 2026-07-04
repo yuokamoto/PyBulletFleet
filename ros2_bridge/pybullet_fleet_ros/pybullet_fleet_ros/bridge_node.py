@@ -9,6 +9,7 @@ Usage::
         --ros-args -p config_yaml:=/path/to/config.yaml
 """
 
+import inspect
 import logging
 import threading
 from typing import Any, Dict, List, Type
@@ -37,6 +38,25 @@ from .robot_handler import RobotHandler
 from .robot_handler_base import RobotHandlerBase
 
 logger = logging.getLogger(__name__)
+
+
+def _handler_accepts_interface_config(handler_cls: Type[RobotHandlerBase]) -> bool:
+    """Return whether *handler_cls* can accept ``interface_config``."""
+    try:
+        params = inspect.signature(handler_cls).parameters.values()
+    except (TypeError, ValueError):
+        return False
+    return any(param.name == "interface_config" or param.kind is inspect.Parameter.VAR_KEYWORD for param in params)
+
+
+def _is_robot_handler_class(value: object) -> bool:
+    """Return whether *value* is a RobotHandler class or subclass."""
+    return isinstance(value, type) and issubclass(value, RobotHandler)
+
+
+def _handler_display_name(value: object) -> str:
+    """Return a readable name for handler class or factory logging."""
+    return getattr(value, "__name__", value.__class__.__name__)
 
 
 class BridgeNode(Node):
@@ -151,9 +171,7 @@ class BridgeNode(Node):
         self._api_config: BridgeApiConfig = resolve_bridge_api_config(bridge_config)
         if not self._api_config.per_robot_api.enabled:
             self.get_logger().warning("per_robot_api disabled: no per-robot ROS handlers will be created")
-        elif self._api_config.per_robot_api.any_group_enabled:
-            self._warn_if_partial_per_robot_groups()
-        else:
+        elif not self._api_config.per_robot_api.any_group_enabled:
             self.get_logger().warning(
                 "per_robot_api enabled but all per-robot groups are disabled: " "no per-robot ROS handlers will be created"
             )
@@ -246,28 +264,6 @@ class BridgeNode(Node):
         """Return whether the current config allows a per-robot handler."""
         return self._api_config.per_robot_api.robot_enabled(agent.name)
 
-    def _warn_if_partial_per_robot_groups(self) -> None:
-        """Warn when config asks for group-level control before decomposition.
-
-        RobotHandler currently creates all per-robot ROS resources as one unit.
-        The config is parsed now so future profiles are stable, but group-level
-        resource suppression requires the Handler Decomposition work.
-        """
-        per_robot = self._api_config.per_robot_api
-        groups = (
-            per_robot.state_publishers,
-            per_robot.tf,
-            per_robot.command_topics,
-            per_robot.services,
-            per_robot.actions,
-        )
-        if all(groups) or not any(groups):
-            return
-        self.get_logger().warning(
-            "partial per_robot_api groups are configured, but RobotHandler still "
-            "creates all per-robot interfaces until handler decomposition is implemented"
-        )
-
     def _register_robot_handler(self, agent: Agent) -> None:
         """Create a RobotHandler for *agent* and register it.
 
@@ -286,14 +282,13 @@ class BridgeNode(Node):
         classes = resolve_handler_classes(agent, self._handler_map, [self.handler_class])
         handlers = []
         for cls in classes:
-            handler = cls(
-                self,
-                agent,
-                tf_broadcaster=self._tf_broadcaster,
-            )
+            kwargs = {"tf_broadcaster": self._tf_broadcaster}
+            if _is_robot_handler_class(cls) and _handler_accepts_interface_config(cls):
+                kwargs["interface_config"] = self._api_config.per_robot_api
+            handler = cls(self, agent, **kwargs)
             handlers.append(handler)
             if cls is not RobotHandler:
-                logger.info("Using custom handler %s for '%s'", cls.__name__, agent.name)
+                logger.info("Using custom handler %s for '%s'", _handler_display_name(cls), agent.name)
         self._handlers[agent.object_id] = handlers
 
     def spawn_robot(self, spawn_params: AgentSpawnParams) -> Agent:
