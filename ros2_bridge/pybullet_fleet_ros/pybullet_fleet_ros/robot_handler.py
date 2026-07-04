@@ -94,6 +94,10 @@ class RobotHandler(RobotHandlerBase):
         self._execute_actions = None
         self._services = None
 
+        if not api.enabled:
+            logger.info("RobotHandler created for '%s' with per-robot interfaces disabled", ns)
+            return
+
         if api.state_publishers:
             self._state_publishers = StatePublisherHandler(self)
             self._interface_groups.append(self._state_publishers)
