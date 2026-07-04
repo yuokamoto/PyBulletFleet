@@ -1,6 +1,7 @@
 """Tests for bridge API interface configuration helpers.
 
 These tests intentionally avoid ROS imports.
+Default pytest coverage mirrors the core cases in ``tests/``.
 """
 
 from pybullet_fleet_ros.interface_config import resolve_bridge_api_config
