@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import cast
 
 import pytest
 
@@ -187,9 +188,9 @@ def test_command_ack_and_event_rejected_maps_are_immutable():
     assert ack.rejected == {"missing": "unknown robot"}
     assert event.rejected == {"missing": "unknown robot"}
     with pytest.raises(TypeError):
-        ack.rejected["other"] = "mutated"
+        cast(dict[str, str], ack.rejected)["other"] = "mutated"
     with pytest.raises(TypeError):
-        event.rejected["other"] = "mutated"
+        cast(dict[str, str], event.rejected)["other"] = "mutated"
 
 
 def test_robot_joint_command_requires_one_target_form():
