@@ -24,6 +24,21 @@ from pybullet_fleet.types import (  # noqa: F401
 # Geometry primitives
 from pybullet_fleet.geometry import Path, Pose
 
+# Fleet API
+from pybullet_fleet.fleet_api import (
+    FLEET_COMMAND_EVENT,
+    CommandAck,
+    CommandEvent,
+    FleetCommandDispatcher,
+    FleetStateProvider,
+    RobotGoalCommand2D,
+    RobotGoalCommand3D,
+    RobotJointPositionsCommand,
+    RobotNamedJointPositionsCommand,
+    RobotState2D,
+    RobotState3D,
+)
+
 # Robot/Agent management
 from pybullet_fleet.agent import Agent, AgentSpawnParams, IKParams
 from pybullet_fleet.plugins.battery_plugin import BatteryPlugin
@@ -137,6 +152,18 @@ __all__ = [
     # Geometry
     "Pose",
     "Path",
+    # Fleet API
+    "FLEET_COMMAND_EVENT",
+    "RobotState2D",
+    "RobotState3D",
+    "RobotGoalCommand2D",
+    "RobotGoalCommand3D",
+    "RobotJointPositionsCommand",
+    "RobotNamedJointPositionsCommand",
+    "CommandAck",
+    "CommandEvent",
+    "FleetStateProvider",
+    "FleetCommandDispatcher",
     # Core simulation
     "MultiRobotSimulationCore",
     "SimulationParams",

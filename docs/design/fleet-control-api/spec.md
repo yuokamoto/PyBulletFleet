@@ -359,17 +359,24 @@ Candidate APIs:
 /fleet/set_joint_targets     # service, acknowledgement
 ```
 
-Candidate command shape:
+Candidate command shapes:
 
 ```text
-RobotJointCommand
+RobotJointPositionsCommand
   string name
-  string[] joint_names
   float64[] positions
-  float64[] velocities   # optional / empty
-  float64[] efforts      # optional / empty
-  builtin_interfaces/Duration time_from_start
+
+RobotNamedJointPositionsCommand
+  string name
+  mapping<string, float64> positions
 ```
+
+The Python transport-neutral API uses a mapping for named joint targets because
+that is the least ambiguous representation for plugins, replay, and tests. A ROS
+message cannot carry a Python mapping directly, so the ROS bridge should encode
+`RobotNamedJointPositionsCommand.positions` as parallel `string[] joint_names`
+and `float64[] positions` fields, validating that both arrays have the same
+length when converting back.
 
 As with navigation, provide both topic and service forms where useful:
 
