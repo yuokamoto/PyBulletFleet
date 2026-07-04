@@ -54,6 +54,11 @@ def _is_robot_handler_class(value: object) -> bool:
     return isinstance(value, type) and issubclass(value, RobotHandler)
 
 
+def _handler_display_name(value: object) -> str:
+    """Return a readable name for handler class or factory logging."""
+    return getattr(value, "__name__", value.__class__.__name__)
+
+
 class BridgeNode(Node):
     """ROS 2 node that drives PyBulletFleet simulation and exposes per-robot topics.
 
@@ -283,7 +288,7 @@ class BridgeNode(Node):
             handler = cls(self, agent, **kwargs)
             handlers.append(handler)
             if cls is not RobotHandler:
-                logger.info("Using custom handler %s for '%s'", cls.__name__, agent.name)
+                logger.info("Using custom handler %s for '%s'", _handler_display_name(cls), agent.name)
         self._handlers[agent.object_id] = handlers
 
     def spawn_robot(self, spawn_params: AgentSpawnParams) -> Agent:
