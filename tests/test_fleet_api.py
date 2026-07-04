@@ -63,7 +63,7 @@ def test_fleet_state_provider_returns_3d_and_2d_snapshots():
                 7,
                 pose=Pose.from_yaw(1.0, 2.0, 0.3, 1.57),
                 velocity=(0.4, 0.5, 0.0),
-                angular_velocity=(0.0, 0.0, 0.2),
+                angular_velocity=0.2,
                 is_moving=True,
                 battery_soc=0.75,
             )
@@ -78,6 +78,7 @@ def test_fleet_state_provider_returns_3d_and_2d_snapshots():
     assert states_3d[0].object_id == 7
     assert states_3d[0].position == (1.0, 2.0, 0.3)
     assert states_3d[0].linear_velocity == (0.4, 0.5, 0.0)
+    assert states_3d[0].angular_velocity == (0.0, 0.0, 0.2)
     assert states_3d[0].battery_soc == 0.75
 
     states_2d = provider.get_states_2d(names=["robot0"])
@@ -144,6 +145,17 @@ def test_dispatcher_rejects_unknown_duplicate_and_ambiguous_names():
     assert duplicate_b.goal_calls == []
 
 
+def test_state_provider_handles_minimal_unnamed_agent_stub():
+    class MinimalAgent:
+        def get_pose(self):
+            return Pose.from_xyz(0.0, 0.0, 0.0)
+
+    states = FleetStateProvider(FakeSim([MinimalAgent()])).get_states()
+
+    assert states[0].name == "agent_unknown"
+    assert states[0].object_id == -1
+
+
 def test_dispatcher_joint_command_and_stop():
     robot0 = FakeAgent("robot0", 1)
     robot1 = FakeAgent("robot1", 2)
@@ -164,6 +176,20 @@ def test_dispatcher_joint_command_and_stop():
     assert stop_ack.accepted_names == ("robot0",)
     assert stop_ack.rejected == {"missing": "unknown robot"}
     assert robot0.stop_calls == 1
+
+
+def test_command_ack_and_event_rejected_maps_are_immutable():
+    dispatcher = FleetCommandDispatcher(FakeSim([]))
+
+    ack = dispatcher.stop(["missing"], command_id="cmd-5")
+    event = dispatcher.command_events[0]
+
+    assert ack.rejected == {"missing": "unknown robot"}
+    assert event.rejected == {"missing": "unknown robot"}
+    with pytest.raises(TypeError):
+        ack.rejected["other"] = "mutated"
+    with pytest.raises(TypeError):
+        event.rejected["other"] = "mutated"
 
 
 def test_robot_joint_command_requires_one_target_form():

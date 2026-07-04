@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from collections import Counter
 from dataclasses import dataclass, field
+from types import MappingProxyType
 from typing import Any, Iterable, Mapping, Sequence
 from uuid import uuid4
 
@@ -110,6 +111,9 @@ class CommandAck:
     accepted_names: tuple[str, ...] = field(default_factory=tuple)
     rejected: Mapping[str, str] = field(default_factory=dict)
 
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "rejected", MappingProxyType(dict(self.rejected)))
+
     @property
     def ok(self) -> bool:
         """Whether at least one target was accepted and none were rejected."""
@@ -127,6 +131,9 @@ class CommandEvent:
     target_names: tuple[str, ...]
     accepted_names: tuple[str, ...]
     rejected: Mapping[str, str] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "rejected", MappingProxyType(dict(self.rejected)))
 
 
 class FleetStateProvider:
@@ -156,7 +163,7 @@ class FleetStateProvider:
             states.append(
                 RobotStateSnapshot2D(
                     name=name,
-                    object_id=int(getattr(agent, "object_id")),
+                    object_id=_agent_object_id(agent),
                     x=float(pose.x),
                     y=float(pose.y),
                     yaw=float(pose.yaw),
@@ -181,11 +188,11 @@ class FleetStateProvider:
             states.append(
                 RobotStateSnapshot3D(
                     name=name,
-                    object_id=int(getattr(agent, "object_id")),
+                    object_id=_agent_object_id(agent),
                     position=_vec3(pose.position),
                     orientation=_quat(pose.orientation),
                     linear_velocity=_vec3(getattr(agent, "velocity", (0.0, 0.0, 0.0))),
-                    angular_velocity=_vec3(getattr(agent, "angular_velocity", (0.0, 0.0, 0.0))),
+                    angular_velocity=_angular_velocity_vec3(getattr(agent, "angular_velocity", (0.0, 0.0, 0.0))),
                     is_moving=bool(getattr(agent, "is_moving", False)),
                     battery_soc=_optional_float(getattr(agent, "battery_soc", None)),
                     is_charging=_optional_bool(getattr(agent, "is_charging", None)),
@@ -338,7 +345,11 @@ def _agent_name(agent: Any) -> str:
     name = getattr(agent, "name", None)
     if name:
         return str(name)
-    return f"agent_{getattr(agent, 'object_id')}"
+    return f"agent_{getattr(agent, 'object_id', 'unknown')}"
+
+
+def _agent_object_id(agent: Any) -> int:
+    return int(getattr(agent, "object_id", -1))
 
 
 def _normalize_names(names: Iterable[str] | None) -> set[str] | None:
@@ -374,6 +385,12 @@ def _yaw_rate(value: Any) -> float:
     if len(seq) == 0:
         return 0.0
     return float(seq[-1])
+
+
+def _angular_velocity_vec3(value: Any) -> Vec3:
+    if isinstance(value, (int, float)):
+        return (0.0, 0.0, float(value))
+    return _vec3(value)
 
 
 def _optional_float(value: Any) -> float | None:
