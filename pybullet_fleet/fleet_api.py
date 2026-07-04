@@ -7,6 +7,7 @@ and call sites without depending on a specific transport.
 
 from __future__ import annotations
 
+from collections import Counter
 from dataclasses import dataclass, field
 from typing import Any, Iterable, Mapping, Sequence
 from uuid import uuid4
@@ -279,7 +280,7 @@ class FleetCommandDispatcher:
         accepted: dict[str, Any] = {}
         rejected: dict[str, str] = {}
         target_names = tuple(names)
-        counts = {name: target_names.count(name) for name in target_names}
+        counts = Counter(target_names)
         for name in target_names:
             if name in accepted or name in rejected:
                 continue
@@ -319,7 +320,7 @@ class FleetCommandDispatcher:
         self.command_events.append(event)
         events = getattr(self.sim_core, "events", None)
         if events is not None and hasattr(events, "emit"):
-            events.emit(FLEET_COMMAND_EVENT, event=event)
+            events.emit(FLEET_COMMAND_EVENT, command_event=event)
         return CommandAck(
             command_id=command_id,
             source=source,

@@ -93,7 +93,7 @@ def test_dispatcher_navigate_accepts_many_and_emits_before_mutation():
     robot1 = FakeAgent("robot1", 2)
     sim = FakeSim([robot0, robot1])
     emitted = []
-    sim.events.on(FLEET_COMMAND_EVENT, lambda event: emitted.append((event, len(robot0.goal_calls))))
+    sim.events.on(FLEET_COMMAND_EVENT, lambda command_event: emitted.append((command_event, len(robot0.goal_calls))))
 
     dispatcher = FleetCommandDispatcher(sim)
     ack = dispatcher.navigate(
