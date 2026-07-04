@@ -17,11 +17,8 @@ from typing import TYPE_CHECKING, Optional
 
 import numpy as np
 from builtin_interfaces.msg import Time as TimeMsg
-from diagnostic_msgs.msg import DiagnosticArray
 from geometry_msgs.msg import PoseStamped, Twist
-from nav_msgs.msg import Odometry
 from nav_msgs.msg import Path as PathMsg
-from sensor_msgs.msg import BatteryState, JointState
 from std_msgs.msg import Float64MultiArray
 from trajectory_msgs.msg import JointTrajectory
 
@@ -39,6 +36,14 @@ from .conversions import (
 )
 
 from .robot_handler_base import RobotHandlerBase
+from .robot_handler_groups import (
+    CommandTopicHandler,
+    ExecuteActionHandler,
+    NavigationActionHandler,
+    ServiceHandler,
+    StatePublisherHandler,
+    TfPublisherHandler,
+)
 
 if TYPE_CHECKING:
     from pybullet_fleet.agent import Agent
@@ -94,42 +99,14 @@ class RobotHandler(RobotHandlerBase):
         off = getattr(node, "rmf_frame_offset", (0.0, 0.0))
         self._rmf_offset = (float(off[0]), float(off[1]))
 
-        # --- Publishers (existing) ---
-        self._odom_pub = node.create_publisher(Odometry, f"/{ns}/odom", 10)
-        self._joint_pub = node.create_publisher(JointState, f"/{ns}/joint_states", 10)
-
-        # --- Status publishers (new) ---
-        self._plan_pub = node.create_publisher(PathMsg, f"/{ns}/plan", 10)
-        self._goal_pub = node.create_publisher(PoseStamped, f"/{ns}/current_goal", 10)
-        self._diag_pub = node.create_publisher(DiagnosticArray, f"/{ns}/diagnostics", 10)
-
-        # --- Subscribers (existing) ---
-        self._cmd_vel_sub = node.create_subscription(Twist, f"/{ns}/cmd_vel", self._cmd_vel_cb, 10)
-
-        # --- Navigation topic subscribers (new) ---
-        self._goal_pose_sub = node.create_subscription(PoseStamped, f"/{ns}/goal_pose", self._goal_pose_cb, 10)
-        self._path_sub = node.create_subscription(PathMsg, f"/{ns}/path", self._path_cb, 10)
-
-        # --- Arm topic subscribers (new) ---
-        self._joint_traj_sub = node.create_subscription(JointTrajectory, f"/{ns}/joint_trajectory", self._joint_traj_cb, 10)
-        self._joint_cmd_sub = node.create_subscription(Float64MultiArray, f"/{ns}/joint_commands", self._joint_cmd_cb, 10)
-
-        # --- Action servers ---
-        self._setup_action_servers(node, ns)
-
-        # --- ExecuteAction topic + action ---
-        self._setup_execute_action(node, ns)
-
-        # --- Attach/detach services ---
-        self._setup_attach_service(node, ns)
-        self._setup_attach_object_service(node, ns)
-
-        # --- Battery (only if plugin is attached) ---
-        self._battery_pub = None
-        self._charging_srv = None
-        if self.agent.battery_plugin is not None:
-            self._battery_pub = node.create_publisher(BatteryState, f"/{ns}/battery_state", 10)
-            self._setup_charging_service(node, ns)
+        self._interface_groups = [
+            StatePublisherHandler(self),
+            TfPublisherHandler(self),
+            CommandTopicHandler(self),
+            NavigationActionHandler(self),
+            ExecuteActionHandler(self),
+            ServiceHandler(self),
+        ]
 
         logger.info("RobotHandler created for '%s' (object_id=%d)", ns, agent.object_id)
 
@@ -937,31 +914,6 @@ class RobotHandler(RobotHandlerBase):
 
     def destroy(self) -> None:
         """Clean up ROS interfaces."""
-        # Publishers
-        self._node.destroy_publisher(self._odom_pub)
-        self._node.destroy_publisher(self._joint_pub)
-        self._node.destroy_publisher(self._plan_pub)
-        self._node.destroy_publisher(self._goal_pub)
-        self._node.destroy_publisher(self._diag_pub)
-        # Subscribers
-        self._node.destroy_subscription(self._cmd_vel_sub)
-        self._node.destroy_subscription(self._goal_pose_sub)
-        self._node.destroy_subscription(self._path_sub)
-        self._node.destroy_subscription(self._joint_traj_sub)
-        self._node.destroy_subscription(self._joint_cmd_sub)
-        # Action servers
-        self._nav_action.destroy()
-        self._follow_path_action.destroy()
-        self._follow_jt_action.destroy()
-        # ExecuteAction
-        self._node.destroy_subscription(self._exec_action_sub)
-        self._exec_action_server.destroy()
-        # Attach services
-        self._node.destroy_service(self._attach_srv)
-        self._node.destroy_service(self._attach_object_srv)
-        # Battery
-        if self._battery_pub is not None:
-            self._node.destroy_publisher(self._battery_pub)
-        if self._charging_srv is not None:
-            self._node.destroy_service(self._charging_srv)
+        for group in reversed(self._interface_groups):
+            group.destroy()
         logger.info("RobotHandler destroyed for '%s'", self._ns)
