@@ -88,6 +88,7 @@ def test_register_robot_handler_passes_interface_config_to_robot_handler_subclas
     agent = MagicMock()
     agent.name = "robot0"
     agent.object_id = 1
+    agent.user_data = {}
     agent._controller = object()
     agent._motion_mode = MotionMode.DIFFERENTIAL
 
@@ -126,6 +127,7 @@ def test_register_robot_handler_skips_interface_config_for_legacy_subclass():
     agent = MagicMock()
     agent.name = "robot0"
     agent.object_id = 1
+    agent.user_data = {}
     agent._controller = object()
     agent._motion_mode = MotionMode.DIFFERENTIAL
 
