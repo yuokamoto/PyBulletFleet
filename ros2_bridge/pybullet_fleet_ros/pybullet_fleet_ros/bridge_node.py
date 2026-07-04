@@ -49,6 +49,11 @@ def _handler_accepts_interface_config(handler_cls: Type[RobotHandlerBase]) -> bo
     return any(param.name == "interface_config" or param.kind is inspect.Parameter.VAR_KEYWORD for param in params)
 
 
+def _is_robot_handler_class(value: object) -> bool:
+    """Return whether *value* is a RobotHandler class or subclass."""
+    return isinstance(value, type) and issubclass(value, RobotHandler)
+
+
 class BridgeNode(Node):
     """ROS 2 node that drives PyBulletFleet simulation and exposes per-robot topics.
 
@@ -273,7 +278,7 @@ class BridgeNode(Node):
         handlers = []
         for cls in classes:
             kwargs = {"tf_broadcaster": self._tf_broadcaster}
-            if issubclass(cls, RobotHandler) and _handler_accepts_interface_config(cls):
+            if _is_robot_handler_class(cls) and _handler_accepts_interface_config(cls):
                 kwargs["interface_config"] = self._api_config.per_robot_api
             handler = cls(self, agent, **kwargs)
             handlers.append(handler)

@@ -136,3 +136,40 @@ def test_register_robot_handler_skips_interface_config_for_legacy_subclass():
     handler = bridge._handlers[agent.object_id][0]
     assert isinstance(handler, LegacyRobotHandler)
     assert handler.tf_broadcaster is bridge._tf_broadcaster
+
+
+def test_register_robot_handler_allows_non_class_callable():
+    """Callable handler entries that are not classes do not trip issubclass()."""
+    from pybullet_fleet.types import MotionMode
+    from pybullet_fleet_ros.bridge_node import BridgeNode
+    from pybullet_fleet_ros.interface_config import PerRobotApiConfig
+
+    class CallableHandler:
+        def __init__(self):
+            self.created = []
+
+        def __call__(self, node, agent, tf_broadcaster=None):
+            handler = SimpleNamespace(node=node, agent=agent, tf_broadcaster=tf_broadcaster)
+            self.created.append(handler)
+            return handler
+
+    factory = CallableHandler()
+    bridge = BridgeNode.__new__(BridgeNode)
+    bridge._api_config = SimpleNamespace(per_robot_api=PerRobotApiConfig(command_topics=False))
+    bridge._handler_map = {"robot0": factory}
+    bridge._handlers = {}
+    bridge._tf_broadcaster = object()
+    bridge.handler_class = factory
+
+    agent = MagicMock()
+    agent.name = "robot0"
+    agent.object_id = 1
+    agent.user_data = {}
+    agent._controller = object()
+    agent._motion_mode = MotionMode.DIFFERENTIAL
+
+    BridgeNode._register_robot_handler(bridge, agent)
+
+    handler = bridge._handlers[agent.object_id][0]
+    assert handler is factory.created[0]
+    assert handler.tf_broadcaster is bridge._tf_broadcaster

@@ -71,6 +71,12 @@ class RobotHandler(RobotHandlerBase):
         tf_broadcaster: Optional["TransformBroadcaster"] = None,
         interface_config: Optional[PerRobotApiConfig] = None,
     ):
+        """Create per-robot ROS interfaces enabled by ``interface_config``.
+
+        When ``interface_config`` is omitted, all per-robot interface groups are
+        created to preserve the historical default. If it is disabled or has no
+        enabled groups, the handler is a no-op facade.
+        """
         super().__init__(node, agent, tf_broadcaster)
         # Backward-compat aliases for internal use
         self._node = node
@@ -94,7 +100,7 @@ class RobotHandler(RobotHandlerBase):
         self._execute_actions = None
         self._services = None
 
-        if not api.enabled:
+        if not api.enabled or not api.any_group_enabled:
             logger.info("RobotHandler created for '%s' with per-robot interfaces disabled", ns)
             return
 

@@ -120,6 +120,29 @@ def test_robot_handler_honors_disabled_config(mock_node, mock_agent):
     handler.destroy()
 
 
+def test_robot_handler_honors_no_groups_config(mock_node, mock_agent):
+    """RobotHandler creates no groups when every per-robot group is disabled."""
+    from pybullet_fleet_ros.interface_config import PerRobotApiConfig
+    from pybullet_fleet_ros.robot_handler import RobotHandler
+
+    handler = RobotHandler(
+        mock_node,
+        mock_agent,
+        interface_config=PerRobotApiConfig(
+            state_publishers=False,
+            tf=False,
+            command_topics=False,
+            services=False,
+            actions=False,
+        ),
+    )
+
+    assert handler._interface_groups == []
+    assert not mock_node.create_publisher.called
+    assert not mock_node.create_subscription.called
+    assert not mock_node.create_service.called
+
+
 def test_cmd_vel_calls_velocity_controller(mock_node, mock_agent):
     """cmd_vel message calls OmniController.set_velocity() (not agent directly)."""
     from unittest.mock import MagicMock
