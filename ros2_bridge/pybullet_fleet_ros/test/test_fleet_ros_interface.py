@@ -1,7 +1,7 @@
 """Tests for fleet-level ROS wrappers.
 
-These tests require generated ``pybullet_fleet_msgs`` Python modules, so they
-run in the ROS workspace and skip in a plain Python environment.
+Most tests require generated ``pybullet_fleet_msgs`` Python modules, so only
+those tests skip when the bindings are unavailable.
 """
 
 from dataclasses import dataclass, field
@@ -9,22 +9,19 @@ from unittest.mock import MagicMock
 
 import pytest
 
-pytest.importorskip("pybullet_fleet_msgs.msg", reason="pybullet_fleet_msgs not generated")
+pytest.importorskip("geometry_msgs.msg", reason="geometry_msgs not available")
 
 from geometry_msgs.msg import Point, Pose as RosPose, Quaternion
 from pybullet_fleet.geometry import Pose
 from pybullet_fleet_ros import fleet_ros_interface as fleet_ros_interface_module
 from pybullet_fleet_ros.fleet_ros_interface import FleetRosInterface
 from pybullet_fleet_ros.interface_config import FleetApiConfig
-from pybullet_fleet_msgs.msg import (
-    FleetJointCommand,
-    FleetNavigate,
-    RobotGoal2D,
-    RobotGoal3D,
-    RobotNamedJointPositionsCommand,
-)
-from pybullet_fleet_msgs.srv import FleetJointCommand as FleetJointCommandSrv
-from pybullet_fleet_msgs.srv import FleetNavigate as FleetNavigateSrv
+
+
+def _fleet_msg_types():
+    msgs = pytest.importorskip("pybullet_fleet_msgs.msg", reason="pybullet_fleet_msgs not generated")
+    srvs = pytest.importorskip("pybullet_fleet_msgs.srv", reason="pybullet_fleet_msgs not generated")
+    return msgs, srvs
 
 
 @dataclass
@@ -81,6 +78,7 @@ def test_enabled_fleet_api_requires_generated_message_bindings(monkeypatch):
 
 
 def test_fleet_state_publisher_uses_provider():
+    _fleet_msg_types()
     node = _node()
     agent = FakeAgent("robot0", 7, pose=Pose.from_yaw(1.0, 2.0, 0.3, 1.57), velocity=(0.4, 0.5, 0.0))
     interface = FleetRosInterface(node, FakeSim([agent]), FleetApiConfig(enabled=True, states=True))
@@ -95,6 +93,7 @@ def test_fleet_state_publisher_uses_provider():
 
 
 def test_fleet_state_publisher_applies_frame_offset():
+    _fleet_msg_types()
     node = _node()
     node.rmf_frame_offset = (100.0, 200.0)
     agent = FakeAgent("robot0", 7, pose=Pose.from_xyz(1.0, 2.0, 0.3))
@@ -108,14 +107,15 @@ def test_fleet_state_publisher_applies_frame_offset():
 
 
 def test_fleet_navigate_service_dispatches_2d_goal():
+    msgs, srvs = _fleet_msg_types()
     node = _node()
     agent = FakeAgent("robot0", 1)
     interface = FleetRosInterface(node, FakeSim([agent]), FleetApiConfig(enabled=True, navigate=True))
-    request = FleetNavigateSrv.Request()
+    request = srvs.FleetNavigate.Request()
     request.command_id = "cmd-1"
     request.source = "test"
-    request.goals_2d = [RobotGoal2D(name="robot0", position=[1.0, 2.0], yaw=0.5, z=0.0)]
-    response = FleetNavigateSrv.Response()
+    request.goals_2d = [msgs.RobotGoal2D(name="robot0", position=[1.0, 2.0], yaw=0.5, z=0.0)]
+    response = srvs.FleetNavigate.Response()
 
     result = interface._on_navigate_service(request, response)
 
@@ -126,13 +126,14 @@ def test_fleet_navigate_service_dispatches_2d_goal():
 
 
 def test_fleet_navigate_service_applies_frame_offset():
+    msgs, srvs = _fleet_msg_types()
     node = _node()
     node.rmf_frame_offset = (100.0, 200.0)
     agent = FakeAgent("robot0", 1)
     interface = FleetRosInterface(node, FakeSim([agent]), FleetApiConfig(enabled=True, navigate=True))
-    request = FleetNavigateSrv.Request()
-    request.goals_2d = [RobotGoal2D(name="robot0", position=[101.0, 202.0], yaw=0.5, z=0.0)]
-    response = FleetNavigateSrv.Response()
+    request = srvs.FleetNavigate.Request()
+    request.goals_2d = [msgs.RobotGoal2D(name="robot0", position=[101.0, 202.0], yaw=0.5, z=0.0)]
+    response = srvs.FleetNavigate.Response()
 
     interface._on_navigate_service(request, response)
 
@@ -141,13 +142,14 @@ def test_fleet_navigate_service_applies_frame_offset():
 
 
 def test_fleet_navigate_service_dispatches_3d_pose_goal():
+    msgs, srvs = _fleet_msg_types()
     node = _node()
     node.rmf_frame_offset = (100.0, 200.0)
     agent = FakeAgent("robot0", 1)
     interface = FleetRosInterface(node, FakeSim([agent]), FleetApiConfig(enabled=True, navigate=True))
-    request = FleetNavigateSrv.Request()
+    request = srvs.FleetNavigate.Request()
     request.goals_3d = [
-        RobotGoal3D(
+        msgs.RobotGoal3D(
             name="robot0",
             pose=RosPose(
                 position=Point(x=101.0, y=202.0, z=0.3),
@@ -155,7 +157,7 @@ def test_fleet_navigate_service_dispatches_3d_pose_goal():
             ),
         )
     ]
-    response = FleetNavigateSrv.Response()
+    response = srvs.FleetNavigate.Response()
 
     result = interface._on_navigate_service(request, response)
 
@@ -165,18 +167,19 @@ def test_fleet_navigate_service_dispatches_3d_pose_goal():
 
 
 def test_named_joint_service_rejects_mismatched_arrays():
+    msgs, srvs = _fleet_msg_types()
     node = _node()
     interface = FleetRosInterface(
         node,
         FakeSim([FakeAgent("robot0", 1)]),
         FleetApiConfig(enabled=True, joint_command=True),
     )
-    request = FleetJointCommandSrv.Request()
+    request = srvs.FleetJointCommand.Request()
     request.command_id = "cmd-2"
     request.named_joint_position_commands = [
-        RobotNamedJointPositionsCommand(name="robot0", joint_names=["joint1", "joint2"], positions=[1.0])
+        msgs.RobotNamedJointPositionsCommand(name="robot0", joint_names=["joint1", "joint2"], positions=[1.0])
     ]
-    response = FleetJointCommandSrv.Response()
+    response = srvs.FleetJointCommand.Response()
 
     result = interface._on_joint_command_service(request, response)
 
