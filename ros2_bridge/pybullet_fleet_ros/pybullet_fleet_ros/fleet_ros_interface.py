@@ -66,9 +66,6 @@ class FleetRosInterface:
     def __init__(self, node, sim_core, config: FleetApiConfig) -> None:
         self.node = node
         self.config = config
-        self.state_provider = FleetStateProvider(sim_core)
-        self.command_dispatcher = FleetCommandDispatcher(sim_core)
-        self._rmf_frame_offset = _node_frame_offset(node)
 
         self._state_pub = None
         self._navigate_sub = None
@@ -79,6 +76,10 @@ class FleetRosInterface:
         if not config.enabled:
             return
         _require_fleet_msgs()
+
+        self.state_provider = FleetStateProvider(sim_core)
+        self.command_dispatcher = FleetCommandDispatcher(sim_core)
+        self._rmf_frame_offset = _node_frame_offset(node)
 
         if config.states:
             self._state_pub = node.create_publisher(FleetState, "/fleet/states", 10)
@@ -125,7 +126,7 @@ class FleetRosInterface:
                 setattr(self, attr, None)
 
     def _on_navigate(self, msg: FleetNavigate) -> None:
-        self._dispatch_navigate(msg)
+        self._log_rejections(self._dispatch_navigate(msg))
 
     def _on_navigate_service(self, request, response):
         response.ack = command_ack_to_msg(self._dispatch_navigate(request))
@@ -139,10 +140,7 @@ class FleetRosInterface:
         )
 
     def _on_joint_command(self, msg: FleetJointCommand) -> None:
-        try:
-            self._dispatch_joint_command(msg)
-        except ValueError as exc:
-            self.node.get_logger().warning(str(exc))
+        self._log_rejections(self._dispatch_joint_command(msg))
 
     def _on_joint_command_service(self, request, response):
         response.ack = command_ack_to_msg(self._dispatch_joint_command(request))
@@ -161,6 +159,12 @@ class FleetRosInterface:
                 rejected={"request": str(exc)},
             )
         return self.command_dispatcher.joint_command(commands, source=source, command_id=command_id)
+
+    def _log_rejections(self, ack: PbfCommandAck) -> None:
+        if not ack.rejected:
+            return
+        details = ", ".join(f"{name}: {reason}" for name, reason in ack.rejected.items())
+        self.node.get_logger().warning(f"Fleet command '{ack.command_id}' rejected targets: {details}")
 
 
 def fleet_state_to_msg(

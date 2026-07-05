@@ -86,6 +86,19 @@ def test_disabled_fleet_api_does_not_require_generated_message_bindings(monkeypa
     assert interface._state_pub is None
 
 
+def test_disabled_fleet_api_does_not_construct_provider_or_dispatcher(monkeypatch):
+    _require_geometry_msgs()
+    state_provider = MagicMock(side_effect=AssertionError("state provider should not be created"))
+    dispatcher = MagicMock(side_effect=AssertionError("dispatcher should not be created"))
+    monkeypatch.setattr(fleet_ros_interface_module, "FleetStateProvider", state_provider)
+    monkeypatch.setattr(fleet_ros_interface_module, "FleetCommandDispatcher", dispatcher)
+
+    FleetRosInterface(_node(), FakeSim([FakeAgent("robot0", 1)]), FleetApiConfig(enabled=False))
+
+    state_provider.assert_not_called()
+    dispatcher.assert_not_called()
+
+
 def test_enabled_fleet_api_requires_generated_message_bindings(monkeypatch):
     _require_geometry_msgs()
     monkeypatch.setattr(fleet_ros_interface_module, "_FLEET_MSGS_IMPORT_ERROR", ImportError("missing"))
@@ -158,6 +171,22 @@ def test_fleet_navigate_service_applies_frame_offset():
     assert agent.goal_calls[0].y == pytest.approx(2.0)
 
 
+def test_fleet_navigate_topic_logs_rejected_targets():
+    msgs, _ = _fleet_msg_types()
+    node = _node()
+    interface = FleetRosInterface(node, FakeSim([FakeAgent("robot0", 1)]), FleetApiConfig(enabled=True, navigate=True))
+    request = msgs.FleetNavigate()
+    request.command_id = "cmd-reject"
+    request.goals_2d = [msgs.RobotGoal2D(name="missing", position=[1.0, 2.0], yaw=0.5, z=0.0)]
+
+    interface._on_navigate(request)
+
+    warning = node.get_logger.return_value.warning
+    warning.assert_called_once()
+    assert "cmd-reject" in warning.call_args.args[0]
+    assert "missing: unknown robot" in warning.call_args.args[0]
+
+
 def test_fleet_navigate_service_dispatches_3d_pose_goal():
     msgs, srvs = _fleet_msg_types()
     node = _node()
@@ -204,3 +233,25 @@ def test_named_joint_service_rejects_mismatched_arrays():
     assert result.ack.accepted_names == []
     assert result.ack.rejected_names == ["request"]
     assert "2 joint names" in result.ack.reject_reasons[0]
+
+
+def test_named_joint_topic_logs_rejected_request():
+    msgs, _ = _fleet_msg_types()
+    node = _node()
+    interface = FleetRosInterface(
+        node,
+        FakeSim([FakeAgent("robot0", 1)]),
+        FleetApiConfig(enabled=True, joint_command=True),
+    )
+    request = msgs.FleetJointCommand()
+    request.command_id = "cmd-2"
+    request.named_joint_position_commands = [
+        msgs.RobotNamedJointPositionsCommand(name="robot0", joint_names=["joint1", "joint2"], positions=[1.0])
+    ]
+
+    interface._on_joint_command(request)
+
+    warning = node.get_logger.return_value.warning
+    warning.assert_called_once()
+    assert "cmd-2" in warning.call_args.args[0]
+    assert "2 joint names" in warning.call_args.args[0]
