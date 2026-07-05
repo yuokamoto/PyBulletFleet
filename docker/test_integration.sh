@@ -91,7 +91,8 @@ fi
 echo "--- Testing fleet navigate service ---"
 RESULT=$(timeout 10 ros2 service call /fleet/navigate pybullet_fleet_msgs/srv/FleetNavigate \
     "{command_id: smoke-nav, source: smoke, goals_2d: [{name: robot0, position: [1.0, 0.0], yaw: 0.0, z: 0.05}], goals_3d: []}" 2>&1)
-if echo "$RESULT" | grep -q "robot0"; then
+if echo "$RESULT" | python3 -c \
+    'import re, sys; data = sys.stdin.read(); sys.exit(0 if re.search(r"accepted_names[:=][\s\S]*robot0", data) else 1)'; then
     echo "  ✓ /fleet/navigate accepted robot0"
 else
     echo "  ✗ /fleet/navigate failed: $RESULT"

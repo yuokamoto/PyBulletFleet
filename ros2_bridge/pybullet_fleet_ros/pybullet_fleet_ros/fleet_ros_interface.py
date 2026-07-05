@@ -42,6 +42,7 @@ class FleetRosInterface:
         self.config = config
         self.state_provider = FleetStateProvider(sim_core)
         self.command_dispatcher = FleetCommandDispatcher(sim_core)
+        self._rmf_frame_offset = _node_frame_offset(node)
 
         self._state_pub = None
         self._navigate_sub = None
@@ -74,7 +75,13 @@ class FleetRosInterface:
         """Publish fleet state after a simulation step."""
         if self._state_pub is None:
             return
-        self._state_pub.publish(fleet_state_to_msg(self.state_provider.get_states(), stamp=stamp))
+        self._state_pub.publish(
+            fleet_state_to_msg(
+                self.state_provider.get_states(),
+                stamp=stamp,
+                xy_offset=self._rmf_frame_offset,
+            )
+        )
 
     def destroy(self) -> None:
         """Destroy ROS entities created by this wrapper."""
@@ -99,7 +106,7 @@ class FleetRosInterface:
 
     def _dispatch_navigate(self, msg: FleetNavigate) -> PbfCommandAck:
         return self.command_dispatcher.navigate(
-            _navigation_goals_from_msg(msg),
+            _navigation_goals_from_msg(msg, xy_offset=self._rmf_frame_offset),
             source=_source_from_msg(msg),
             command_id=msg.command_id or None,
         )
@@ -129,25 +136,30 @@ class FleetRosInterface:
         return self.command_dispatcher.joint_command(commands, source=source, command_id=command_id)
 
 
-def fleet_state_to_msg(states: Iterable[RobotState3D], stamp=None, frame_id: str = "odom") -> FleetState:
+def fleet_state_to_msg(
+    states: Iterable[RobotState3D],
+    stamp=None,
+    frame_id: str = "odom",
+    xy_offset: tuple[float, float] = (0.0, 0.0),
+) -> FleetState:
     """Convert Python fleet state values into a ROS fleet state message."""
     msg = FleetState()
     msg.header = Header(frame_id=frame_id)
     if stamp is not None:
         msg.header.stamp = stamp
-    msg.robots = [robot_state3d_to_msg(state) for state in states]
+    msg.robots = [robot_state3d_to_msg(state, xy_offset=xy_offset) for state in states]
     return msg
 
 
-def robot_state3d_to_msg(state: RobotState3D) -> RobotState3DMsg:
+def robot_state3d_to_msg(state: RobotState3D, xy_offset: tuple[float, float] = (0.0, 0.0)) -> RobotState3DMsg:
     """Convert one 3D robot state into its ROS message encoding."""
     msg = RobotState3DMsg()
     msg.name = state.name
     msg.object_id = int(state.object_id)
     msg.pose = Pose(
         position=Point(
-            x=state.position[0],
-            y=state.position[1],
+            x=state.position[0] + xy_offset[0],
+            y=state.position[1] + xy_offset[1],
             z=state.position[2],
         ),
         orientation=Quaternion(
@@ -189,23 +201,32 @@ def command_ack_to_msg(ack: PbfCommandAck) -> CommandAck:
     return msg
 
 
-def _navigation_goals_from_msg(msg: FleetNavigate) -> list[RobotGoalCommand2D | RobotGoalCommand3D]:
-    return [_goal_2d_from_msg(goal) for goal in msg.goals_2d] + [_goal_3d_from_msg(goal) for goal in msg.goals_3d]
+def _navigation_goals_from_msg(
+    msg: FleetNavigate,
+    xy_offset: tuple[float, float] = (0.0, 0.0),
+) -> list[RobotGoalCommand2D | RobotGoalCommand3D]:
+    return [_goal_2d_from_msg(goal, xy_offset=xy_offset) for goal in msg.goals_2d] + [
+        _goal_3d_from_msg(goal, xy_offset=xy_offset) for goal in msg.goals_3d
+    ]
 
 
-def _goal_2d_from_msg(msg: RobotGoal2D) -> RobotGoalCommand2D:
+def _goal_2d_from_msg(msg: RobotGoal2D, xy_offset: tuple[float, float] = (0.0, 0.0)) -> RobotGoalCommand2D:
     return RobotGoalCommand2D(
         name=msg.name,
-        position=(float(msg.position[0]), float(msg.position[1])),
+        position=(float(msg.position[0]) - xy_offset[0], float(msg.position[1]) - xy_offset[1]),
         yaw=float(msg.yaw),
         z=float(msg.z),
     )
 
 
-def _goal_3d_from_msg(msg: RobotGoal3D) -> RobotGoalCommand3D:
+def _goal_3d_from_msg(msg: RobotGoal3D, xy_offset: tuple[float, float] = (0.0, 0.0)) -> RobotGoalCommand3D:
     return RobotGoalCommand3D(
         name=msg.name,
-        position=(float(msg.position.x), float(msg.position.y), float(msg.position.z)),
+        position=(
+            float(msg.position.x) - xy_offset[0],
+            float(msg.position.y) - xy_offset[1],
+            float(msg.position.z),
+        ),
         orientation=(
             float(msg.orientation.x),
             float(msg.orientation.y),
@@ -243,3 +264,10 @@ def _named_joint_positions_from_msg(msg: RobotNamedJointPositionsCommandMsg) -> 
 
 def _source_from_msg(msg) -> str:
     return msg.source or "ros2"
+
+
+def _node_frame_offset(node) -> tuple[float, float]:
+    value = getattr(node, "rmf_frame_offset", (0.0, 0.0))
+    if isinstance(value, (list, tuple)) and len(value) >= 2:
+        return (float(value[0]), float(value[1]))
+    return (0.0, 0.0)

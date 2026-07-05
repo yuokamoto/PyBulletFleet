@@ -71,6 +71,19 @@ def test_fleet_state_publisher_uses_provider():
     assert published.robots[0].twist.linear.x == pytest.approx(0.4)
 
 
+def test_fleet_state_publisher_applies_frame_offset():
+    node = _node()
+    node.rmf_frame_offset = (100.0, 200.0)
+    agent = FakeAgent("robot0", 7, pose=Pose.from_xyz(1.0, 2.0, 0.3))
+    interface = FleetRosInterface(node, FakeSim([agent]), FleetApiConfig(enabled=True, states=True))
+
+    interface.post_step()
+
+    published = node.create_publisher.return_value.publish.call_args.args[0]
+    assert published.robots[0].pose.position.x == pytest.approx(101.0)
+    assert published.robots[0].pose.position.y == pytest.approx(202.0)
+
+
 def test_fleet_navigate_service_dispatches_2d_goal():
     node = _node()
     agent = FakeAgent("robot0", 1)
@@ -87,6 +100,21 @@ def test_fleet_navigate_service_dispatches_2d_goal():
     assert result.ack.accepted_names == ["robot0"]
     assert agent.goal_calls[0].x == pytest.approx(1.0)
     assert agent.goal_calls[0].yaw == pytest.approx(0.5)
+
+
+def test_fleet_navigate_service_applies_frame_offset():
+    node = _node()
+    node.rmf_frame_offset = (100.0, 200.0)
+    agent = FakeAgent("robot0", 1)
+    interface = FleetRosInterface(node, FakeSim([agent]), FleetApiConfig(enabled=True, navigate=True))
+    request = FleetNavigateSrv.Request()
+    request.goals_2d = [RobotGoal2D(name="robot0", position=[101.0, 202.0], yaw=0.5, z=0.0)]
+    response = FleetNavigateSrv.Response()
+
+    interface._on_navigate_service(request, response)
+
+    assert agent.goal_calls[0].x == pytest.approx(1.0)
+    assert agent.goal_calls[0].y == pytest.approx(2.0)
 
 
 def test_named_joint_service_rejects_mismatched_arrays():
