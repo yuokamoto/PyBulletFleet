@@ -26,7 +26,8 @@ TOPICS=$(ros2 topic list)
 echo "$TOPICS"
 
 for topic in /clock /robot0/odom /robot0/cmd_vel /robot0/joint_states \
-             /robot1/odom /robot2/odom /tf; do
+             /robot1/odom /robot2/odom /tf /fleet/states /fleet/navigate \
+             /fleet/joint_command; do
     if echo "$TOPICS" | grep -q "$topic"; then
         echo "  ✓ $topic"
     else
@@ -44,10 +45,15 @@ echo "--- Checking odom publishes ---"
 timeout 5 ros2 topic echo /robot0/odom --once || { echo "✗ odom not publishing"; kill $BRIDGE_PID; exit 1; }
 echo "  ✓ /robot0/odom publishing"
 
+echo "--- Checking fleet state publishes ---"
+timeout 5 ros2 topic echo /fleet/states --once || { echo "✗ /fleet/states not publishing"; kill $BRIDGE_PID; exit 1; }
+echo "  ✓ /fleet/states publishing"
+
 echo "--- Checking services ---"
 SERVICES=$(ros2 service list)
 for svc in /sim/get_simulator_features /sim/spawn_entity /sim/get_entities \
-           /sim/step_simulation /sim/get_simulation_state; do
+           /sim/step_simulation /sim/get_simulation_state /fleet/navigate \
+           /fleet/joint_command; do
     if echo "$SERVICES" | grep -q "$svc"; then
         echo "  ✓ $svc"
     else
@@ -78,6 +84,18 @@ if echo "$RESULT" | grep -q "features=\["; then
     echo "  ✓ GetSimulatorFeatures returned features"
 else
     echo "  ✗ GetSimulatorFeatures failed: $RESULT"
+    kill $BRIDGE_PID 2>/dev/null
+    exit 1
+fi
+
+echo "--- Testing fleet navigate service ---"
+RESULT=$(timeout 10 ros2 service call /fleet/navigate pybullet_fleet_msgs/srv/FleetNavigate \
+    "{command_id: smoke-nav, source: smoke, goals_2d: [{name: robot0, position: [1.0, 0.0], yaw: 0.0, z: 0.05}], goals_3d: []}" 2>&1)
+if echo "$RESULT" | python3 -c \
+    'import re, sys; data = sys.stdin.read(); sys.exit(0 if re.search(r"accepted_names[:=][\s\S]*robot0", data) else 1)'; then
+    echo "  ✓ /fleet/navigate accepted robot0"
+else
+    echo "  ✗ /fleet/navigate failed: $RESULT"
     kill $BRIDGE_PID 2>/dev/null
     exit 1
 fi

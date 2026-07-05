@@ -150,19 +150,21 @@ Future improvements. Items already implemented have been removed — see git log
 
 ### Near-Term
 
-#### Batch API ROS Wrapper (Pattern 2)
+#### Fleet-Level ROS Wrapper (Pattern 2)
 
-`AgentManager` batch API に numpy flat array 一括取得を追加し、ROS ラッパーで O(1) endpoint 化。
+The bridge can expose fleet-level state and command endpoints alongside the
+existing per-robot interfaces.
 
 ```
 fleet_adapter ↔ 1×/fleet/states + 1×/fleet/navigate ↔ bridge_node ↔ sim_core
 ```
 
-- `/fleet/states` publisher (FleetStates.msg) — N 台分を1メッセージ
-- `/fleet/navigate` service — batch navigation
+- `/fleet/states` publisher — N 台分を1メッセージ
+- `/fleet/navigate` topic/service — batch navigation
+- `/fleet/joint_command` topic/service — batch joint commands
 - 100 robots: 200 endpoints → 2–3 endpoints
 
-**Depends on:** `pybullet_fleet_msgs` に FleetStates.msg 定義
+Enable these endpoints with the `fleet_api` config section.
 
 ---
 

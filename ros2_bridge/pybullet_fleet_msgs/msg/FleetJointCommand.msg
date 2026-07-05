@@ -1,0 +1,4 @@
+string command_id
+string source
+RobotJointPositionsCommand[] joint_position_commands
+RobotNamedJointPositionsCommand[] named_joint_position_commands

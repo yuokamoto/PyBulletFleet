@@ -8,6 +8,12 @@ simulation:
   gui: false
   physics: false
 
+fleet_api:
+  enabled: true
+  states: true
+  navigate: true
+  joint_command: true
+
 entities:
   - name: robot0
     urdf_path: "robots/mobile_robot.urdf"

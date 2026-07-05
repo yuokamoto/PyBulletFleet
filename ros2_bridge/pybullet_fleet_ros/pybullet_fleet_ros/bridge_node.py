@@ -31,6 +31,7 @@ from pybullet_fleet.types import MotionMode
 
 from .bridge_plugin import BridgePlugin
 from .conversions import sim_time_to_ros_time
+from .fleet_ros_interface import FleetRosInterface
 from .handler_registry import HandlerMap, load_handler_map_from_config, resolve_handler_classes
 from .interface_config import BridgeApiConfig, resolve_bridge_api_config
 from .param_utils import get_bool_param, get_float_param
@@ -169,6 +170,7 @@ class BridgeNode(Node):
 
         # Interface selection from explicit fleet_api/per_robot_api sections.
         self._api_config: BridgeApiConfig = resolve_bridge_api_config(bridge_config)
+        self._fleet_ros = FleetRosInterface(self, self.sim, self._api_config.fleet_api)
         if not self._api_config.per_robot_api.enabled:
             self.get_logger().warning("per_robot_api disabled: no per-robot ROS handlers will be created")
         elif not self._api_config.per_robot_api.any_group_enabled:
@@ -365,6 +367,7 @@ class BridgeNode(Node):
                 self._last_clock_time = sim_time
 
             # Per-robot update (odom, TF, joint_states, diagnostics)
+            self._fleet_ros.post_step(stamp=stamp)
             for handlers in self._handlers.values():
                 for h in handlers:
                     h.post_step(dt=dt, stamp=stamp)

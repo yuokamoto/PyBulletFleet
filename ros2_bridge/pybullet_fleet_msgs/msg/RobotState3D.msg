@@ -1,0 +1,9 @@
+string name
+int32 object_id
+geometry_msgs/Pose pose
+geometry_msgs/Twist twist
+bool is_moving
+bool has_battery_soc
+float64 battery_soc
+bool has_is_charging
+bool is_charging
