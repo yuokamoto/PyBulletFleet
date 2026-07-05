@@ -223,15 +223,15 @@ def _goal_3d_from_msg(msg: RobotGoal3D, xy_offset: tuple[float, float] = (0.0, 0
     return RobotGoalCommand3D(
         name=msg.name,
         position=(
-            float(msg.position.x) - xy_offset[0],
-            float(msg.position.y) - xy_offset[1],
-            float(msg.position.z),
+            float(msg.pose.position.x) - xy_offset[0],
+            float(msg.pose.position.y) - xy_offset[1],
+            float(msg.pose.position.z),
         ),
         orientation=(
-            float(msg.orientation.x),
-            float(msg.orientation.y),
-            float(msg.orientation.z),
-            float(msg.orientation.w),
+            float(msg.pose.orientation.x),
+            float(msg.pose.orientation.y),
+            float(msg.pose.orientation.z),
+            float(msg.pose.orientation.w),
         ),
     )
 

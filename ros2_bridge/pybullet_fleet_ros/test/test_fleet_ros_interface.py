@@ -11,10 +11,17 @@ import pytest
 
 pytest.importorskip("pybullet_fleet_msgs.msg", reason="pybullet_fleet_msgs not generated")
 
+from geometry_msgs.msg import Point, Pose as RosPose, Quaternion
 from pybullet_fleet.geometry import Pose
 from pybullet_fleet_ros.fleet_ros_interface import FleetRosInterface
 from pybullet_fleet_ros.interface_config import FleetApiConfig
-from pybullet_fleet_msgs.msg import FleetJointCommand, FleetNavigate, RobotGoal2D, RobotNamedJointPositionsCommand
+from pybullet_fleet_msgs.msg import (
+    FleetJointCommand,
+    FleetNavigate,
+    RobotGoal2D,
+    RobotGoal3D,
+    RobotNamedJointPositionsCommand,
+)
 from pybullet_fleet_msgs.srv import FleetJointCommand as FleetJointCommandSrv
 from pybullet_fleet_msgs.srv import FleetNavigate as FleetNavigateSrv
 
@@ -115,6 +122,30 @@ def test_fleet_navigate_service_applies_frame_offset():
 
     assert agent.goal_calls[0].x == pytest.approx(1.0)
     assert agent.goal_calls[0].y == pytest.approx(2.0)
+
+
+def test_fleet_navigate_service_dispatches_3d_pose_goal():
+    node = _node()
+    node.rmf_frame_offset = (100.0, 200.0)
+    agent = FakeAgent("robot0", 1)
+    interface = FleetRosInterface(node, FakeSim([agent]), FleetApiConfig(enabled=True, navigate=True))
+    request = FleetNavigateSrv.Request()
+    request.goals_3d = [
+        RobotGoal3D(
+            name="robot0",
+            pose=RosPose(
+                position=Point(x=101.0, y=202.0, z=0.3),
+                orientation=Quaternion(x=0.0, y=0.0, z=0.707, w=0.707),
+            ),
+        )
+    ]
+    response = FleetNavigateSrv.Response()
+
+    result = interface._on_navigate_service(request, response)
+
+    assert result.ack.accepted_names == ["robot0"]
+    assert agent.goal_calls[0].position == pytest.approx([1.0, 2.0, 0.3])
+    assert agent.goal_calls[0].orientation == pytest.approx([0.0, 0.0, 0.707, 0.707])
 
 
 def test_named_joint_service_rejects_mismatched_arrays():
