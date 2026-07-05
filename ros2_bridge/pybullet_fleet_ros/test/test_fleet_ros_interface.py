@@ -231,8 +231,34 @@ def test_named_joint_service_rejects_mismatched_arrays():
 
     assert result.ack.command_id == "cmd-2"
     assert result.ack.accepted_names == []
-    assert result.ack.rejected_names == ["request"]
+    assert result.ack.rejected_names == ["robot0"]
     assert "2 joint names" in result.ack.reject_reasons[0]
+
+
+def test_named_joint_service_rejects_invalid_robot_but_dispatches_valid_command():
+    msgs, srvs = _fleet_msg_types()
+    node = _node()
+    robot0 = FakeAgent("robot0", 1)
+    robot1 = FakeAgent("robot1", 2)
+    interface = FleetRosInterface(
+        node,
+        FakeSim([robot0, robot1]),
+        FleetApiConfig(enabled=True, joint_command=True),
+    )
+    request = srvs.FleetJointCommand.Request()
+    request.command_id = "cmd-mixed"
+    request.named_joint_position_commands = [
+        msgs.RobotNamedJointPositionsCommand(name="robot0", joint_names=["joint1"], positions=[1.0]),
+        msgs.RobotNamedJointPositionsCommand(name="robot1", joint_names=["joint1", "joint2"], positions=[2.0]),
+    ]
+    response = srvs.FleetJointCommand.Response()
+
+    result = interface._on_joint_command_service(request, response)
+
+    assert result.ack.accepted_names == ["robot0"]
+    assert result.ack.rejected_names == ["robot1"]
+    assert robot0.joint_calls == [{"joint1": 1.0}]
+    assert robot1.joint_calls == []
 
 
 def test_named_joint_topic_logs_rejected_request():
@@ -254,4 +280,5 @@ def test_named_joint_topic_logs_rejected_request():
     warning = node.get_logger.return_value.warning
     warning.assert_called_once()
     assert "cmd-2" in warning.call_args.args[0]
+    assert "robot0" in warning.call_args.args[0]
     assert "2 joint names" in warning.call_args.args[0]

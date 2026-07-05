@@ -149,16 +149,24 @@ class FleetRosInterface:
     def _dispatch_joint_command(self, msg: FleetJointCommand) -> PbfCommandAck:
         source = _source_from_msg(msg)
         command_id = msg.command_id or None
-        try:
-            commands = _joint_commands_from_msg(msg)
-        except ValueError as exc:
+        commands, validation_rejected = _joint_commands_from_msg(msg)
+        if not commands:
             return PbfCommandAck(
                 command_id=command_id or "invalid",
                 source=source,
                 sim_time=float(getattr(self.command_dispatcher.sim_core, "sim_time", 0.0)),
-                rejected={"request": str(exc)},
+                rejected=validation_rejected,
             )
-        return self.command_dispatcher.joint_command(commands, source=source, command_id=command_id)
+        ack = self.command_dispatcher.joint_command(commands, source=source, command_id=command_id)
+        if not validation_rejected:
+            return ack
+        return PbfCommandAck(
+            command_id=ack.command_id,
+            source=ack.source,
+            sim_time=ack.sim_time,
+            accepted_names=ack.accepted_names,
+            rejected={**dict(ack.rejected), **validation_rejected},
+        )
 
     def _log_rejections(self, ack: PbfCommandAck) -> None:
         if not ack.rejected:
@@ -272,12 +280,17 @@ def _goal_3d_from_msg(msg: RobotGoal3D, xy_offset: tuple[float, float] = (0.0, 0
 
 def _joint_commands_from_msg(
     msg: FleetJointCommand,
-) -> list[RobotJointPositionsCommand | RobotNamedJointPositionsCommand]:
+) -> tuple[list[RobotJointPositionsCommand | RobotNamedJointPositionsCommand], dict[str, str]]:
     commands: list[RobotJointPositionsCommand | RobotNamedJointPositionsCommand] = [
         _joint_positions_from_msg(command) for command in msg.joint_position_commands
     ]
-    commands.extend(_named_joint_positions_from_msg(command) for command in msg.named_joint_position_commands)
-    return commands
+    rejected: dict[str, str] = {}
+    for command in msg.named_joint_position_commands:
+        try:
+            commands.append(_named_joint_positions_from_msg(command))
+        except ValueError as exc:
+            rejected[command.name] = str(exc)
+    return commands, rejected
 
 
 def _joint_positions_from_msg(msg: RobotJointPositionsCommandMsg) -> RobotJointPositionsCommand:
