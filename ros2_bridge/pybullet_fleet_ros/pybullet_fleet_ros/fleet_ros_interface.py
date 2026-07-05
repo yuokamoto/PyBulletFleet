@@ -17,21 +17,46 @@ from pybullet_fleet.fleet_api import (
     RobotNamedJointPositionsCommand,
     RobotState3D,
 )
-from pybullet_fleet_msgs.msg import (
-    CommandAck,
-    FleetJointCommand,
-    FleetNavigate,
-    FleetState,
-    RobotGoal2D,
-    RobotGoal3D,
-    RobotJointPositionsCommand as RobotJointPositionsCommandMsg,
-    RobotNamedJointPositionsCommand as RobotNamedJointPositionsCommandMsg,
-    RobotState3D as RobotState3DMsg,
-)
-from pybullet_fleet_msgs.srv import FleetJointCommand as FleetJointCommandSrv
-from pybullet_fleet_msgs.srv import FleetNavigate as FleetNavigateSrv
+try:
+    from pybullet_fleet_msgs.msg import (
+        CommandAck,
+        FleetJointCommand,
+        FleetNavigate,
+        FleetState,
+        RobotGoal2D,
+        RobotGoal3D,
+        RobotJointPositionsCommand as RobotJointPositionsCommandMsg,
+        RobotNamedJointPositionsCommand as RobotNamedJointPositionsCommandMsg,
+        RobotState3D as RobotState3DMsg,
+    )
+    from pybullet_fleet_msgs.srv import FleetJointCommand as FleetJointCommandSrv
+    from pybullet_fleet_msgs.srv import FleetNavigate as FleetNavigateSrv
+
+    _FLEET_MSGS_IMPORT_ERROR: ImportError | None = None
+except ImportError as exc:
+    CommandAck = None
+    FleetJointCommand = None
+    FleetNavigate = None
+    FleetState = None
+    RobotGoal2D = None
+    RobotGoal3D = None
+    RobotJointPositionsCommandMsg = None
+    RobotNamedJointPositionsCommandMsg = None
+    RobotState3DMsg = None
+    FleetJointCommandSrv = None
+    FleetNavigateSrv = None
+    _FLEET_MSGS_IMPORT_ERROR = exc
 
 from .interface_config import FleetApiConfig
+
+
+def _require_fleet_msgs() -> None:
+    if _FLEET_MSGS_IMPORT_ERROR is None:
+        return
+    raise RuntimeError(
+        "fleet_api is enabled but pybullet_fleet_msgs Python bindings are unavailable. "
+        "Build/source the ROS workspace so pybullet_fleet_msgs is generated."
+    ) from _FLEET_MSGS_IMPORT_ERROR
 
 
 class FleetRosInterface:
@@ -52,6 +77,7 @@ class FleetRosInterface:
 
         if not config.enabled:
             return
+        _require_fleet_msgs()
 
         if config.states:
             self._state_pub = node.create_publisher(FleetState, "/fleet/states", 10)
@@ -143,6 +169,7 @@ def fleet_state_to_msg(
     xy_offset: tuple[float, float] = (0.0, 0.0),
 ) -> FleetState:
     """Convert Python fleet state values into a ROS fleet state message."""
+    _require_fleet_msgs()
     msg = FleetState()
     msg.header = Header(frame_id=frame_id)
     if stamp is not None:
@@ -153,6 +180,7 @@ def fleet_state_to_msg(
 
 def robot_state3d_to_msg(state: RobotState3D, xy_offset: tuple[float, float] = (0.0, 0.0)) -> RobotState3DMsg:
     """Convert one 3D robot state into its ROS message encoding."""
+    _require_fleet_msgs()
     msg = RobotState3DMsg()
     msg.name = state.name
     msg.object_id = int(state.object_id)
@@ -191,6 +219,7 @@ def robot_state3d_to_msg(state: RobotState3D, xy_offset: tuple[float, float] = (
 
 def command_ack_to_msg(ack: PbfCommandAck) -> CommandAck:
     """Convert a Python command acknowledgement into a ROS message."""
+    _require_fleet_msgs()
     msg = CommandAck()
     msg.command_id = ack.command_id
     msg.source = ack.source

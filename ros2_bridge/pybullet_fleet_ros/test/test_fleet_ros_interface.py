@@ -13,6 +13,7 @@ pytest.importorskip("pybullet_fleet_msgs.msg", reason="pybullet_fleet_msgs not g
 
 from geometry_msgs.msg import Point, Pose as RosPose, Quaternion
 from pybullet_fleet.geometry import Pose
+from pybullet_fleet_ros import fleet_ros_interface as fleet_ros_interface_module
 from pybullet_fleet_ros.fleet_ros_interface import FleetRosInterface
 from pybullet_fleet_ros.interface_config import FleetApiConfig
 from pybullet_fleet_msgs.msg import (
@@ -62,6 +63,21 @@ def _node():
     node.create_subscription.return_value = MagicMock()
     node.create_service.return_value = MagicMock()
     return node
+
+
+def test_disabled_fleet_api_does_not_require_generated_message_bindings(monkeypatch):
+    monkeypatch.setattr(fleet_ros_interface_module, "_FLEET_MSGS_IMPORT_ERROR", ImportError("missing"))
+
+    interface = FleetRosInterface(_node(), FakeSim([]), FleetApiConfig(enabled=False))
+
+    assert interface._state_pub is None
+
+
+def test_enabled_fleet_api_requires_generated_message_bindings(monkeypatch):
+    monkeypatch.setattr(fleet_ros_interface_module, "_FLEET_MSGS_IMPORT_ERROR", ImportError("missing"))
+
+    with pytest.raises(RuntimeError, match="pybullet_fleet_msgs Python bindings are unavailable"):
+        FleetRosInterface(_node(), FakeSim([]), FleetApiConfig(enabled=True, states=True))
 
 
 def test_fleet_state_publisher_uses_provider():
