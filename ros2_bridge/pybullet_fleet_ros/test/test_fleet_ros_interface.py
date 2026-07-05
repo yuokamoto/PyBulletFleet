@@ -9,16 +9,31 @@ from unittest.mock import MagicMock
 
 import pytest
 
-pytest.importorskip("geometry_msgs.msg", reason="geometry_msgs not available")
+try:
+    from geometry_msgs.msg import Point, Pose as RosPose, Quaternion
+    from pybullet_fleet_ros import fleet_ros_interface as fleet_ros_interface_module
+    from pybullet_fleet_ros.fleet_ros_interface import FleetRosInterface
 
-from geometry_msgs.msg import Point, Pose as RosPose, Quaternion
+    _GEOMETRY_MSGS_IMPORT_ERROR = None
+except ImportError as exc:
+    Point = None
+    RosPose = None
+    Quaternion = None
+    fleet_ros_interface_module = None
+    FleetRosInterface = None
+    _GEOMETRY_MSGS_IMPORT_ERROR = exc
+
 from pybullet_fleet.geometry import Pose
-from pybullet_fleet_ros import fleet_ros_interface as fleet_ros_interface_module
-from pybullet_fleet_ros.fleet_ros_interface import FleetRosInterface
 from pybullet_fleet_ros.interface_config import FleetApiConfig
 
 
+def _require_geometry_msgs():
+    if _GEOMETRY_MSGS_IMPORT_ERROR is not None:
+        pytest.skip("geometry_msgs not available")
+
+
 def _fleet_msg_types():
+    _require_geometry_msgs()
     msgs = pytest.importorskip("pybullet_fleet_msgs.msg", reason="pybullet_fleet_msgs not generated")
     srvs = pytest.importorskip("pybullet_fleet_msgs.srv", reason="pybullet_fleet_msgs not generated")
     return msgs, srvs
@@ -63,6 +78,7 @@ def _node():
 
 
 def test_disabled_fleet_api_does_not_require_generated_message_bindings(monkeypatch):
+    _require_geometry_msgs()
     monkeypatch.setattr(fleet_ros_interface_module, "_FLEET_MSGS_IMPORT_ERROR", ImportError("missing"))
 
     interface = FleetRosInterface(_node(), FakeSim([]), FleetApiConfig(enabled=False))
@@ -71,6 +87,7 @@ def test_disabled_fleet_api_does_not_require_generated_message_bindings(monkeypa
 
 
 def test_enabled_fleet_api_requires_generated_message_bindings(monkeypatch):
+    _require_geometry_msgs()
     monkeypatch.setattr(fleet_ros_interface_module, "_FLEET_MSGS_IMPORT_ERROR", ImportError("missing"))
 
     with pytest.raises(RuntimeError, match="pybullet_fleet_msgs Python bindings are unavailable"):
