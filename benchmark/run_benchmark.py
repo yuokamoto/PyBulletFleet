@@ -171,7 +171,7 @@ def run_worker(
             cmd.extend(["--config", config_path])
         if scenario:
             cmd.extend(["--scenario", scenario])
-        if benchmark_type == "mobile" and collision_freq is not None:
+        if benchmark_type in {"mobile", "arm"} and collision_freq is not None:
             cmd.extend(["--collision-freq", str(collision_freq)])
 
     proc = subprocess.run(cmd, capture_output=True, text=True)

@@ -177,6 +177,14 @@ def bench_case(
     gui: bool = False,
 ) -> dict:
     sim, mgr, agents = _make_manager_and_agents(n, collision_freq, mode, controller_impl, gui=gui)
+
+    state_snapshot_s = 0.0
+    state_count = 0
+    if command_interface == "per_agent":
+        setup_s, accepted, rejected = _apply_per_agent_commands(agents, mode)
+    else:
+        setup_s, accepted, rejected, state_snapshot_s, state_count = _apply_fleet_commands(sim, agents, mode)
+
     if gui:
         sim.setup_camera(
             camera_config={
@@ -188,13 +196,6 @@ def bench_case(
         )
         sim.run_simulation(duration=None)
         return {}
-
-    state_snapshot_s = 0.0
-    state_count = 0
-    if command_interface == "per_agent":
-        setup_s, accepted, rejected = _apply_per_agent_commands(agents, mode)
-    else:
-        setup_s, accepted, rejected, state_snapshot_s, state_count = _apply_fleet_commands(sim, agents, mode)
 
     controller_label = "Batch" if controller_impl == "batch" else "PerAgent"
     command_label = "FleetCommandDispatcher" if command_interface == "fleet" else "per-agent API"
@@ -354,9 +355,18 @@ def main() -> None:
         f"(n={args.agents}, steps={args.steps}, collision_freq={args.collision_freq}) ===\n"
     )
     if args.gui:
-        batch_name = "BatchOmniController" if args.mode == "omni" else "BatchDifferentialController"
-        print(f"{batch_name} — GUI  (n={args.agents})\nClose the window to exit.\n")
-        bench_case(args.agents, args.steps, args.collision_freq, args.mode, "batch", "per_agent", gui=True)
+        controller = args.controller[0]
+        command_interface = args.command_interface[0]
+        controller_name = (
+            ("BatchOmniController" if args.mode == "omni" else "BatchDifferentialController")
+            if controller == "batch"
+            else ctrl_name
+        )
+        print(
+            f"{controller_name} via {command_interface} command interface — GUI  (n={args.agents})\n"
+            "Close the window to exit.\n"
+        )
+        bench_case(args.agents, args.steps, args.collision_freq, args.mode, controller, command_interface, gui=True)
     else:
         results = [
             bench_case(args.agents, args.steps, args.collision_freq, args.mode, controller, command_interface)

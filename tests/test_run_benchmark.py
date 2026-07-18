@@ -7,7 +7,7 @@ from unittest.mock import patch
 # Ensure benchmark/ is importable
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "benchmark"))
 
-from run_benchmark import run_multiple
+from run_benchmark import run_multiple, run_worker
 
 
 def _make_mobile_result(**overrides):
@@ -54,6 +54,22 @@ def _make_batch_result(**overrides):
     }
     base.update(overrides)
     return base
+
+
+class _Completed:
+    returncode = 0
+    stdout = "{}"
+    stderr = ""
+
+
+class TestRunWorker:
+    @patch("run_benchmark.subprocess.run")
+    def test_arm_forwards_collision_freq(self, mock_run):
+        mock_run.return_value = _Completed()
+        run_worker(3, 1.0, "arm", collision_freq=0)
+        argv = mock_run.call_args.args[0]
+        assert "--collision-freq" in argv
+        assert argv[argv.index("--collision-freq") + 1] == "0"
 
 
 class TestRunMultipleEmptyResults:
