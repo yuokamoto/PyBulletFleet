@@ -61,7 +61,7 @@ if HAS_RMF:
     from rmf_fleet_msgs.msg import RobotMode
     from rmf_fleet_msgs.msg import SpeedLimitRequest
 
-    from pybullet_fleet_rmf.robot_client_api import RobotClientAPI
+    from pybullet_fleet_rmf.fleet_clients import create_rmf_client_factory
 
 
 def main(argv=sys.argv):
@@ -102,6 +102,12 @@ def main(argv=sys.argv):
         "--use_sim_time",
         action="store_true",
         help="Use sim time (default: false)",
+    )
+    parser.add_argument(
+        "--client-mode",
+        choices=["per_robot_ros", "fleet_ros"],
+        default=None,
+        help="RMF client transport (default: pybullet_fleet.rmf_client_mode or per_robot_ros)",
     )
     args = parser.parse_args(args_without_ros[1:])
 
@@ -181,6 +187,15 @@ def main(argv=sys.argv):
     # Build RobotClientAPI wrappers for each robot
     pybullet_config = config_yaml.get("pybullet_fleet", {})
     update_period = 1.0 / pybullet_config.get("robot_state_update_frequency", 10.0)
+    client_mode = args.client_mode or pybullet_config.get("rmf_client_mode", "per_robot_ros")
+    try:
+        client_factory = create_rmf_client_factory(client_mode, node)
+    except ValueError as exc:
+        node.get_logger().error(str(exc))
+        node.destroy_node()
+        rclpy.shutdown()
+        return
+    node.get_logger().info(f"RMF client mode: {client_mode}")
 
     # The nav graph is used to detect charger waypoints via the
     # is_charger attribute (set in the building.yaml / nav_graph).
@@ -189,7 +204,7 @@ def main(argv=sys.argv):
     robots: dict[str, "RobotAdapter"] = {}
     for robot_name in fleet_config.known_robots:
         robot_config = fleet_config.get_known_robot_configuration(robot_name)
-        api = RobotClientAPI(robot_name=robot_name, node=node)
+        api = client_factory.robot(robot_name)
         robots[robot_name] = RobotAdapter(
             robot_name,
             robot_config,

@@ -211,19 +211,34 @@ share the same success condition and should be evaluated together.
 
 ### Phase 5a — RMF Client Abstraction
 
+Status: in progress.
+
 Tasks:
 
 - Extract the RMF-facing client contract from `RobotClientAPI`.
-- Define a transport-independent client interface:
-  - `get_states()`
-  - `navigate(goals)`
-  - `stop(names)`
-  - `execute_action(commands)`
-  - `attach(commands)`
-- Implement `RosFleetClient` using ROS `/fleet/*` endpoints.
+- Define a transport-independent per-robot facade consumed by
+  `RobotAdapter`:
+  - `get_data()`
+  - `navigate(cmd_id, position, map_name, speed_limit)`
+  - `stop()`
+  - `start_charge(cmd_id)` / `stop_charge()`
+  - `toggle_attach(attach, cmd_id)`
+- Add a client factory so the adapter can choose the transport without
+  changing RMF callback logic.
+- Implement `RosFleetClient` using ROS `/fleet/states` and `/fleet/navigate`
+  for patrol/navigation.
 - Implement `PythonFleetClient` using `FleetStateProvider` and
   `FleetCommandDispatcher` directly.
 - Keep the existing per-robot ROS client path as a compatibility implementation.
+
+Current implementation notes:
+
+- `per_robot_ros` remains the default and preserves existing demos.
+- `fleet_ros` is available as an experimental RMF client mode for
+  `/fleet/states` + `/fleet/navigate`; delivery/charging still use per-robot
+  compatibility services until fleet-level attach/charge APIs exist.
+- `PythonFleetClient` is still pending and should reuse the same client
+  factory/interface.
 
 Exit criteria:
 

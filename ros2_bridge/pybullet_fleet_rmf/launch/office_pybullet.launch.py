@@ -14,6 +14,7 @@ Usage::
     # Start the demo:
     ros2 launch pybullet_fleet_rmf office_pybullet.launch.py
     ros2 launch pybullet_fleet_rmf office_pybullet.launch.py gui:=true
+    ros2 launch pybullet_fleet_rmf office_pybullet.launch.py client_mode:=fleet_ros
 
     # With web dashboard (start api-server + dashboard via docker compose):
     ros2 launch pybullet_fleet_rmf office_pybullet.launch.py \\
@@ -58,6 +59,11 @@ def generate_launch_description():
                 description="API server WebSocket URI (e.g. ws://localhost:8000/_internal)",
             ),
             DeclareLaunchArgument(
+                "client_mode",
+                default_value="per_robot_ros",
+                description="RMF client transport: per_robot_ros or fleet_ros",
+            ),
+            DeclareLaunchArgument(
                 "headless",
                 default_value="false",
                 description="Skip rviz launch",
@@ -96,6 +102,7 @@ def generate_launch_description():
                     "gui": LaunchConfiguration("gui"),
                     "target_rtf": LaunchConfiguration("target_rtf"),
                     "server_uri": LaunchConfiguration("server_uri"),
+                    "client_mode": LaunchConfiguration("client_mode"),
                     "use_sim_time": LaunchConfiguration("use_sim_time"),
                 }.items(),
             ),

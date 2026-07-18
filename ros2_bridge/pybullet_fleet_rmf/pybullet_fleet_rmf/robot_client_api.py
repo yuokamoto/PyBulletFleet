@@ -16,7 +16,6 @@ pattern established by ``rmf_demos_fleet_adapter/RobotClientAPI.py``.
 import logging
 import math
 import threading
-from dataclasses import dataclass
 from typing import Optional
 
 from action_msgs.msg import GoalStatus
@@ -29,22 +28,9 @@ from sensor_msgs.msg import BatteryState
 from std_srvs.srv import SetBool
 
 from pybullet_fleet_msgs.srv import AttachObject
+from pybullet_fleet_rmf.client_interface import RobotUpdateData
 
 logger = logging.getLogger(__name__)
-
-
-@dataclass
-class RobotUpdateData:
-    """Snapshot of robot state for EasyFullControl updates."""
-
-    map: str
-    position: list  # [x, y, yaw]
-    battery_soc: float
-    last_completed_cmd_id: int
-
-    def is_command_completed(self, cmd_id: int) -> bool:
-        """Check if the given command has been completed."""
-        return self.last_completed_cmd_id >= cmd_id
 
 
 class RobotClientAPI:

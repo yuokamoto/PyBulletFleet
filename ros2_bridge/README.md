@@ -124,10 +124,31 @@ Fleet adapter and infrastructure handlers for [Open-RMF](https://www.open-rmf.or
 
 ### Fleet Adapter
 
-`fleet_adapter` registers simulated robots with the RMF fleet manager via `rmf_adapter.easy_full_control`. Commands are forwarded to the bridge node through `RobotClientAPI`:
+`fleet_adapter` registers simulated robots with the RMF fleet manager via `rmf_adapter.easy_full_control`. Commands are forwarded through an RMF client abstraction. The default client is the existing per-robot ROS implementation:
 
 ```
-RMF Schedule ← FleetAdapterNode → RobotClientAPI → BridgeNode → PyBulletFleet
+RMF Schedule ← FleetAdapterNode → per-robot ROS client → BridgeNode → PyBulletFleet
+```
+
+An experimental fleet-level ROS client can be selected with
+`--client-mode fleet_ros` or `pybullet_fleet.rmf_client_mode: fleet_ros` in the
+fleet config. That mode consumes `/fleet/states` and sends navigation through
+the `/fleet/navigate` service, so the bridge config must enable:
+
+```yaml
+fleet_api:
+  enabled: true
+  states: true
+  navigate: true
+```
+
+Delivery and charging compatibility still use per-robot services until
+fleet-level attach/charge APIs are added.
+
+The office demo exposes this experimental path directly:
+
+```bash
+ros2 launch pybullet_fleet_rmf office_pybullet.launch.py client_mode:=fleet_ros
 ```
 
 Supported RMF task actions:

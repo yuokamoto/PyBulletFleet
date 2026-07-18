@@ -19,6 +19,7 @@ Optional launch arguments (defaults provided):
     gui:          Enable PyBullet GUI (default: use YAML config)
     target_rtf:   Target real-time factor (default: use YAML config)
     server_uri:   API server WebSocket URI (default: ``""``)
+    client_mode:  RMF client transport (default: ``per_robot_ros``)
 
 Example (from a demo launch file)::
 
@@ -95,6 +96,11 @@ def generate_launch_description():
                 description="API server WebSocket URI",
             ),
             DeclareLaunchArgument(
+                "client_mode",
+                default_value="per_robot_ros",
+                description="RMF client transport: per_robot_ros or fleet_ros",
+            ),
+            DeclareLaunchArgument(
                 "use_sim_time",
                 default_value="true",
                 description="Use simulation clock (/clock) for all nodes. Default true for acceleration.",
@@ -112,6 +118,8 @@ def generate_launch_description():
                     LaunchConfiguration("fleet_config"),
                     "-n",
                     LaunchConfiguration("nav_graph"),
+                    "--client-mode",
+                    LaunchConfiguration("client_mode"),
                 ],
                 parameters=[
                     {
@@ -134,6 +142,8 @@ def generate_launch_description():
                     "-n",
                     LaunchConfiguration("nav_graph"),
                     "-sim",
+                    "--client-mode",
+                    LaunchConfiguration("client_mode"),
                 ],
                 parameters=[
                     {

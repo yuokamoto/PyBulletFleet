@@ -17,6 +17,12 @@
 handler_map:
   "*_door": pybullet_fleet_rmf.door_handler.DoorHandler
 
+fleet_api:
+  enabled: true
+  states: true
+  navigate: true
+  joint_command: false
+
 simulation:
   gui: true
   physics: false
