@@ -1,7 +1,7 @@
-"""Robot client API for PyBulletFleet bridge (EasyFullControl pattern).
+"""Per-robot ROS client for PyBulletFleet RMF integration.
 
-Provides a ``RobotClientAPI`` that communicates with the PyBulletFleet
-bridge node via ROS 2 topics and actions:
+Provides a ``PerRobotRosClient`` that communicates with the PyBulletFleet
+bridge node via per-robot ROS 2 topics, actions, and services:
 
 - **State**: Subscribes to ``/<robot>/odom`` for position/orientation
   and ``/<robot>/battery_state`` for battery state.
@@ -9,8 +9,8 @@ bridge node via ROS 2 topics and actions:
 - **Stop**: Cancels active NavigateToPose goals.
 - **Charging**: Calls ``/<robot>/set_charging`` service to start/stop charging.
 
-This replaces the old ``PybulletCommandHandle`` and follows the
-pattern established by ``rmf_demos_fleet_adapter/RobotClientAPI.py``.
+This replaces the old ``PybulletCommandHandle`` and keeps the
+rmf_demos-style per-robot transport available beside the fleet-level client.
 """
 
 import logging
@@ -33,8 +33,8 @@ from pybullet_fleet_rmf.client_interface import RobotUpdateData
 logger = logging.getLogger(__name__)
 
 
-class RobotClientAPI:
-    """Per-robot API wrapper for communicating with PyBulletFleet bridge.
+class PerRobotRosClient:
+    """Per-robot ROS wrapper for communicating with PyBulletFleet bridge.
 
     Subscribes to ``/<robot_name>/odom`` for state and sends
     ``NavigateToPose`` action goals for navigation commands.

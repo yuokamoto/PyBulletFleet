@@ -51,6 +51,15 @@ See **[docker/README.md](../docker/README.md)** for build instructions and demo 
 | Sub | `/{robot}/joint_trajectory` | `trajectory_msgs/JointTrajectory` | Joint trajectory command |
 | Sub | `/{robot}/joint_commands` | `std_msgs/Float64MultiArray` | Direct joint position command |
 
+### Fleet-Level Interfaces
+
+| Direction | Topic/Service | Type | Description |
+|-----------|---------------|------|-------------|
+| Pub | `/fleet/states` | `pybullet_fleet_msgs/FleetState` | Batched robot state |
+| Sub/Srv | `/fleet/navigate` | `pybullet_fleet_msgs/FleetNavigate` | Batched navigation command |
+| Sub/Srv | `/fleet/stop` | `pybullet_fleet_msgs/FleetStop` | Batched stop command |
+| Sub/Srv | `/fleet/joint_command` | `pybullet_fleet_msgs/FleetJointCommand` | Batched joint position command |
+
 ### Per-Robot Action Servers
 
 | Action Server | Type | Description |
@@ -140,6 +149,7 @@ fleet_api:
   enabled: true
   states: true
   navigate: true
+  stop: true
 ```
 
 Delivery and charging compatibility still use per-robot services until
@@ -200,11 +210,12 @@ The bridge can expose fleet-level state and command endpoints alongside the
 existing per-robot interfaces.
 
 ```
-fleet_adapter ↔ 1×/fleet/states + 1×/fleet/navigate ↔ bridge_node ↔ sim_core
+fleet_adapter ↔ /fleet/states + /fleet/navigate + /fleet/stop ↔ bridge_node ↔ sim_core
 ```
 
 - `/fleet/states` publisher — N 台分を1メッセージ
 - `/fleet/navigate` topic/service — batch navigation
+- `/fleet/stop` topic/service — batch stop
 - `/fleet/joint_command` topic/service — batch joint commands
 - 100 robots: 200 endpoints → 2–3 endpoints
 
@@ -268,13 +279,13 @@ ROS 2 topic/service 層をバイパスし、低レイテンシ・シンプルデ
 
 #### rmf_demos Fleet Adapter 流用パターン
 
-現行の自前 `fleet_adapter` + `RobotClientAPI` (ROS 2 Action/Service 直接通信) に加え、
+現行の自前 `fleet_adapter` + `PerRobotRosClient` (ROS 2 Action/Service 直接通信) に加え、
 `rmf_demos` の `fleet_adapter` + `fleet_manager` を流用するパターンを reference 実装として用意する。
 
 **アーキテクチャ比較:**
 
 ```
-[現行] fleet_adapter → RobotClientAPI (ROS 2) → robot_handler → Agent API
+[現行] fleet_adapter → PerRobotRosClient (ROS 2) → robot_handler → Agent API
 [rmf_demos] fleet_adapter → RobotClientAPI (HTTP) → fleet_manager (FastAPI) → ROS topics → robot_handler
 ```
 

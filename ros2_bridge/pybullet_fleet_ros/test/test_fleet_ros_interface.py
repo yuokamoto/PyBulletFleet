@@ -51,6 +51,7 @@ class FakeAgent:
     def __post_init__(self):
         self.goal_calls = []
         self.joint_calls = []
+        self.stop_calls = 0
 
     def get_pose(self):
         return self.pose
@@ -60,6 +61,9 @@ class FakeAgent:
 
     def set_joints_targets_by_name(self, positions):
         self.joint_calls.append(dict(positions))
+
+    def stop(self):
+        self.stop_calls += 1
 
 
 class FakeSim:
@@ -210,6 +214,32 @@ def test_fleet_navigate_service_dispatches_3d_pose_goal():
     assert result.ack.accepted_names == ["robot0"]
     assert agent.goal_calls[0].position == pytest.approx([1.0, 2.0, 0.3])
     assert agent.goal_calls[0].orientation == pytest.approx([0.0, 0.0, 0.707, 0.707])
+
+
+def test_fleet_stop_service_dispatches_named_targets():
+    _, srvs = _fleet_msg_types()
+    node = _node()
+    robot0 = FakeAgent("robot0", 1)
+    robot1 = FakeAgent("robot1", 2)
+    interface = FleetRosInterface(
+        node,
+        FakeSim([robot0, robot1]),
+        FleetApiConfig(enabled=True, stop=True),
+    )
+    request = srvs.FleetStop.Request()
+    request.command_id = "stop-1"
+    request.source = "test"
+    request.names = ["robot0", "missing"]
+    response = srvs.FleetStop.Response()
+
+    result = interface._on_stop_service(request, response)
+
+    assert result.ack.command_id == "stop-1"
+    assert result.ack.source == "test"
+    assert result.ack.accepted_names == ["robot0"]
+    assert result.ack.rejected_names == ["missing"]
+    assert robot0.stop_calls == 1
+    assert robot1.stop_calls == 0
 
 
 def test_named_joint_service_rejects_mismatched_arrays():

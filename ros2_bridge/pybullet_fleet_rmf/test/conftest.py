@@ -11,21 +11,21 @@ import pytest
 
 @pytest.fixture(autouse=True)
 def _patch_action_client():
-    """Stub the ActionClient bound in robot_client_api.
+    """Stub the ActionClient bound in per_robot_ros_client.
 
     ``rclpy.action.ActionClient`` is a pybind11 C-binding that rejects a
-    ``MagicMock`` node. ``robot_client_api`` imports it at module scope, so we
+    ``MagicMock`` node. ``per_robot_ros_client`` imports it at module scope, so we
     patch the bound name there (cf. test_sim_services patching ActionServer).
     No-op when the module can't be imported (ROS unavailable → tests skip).
     """
     try:
-        import pybullet_fleet_rmf.robot_client_api  # noqa: F401
+        import pybullet_fleet_rmf.per_robot_ros_client  # noqa: F401
     except ImportError:
         # Only swallow missing-dependency (ROS unavailable) cases; let other
         # import-time errors surface instead of masquerading as "ROS missing".
         yield
         return
-    with patch("pybullet_fleet_rmf.robot_client_api.ActionClient"):
+    with patch("pybullet_fleet_rmf.per_robot_ros_client.ActionClient"):
         yield
 
 
@@ -43,7 +43,7 @@ def mock_node():
     - ``side_effect`` runs the lambda *per call*, returning a *fresh* mock each
       time — mirroring a real node (each pub/sub is its own object). Tests rely on
       this to assert against a specific resource (e.g. DoorHandler._shared_pub,
-      RobotClientAPI's separate odom vs battery subscriptions).
+      PerRobotRosClient's separate odom vs battery subscriptions).
     """
     node = MagicMock()
     node.get_logger.return_value = MagicMock()  # so get_logger().info(...) is a no-op

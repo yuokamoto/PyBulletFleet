@@ -184,7 +184,7 @@ def main(argv=sys.argv):
         fleet_handle.more().add_performable_action(action_name, _consider_action)
         node.get_logger().info(f"Performable action '{action_name}' registered")
 
-    # Build RobotClientAPI wrappers for each robot
+    # Build RMF client wrappers for each robot
     pybullet_config = config_yaml.get("pybullet_fleet", {})
     update_period = 1.0 / pybullet_config.get("robot_state_update_frequency", 10.0)
     client_mode = args.client_mode or pybullet_config.get("rmf_client_mode", "per_robot_ros")

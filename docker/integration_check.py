@@ -9,7 +9,7 @@ import rclpy
 from geometry_msgs.msg import Twist
 from nav_msgs.msg import Odometry
 from pybullet_fleet_msgs.msg import FleetState, RobotGoal2D, RobotJointPositionsCommand
-from pybullet_fleet_msgs.srv import FleetJointCommand, FleetNavigate
+from pybullet_fleet_msgs.srv import FleetJointCommand, FleetNavigate, FleetStop
 from rosgraph_msgs.msg import Clock
 from simulation_interfaces.msg import Result
 from simulation_interfaces.srv import (
@@ -33,6 +33,7 @@ EXPECTED_TOPICS = [
     "/tf",
     "/fleet/states",
     "/fleet/navigate",
+    "/fleet/stop",
     "/fleet/joint_command",
 ]
 EXPECTED_SERVICES = [
@@ -45,6 +46,7 @@ EXPECTED_SERVICES = [
     "/sim/step_simulation",
     "/sim/get_simulation_state",
     "/fleet/navigate",
+    "/fleet/stop",
     "/fleet/joint_command",
 ]
 EXPECTED_ROBOTS = {"robot0", "robot1", "robot2"}
@@ -69,6 +71,7 @@ class BridgeIntegrationCheck(RosCheckNode):
         self.set_entity_state = self.create_client(SetEntityState, "/sim/set_entity_state")
         self.spawn_entity = self.create_client(SpawnEntity, "/sim/spawn_entity")
         self.fleet_nav = self.create_client(FleetNavigate, "/fleet/navigate")
+        self.fleet_stop = self.create_client(FleetStop, "/fleet/stop")
         self.fleet_joint = self.create_client(FleetJointCommand, "/fleet/joint_command")
 
     def _on_clock(self, _msg: Clock) -> None:
@@ -227,6 +230,15 @@ def main() -> int:
             print(f"  FAIL /fleet/navigate ack: {nav_resp.ack}")
             return 1
 
+        stop_req = FleetStop.Request()
+        stop_req.command_id = "smoke-stop"
+        stop_req.source = "smoke"
+        stop_req.names = ["robot0"]
+        stop_resp = node.call_service(node.fleet_stop, stop_req, CALL_TIMEOUT)
+        if "robot0" not in stop_resp.ack.accepted_names:
+            print(f"  FAIL /fleet/stop ack: {stop_resp.ack}")
+            return 1
+
         joint_req = FleetJointCommand.Request()
         joint_req.command_id = "smoke-joint"
         joint_req.source = "smoke"
@@ -235,7 +247,7 @@ def main() -> int:
         if "robot0" not in joint_resp.ack.accepted_names:
             print(f"  FAIL /fleet/joint_command ack: {joint_resp.ack}")
             return 1
-        print("  OK /fleet/navigate and /fleet/joint_command accepted robot0")
+        print("  OK /fleet/navigate, /fleet/stop, and /fleet/joint_command accepted robot0")
         return 0
     finally:
         node.destroy_node()

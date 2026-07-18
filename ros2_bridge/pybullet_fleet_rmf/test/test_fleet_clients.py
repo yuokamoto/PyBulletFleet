@@ -13,8 +13,9 @@ from pybullet_fleet_msgs.msg import FleetState, RobotState3D
 
 def _node_with_clients(*clients):
     node = MagicMock()
+    remaining = list(clients)
     node.create_subscription.side_effect = lambda *args, **kwargs: MagicMock()
-    node.create_client.side_effect = list(clients)
+    node.create_client.side_effect = lambda *args, **kwargs: remaining.pop(0) if remaining else MagicMock()
     return node
 
 
@@ -34,25 +35,27 @@ def _fleet_state(robot_name="tinyRobot1", x=1.0, y=2.0, yaw=0.0, battery_soc=0.5
 
 def test_client_factory_defaults_to_per_robot_ros(mock_node):
     from pybullet_fleet_rmf.fleet_clients import PerRobotRosClientFactory, create_rmf_client_factory
-    from pybullet_fleet_rmf.robot_client_api import RobotClientAPI
+    from pybullet_fleet_rmf.per_robot_ros_client import PerRobotRosClient
 
     factory = create_rmf_client_factory("", mock_node)
     assert isinstance(factory, PerRobotRosClientFactory)
-    assert isinstance(factory.robot("tinyRobot1"), RobotClientAPI)
+    assert isinstance(factory.robot("tinyRobot1"), PerRobotRosClient)
 
 
 def test_client_factory_creates_fleet_ros_client():
     from pybullet_fleet_rmf.fleet_clients import RosFleetClient, create_rmf_client_factory
 
     nav_client = MagicMock()
-    node = _node_with_clients(nav_client)
+    stop_client = MagicMock()
+    node = _node_with_clients(nav_client, stop_client)
 
     factory = create_rmf_client_factory("fleet_ros", node)
 
     assert isinstance(factory, RosFleetClient)
     node.create_subscription.assert_called_once()
-    node.create_client.assert_called_once()
-    assert node.create_client.call_args.args[1] == "/fleet/navigate"
+    assert node.create_client.call_count == 2
+    assert node.create_client.call_args_list[0].args[1] == "/fleet/navigate"
+    assert node.create_client.call_args_list[1].args[1] == "/fleet/stop"
 
 
 def test_client_factory_rejects_aliases(mock_node):
@@ -128,6 +131,28 @@ def test_ros_fleet_robot_client_navigates_through_fleet_service():
     assert req.goals_2d[0].name == "tinyRobot1"
     assert list(req.goals_2d[0].position) == pytest.approx([1.0, 2.0])
     assert req.goals_2d[0].yaw == pytest.approx(0.3)
+    future.add_done_callback.assert_called_once()
+
+
+def test_ros_fleet_robot_client_stops_through_fleet_service():
+    from pybullet_fleet_rmf.fleet_clients import RosFleetClient
+
+    future = MagicMock()
+    nav_client = MagicMock()
+    stop_client = MagicMock()
+    stop_client.service_is_ready.return_value = True
+    stop_client.call_async.return_value = future
+    node = _node_with_clients(nav_client, stop_client)
+    fleet = RosFleetClient(node, map_name="L1")
+    robot = fleet.robot("tinyRobot1")
+
+    assert robot.stop() is True
+
+    stop_client.call_async.assert_called_once()
+    req = stop_client.call_async.call_args.args[0]
+    assert req.command_id == "1"
+    assert req.source == "rmf"
+    assert req.names == ["tinyRobot1"]
     future.add_done_callback.assert_called_once()
 
 

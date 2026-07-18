@@ -215,7 +215,7 @@ Status: in progress.
 
 Tasks:
 
-- Extract the RMF-facing client contract from `RobotClientAPI`.
+- Extract the RMF-facing client contract from the per-robot ROS client.
 - Define a transport-independent per-robot facade consumed by
   `RobotAdapter`:
   - `get_data()`
@@ -235,8 +235,9 @@ Current implementation notes:
 
 - `per_robot_ros` remains the default and preserves existing demos.
 - `fleet_ros` is available as an experimental RMF client mode for
-  `/fleet/states` + `/fleet/navigate`; delivery/charging still use per-robot
-  compatibility services until fleet-level attach/charge APIs exist.
+  `/fleet/states` + `/fleet/navigate` + `/fleet/stop`; delivery/charging still
+  use per-robot compatibility services until fleet-level attach/charge APIs
+  exist.
 - `PythonFleetClient` is still pending and should reuse the same client
   factory/interface.
 
@@ -253,6 +254,7 @@ Tasks:
 - Let RMF consume fleet state snapshots instead of per-robot state publishers.
 - Add `/fleet/navigate` / dispatcher-backed navigation support to the client
   abstraction.
+- Add `/fleet/stop` / dispatcher-backed stop support to the client abstraction.
 - Add optional command coalescing in `RosFleetClient`:
   collect per-robot RMF `navigate()` callbacks that arrive within a short flush
   window and send them as one `/fleet/navigate` request.
@@ -263,7 +265,7 @@ Tasks:
 
 Exit criteria:
 
-- Patrol can run with fleet state and fleet navigation.
+- Patrol can run with fleet state, fleet navigation, and fleet stop.
 - Optional coalescing can be enabled without changing `RobotAdapter` callback
   code, and single-robot navigation remains the default behavior.
 

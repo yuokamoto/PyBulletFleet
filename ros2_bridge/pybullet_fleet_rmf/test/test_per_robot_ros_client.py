@@ -1,4 +1,4 @@
-"""Unit tests for RobotClientAPI (RMF EasyFullControl ↔ bridge client).
+"""Unit tests for PerRobotRosClient (RMF EasyFullControl ↔ bridge client).
 
 Mock-based; require ROS 2 message types. Run inside Docker or a sourced ROS 2
 workspace.
@@ -11,7 +11,7 @@ import pytest
 
 # importorskip the module under test: it pulls rclpy + all the ROS/RMF message
 # deps used below, so a single guard covers them all (skips outside a ROS env).
-pytest.importorskip("pybullet_fleet_rmf.robot_client_api", reason="ROS 2 / RMF not available")
+pytest.importorskip("pybullet_fleet_rmf.per_robot_ros_client", reason="ROS 2 / RMF not available")
 
 from action_msgs.msg import GoalStatus
 from nav_msgs.msg import Odometry
@@ -19,9 +19,9 @@ from sensor_msgs.msg import BatteryState
 
 
 def _api(mock_node, name="tinyRobot1"):
-    from pybullet_fleet_rmf.robot_client_api import RobotClientAPI
+    from pybullet_fleet_rmf.per_robot_ros_client import PerRobotRosClient
 
-    return RobotClientAPI(name, mock_node, map_name="L1")
+    return PerRobotRosClient(name, mock_node, map_name="L1")
 
 
 def _odom_at(api, x, y, yaw):
@@ -35,7 +35,7 @@ def _odom_at(api, x, y, yaw):
 
 
 def test_update_data_is_command_completed():
-    from pybullet_fleet_rmf.robot_client_api import RobotUpdateData
+    from pybullet_fleet_rmf.client_interface import RobotUpdateData
 
     d = RobotUpdateData(map="L1", position=[0.0, 0.0, 0.0], battery_soc=1.0, last_completed_cmd_id=5)
     assert d.is_command_completed(5)

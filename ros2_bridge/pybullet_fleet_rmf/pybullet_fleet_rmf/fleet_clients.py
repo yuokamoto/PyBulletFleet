@@ -14,9 +14,10 @@ from std_srvs.srv import SetBool
 from pybullet_fleet_msgs.msg import FleetState, RobotGoal2D
 from pybullet_fleet_msgs.srv import AttachObject
 from pybullet_fleet_msgs.srv import FleetNavigate as FleetNavigateSrv
+from pybullet_fleet_msgs.srv import FleetStop as FleetStopSrv
 
 from pybullet_fleet_rmf.client_interface import RobotUpdateData
-from pybullet_fleet_rmf.robot_client_api import RobotClientAPI
+from pybullet_fleet_rmf.per_robot_ros_client import PerRobotRosClient
 
 logger = logging.getLogger(__name__)
 
@@ -28,9 +29,9 @@ class PerRobotRosClientFactory:
         self._node = node
         self._map_name = map_name
 
-    def robot(self, robot_name: str) -> RobotClientAPI:
-        """Create one legacy per-robot ROS client."""
-        return RobotClientAPI(robot_name=robot_name, node=self._node, map_name=self._map_name)
+    def robot(self, robot_name: str) -> PerRobotRosClient:
+        """Create one per-robot ROS client."""
+        return PerRobotRosClient(robot_name=robot_name, node=self._node, map_name=self._map_name)
 
 
 class RosFleetClient:
@@ -57,6 +58,7 @@ class RosFleetClient:
         self._map_names: dict[str, str] = {}
         self._state_sub = node.create_subscription(FleetState, "/fleet/states", self._on_fleet_state, 10)
         self._navigate_client = node.create_client(FleetNavigateSrv, "/fleet/navigate")
+        self._stop_client = node.create_client(FleetStopSrv, "/fleet/stop")
 
     def robot(self, robot_name: str) -> "RosFleetRobotClient":
         """Return a per-robot facade over the shared fleet endpoints."""
@@ -142,6 +144,36 @@ class RosFleetClient:
         if robot_name in getattr(ack, "rejected_names", []):
             logger.warning("[%s] /fleet/navigate rejected cmd %s", robot_name, cmd_id)
 
+    def call_stop(self, robot_name: str, cmd_id: int) -> bool:
+        """Send one fleet stop request."""
+        if not self._stop_client.service_is_ready():
+            if not self._stop_client.wait_for_service(timeout_sec=2.0):
+                logger.error("[%s] /fleet/stop service not available", robot_name)
+                return False
+
+        req = FleetStopSrv.Request()
+        req.command_id = str(cmd_id)
+        req.source = "rmf"
+        req.names = [robot_name]
+        future = self._stop_client.call_async(req)
+        future.add_done_callback(lambda done: self._on_stop_ack(done, robot_name, cmd_id))
+        return True
+
+    def _on_stop_ack(self, future, robot_name: str, cmd_id: int) -> None:
+        try:
+            response = future.result()
+        except Exception as exc:  # noqa: B902
+            logger.error("[%s] /fleet/stop call failed: %s", robot_name, exc)
+            return
+        ack = getattr(response, "ack", None)
+        if ack is None:
+            logger.warning("[%s] /fleet/stop returned no ack", robot_name)
+            return
+        if robot_name in getattr(ack, "rejected_names", []):
+            logger.warning("[%s] /fleet/stop rejected cmd %s", robot_name, cmd_id)
+            return
+        self.mark_completed(robot_name, cmd_id)
+
 
 class RosFleetRobotClient:
     """Per-robot facade over :class:`RosFleetClient`."""
@@ -182,13 +214,9 @@ class RosFleetRobotClient:
         return self._fleet.call_navigate(self._name, cmd_id, position, map_name)
 
     def stop(self) -> bool:
-        data = self.get_data()
-        if data is None:
-            self._active_target = None
-            return True
         self._active_cmd_id += 1
         self._active_target = None
-        return self._fleet.call_navigate(self._name, self._active_cmd_id, data.position, data.map)
+        return self._fleet.call_stop(self._name, self._active_cmd_id)
 
     def start_charge(self, cmd_id: int) -> bool:
         self._active_cmd_id = cmd_id

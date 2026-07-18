@@ -24,6 +24,7 @@ try:
         FleetJointCommand,
         FleetNavigate,
         FleetState,
+        FleetStop,
         RobotGoal2D,
         RobotGoal3D,
         RobotJointPositionsCommand as RobotJointPositionsCommandMsg,
@@ -32,6 +33,7 @@ try:
     )
     from pybullet_fleet_msgs.srv import FleetJointCommand as FleetJointCommandSrv
     from pybullet_fleet_msgs.srv import FleetNavigate as FleetNavigateSrv
+    from pybullet_fleet_msgs.srv import FleetStop as FleetStopSrv
 
     _FLEET_MSGS_IMPORT_ERROR: ImportError | None = None
 except ImportError as exc:
@@ -39,6 +41,7 @@ except ImportError as exc:
     FleetJointCommand = None
     FleetNavigate = None
     FleetState = None
+    FleetStop = None
     RobotGoal2D = None
     RobotGoal3D = None
     RobotJointPositionsCommandMsg = None
@@ -46,6 +49,7 @@ except ImportError as exc:
     RobotState3DMsg = None
     FleetJointCommandSrv = None
     FleetNavigateSrv = None
+    FleetStopSrv = None
     _FLEET_MSGS_IMPORT_ERROR = exc
 
 from .interface_config import FleetApiConfig
@@ -70,6 +74,8 @@ class FleetRosInterface:
         self._state_pub = None
         self._navigate_sub = None
         self._navigate_srv = None
+        self._stop_sub = None
+        self._stop_srv = None
         self._joint_sub = None
         self._joint_srv = None
 
@@ -86,6 +92,9 @@ class FleetRosInterface:
         if config.navigate:
             self._navigate_sub = node.create_subscription(FleetNavigate, "/fleet/navigate", self._on_navigate, 10)
             self._navigate_srv = node.create_service(FleetNavigateSrv, "/fleet/navigate", self._on_navigate_service)
+        if config.stop:
+            self._stop_sub = node.create_subscription(FleetStop, "/fleet/stop", self._on_stop, 10)
+            self._stop_srv = node.create_service(FleetStopSrv, "/fleet/stop", self._on_stop_service)
         if config.joint_command:
             self._joint_sub = node.create_subscription(
                 FleetJointCommand,
@@ -117,6 +126,8 @@ class FleetRosInterface:
             ("_state_pub", self.node.destroy_publisher),
             ("_navigate_sub", self.node.destroy_subscription),
             ("_navigate_srv", self.node.destroy_service),
+            ("_stop_sub", self.node.destroy_subscription),
+            ("_stop_srv", self.node.destroy_service),
             ("_joint_sub", self.node.destroy_subscription),
             ("_joint_srv", self.node.destroy_service),
         ):
@@ -135,6 +146,20 @@ class FleetRosInterface:
     def _dispatch_navigate(self, msg: FleetNavigate) -> PbfCommandAck:
         return self.command_dispatcher.navigate(
             _navigation_goals_from_msg(msg, xy_offset=self._rmf_frame_offset),
+            source=_source_from_msg(msg),
+            command_id=msg.command_id or None,
+        )
+
+    def _on_stop(self, msg: FleetStop) -> None:
+        self._log_rejections(self._dispatch_stop(msg))
+
+    def _on_stop_service(self, request, response):
+        response.ack = command_ack_to_msg(self._dispatch_stop(request))
+        return response
+
+    def _dispatch_stop(self, msg: FleetStop) -> PbfCommandAck:
+        return self.command_dispatcher.stop(
+            tuple(msg.names),
             source=_source_from_msg(msg),
             command_id=msg.command_id or None,
         )
