@@ -136,17 +136,19 @@ def run_worker(
     script_path = os.path.join(os.path.dirname(__file__), script)
 
     if benchmark_type in _CONTROL_PATH_BENCHMARK_TYPES:
+        effective_steps = 600 if steps is None else steps
+        effective_collision_freq = 60 if collision_freq is None else collision_freq
         cmd = [
             sys.executable,
             script_path,
             "--agents",
             str(num_agents),
             "--steps",
-            str(steps or int(duration)),
+            str(effective_steps),
             "--mode",
             mode,
             "--collision-freq",
-            str(60 if collision_freq is None else collision_freq),
+            str(effective_collision_freq),
             "--controller",
             controller or "batch",
             "--command-interface",

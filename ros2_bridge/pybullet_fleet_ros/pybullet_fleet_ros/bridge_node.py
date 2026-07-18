@@ -448,6 +448,8 @@ class BridgeNode(Node):
         self._pre_step_handlers.clear()
         self._post_step_handlers.clear()
         self._throttled_post_step_handlers.clear()
+        self._last_clock_time = -1.0
+        self._last_publish_time = -1.0
         for bp in self._bridge_plugins:
             bp.on_reset()
             bp.destroy()

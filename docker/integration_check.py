@@ -134,6 +134,8 @@ def _check_sim_crud(node: BridgeIntegrationCheck) -> bool:
 
     set_req = SetEntityState.Request()
     set_req.entity = name
+    if hasattr(set_req, "set_pose"):
+        set_req.set_pose = True
     set_req.state.pose.position.x = 3.0
     set_req.state.pose.position.y = 1.0
     set_req.state.pose.position.z = 0.05

@@ -126,7 +126,7 @@ def _set_fleet_goals(sim, agents, wp_fn) -> tuple[float, int, int]:
     dispatcher = FleetCommandDispatcher(sim)
     commands = []
     for agent in agents:
-        goal = wp_fn(agent.get_pose())[-1]
+        goal = wp_fn(agent.get_pose())[0]
         commands.append(
             RobotGoalCommand2D(
                 name=agent.name,
