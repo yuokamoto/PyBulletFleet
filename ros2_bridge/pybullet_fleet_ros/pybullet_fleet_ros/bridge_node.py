@@ -332,6 +332,11 @@ class BridgeNode(Node):
             if cls is not RobotHandler:
                 logger.info("Using custom handler %s for '%s'", _handler_display_name(cls), agent.name)
         with self._handler_lock:
+            if agent.object_id in self._handlers:
+                duplicate_handlers = handlers
+                handlers = []
+            else:
+                duplicate_handlers = []
             for handler in handlers:
                 _register_step_handler(
                     handler,
@@ -339,7 +344,10 @@ class BridgeNode(Node):
                     self._post_step_handlers,
                     self._throttled_post_step_handlers,
                 )
-            self._handlers[agent.object_id] = handlers
+            if handlers:
+                self._handlers[agent.object_id] = handlers
+        if duplicate_handlers:
+            self._destroy_handlers(duplicate_handlers)
 
     def _unregister_step_handlers(self, handlers: List["RobotHandlerBase"]) -> None:
         """Remove handlers from per-step dispatch lists."""
@@ -364,9 +372,7 @@ class BridgeNode(Node):
         # from_params emits AGENT_SPAWNED at the end of construction, which
         # _on_agent_spawned already turns into a RobotHandler. Register here only
         # if that didn't happen (idempotent — avoids a double registration).
-        with self._handler_lock:
-            has_handlers = agent.object_id in self._handlers
-        if not has_handlers and self._should_create_per_robot_handler(agent):
+        if self._should_create_per_robot_handler(agent):
             self._register_robot_handler(agent)
         self.get_logger().info(f"Spawned robot '{agent.name}' (id={agent.object_id})")
         return agent

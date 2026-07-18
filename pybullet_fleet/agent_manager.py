@@ -505,10 +505,12 @@ class SimObjectManager(Generic[T]):
         flat_params: List[SimObjectSpawnParams] = []
         for params, count in spawn_params_count_list:
             flat_params.extend([params] * count)
-        random.shuffle(flat_params)
+        if name_prefix is None:
+            random.shuffle(flat_params)
 
-        # Build grid coordinates. Keep prefixed names deterministic; otherwise
-        # shuffle positions so exact-count mixed types are spatially distributed.
+        # Build grid coordinates. Keep prefixed names and their params
+        # deterministic; otherwise shuffle positions so exact-count mixed types
+        # are spatially distributed.
         grid_coords = [
             [x, y, z]
             for z in range(grid_params.z_min, grid_params.z_max + 1)

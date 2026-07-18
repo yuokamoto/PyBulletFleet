@@ -224,9 +224,7 @@ def run_multiple(
         effective_command_interface = command_interface
 
     entity_label = "arms" if benchmark_type == "arm" else "agents"
-    duration_label = (
-        f"{effective_steps} steps" if benchmark_type in _CONTROL_PATH_BENCHMARK_TYPES else f"{duration}s"
-    )
+    duration_label = f"{effective_steps} steps" if benchmark_type in _CONTROL_PATH_BENCHMARK_TYPES else f"{duration}s"
     label_parts = [f"{num_agents} {entity_label}", duration_label]
     if benchmark_type in _CONTROL_PATH_BENCHMARK_TYPES:
         label_parts.append(f"controller={effective_controller}")
@@ -496,7 +494,9 @@ Use --config to point at a custom YAML file.
         "--duration",
         type=float,
         default=None,
-        help="Simulation duration in seconds for mobile/arm benchmarks (default: 10.0; not supported for control-path)",
+        help=(
+            "Simulation duration in seconds for mobile/arm benchmarks " "(omitted: use 10.0s; not supported for control-path)"
+        ),
     )
     parser.add_argument("--repetitions", type=int, default=3, help="Number of repetitions (default: 3)")
     parser.add_argument("--gui", action="store_true", help="Enable GUI (mobile only)")

@@ -137,6 +137,22 @@ class TestRunMultipleEmptyResults:
         assert result["controller_impl"] == "batch"
         assert result["command_interface"] == "fleet"
 
+    @patch("run_benchmark.run_worker")
+    def test_batch_zero_reps_prints_effective_defaults(self, mock_worker, capsys):
+        mock_worker.return_value = None
+        run_multiple(
+            num_agents=5,
+            duration=1.0,
+            num_reps=0,
+            benchmark_type="mobile_control_path",
+        )
+        output = capsys.readouterr().out
+        assert "600 steps" in output
+        assert "controller=batch" in output
+        assert "command_interface=fleet" in output
+        assert "controller=None" not in output
+        assert "command_interface=None" not in output
+
 
 class TestRunMultipleWithResults:
     """run_multiple aggregates results correctly when num_reps >= 1."""

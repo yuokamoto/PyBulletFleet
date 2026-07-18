@@ -194,6 +194,29 @@ class TestSpawningGrid:
         assert positions_by_name["robot_1"] == pytest.approx([1.0, 0.0, 0.5])
         assert positions_by_name["robot_2"] == pytest.approx([2.0, 0.0, 0.5])
 
+    def test_grid_name_prefix_preserves_exact_count_param_order(self, pybullet_env, mock_sim_core, manager_cls, monkeypatch):
+        """Prefixed exact-count grid spawns keep stable name-to-params identity."""
+        mgr = _create_manager(manager_cls, mock_sim_core)
+        first = _make_spawn_params(manager_cls)
+        second = _make_spawn_params(manager_cls)
+        first.mass = 1.0
+        second.mass = 2.0
+        grid = _make_grid(x_max=1, y_max=0)
+
+        def reverse_shuffle(items):
+            items.reverse()
+
+        monkeypatch.setattr(random, "shuffle", reverse_shuffle)
+        objects = mgr.spawn_grid_counts(
+            grid_params=grid,
+            spawn_params_count_list=[(first, 1), (second, 1)],
+            name_prefix="robot",
+        )
+
+        masses_by_name = {obj.name: obj.mass for obj in objects}
+        assert masses_by_name["robot_0"] == pytest.approx(1.0)
+        assert masses_by_name["robot_1"] == pytest.approx(2.0)
+
     def test_grid_3d(self, pybullet_env, mock_sim_core, manager_cls):
         """2×2×2 grid (8 objects) with z layers — positions valid and unique in 3D."""
         mgr = _create_manager(manager_cls, mock_sim_core)
