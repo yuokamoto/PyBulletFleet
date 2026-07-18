@@ -301,9 +301,9 @@ def run_multiple(
             "mem_spawn_rss_mb": stats([r["mem_spawn_mb"]["rss_mb"] for r in results]),
             "mem_total_rss_mb": stats([r["mem_total_mb"]["rss_mb"] for r in results]),
         }
-        if benchmark_type == "mobile" and results:
-            aggregated["batch_controller"] = results[0].get("batch_controller")
-            aggregated["command_interface"] = results[0].get("command_interface")
+        if benchmark_type == "mobile":
+            aggregated["batch_controller"] = results[0].get("batch_controller") if results else None
+            aggregated["command_interface"] = results[0].get("command_interface") if results else None
             aggregated["command_setup_s"] = stats([r.get("command_setup_s", 0.0) for r in results])
             aggregated["accepted_commands"] = stats([r.get("accepted_commands", 0) for r in results])
             aggregated["rejected_commands"] = stats([r.get("rejected_commands", 0) for r in results])

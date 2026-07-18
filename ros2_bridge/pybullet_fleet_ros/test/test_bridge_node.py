@@ -22,6 +22,7 @@ def _make_bridge_stub(handler_class, *, per_robot_api, handler_map=None):
     bridge._api_config = SimpleNamespace(per_robot_api=per_robot_api)
     bridge._handler_map = handler_map or {}
     bridge._handler_lock = threading.RLock()
+    bridge._handler_callback_lock = threading.RLock()
     bridge._handlers = {}
     bridge._tf_broadcaster = object()
     bridge._pre_step_handlers = []

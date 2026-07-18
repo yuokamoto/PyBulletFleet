@@ -89,6 +89,9 @@ class TestRunMultipleEmptyResults:
         assert result["num_reps"] == 0
         # Mobile-specific key should be absent
         assert "expected_steps" not in result
+        assert result["command_setup_s"]["median"] == 0.0
+        assert result["accepted_commands"]["median"] == 0.0
+        assert result["rejected_commands"]["median"] == 0.0
 
     @patch("run_benchmark.run_worker")
     def test_arm_zero_reps_does_not_raise(self, mock_worker):

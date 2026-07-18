@@ -195,6 +195,7 @@ class BridgeNode(Node):
 
         # Robot handlers (object_id → list of RobotHandlerBase instances)
         self._handler_lock = threading.RLock()
+        self._handler_callback_lock = threading.RLock()
         self._handlers: Dict[int, List["RobotHandlerBase"]] = {}
         self._pre_step_handlers: List["RobotHandlerBase"] = []
         self._post_step_handlers: List["RobotHandlerBase"] = []
@@ -350,6 +351,12 @@ class BridgeNode(Node):
             if handler in self._throttled_post_step_handlers:
                 self._throttled_post_step_handlers.remove(handler)
 
+    def _destroy_handlers(self, handlers: List["RobotHandlerBase"]) -> None:
+        """Destroy handlers after they are unreachable from step dispatch lists."""
+        with self._handler_callback_lock:
+            for handler in handlers:
+                handler.destroy()
+
     def spawn_robot(self, spawn_params: AgentSpawnParams) -> Agent:
         """Spawn a robot dynamically (e.g., via SpawnEntity service)."""
         agent = Agent.from_params(spawn_params, sim_core=self.sim)
@@ -367,14 +374,14 @@ class BridgeNode(Node):
             handlers = self._handlers.pop(object_id, None)
             if handlers:
                 self._unregister_step_handlers(handlers)
-                for h in handlers:
-                    h.destroy()
         if handlers:
             agent = handlers[0].agent
         else:
             agent = next((a for a in self.sim.agents if a.object_id == object_id), None)
         if agent is None:
             return False
+        if handlers:
+            self._destroy_handlers(handlers)
         self.sim.remove_object(agent)
         self.get_logger().info(f"Removed robot '{agent.name}' (id={object_id})")
         return True
@@ -397,9 +404,9 @@ class BridgeNode(Node):
             handlers = self._handlers.pop(agent.object_id, None)
             if handlers is not None:
                 self._unregister_step_handlers(handlers)
-                for h in handlers:
-                    h.destroy()
-                self.get_logger().info(f"Removed handler(s) for {agent.name}")
+        if handlers is not None:
+            self._destroy_handlers(handlers)
+            self.get_logger().info(f"Removed handler(s) for {agent.name}")
 
     def _run_simulation_loop(self) -> None:
         """Run ``sim.run_simulation()`` on a daemon thread."""
@@ -415,7 +422,9 @@ class BridgeNode(Node):
         """PRE_STEP — delegate to handler.pre_step()."""
         stamp = sim_time_to_ros_time(sim_time)
         with self._handler_lock:
-            for h in self._pre_step_handlers:
+            handlers = list(self._pre_step_handlers)
+        with self._handler_callback_lock:
+            for h in handlers:
                 h.pre_step(dt=dt, stamp=stamp)
 
     def _on_post_step(self, dt, sim_time, **kwargs) -> None:
@@ -435,11 +444,15 @@ class BridgeNode(Node):
             if should_run_throttled_post_step:
                 self._fleet_ros.post_step(stamp=stamp)
                 with self._handler_lock:
-                    for h in self._throttled_post_step_handlers:
+                    throttled_handlers = list(self._throttled_post_step_handlers)
+                with self._handler_callback_lock:
+                    for h in throttled_handlers:
                         h.post_step(dt=dt, stamp=stamp)
                 self._last_publish_time = sim_time
             with self._handler_lock:
-                for h in self._post_step_handlers:
+                post_handlers = list(self._post_step_handlers)
+            with self._handler_callback_lock:
+                for h in post_handlers:
                     h.post_step(dt=dt, stamp=stamp)
 
             # Bridge plugins (workcell handler, etc.)
@@ -453,13 +466,12 @@ class BridgeNode(Node):
     def reset(self) -> None:
         """Destroy all robot handlers and reset the simulation."""
         with self._handler_lock:
-            for handlers in list(self._handlers.values()):
-                for h in handlers:
-                    h.destroy()
+            handlers_to_destroy = [handler for handlers in self._handlers.values() for handler in handlers]
             self._handlers.clear()
             self._pre_step_handlers.clear()
             self._post_step_handlers.clear()
             self._throttled_post_step_handlers.clear()
+        self._destroy_handlers(handlers_to_destroy)
         self._last_clock_time = -1.0
         self._last_publish_time = -1.0
         for bp in self._bridge_plugins:
