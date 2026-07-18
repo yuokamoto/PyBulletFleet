@@ -212,14 +212,25 @@ def run_multiple(
     """Run benchmark multiple times and compute statistics."""
     results = []
 
+    if benchmark_type in _CONTROL_PATH_BENCHMARK_TYPES:
+        effective_steps = 600 if steps is None else steps
+        effective_collision_freq = 60 if collision_freq is None else collision_freq
+        effective_controller = controller or "batch"
+        effective_command_interface = command_interface or "fleet"
+    else:
+        effective_steps = steps
+        effective_collision_freq = collision_freq
+        effective_controller = controller
+        effective_command_interface = command_interface
+
     entity_label = "arms" if benchmark_type == "arm" else "agents"
     duration_label = (
-        f"{steps} steps" if benchmark_type in _CONTROL_PATH_BENCHMARK_TYPES and steps is not None else f"{duration}s"
+        f"{effective_steps} steps" if benchmark_type in _CONTROL_PATH_BENCHMARK_TYPES else f"{duration}s"
     )
     label_parts = [f"{num_agents} {entity_label}", duration_label]
     if benchmark_type in _CONTROL_PATH_BENCHMARK_TYPES:
-        label_parts.append(f"controller={controller}")
-        label_parts.append(f"command_interface={command_interface}")
+        label_parts.append(f"controller={effective_controller}")
+        label_parts.append(f"command_interface={effective_command_interface}")
     elif scenario:
         label_parts.append(f"scenario={scenario}")
 
@@ -257,10 +268,6 @@ def run_multiple(
         }
 
     if benchmark_type in _CONTROL_PATH_BENCHMARK_TYPES:
-        effective_steps = 600 if steps is None else steps
-        effective_collision_freq = 60 if collision_freq is None else collision_freq
-        effective_controller = controller or "batch"
-        effective_command_interface = command_interface or "fleet"
         return {
             "num_agents": num_agents,
             "benchmark_type": benchmark_type,

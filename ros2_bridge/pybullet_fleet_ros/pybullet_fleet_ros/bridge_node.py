@@ -343,13 +343,14 @@ class BridgeNode(Node):
 
     def _unregister_step_handlers(self, handlers: List["RobotHandlerBase"]) -> None:
         """Remove handlers from per-step dispatch lists."""
-        for handler in handlers:
-            if handler in self._pre_step_handlers:
-                self._pre_step_handlers.remove(handler)
-            if handler in self._post_step_handlers:
-                self._post_step_handlers.remove(handler)
-            if handler in self._throttled_post_step_handlers:
-                self._throttled_post_step_handlers.remove(handler)
+        with self._handler_lock:
+            for handler in handlers:
+                if handler in self._pre_step_handlers:
+                    self._pre_step_handlers.remove(handler)
+                if handler in self._post_step_handlers:
+                    self._post_step_handlers.remove(handler)
+                if handler in self._throttled_post_step_handlers:
+                    self._throttled_post_step_handlers.remove(handler)
 
     def _destroy_handlers(self, handlers: List["RobotHandlerBase"]) -> None:
         """Destroy handlers after they are unreachable from step dispatch lists."""
@@ -363,7 +364,9 @@ class BridgeNode(Node):
         # from_params emits AGENT_SPAWNED at the end of construction, which
         # _on_agent_spawned already turns into a RobotHandler. Register here only
         # if that didn't happen (idempotent — avoids a double registration).
-        if agent.object_id not in self._handlers and self._should_create_per_robot_handler(agent):
+        with self._handler_lock:
+            has_handlers = agent.object_id in self._handlers
+        if not has_handlers and self._should_create_per_robot_handler(agent):
             self._register_robot_handler(agent)
         self.get_logger().info(f"Spawned robot '{agent.name}' (id={agent.object_id})")
         return agent
