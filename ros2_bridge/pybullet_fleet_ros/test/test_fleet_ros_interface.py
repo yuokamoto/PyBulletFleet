@@ -40,6 +40,11 @@ def _fleet_msg_types():
 
 
 @dataclass
+class FakeObject:
+    name: str
+
+
+@dataclass
 class FakeAgent:
     name: str
     object_id: int
@@ -52,6 +57,11 @@ class FakeAgent:
         self.goal_calls = []
         self.joint_calls = []
         self.stop_calls = 0
+        self.attach_calls = []
+        self.detach_calls = []
+        self.attached_objects = []
+        self.pickable_object = None
+        self.sim_core = None
 
     def get_pose(self):
         return self.pose
@@ -65,11 +75,30 @@ class FakeAgent:
     def stop(self):
         self.stop_calls += 1
 
+    def find_nearest_pickable(self, search_radius=0.5):
+        return self.pickable_object
+
+    def attach_object(self, obj, parent_link_index="base_link", relative_pose=None):
+        self.attach_calls.append((obj, parent_link_index, relative_pose))
+        self.attached_objects.append(obj)
+        return True
+
+    def detach_object(self, obj):
+        self.detach_calls.append(obj)
+        self.attached_objects.remove(obj)
+        return True
+
+    def get_attached_objects(self):
+        return list(self.attached_objects)
+
 
 class FakeSim:
     def __init__(self, agents):
         self.agents = agents
         self.sim_time = 12.5
+        self.sim_objects = []
+        for agent in self.agents:
+            agent.sim_core = self
 
 
 def _node():
@@ -240,6 +269,40 @@ def test_fleet_stop_service_dispatches_named_targets():
     assert result.ack.rejected_names == ["missing"]
     assert robot0.stop_calls == 1
     assert robot1.stop_calls == 0
+
+
+def test_fleet_attach_service_dispatches_object_commands():
+    msgs, srvs = _fleet_msg_types()
+    node = _node()
+    robot0 = FakeAgent("robot0", 1)
+    box = FakeObject("box")
+    sim = FakeSim([robot0])
+    sim.sim_objects = [box]
+    interface = FleetRosInterface(
+        node,
+        sim,
+        FleetApiConfig(enabled=True, attach=True),
+    )
+    request = srvs.FleetAttach.Request()
+    request.command_id = "attach-1"
+    request.source = "test"
+    command = msgs.RobotAttachCommand()
+    command.name = "robot0"
+    command.attach = True
+    command.object_name = "box"
+    command.parent_link = "tool"
+    command.offset.position.z = 0.2
+    request.commands = [command]
+    response = srvs.FleetAttach.Response()
+
+    result = interface._on_attach_service(request, response)
+
+    assert result.ack.command_id == "attach-1"
+    assert result.ack.accepted_names == ["robot0"]
+    assert result.ack.rejected_names == []
+    assert robot0.attach_calls[0][0] is box
+    assert robot0.attach_calls[0][1] == "tool"
+    assert robot0.attach_calls[0][2].z == pytest.approx(0.2)
 
 
 def test_named_joint_service_rejects_mismatched_arrays():

@@ -11,8 +11,8 @@ from geometry_msgs.msg import Pose as RosPose, Point, Quaternion
 from rclpy.node import Node
 from std_srvs.srv import SetBool
 
-from pybullet_fleet_msgs.msg import FleetState, RobotGoal2D
-from pybullet_fleet_msgs.srv import AttachObject
+from pybullet_fleet_msgs.msg import FleetState, RobotAttachCommand, RobotGoal2D
+from pybullet_fleet_msgs.srv import FleetAttach as FleetAttachSrv
 from pybullet_fleet_msgs.srv import FleetNavigate as FleetNavigateSrv
 from pybullet_fleet_msgs.srv import FleetStop as FleetStopSrv
 
@@ -59,6 +59,7 @@ class RosFleetClient:
         self._state_sub = node.create_subscription(FleetState, "/fleet/states", self._on_fleet_state, 10)
         self._navigate_client = node.create_client(FleetNavigateSrv, "/fleet/navigate")
         self._stop_client = node.create_client(FleetStopSrv, "/fleet/stop")
+        self._attach_client = node.create_client(FleetAttachSrv, "/fleet/attach")
 
     def robot(self, robot_name: str) -> "RosFleetRobotClient":
         """Return a per-robot facade over the shared fleet endpoints."""
@@ -174,6 +175,66 @@ class RosFleetClient:
             return
         self.mark_completed(robot_name, cmd_id)
 
+    def call_attach(
+        self,
+        robot_name: str,
+        cmd_id: int,
+        *,
+        attach: bool,
+        object_name: str = "",
+        parent_link: str = "",
+        offset_position: tuple = (0.0, 0.0, 0.0),
+        offset_orientation: tuple = (0.0, 0.0, 0.0, 1.0),
+        search_radius: float = 0.0,
+    ) -> bool:
+        """Send one fleet attach/detach request."""
+        if not self._attach_client.service_is_ready():
+            if not self._attach_client.wait_for_service(timeout_sec=5.0):
+                logger.error("[%s] /fleet/attach service not available", robot_name)
+                return False
+
+        req = FleetAttachSrv.Request()
+        req.command_id = str(cmd_id)
+        req.source = "rmf"
+        command = RobotAttachCommand()
+        command.name = robot_name
+        command.attach = bool(attach)
+        command.object_name = object_name
+        command.parent_link = parent_link
+        command.offset = RosPose(
+            position=Point(
+                x=float(offset_position[0]),
+                y=float(offset_position[1]),
+                z=float(offset_position[2]),
+            ),
+            orientation=Quaternion(
+                x=float(offset_orientation[0]),
+                y=float(offset_orientation[1]),
+                z=float(offset_orientation[2]),
+                w=float(offset_orientation[3]),
+            ),
+        )
+        command.search_radius = float(search_radius)
+        req.commands = [command]
+        future = self._attach_client.call_async(req)
+        future.add_done_callback(lambda done: self._on_attach_ack(done, robot_name, cmd_id))
+        return True
+
+    def _on_attach_ack(self, future, robot_name: str, cmd_id: int) -> None:
+        try:
+            response = future.result()
+        except Exception as exc:  # noqa: B902
+            logger.error("[%s] /fleet/attach call failed: %s", robot_name, exc)
+            return
+        ack = getattr(response, "ack", None)
+        if ack is None:
+            logger.warning("[%s] /fleet/attach returned no ack", robot_name)
+            return
+        if robot_name in getattr(ack, "rejected_names", []):
+            logger.warning("[%s] /fleet/attach rejected cmd %s", robot_name, cmd_id)
+            return
+        self.mark_completed(robot_name, cmd_id)
+
 
 class RosFleetRobotClient:
     """Per-robot facade over :class:`RosFleetClient`."""
@@ -185,8 +246,6 @@ class RosFleetRobotClient:
         self._map_name = fleet._default_map_name
         self._active_cmd_id = 0
         self._active_target: Optional[list] = None
-        self._attach_client = self._node.create_client(SetBool, f"/{robot_name}/toggle_attach")
-        self._attach_object_client = self._node.create_client(AttachObject, f"/{robot_name}/attach_object")
         self._charging_client = self._node.create_client(SetBool, f"/{robot_name}/set_charging")
 
     def get_data(self) -> RobotUpdateData | None:
@@ -237,12 +296,12 @@ class RosFleetRobotClient:
 
     def toggle_attach(self, attach: bool, cmd_id: int) -> bool:
         self._active_cmd_id = cmd_id
-        if not self._attach_client.wait_for_service(timeout_sec=5.0):
-            logger.error("[%s] toggle_attach service not available", self._name)
-            return False
-        future = self._attach_client.call_async(_set_bool_request(attach))
-        future.add_done_callback(lambda done: self._on_set_bool_done(done, cmd_id, "toggle_attach"))
-        return True
+        return self._fleet.call_attach(
+            self._name,
+            cmd_id,
+            attach=attach,
+            search_radius=1.0,
+        )
 
     def attach_object(
         self,
@@ -255,26 +314,16 @@ class RosFleetRobotClient:
         search_radius: float = 0.0,
     ) -> bool:
         self._active_cmd_id = cmd_id
-        if not self._attach_object_client.wait_for_service(timeout_sec=5.0):
-            logger.error("[%s] attach_object service not available", self._name)
-            return False
-        req = AttachObject.Request()
-        req.attach = attach
-        req.object_name = object_name
-        req.parent_link = parent_link
-        req.offset = RosPose(
-            position=Point(x=offset_position[0], y=offset_position[1], z=offset_position[2]),
-            orientation=Quaternion(
-                x=offset_orientation[0],
-                y=offset_orientation[1],
-                z=offset_orientation[2],
-                w=offset_orientation[3],
-            ),
+        return self._fleet.call_attach(
+            self._name,
+            cmd_id,
+            attach=attach,
+            object_name=object_name,
+            parent_link=parent_link,
+            offset_position=offset_position,
+            offset_orientation=offset_orientation,
+            search_radius=search_radius,
         )
-        req.search_radius = float(search_radius)
-        future = self._attach_object_client.call_async(req)
-        future.add_done_callback(lambda done: self._on_set_bool_done(done, cmd_id, "attach_object"))
-        return True
 
     def _on_set_bool_done(self, future, cmd_id: int, label: str) -> None:
         self._log_set_bool_result(future, label)

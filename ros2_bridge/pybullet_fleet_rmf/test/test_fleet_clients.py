@@ -47,15 +47,17 @@ def test_client_factory_creates_fleet_ros_client():
 
     nav_client = MagicMock()
     stop_client = MagicMock()
-    node = _node_with_clients(nav_client, stop_client)
+    attach_client = MagicMock()
+    node = _node_with_clients(nav_client, stop_client, attach_client)
 
     factory = create_rmf_client_factory("fleet_ros", node)
 
     assert isinstance(factory, RosFleetClient)
     node.create_subscription.assert_called_once()
-    assert node.create_client.call_count == 2
+    assert node.create_client.call_count == 3
     assert node.create_client.call_args_list[0].args[1] == "/fleet/navigate"
     assert node.create_client.call_args_list[1].args[1] == "/fleet/stop"
+    assert node.create_client.call_args_list[2].args[1] == "/fleet/attach"
 
 
 def test_client_factory_rejects_aliases(mock_node):
@@ -153,6 +155,42 @@ def test_ros_fleet_robot_client_stops_through_fleet_service():
     assert req.command_id == "1"
     assert req.source == "rmf"
     assert req.names == ["tinyRobot1"]
+    future.add_done_callback.assert_called_once()
+
+
+def test_ros_fleet_robot_client_attaches_through_fleet_service():
+    from pybullet_fleet_rmf.fleet_clients import RosFleetClient
+
+    future = MagicMock()
+    nav_client = MagicMock()
+    stop_client = MagicMock()
+    attach_client = MagicMock()
+    attach_client.service_is_ready.return_value = True
+    attach_client.call_async.return_value = future
+    node = _node_with_clients(nav_client, stop_client, attach_client)
+    fleet = RosFleetClient(node, map_name="L1")
+    robot = fleet.robot("tinyRobot1")
+
+    assert robot.attach_object(
+        True,
+        7,
+        object_name="box",
+        parent_link="tool",
+        offset_position=(0.0, 0.0, 0.2),
+        search_radius=0.75,
+    )
+
+    attach_client.call_async.assert_called_once()
+    req = attach_client.call_async.call_args.args[0]
+    assert req.command_id == "7"
+    assert req.source == "rmf"
+    assert len(req.commands) == 1
+    assert req.commands[0].name == "tinyRobot1"
+    assert req.commands[0].attach is True
+    assert req.commands[0].object_name == "box"
+    assert req.commands[0].parent_link == "tool"
+    assert req.commands[0].offset.position.z == pytest.approx(0.2)
+    assert req.commands[0].search_radius == pytest.approx(0.75)
     future.add_done_callback.assert_called_once()
 
 

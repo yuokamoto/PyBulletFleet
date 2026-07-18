@@ -13,10 +13,16 @@ from pybullet_fleet.fleet_api import (
     FleetStateProvider,
     RobotGoalCommand2D,
     RobotGoalCommand3D,
+    RobotAttachCommand,
     RobotJointPositionsCommand,
     RobotNamedJointPositionsCommand,
 )
 from pybullet_fleet.geometry import Pose
+
+
+@dataclass
+class FakeObject:
+    name: str
 
 
 @dataclass
@@ -34,6 +40,11 @@ class FakeAgent:
         self.goal_calls = []
         self.stop_calls = 0
         self.joint_calls = []
+        self.attach_calls = []
+        self.detach_calls = []
+        self.attached_objects = []
+        self.pickable_object = None
+        self.sim_core = None
 
     def get_pose(self) -> Pose:
         return self.pose
@@ -50,12 +61,31 @@ class FakeAgent:
     def set_joints_targets_by_name(self, positions_by_name, max_force=500.0):
         self.joint_calls.append(("named", dict(positions_by_name), max_force))
 
+    def find_nearest_pickable(self, search_radius=0.5):
+        return self.pickable_object
+
+    def attach_object(self, obj, parent_link_index="base_link", relative_pose=None):
+        self.attach_calls.append((obj, parent_link_index, relative_pose))
+        self.attached_objects.append(obj)
+        return True
+
+    def detach_object(self, obj):
+        self.detach_calls.append(obj)
+        self.attached_objects.remove(obj)
+        return True
+
+    def get_attached_objects(self):
+        return list(self.attached_objects)
+
 
 class FakeSim:
     def __init__(self, agents, sim_time=12.5):
         self.agents = agents
         self.sim_time = sim_time
         self.events = EventBus()
+        self.sim_objects = []
+        for agent in self.agents:
+            agent.sim_core = self
 
 
 def test_fleet_state_provider_returns_3d_and_2d_snapshots():
@@ -220,6 +250,52 @@ def test_dispatcher_joint_command_and_stop():
     assert stop_ack.accepted_names == ("robot0",)
     assert stop_ack.rejected == {"missing": "unknown robot"}
     assert robot0.stop_calls == 1
+
+
+def test_dispatcher_attach_by_name_and_detach_attached_object():
+    robot0 = FakeAgent("robot0", 1)
+    box = FakeObject("box")
+    sim = FakeSim([robot0])
+    sim.sim_objects = [box]
+    dispatcher = FleetCommandDispatcher(sim)
+
+    attach_ack = dispatcher.attach(
+        [
+            RobotAttachCommand(
+                "robot0",
+                attach=True,
+                object_name="box",
+                parent_link="tool",
+                offset=Pose.from_xyz(0.0, 0.0, 0.2),
+            )
+        ],
+        command_id="cmd-attach",
+    )
+    detach_ack = dispatcher.attach(
+        [RobotAttachCommand("robot0", attach=False, object_name="box")],
+        command_id="cmd-detach",
+    )
+
+    assert attach_ack.ok
+    assert detach_ack.ok
+    assert robot0.attach_calls[0][0] is box
+    assert robot0.attach_calls[0][1] == "tool"
+    assert robot0.attach_calls[0][2].z == pytest.approx(0.2)
+    assert robot0.detach_calls == [box]
+
+
+def test_dispatcher_attach_rejects_missing_object_before_mutation():
+    robot0 = FakeAgent("robot0", 1)
+    dispatcher = FleetCommandDispatcher(FakeSim([robot0]))
+
+    ack = dispatcher.attach(
+        [RobotAttachCommand("robot0", attach=True, object_name="missing")],
+        command_id="cmd-missing",
+    )
+
+    assert ack.accepted_names == ()
+    assert ack.rejected == {"robot0": "object 'missing' not found"}
+    assert robot0.attach_calls == []
 
 
 def test_command_ack_and_event_rejected_maps_are_immutable():

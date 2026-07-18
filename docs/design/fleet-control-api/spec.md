@@ -89,8 +89,8 @@ The fleet APIs are the preferred scalable path:
 - `/fleet/navigate`
 - `/fleet/joint_command`
 - `/fleet/stop`
+- `/fleet/attach`
 - future `/fleet/execute_action`
-- future `/fleet/attach`
 - future `/fleet/set_charging`
 
 Per-robot APIs remain available for compatibility, RMF migration, and debugging,
@@ -114,7 +114,7 @@ fleet_api:
   joint_command: true
   stop: true
   execute_action: false
-  attach: false
+  attach: true
   charging: false
 
 per_robot_api:
@@ -246,7 +246,7 @@ The practical sequence is:
 2. Keep per-robot command/service/action endpoints for RMF compatibility.
 3. Add `/fleet/navigate` support in `RosFleetClient` for navigation dispatch.
 4. Add `/fleet/stop` support in `RosFleetClient` for cancellation/stop.
-5. Add fleet-level action/attach APIs.
+5. Add fleet-level action APIs.
 6. Move RMF adapter command paths from per-robot endpoints to fleet-level
    endpoints as those APIs become available.
 
@@ -283,9 +283,9 @@ These can be exposed through future services such as `/fleet/get_robot_info`,
 snapshot/replay records where message size is less critical.
 
 Patrol-style RMF tasks can use `/fleet/states` and `/fleet/navigate`.
-Delivery-style tasks also need attach/drop or generic action support, so
-`/fleet/execute_action` and/or `/fleet/attach` should be added before claiming
-full RMF batch support.
+Delivery-style tasks also need generic action support for non-attach actions,
+so `/fleet/execute_action` should be added before claiming full RMF batch
+support.
 
 ## Message Shape: 2D and 3D
 

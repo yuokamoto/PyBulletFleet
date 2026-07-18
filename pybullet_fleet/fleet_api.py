@@ -104,6 +104,18 @@ class RobotNamedJointPositionsCommand:
 
 
 @dataclass(frozen=True)
+class RobotAttachCommand:
+    """Attach or detach a simulation object for one robot."""
+
+    name: str
+    attach: bool
+    object_name: str = ""
+    parent_link: str = "base_link"
+    offset: Pose = field(default_factory=lambda: Pose.from_xyz(0.0, 0.0, 0.0))
+    search_radius: float = 0.5
+
+
+@dataclass(frozen=True)
 class CommandAck:
     """Result of accepting or rejecting a fleet command."""
 
@@ -283,6 +295,49 @@ class FleetCommandDispatcher:
             accepted[name].stop()
         return ack
 
+    def attach(
+        self,
+        commands: Iterable[RobotAttachCommand],
+        *,
+        source: str = "python",
+        command_id: str | None = None,
+    ) -> CommandAck:
+        """Attach or detach objects for one or more robots by name."""
+        command_tuple = tuple(commands)
+        resolved_id = _resolve_command_id(command_id, command_tuple)
+        accepted, rejected = self._resolve_targets(command.name for command in command_tuple)
+        by_name = _first_command_by_name(command_tuple)
+        targets: dict[str, Any] = {}
+        for name, agent in tuple(accepted.items()):
+            target, reason = _resolve_attach_target(agent, by_name[name])
+            if reason is not None:
+                rejected[name] = reason
+                del accepted[name]
+                continue
+            targets[name] = target
+
+        ack = self._ack(
+            "attach",
+            resolved_id,
+            source,
+            tuple(command.name for command in command_tuple),
+            accepted,
+            rejected,
+        )
+        for name in ack.accepted_names:
+            command = by_name[name]
+            agent = accepted[name]
+            target = targets[name]
+            if command.attach:
+                agent.attach_object(
+                    target,
+                    parent_link_index=command.parent_link or "base_link",
+                    relative_pose=command.offset,
+                )
+            else:
+                agent.detach_object(target)
+        return ack
+
     def _resolve_targets(self, names: Iterable[str]) -> tuple[dict[str, Any], dict[str, str]]:
         self.refresh_name_index()
         accepted: dict[str, Any] = {}
@@ -428,3 +483,42 @@ def _first_command_by_name(commands: Iterable[Any]) -> dict[str, Any]:
     for command in commands:
         by_name.setdefault(command.name, command)
     return by_name
+
+
+def _resolve_attach_target(agent: Any, command: RobotAttachCommand) -> tuple[Any | None, str | None]:
+    if command.attach:
+        if command.object_name:
+            obj = _find_sim_object(agent, command.object_name)
+            if obj is None:
+                return None, f"object '{command.object_name}' not found"
+            return obj, None
+        finder = getattr(agent, "find_nearest_pickable", None)
+        if finder is None:
+            return None, "robot does not support nearest pickable search"
+        obj = finder(search_radius=float(command.search_radius or 0.5))
+        if obj is None:
+            return None, f"no pickable object within {float(command.search_radius or 0.5):.3g}m"
+        return obj, None
+
+    attached_getter = getattr(agent, "get_attached_objects", None)
+    if attached_getter is None:
+        return None, "robot does not expose attached objects"
+    attached = tuple(attached_getter())
+    if command.object_name:
+        for obj in attached:
+            if getattr(obj, "name", None) == command.object_name:
+                return obj, None
+        return None, f"object '{command.object_name}' not attached"
+    if not attached:
+        return None, "no attached object to detach"
+    return attached[0], None
+
+
+def _find_sim_object(agent: Any, object_name: str) -> Any | None:
+    sim_core = getattr(agent, "sim_core", None)
+    if sim_core is None:
+        return None
+    for obj in getattr(sim_core, "sim_objects", ()):
+        if getattr(obj, "name", None) == object_name:
+            return obj
+    return None

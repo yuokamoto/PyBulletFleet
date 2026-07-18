@@ -11,16 +11,19 @@ from pybullet_fleet.fleet_api import (
     CommandAck as PbfCommandAck,
     FleetCommandDispatcher,
     FleetStateProvider,
+    RobotAttachCommand,
     RobotGoalCommand2D,
     RobotGoalCommand3D,
     RobotJointPositionsCommand,
     RobotNamedJointPositionsCommand,
     RobotState3D,
 )
+from pybullet_fleet.geometry import Pose as PbfPose
 
 try:
     from pybullet_fleet_msgs.msg import (
         CommandAck,
+        FleetAttach,
         FleetJointCommand,
         FleetNavigate,
         FleetState,
@@ -31,6 +34,7 @@ try:
         RobotNamedJointPositionsCommand as RobotNamedJointPositionsCommandMsg,
         RobotState3D as RobotState3DMsg,
     )
+    from pybullet_fleet_msgs.srv import FleetAttach as FleetAttachSrv
     from pybullet_fleet_msgs.srv import FleetJointCommand as FleetJointCommandSrv
     from pybullet_fleet_msgs.srv import FleetNavigate as FleetNavigateSrv
     from pybullet_fleet_msgs.srv import FleetStop as FleetStopSrv
@@ -38,6 +42,7 @@ try:
     _FLEET_MSGS_IMPORT_ERROR: ImportError | None = None
 except ImportError as exc:
     CommandAck = None
+    FleetAttach = None
     FleetJointCommand = None
     FleetNavigate = None
     FleetState = None
@@ -47,6 +52,7 @@ except ImportError as exc:
     RobotJointPositionsCommandMsg = None
     RobotNamedJointPositionsCommandMsg = None
     RobotState3DMsg = None
+    FleetAttachSrv = None
     FleetJointCommandSrv = None
     FleetNavigateSrv = None
     FleetStopSrv = None
@@ -76,6 +82,8 @@ class FleetRosInterface:
         self._navigate_srv = None
         self._stop_sub = None
         self._stop_srv = None
+        self._attach_sub = None
+        self._attach_srv = None
         self._joint_sub = None
         self._joint_srv = None
 
@@ -95,6 +103,9 @@ class FleetRosInterface:
         if config.stop:
             self._stop_sub = node.create_subscription(FleetStop, "/fleet/stop", self._on_stop, 10)
             self._stop_srv = node.create_service(FleetStopSrv, "/fleet/stop", self._on_stop_service)
+        if config.attach:
+            self._attach_sub = node.create_subscription(FleetAttach, "/fleet/attach", self._on_attach, 10)
+            self._attach_srv = node.create_service(FleetAttachSrv, "/fleet/attach", self._on_attach_service)
         if config.joint_command:
             self._joint_sub = node.create_subscription(
                 FleetJointCommand,
@@ -128,6 +139,8 @@ class FleetRosInterface:
             ("_navigate_srv", self.node.destroy_service),
             ("_stop_sub", self.node.destroy_subscription),
             ("_stop_srv", self.node.destroy_service),
+            ("_attach_sub", self.node.destroy_subscription),
+            ("_attach_srv", self.node.destroy_service),
             ("_joint_sub", self.node.destroy_subscription),
             ("_joint_srv", self.node.destroy_service),
         ):
@@ -160,6 +173,20 @@ class FleetRosInterface:
     def _dispatch_stop(self, msg: FleetStop) -> PbfCommandAck:
         return self.command_dispatcher.stop(
             tuple(msg.names),
+            source=_source_from_msg(msg),
+            command_id=msg.command_id or None,
+        )
+
+    def _on_attach(self, msg: FleetAttach) -> None:
+        self._log_rejections(self._dispatch_attach(msg))
+
+    def _on_attach_service(self, request, response):
+        response.ack = command_ack_to_msg(self._dispatch_attach(request))
+        return response
+
+    def _dispatch_attach(self, msg: FleetAttach) -> PbfCommandAck:
+        return self.command_dispatcher.attach(
+            _attach_commands_from_msg(msg),
             source=_source_from_msg(msg),
             command_id=msg.command_id or None,
         )
@@ -275,6 +302,38 @@ def _navigation_goals_from_msg(
     return [_goal_2d_from_msg(goal, xy_offset=xy_offset) for goal in msg.goals_2d] + [
         _goal_3d_from_msg(goal, xy_offset=xy_offset) for goal in msg.goals_3d
     ]
+
+
+def _attach_commands_from_msg(msg: FleetAttach) -> list[RobotAttachCommand]:
+    commands = []
+    for command in msg.commands:
+        offset = command.offset
+        offset_orientation = [
+            float(offset.orientation.x),
+            float(offset.orientation.y),
+            float(offset.orientation.z),
+            float(offset.orientation.w),
+        ]
+        if all(v == 0.0 for v in offset_orientation):
+            offset_orientation = [0.0, 0.0, 0.0, 1.0]
+        commands.append(
+            RobotAttachCommand(
+                name=command.name,
+                attach=bool(command.attach),
+                object_name=command.object_name,
+                parent_link=command.parent_link or "base_link",
+                offset=PbfPose(
+                    position=[
+                        float(offset.position.x),
+                        float(offset.position.y),
+                        float(offset.position.z),
+                    ],
+                    orientation=offset_orientation,
+                ),
+                search_radius=float(command.search_radius or 0.5),
+            )
+        )
+    return commands
 
 
 def _goal_2d_from_msg(msg: RobotGoal2D, xy_offset: tuple[float, float] = (0.0, 0.0)) -> RobotGoalCommand2D:

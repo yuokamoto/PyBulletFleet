@@ -13,6 +13,7 @@ fleet_api:
   states: true
   navigate: true
   stop: true
+  attach: true
   joint_command: true
 
 entities:

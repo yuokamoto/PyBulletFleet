@@ -235,9 +235,9 @@ Current implementation notes:
 
 - `per_robot_ros` remains the default and preserves existing demos.
 - `fleet_ros` is available as an experimental RMF client mode for
-  `/fleet/states` + `/fleet/navigate` + `/fleet/stop`; delivery/charging still
-  use per-robot compatibility services until fleet-level attach/charge APIs
-  exist.
+  `/fleet/states` + `/fleet/navigate` + `/fleet/stop` + `/fleet/attach`;
+  charging still uses per-robot compatibility services until a fleet-level
+  charge API exists.
 - `PythonFleetClient` is still pending and should reuse the same client
   factory/interface.
 
@@ -255,6 +255,8 @@ Tasks:
 - Add `/fleet/navigate` / dispatcher-backed navigation support to the client
   abstraction.
 - Add `/fleet/stop` / dispatcher-backed stop support to the client abstraction.
+- Add `/fleet/attach` / dispatcher-backed attach support to the client
+  abstraction.
 - Add optional command coalescing in `RosFleetClient`:
   collect per-robot RMF `navigate()` callbacks that arrive within a short flush
   window and send them as one `/fleet/navigate` request.
@@ -266,6 +268,8 @@ Tasks:
 Exit criteria:
 
 - Patrol can run with fleet state, fleet navigation, and fleet stop.
+- Delivery attach/drop can use fleet attach instead of per-robot attach
+  services.
 - Optional coalescing can be enabled without changing `RobotAdapter` callback
   code, and single-robot navigation remains the default behavior.
 
@@ -297,8 +301,8 @@ Exit criteria:
 
 - Plugin + Bridge can observe and optionally command the same simulation without
   maintaining a separate control implementation.
-- Delivery remains supported through per-robot compatibility paths until
-  fleet-level `stop`, `execute_action`, and `attach` APIs are ready.
+- Delivery remains supported through fleet attach plus per-robot compatibility
+  paths until fleet-level `execute_action` is ready.
 
 ### Phase 5e — Post Fleet-API Performance Refresh
 
