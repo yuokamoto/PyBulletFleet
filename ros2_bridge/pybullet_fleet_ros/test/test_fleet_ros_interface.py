@@ -59,6 +59,7 @@ class FakeAgent:
         self.stop_calls = 0
         self.attach_calls = []
         self.detach_calls = []
+        self.action_calls = []
         self.attached_objects = []
         self.pickable_object = None
         self.sim_core = None
@@ -90,6 +91,9 @@ class FakeAgent:
 
     def get_attached_objects(self):
         return list(self.attached_objects)
+
+    def add_action(self, action):
+        self.action_calls.append(action)
 
 
 class FakeSim:
@@ -303,6 +307,36 @@ def test_fleet_attach_service_dispatches_object_commands():
     assert robot0.attach_calls[0][0] is box
     assert robot0.attach_calls[0][1] == "tool"
     assert robot0.attach_calls[0][2].z == pytest.approx(0.2)
+
+
+def test_fleet_execute_action_service_dispatches_action_commands():
+    msgs, srvs = _fleet_msg_types()
+    node = _node()
+    robot0 = FakeAgent("robot0", 1)
+    interface = FleetRosInterface(
+        node,
+        FakeSim([robot0]),
+        FleetApiConfig(enabled=True, execute_action=True),
+    )
+    request = srvs.FleetExecuteAction.Request()
+    request.command_id = "action-1"
+    request.source = "test"
+    request.commands = [
+        msgs.RobotActionCommand(
+            name="robot0",
+            action_type="wait",
+            action_params_json='{"duration": 0.1}',
+        )
+    ]
+    response = srvs.FleetExecuteAction.Response()
+
+    result = interface._on_execute_action_service(request, response)
+
+    assert result.ack.command_id == "action-1"
+    assert result.ack.accepted_names == ["robot0"]
+    assert result.ack.rejected_names == []
+    assert len(robot0.action_calls) == 1
+    assert type(robot0.action_calls[0]).__name__ == "WaitAction"
 
 
 def test_named_joint_service_rejects_mismatched_arrays():

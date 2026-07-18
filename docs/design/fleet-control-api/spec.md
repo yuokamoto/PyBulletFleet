@@ -90,7 +90,7 @@ The fleet APIs are the preferred scalable path:
 - `/fleet/joint_command`
 - `/fleet/stop`
 - `/fleet/attach`
-- future `/fleet/execute_action`
+- `/fleet/execute_action`
 - future `/fleet/set_charging`
 
 Per-robot APIs remain available for compatibility, RMF migration, and debugging,
@@ -113,7 +113,7 @@ fleet_api:
   navigate: true
   joint_command: true
   stop: true
-  execute_action: false
+  execute_action: true
   attach: true
   charging: false
 
@@ -246,8 +246,7 @@ The practical sequence is:
 2. Keep per-robot command/service/action endpoints for RMF compatibility.
 3. Add `/fleet/navigate` support in `RosFleetClient` for navigation dispatch.
 4. Add `/fleet/stop` support in `RosFleetClient` for cancellation/stop.
-5. Add fleet-level action APIs.
-6. Move RMF adapter command paths from per-robot endpoints to fleet-level
+5. Move RMF adapter command paths from per-robot endpoints to fleet-level
    endpoints as those APIs become available.
 
 For Pattern 3/4, replace "use `/fleet/states`" with "call
@@ -283,9 +282,9 @@ These can be exposed through future services such as `/fleet/get_robot_info`,
 snapshot/replay records where message size is less critical.
 
 Patrol-style RMF tasks can use `/fleet/states` and `/fleet/navigate`.
-Delivery-style tasks also need generic action support for non-attach actions,
-so `/fleet/execute_action` should be added before claiming full RMF batch
-support.
+Delivery-style tasks use fleet attach/drop. Generic PyBulletFleet actions can
+use `/fleet/execute_action`, but RMF category-to-action mapping should remain
+explicit so unsupported task categories do not silently enqueue arbitrary work.
 
 ## Message Shape: 2D and 3D
 

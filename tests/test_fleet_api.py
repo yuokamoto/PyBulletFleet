@@ -14,6 +14,7 @@ from pybullet_fleet.fleet_api import (
     RobotGoalCommand2D,
     RobotGoalCommand3D,
     RobotAttachCommand,
+    RobotActionCommand,
     RobotJointPositionsCommand,
     RobotNamedJointPositionsCommand,
 )
@@ -42,6 +43,7 @@ class FakeAgent:
         self.joint_calls = []
         self.attach_calls = []
         self.detach_calls = []
+        self.action_calls = []
         self.attached_objects = []
         self.pickable_object = None
         self.sim_core = None
@@ -76,6 +78,9 @@ class FakeAgent:
 
     def get_attached_objects(self):
         return list(self.attached_objects)
+
+    def add_action(self, action):
+        self.action_calls.append(action)
 
 
 class FakeSim:
@@ -296,6 +301,35 @@ def test_dispatcher_attach_rejects_missing_object_before_mutation():
     assert ack.accepted_names == ()
     assert ack.rejected == {"robot0": "object 'missing' not found"}
     assert robot0.attach_calls == []
+
+
+def test_dispatcher_execute_action_queues_parsed_actions():
+    robot0 = FakeAgent("robot0", 1)
+    dispatcher = FleetCommandDispatcher(FakeSim([robot0]))
+
+    ack = dispatcher.execute_action(
+        [RobotActionCommand("robot0", "wait", '{"duration": 0.1}')],
+        command_id="cmd-action",
+    )
+
+    assert ack.ok
+    assert len(robot0.action_calls) == 1
+    assert type(robot0.action_calls[0]).__name__ == "WaitAction"
+    assert dispatcher.command_events[0].command_type == "execute_action"
+
+
+def test_dispatcher_execute_action_rejects_invalid_actions():
+    robot0 = FakeAgent("robot0", 1)
+    dispatcher = FleetCommandDispatcher(FakeSim([robot0]))
+
+    ack = dispatcher.execute_action(
+        [RobotActionCommand("robot0", "missing_action")],
+        command_id="cmd-invalid",
+    )
+
+    assert ack.accepted_names == ()
+    assert ack.rejected == {"robot0": "invalid action 'missing_action'"}
+    assert robot0.action_calls == []
 
 
 def test_command_ack_and_event_rejected_maps_are_immutable():

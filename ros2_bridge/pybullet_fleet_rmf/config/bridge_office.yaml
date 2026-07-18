@@ -23,6 +23,7 @@ fleet_api:
   navigate: true
   stop: true
   attach: true
+  execute_action: true
   joint_command: false
 
 simulation:

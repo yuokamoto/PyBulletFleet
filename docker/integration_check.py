@@ -11,10 +11,17 @@ from nav_msgs.msg import Odometry
 from pybullet_fleet_msgs.msg import (
     FleetState,
     RobotAttachCommand,
+    RobotActionCommand,
     RobotGoal2D,
     RobotJointPositionsCommand,
 )
-from pybullet_fleet_msgs.srv import FleetAttach, FleetJointCommand, FleetNavigate, FleetStop
+from pybullet_fleet_msgs.srv import (
+    FleetAttach,
+    FleetExecuteAction,
+    FleetJointCommand,
+    FleetNavigate,
+    FleetStop,
+)
 from rosgraph_msgs.msg import Clock
 from simulation_interfaces.msg import Result
 from simulation_interfaces.srv import (
@@ -40,6 +47,7 @@ EXPECTED_TOPICS = [
     "/fleet/navigate",
     "/fleet/stop",
     "/fleet/attach",
+    "/fleet/execute_action",
     "/fleet/joint_command",
 ]
 EXPECTED_SERVICES = [
@@ -54,6 +62,7 @@ EXPECTED_SERVICES = [
     "/fleet/navigate",
     "/fleet/stop",
     "/fleet/attach",
+    "/fleet/execute_action",
     "/fleet/joint_command",
 ]
 EXPECTED_ROBOTS = {"robot0", "robot1", "robot2"}
@@ -80,6 +89,7 @@ class BridgeIntegrationCheck(RosCheckNode):
         self.fleet_nav = self.create_client(FleetNavigate, "/fleet/navigate")
         self.fleet_stop = self.create_client(FleetStop, "/fleet/stop")
         self.fleet_attach = self.create_client(FleetAttach, "/fleet/attach")
+        self.fleet_action = self.create_client(FleetExecuteAction, "/fleet/execute_action")
         self.fleet_joint = self.create_client(FleetJointCommand, "/fleet/joint_command")
 
     def _on_clock(self, _msg: Clock) -> None:
@@ -256,6 +266,21 @@ def main() -> int:
             print(f"  FAIL /fleet/attach reject ack: {attach_resp.ack}")
             return 1
 
+        action_req = FleetExecuteAction.Request()
+        action_req.command_id = "smoke-action"
+        action_req.source = "smoke"
+        action_req.commands = [
+            RobotActionCommand(
+                name="robot0",
+                action_type="wait",
+                action_params_json='{"duration": 0.1}',
+            )
+        ]
+        action_resp = node.call_service(node.fleet_action, action_req, CALL_TIMEOUT)
+        if "robot0" not in action_resp.ack.accepted_names:
+            print(f"  FAIL /fleet/execute_action ack: {action_resp.ack}")
+            return 1
+
         joint_req = FleetJointCommand.Request()
         joint_req.command_id = "smoke-joint"
         joint_req.source = "smoke"
@@ -266,6 +291,7 @@ def main() -> int:
             return 1
         print(
             "  OK /fleet/navigate, /fleet/stop, /fleet/attach, "
+            "/fleet/execute_action, "
             "and /fleet/joint_command responded"
         )
         return 0

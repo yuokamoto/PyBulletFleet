@@ -235,9 +235,9 @@ Current implementation notes:
 
 - `per_robot_ros` remains the default and preserves existing demos.
 - `fleet_ros` is available as an experimental RMF client mode for
-  `/fleet/states` + `/fleet/navigate` + `/fleet/stop` + `/fleet/attach`;
-  charging still uses per-robot compatibility services until a fleet-level
-  charge API exists.
+  `/fleet/states` + `/fleet/navigate` + `/fleet/stop` + `/fleet/attach` +
+  `/fleet/execute_action`; charging still uses per-robot compatibility
+  services until a fleet-level charge API exists.
 - `PythonFleetClient` is still pending and should reuse the same client
   factory/interface.
 
@@ -257,6 +257,8 @@ Tasks:
 - Add `/fleet/stop` / dispatcher-backed stop support to the client abstraction.
 - Add `/fleet/attach` / dispatcher-backed attach support to the client
   abstraction.
+- Add `/fleet/execute_action` / dispatcher-backed generic action enqueue
+  support.
 - Add optional command coalescing in `RosFleetClient`:
   collect per-robot RMF `navigate()` callbacks that arrive within a short flush
   window and send them as one `/fleet/navigate` request.
@@ -270,6 +272,8 @@ Exit criteria:
 - Patrol can run with fleet state, fleet navigation, and fleet stop.
 - Delivery attach/drop can use fleet attach instead of per-robot attach
   services.
+- Generic PyBulletFleet actions can be queued through a fleet endpoint; RMF
+  category mapping remains explicit in the adapter.
 - Optional coalescing can be enabled without changing `RobotAdapter` callback
   code, and single-robot navigation remains the default behavior.
 
@@ -301,8 +305,9 @@ Exit criteria:
 
 - Plugin + Bridge can observe and optionally command the same simulation without
   maintaining a separate control implementation.
-- Delivery remains supported through fleet attach plus per-robot compatibility
-  paths until fleet-level `execute_action` is ready.
+- Delivery remains supported through fleet attach; remaining per-robot
+  compatibility paths are mainly charging and any RMF custom categories that
+  are not yet mapped onto fleet endpoints.
 
 ### Phase 5e — Post Fleet-API Performance Refresh
 

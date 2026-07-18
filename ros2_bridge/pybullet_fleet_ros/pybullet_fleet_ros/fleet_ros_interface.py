@@ -11,6 +11,7 @@ from pybullet_fleet.fleet_api import (
     CommandAck as PbfCommandAck,
     FleetCommandDispatcher,
     FleetStateProvider,
+    RobotActionCommand,
     RobotAttachCommand,
     RobotGoalCommand2D,
     RobotGoalCommand3D,
@@ -24,6 +25,7 @@ try:
     from pybullet_fleet_msgs.msg import (
         CommandAck,
         FleetAttach,
+        FleetExecuteAction,
         FleetJointCommand,
         FleetNavigate,
         FleetState,
@@ -35,6 +37,7 @@ try:
         RobotState3D as RobotState3DMsg,
     )
     from pybullet_fleet_msgs.srv import FleetAttach as FleetAttachSrv
+    from pybullet_fleet_msgs.srv import FleetExecuteAction as FleetExecuteActionSrv
     from pybullet_fleet_msgs.srv import FleetJointCommand as FleetJointCommandSrv
     from pybullet_fleet_msgs.srv import FleetNavigate as FleetNavigateSrv
     from pybullet_fleet_msgs.srv import FleetStop as FleetStopSrv
@@ -43,6 +46,7 @@ try:
 except ImportError as exc:
     CommandAck = None
     FleetAttach = None
+    FleetExecuteAction = None
     FleetJointCommand = None
     FleetNavigate = None
     FleetState = None
@@ -53,6 +57,7 @@ except ImportError as exc:
     RobotNamedJointPositionsCommandMsg = None
     RobotState3DMsg = None
     FleetAttachSrv = None
+    FleetExecuteActionSrv = None
     FleetJointCommandSrv = None
     FleetNavigateSrv = None
     FleetStopSrv = None
@@ -84,6 +89,8 @@ class FleetRosInterface:
         self._stop_srv = None
         self._attach_sub = None
         self._attach_srv = None
+        self._execute_action_sub = None
+        self._execute_action_srv = None
         self._joint_sub = None
         self._joint_srv = None
 
@@ -106,6 +113,18 @@ class FleetRosInterface:
         if config.attach:
             self._attach_sub = node.create_subscription(FleetAttach, "/fleet/attach", self._on_attach, 10)
             self._attach_srv = node.create_service(FleetAttachSrv, "/fleet/attach", self._on_attach_service)
+        if config.execute_action:
+            self._execute_action_sub = node.create_subscription(
+                FleetExecuteAction,
+                "/fleet/execute_action",
+                self._on_execute_action,
+                10,
+            )
+            self._execute_action_srv = node.create_service(
+                FleetExecuteActionSrv,
+                "/fleet/execute_action",
+                self._on_execute_action_service,
+            )
         if config.joint_command:
             self._joint_sub = node.create_subscription(
                 FleetJointCommand,
@@ -141,6 +160,8 @@ class FleetRosInterface:
             ("_stop_srv", self.node.destroy_service),
             ("_attach_sub", self.node.destroy_subscription),
             ("_attach_srv", self.node.destroy_service),
+            ("_execute_action_sub", self.node.destroy_subscription),
+            ("_execute_action_srv", self.node.destroy_service),
             ("_joint_sub", self.node.destroy_subscription),
             ("_joint_srv", self.node.destroy_service),
         ):
@@ -187,6 +208,20 @@ class FleetRosInterface:
     def _dispatch_attach(self, msg: FleetAttach) -> PbfCommandAck:
         return self.command_dispatcher.attach(
             _attach_commands_from_msg(msg),
+            source=_source_from_msg(msg),
+            command_id=msg.command_id or None,
+        )
+
+    def _on_execute_action(self, msg: FleetExecuteAction) -> None:
+        self._log_rejections(self._dispatch_execute_action(msg))
+
+    def _on_execute_action_service(self, request, response):
+        response.ack = command_ack_to_msg(self._dispatch_execute_action(request))
+        return response
+
+    def _dispatch_execute_action(self, msg: FleetExecuteAction) -> PbfCommandAck:
+        return self.command_dispatcher.execute_action(
+            _action_commands_from_msg(msg),
             source=_source_from_msg(msg),
             command_id=msg.command_id or None,
         )
@@ -334,6 +369,18 @@ def _attach_commands_from_msg(msg: FleetAttach) -> list[RobotAttachCommand]:
             )
         )
     return commands
+
+
+def _action_commands_from_msg(msg: FleetExecuteAction) -> list[RobotActionCommand]:
+    return [
+        RobotActionCommand(
+            name=command.name,
+            action_type=command.action_type,
+            action_params_json=command.action_params_json,
+            command_id=msg.command_id or None,
+        )
+        for command in msg.commands
+    ]
 
 
 def _goal_2d_from_msg(msg: RobotGoal2D, xy_offset: tuple[float, float] = (0.0, 0.0)) -> RobotGoalCommand2D:

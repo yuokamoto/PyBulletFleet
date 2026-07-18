@@ -59,6 +59,7 @@ See **[docker/README.md](../docker/README.md)** for build instructions and demo 
 | Sub/Srv | `/fleet/navigate` | `pybullet_fleet_msgs/FleetNavigate` | Batched navigation command |
 | Sub/Srv | `/fleet/stop` | `pybullet_fleet_msgs/FleetStop` | Batched stop command |
 | Sub/Srv | `/fleet/attach` | `pybullet_fleet_msgs/FleetAttach` | Batched attach/detach command |
+| Sub/Srv | `/fleet/execute_action` | `pybullet_fleet_msgs/FleetExecuteAction` | Batched generic action command |
 | Sub/Srv | `/fleet/joint_command` | `pybullet_fleet_msgs/FleetJointCommand` | Batched joint position command |
 
 ### Per-Robot Action Servers
@@ -152,6 +153,7 @@ fleet_api:
   navigate: true
   stop: true
   attach: true
+  execute_action: true
 ```
 
 Delivery and charging compatibility still use per-robot services until
@@ -212,13 +214,14 @@ The bridge can expose fleet-level state and command endpoints alongside the
 existing per-robot interfaces.
 
 ```
-fleet_adapter ↔ /fleet/states + /fleet/navigate + /fleet/stop + /fleet/attach ↔ bridge_node ↔ sim_core
+fleet_adapter ↔ /fleet/states + /fleet/navigate + /fleet/stop + /fleet/attach + /fleet/execute_action ↔ bridge_node ↔ sim_core
 ```
 
 - `/fleet/states` publisher — N 台分を1メッセージ
 - `/fleet/navigate` topic/service — batch navigation
 - `/fleet/stop` topic/service — batch stop
 - `/fleet/attach` topic/service — batch attach/detach
+- `/fleet/execute_action` topic/service — batch generic actions
 - `/fleet/joint_command` topic/service — batch joint commands
 - 100 robots: 200 endpoints → 2–3 endpoints
 

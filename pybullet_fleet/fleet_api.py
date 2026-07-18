@@ -116,6 +116,16 @@ class RobotAttachCommand:
 
 
 @dataclass(frozen=True)
+class RobotActionCommand:
+    """Generic PyBulletFleet action command for one robot."""
+
+    name: str
+    action_type: str
+    action_params_json: str = ""
+    command_id: str | None = None
+
+
+@dataclass(frozen=True)
 class CommandAck:
     """Result of accepting or rejecting a fleet command."""
 
@@ -338,6 +348,39 @@ class FleetCommandDispatcher:
                 agent.detach_object(target)
         return ack
 
+    def execute_action(
+        self,
+        commands: Iterable[RobotActionCommand],
+        *,
+        source: str = "python",
+        command_id: str | None = None,
+    ) -> CommandAck:
+        """Queue generic PyBulletFleet actions for one or more robots."""
+        command_tuple = tuple(commands)
+        resolved_id = _resolve_command_id(command_id, command_tuple)
+        accepted, rejected = self._resolve_targets(command.name for command in command_tuple)
+        by_name = _first_command_by_name(command_tuple)
+        actions: dict[str, Any] = {}
+        for name in tuple(accepted.keys()):
+            action = _build_action_command(by_name[name])
+            if action is None:
+                rejected[name] = f"invalid action '{by_name[name].action_type}'"
+                del accepted[name]
+                continue
+            actions[name] = action
+
+        ack = self._ack(
+            "execute_action",
+            resolved_id,
+            source,
+            tuple(command.name for command in command_tuple),
+            accepted,
+            rejected,
+        )
+        for name in ack.accepted_names:
+            accepted[name].add_action(actions[name])
+        return ack
+
     def _resolve_targets(self, names: Iterable[str]) -> tuple[dict[str, Any], dict[str, str]]:
         self.refresh_name_index()
         accepted: dict[str, Any] = {}
@@ -522,3 +565,9 @@ def _find_sim_object(agent: Any, object_name: str) -> Any | None:
         if getattr(obj, "name", None) == object_name:
             return obj
     return None
+
+
+def _build_action_command(command: RobotActionCommand) -> Any | None:
+    from pybullet_fleet.action_parser import parse_action_goal
+
+    return parse_action_goal(command.action_type, command.action_params_json)
