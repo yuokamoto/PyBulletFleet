@@ -257,14 +257,18 @@ def run_multiple(
         }
 
     if benchmark_type in _CONTROL_PATH_BENCHMARK_TYPES:
+        effective_steps = 600 if steps is None else steps
+        effective_collision_freq = 60 if collision_freq is None else collision_freq
+        effective_controller = controller or "batch"
+        effective_command_interface = command_interface or "fleet"
         return {
             "num_agents": num_agents,
             "benchmark_type": benchmark_type,
-            "steps": steps,
+            "steps": effective_steps,
             "mode": mode,
-            "collision_freq": collision_freq,
-            "controller_impl": controller,
-            "command_interface": command_interface,
+            "collision_freq": effective_collision_freq,
+            "controller_impl": effective_controller,
+            "command_interface": effective_command_interface,
             "num_reps": num_reps,
             "setup_s": stats([r["setup_s"] for r in results]),
             "accepted": stats([r["accepted"] for r in results]),
@@ -481,7 +485,12 @@ Use --config to point at a custom YAML file.
 
     # Basic options (shared)
     parser.add_argument("--agents", type=int, default=None, help="Number of agents/arms")
-    parser.add_argument("--duration", type=float, default=None, help="Simulation duration in seconds (default: 10.0)")
+    parser.add_argument(
+        "--duration",
+        type=float,
+        default=None,
+        help="Simulation duration in seconds for mobile/arm benchmarks (default: 10.0; not supported for control-path)",
+    )
     parser.add_argument("--repetitions", type=int, default=3, help="Number of repetitions (default: 3)")
     parser.add_argument("--gui", action="store_true", help="Enable GUI (mobile only)")
     parser.add_argument("--config", type=str, default=None, help="Path to benchmark config file")

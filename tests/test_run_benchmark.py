@@ -104,6 +104,20 @@ class TestRunMultipleEmptyResults:
         assert result["controller_impl"] == "batch"
         assert result["command_interface"] == "fleet"
 
+    @patch("run_benchmark.run_worker")
+    def test_batch_zero_reps_reports_effective_defaults(self, mock_worker):
+        mock_worker.return_value = None
+        result = run_multiple(
+            num_agents=5,
+            duration=1.0,
+            num_reps=0,
+            benchmark_type="mobile_control_path",
+        )
+        assert result["steps"] == 600
+        assert result["collision_freq"] == 60
+        assert result["controller_impl"] == "batch"
+        assert result["command_interface"] == "fleet"
+
 
 class TestRunMultipleWithResults:
     """run_multiple aggregates results correctly when num_reps >= 1."""

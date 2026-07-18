@@ -350,7 +350,7 @@ def main() -> None:
 
     ctrl_name = "OmniController" if args.mode == "omni" else "DifferentialController"
     print(
-        f"\n=== Batch vs per-agent {ctrl_name} perf  "
+        f"\n=== Controller/API interface {ctrl_name} perf  "
         f"(n={args.agents}, steps={args.steps}, collision_freq={args.collision_freq}) ===\n"
     )
     if args.gui:
