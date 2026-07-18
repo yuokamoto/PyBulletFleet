@@ -68,8 +68,8 @@ MultiRobotSimulationCore  (core_simulation.py)
      ```bash
      cd docker
      docker compose run --rm --no-deps \
-       -v "$(pwd)/test_integration.sh:/test_integration.sh:ro" \
-       bridge bash /test_integration.sh
+       -v "$(pwd):/docker:ro" \
+       bridge bash /docker/test_integration.sh
      # expect: "=== All integration tests PASSED ===" (exit 0)
      ```
   Do not push if either step fails. (Goal: replace the manual bridge step with a

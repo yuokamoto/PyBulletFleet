@@ -39,6 +39,23 @@ def _make_arm_result(**overrides):
     return base
 
 
+def _make_batch_result(**overrides):
+    """Return a minimal batch-worker result dict."""
+    base = {
+        "setup_s": 0.01,
+        "accepted": 10,
+        "rejected": 0,
+        "wall_s": 0.2,
+        "mean_ms": 1.0,
+        "p50_ms": 0.9,
+        "p95_ms": 1.5,
+        "max_ms": 2.0,
+        "state_snapshot_s": 0.001,
+    }
+    base.update(overrides)
+    return base
+
+
 class TestRunMultipleEmptyResults:
     """run_multiple must not crash when num_reps=0 (empty results)."""
 
@@ -70,6 +87,23 @@ class TestRunMultipleEmptyResults:
         assert result["num_agents"] == 5
         assert result["num_reps"] == 0
 
+    @patch("run_benchmark.run_worker")
+    def test_batch_zero_reps_does_not_raise(self, mock_worker):
+        mock_worker.return_value = None
+        result = run_multiple(
+            num_agents=5,
+            duration=1.0,
+            num_reps=0,
+            benchmark_type="mobile_control_path",
+            steps=10,
+            controller="batch",
+            command_interface="fleet",
+        )
+        assert result["num_agents"] == 5
+        assert result["num_reps"] == 0
+        assert result["controller_impl"] == "batch"
+        assert result["command_interface"] == "fleet"
+
 
 class TestRunMultipleWithResults:
     """run_multiple aggregates results correctly when num_reps >= 1."""
@@ -97,3 +131,26 @@ class TestRunMultipleWithResults:
         )
         assert result["mode"] == "kinematic"
         assert "expected_steps" not in result
+
+    @patch("run_benchmark.run_worker")
+    def test_batch_single_rep(self, mock_worker):
+        mock_worker.return_value = _make_batch_result()
+        result = run_multiple(
+            num_agents=10,
+            duration=1.0,
+            num_reps=1,
+            benchmark_type="mobile_control_path",
+            steps=20,
+            mode="diff",
+            collision_freq=0,
+            controller="batch",
+            command_interface="fleet",
+        )
+        assert result["benchmark_type"] == "mobile_control_path"
+        assert result["steps"] == 20
+        assert result["controller_impl"] == "batch"
+        assert result["command_interface"] == "fleet"
+        assert result["mode"] == "diff"
+        assert result["collision_freq"] == 0
+        assert result["setup_s"]["median"] == 0.01
+        assert result["accepted"]["median"] == 10

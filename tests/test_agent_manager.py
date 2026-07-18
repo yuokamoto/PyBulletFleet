@@ -180,6 +180,16 @@ class TestSpawningGrid:
         assert_grid_positions(poses, {0.0, 1.0, 2.0, 3.0}, {0.0, 1.0, 2.0, 3.0}, expected_zs=0.5)
         assert len(unique_xy(poses)) == 6
 
+    def test_grid_name_prefix(self, pybullet_env, mock_sim_core, manager_cls):
+        """Grid spawns can assign stable generated names."""
+        mgr = _create_manager(manager_cls, mock_sim_core)
+        params = _make_spawn_params(manager_cls)
+        grid = _make_grid(x_max=2, y_max=0)
+
+        objects = mgr.spawn_objects_grid(num_objects=3, grid_params=grid, spawn_params=params, name_prefix="robot")
+
+        assert [obj.name for obj in objects] == ["robot_0", "robot_1", "robot_2"]
+
     def test_grid_3d(self, pybullet_env, mock_sim_core, manager_cls):
         """2×2×2 grid (8 objects) with z layers — positions valid and unique in 3D."""
         mgr = _create_manager(manager_cls, mock_sim_core)

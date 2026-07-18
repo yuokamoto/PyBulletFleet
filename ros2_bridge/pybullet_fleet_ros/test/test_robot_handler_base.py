@@ -93,6 +93,19 @@ class TestRobotHandlerBaseContract:
         h = MinimalHandler(mock_node, mock_agent)
         h.post_step(dt=0.01, stamp=TimeMsg(sec=1, nanosec=0))  # should not raise
 
+    def test_step_dispatch_defaults_keep_legacy_behavior(self, mock_node, mock_agent):
+        """Custom handlers run every step unless they explicitly opt out."""
+        from pybullet_fleet_ros.robot_handler_base import RobotHandlerBase
+
+        class MinimalHandler(RobotHandlerBase):
+            def destroy(self):
+                pass
+
+        h = MinimalHandler(mock_node, mock_agent)
+        assert h.needs_pre_step is True
+        assert h.needs_post_step is True
+        assert h.throttle_post_step is False
+
     def test_destroy_is_abstract(self):
         """Cannot instantiate RobotHandlerBase without implementing destroy()."""
         from pybullet_fleet_ros.robot_handler_base import RobotHandlerBase
@@ -141,6 +154,57 @@ class TestRobotHandlerInheritance:
 
 class TestBridgeNodeUsesNewAPI:
     """BridgeNode calls pre_step/post_step on handlers."""
+
+    def test_register_step_handler_uses_exactly_one_post_step_list(self):
+        """A throttled handler must not also be registered for every-step post_step."""
+        from unittest.mock import MagicMock
+
+        from pybullet_fleet_ros.bridge_node import _register_step_handler
+
+        handler = MagicMock(needs_pre_step=True, needs_post_step=True, throttle_post_step=True)
+        pre_handlers = []
+        post_handlers = []
+        throttled_post_handlers = []
+
+        _register_step_handler(handler, pre_handlers, post_handlers, throttled_post_handlers)
+
+        assert pre_handlers == [handler]
+        assert post_handlers == []
+        assert throttled_post_handlers == [handler]
+
+    def test_register_step_handler_keeps_unthrottled_post_step_separate(self):
+        """A normal custom handler stays on the every-step post_step path."""
+        from unittest.mock import MagicMock
+
+        from pybullet_fleet_ros.bridge_node import _register_step_handler
+
+        handler = MagicMock(needs_pre_step=True, needs_post_step=True, throttle_post_step=False)
+        pre_handlers = []
+        post_handlers = []
+        throttled_post_handlers = []
+
+        _register_step_handler(handler, pre_handlers, post_handlers, throttled_post_handlers)
+
+        assert pre_handlers == [handler]
+        assert post_handlers == [handler]
+        assert throttled_post_handlers == []
+
+    def test_register_step_handler_skips_post_step_when_not_needed(self):
+        """Handlers that opt out of post_step are not registered in either post list."""
+        from unittest.mock import MagicMock
+
+        from pybullet_fleet_ros.bridge_node import _register_step_handler
+
+        handler = MagicMock(needs_pre_step=False, needs_post_step=False, throttle_post_step=True)
+        pre_handlers = []
+        post_handlers = []
+        throttled_post_handlers = []
+
+        _register_step_handler(handler, pre_handlers, post_handlers, throttled_post_handlers)
+
+        assert pre_handlers == []
+        assert post_handlers == []
+        assert throttled_post_handlers == []
 
     def test_on_pre_step_calls_handler_pre_step(self, mock_node, mock_agent):
         """BridgeNode._on_pre_step delegates to handler.pre_step()."""

@@ -564,7 +564,7 @@ Speedup controller loop: 1.26×
 ```
 
 The controller-loop speedup increases with agent count: ~3–5× at 500 agents
-with collision disabled (see `examples/scale/batch_controller_500_demo.py`).
+with collision disabled (see `examples/scale/batch_controller_scale_demo.py`).
 
 Run `python3 examples/scale/100robots_cube_patrol_demo.py --benchmark` for a
 live batch vs per-agent comparison on your hardware.

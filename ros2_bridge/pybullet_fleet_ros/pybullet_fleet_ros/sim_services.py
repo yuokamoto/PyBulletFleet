@@ -234,7 +234,7 @@ class SimServices:
             response.result.result = _NOT_FOUND
             response.result.error_message = f"Entity '{request.entity}' not found"
             return response
-        if request.set_pose:
+        if getattr(request, "set_pose", True):
             new_pose = ros_pose_to_pbf(request.state.pose)
             obj.set_pose(new_pose)
         response.result.result = _OK

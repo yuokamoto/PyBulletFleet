@@ -14,6 +14,63 @@ Most demos open a PyBullet GUI window and run until you close it — they are me
 to be watched, not run in CI. Some `models/` demos need extras:
 `pip install 'pybullet-fleet[sdf,models]'`.
 
+## Scale Demo Roles
+
+| Demo | Role |
+|------|------|
+| `scale/100robots_grid_demo.py` | Primary config-driven mixed-fleet demo. Use it to try controller, command-interface, and movement switches in a user-facing scene. |
+| `scale/100robots_cube_patrol_demo.py` | Tutorial-style 100 mobile robot patrol scene using `managers:` and `fleet_controller:` config. |
+| `scale/batch_controller_scale_demo.py` | Focused batch-controller scale demo. Robot count is `--n` (default 500); use it for quick fleet API and command setup checks, not rigorous benchmarking. |
+| `scale/pick_drop_mobile_100robots_demo.py` | 100 mobile manipulators using pick/drop action sequences and object management. |
+| `scale/pick_drop_arm_100robots_demo.py` | 100 fixed-base arms using synchronized joint/action pick-drop cycles. |
+
+## Fleet API Verification
+
+`scale/batch_controller_scale_demo.py` can exercise the same scale scene through
+either the per-agent command interface or the transport-neutral fleet API. The
+controller implementation remains the batch controller in both modes, and the
+default command interface is fleet.
+
+```bash
+# Default: batch controller + fleet command interface.
+python3 pybullet_fleet/examples/scale/batch_controller_scale_demo.py \
+  --no-gui --duration 5 --n 100
+
+# Per-agent command interface comparison path.
+python3 pybullet_fleet/examples/scale/batch_controller_scale_demo.py \
+  --no-gui --duration 5 --n 100 --command-interface per_agent
+```
+
+Both modes print command setup time and fleet state snapshot time so local runs
+can compare the control path without changing the scene, robot count, or loop.
+
+`scale/100robots_grid_demo.py` is a config-driven example for trying the same
+switches in a user-facing demo. `config/100robots_config.yaml` controls the
+standard scene, and CLI flags choose the controller and command path:
+
+```bash
+# Default: batch controller, fleet command interface, random movement.
+python3 pybullet_fleet/examples/scale/100robots_grid_demo.py --duration 5
+
+# Compare command APIs on a repeated goal-command run. In mixed mode, arm robots
+# keep moving through random joint commands while mobile robots receive goals.
+python3 pybullet_fleet/examples/scale/100robots_grid_demo.py \
+  --mode single --movement goal --command-interface per_agent --duration 5
+python3 pybullet_fleet/examples/scale/100robots_grid_demo.py \
+  --mode single --movement goal --command-interface fleet --duration 5
+```
+
+For repeatable timing comparisons, use the benchmark runner:
+
+```bash
+python3 benchmark/run_benchmark.py --type mobile \
+  --controller per_agent batch --command-interface per_agent fleet --agents 500 --steps 600
+```
+
+For ROS bridge verification, run the Docker smoke and optional scale checks
+documented in `docker/README.md`; they check `/fleet/states`, `/fleet/navigate`,
+and `/fleet/joint_command` using the bridge.
+
 ## Running them after `pip install` (no clone needed)
 
 The examples ship **inside the wheel**, so a pip-installed package can list,

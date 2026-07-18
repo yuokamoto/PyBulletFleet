@@ -457,14 +457,67 @@ The bridge is **`config_yaml`-driven**: pass a config to spawn robots (there is 
 
 ## Automated Tests
 
+The Docker image copies these test scripts under `/opt/pybullet_fleet/docker/`.
+The examples below mount the local `docker/` directory to `/docker:ro` so script
+edits can be tested without rebuilding the image. Omit the mount and run the
+`/opt/pybullet_fleet/docker/...` scripts when you want to test only the image
+contents.
+
 ```bash
 cd docker
 
 # Integration smoke test (headless) — spawns 3 robots from bridge_test.yaml and
-# checks topics, services, cmd_vel, and the simulation_interfaces service calls.
+# checks topics, services, cmd_vel, simulation_interfaces, and fleet API calls.
 docker compose run --rm --no-deps \
-  -v "$(pwd)/test_integration.sh:/test_integration.sh:ro" \
-  bridge bash /test_integration.sh
+  -v "$(pwd):/docker:ro" \
+  bridge bash /docker/test_integration.sh
+
+# Optional fleet API scale check. The shell wrapper derives a temporary config
+# from pybullet_fleet_ros/config/bridge_fleet_scale.yaml, updates the grid count,
+# starts bridge_node, then the Python checker sends one /fleet/navigate request
+# for all robots and waits until the commanded robots start moving.
+docker compose run --rm --no-deps \
+  -v "$(pwd):/docker:ro" \
+  bridge bash /docker/test_fleet_scale.sh --robots 100 --interface-mode fleet \
+    --command-interface fleet --publish-rate 5
+
+# Optional per-robot comparison path. This creates per-robot command topics and
+# publishes the same goal pattern to /robot_N/goal_pose, then verifies motion via
+# simulation_interfaces state queries.
+docker compose run --rm --no-deps \
+  -v "$(pwd):/docker:ro" \
+  bridge bash /docker/test_fleet_scale.sh --robots 100 --interface-mode per_robot \
+    --command-interface per_robot --publish-rate 5
+
+# Optional side-by-side command path check. Hybrid mode creates both fleet and
+# per-robot command interfaces, then the checker exercises both on one bridge run.
+docker compose run --rm --no-deps \
+  -v "$(pwd):/docker:ro" \
+  bridge bash /docker/test_fleet_scale.sh --robots 100 --interface-mode hybrid \
+    --command-interface all --publish-rate 5 --target-rtf 0.0
+
+# Hybrid debug: enable only selected per-robot interface groups to isolate which
+# ROS entities add latency. Valid groups are state_publishers, tf, command_topics,
+# services, and actions. Use default (state_publishers,tf,command_topics), all,
+# or none as shorthands.
+docker compose run --rm --no-deps \
+  -v "$(pwd):/docker:ro" \
+  bridge bash /docker/test_fleet_scale.sh --robots 1000 --interface-mode hybrid \
+    --command-interface fleet --per-robot-groups command_topics --publish-rate 5
+
+# Skip motion verification when measuring only endpoint readiness and command
+# send/ack overhead.
+docker compose run --rm --no-deps \
+  -v "$(pwd):/docker:ro" \
+  bridge bash /docker/test_fleet_scale.sh --robots 1000 --interface-mode fleet \
+    --command-interface fleet --no-verify-motion
+
+# To inspect the generated bridge config:
+docker compose run --rm --no-deps \
+  -v "$(pwd):/docker:ro" \
+  -v "$(pwd):/work" \
+  bridge bash /docker/test_fleet_scale.sh --robots 10 --config-out /work/bridge_fleet_scale.yaml \
+    --generate-only
 
 # colcon launch_testing
 docker compose run --rm bridge bash -c "\

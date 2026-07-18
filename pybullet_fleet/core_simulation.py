@@ -3113,10 +3113,7 @@ class MultiRobotSimulationCore:
                     mgr = SimObjectManager(sim_core=self, object_class=entity_cls)
                     self.register_manager(mgr)
 
-                grid_objects = mgr.spawn_grid_mixed(count, grid_params, [(spawn_params, 1.0)])
-
-                for i, obj in enumerate(grid_objects):
-                    obj.name = f"{name_base}_{i}"
+                grid_objects = mgr.spawn_grid_mixed(count, grid_params, [(spawn_params, 1.0)], name_prefix=name_base)
 
                 spawned.extend(grid_objects)
 

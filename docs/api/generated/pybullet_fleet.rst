@@ -58,6 +58,15 @@ pybullet\_fleet.data\_monitor module
    :show-inheritance:
    :noindex:
 
+pybullet\_fleet.fleet\_api module
+---------------------------------
+
+.. automodule:: pybullet_fleet.fleet_api
+   :members:
+   :undoc-members:
+   :show-inheritance:
+   :noindex:
+
 pybullet\_fleet.geometry module
 -------------------------------
 

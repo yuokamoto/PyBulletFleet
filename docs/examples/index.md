@@ -82,6 +82,8 @@ for all available names.
 | `agent.get_pose()` / `set_pose()` | Tutorial 1 |
 | `agent.set_goal_pose()` | Tutorial 1 |
 | `agent.set_path()` | Tutorial 3 |
+| `FleetCommandDispatcher.navigate()` | Tutorial 3 |
+| `FleetStateProvider.get_states()` | Tutorial 3 |
 | `sim_core.register_callback()` | Tutorials 1–3 |
 | `MoveAction` / `PickAction` / `DropAction` / `WaitAction` | Tutorials 2, 4 |
 | `JointAction` | Tutorial 4 |

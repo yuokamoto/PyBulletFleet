@@ -159,6 +159,11 @@ class RobotHandler(RobotHandlerBase):
             return
         self._command_topics.pre_step(dt=dt, stamp=stamp)
 
+    @property
+    def needs_pre_step(self) -> bool:
+        """Whether this handler has work to do before every simulation step."""
+        return self._command_topics is not None
+
     def _shift_xy(self, x: float, y: float, sign: int) -> tuple:
         """Apply the sim↔RMF frame offset to a planar position.
 
@@ -174,6 +179,16 @@ class RobotHandler(RobotHandlerBase):
             self._state_publishers.post_step(dt=dt, stamp=stamp)
         if self._tf_publisher is not None:
             self._tf_publisher.post_step(dt=dt, stamp=stamp)
+
+    @property
+    def needs_post_step(self) -> bool:
+        """Whether this handler publishes state after simulation steps."""
+        return self._state_publishers is not None or self._tf_publisher is not None
+
+    @property
+    def throttle_post_step(self) -> bool:
+        """Whether post_step work should follow the bridge publish rate."""
+        return True
 
     def destroy(self) -> None:
         """Clean up ROS interfaces."""

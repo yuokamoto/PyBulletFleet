@@ -17,6 +17,7 @@ simulation:
   timestep: 0.1     # 100ms timestep (10 Hz) for smooth movement
   physics: false    # Kinematic control
   monitor: true     # Enable monitor
+  enable_monitor_gui: true  # Show the tkinter monitor window when available
   log_level: info   # Show INFO level logs for profiling
 
   # Profiling configuration
