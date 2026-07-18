@@ -194,6 +194,7 @@ class BridgeNode(Node):
         self._tf_broadcaster = TransformBroadcaster(self)
 
         # Robot handlers (object_id → list of RobotHandlerBase instances)
+        self._handler_lock = threading.RLock()
         self._handlers: Dict[int, List["RobotHandlerBase"]] = {}
         self._pre_step_handlers: List["RobotHandlerBase"] = []
         self._post_step_handlers: List["RobotHandlerBase"] = []
@@ -327,15 +328,17 @@ class BridgeNode(Node):
                 kwargs["interface_config"] = self._api_config.per_robot_api
             handler = cls(self, agent, **kwargs)
             handlers.append(handler)
-            _register_step_handler(
-                handler,
-                self._pre_step_handlers,
-                self._post_step_handlers,
-                self._throttled_post_step_handlers,
-            )
             if cls is not RobotHandler:
                 logger.info("Using custom handler %s for '%s'", _handler_display_name(cls), agent.name)
-        self._handlers[agent.object_id] = handlers
+        with self._handler_lock:
+            for handler in handlers:
+                _register_step_handler(
+                    handler,
+                    self._pre_step_handlers,
+                    self._post_step_handlers,
+                    self._throttled_post_step_handlers,
+                )
+            self._handlers[agent.object_id] = handlers
 
     def _unregister_step_handlers(self, handlers: List["RobotHandlerBase"]) -> None:
         """Remove handlers from per-step dispatch lists."""
@@ -360,17 +363,18 @@ class BridgeNode(Node):
 
     def remove_robot(self, object_id: int) -> bool:
         """Remove a robot and its ROS interfaces."""
-        handlers = self._handlers.pop(object_id, None)
+        with self._handler_lock:
+            handlers = self._handlers.pop(object_id, None)
+            if handlers:
+                self._unregister_step_handlers(handlers)
+                for h in handlers:
+                    h.destroy()
         if handlers:
             agent = handlers[0].agent
         else:
             agent = next((a for a in self.sim.agents if a.object_id == object_id), None)
         if agent is None:
             return False
-        if handlers:
-            self._unregister_step_handlers(handlers)
-            for h in handlers:
-                h.destroy()
         self.sim.remove_object(agent)
         self.get_logger().info(f"Removed robot '{agent.name}' (id={object_id})")
         return True
@@ -379,19 +383,23 @@ class BridgeNode(Node):
         """Auto-register RobotHandler when a new agent spawns."""
         if not self._should_create_per_robot_handler(agent):
             return
-        if agent.object_id not in self._handlers:
-            self._register_robot_handler(agent)
+        with self._handler_lock:
+            if agent.object_id in self._handlers:
+                return
+        self._register_robot_handler(agent)
+        with self._handler_lock:
             n = len(self._handlers[agent.object_id])
-            self.get_logger().info(f"Registered {n} handler(s) for {agent.name}")
+        self.get_logger().info(f"Registered {n} handler(s) for {agent.name}")
 
     def _on_agent_removed(self, agent, **kwargs):
         """Auto-cleanup when agent is removed."""
-        handlers = self._handlers.pop(agent.object_id, None)
-        if handlers is not None:
-            self._unregister_step_handlers(handlers)
-            for h in handlers:
-                h.destroy()
-            self.get_logger().info(f"Removed handler(s) for {agent.name}")
+        with self._handler_lock:
+            handlers = self._handlers.pop(agent.object_id, None)
+            if handlers is not None:
+                self._unregister_step_handlers(handlers)
+                for h in handlers:
+                    h.destroy()
+                self.get_logger().info(f"Removed handler(s) for {agent.name}")
 
     def _run_simulation_loop(self) -> None:
         """Run ``sim.run_simulation()`` on a daemon thread."""
@@ -406,8 +414,9 @@ class BridgeNode(Node):
     def _on_pre_step(self, dt, sim_time, **kwargs) -> None:
         """PRE_STEP — delegate to handler.pre_step()."""
         stamp = sim_time_to_ros_time(sim_time)
-        for h in self._pre_step_handlers:
-            h.pre_step(dt=dt, stamp=stamp)
+        with self._handler_lock:
+            for h in self._pre_step_handlers:
+                h.pre_step(dt=dt, stamp=stamp)
 
     def _on_post_step(self, dt, sim_time, **kwargs) -> None:
         """POST_STEP — publish /clock and delegate to handler.post_step()."""
@@ -425,11 +434,13 @@ class BridgeNode(Node):
             # Per-robot update (odom, TF, joint_states, diagnostics)
             if should_run_throttled_post_step:
                 self._fleet_ros.post_step(stamp=stamp)
-                for h in self._throttled_post_step_handlers:
-                    h.post_step(dt=dt, stamp=stamp)
+                with self._handler_lock:
+                    for h in self._throttled_post_step_handlers:
+                        h.post_step(dt=dt, stamp=stamp)
                 self._last_publish_time = sim_time
-            for h in self._post_step_handlers:
-                h.post_step(dt=dt, stamp=stamp)
+            with self._handler_lock:
+                for h in self._post_step_handlers:
+                    h.post_step(dt=dt, stamp=stamp)
 
             # Bridge plugins (workcell handler, etc.)
             for bp in self._bridge_plugins:
@@ -441,13 +452,14 @@ class BridgeNode(Node):
 
     def reset(self) -> None:
         """Destroy all robot handlers and reset the simulation."""
-        for handlers in list(self._handlers.values()):
-            for h in handlers:
-                h.destroy()
-        self._handlers.clear()
-        self._pre_step_handlers.clear()
-        self._post_step_handlers.clear()
-        self._throttled_post_step_handlers.clear()
+        with self._handler_lock:
+            for handlers in list(self._handlers.values()):
+                for h in handlers:
+                    h.destroy()
+            self._handlers.clear()
+            self._pre_step_handlers.clear()
+            self._post_step_handlers.clear()
+            self._throttled_post_step_handlers.clear()
         self._last_clock_time = -1.0
         self._last_publish_time = -1.0
         for bp in self._bridge_plugins:
