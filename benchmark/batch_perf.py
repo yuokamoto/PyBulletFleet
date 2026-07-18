@@ -1,6 +1,6 @@
 """Controller and command-interface micro-benchmark.
 
-Spawns N agents on a grid, gives each a short repeating path, and measures
+Spawns N agents on a grid, sends one navigation goal per agent, and measures
 wall time + per-step phase costs over a fixed step budget.
 
 This script compares two independent axes:
