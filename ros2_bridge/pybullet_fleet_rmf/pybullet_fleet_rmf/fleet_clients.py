@@ -266,9 +266,9 @@ class RosFleetRobotClient:
 def create_rmf_client_factory(mode: str, node: Node, map_name: str = "L1"):
     """Create an RMF client factory for ``mode``."""
     normalized = (mode or "per_robot_ros").strip().lower()
-    if normalized in ("per_robot", "per_robot_ros", "legacy", "legacy_ros"):
+    if normalized == "per_robot_ros":
         return PerRobotRosClientFactory(node, map_name=map_name)
-    if normalized in ("fleet", "fleet_ros", "ros_fleet"):
+    if normalized == "fleet_ros":
         return RosFleetClient(node, map_name=map_name)
     raise ValueError(f"Unknown RMF client mode: {mode!r}")
 

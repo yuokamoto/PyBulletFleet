@@ -55,6 +55,14 @@ def test_client_factory_creates_fleet_ros_client():
     assert node.create_client.call_args.args[1] == "/fleet/navigate"
 
 
+def test_client_factory_rejects_aliases(mock_node):
+    from pybullet_fleet_rmf.fleet_clients import create_rmf_client_factory
+
+    for mode in ("per_robot", "legacy", "legacy_ros", "fleet", "ros_fleet"):
+        with pytest.raises(ValueError):
+            create_rmf_client_factory(mode, mock_node)
+
+
 def test_ros_fleet_client_reads_shared_fleet_state():
     from pybullet_fleet_rmf.fleet_clients import RosFleetClient
 
