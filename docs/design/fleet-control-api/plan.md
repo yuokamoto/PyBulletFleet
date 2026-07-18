@@ -253,12 +253,19 @@ Tasks:
 - Let RMF consume fleet state snapshots instead of per-robot state publishers.
 - Add `/fleet/navigate` / dispatcher-backed navigation support to the client
   abstraction.
+- Add optional command coalescing in `RosFleetClient`:
+  collect per-robot RMF `navigate()` callbacks that arrive within a short flush
+  window and send them as one `/fleet/navigate` request.
+- Keep coalescing conservative or disabled by default until ack/rejection and
+  latency semantics are validated.
 - Keep existing per-robot command/service/action paths initially for delivery
   and compatibility.
 
 Exit criteria:
 
 - Patrol can run with fleet state and fleet navigation.
+- Optional coalescing can be enabled without changing `RobotAdapter` callback
+  code, and single-robot navigation remains the default behavior.
 
 ### Phase 5c — Plugin Only Launch Path
 
@@ -339,6 +346,8 @@ Tasks:
   - service command request -> ack latency;
   - topic command publish time and publish -> first motion latency;
   - command request -> first motion latency;
+  - RMF per-robot navigate -> coalesced `/fleet/navigate` flush latency;
+  - coalescing on/off command latency and task-completion impact;
   - joint command request -> ack latency and first joint motion latency;
   - fleet state snapshot/publish time;
   - memory and startup time where available.
