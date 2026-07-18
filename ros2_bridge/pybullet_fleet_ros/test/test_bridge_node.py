@@ -14,6 +14,21 @@ import yaml
 ros_msgs = pytest.importorskip("rclpy", reason="ROS 2 (rclpy) not available")
 
 
+def _make_bridge_stub(handler_class, *, per_robot_api, handler_map=None):
+    from pybullet_fleet_ros.bridge_node import BridgeNode
+
+    bridge = BridgeNode.__new__(BridgeNode)
+    bridge._api_config = SimpleNamespace(per_robot_api=per_robot_api)
+    bridge._handler_map = handler_map or {}
+    bridge._handlers = {}
+    bridge._tf_broadcaster = object()
+    bridge._pre_step_handlers = []
+    bridge._post_step_handlers = []
+    bridge._throttled_post_step_handlers = []
+    bridge.handler_class = handler_class
+    return bridge
+
+
 def test_step_once_increments_sim_time():
     """step_once() advances the step count and sim_time.
 
@@ -78,12 +93,7 @@ def test_register_robot_handler_passes_interface_config_to_robot_handler_subclas
             pass
 
     cfg = PerRobotApiConfig(command_topics=False)
-    bridge = BridgeNode.__new__(BridgeNode)
-    bridge._api_config = SimpleNamespace(per_robot_api=cfg)
-    bridge._handler_map = {}
-    bridge._handlers = {}
-    bridge._tf_broadcaster = object()
-    bridge.handler_class = CustomRobotHandler
+    bridge = _make_bridge_stub(CustomRobotHandler, per_robot_api=cfg)
 
     agent = MagicMock()
     agent.name = "robot0"
@@ -117,12 +127,7 @@ def test_register_robot_handler_skips_interface_config_for_legacy_subclass():
             pass
 
     cfg = PerRobotApiConfig(command_topics=False)
-    bridge = BridgeNode.__new__(BridgeNode)
-    bridge._api_config = SimpleNamespace(per_robot_api=cfg)
-    bridge._handler_map = {}
-    bridge._handlers = {}
-    bridge._tf_broadcaster = object()
-    bridge.handler_class = LegacyRobotHandler
+    bridge = _make_bridge_stub(LegacyRobotHandler, per_robot_api=cfg)
 
     agent = MagicMock()
     agent.name = "robot0"
@@ -154,12 +159,11 @@ def test_register_robot_handler_allows_non_class_callable():
             return handler
 
     factory = CallableHandler()
-    bridge = BridgeNode.__new__(BridgeNode)
-    bridge._api_config = SimpleNamespace(per_robot_api=PerRobotApiConfig(command_topics=False))
-    bridge._handler_map = {"robot0": factory}
-    bridge._handlers = {}
-    bridge._tf_broadcaster = object()
-    bridge.handler_class = factory
+    bridge = _make_bridge_stub(
+        factory,
+        per_robot_api=PerRobotApiConfig(command_topics=False),
+        handler_map={"robot0": factory},
+    )
 
     agent = MagicMock()
     agent.name = "robot0"
