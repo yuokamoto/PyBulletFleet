@@ -213,7 +213,9 @@ def run_multiple(
     results = []
 
     entity_label = "arms" if benchmark_type == "arm" else "agents"
-    duration_label = f"{steps} steps" if benchmark_type in _CONTROL_PATH_BENCHMARK_TYPES and steps is not None else f"{duration}s"
+    duration_label = (
+        f"{steps} steps" if benchmark_type in _CONTROL_PATH_BENCHMARK_TYPES and steps is not None else f"{duration}s"
+    )
     label_parts = [f"{num_agents} {entity_label}", duration_label]
     if benchmark_type in _CONTROL_PATH_BENCHMARK_TYPES:
         label_parts.append(f"controller={controller}")

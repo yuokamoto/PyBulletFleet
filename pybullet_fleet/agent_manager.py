@@ -272,15 +272,18 @@ class SimObjectManager(Generic[T]):
         *,
         name_prefix: Optional[str] = None,
     ) -> List[T]:
-        """
-        Spawn multiple objects in a grid pattern.
-        This is a convenience wrapper around spawn_grid_counts for spawning a single object type with a specified count.
+        """Spawn multiple objects in a grid pattern.
+
+        This is a convenience wrapper around ``spawn_grid_counts`` for spawning
+        a single object type with a specified count.
+
         Args:
             num_objects: Number of objects to spawn
             grid_params: GridSpawnParams instance with grid configuration
             spawn_params: SimObjectSpawnParams instance with object parameters
             name_prefix: Optional prefix for stable generated names
                 (``<prefix>_0``, ``<prefix>_1``, ...).
+
         Returns:
             List of spawned object instances
         """

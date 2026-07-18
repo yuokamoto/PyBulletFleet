@@ -121,6 +121,7 @@ class FleetScaleClient(RosCheckNode):
             raise RuntimeError(f"/clock did not advance during RTF measurement: sim_delta={sim_delta:.6f}s")
         return sim_delta / wall_delta, sim_delta, wall_delta
 
+
 def _robot_name(index: int) -> str:
     return f"robot_{index}"
 

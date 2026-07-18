@@ -66,7 +66,9 @@ def run_benchmark(
     config = load_config(config_path, scenario)
     sim_config = config.get("simulation", {})
     agents_config = config.get("agents", {})
-    effective_collision_freq = collision_freq if collision_freq is not None else sim_config.get("collision_check_frequency", None)
+    effective_collision_freq = (
+        collision_freq if collision_freq is not None else sim_config.get("collision_check_frequency", None)
+    )
 
     # Setup simulation parameters from config
     params = SimulationParams(
