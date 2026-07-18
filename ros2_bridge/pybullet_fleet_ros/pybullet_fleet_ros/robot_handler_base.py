@@ -13,6 +13,10 @@ If raw simulation time is needed, use ``self.agent._sim_core.sim_time``.
 Subclasses must implement :meth:`destroy` to clean up ROS resources.
 :meth:`pre_step` and :meth:`post_step` are no-ops by default — override
 only those you need.
+
+Handlers can also opt out of per-step dispatch.  By default custom handlers keep
+the legacy behavior: both hooks run every simulation step, and ``post_step`` is
+not throttled by the bridge publish rate.
 """
 
 from abc import ABC, abstractmethod
@@ -58,6 +62,11 @@ class RobotHandlerBase(ABC):
             stamp: ROS timestamp for this step.
         """
 
+    @property
+    def needs_pre_step(self) -> bool:
+        """Whether BridgeNode should call :meth:`pre_step` every step."""
+        return True
+
     def post_step(self, dt: float, stamp: "TimeMsg") -> None:
         """Called after each simulation step (POST_STEP event).
 
@@ -68,6 +77,21 @@ class RobotHandlerBase(ABC):
             dt: Time delta of this step.
             stamp: ROS timestamp for this step.
         """
+
+    @property
+    def needs_post_step(self) -> bool:
+        """Whether BridgeNode should call :meth:`post_step`."""
+        return True
+
+    @property
+    def throttle_post_step(self) -> bool:
+        """Whether :meth:`post_step` should follow the bridge publish rate.
+
+        The default is ``False`` so custom handlers keep the historical
+        every-step lifecycle behavior.  Publish-only handlers may override this
+        to ``True`` to reuse the bridge-level ``publish_rate`` throttle.
+        """
+        return False
 
     @abstractmethod
     def destroy(self) -> None:

@@ -28,11 +28,17 @@ from benchmark.tools import get_system_info, get_memory_info, force_cleanup, cpu
 from pybullet_fleet.core_simulation import MultiRobotSimulationCore, SimulationParams
 from pybullet_fleet.agent_manager import AgentManager, GridSpawnParams
 from pybullet_fleet.agent import AgentSpawnParams, MotionMode
+from pybullet_fleet.fleet_api import FleetCommandDispatcher, RobotGoalCommand2D
 from pybullet_fleet.geometry import Pose
 
 
 def run_benchmark(
-    num_agents: int, duration: float, gui: bool = False, config_path: Optional[str] = None, scenario: Optional[str] = None
+    num_agents: int,
+    duration: float,
+    gui: bool = False,
+    config_path: Optional[str] = None,
+    scenario: Optional[str] = None,
+    collision_freq: Optional[int] = None,
 ) -> dict:
     """
     Run a single benchmark test.
@@ -43,6 +49,7 @@ def run_benchmark(
         gui: Whether to enable GUI
         config_path: Path to benchmark config file
         scenario: Scenario name from config file
+        collision_freq: Optional CLI override for collision_check_frequency.
 
     Returns:
         Dictionary with benchmark results
@@ -59,6 +66,9 @@ def run_benchmark(
     config = load_config(config_path, scenario)
     sim_config = config.get("simulation", {})
     agents_config = config.get("agents", {})
+    effective_collision_freq = (
+        collision_freq if collision_freq is not None else sim_config.get("collision_check_frequency", None)
+    )
 
     # Setup simulation parameters from config
     params = SimulationParams(
@@ -71,7 +81,7 @@ def run_benchmark(
         enable_monitor_gui=sim_config.get("enable_monitor_gui", False),
         enable_time_profiling=sim_config.get("enable_time_profiling", False),  # Default: disabled for benchmark accuracy
         log_level=sim_config.get("log_level", "WARN"),  # Quiet for benchmark
-        collision_check_frequency=sim_config.get("collision_check_frequency", None),
+        collision_check_frequency=effective_collision_freq,
         ignore_static_collision=sim_config.get("ignore_static_collision", sim_config.get("ignore_structure_collision", True)),
     )
 
@@ -80,8 +90,12 @@ def run_benchmark(
     # Memory before spawning
     mem_before = get_memory_info()
 
-    # Setup agent manager — batch_controller drives all agents via a single vectorised controller
-    batch_controller = agents_config.get("batch_controller", None)
+    # Default to the expected fastest mobile path for fleet-scale benchmarks.
+    batch_controller = agents_config.get("batch_controller", "batch_omni")
+    command_interface = agents_config.get("command_interface", "fleet")
+    if command_interface not in ("per_agent", "fleet"):
+        raise ValueError(f"Unsupported agents.command_interface: {command_interface!r}")
+
     agent_manager = AgentManager(sim_core=sim_core, batch_controller=batch_controller)
 
     # Calculate grid size
@@ -118,6 +132,7 @@ def run_benchmark(
         num_agents=num_agents,
         grid_params=grid_params,
         spawn_params=agent_spawn_params,
+        name_prefix="robot",
     )
 
     wall_spawn_time = time.perf_counter() - wall_spawn_start
@@ -131,10 +146,35 @@ def run_benchmark(
 
     num_moving_agents = max(num_agents // 2, min(num_agents, 10))  # Move max(half, 10) agents, capped to total agent count
     moving_indices = random.sample(range(len(agents)), num_moving_agents)
-    for agent_idx in moving_indices:
-        target_x = random.uniform(-10, grid_size + 10)
-        target_y = random.uniform(-10, grid_size + 10)
-        agents[agent_idx].set_goal_pose(Pose.from_xyz(target_x, target_y, 0.1))
+    command_start = time.perf_counter()
+    accepted_commands = len(moving_indices)
+    rejected_commands = 0
+    if command_interface == "fleet":
+        commands = []
+        for agent_idx in moving_indices:
+            target_x = random.uniform(-10, grid_size + 10)
+            target_y = random.uniform(-10, grid_size + 10)
+            commands.append(
+                RobotGoalCommand2D(
+                    name=agents[agent_idx].name,
+                    position=(target_x, target_y),
+                    yaw=0.0,
+                    z=0.1,
+                )
+            )
+        ack = FleetCommandDispatcher(sim_core).navigate(
+            commands,
+            source="mobile-benchmark",
+            command_id="mobile-benchmark-nav",
+        )
+        accepted_commands = len(ack.accepted_names)
+        rejected_commands = len(ack.rejected)
+    else:
+        for agent_idx in moving_indices:
+            target_x = random.uniform(-10, grid_size + 10)
+            target_y = random.uniform(-10, grid_size + 10)
+            agents[agent_idx].set_goal_pose(Pose.from_xyz(target_x, target_y, 0.1))
+    command_setup_s = time.perf_counter() - command_start
 
     # Warmup steps to stabilize timing
     for _ in range(10):
@@ -151,6 +191,10 @@ def run_benchmark(
 
     # Memory after simulation
     mem_after_sim = get_memory_info()
+    mem_peak_observed = {
+        "rss_mb": max(mem_after_spawn["rss_mb"], mem_after_sim["rss_mb"]),
+        "py_traced_mb": max(mem_after_spawn["py_traced_mb"], mem_after_sim["py_traced_mb"]),
+    }
 
     # Calculate metrics
     expected_steps = int(duration / params.timestep)
@@ -174,6 +218,11 @@ def run_benchmark(
         "gui": gui,
         "scenario": scenario,
         "batch_controller": batch_controller,
+        "command_interface": command_interface,
+        "collision_check_frequency": effective_collision_freq,
+        "command_setup_s": command_setup_s,
+        "accepted_commands": accepted_commands,
+        "rejected_commands": rejected_commands,
         "spawn_time_s": wall_spawn_time,
         "spawn_cpu_s": cpu_spawn_time,
         "spawn_cpu_percent": (cpu_spawn_time / wall_spawn_time * 100.0) if wall_spawn_time > 0 else 0.0,
@@ -189,8 +238,8 @@ def run_benchmark(
             "py_traced_mb": mem_after_spawn["py_traced_mb"] - mem_before["py_traced_mb"],
         },
         "mem_total_mb": {
-            "rss_mb": mem_after_sim["rss_mb"] - mem_before["rss_mb"],
-            "py_traced_mb": mem_after_sim["py_traced_mb"] - mem_before["py_traced_mb"],
+            "rss_mb": mem_peak_observed["rss_mb"] - mem_before["rss_mb"],
+            "py_traced_mb": mem_peak_observed["py_traced_mb"] - mem_before["py_traced_mb"],
         },
         "system_info": get_system_info(),
     }
@@ -204,6 +253,12 @@ def parse_args():
     parser.add_argument("--gui", action="store_true", help="Enable GUI (slower, for visualization)")
     parser.add_argument("--config", type=str, default=None, help="Path to benchmark config file")
     parser.add_argument("--scenario", type=str, default=None, help="Scenario name from config file")
+    parser.add_argument(
+        "--collision-freq",
+        type=int,
+        default=None,
+        help="Override collision_check_frequency from config (0 = disabled)",
+    )
     return parser.parse_args()
 
 
@@ -216,6 +271,7 @@ if __name__ == "__main__":
         gui=args.gui,
         config_path=args.config,
         scenario=args.scenario,
+        collision_freq=args.collision_freq,
     )
 
     # Output JSON to stdout

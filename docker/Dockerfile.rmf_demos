@@ -97,8 +97,17 @@ RUN source /opt/ros/jazzy/setup.bash && \
     --cmake-args -DCMAKE_BUILD_TYPE=Release
 
 # Copy test and utility scripts
+COPY docker/bridge_test_lib.sh /opt/pybullet_fleet/docker/bridge_test_lib.sh
+COPY docker/ros_check_utils.py /opt/pybullet_fleet/docker/ros_check_utils.py
 COPY docker/test_integration.sh /opt/pybullet_fleet/docker/test_integration.sh
-RUN chmod +x /opt/pybullet_fleet/docker/test_integration.sh
+COPY docker/integration_check.py /opt/pybullet_fleet/docker/integration_check.py
+COPY docker/test_fleet_scale.sh /opt/pybullet_fleet/docker/test_fleet_scale.sh
+COPY docker/fleet_scale_check.py /opt/pybullet_fleet/docker/fleet_scale_check.py
+COPY docker/fleet_scale_config.py /opt/pybullet_fleet/docker/fleet_scale_config.py
+RUN chmod +x \
+    /opt/pybullet_fleet/docker/bridge_test_lib.sh \
+    /opt/pybullet_fleet/docker/test_integration.sh \
+    /opt/pybullet_fleet/docker/test_fleet_scale.sh
 
 # Keep download script in image for manual re-runs if needed
 COPY docker/download_fuel_models.py /opt/pybullet_fleet/docker/download_fuel_models.py

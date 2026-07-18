@@ -231,27 +231,37 @@ For repeatable, process-isolated measurement use the scripts under `benchmark/`:
 
 | Script | Purpose |
 |--------|---------|
-| `benchmark/batch_perf.py` | Batch vs per-agent step-time comparison with phase breakdown. Runs a fixed number of steps (not wall-clock duration) for stable statistics. |
-| `benchmark/run_benchmark.py` | Multi-run sweep with subprocess isolation and median/stdev. Supports `--compare` for scenario comparison. |
+| `benchmark/batch_perf.py` | Controller and command-interface comparison with phase breakdown. Runs a fixed number of steps for stable statistics. |
+| `benchmark/run_benchmark.py` | Multi-run sweep with subprocess isolation and median/stdev. Supports scenario comparison and controller/command-interface axes. |
 | `benchmark/mobile_benchmark.py` | Worker process called by `run_benchmark.py`. Outputs JSON. |
 
-**Batch vs per-agent comparison** (requires ≥ 300 steps for stable results — use `--duration 30` at the default 0.1 s timestep):
+The default mobile whole-system benchmark uses the expected fastest path from
+`benchmark/configs/general.yaml`: `agents.batch_controller: batch_omni` and
+`agents.command_interface: fleet`. Override those fields in a scenario or custom
+config to compare against the legacy per-agent path. `--collision-freq` can
+override the config value for mobile, arm, and mobile control-path runs.
+
+**Controller vs command-interface comparison**:
+
+| Axis | Values | Meaning |
+|------|--------|---------|
+| Controller implementation | `per_agent`, `batch` | How robot motion is computed inside the simulation. |
+| Command interface | `per_agent`, `fleet` | How navigation commands are submitted to the simulation. |
 
 ```bash
 # Quick comparison in one process (phase breakdown shown)
-python3 benchmark/batch_perf.py --n 1000 --mode omni
+python3 benchmark/batch_perf.py --agents 1000 --mode omni \
+    --controller per_agent batch --command-interface per_agent fleet
 
-# Rigorous comparison with process isolation across agent counts
-python3 benchmark/run_benchmark.py --compare per_agent batch_omni \
-    --sweep 100 500 1000 2000 --duration 30 --repetitions 3
+# Process-isolated comparison across agent counts
+python3 benchmark/run_benchmark.py --type mobile_control_path \
+    --controller per_agent batch --command-interface per_agent fleet \
+    --sweep 100 500 1000 2000 --steps 300 --repetitions 3
 ```
 
-Scenario names (`per_agent`, `batch_omni`, etc.) are defined under the `scenarios:`
-key in `benchmark/configs/general.yaml`.  Use `--config` to point at a custom file.
-
-> **Note:** With `timestep=0.1` and `duration=5`, only 50 steps are measured — GC
-> pauses can inflate the mean by 10× or more. Use `--duration 30` (300 steps) or
-> longer for reliable numbers.
+The default for the new path is `--controller batch --command-interface fleet`.
+Use `--steps 300` or more for stable means; very short runs can be dominated by
+startup, GC, or one-time cache effects.
 
 ## References
 

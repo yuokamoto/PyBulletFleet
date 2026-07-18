@@ -5,106 +5,43 @@ set -e
 
 echo "=== Integration Test: PyBulletFleet ROS 2 Bridge ==="
 
-# Source ROS
-source /opt/ros/jazzy/setup.bash
-source /rmf_demos_ws/install/setup.bash
+LIB=${BRIDGE_TEST_LIB:-/bridge_test_lib.sh}
+if [ ! -f "$LIB" ]; then
+    LIB=/docker/bridge_test_lib.sh
+fi
+if [ ! -f "$LIB" ]; then
+    LIB=/opt/pybullet_fleet/docker/bridge_test_lib.sh
+fi
+source "$LIB"
 
 # URDF paths are relative to pybullet_fleet root
-cd /opt/pybullet_fleet
+source_ros_env
+bridge_repo_root
 
 # Start bridge in background.
 # The bridge is config_yaml-driven (num_robots/robot_urdf were removed); spawn
 # the three test robots (robot0/1/2) from bridge_test.yaml.
 TEST_CONFIG=/rmf_demos_ws/install/pybullet_fleet_ros/share/pybullet_fleet_ros/config/bridge_test.yaml
-ros2 run pybullet_fleet_ros bridge_node \
-    --ros-args -p config_yaml:=$TEST_CONFIG -p gui:=false -p publish_rate:=10.0 &
-BRIDGE_PID=$!
-sleep 3
+start_bridge_node "$TEST_CONFIG" false 10.0
 
-echo "--- Checking topics ---"
-TOPICS=$(ros2 topic list)
-echo "$TOPICS"
+cleanup() {
+    # Force-kill and don't `wait` — bridge_node does not always exit on a plain
+    # SIGTERM, and `wait` on it would hang the test after all checks passed.
+    stop_bridge_node "$BRIDGE_PID"
+}
+trap cleanup EXIT
 
-for topic in /clock /robot0/odom /robot0/cmd_vel /robot0/joint_states \
-             /robot1/odom /robot2/odom /tf /fleet/states /fleet/navigate \
-             /fleet/joint_command; do
-    if echo "$TOPICS" | grep -q "$topic"; then
-        echo "  ✓ $topic"
-    else
-        echo "  ✗ $topic MISSING"
-        kill $BRIDGE_PID 2>/dev/null
-        exit 1
-    fi
-done
-
-echo "--- Checking /clock publishes ---"
-timeout 5 ros2 topic echo /clock --once || { echo "✗ /clock not publishing"; kill $BRIDGE_PID; exit 1; }
-echo "  ✓ /clock publishing"
-
-echo "--- Checking odom publishes ---"
-timeout 5 ros2 topic echo /robot0/odom --once || { echo "✗ odom not publishing"; kill $BRIDGE_PID; exit 1; }
-echo "  ✓ /robot0/odom publishing"
-
-echo "--- Checking fleet state publishes ---"
-timeout 5 ros2 topic echo /fleet/states --once || { echo "✗ /fleet/states not publishing"; kill $BRIDGE_PID; exit 1; }
-echo "  ✓ /fleet/states publishing"
-
-echo "--- Checking services ---"
-SERVICES=$(ros2 service list)
-for svc in /sim/get_simulator_features /sim/spawn_entity /sim/get_entities \
-           /sim/step_simulation /sim/get_simulation_state /fleet/navigate \
-           /fleet/joint_command; do
-    if echo "$SERVICES" | grep -q "$svc"; then
-        echo "  ✓ $svc"
-    else
-        echo "  ✗ $svc MISSING"
-        kill $BRIDGE_PID 2>/dev/null
-        exit 1
-    fi
-done
-
-echo "--- Testing cmd_vel → OmniVelocityController ---"
-ros2 topic pub --once /robot0/cmd_vel geometry_msgs/msg/Twist \
-    "{linear: {x: 1.0, y: 0.0, z: 0.0}, angular: {x: 0.0, y: 0.0, z: 0.0}}"
-sleep 1
-echo "  ✓ cmd_vel published"
-
-echo "--- Testing service calls ---"
-RESULT=$(timeout 10 ros2 service call /sim/get_entities simulation_interfaces/srv/GetEntities "{}" 2>&1)
-if echo "$RESULT" | grep -q "entities="; then
-    echo "  ✓ GetEntities returned entities"
-else
-    echo "  ✗ GetEntities failed: $RESULT"
-    kill $BRIDGE_PID 2>/dev/null
-    exit 1
+CHECKER=${INTEGRATION_CHECK:-/integration_check.py}
+if [ ! -f "$CHECKER" ]; then
+    CHECKER=/docker/integration_check.py
 fi
-
-RESULT=$(timeout 10 ros2 service call /sim/get_simulator_features simulation_interfaces/srv/GetSimulatorFeatures "{}" 2>&1)
-if echo "$RESULT" | grep -q "features=\["; then
-    echo "  ✓ GetSimulatorFeatures returned features"
-else
-    echo "  ✗ GetSimulatorFeatures failed: $RESULT"
-    kill $BRIDGE_PID 2>/dev/null
-    exit 1
+if [ ! -f "$CHECKER" ]; then
+    CHECKER=/opt/pybullet_fleet/docker/integration_check.py
 fi
+python3 "$CHECKER"
 
-echo "--- Testing fleet navigate service ---"
-RESULT=$(timeout 10 ros2 service call /fleet/navigate pybullet_fleet_msgs/srv/FleetNavigate \
-    "{command_id: smoke-nav, source: smoke, goals_2d: [{name: robot0, position: [1.0, 0.0], yaw: 0.0, z: 0.05}], goals_3d: []}" 2>&1)
-if echo "$RESULT" | python3 -c \
-    'import re, sys; data = sys.stdin.read(); sys.exit(0 if re.search(r"accepted_names[:=][\s\S]*robot0", data) else 1)'; then
-    echo "  ✓ /fleet/navigate accepted robot0"
-else
-    echo "  ✗ /fleet/navigate failed: $RESULT"
-    kill $BRIDGE_PID 2>/dev/null
-    exit 1
-fi
-
-# Cleanup. Force-kill and don't `wait` — bridge_node does not always exit on a
-# plain SIGTERM, and `wait` on it would hang the test after all checks passed.
-kill $BRIDGE_PID 2>/dev/null || true
-sleep 1
-kill -9 $BRIDGE_PID 2>/dev/null || true
+trap - EXIT
+cleanup
 
 echo ""
 echo "=== All integration tests PASSED ==="

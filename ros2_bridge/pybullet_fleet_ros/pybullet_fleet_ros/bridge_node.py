@@ -60,6 +60,39 @@ def _handler_display_name(value: object) -> str:
     return getattr(value, "__name__", value.__class__.__name__)
 
 
+def _handler_needs_pre_step(handler: RobotHandlerBase) -> bool:
+    # RobotHandlerBase defines this property; getattr keeps older test doubles
+    # and non-standard handlers compatible.
+    return bool(getattr(handler, "needs_pre_step", True))
+
+
+def _handler_needs_post_step(handler: RobotHandlerBase) -> bool:
+    # Default is every-step post_step for custom handler compatibility.
+    return bool(getattr(handler, "needs_post_step", True))
+
+
+def _handler_throttles_post_step(handler: RobotHandlerBase) -> bool:
+    # Only publish-oriented handlers should opt into bridge publish_rate
+    # throttling; custom handlers default to every-step post_step.
+    return bool(getattr(handler, "throttle_post_step", False))
+
+
+def _register_step_handler(
+    handler: RobotHandlerBase,
+    pre_step_handlers: List[RobotHandlerBase],
+    post_step_handlers: List[RobotHandlerBase],
+    throttled_post_step_handlers: List[RobotHandlerBase],
+) -> None:
+    """Register a handler in exactly the step dispatch lists it needs."""
+    if _handler_needs_pre_step(handler):
+        pre_step_handlers.append(handler)
+    if _handler_needs_post_step(handler):
+        if _handler_throttles_post_step(handler):
+            throttled_post_step_handlers.append(handler)
+        else:
+            post_step_handlers.append(handler)
+
+
 class BridgeNode(Node):
     """ROS 2 node that drives PyBulletFleet simulation and exposes per-robot topics.
 
@@ -161,12 +194,19 @@ class BridgeNode(Node):
         self._tf_broadcaster = TransformBroadcaster(self)
 
         # Robot handlers (object_id → list of RobotHandlerBase instances)
+        self._handler_lock = threading.RLock()
+        self._handler_callback_lock = threading.RLock()
         self._handlers: Dict[int, List["RobotHandlerBase"]] = {}
+        self._pre_step_handlers: List["RobotHandlerBase"] = []
+        self._post_step_handlers: List["RobotHandlerBase"] = []
+        self._throttled_post_step_handlers: List["RobotHandlerBase"] = []
 
         # /clock publisher and throttle state
         self._clock_pub = self.create_publisher(Clock, "/clock", 10)
         self._last_clock_time: float = -1.0
         self._clock_min_interval: float = 1.0 / publish_rate  # throttle /clock
+        self._last_publish_time: float = -1.0
+        self._publish_min_interval: float = 1.0 / publish_rate
 
         # Interface selection from explicit fleet_api/per_robot_api sections.
         self._api_config: BridgeApiConfig = resolve_bridge_api_config(bridge_config)
@@ -291,7 +331,40 @@ class BridgeNode(Node):
             handlers.append(handler)
             if cls is not RobotHandler:
                 logger.info("Using custom handler %s for '%s'", _handler_display_name(cls), agent.name)
-        self._handlers[agent.object_id] = handlers
+        with self._handler_lock:
+            if agent.object_id in self._handlers:
+                duplicate_handlers = handlers
+                handlers = []
+            else:
+                duplicate_handlers = []
+            for handler in handlers:
+                _register_step_handler(
+                    handler,
+                    self._pre_step_handlers,
+                    self._post_step_handlers,
+                    self._throttled_post_step_handlers,
+                )
+            if handlers:
+                self._handlers[agent.object_id] = handlers
+        if duplicate_handlers:
+            self._destroy_handlers(duplicate_handlers)
+
+    def _unregister_step_handlers(self, handlers: List["RobotHandlerBase"]) -> None:
+        """Remove handlers from per-step dispatch lists."""
+        with self._handler_lock:
+            for handler in handlers:
+                if handler in self._pre_step_handlers:
+                    self._pre_step_handlers.remove(handler)
+                if handler in self._post_step_handlers:
+                    self._post_step_handlers.remove(handler)
+                if handler in self._throttled_post_step_handlers:
+                    self._throttled_post_step_handlers.remove(handler)
+
+    def _destroy_handlers(self, handlers: List["RobotHandlerBase"]) -> None:
+        """Destroy handlers after they are unreachable from step dispatch lists."""
+        with self._handler_callback_lock:
+            for handler in handlers:
+                handler.destroy()
 
     def spawn_robot(self, spawn_params: AgentSpawnParams) -> Agent:
         """Spawn a robot dynamically (e.g., via SpawnEntity service)."""
@@ -299,14 +372,17 @@ class BridgeNode(Node):
         # from_params emits AGENT_SPAWNED at the end of construction, which
         # _on_agent_spawned already turns into a RobotHandler. Register here only
         # if that didn't happen (idempotent — avoids a double registration).
-        if agent.object_id not in self._handlers and self._should_create_per_robot_handler(agent):
+        if self._should_create_per_robot_handler(agent):
             self._register_robot_handler(agent)
         self.get_logger().info(f"Spawned robot '{agent.name}' (id={agent.object_id})")
         return agent
 
     def remove_robot(self, object_id: int) -> bool:
         """Remove a robot and its ROS interfaces."""
-        handlers = self._handlers.pop(object_id, None)
+        with self._handler_lock:
+            handlers = self._handlers.pop(object_id, None)
+            if handlers:
+                self._unregister_step_handlers(handlers)
         if handlers:
             agent = handlers[0].agent
         else:
@@ -314,8 +390,7 @@ class BridgeNode(Node):
         if agent is None:
             return False
         if handlers:
-            for h in handlers:
-                h.destroy()
+            self._destroy_handlers(handlers)
         self.sim.remove_object(agent)
         self.get_logger().info(f"Removed robot '{agent.name}' (id={object_id})")
         return True
@@ -324,17 +399,22 @@ class BridgeNode(Node):
         """Auto-register RobotHandler when a new agent spawns."""
         if not self._should_create_per_robot_handler(agent):
             return
-        if agent.object_id not in self._handlers:
-            self._register_robot_handler(agent)
+        with self._handler_lock:
+            if agent.object_id in self._handlers:
+                return
+        self._register_robot_handler(agent)
+        with self._handler_lock:
             n = len(self._handlers[agent.object_id])
-            self.get_logger().info(f"Registered {n} handler(s) for {agent.name}")
+        self.get_logger().info(f"Registered {n} handler(s) for {agent.name}")
 
     def _on_agent_removed(self, agent, **kwargs):
         """Auto-cleanup when agent is removed."""
-        handlers = self._handlers.pop(agent.object_id, None)
+        with self._handler_lock:
+            handlers = self._handlers.pop(agent.object_id, None)
+            if handlers is not None:
+                self._unregister_step_handlers(handlers)
         if handlers is not None:
-            for h in handlers:
-                h.destroy()
+            self._destroy_handlers(handlers)
             self.get_logger().info(f"Removed handler(s) for {agent.name}")
 
     def _run_simulation_loop(self) -> None:
@@ -350,7 +430,9 @@ class BridgeNode(Node):
     def _on_pre_step(self, dt, sim_time, **kwargs) -> None:
         """PRE_STEP — delegate to handler.pre_step()."""
         stamp = sim_time_to_ros_time(sim_time)
-        for handlers in self._handlers.values():
+        with self._handler_lock:
+            handlers = list(self._pre_step_handlers)
+        with self._handler_callback_lock:
             for h in handlers:
                 h.pre_step(dt=dt, stamp=stamp)
 
@@ -359,7 +441,8 @@ class BridgeNode(Node):
         try:
             stamp = sim_time_to_ros_time(sim_time)
 
-            # Publish /clock (throttled)
+            # Publish /clock and publish-oriented post-step handlers (throttled)
+            should_run_throttled_post_step = sim_time - self._last_publish_time >= self._publish_min_interval
             if sim_time - self._last_clock_time >= self._clock_min_interval:
                 clock_msg = Clock()
                 clock_msg.clock = stamp
@@ -367,9 +450,18 @@ class BridgeNode(Node):
                 self._last_clock_time = sim_time
 
             # Per-robot update (odom, TF, joint_states, diagnostics)
-            self._fleet_ros.post_step(stamp=stamp)
-            for handlers in self._handlers.values():
-                for h in handlers:
+            if should_run_throttled_post_step:
+                self._fleet_ros.post_step(stamp=stamp)
+                with self._handler_lock:
+                    throttled_handlers = list(self._throttled_post_step_handlers)
+                with self._handler_callback_lock:
+                    for h in throttled_handlers:
+                        h.post_step(dt=dt, stamp=stamp)
+                self._last_publish_time = sim_time
+            with self._handler_lock:
+                post_handlers = list(self._post_step_handlers)
+            with self._handler_callback_lock:
+                for h in post_handlers:
                     h.post_step(dt=dt, stamp=stamp)
 
             # Bridge plugins (workcell handler, etc.)
@@ -382,10 +474,15 @@ class BridgeNode(Node):
 
     def reset(self) -> None:
         """Destroy all robot handlers and reset the simulation."""
-        for handlers in list(self._handlers.values()):
-            for h in handlers:
-                h.destroy()
-        self._handlers.clear()
+        with self._handler_lock:
+            handlers_to_destroy = [handler for handlers in self._handlers.values() for handler in handlers]
+            self._handlers.clear()
+            self._pre_step_handlers.clear()
+            self._post_step_handlers.clear()
+            self._throttled_post_step_handlers.clear()
+        self._destroy_handlers(handlers_to_destroy)
+        self._last_clock_time = -1.0
+        self._last_publish_time = -1.0
         for bp in self._bridge_plugins:
             bp.on_reset()
             bp.destroy()

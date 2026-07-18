@@ -7,7 +7,7 @@ from unittest.mock import patch
 # Ensure benchmark/ is importable
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "benchmark"))
 
-from run_benchmark import run_multiple
+from run_benchmark import run_multiple, run_worker
 
 
 def _make_mobile_result(**overrides):
@@ -39,6 +39,39 @@ def _make_arm_result(**overrides):
     return base
 
 
+def _make_batch_result(**overrides):
+    """Return a minimal batch-worker result dict."""
+    base = {
+        "setup_s": 0.01,
+        "accepted": 10,
+        "rejected": 0,
+        "wall_s": 0.2,
+        "mean_ms": 1.0,
+        "p50_ms": 0.9,
+        "p95_ms": 1.5,
+        "max_ms": 2.0,
+        "state_snapshot_s": 0.001,
+    }
+    base.update(overrides)
+    return base
+
+
+class _Completed:
+    returncode = 0
+    stdout = "{}"
+    stderr = ""
+
+
+class TestRunWorker:
+    @patch("run_benchmark.subprocess.run")
+    def test_arm_forwards_collision_freq(self, mock_run):
+        mock_run.return_value = _Completed()
+        run_worker(3, 1.0, "arm", collision_freq=0)
+        argv = mock_run.call_args.args[0]
+        assert "--collision-freq" in argv
+        assert argv[argv.index("--collision-freq") + 1] == "0"
+
+
 class TestRunMultipleEmptyResults:
     """run_multiple must not crash when num_reps=0 (empty results)."""
 
@@ -56,6 +89,9 @@ class TestRunMultipleEmptyResults:
         assert result["num_reps"] == 0
         # Mobile-specific key should be absent
         assert "expected_steps" not in result
+        assert result["command_setup_s"]["median"] == 0.0
+        assert result["accepted_commands"]["median"] == 0.0
+        assert result["rejected_commands"]["median"] == 0.0
 
     @patch("run_benchmark.run_worker")
     def test_arm_zero_reps_does_not_raise(self, mock_worker):
@@ -69,6 +105,53 @@ class TestRunMultipleEmptyResults:
         )
         assert result["num_agents"] == 5
         assert result["num_reps"] == 0
+
+    @patch("run_benchmark.run_worker")
+    def test_batch_zero_reps_does_not_raise(self, mock_worker):
+        mock_worker.return_value = None
+        result = run_multiple(
+            num_agents=5,
+            duration=1.0,
+            num_reps=0,
+            benchmark_type="mobile_control_path",
+            steps=10,
+            controller="batch",
+            command_interface="fleet",
+        )
+        assert result["num_agents"] == 5
+        assert result["num_reps"] == 0
+        assert result["controller_impl"] == "batch"
+        assert result["command_interface"] == "fleet"
+
+    @patch("run_benchmark.run_worker")
+    def test_batch_zero_reps_reports_effective_defaults(self, mock_worker):
+        mock_worker.return_value = None
+        result = run_multiple(
+            num_agents=5,
+            duration=1.0,
+            num_reps=0,
+            benchmark_type="mobile_control_path",
+        )
+        assert result["steps"] == 600
+        assert result["collision_freq"] == 60
+        assert result["controller_impl"] == "batch"
+        assert result["command_interface"] == "fleet"
+
+    @patch("run_benchmark.run_worker")
+    def test_batch_zero_reps_prints_effective_defaults(self, mock_worker, capsys):
+        mock_worker.return_value = None
+        run_multiple(
+            num_agents=5,
+            duration=1.0,
+            num_reps=0,
+            benchmark_type="mobile_control_path",
+        )
+        output = capsys.readouterr().out
+        assert "600 steps" in output
+        assert "controller=batch" in output
+        assert "command_interface=fleet" in output
+        assert "controller=None" not in output
+        assert "command_interface=None" not in output
 
 
 class TestRunMultipleWithResults:
@@ -97,3 +180,26 @@ class TestRunMultipleWithResults:
         )
         assert result["mode"] == "kinematic"
         assert "expected_steps" not in result
+
+    @patch("run_benchmark.run_worker")
+    def test_batch_single_rep(self, mock_worker):
+        mock_worker.return_value = _make_batch_result()
+        result = run_multiple(
+            num_agents=10,
+            duration=1.0,
+            num_reps=1,
+            benchmark_type="mobile_control_path",
+            steps=20,
+            mode="diff",
+            collision_freq=0,
+            controller="batch",
+            command_interface="fleet",
+        )
+        assert result["benchmark_type"] == "mobile_control_path"
+        assert result["steps"] == 20
+        assert result["controller_impl"] == "batch"
+        assert result["command_interface"] == "fleet"
+        assert result["mode"] == "diff"
+        assert result["collision_freq"] == 0
+        assert result["setup_s"]["median"] == 0.01
+        assert result["accepted"]["median"] == 10

@@ -29,6 +29,7 @@ Clone the repository and install in editable mode with development dependencies:
 ```bash
 git clone https://github.com/yuokamoto/PyBulletFleet.git
 cd PyBulletFleet
+sudo apt install python3-tk  # required for the optional DataMonitor tkinter GUI
 pip install -e ".[dev]"
 ```
 
@@ -44,8 +45,21 @@ python examples/scale/100robots_grid_demo.py
 ```
 
 You should see a PyBullet GUI window open with 100 robots spawned in a grid
-formation. Each robot navigates toward a randomly assigned goal using
-kinematic teleportation.
+formation. By default, mobile robots use a random kinematic movement callback
+and arm robots use random joint commands.
+
+To compare command APIs on the same scene, run the repeated goal-command mode:
+
+```bash
+python examples/scale/100robots_grid_demo.py \
+  --mode single --movement goal --command-interface fleet --duration 5
+
+python examples/scale/100robots_grid_demo.py \
+  --mode single --movement goal --command-interface per_agent --duration 5
+```
+
+`--command-interface per_agent|fleet` selects how goals are submitted while
+keeping the scene unchanged.
 
 ## YAML Configuration Basics
 
@@ -131,6 +145,7 @@ For step-by-step walkthroughs, see the **[Tutorials](../examples/index)** page.
 |--------|-------------|
 | `100robots_grid_demo.py` | Grid-based multi-agent demo — best starting point |
 | `100robots_cube_patrol_demo.py` | 100 agents patrolling between cubes |
+| `batch_controller_scale_demo.py` | Batch-controller scale demo; `--n` controls robot count, default 500 |
 | `pick_drop_arm_100robots_demo.py` | 100 arm robots with synchronised pick-and-drop |
 | `pick_drop_mobile_100robots_demo.py` | 100 mobile robots picking and dropping objects |
 

@@ -56,6 +56,7 @@ pip install pybullet-fleet
 ```bash
 git clone https://github.com/yuokamoto/PyBulletFleet.git
 cd PyBulletFleet
+sudo apt install python3-tk  # required for the optional DataMonitor tkinter GUI
 pip install -e ".[dev]"
 ```
 

@@ -7,11 +7,29 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import tempfile
+import threading
 
 import pytest
 import yaml
 
 ros_msgs = pytest.importorskip("rclpy", reason="ROS 2 (rclpy) not available")
+
+
+def _make_bridge_stub(handler_class, *, per_robot_api, handler_map=None):
+    from pybullet_fleet_ros.bridge_node import BridgeNode
+
+    bridge = BridgeNode.__new__(BridgeNode)
+    bridge._api_config = SimpleNamespace(per_robot_api=per_robot_api)
+    bridge._handler_map = handler_map or {}
+    bridge._handler_lock = threading.RLock()
+    bridge._handler_callback_lock = threading.RLock()
+    bridge._handlers = {}
+    bridge._tf_broadcaster = object()
+    bridge._pre_step_handlers = []
+    bridge._post_step_handlers = []
+    bridge._throttled_post_step_handlers = []
+    bridge.handler_class = handler_class
+    return bridge
 
 
 def test_step_once_increments_sim_time():
@@ -78,12 +96,7 @@ def test_register_robot_handler_passes_interface_config_to_robot_handler_subclas
             pass
 
     cfg = PerRobotApiConfig(command_topics=False)
-    bridge = BridgeNode.__new__(BridgeNode)
-    bridge._api_config = SimpleNamespace(per_robot_api=cfg)
-    bridge._handler_map = {}
-    bridge._handlers = {}
-    bridge._tf_broadcaster = object()
-    bridge.handler_class = CustomRobotHandler
+    bridge = _make_bridge_stub(CustomRobotHandler, per_robot_api=cfg)
 
     agent = MagicMock()
     agent.name = "robot0"
@@ -117,12 +130,7 @@ def test_register_robot_handler_skips_interface_config_for_legacy_subclass():
             pass
 
     cfg = PerRobotApiConfig(command_topics=False)
-    bridge = BridgeNode.__new__(BridgeNode)
-    bridge._api_config = SimpleNamespace(per_robot_api=cfg)
-    bridge._handler_map = {}
-    bridge._handlers = {}
-    bridge._tf_broadcaster = object()
-    bridge.handler_class = LegacyRobotHandler
+    bridge = _make_bridge_stub(LegacyRobotHandler, per_robot_api=cfg)
 
     agent = MagicMock()
     agent.name = "robot0"
@@ -154,12 +162,11 @@ def test_register_robot_handler_allows_non_class_callable():
             return handler
 
     factory = CallableHandler()
-    bridge = BridgeNode.__new__(BridgeNode)
-    bridge._api_config = SimpleNamespace(per_robot_api=PerRobotApiConfig(command_topics=False))
-    bridge._handler_map = {"robot0": factory}
-    bridge._handlers = {}
-    bridge._tf_broadcaster = object()
-    bridge.handler_class = factory
+    bridge = _make_bridge_stub(
+        factory,
+        per_robot_api=PerRobotApiConfig(command_topics=False),
+        handler_map={"robot0": factory},
+    )
 
     agent = MagicMock()
     agent.name = "robot0"
@@ -173,3 +180,50 @@ def test_register_robot_handler_allows_non_class_callable():
     handler = bridge._handlers[agent.object_id][0]
     assert handler is factory.created[0]
     assert handler.tf_broadcaster is bridge._tf_broadcaster
+
+
+def test_register_robot_handler_duplicate_registration_is_cleaned_up():
+    """A racing second registration must not duplicate dispatch entries."""
+    from pybullet_fleet.types import MotionMode
+    from pybullet_fleet_ros.bridge_node import BridgeNode
+    from pybullet_fleet_ros.interface_config import PerRobotApiConfig
+
+    class CountingHandler:
+        created = []
+        destroyed_instances = []
+
+        def __init__(self, node, agent, tf_broadcaster=None):
+            self.node = node
+            self.agent = agent
+            self.tf_broadcaster = tf_broadcaster
+            self.is_destroyed = False
+            self.created.append(self)
+
+        def destroy(self):
+            self.is_destroyed = True
+            self.destroyed_instances.append(self)
+
+    bridge = _make_bridge_stub(
+        CountingHandler,
+        per_robot_api=PerRobotApiConfig(command_topics=False),
+        handler_map={"robot0": CountingHandler},
+    )
+
+    agent = MagicMock()
+    agent.name = "robot0"
+    agent.object_id = 1
+    agent.user_data = {}
+    agent._controller = object()
+    agent._motion_mode = MotionMode.DIFFERENTIAL
+
+    BridgeNode._register_robot_handler(bridge, agent)
+    first = bridge._handlers[agent.object_id][0]
+    BridgeNode._register_robot_handler(bridge, agent)
+
+    assert bridge._handlers[agent.object_id] == [first]
+    assert bridge._pre_step_handlers == [first]
+    assert bridge._post_step_handlers == [first]
+    assert bridge._throttled_post_step_handlers == []
+    assert len(CountingHandler.created) == 2
+    assert CountingHandler.created[1].is_destroyed is True
+    assert CountingHandler.destroyed_instances == [CountingHandler.created[1]]

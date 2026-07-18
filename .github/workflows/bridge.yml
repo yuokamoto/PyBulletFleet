@@ -62,12 +62,13 @@ jobs:
 
       - name: Run integration smoke test
         # test_integration.sh spawns robot0/1/2 from bridge_test.yaml (gui:=false)
-        # and checks topics, services, cmd_vel, and simulation_interfaces calls.
+        # and integration_check.py checks topics, services, cmd_vel, simulation_interfaces,
+        # and fleet API calls.
         run: |
           cd docker
           docker compose run --rm --no-deps \
-            -v "$(pwd)/test_integration.sh:/test_integration.sh:ro" \
-            bridge bash /test_integration.sh
+            -v "$(pwd):/docker:ro" \
+            bridge bash /docker/test_integration.sh
 
       - name: Run RMF integration smoke test
         # Launches the headless office RMF demo and asserts the RMF stack stands

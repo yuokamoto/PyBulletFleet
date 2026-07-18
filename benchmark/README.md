@@ -55,7 +55,7 @@ flowchart TD
 ### Tool Categories
 
 - 🎯 **Benchmarking:** `run_benchmark.py`, `mobile_benchmark.py`, `arm_benchmark.py` — measure overall performance (RTF, step time, memory)
-- ⚡ **Controller comparison:** `batch_perf.py` — batch vs per-agent step-time with phase breakdown
+- ⚡ **Controller comparison:** `run_benchmark.py --type mobile --controller ... --command-interface ...`, `batch_perf.py` — controller and command-interface timing with phase breakdown
 - 🔍 **Profiling:** `profiling/` — identify *what is slow* (see `profiling/README.md`)
 - 🧪 **Experiments:** `experiments/` — compare *which is faster* (see `experiments/README.md`)
 
@@ -71,6 +71,8 @@ flowchart TD
 
 ```bash
 # Mobile: single benchmark (1000 agents, 10s, 3 repetitions)
+# Uses the default overall-performance path from benchmark/configs/general.yaml:
+# batch controller + fleet command interface.
 python benchmark/run_benchmark.py --agents 1000 --duration 10
 
 # Mobile: multi-agent sweep
@@ -79,9 +81,16 @@ python benchmark/run_benchmark.py --sweep 100 500 1000 2000 5000
 # Mobile: scenario comparison
 python benchmark/run_benchmark.py --compare no_collision collision_10hz collision_3d_full --agents 1000
 
-# Batch vs per-agent controller comparison (use --duration 30 for ≥300 steps)
-python benchmark/run_benchmark.py --compare per_agent batch_omni --sweep 100 500 1000 2000 --duration 30
-python benchmark/batch_perf.py --n 1000 --mode omni   # quick in-process version with phase breakdown
+# Mobile controller and command-ingress comparison.
+python benchmark/run_benchmark.py --type mobile_control_path \
+  --controller per_agent batch --command-interface per_agent fleet --agents 1000 --steps 600
+python benchmark/run_benchmark.py --type mobile_control_path \
+  --controller batch --command-interface per_agent fleet --sweep 100 500 1000 2000 --steps 300
+python benchmark/run_benchmark.py --type mobile_control_path \
+  --controller batch --command-interface fleet --agents 1000 --steps 300 --collision-freq 0
+python benchmark/batch_perf.py --agents 1000 --mode omni
+python benchmark/batch_perf.py --agents 1000 --mode omni \
+  --controller per_agent batch --command-interface per_agent fleet
 
 # Arm: single benchmark (10 arms, physics mode)
 python benchmark/run_benchmark.py --type arm --agents 10 --duration 5 --scenario physics
@@ -226,6 +235,12 @@ benchmark/
 - Both output JSON to stdout
 - Process isolation ensures clean memory state between runs
 
+The default mobile worker path is configured in `benchmark/configs/general.yaml`
+as `agents.batch_controller: batch_omni` and `agents.command_interface: fleet`.
+Override those fields in a scenario or custom config when you need the legacy
+per-agent path for comparison. `--collision-freq` can override the config value
+for mobile, arm, and mobile control-path runs.
+
 ### **Shared Helpers** (`tools.py`)
 - `get_system_info()` — CPU, memory, OS detection
 - `get_memory_info()` — RSS + tracemalloc measurement
@@ -235,6 +250,9 @@ benchmark/
 - Spawns worker processes, aggregates results
 - `--type mobile` (default): mobile agent benchmarks
 - `--type arm`: arm robot benchmarks (supports `--scenario physics|kinematic`)
+- `--type mobile --controller ... --command-interface ...`: separate comparison axes
+  for controller implementation (`per_agent`, `batch`) and command interface
+  (`per_agent`, `fleet`)
 - **Modes:** Single Test · Sweep (multiple counts) · Compare (multiple scenarios)
 - Computes statistics (median, mean, stdev) and generates comparison tables
 

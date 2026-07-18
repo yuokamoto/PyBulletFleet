@@ -42,6 +42,7 @@ from pybullet_fleet.core_simulation import MultiRobotSimulationCore, SimulationP
 from pybullet_fleet.agent import Agent
 from pybullet_fleet.geometry import Pose
 from pybullet_fleet.action import JointAction
+from pybullet_fleet.robot_models import resolve_model
 
 
 # ---------------------------------------------------------------------------
@@ -109,6 +110,7 @@ def run_benchmark(
     duration: float,
     config_path: Optional[str] = None,
     scenario: Optional[str] = None,
+    collision_freq: Optional[int] = None,
 ) -> Dict[str, Any]:
     """Run a single arm benchmark and return metrics dict.
 
@@ -126,6 +128,7 @@ def run_benchmark(
 
     sim_config = config.get("simulation", {})
     arm_config = config.get("arm", {})
+    effective_collision_freq = collision_freq if collision_freq is not None else sim_config.get("collision_check_frequency", 0)
 
     # Resolve arm parameters
     timestep = sim_config.get("timestep", 0.01)
@@ -135,9 +138,7 @@ def run_benchmark(
     urdf_path = arm_config.get("urdf_path", "arm_robot")
     spacing = arm_config.get("spacing", 1.5)
 
-    # Resolve URDF path relative to benchmark/
-    if not os.path.isabs(urdf_path):
-        urdf_path = os.path.join(os.path.dirname(__file__), urdf_path)
+    urdf_path = resolve_model(urdf_path)
 
     # Build SimulationParams
     params = SimulationParams(
@@ -150,7 +151,7 @@ def run_benchmark(
         enable_monitor_gui=sim_config.get("enable_monitor_gui", False),
         enable_time_profiling=sim_config.get("enable_time_profiling", False),
         log_level=sim_config.get("log_level", "WARN"),
-        collision_check_frequency=sim_config.get("collision_check_frequency", 0),
+        collision_check_frequency=effective_collision_freq,
         ignore_static_collision=sim_config.get("ignore_static_collision", True),
     )
 
@@ -192,6 +193,10 @@ def run_benchmark(
 
     # Memory after simulation
     mem_after_sim = get_memory_info()
+    mem_peak_observed = {
+        "rss_mb": max(mem_after_spawn["rss_mb"], mem_after_sim["rss_mb"]),
+        "py_traced_mb": max(mem_after_spawn["py_traced_mb"], mem_after_sim["py_traced_mb"]),
+    }
 
     actual_steps = sim_core.step_count
     rtf = duration / wall_sim_time if wall_sim_time > 0 else 0.0
@@ -214,6 +219,7 @@ def run_benchmark(
         "mass_source": "explicit" if mass is not None else "urdf",
         "mode": "kinematic" if mass == 0.0 else "physics",
         "physics_engine": physics,
+        "collision_check_frequency": effective_collision_freq,
         "timestep": timestep,
         "duration_s": duration,
         "scenario": scenario,
@@ -231,8 +237,8 @@ def run_benchmark(
             "py_traced_mb": mem_after_spawn["py_traced_mb"] - mem_before["py_traced_mb"],
         },
         "mem_total_mb": {
-            "rss_mb": mem_after_sim["rss_mb"] - mem_before["rss_mb"],
-            "py_traced_mb": mem_after_sim["py_traced_mb"] - mem_before["py_traced_mb"],
+            "rss_mb": mem_peak_observed["rss_mb"] - mem_before["rss_mb"],
+            "py_traced_mb": mem_peak_observed["py_traced_mb"] - mem_before["py_traced_mb"],
         },
         "system_info": get_system_info(),
     }
@@ -250,6 +256,12 @@ def parse_args():
     parser.add_argument("--duration", type=float, required=True, help="Simulation duration in seconds")
     parser.add_argument("--config", type=str, default=None, help="Path to benchmark config file")
     parser.add_argument("--scenario", type=str, default=None, help="Scenario name from config (e.g., physics, kinematic)")
+    parser.add_argument(
+        "--collision-freq",
+        type=int,
+        default=None,
+        help="Override collision_check_frequency from config (0 = disabled)",
+    )
     return parser.parse_args()
 
 
@@ -261,6 +273,7 @@ if __name__ == "__main__":
         duration=args.duration,
         config_path=args.config,
         scenario=args.scenario,
+        collision_freq=args.collision_freq,
     )
 
     # Output JSON to stdout

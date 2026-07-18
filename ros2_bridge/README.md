@@ -93,6 +93,29 @@ See **[docker/README.md](../docker/README.md)** for build instructions and demo 
 | `/sim/get_simulator_features` | Query supported features |
 | `/sim/simulate_steps` | Step simulation (action, with feedback) |
 
+### Bridge Test TODO
+
+- Factor repeated `simulation_interfaces` service-call assertions into a small
+  bridge test client shared by Docker smoke checks and `launch_testing` tests.
+  Candidate helpers: `spawn/get/set/delete/list/assert pose`.
+- Keep that helper as test support under `docker/` or
+  `pybullet_fleet_ros/test_utils.py`; do not expose it as a PyBulletFleet
+  runtime API.
+- Add `launch_testing` coverage for the bridge once the fleet API examples are
+  stable. The Docker smoke checks should remain the installed-runtime test;
+  `launch_testing` should cover package-level behavior and regressions.
+- Add a dedicated controller behavior check only if needed: publish
+  `/{robot}/cmd_vel`, step the simulator, and assert an observable state change
+  such as odometry movement. The current smoke test only verifies that the
+  publish path is available.
+- Keep integration coverage for all interface modes: `per_robot`, `fleet`, and
+  `hybrid`, including dynamic spawn/delete behavior after startup.
+- Add scale/performance checks with loose regression thresholds for ROS graph
+  size, `/fleet/states` publish latency, `/fleet/navigate` command latency, and
+  bridge startup time.
+- Add parity checks for service/topic/action variants when fleet-level command
+  APIs are added, so request semantics do not drift across transports.
+
 ---
 
 ## pybullet_fleet_rmf — Open-RMF Integration
@@ -284,6 +307,13 @@ rmf_demos でも airport_terminal のみ使用。
 
 ### Documentation TODO
 
+- Add a dedicated ReadTheDocs `ROS 2 Bridge` section after the fleet API and
+  scale examples stabilize. Candidate pages:
+  - `quickstart.md` — build/source/run bridge, Docker entrypoints
+  - `configuration.md` — `fleet_api`, `per_robot_api`, handler groups
+  - `examples.md` — RMF demos, scale checks, debugging flows
+  - `performance.md` — move the current `ros2_bridge/PERFORMANCE.md` content
+  - `troubleshooting.md` — DDS graph limits, endpoint count, action server scale
 - Standard Delivery フロー図 (dispatch_delivery → RMF → WorkcellHandler → PickAction → DropAction)
 - Cart Delivery フロー図 (dispatch_cart_delivery → compose → toggle_attach)
 - 通信手段の違い (ROS topic vs fleet_adapter callback)

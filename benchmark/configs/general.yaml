@@ -28,6 +28,8 @@ simulation:
 # Agent Configuration
 agents:
   num_agents: 1000  # Default number of agents to spawn
+  batch_controller: batch_omni  # Default overall mobile benchmark path: batch controller
+  command_interface: fleet  # Default command ingress: fleet-level dispatcher
   urdf_path: "simple_cube"  # Bundled model name (resolve_model) or a path to a .urdf/.sdf
   motion_mode: "OMNIDIRECTIONAL"  # OMNIDIRECTIONAL, DIFFERENTIAL, ACKERMANN
   controller:
@@ -100,6 +102,7 @@ scenarios:
       collision_check_frequency: 0
     agents:
       batch_controller: null
+      command_interface: per_agent
     benchmark:
       repetitions: 3
 
@@ -108,6 +111,7 @@ scenarios:
       collision_check_frequency: 0
     agents:
       batch_controller: batch_omni
+      command_interface: fleet
     benchmark:
       repetitions: 3
 

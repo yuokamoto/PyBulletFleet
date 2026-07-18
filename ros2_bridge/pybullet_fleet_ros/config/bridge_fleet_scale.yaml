@@ -1,0 +1,40 @@
+# Scale-check template for docker/test_fleet_scale.sh.
+#
+# fleet_scale_check.py uses this as a base and overrides:
+# - simulation.gui
+# - simulation.target_rtf
+# - fleet_api / per_robot_api enable flags
+# - entities[0].grid.count / columns
+simulation:
+  gui: false
+  physics: false
+  target_rtf: 0.0
+
+fleet_api:
+  enabled: true
+  states: true
+  navigate: true
+  joint_command: false
+
+per_robot_api:
+  enabled: false
+  state_publishers: false
+  tf: false
+  command_topics: false
+  services: false
+  actions: false
+
+entities:
+  - name: robot
+    urdf_path: robots/simple_cube.urdf
+    motion_mode: omnidirectional
+    batch_controller: batch_omni
+    controller:
+      type: omni
+      max_linear_vel: 2.0
+      max_angular_vel: 3.0
+    grid:
+      count: 100
+      columns: 10
+      spacing: [2.0, 2.0, 0.0]
+      offset: [0.0, 0.0, 0.05]

@@ -83,7 +83,7 @@ arm_agent = Agent.from_urdf(
 )
 profile = auto_detect_profile(arm_urdf, sim_core.client)
 print(f"Using {args.robot}: EE={profile.ee_link_name}, joints={len(profile.movable_joint_names)}")
-print(f"  PICK={[round(x,2) for x in PICK_JOINTS]}  PLACE={[round(x,2) for x in PLACE_JOINTS]}")
+print(f"  PICK={[round(x, 2) for x in PICK_JOINTS]}  PLACE={[round(x, 2) for x in PLACE_JOINTS]}")
 
 # Spawn box to pick/drop
 box_sim = SimObject.from_mesh(

@@ -265,22 +265,41 @@ class SimObjectManager(Generic[T]):
         self.object_ids.clear()
 
     def spawn_objects_grid(
-        self, num_objects: int, grid_params: GridSpawnParams, spawn_params: SimObjectSpawnParams
+        self,
+        num_objects: int,
+        grid_params: GridSpawnParams,
+        spawn_params: SimObjectSpawnParams,
+        *,
+        name_prefix: Optional[str] = None,
     ) -> List[T]:
-        """
-        Spawn multiple objects in a grid pattern.
-        This is a convenience wrapper around spawn_grid_counts for spawning a single object type with a specified count.
+        """Spawn multiple objects in a grid pattern.
+
+        This is a convenience wrapper around ``spawn_grid_counts`` for spawning
+        a single object type with a specified count.
+
         Args:
             num_objects: Number of objects to spawn
             grid_params: GridSpawnParams instance with grid configuration
             spawn_params: SimObjectSpawnParams instance with object parameters
+            name_prefix: Optional prefix for stable generated names
+                (``<prefix>_0``, ``<prefix>_1``, ...).
+
         Returns:
             List of spawned object instances
         """
-        return self.spawn_grid_counts(grid_params=grid_params, spawn_params_count_list=[(spawn_params, num_objects)])
+        return self.spawn_grid_counts(
+            grid_params=grid_params,
+            spawn_params_count_list=[(spawn_params, num_objects)],
+            name_prefix=name_prefix,
+        )
 
     def spawn_grid_mixed(
-        self, num_objects: int, grid_params: GridSpawnParams, spawn_params_list: List[Tuple[SimObjectSpawnParams, float]]
+        self,
+        num_objects: int,
+        grid_params: GridSpawnParams,
+        spawn_params_list: List[Tuple[SimObjectSpawnParams, float]],
+        *,
+        name_prefix: Optional[str] = None,
     ) -> List[T]:
         """
         Spawn multiple SimObjects in a grid pattern with mixed types.
@@ -295,6 +314,8 @@ class SimObjectManager(Generic[T]):
                              - spawn_params: SimObjectSpawnParams for this type
                              - probability: Spawn probability (0.0 to 1.0)
                              Note: Probabilities don't need to sum to 1.0
+            name_prefix: Optional prefix for stable generated names
+                (``<prefix>_0``, ``<prefix>_1``, ...).
 
         Returns:
             List of spawned SimObject instances
@@ -313,6 +334,7 @@ class SimObjectManager(Generic[T]):
             num_objects=num_objects,
             grid_params=grid_params,
             spawn_params_list=spawn_params_list,
+            name_prefix=name_prefix,
         )
 
     def _spawn_grid_mixed_impl(
@@ -320,6 +342,8 @@ class SimObjectManager(Generic[T]):
         num_objects: int,
         grid_params: GridSpawnParams,
         spawn_params_list: List[Tuple[Any, float]],
+        *,
+        name_prefix: Optional[str] = None,
     ) -> List[Any]:
         """
         Internal implementation for spawn_grid_mixed.
@@ -330,6 +354,8 @@ class SimObjectManager(Generic[T]):
             num_objects: Maximum number of objects to spawn
             grid_params: GridSpawnParams instance with grid configuration
             spawn_params_list: List of (spawn_params, probability) tuples
+            name_prefix: Optional prefix for stable generated names
+                (``<prefix>_0``, ``<prefix>_1``, ...).
 
         Returns:
             List of spawned object instances
@@ -389,6 +415,7 @@ class SimObjectManager(Generic[T]):
 
                     # Spawn object using from_params()
                     obj = cls.from_params(spawn_params=grid_spawn_params, sim_core=self.sim_core)
+                    self._assign_grid_name(obj, name_prefix, len(spawned_objects))
 
                     # Track object
                     self.add_object(obj)
@@ -421,6 +448,12 @@ class SimObjectManager(Generic[T]):
             )
         return spawned_objects
 
+    def _assign_grid_name(self, obj: T, name_prefix: Optional[str], index: int) -> None:
+        """Assign an API-generated name when grid spawning requested one."""
+        if name_prefix is None:
+            return
+        obj.set_name(f"{name_prefix}_{index}")
+
     def _make_spawn_pose(self, params: SimObjectSpawnParams, spawn_pos: List[float]) -> Pose:
         """Create a Pose for grid spawning, preserving orientation from *params* if set."""
         if params.initial_pose is not None:
@@ -431,17 +464,22 @@ class SimObjectManager(Generic[T]):
         self,
         grid_params: GridSpawnParams,
         spawn_params_count_list: List[Tuple[SimObjectSpawnParams, int]],
+        *,
+        name_prefix: Optional[str] = None,
     ) -> List[T]:
         """
         Spawn objects on a grid according to the specified count for each type.
 
-        Each type is spawned exactly the requested number of times.
-        Grid positions are randomly shuffled so that types are distributed
-        uniformly across the grid.
+        Each type is spawned exactly the requested number of times. Grid
+        positions are randomly shuffled unless ``name_prefix`` is set; prefixed
+        names keep deterministic grid placement so ``<prefix>_i`` maps to a
+        stable position across runs.
 
         Args:
             grid_params: GridSpawnParams
             spawn_params_count_list: List of (spawn_params, count)
+            name_prefix: Optional prefix for stable generated names
+                (``<prefix>_0``, ``<prefix>_1``, ...).
 
         Returns:
             List of spawned objects
@@ -467,16 +505,20 @@ class SimObjectManager(Generic[T]):
         flat_params: List[SimObjectSpawnParams] = []
         for params, count in spawn_params_count_list:
             flat_params.extend([params] * count)
-        random.shuffle(flat_params)
+        if name_prefix is None:
+            random.shuffle(flat_params)
 
-        # Build shuffled grid coordinates
+        # Build grid coordinates. Keep prefixed names and their params
+        # deterministic; otherwise shuffle positions so exact-count mixed types
+        # are spatially distributed.
         grid_coords = [
             [x, y, z]
             for z in range(grid_params.z_min, grid_params.z_max + 1)
             for y in range(grid_params.y_min, grid_params.y_max + 1)
             for x in range(grid_params.x_min, grid_params.x_max + 1)
         ]
-        random.shuffle(grid_coords)
+        if name_prefix is None:
+            random.shuffle(grid_coords)
 
         # --- Spawn: zip flat_params with grid_coords 1-to-1 -----------
         # len(flat_params) <= len(grid_coords) is guaranteed by the
@@ -491,6 +533,7 @@ class SimObjectManager(Generic[T]):
                 spawn_pose = self._make_spawn_pose(params, spawn_pos)
                 grid_spawn_params = replace(params, initial_pose=spawn_pose)
                 obj = cls.from_params(spawn_params=grid_spawn_params, sim_core=self.sim_core)
+                self._assign_grid_name(obj, name_prefix, len(spawned_objects))
                 self.add_object(obj)
                 spawned_objects.append(obj)
 
@@ -823,23 +866,51 @@ class AgentManager(SimObjectManager[Agent]):
     # ------------------------------------------------------------------
     # Convenience aliases (delegate to SimObjectManager methods)
     # ------------------------------------------------------------------
-    def spawn_agents_grid(self, num_agents: int, grid_params: GridSpawnParams, spawn_params: AgentSpawnParams) -> List[Agent]:
+    def spawn_agents_grid(
+        self,
+        num_agents: int,
+        grid_params: GridSpawnParams,
+        spawn_params: AgentSpawnParams,
+        *,
+        name_prefix: Optional[str] = None,
+    ) -> List[Agent]:
         """Spawn agents in a grid.  Alias for :meth:`spawn_objects_grid`."""
-        return self.spawn_objects_grid(num_objects=num_agents, grid_params=grid_params, spawn_params=spawn_params)
+        return self.spawn_objects_grid(
+            num_objects=num_agents,
+            grid_params=grid_params,
+            spawn_params=spawn_params,
+            name_prefix=name_prefix,
+        )
 
     def spawn_agents_grid_mixed(
-        self, num_agents: int, grid_params: GridSpawnParams, spawn_params_list: List[Tuple[AgentSpawnParams, float]]
+        self,
+        num_agents: int,
+        grid_params: GridSpawnParams,
+        spawn_params_list: List[Tuple[AgentSpawnParams, float]],
+        *,
+        name_prefix: Optional[str] = None,
     ) -> List[Agent]:
         """Spawn mixed agent types.  Alias for :meth:`spawn_grid_mixed`."""
-        return self.spawn_grid_mixed(num_objects=num_agents, grid_params=grid_params, spawn_params_list=spawn_params_list)
+        return self.spawn_grid_mixed(
+            num_objects=num_agents,
+            grid_params=grid_params,
+            spawn_params_list=spawn_params_list,
+            name_prefix=name_prefix,
+        )
 
     def spawn_agent_grid_counts(
         self,
         grid_params: GridSpawnParams,
         spawn_params_count_list: List[Tuple[AgentSpawnParams, int]],
+        *,
+        name_prefix: Optional[str] = None,
     ) -> List[Agent]:
         """Spawn exact counts per type.  Alias for :meth:`spawn_grid_counts`."""
-        return self.spawn_grid_counts(grid_params=grid_params, spawn_params_count_list=spawn_params_count_list)
+        return self.spawn_grid_counts(
+            grid_params=grid_params,
+            spawn_params_count_list=spawn_params_count_list,
+            name_prefix=name_prefix,
+        )
 
     def set_goal_pose(self, agent_index: int, goal: Pose):
         """

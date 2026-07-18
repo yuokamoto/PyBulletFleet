@@ -162,6 +162,41 @@ per-agent; at 500+ it is 3–5× faster.
 > Agents with different motion modes must be in separate managers, because each batch
 > controller supports one motion model.
 
+### Controller vs command interface
+
+Fleet-scale examples expose two independent comparison axes:
+
+| Axis | Values | Meaning |
+|------|--------|---------|
+| Controller implementation | `per_agent`, `batch` | How robot motion is computed inside the simulation. |
+| Command interface | `per_agent`, `fleet` | How goals are submitted to the simulation. |
+
+`per_agent` controllers use each `Agent` controller. `batch` controllers use one
+vectorised manager-level controller. `per_agent` command submission calls each
+`Agent` directly, while `fleet` submits name-based commands through
+`FleetCommandDispatcher`.
+
+The fastest default is usually `--controller batch --command-interface fleet`.
+Use `per_agent` command submission when you want to compare the API overhead
+while keeping the scene and controller implementation unchanged.
+
+```bash
+# User-facing scale demo: repeated goal commands.
+python examples/scale/100robots_grid_demo.py \
+  --mode single --movement goal --controller batch --command-interface fleet --duration 10
+
+python examples/scale/100robots_grid_demo.py \
+  --mode single --movement goal --controller batch --command-interface per_agent --duration 10
+
+# Focused setup-time and state-snapshot smoke. Robot count is configurable.
+python examples/scale/batch_controller_scale_demo.py \
+  --no-gui --duration 5 --n 500 --command-interface fleet
+```
+
+`100robots_grid_demo.py` keeps using `config/100robots_config.yaml` for the
+standard scene. In `--movement goal` mode, mobile robots receive repeated goals;
+in mixed mode, arm robots continue moving through random joint commands.
+
 ### Alternative: Python API
 
 If you prefer to construct managers imperatively (e.g. when URDF paths are resolved
@@ -379,18 +414,20 @@ See [Benchmark Results](../benchmarking/results) for the full throughput table.
 
 ### Scale Demos
 
-All four scale demo scripts live in `examples/scale/`:
+The scale demos in `examples/scale/` have different roles:
 
 | Script | What it demonstrates |
 |--------|---------------------|
 | [`100robots_cube_patrol_demo.py`](https://github.com/yuokamoto/PyBulletFleet/blob/main/examples/scale/100robots_cube_patrol_demo.py) | 100 mobile robots patrolling cube paths — config-driven `managers:` + `fleet_controller:` (this tutorial) |
-| [`100robots_grid_demo.py`](https://github.com/yuokamoto/PyBulletFleet/blob/main/examples/scale/100robots_grid_demo.py) | Mixed fleet (mobile + arm) in a grid with `--mode mixed\|single` |
+| [`100robots_grid_demo.py`](https://github.com/yuokamoto/PyBulletFleet/blob/main/examples/scale/100robots_grid_demo.py) | Primary mixed-fleet grid demo; supports controller, command-interface, and movement switches |
+| [`batch_controller_scale_demo.py`](https://github.com/yuokamoto/PyBulletFleet/blob/main/examples/scale/batch_controller_scale_demo.py) | Focused batch-controller scale demo; `--n` controls robot count and defaults to 500 |
 | [`pick_drop_mobile_100robots_demo.py`](https://github.com/yuokamoto/PyBulletFleet/blob/main/examples/scale/pick_drop_mobile_100robots_demo.py) | 100 mobile robots with pick/drop action sequences and `SimObjectManager` |
 | [`pick_drop_arm_100robots_demo.py`](https://github.com/yuokamoto/PyBulletFleet/blob/main/examples/scale/pick_drop_arm_100robots_demo.py) | 100 fixed-base arms with `JointAction` pick/drop cycles |
 
 ```bash
 python examples/scale/100robots_cube_patrol_demo.py
 python examples/scale/100robots_grid_demo.py
+python examples/scale/batch_controller_scale_demo.py --no-gui --duration 5
 python examples/scale/pick_drop_mobile_100robots_demo.py
 python examples/scale/pick_drop_arm_100robots_demo.py
 ```
@@ -403,6 +440,7 @@ Pass a model name resolved by `resolve_model()` or a direct URDF path:
 ```bash
 # Mobile demos — use mobile models
 python examples/scale/100robots_cube_patrol_demo.py --robot racecar
+python examples/scale/batch_controller_scale_demo.py --robot racecar
 python examples/scale/pick_drop_mobile_100robots_demo.py --robot mobile_robot
 
 # Arm demo — use arm models
@@ -417,6 +455,7 @@ python examples/scale/100robots_grid_demo.py --robot racecar --arm-robot kuka_ii
 | `100robots_grid_demo.py` | `--robot` (mobile) | `husky` | `racecar`, `mobile_robot` |
 | `100robots_grid_demo.py` | `--arm-robot` (arm) | `panda` | `kuka_iiwa`, `arm_robot` |
 | `100robots_cube_patrol_demo.py` | `--robot` (mobile) | `husky` | `racecar`, `mobile_robot` |
+| `batch_controller_scale_demo.py` | `--robot` (mobile) | `simple_cube` | `husky`, `racecar`, `mobile_robot` |
 | `pick_drop_mobile_100robots_demo.py` | `--robot` (mobile) | `husky` | `racecar`, `mobile_robot` |
 | `pick_drop_arm_100robots_demo.py` | `--robot` (arm) | `panda` | `kuka_iiwa`, `arm_robot` |
 
