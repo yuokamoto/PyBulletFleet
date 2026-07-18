@@ -470,9 +470,10 @@ class SimObjectManager(Generic[T]):
         """
         Spawn objects on a grid according to the specified count for each type.
 
-        Each type is spawned exactly the requested number of times.
-        Grid positions are randomly shuffled so that types are distributed
-        uniformly across the grid.
+        Each type is spawned exactly the requested number of times. Grid
+        positions are randomly shuffled unless ``name_prefix`` is set; prefixed
+        names keep deterministic grid placement so ``<prefix>_i`` maps to a
+        stable position across runs.
 
         Args:
             grid_params: GridSpawnParams
@@ -506,14 +507,16 @@ class SimObjectManager(Generic[T]):
             flat_params.extend([params] * count)
         random.shuffle(flat_params)
 
-        # Build shuffled grid coordinates
+        # Build grid coordinates. Keep prefixed names deterministic; otherwise
+        # shuffle positions so exact-count mixed types are spatially distributed.
         grid_coords = [
             [x, y, z]
             for z in range(grid_params.z_min, grid_params.z_max + 1)
             for y in range(grid_params.y_min, grid_params.y_max + 1)
             for x in range(grid_params.x_min, grid_params.x_max + 1)
         ]
-        random.shuffle(grid_coords)
+        if name_prefix is None:
+            random.shuffle(grid_coords)
 
         # --- Spawn: zip flat_params with grid_coords 1-to-1 -----------
         # len(flat_params) <= len(grid_coords) is guaranteed by the

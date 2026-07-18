@@ -189,6 +189,10 @@ class TestSpawningGrid:
         objects = mgr.spawn_objects_grid(num_objects=3, grid_params=grid, spawn_params=params, name_prefix="robot")
 
         assert [obj.name for obj in objects] == ["robot_0", "robot_1", "robot_2"]
+        positions_by_name = {obj.name: obj.get_pose().position for obj in objects}
+        assert positions_by_name["robot_0"] == pytest.approx([0.0, 0.0, 0.5])
+        assert positions_by_name["robot_1"] == pytest.approx([1.0, 0.0, 0.5])
+        assert positions_by_name["robot_2"] == pytest.approx([2.0, 0.0, 0.5])
 
     def test_grid_3d(self, pybullet_env, mock_sim_core, manager_cls):
         """2×2×2 grid (8 objects) with z layers — positions valid and unique in 3D."""
