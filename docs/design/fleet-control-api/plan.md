@@ -461,6 +461,16 @@ Tasks:
   - `/fleet/attach`;
   - `/fleet/execute_action`;
   - `/fleet/joint_command`.
+- Factor the repeated typed-command dispatch structure into small helper
+  methods before adding the generic command path:
+  - command tuple normalization and command-id resolution;
+  - robot target resolution and duplicate/ambiguous-name rejection;
+  - pre-apply validation hooks for command-specific preparation such as attach
+    target lookup or action parsing;
+  - common acknowledgement/event creation before mutating simulation state.
+  Keep command-specific mutation logic (`set_goal_pose`, `stop`,
+  `attach_object`, `queue_action`, joint target writes) explicit so the
+  dispatcher stays readable.
 - Ensure unknown command types are rejected explicitly and logged.
 - Decide whether generic command payloads should use JSON only, or allow a
   typed envelope plus JSON parameters.

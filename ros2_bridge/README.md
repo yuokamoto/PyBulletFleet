@@ -65,6 +65,9 @@ See **[docker/README.md](../docker/README.md)** for build instructions and demo 
 Fleet command messages and service requests include `std_msgs/Header`.
 `header.frame_id` names the command frame for pose-bearing commands, normally
 `odom`; `header.stamp` is the caller's command issue time.
+Per-robot `AttachObject` requests reuse `RobotAttachCommand`, and per-robot
+`ExecuteActionGoal` requests wrap `RobotActionCommand`, so detailed attach and
+generic action payloads stay aligned with their fleet-level equivalents.
 
 ### Per-Robot Action Servers
 

@@ -572,12 +572,20 @@ class ExecuteActionHandler(RobotInterfaceGroup):
         from .action_parser import parse_action_goal
 
         owner = self.owner
-        action = parse_action_goal(msg.action_type, msg.action_params_json)
+        command = msg.command
+        if command.name and command.name != owner._ns:
+            logger.error(
+                "'%s': execute_action topic target mismatch: command target='%s'",
+                owner._ns,
+                command.name,
+            )
+            return
+        action = parse_action_goal(command.action_type, command.action_params_json)
         if action is None:
             logger.error(
                 "'%s': failed to parse execute_action topic: type='%s'",
                 owner._ns,
-                msg.action_type,
+                command.action_type,
             )
             return
         owner.agent.add_action(action)
@@ -603,13 +611,20 @@ class ExecuteActionHandler(RobotInterfaceGroup):
         from .action_parser import parse_action_goal
 
         owner = self.owner
-        goal_msg = goal_handle.request.goal
-        action = parse_action_goal(goal_msg.action_type, goal_msg.action_params_json)
+        command = goal_handle.request.goal.command
+        if command.name and command.name != owner._ns:
+            goal_handle.abort()
+            result = ExecuteAction.Result()
+            result.success = False
+            result.message = f"Command target '{command.name}' does not match robot '{owner._ns}'"
+            return result
+
+        action = parse_action_goal(command.action_type, command.action_params_json)
         if action is None:
             goal_handle.abort()
             result = ExecuteAction.Result()
             result.success = False
-            result.message = f"Failed to parse action: type='{goal_msg.action_type}'"
+            result.message = f"Failed to parse action: type='{command.action_type}'"
             return result
 
         owner.agent.add_action(action)
