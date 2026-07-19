@@ -163,8 +163,14 @@ fleet_api:
   execute_action: true
 ```
 
-Delivery and charging compatibility still use per-robot services until
-fleet-level attach/charge APIs are added.
+Delivery attach/drop can use `/fleet/attach` in `fleet_ros` mode. Charging
+still uses per-robot services until a fleet-level charge API is added.
+
+The direct in-process `python_fleet` client is implemented for Plugin Only
+deployments. It uses `FleetStateProvider` and `FleetCommandDispatcher` directly,
+without ROS bridge endpoints in the control path. Launch/config wiring that
+constructs and passes the shared simulation core is still pending, so this mode
+is not exposed by the standard RMF launch files yet.
 
 The office demo exposes this experimental path directly:
 

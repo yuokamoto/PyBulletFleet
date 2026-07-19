@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import math
 import threading
-from typing import Optional
+from typing import Any, Optional
 
 from geometry_msgs.msg import Pose as RosPose, Point, Quaternion
 from rclpy.node import Node
@@ -17,6 +17,13 @@ from pybullet_fleet_msgs.srv import FleetAttach as FleetAttachSrv
 from pybullet_fleet_msgs.srv import FleetNavigate as FleetNavigateSrv
 from pybullet_fleet_msgs.srv import FleetStop as FleetStopSrv
 
+from pybullet_fleet.fleet_api import (
+    FleetCommandDispatcher,
+    FleetStateProvider,
+    RobotAttachCommand as PbfRobotAttachCommand,
+    RobotGoalCommand2D,
+)
+from pybullet_fleet.geometry import Pose as PbfPose
 from pybullet_fleet_rmf.client_interface import RobotUpdateData
 from pybullet_fleet_rmf.per_robot_ros_client import PerRobotRosClient
 
@@ -344,13 +351,251 @@ class RosFleetRobotClient:
             logger.warning("[%s] %s failed: %s", self._name, label, msg)
 
 
-def create_rmf_client_factory(mode: str, node: Node, map_name: str = "L1"):
+class PythonFleetClient:
+    """Direct in-process fleet client for Plugin Only deployments.
+
+    This client consumes :class:`FleetStateProvider` and
+    :class:`FleetCommandDispatcher` directly. It does not create ROS bridge
+    clients, so the RMF adapter can command the simulation without DDS
+    serialization or per-robot bridge endpoints in the control path.
+    """
+
+    def __init__(
+        self,
+        provider: FleetStateProvider,
+        dispatcher: FleetCommandDispatcher,
+        map_name: str = "L1",
+        *,
+        completion_radius: float = 0.25,
+    ) -> None:
+        self._provider = provider
+        self._dispatcher = dispatcher
+        self._default_map_name = map_name
+        self._completion_radius = float(completion_radius)
+        self._lock = threading.Lock()
+        self._map_names: dict[str, str] = {}
+        self._completed: dict[str, int] = {}
+
+    @classmethod
+    def from_sim_core(
+        cls,
+        sim_core: Any,
+        map_name: str = "L1",
+        *,
+        completion_radius: float = 0.25,
+    ) -> "PythonFleetClient":
+        """Build provider and dispatcher from one simulation core."""
+        return cls(
+            FleetStateProvider(sim_core),
+            FleetCommandDispatcher(sim_core),
+            map_name=map_name,
+            completion_radius=completion_radius,
+        )
+
+    def robot(self, robot_name: str) -> "PythonFleetRobotClient":
+        """Return a per-robot facade over the direct fleet API."""
+        return PythonFleetRobotClient(robot_name, self)
+
+    def get_state(self, robot_name: str) -> RobotUpdateData | None:
+        """Return current state for ``robot_name`` from the provider."""
+        for state in self._provider.get_states_3d(names=[robot_name]):
+            yaw = _quat_tuple_to_yaw(state.orientation)
+            with self._lock:
+                map_name = self._map_names.get(robot_name, self._default_map_name)
+                completed = self._completed.get(robot_name, 0)
+            return RobotUpdateData(
+                map=map_name,
+                position=[float(state.position[0]), float(state.position[1]), yaw],
+                battery_soc=float(state.battery_soc if state.battery_soc is not None else 1.0),
+                last_completed_cmd_id=completed,
+            )
+        return None
+
+    def set_robot_map_name(self, robot_name: str, map_name: str) -> None:
+        """Set the map used for one robot's RMF state updates."""
+        with self._lock:
+            self._map_names[robot_name] = map_name
+
+    def mark_completed(self, robot_name: str, cmd_id: int) -> None:
+        """Update completion state for a robot."""
+        with self._lock:
+            self._completed[robot_name] = max(self._completed.get(robot_name, 0), int(cmd_id))
+
+    def navigate(self, robot_name: str, cmd_id: int, position: list, map_name: str) -> bool:
+        """Dispatch one direct fleet navigation command."""
+        del map_name
+        ack = self._dispatcher.navigate(
+            [
+                RobotGoalCommand2D(
+                    name=robot_name,
+                    position=(float(position[0]), float(position[1])),
+                    yaw=float(position[2]) if len(position) > 2 else 0.0,
+                    z=0.0,
+                )
+            ],
+            source="rmf-python",
+            command_id=str(cmd_id),
+        )
+        return _ack_accepts(ack, robot_name, "navigate")
+
+    def stop(self, robot_name: str, cmd_id: int) -> bool:
+        """Dispatch one direct fleet stop command."""
+        ack = self._dispatcher.stop([robot_name], source="rmf-python", command_id=str(cmd_id))
+        if not _ack_accepts(ack, robot_name, "stop"):
+            return False
+        self.mark_completed(robot_name, cmd_id)
+        return True
+
+    def attach(
+        self,
+        robot_name: str,
+        cmd_id: int,
+        *,
+        attach: bool,
+        object_name: str = "",
+        parent_link: str = "",
+        offset_position: tuple = (0.0, 0.0, 0.0),
+        offset_orientation: tuple = (0.0, 0.0, 0.0, 1.0),
+        search_radius: float = 0.0,
+    ) -> bool:
+        """Dispatch one direct fleet attach/detach command."""
+        ack = self._dispatcher.attach(
+            [
+                PbfRobotAttachCommand(
+                    name=robot_name,
+                    attach=bool(attach),
+                    object_name=object_name,
+                    parent_link=parent_link or "base_link",
+                    offset=PbfPose(
+                        position=[
+                            float(offset_position[0]),
+                            float(offset_position[1]),
+                            float(offset_position[2]),
+                        ],
+                        orientation=[
+                            float(offset_orientation[0]),
+                            float(offset_orientation[1]),
+                            float(offset_orientation[2]),
+                            float(offset_orientation[3]),
+                        ],
+                    ),
+                    search_radius=float(search_radius or 0.5),
+                )
+            ],
+            source="rmf-python",
+            command_id=str(cmd_id),
+        )
+        if not _ack_accepts(ack, robot_name, "attach"):
+            return False
+        self.mark_completed(robot_name, cmd_id)
+        return True
+
+    def set_charging(self, robot_name: str, cmd_id: int, charging: bool) -> bool:
+        """Set charging directly on an agent when the core agent supports it."""
+        agent = _direct_agent_by_name(self._dispatcher.sim_core, robot_name)
+        if agent is None:
+            logger.warning("[%s] direct set_charging rejected: unknown or ambiguous robot", robot_name)
+            return False
+        agent.set_charging(bool(charging))
+        if charging:
+            self.mark_completed(robot_name, cmd_id)
+        return True
+
+
+class PythonFleetRobotClient:
+    """Per-robot RMF facade over :class:`PythonFleetClient`."""
+
+    def __init__(self, robot_name: str, fleet: PythonFleetClient) -> None:
+        self._name = robot_name
+        self._fleet = fleet
+        self._map_name = fleet._default_map_name
+        self._active_cmd_id = 0
+        self._active_target: Optional[list] = None
+
+    def get_data(self) -> RobotUpdateData | None:
+        data = self._fleet.get_state(self._name)
+        if data is None:
+            return None
+        reached_target = (
+            self._active_target is not None
+            and _distance_xy(data.position, self._active_target) <= self._fleet._completion_radius
+        )
+        if reached_target:
+            self._fleet.mark_completed(self._name, self._active_cmd_id)
+            data.last_completed_cmd_id = max(data.last_completed_cmd_id, self._active_cmd_id)
+            self._active_target = None
+        return data
+
+    def set_map_name(self, map_name: str) -> None:
+        self._map_name = map_name
+        self._fleet.set_robot_map_name(self._name, map_name)
+
+    def navigate(self, cmd_id: int, position: list, map_name: str, speed_limit: float = 0.0) -> bool:
+        del speed_limit
+        self._active_cmd_id = cmd_id
+        self._active_target = list(position)
+        return self._fleet.navigate(self._name, cmd_id, position, map_name)
+
+    def stop(self) -> bool:
+        self._active_cmd_id += 1
+        self._active_target = None
+        return self._fleet.stop(self._name, self._active_cmd_id)
+
+    def start_charge(self, cmd_id: int) -> bool:
+        self._active_cmd_id = cmd_id
+        return self._fleet.set_charging(self._name, cmd_id, True)
+
+    def stop_charge(self) -> bool:
+        return self._fleet.set_charging(self._name, self._active_cmd_id, False)
+
+    def toggle_attach(self, attach: bool, cmd_id: int) -> bool:
+        self._active_cmd_id = cmd_id
+        return self._fleet.attach(self._name, cmd_id, attach=attach, search_radius=1.0)
+
+    def attach_object(
+        self,
+        attach: bool,
+        cmd_id: int,
+        object_name: str = "",
+        parent_link: str = "",
+        offset_position: tuple = (0.0, 0.0, 0.0),
+        offset_orientation: tuple = (0.0, 0.0, 0.0, 1.0),
+        search_radius: float = 0.0,
+    ) -> bool:
+        self._active_cmd_id = cmd_id
+        return self._fleet.attach(
+            self._name,
+            cmd_id,
+            attach=attach,
+            object_name=object_name,
+            parent_link=parent_link,
+            offset_position=offset_position,
+            offset_orientation=offset_orientation,
+            search_radius=search_radius,
+        )
+
+
+def create_rmf_client_factory(
+    mode: str,
+    node: Node,
+    map_name: str = "L1",
+    *,
+    sim_core: Any | None = None,
+    provider: FleetStateProvider | None = None,
+    dispatcher: FleetCommandDispatcher | None = None,
+):
     """Create an RMF client factory for ``mode``."""
     normalized = (mode or "per_robot_ros").strip().lower()
     if normalized == "per_robot_ros":
         return PerRobotRosClientFactory(node, map_name=map_name)
     if normalized == "fleet_ros":
         return RosFleetClient(node, map_name=map_name)
+    if normalized == "python_fleet":
+        if provider is None or dispatcher is None:
+            if sim_core is None:
+                raise ValueError("python_fleet mode requires sim_core or provider+dispatcher")
+            return PythonFleetClient.from_sim_core(sim_core, map_name=map_name)
+        return PythonFleetClient(provider, dispatcher, map_name=map_name)
     raise ValueError(f"Unknown RMF client mode: {mode!r}")
 
 
@@ -374,7 +619,27 @@ def _distance_xy(a: list, b: list) -> float:
     return math.hypot(float(a[0]) - float(b[0]), float(a[1]) - float(b[1]))
 
 
+def _ack_accepts(ack, robot_name: str, command_type: str) -> bool:
+    if robot_name in ack.accepted_names:
+        return True
+    reason = ack.rejected.get(robot_name, "not accepted")
+    logger.warning("[%s] direct %s rejected: %s", robot_name, command_type, reason)
+    return False
+
+
+def _direct_agent_by_name(sim_core: Any, robot_name: str) -> Any | None:
+    matches = [agent for agent in getattr(sim_core, "agents", ()) if getattr(agent, "name", None) == robot_name]
+    return matches[0] if len(matches) == 1 else None
+
+
 def _quat_to_yaw(q) -> float:
     siny_cosp = 2.0 * (q.w * q.z + q.x * q.y)
     cosy_cosp = 1.0 - 2.0 * (q.y * q.y + q.z * q.z)
+    return math.atan2(siny_cosp, cosy_cosp)
+
+
+def _quat_tuple_to_yaw(q) -> float:
+    x, y, z, w = q
+    siny_cosp = 2.0 * (w * z + x * y)
+    cosy_cosp = 1.0 - 2.0 * (y * y + z * z)
     return math.atan2(siny_cosp, cosy_cosp)

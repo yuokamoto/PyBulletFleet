@@ -33,6 +33,72 @@ def _fleet_state(robot_name="tinyRobot1", x=1.0, y=2.0, yaw=0.0, battery_soc=0.5
     return state
 
 
+class _FakeObject:
+    def __init__(self, name: str):
+        self.name = name
+
+
+class _FakeAgent:
+    def __init__(self, name: str, object_id: int = 1):
+        from pybullet_fleet.geometry import Pose as PbfPose
+
+        self.name = name
+        self.object_id = object_id
+        self.velocity = (0.0, 0.0, 0.0)
+        self.angular_velocity = 0.0
+        self.is_moving = False
+        self.battery_soc = 0.75
+        self.is_charging = False
+        self.pose = PbfPose.from_xyz(0.0, 0.0, 0.0)
+        self.goal_calls = []
+        self.stop_calls = 0
+        self.attach_calls = []
+        self.detach_calls = []
+        self.attached = []
+        self.sim_core = None
+
+    def get_pose(self):
+        return self.pose
+
+    def set_goal_pose(self, pose):
+        self.goal_calls.append(pose)
+        self.is_moving = True
+
+    def stop(self):
+        self.stop_calls += 1
+        self.is_moving = False
+
+    def attach_object(self, obj, parent_link_index="base_link", relative_pose=None):
+        self.attach_calls.append((obj, parent_link_index, relative_pose))
+        self.attached.append(obj)
+        return True
+
+    def detach_object(self, obj):
+        self.detach_calls.append(obj)
+        if obj in self.attached:
+            self.attached.remove(obj)
+        return True
+
+    def get_attached_objects(self):
+        return list(self.attached)
+
+    def find_nearest_pickable(self, search_radius=0.5):
+        del search_radius
+        return self.sim_core.sim_objects[0] if self.sim_core.sim_objects else None
+
+    def set_charging(self, charging: bool):
+        self.is_charging = bool(charging)
+
+
+class _FakeSim:
+    def __init__(self, agents, objects=None):
+        self.agents = list(agents)
+        self.sim_objects = list(objects or [])
+        self.sim_time = 1.25
+        for agent in self.agents:
+            agent.sim_core = self
+
+
 def test_client_factory_defaults_to_per_robot_ros(mock_node):
     from pybullet_fleet_rmf.fleet_clients import PerRobotRosClientFactory, create_rmf_client_factory
     from pybullet_fleet_rmf.per_robot_ros_client import PerRobotRosClient
@@ -58,6 +124,18 @@ def test_client_factory_creates_fleet_ros_client():
     assert node.create_client.call_args_list[0].args[1] == "/fleet/navigate"
     assert node.create_client.call_args_list[1].args[1] == "/fleet/stop"
     assert node.create_client.call_args_list[2].args[1] == "/fleet/attach"
+
+
+def test_client_factory_creates_python_fleet_client(mock_node):
+    from pybullet_fleet_rmf.fleet_clients import PythonFleetClient, create_rmf_client_factory
+
+    sim = _FakeSim([_FakeAgent("tinyRobot1")])
+
+    factory = create_rmf_client_factory("python_fleet", mock_node, sim_core=sim)
+
+    assert isinstance(factory, PythonFleetClient)
+    assert not mock_node.create_subscription.called
+    assert not mock_node.create_client.called
 
 
 def test_client_factory_rejects_aliases(mock_node):
@@ -214,3 +292,63 @@ def test_ros_fleet_robot_client_marks_navigation_complete_from_state():
 
     state_cb(_fleet_state(x=1.0, y=0.0))
     assert robot.get_data().is_command_completed(4)
+
+
+def test_python_fleet_client_reads_provider_state_and_tracks_map(mock_node):
+    del mock_node
+    from pybullet_fleet_rmf.fleet_clients import PythonFleetClient
+
+    agent = _FakeAgent("tinyRobot1")
+    sim = _FakeSim([agent])
+    fleet = PythonFleetClient.from_sim_core(sim, map_name="L1")
+    robot = fleet.robot("tinyRobot1")
+
+    robot.set_map_name("L2")
+    data = robot.get_data()
+
+    assert data is not None
+    assert data.map == "L2"
+    assert data.position == pytest.approx([0.0, 0.0, 0.0])
+    assert data.battery_soc == pytest.approx(0.75)
+
+
+def test_python_fleet_robot_client_dispatches_navigation_stop_and_attach(mock_node):
+    del mock_node
+    from pybullet_fleet_rmf.fleet_clients import PythonFleetClient
+
+    box = _FakeObject("box")
+    agent = _FakeAgent("tinyRobot1")
+    sim = _FakeSim([agent], [box])
+    fleet = PythonFleetClient.from_sim_core(sim, map_name="L1")
+    robot = fleet.robot("tinyRobot1")
+
+    assert robot.navigate(3, [1.0, 2.0, 0.5], "L1")
+    assert agent.goal_calls[0].x == pytest.approx(1.0)
+    assert agent.goal_calls[0].y == pytest.approx(2.0)
+    assert agent.goal_calls[0].yaw == pytest.approx(0.5)
+
+    assert robot.stop()
+    assert agent.stop_calls == 1
+    assert robot.get_data().last_completed_cmd_id == 4
+
+    assert robot.attach_object(True, 7, object_name="box", parent_link="tool", offset_position=(0.0, 0.0, 0.2))
+    assert agent.attach_calls[0][0] is box
+    assert agent.attach_calls[0][1] == "tool"
+    assert agent.attach_calls[0][2].z == pytest.approx(0.2)
+    assert robot.get_data().last_completed_cmd_id == 7
+
+
+def test_python_fleet_robot_client_sets_charging_directly(mock_node):
+    del mock_node
+    from pybullet_fleet_rmf.fleet_clients import PythonFleetClient
+
+    agent = _FakeAgent("tinyRobot1")
+    sim = _FakeSim([agent])
+    robot = PythonFleetClient.from_sim_core(sim, map_name="L1").robot("tinyRobot1")
+
+    assert robot.start_charge(8)
+    assert agent.is_charging is True
+    assert robot.get_data().last_completed_cmd_id == 8
+
+    assert robot.stop_charge()
+    assert agent.is_charging is False

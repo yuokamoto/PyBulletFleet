@@ -238,8 +238,10 @@ Current implementation notes:
   `/fleet/states` + `/fleet/navigate` + `/fleet/stop` + `/fleet/attach` +
   `/fleet/execute_action`; charging still uses per-robot compatibility
   services until a fleet-level charge API exists.
-- `PythonFleetClient` is still pending and should reuse the same client
-  factory/interface.
+- `python_fleet` is available as the direct in-process RMF client transport.
+  It uses `FleetStateProvider` and `FleetCommandDispatcher` directly; the
+  plugin-only launch/runtime path that constructs and passes the shared
+  simulation core is still pending.
 
 Exit criteria:
 
@@ -272,12 +274,16 @@ Exit criteria:
 
 ### Phase 5c — Plugin Only Launch Path
 
+Status: in progress.
+
 Tasks:
 
 - Add a launch/runtime path where RMF adapter, simulation core,
   `FleetStateProvider`, and `FleetCommandDispatcher` run in one Python process.
 - No ROS bridge is required in the control path.
 - Use the same RMF client abstraction with `PythonFleetClient`.
+- Wire launch/config so `python_fleet` receives the shared simulation core
+  instead of requiring ROS bridge endpoints.
 
 Exit criteria:
 
