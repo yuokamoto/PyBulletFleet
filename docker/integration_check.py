@@ -17,6 +17,7 @@ from pybullet_fleet_msgs.msg import (
     RobotJointPositionsCommand,
 )
 from pybullet_fleet_msgs.srv import (
+    AttachObject,
     FleetAttach,
     FleetExecuteAction,
     FleetJointCommand,
@@ -60,6 +61,7 @@ EXPECTED_SERVICES = [
     "/sim/get_entities",
     "/sim/step_simulation",
     "/sim/get_simulation_state",
+    "/robot0/attach_object",
     "/fleet/navigate",
     "/fleet/stop",
     "/fleet/attach",
@@ -87,6 +89,7 @@ class BridgeIntegrationCheck(RosCheckNode):
         self.get_features = self.create_client(GetSimulatorFeatures, "/sim/get_simulator_features")
         self.set_entity_state = self.create_client(SetEntityState, "/sim/set_entity_state")
         self.spawn_entity = self.create_client(SpawnEntity, "/sim/spawn_entity")
+        self.robot_attach_object = self.create_client(AttachObject, "/robot0/attach_object")
         self.fleet_nav = self.create_client(FleetNavigate, "/fleet/navigate")
         self.fleet_stop = self.create_client(FleetStop, "/fleet/stop")
         self.fleet_attach = self.create_client(FleetAttach, "/fleet/attach")
@@ -263,6 +266,18 @@ def main() -> int:
         node.cmd_vel.publish(Twist())
         node.spin_for(0.2)
         print("  OK /robot0/cmd_vel publish path is available and reset")
+
+        print("--- Testing per-robot attach_object service ---")
+        robot_attach_req = AttachObject.Request()
+        robot_attach_req.command = RobotAttachCommand(name="robot0", attach=False)
+        robot_attach_resp = node.call_service(node.robot_attach_object, robot_attach_req, CALL_TIMEOUT)
+        if robot_attach_resp.success:
+            print("  FAIL /robot0/attach_object unexpectedly detached an object")
+            return 1
+        if "No attached object" not in robot_attach_resp.message:
+            print(f"  FAIL /robot0/attach_object unexpected response: {robot_attach_resp.message}")
+            return 1
+        print("  OK /robot0/attach_object accepts RobotAttachCommand requests")
 
         print("--- Testing simulation services ---")
         entities = node.call_service(node.get_entities, GetEntities.Request(), CALL_TIMEOUT)

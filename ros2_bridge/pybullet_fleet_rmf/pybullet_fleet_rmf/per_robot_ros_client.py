@@ -27,6 +27,7 @@ from rclpy.node import Node
 from sensor_msgs.msg import BatteryState
 from std_srvs.srv import SetBool
 
+from pybullet_fleet_msgs.msg import RobotAttachCommand
 from pybullet_fleet_msgs.srv import AttachObject
 from pybullet_fleet_rmf.client_interface import RobotUpdateData
 
@@ -331,10 +332,12 @@ class PerRobotRosClient:
         from geometry_msgs.msg import Pose as RosPose, Point, Quaternion
 
         req = AttachObject.Request()
-        req.attach = attach
-        req.object_name = object_name
-        req.parent_link = parent_link
-        req.offset = RosPose(
+        req.command = RobotAttachCommand()
+        req.command.name = self._name
+        req.command.attach = attach
+        req.command.object_name = object_name
+        req.command.parent_link = parent_link
+        req.command.offset = RosPose(
             position=Point(x=offset_position[0], y=offset_position[1], z=offset_position[2]),
             orientation=Quaternion(
                 x=offset_orientation[0],
@@ -343,7 +346,7 @@ class PerRobotRosClient:
                 w=offset_orientation[3],
             ),
         )
-        req.search_radius = float(search_radius)
+        req.command.search_radius = float(search_radius)
 
         future = self._attach_object_client.call_async(req)
         future.add_done_callback(self._on_attach_object_done)

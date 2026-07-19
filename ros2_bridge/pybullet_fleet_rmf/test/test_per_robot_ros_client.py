@@ -117,6 +117,37 @@ def test_stop_when_idle_is_noop(mock_node):
     assert _api(mock_node).stop() is True  # cancelling when idle is fine
 
 
+def test_attach_object_uses_shared_robot_attach_command(mock_node):
+    api = _api(mock_node, name="robot0")
+    future = MagicMock()
+    api._attach_object_client.wait_for_service.return_value = True
+    api._attach_object_client.call_async.return_value = future
+
+    assert api.attach_object(
+        True,
+        12,
+        object_name="box",
+        parent_link="tool",
+        offset_position=(0.1, 0.2, 0.3),
+        offset_orientation=(0.0, 0.0, 0.5, 0.5),
+        search_radius=0.75,
+    )
+
+    api._attach_object_client.call_async.assert_called_once()
+    req = api._attach_object_client.call_async.call_args.args[0]
+    assert req.command.name == "robot0"
+    assert req.command.attach is True
+    assert req.command.object_name == "box"
+    assert req.command.parent_link == "tool"
+    assert req.command.offset.position.x == pytest.approx(0.1)
+    assert req.command.offset.position.y == pytest.approx(0.2)
+    assert req.command.offset.position.z == pytest.approx(0.3)
+    assert req.command.offset.orientation.z == pytest.approx(0.5)
+    assert req.command.offset.orientation.w == pytest.approx(0.5)
+    assert req.command.search_radius == pytest.approx(0.75)
+    future.add_done_callback.assert_called_once()
+
+
 def test_on_nav_complete_marks_completed_on_success(mock_node):
     api = _api(mock_node)
     api._active_cmd_id = 9

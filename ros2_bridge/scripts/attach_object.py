@@ -40,6 +40,8 @@ from rclpy.node import Node
 
 def _call_attach_object(node, robot, attach, object_name, parent_link, offset, search_radius):
     """Call the AttachObject service."""
+    from geometry_msgs.msg import Point, Pose, Quaternion
+    from pybullet_fleet_msgs.msg import RobotAttachCommand
     from pybullet_fleet_msgs.srv import AttachObject
 
     client = node.create_client(AttachObject, f"/{robot}/attach_object")
@@ -48,16 +50,20 @@ def _call_attach_object(node, robot, attach, object_name, parent_link, offset, s
         return False
 
     request = AttachObject.Request()
-    request.attach = attach
-    request.object_name = object_name or ""
-    request.parent_link = parent_link or ""
-    request.search_radius = search_radius
+    command = RobotAttachCommand()
+    command.name = robot
+    command.attach = attach
+    command.object_name = object_name or ""
+    command.parent_link = parent_link or ""
+    command.search_radius = search_radius
 
+    position = Point()
     if offset:
-        request.offset.position.x = offset[0]
-        request.offset.position.y = offset[1]
-        request.offset.position.z = offset[2]
-    request.offset.orientation.w = 1.0
+        position.x = offset[0]
+        position.y = offset[1]
+        position.z = offset[2]
+    command.offset = Pose(position=position, orientation=Quaternion(w=1.0))
+    request.command = command
 
     future = client.call_async(request)
     rclpy.spin_until_future_complete(node, future)
