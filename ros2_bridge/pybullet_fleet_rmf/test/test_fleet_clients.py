@@ -109,7 +109,7 @@ def test_client_factory_defaults_to_per_robot_ros(mock_node):
 
 
 def test_client_factory_creates_fleet_ros_client():
-    from pybullet_fleet_rmf.fleet_clients import RosFleetClient, create_rmf_client_factory
+    from pybullet_fleet_rmf.fleet_clients import RosRmfFleetClient, create_rmf_client_factory
 
     nav_client = MagicMock()
     stop_client = MagicMock()
@@ -118,7 +118,7 @@ def test_client_factory_creates_fleet_ros_client():
 
     factory = create_rmf_client_factory("fleet_ros", node)
 
-    assert isinstance(factory, RosFleetClient)
+    assert isinstance(factory, RosRmfFleetClient)
     node.create_subscription.assert_called_once()
     assert node.create_client.call_count == 3
     assert node.create_client.call_args_list[0].args[1] == "/fleet/navigate"
@@ -127,13 +127,13 @@ def test_client_factory_creates_fleet_ros_client():
 
 
 def test_client_factory_creates_python_fleet_client(mock_node):
-    from pybullet_fleet_rmf.fleet_clients import PythonFleetClient, create_rmf_client_factory
+    from pybullet_fleet_rmf.fleet_clients import PythonRmfFleetClient, create_rmf_client_factory
 
     sim = _FakeSim([_FakeAgent("tinyRobot1")])
 
     factory = create_rmf_client_factory("python_fleet", mock_node, sim_core=sim)
 
-    assert isinstance(factory, PythonFleetClient)
+    assert isinstance(factory, PythonRmfFleetClient)
     assert not mock_node.create_subscription.called
     assert not mock_node.create_client.called
 
@@ -147,11 +147,11 @@ def test_client_factory_rejects_aliases(mock_node):
 
 
 def test_ros_fleet_client_reads_shared_fleet_state():
-    from pybullet_fleet_rmf.fleet_clients import RosFleetClient
+    from pybullet_fleet_rmf.fleet_clients import RosRmfFleetClient
 
     nav_client = MagicMock()
     node = _node_with_clients(nav_client, MagicMock(), MagicMock(), MagicMock())
-    fleet = RosFleetClient(node, map_name="L1")
+    fleet = RosRmfFleetClient(node, map_name="L1")
     state_cb = node.create_subscription.call_args.args[2]
     robot = fleet.robot("tinyRobot1")
 
@@ -167,11 +167,11 @@ def test_ros_fleet_client_reads_shared_fleet_state():
 
 
 def test_ros_fleet_client_tracks_map_name_per_robot():
-    from pybullet_fleet_rmf.fleet_clients import RosFleetClient
+    from pybullet_fleet_rmf.fleet_clients import RosRmfFleetClient
 
     nav_client = MagicMock()
     node = _node_with_clients(nav_client, MagicMock(), MagicMock(), MagicMock(), MagicMock(), MagicMock(), MagicMock())
-    fleet = RosFleetClient(node, map_name="L1")
+    fleet = RosRmfFleetClient(node, map_name="L1")
     state_cb = node.create_subscription.call_args.args[2]
     first = fleet.robot("tinyRobot1")
     second = fleet.robot("tinyRobot2")
@@ -189,14 +189,14 @@ def test_ros_fleet_client_tracks_map_name_per_robot():
 
 
 def test_ros_fleet_robot_client_navigates_through_fleet_service():
-    from pybullet_fleet_rmf.fleet_clients import RosFleetClient
+    from pybullet_fleet_rmf.fleet_clients import RosRmfFleetClient
 
     future = MagicMock()
     nav_client = MagicMock()
     nav_client.service_is_ready.return_value = True
     nav_client.call_async.return_value = future
     node = _node_with_clients(nav_client, MagicMock(), MagicMock(), MagicMock())
-    fleet = RosFleetClient(node, map_name="L1")
+    fleet = RosRmfFleetClient(node, map_name="L1")
     state_cb = node.create_subscription.call_args.args[2]
     robot = fleet.robot("tinyRobot1")
     state_cb(_fleet_state(x=0.0, y=0.0))
@@ -216,7 +216,7 @@ def test_ros_fleet_robot_client_navigates_through_fleet_service():
 
 
 def test_ros_fleet_robot_client_stops_through_fleet_service():
-    from pybullet_fleet_rmf.fleet_clients import RosFleetClient
+    from pybullet_fleet_rmf.fleet_clients import RosRmfFleetClient
 
     future = MagicMock()
     nav_client = MagicMock()
@@ -224,7 +224,7 @@ def test_ros_fleet_robot_client_stops_through_fleet_service():
     stop_client.service_is_ready.return_value = True
     stop_client.call_async.return_value = future
     node = _node_with_clients(nav_client, stop_client)
-    fleet = RosFleetClient(node, map_name="L1")
+    fleet = RosRmfFleetClient(node, map_name="L1")
     robot = fleet.robot("tinyRobot1")
 
     assert robot.stop() is True
@@ -239,7 +239,7 @@ def test_ros_fleet_robot_client_stops_through_fleet_service():
 
 
 def test_ros_fleet_robot_client_attaches_through_fleet_service():
-    from pybullet_fleet_rmf.fleet_clients import RosFleetClient
+    from pybullet_fleet_rmf.fleet_clients import RosRmfFleetClient
 
     future = MagicMock()
     nav_client = MagicMock()
@@ -248,7 +248,7 @@ def test_ros_fleet_robot_client_attaches_through_fleet_service():
     attach_client.service_is_ready.return_value = True
     attach_client.call_async.return_value = future
     node = _node_with_clients(nav_client, stop_client, attach_client)
-    fleet = RosFleetClient(node, map_name="L1")
+    fleet = RosRmfFleetClient(node, map_name="L1")
     robot = fleet.robot("tinyRobot1")
 
     assert robot.attach_object(
@@ -276,13 +276,13 @@ def test_ros_fleet_robot_client_attaches_through_fleet_service():
 
 
 def test_ros_fleet_robot_client_marks_navigation_complete_from_state():
-    from pybullet_fleet_rmf.fleet_clients import RosFleetClient
+    from pybullet_fleet_rmf.fleet_clients import RosRmfFleetClient
 
     nav_client = MagicMock()
     nav_client.service_is_ready.return_value = True
     nav_client.call_async.return_value = MagicMock()
     node = _node_with_clients(nav_client, MagicMock(), MagicMock(), MagicMock())
-    fleet = RosFleetClient(node, map_name="L1")
+    fleet = RosRmfFleetClient(node, map_name="L1")
     state_cb = node.create_subscription.call_args.args[2]
     robot = fleet.robot("tinyRobot1")
 
@@ -296,11 +296,11 @@ def test_ros_fleet_robot_client_marks_navigation_complete_from_state():
 
 def test_python_fleet_client_reads_provider_state_and_tracks_map(mock_node):
     del mock_node
-    from pybullet_fleet_rmf.fleet_clients import PythonFleetClient
+    from pybullet_fleet_rmf.fleet_clients import PythonRmfFleetClient
 
     agent = _FakeAgent("tinyRobot1")
     sim = _FakeSim([agent])
-    fleet = PythonFleetClient.from_sim_core(sim, map_name="L1")
+    fleet = PythonRmfFleetClient.from_sim_core(sim, map_name="L1")
     robot = fleet.robot("tinyRobot1")
 
     robot.set_map_name("L2")
@@ -314,12 +314,12 @@ def test_python_fleet_client_reads_provider_state_and_tracks_map(mock_node):
 
 def test_python_fleet_robot_client_dispatches_navigation_stop_and_attach(mock_node):
     del mock_node
-    from pybullet_fleet_rmf.fleet_clients import PythonFleetClient
+    from pybullet_fleet_rmf.fleet_clients import PythonRmfFleetClient
 
     box = _FakeObject("box")
     agent = _FakeAgent("tinyRobot1")
     sim = _FakeSim([agent], [box])
-    fleet = PythonFleetClient.from_sim_core(sim, map_name="L1")
+    fleet = PythonRmfFleetClient.from_sim_core(sim, map_name="L1")
     robot = fleet.robot("tinyRobot1")
 
     assert robot.navigate(3, [1.0, 2.0, 0.5], "L1")
@@ -340,11 +340,11 @@ def test_python_fleet_robot_client_dispatches_navigation_stop_and_attach(mock_no
 
 def test_python_fleet_robot_client_sets_charging_directly(mock_node):
     del mock_node
-    from pybullet_fleet_rmf.fleet_clients import PythonFleetClient
+    from pybullet_fleet_rmf.fleet_clients import PythonRmfFleetClient
 
     agent = _FakeAgent("tinyRobot1")
     sim = _FakeSim([agent])
-    robot = PythonFleetClient.from_sim_core(sim, map_name="L1").robot("tinyRobot1")
+    robot = PythonRmfFleetClient.from_sim_core(sim, map_name="L1").robot("tinyRobot1")
 
     assert robot.start_charge(8)
     assert agent.is_charging is True

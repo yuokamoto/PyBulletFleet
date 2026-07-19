@@ -42,7 +42,7 @@ class PerRobotRosClientFactory:
         return PerRobotRosClient(robot_name=robot_name, node=self._node, map_name=self._map_name)
 
 
-class _FleetRobotClientBase:
+class _RmfRobotClientFacadeBase:
     """Shared RMF-facing per-robot facade logic for fleet clients.
 
     Subclasses share RMF command bookkeeping and delegate transport-specific
@@ -112,7 +112,7 @@ class _FleetRobotClientBase:
         )
 
 
-class RosFleetClient:
+class RosRmfFleetClient:
     """Shared ROS fleet-endpoint client for RMF.
 
     The client consumes ``/fleet/states`` once and sends navigation commands
@@ -139,9 +139,9 @@ class RosFleetClient:
         self._stop_client = node.create_client(FleetStopSrv, "/fleet/stop")
         self._attach_client = node.create_client(FleetAttachSrv, "/fleet/attach")
 
-    def robot(self, robot_name: str) -> "RosFleetRobotClient":
+    def robot(self, robot_name: str) -> "RosRmfFleetRobotClient":
         """Return a per-robot facade over the shared fleet endpoints."""
-        return RosFleetRobotClient(robot_name, self)
+        return RosRmfFleetRobotClient(robot_name, self)
 
     def get_state(self, robot_name: str) -> RobotUpdateData | None:
         """Return cached state for ``robot_name``."""
@@ -355,10 +355,10 @@ class RosFleetClient:
         self.mark_completed(robot_name, cmd_id)
 
 
-class RosFleetRobotClient(_FleetRobotClientBase):
-    """Per-robot facade over :class:`RosFleetClient`."""
+class RosRmfFleetRobotClient(_RmfRobotClientFacadeBase):
+    """Per-robot facade over :class:`RosRmfFleetClient`."""
 
-    def __init__(self, robot_name: str, fleet: RosFleetClient) -> None:
+    def __init__(self, robot_name: str, fleet: RosRmfFleetClient) -> None:
         super().__init__(robot_name, fleet)
         self._node = fleet._node
         self._charging_client = self._node.create_client(SetBool, f"/{robot_name}/set_charging")
@@ -395,7 +395,7 @@ class RosFleetRobotClient(_FleetRobotClientBase):
             logger.warning("[%s] %s failed: %s", self._name, label, msg)
 
 
-class PythonFleetClient:
+class PythonRmfFleetClient:
     """Direct in-process fleet client for Plugin Only deployments.
 
     This client consumes :class:`FleetStateProvider` and
@@ -427,7 +427,7 @@ class PythonFleetClient:
         map_name: str = "L1",
         *,
         completion_radius: float = 0.25,
-    ) -> "PythonFleetClient":
+    ) -> "PythonRmfFleetClient":
         """Build provider and dispatcher from one simulation core."""
         return cls(
             FleetStateProvider(sim_core),
@@ -436,9 +436,9 @@ class PythonFleetClient:
             completion_radius=completion_radius,
         )
 
-    def robot(self, robot_name: str) -> "PythonFleetRobotClient":
+    def robot(self, robot_name: str) -> "PythonRmfFleetRobotClient":
         """Return a per-robot facade over the direct fleet API."""
-        return PythonFleetRobotClient(robot_name, self)
+        return PythonRmfFleetRobotClient(robot_name, self)
 
     def get_state(self, robot_name: str) -> RobotUpdateData | None:
         """Return current state for ``robot_name`` from the provider."""
@@ -584,10 +584,10 @@ class PythonFleetClient:
         return True
 
 
-class PythonFleetRobotClient(_FleetRobotClientBase):
-    """Per-robot RMF facade over :class:`PythonFleetClient`."""
+class PythonRmfFleetRobotClient(_RmfRobotClientFacadeBase):
+    """Per-robot RMF facade over :class:`PythonRmfFleetClient`."""
 
-    def __init__(self, robot_name: str, fleet: PythonFleetClient) -> None:
+    def __init__(self, robot_name: str, fleet: PythonRmfFleetClient) -> None:
         super().__init__(robot_name, fleet)
 
     def start_charge(self, cmd_id: int) -> bool:
@@ -612,13 +612,13 @@ def create_rmf_client_factory(
     if normalized == "per_robot_ros":
         return PerRobotRosClientFactory(node, map_name=map_name)
     if normalized == "fleet_ros":
-        return RosFleetClient(node, map_name=map_name)
+        return RosRmfFleetClient(node, map_name=map_name)
     if normalized == "python_fleet":
         if provider is None or dispatcher is None:
             if sim_core is None:
                 raise ValueError("python_fleet mode requires sim_core or provider+dispatcher")
-            return PythonFleetClient.from_sim_core(sim_core, map_name=map_name)
-        return PythonFleetClient(provider, dispatcher, map_name=map_name)
+            return PythonRmfFleetClient.from_sim_core(sim_core, map_name=map_name)
+        return PythonRmfFleetClient(provider, dispatcher, map_name=map_name)
     raise ValueError(f"Unknown RMF client mode: {mode!r}")
 
 

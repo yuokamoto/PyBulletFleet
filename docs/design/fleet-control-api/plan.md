@@ -225,9 +225,9 @@ Tasks:
   - `toggle_attach(attach, cmd_id)`
 - Add a client factory so the adapter can choose the transport without
   changing RMF callback logic.
-- Implement `RosFleetClient` using ROS `/fleet/states` and `/fleet/navigate`
+- Implement `RosRmfFleetClient` using ROS `/fleet/states` and `/fleet/navigate`
   for patrol/navigation.
-- Implement `PythonFleetClient` using `FleetStateProvider` and
+- Implement `PythonRmfFleetClient` using `FleetStateProvider` and
   `FleetCommandDispatcher` directly.
 - Keep the existing per-robot ROS client path as a compatibility implementation.
 
@@ -281,7 +281,7 @@ Tasks:
 - Add a launch/runtime path where RMF adapter, simulation core,
   `FleetStateProvider`, and `FleetCommandDispatcher` run in one Python process.
 - No ROS bridge is required in the control path.
-- Use the same RMF client abstraction with `PythonFleetClient`.
+- Use the same RMF client abstraction with `PythonRmfFleetClient`.
 - Wire launch/config so `python_fleet` receives the shared simulation core
   instead of requiring ROS bridge endpoints.
 
@@ -292,7 +292,7 @@ Current implementation notes:
   plugin.
 - `pybullet_fleet_rmf.rmf_adapter_plugin.RmfAdapterBridgePlugin` starts the RMF
   adapter inside `bridge_node` and passes the shared `sim_core` to
-  `PythonFleetClient`.
+  `PythonRmfFleetClient`.
 - The standalone executable still cannot use `python_fleet` by itself because a
   separate ROS process has no direct simulation core reference.
 
@@ -395,10 +395,10 @@ Measure the same RMF scenario through multiple transport/configuration modes:
    - `/fleet/navigate` and later `/fleet/execute_action` / `/fleet/attach`;
    - minimal per-robot ROS interfaces.
 4. **Plugin Only**
-   - RMF adapter calls `PythonFleetClient`;
+   - RMF adapter calls `PythonRmfFleetClient`;
    - no ROS bridge in the control path.
 5. **Plugin + Bridge**
-   - RMF adapter uses `PythonFleetClient`;
+   - RMF adapter uses `PythonRmfFleetClient`;
    - ROS bridge remains active for observation/debug/external control.
 
 ### Scenarios
@@ -509,7 +509,7 @@ window while preserving RMF's per-robot callback contract.
 
 Tasks:
 
-- Add optional command coalescing in `RosFleetClient`:
+- Add optional command coalescing in `RosRmfFleetClient`:
   collect per-robot RMF `navigate()` callbacks that arrive within a short flush
   window and send them as one `/fleet/navigate` request.
 - Keep coalescing conservative or disabled by default until ack/rejection and
@@ -724,7 +724,7 @@ Exit criteria:
 4. Python fleet state/command abstractions.
 5. ROS `/fleet/states`, `/fleet/navigate`, `/fleet/joint_command` wrappers.
 6. Fleet API examples and integration checks.
-7. RMF client abstraction (`RosFleetClient`, `PythonFleetClient`, legacy client).
+7. RMF client abstraction (`RosRmfFleetClient`, `PythonRmfFleetClient`, legacy client).
 8. RMF state-source and typed fleet command migration.
 9. Plugin Only launch path.
 10. Plugin + Bridge launch path.

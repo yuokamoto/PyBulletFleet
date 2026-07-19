@@ -255,8 +255,8 @@ The practical sequence is:
 
 1. Use `/fleet/states` as the main robot-state source.
 2. Keep per-robot command/service/action endpoints for RMF compatibility.
-3. Add `/fleet/navigate` support in `RosFleetClient` for navigation dispatch.
-4. Add `/fleet/stop` support in `RosFleetClient` for cancellation/stop.
+3. Add `/fleet/navigate` support in `RosRmfFleetClient` for navigation dispatch.
+4. Add `/fleet/stop` support in `RosRmfFleetClient` for cancellation/stop.
 5. Move RMF adapter command paths from per-robot endpoints to fleet-level
    endpoints as those APIs become available.
 
