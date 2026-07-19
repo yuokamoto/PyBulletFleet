@@ -40,6 +40,7 @@ from rclpy.parameter import Parameter
 
 logger = logging.getLogger(__name__)
 _RMF_RCLCPP_INITIALIZED = False
+DEFAULT_PLANNER_CACHE_RESET_SIZE = 2500
 
 try:
     import rmf_adapter
@@ -96,6 +97,15 @@ def _enable_sim_time(node) -> None:
         node.set_parameters([Parameter("use_sim_time", Parameter.Type.BOOL, True)])
     except Exception as exc:  # noqa: B902
         node.get_logger().warning(f"Failed to set use_sim_time on RMF adapter node: {exc}")
+
+
+def _planner_cache_reset_size(pybullet_config: dict) -> int:
+    """Return RMF planner cache reset size from PyBulletFleet config."""
+    value = pybullet_config.get("planner_cache_reset_size", DEFAULT_PLANNER_CACHE_RESET_SIZE)
+    try:
+        return max(1, int(value))
+    except (TypeError, ValueError):
+        return DEFAULT_PLANNER_CACHE_RESET_SIZE
 
 
 def start_adapter_runtime(
@@ -160,8 +170,10 @@ def start_adapter_runtime(
     else:
         node.get_logger().info("No server_uri configured — fleet state will not be pushed to API server")
 
+    pybullet_config = config_yaml.get("pybullet_fleet", {})
+
     fleet_handle = adapter.add_easy_fleet(fleet_config)
-    fleet_handle.more().set_planner_cache_reset_size(2500)
+    fleet_handle.more().set_planner_cache_reset_size(_planner_cache_reset_size(pybullet_config))
 
     # Register performable actions from config (e.g. teleop, clean).
     # Standard delivery tasks (dispatch_delivery) are handled by RMF's
@@ -184,7 +196,6 @@ def start_adapter_runtime(
         node.get_logger().info(f"Performable action '{action_name}' registered")
 
     # Build RMF client wrappers for each robot
-    pybullet_config = config_yaml.get("pybullet_fleet", {})
     update_period = 1.0 / pybullet_config.get("robot_state_update_frequency", 10.0)
     resolved_client_mode = client_mode or pybullet_config.get("rmf_client_mode", "per_robot_ros")
     try:

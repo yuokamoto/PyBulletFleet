@@ -189,6 +189,14 @@ The standalone `fleet_adapter` executable can select `per_robot_ros` or
 requires an in-process `sim_core` and is therefore intended for the bridge
 plugin path rather than a separate ROS process.
 
+The RMF planner cache reset size defaults to `2500` and can be tuned from the
+RMF fleet config:
+
+```yaml
+pybullet_fleet:
+  planner_cache_reset_size: 2500
+```
+
 The office demo exposes this experimental path directly:
 
 ```bash

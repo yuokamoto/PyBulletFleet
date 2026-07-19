@@ -7,6 +7,25 @@ import pytest
 pytest.importorskip("pybullet_fleet_rmf.rmf_adapter_plugin", reason="ROS 2 / RMF dependencies not available")
 
 
+def test_planner_cache_reset_size_uses_default():
+    from pybullet_fleet_rmf.fleet_adapter import DEFAULT_PLANNER_CACHE_RESET_SIZE, _planner_cache_reset_size
+
+    assert _planner_cache_reset_size({}) == DEFAULT_PLANNER_CACHE_RESET_SIZE
+
+
+def test_planner_cache_reset_size_accepts_config_value():
+    from pybullet_fleet_rmf.fleet_adapter import _planner_cache_reset_size
+
+    assert _planner_cache_reset_size({"planner_cache_reset_size": "100"}) == 100
+
+
+def test_planner_cache_reset_size_rejects_invalid_values():
+    from pybullet_fleet_rmf.fleet_adapter import DEFAULT_PLANNER_CACHE_RESET_SIZE, _planner_cache_reset_size
+
+    assert _planner_cache_reset_size({"planner_cache_reset_size": "bad"}) == DEFAULT_PLANNER_CACHE_RESET_SIZE
+    assert _planner_cache_reset_size({"planner_cache_reset_size": 0}) == 1
+
+
 def test_rmf_adapter_bridge_plugin_starts_runtime_with_sim_core(monkeypatch):
     from pybullet_fleet_rmf.rmf_adapter_plugin import RmfAdapterBridgePlugin
 
@@ -62,4 +81,3 @@ def test_rmf_adapter_bridge_plugin_raises_when_runtime_fails(monkeypatch):
 
     with pytest.raises(RuntimeError, match="in-process RMF adapter"):
         plugin.on_init()
-
