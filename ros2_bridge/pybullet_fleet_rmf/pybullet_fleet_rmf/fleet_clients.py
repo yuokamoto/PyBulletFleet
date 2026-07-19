@@ -42,7 +42,7 @@ class PerRobotRosClientFactory:
         return PerRobotRosClient(robot_name=robot_name, node=self._node, map_name=self._map_name)
 
 
-class _RmfRobotClientFacadeBase:
+class _RmfRobotClientBase:
     """Shared RMF-facing per-robot facade logic for fleet clients.
 
     Subclasses share RMF command bookkeeping and delegate transport-specific
@@ -355,7 +355,7 @@ class RosRmfFleetClient:
         self.mark_completed(robot_name, cmd_id)
 
 
-class RosRmfFleetRobotClient(_RmfRobotClientFacadeBase):
+class RosRmfFleetRobotClient(_RmfRobotClientBase):
     """Per-robot facade over :class:`RosRmfFleetClient`."""
 
     def __init__(self, robot_name: str, fleet: RosRmfFleetClient) -> None:
@@ -584,7 +584,7 @@ class PythonRmfFleetClient:
         return True
 
 
-class PythonRmfFleetRobotClient(_RmfRobotClientFacadeBase):
+class PythonRmfFleetRobotClient(_RmfRobotClientBase):
     """Per-robot RMF facade over :class:`PythonRmfFleetClient`."""
 
     def __init__(self, robot_name: str, fleet: PythonRmfFleetClient) -> None:
