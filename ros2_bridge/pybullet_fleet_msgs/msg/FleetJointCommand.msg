@@ -1,3 +1,4 @@
+std_msgs/Header header
 string command_id
 string source
 RobotJointPositionsCommand[] joint_position_commands

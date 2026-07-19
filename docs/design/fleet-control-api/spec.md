@@ -102,6 +102,17 @@ Fleet-level command callbacks should enqueue commands into the dispatcher and
 return acknowledgements. They should not run long blocking robot actions inside
 the ROS callback thread.
 
+Fleet ROS command messages and service requests carry `std_msgs/Header`:
+
+- `header.stamp` is the command issue time from the caller's ROS clock. A zero
+  stamp means the receiver may use its current time.
+- `header.frame_id` is the command frame for pose-bearing commands. The default
+  bridge convention is `odom`.
+- `command_id` remains the logical command identifier used for acknowledgement,
+  trace, replay, and RMF completion tracking.
+- `source` identifies the caller, such as `rmf`, `fleet-scale-check`, or a
+  future plugin.
+
 ## Configuration Model
 
 Use explicit capability groups rather than one exclusive mode flag.

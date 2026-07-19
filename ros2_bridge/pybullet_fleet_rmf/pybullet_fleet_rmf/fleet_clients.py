@@ -9,6 +9,7 @@ from typing import Optional
 
 from geometry_msgs.msg import Pose as RosPose, Point, Quaternion
 from rclpy.node import Node
+from std_msgs.msg import Header
 from std_srvs.srv import SetBool
 
 from pybullet_fleet_msgs.msg import FleetState, RobotAttachCommand, RobotGoal2D
@@ -120,6 +121,7 @@ class RosFleetClient:
                 return False
 
         req = FleetNavigateSrv.Request()
+        req.header = _command_header(self._node)
         req.command_id = str(cmd_id)
         req.source = "rmf"
         goal = RobotGoal2D()
@@ -153,6 +155,7 @@ class RosFleetClient:
                 return False
 
         req = FleetStopSrv.Request()
+        req.header = _command_header(self._node)
         req.command_id = str(cmd_id)
         req.source = "rmf"
         req.names = [robot_name]
@@ -194,6 +197,7 @@ class RosFleetClient:
                 return False
 
         req = FleetAttachSrv.Request()
+        req.header = _command_header(self._node)
         req.command_id = str(cmd_id)
         req.source = "rmf"
         command = RobotAttachCommand()
@@ -354,6 +358,16 @@ def _set_bool_request(value: bool) -> SetBool.Request:
     req = SetBool.Request()
     req.data = bool(value)
     return req
+
+
+def _command_header(node: Node, frame_id: str = "odom") -> Header:
+    header = Header(frame_id=frame_id)
+    try:
+        stamp = node.get_clock().now().to_msg()
+        header.stamp = stamp
+    except Exception:  # noqa: B902
+        pass
+    return header
 
 
 def _distance_xy(a: list, b: list) -> float:

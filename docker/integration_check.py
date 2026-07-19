@@ -121,6 +121,11 @@ def _result_message(response) -> str:
     return getattr(response.result, "error_message", "")
 
 
+def _stamp_command(node: BridgeIntegrationCheck, request) -> None:
+    request.header.frame_id = "odom"
+    request.header.stamp = node.get_clock().now().to_msg()
+
+
 def _has_entity(node: BridgeIntegrationCheck, name: str) -> bool:
     response = node.call_service(node.get_entities, GetEntities.Request(), CALL_TIMEOUT)
     return name in set(response.entities)
@@ -240,6 +245,7 @@ def main() -> int:
 
         print("--- Testing fleet services ---")
         nav_req = FleetNavigate.Request()
+        _stamp_command(node, nav_req)
         nav_req.command_id = "smoke-nav"
         nav_req.source = "smoke"
         nav_req.goals_2d = [RobotGoal2D(name="robot0", position=[1.0, 0.0], yaw=0.0, z=0.05)]
@@ -249,6 +255,7 @@ def main() -> int:
             return 1
 
         stop_req = FleetStop.Request()
+        _stamp_command(node, stop_req)
         stop_req.command_id = "smoke-stop"
         stop_req.source = "smoke"
         stop_req.names = ["robot0"]
@@ -258,6 +265,7 @@ def main() -> int:
             return 1
 
         attach_req = FleetAttach.Request()
+        _stamp_command(node, attach_req)
         attach_req.command_id = "smoke-attach"
         attach_req.source = "smoke"
         attach_req.commands = [RobotAttachCommand(name="robot0", attach=False)]
@@ -267,6 +275,7 @@ def main() -> int:
             return 1
 
         action_req = FleetExecuteAction.Request()
+        _stamp_command(node, action_req)
         action_req.command_id = "smoke-action"
         action_req.source = "smoke"
         action_req.commands = [
@@ -282,6 +291,7 @@ def main() -> int:
             return 1
 
         joint_req = FleetJointCommand.Request()
+        _stamp_command(node, joint_req)
         joint_req.command_id = "smoke-joint"
         joint_req.source = "smoke"
         joint_req.joint_position_commands = [RobotJointPositionsCommand(name="robot0", positions=[])]

@@ -42,6 +42,7 @@ class FleetScaleClient(RosCheckNode):
 
     def call_navigate(self, goals: list[RobotGoal2D], timeout: float) -> FleetNavigateSrv.Response:
         request = FleetNavigateSrv.Request()
+        self._stamp_command(request)
         request.command_id = "scale-nav"
         request.source = "fleet-scale-check"
         request.goals_2d = goals
@@ -58,6 +59,7 @@ class FleetScaleClient(RosCheckNode):
             matched = self.navigate_pub.get_subscription_count()
 
         request = FleetNavigateMsg()
+        self._stamp_command(request)
         request.command_id = "scale-nav-topic"
         request.source = "fleet-scale-check"
         request.goals_2d = goals
@@ -65,6 +67,10 @@ class FleetScaleClient(RosCheckNode):
         self.navigate_pub.publish(request)
         rclpy.spin_once(self, timeout_sec=0.05)
         return time.perf_counter() - start, matched
+
+    def _stamp_command(self, msg) -> None:
+        msg.header.frame_id = "odom"
+        msg.header.stamp = self.get_clock().now().to_msg()
 
     def publish_per_robot_goals(
         self,

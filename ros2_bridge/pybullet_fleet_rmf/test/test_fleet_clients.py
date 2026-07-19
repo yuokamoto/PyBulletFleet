@@ -127,6 +127,7 @@ def test_ros_fleet_robot_client_navigates_through_fleet_service():
 
     nav_client.call_async.assert_called_once()
     req = nav_client.call_async.call_args.args[0]
+    assert req.header.frame_id == "odom"
     assert req.command_id == "12"
     assert req.source == "rmf"
     assert len(req.goals_2d) == 1
@@ -152,6 +153,7 @@ def test_ros_fleet_robot_client_stops_through_fleet_service():
 
     stop_client.call_async.assert_called_once()
     req = stop_client.call_async.call_args.args[0]
+    assert req.header.frame_id == "odom"
     assert req.command_id == "1"
     assert req.source == "rmf"
     assert req.names == ["tinyRobot1"]
@@ -182,6 +184,7 @@ def test_ros_fleet_robot_client_attaches_through_fleet_service():
 
     attach_client.call_async.assert_called_once()
     req = attach_client.call_async.call_args.args[0]
+    assert req.header.frame_id == "odom"
     assert req.command_id == "7"
     assert req.source == "rmf"
     assert len(req.commands) == 1
