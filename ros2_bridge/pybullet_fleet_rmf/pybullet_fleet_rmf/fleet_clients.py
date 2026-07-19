@@ -113,7 +113,13 @@ class RosFleetClient:
                 )
 
     def mark_completed(self, robot_name: str, cmd_id: int) -> None:
-        """Update completion state for a robot."""
+        """Mark an RMF command id as completed for one robot.
+
+        This updates only the RMF-facing completion watermark returned by
+        ``RobotUpdateData.last_completed_cmd_id``. It does not mean every
+        PyBulletFleet action has finished; navigation completion is still
+        detected separately from pose proximity in the per-robot facade.
+        """
         with self._lock:
             data = self._states.get(robot_name)
             if data is None:
@@ -417,7 +423,13 @@ class PythonFleetClient:
             self._map_names[robot_name] = map_name
 
     def mark_completed(self, robot_name: str, cmd_id: int) -> None:
-        """Update completion state for a robot."""
+        """Mark an RMF command id as completed for one robot.
+
+        This updates only the RMF-facing completion watermark returned by
+        ``RobotUpdateData.last_completed_cmd_id``. It does not mean every
+        PyBulletFleet action has finished; navigation completion is still
+        detected separately from pose proximity in the per-robot facade.
+        """
         with self._lock:
             self._completed[robot_name] = max(self._completed.get(robot_name, 0), int(cmd_id))
 
