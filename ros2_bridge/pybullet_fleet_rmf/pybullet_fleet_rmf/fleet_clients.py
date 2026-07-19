@@ -42,6 +42,76 @@ class PerRobotRosClientFactory:
         return PerRobotRosClient(robot_name=robot_name, node=self._node, map_name=self._map_name)
 
 
+class _FleetRobotClientBase:
+    """Shared RMF-facing per-robot facade logic for fleet clients.
+
+    Subclasses share RMF command bookkeeping and delegate transport-specific
+    calls to their fleet backend. Charging remains transport-specific.
+    """
+
+    def __init__(self, robot_name: str, fleet: Any) -> None:
+        self._name = robot_name
+        self._fleet = fleet
+        self._map_name = fleet._default_map_name
+        self._active_cmd_id = 0
+        self._active_target: Optional[list] = None
+
+    def get_data(self) -> RobotUpdateData | None:
+        data = self._fleet.get_state(self._name)
+        if data is None:
+            return None
+        reached_target = (
+            self._active_target is not None
+            and _distance_xy(data.position, self._active_target) <= self._fleet._completion_radius
+        )
+        if reached_target:
+            self._fleet.mark_completed(self._name, self._active_cmd_id)
+            data.last_completed_cmd_id = max(data.last_completed_cmd_id, self._active_cmd_id)
+            self._active_target = None
+        return data
+
+    def set_map_name(self, map_name: str) -> None:
+        self._map_name = map_name
+        self._fleet.set_robot_map_name(self._name, map_name)
+
+    def navigate(self, cmd_id: int, position: list, map_name: str, speed_limit: float = 0.0) -> bool:
+        del speed_limit
+        self._active_cmd_id = cmd_id
+        self._active_target = list(position)
+        return self._fleet._command_navigate(self._name, cmd_id, position, map_name)
+
+    def stop(self) -> bool:
+        self._active_cmd_id += 1
+        self._active_target = None
+        return self._fleet._command_stop(self._name, self._active_cmd_id)
+
+    def toggle_attach(self, attach: bool, cmd_id: int) -> bool:
+        self._active_cmd_id = cmd_id
+        return self._fleet._command_attach(self._name, cmd_id, attach=attach, search_radius=1.0)
+
+    def attach_object(
+        self,
+        attach: bool,
+        cmd_id: int,
+        object_name: str = "",
+        parent_link: str = "",
+        offset_position: tuple = (0.0, 0.0, 0.0),
+        offset_orientation: tuple = (0.0, 0.0, 0.0, 1.0),
+        search_radius: float = 0.0,
+    ) -> bool:
+        self._active_cmd_id = cmd_id
+        return self._fleet._command_attach(
+            self._name,
+            cmd_id,
+            attach=attach,
+            object_name=object_name,
+            parent_link=parent_link,
+            offset_position=offset_position,
+            offset_orientation=offset_orientation,
+            search_radius=search_radius,
+        )
+
+
 class RosFleetClient:
     """Shared ROS fleet-endpoint client for RMF.
 
@@ -147,6 +217,10 @@ class RosFleetClient:
         future.add_done_callback(lambda done: self._on_navigate_ack(done, robot_name, cmd_id))
         return True
 
+    def _command_navigate(self, robot_name: str, cmd_id: int, position: list, map_name: str) -> bool:
+        """Transport hook used by the shared per-robot facade."""
+        return self.call_navigate(robot_name, cmd_id, position, map_name)
+
     def _on_navigate_ack(self, future, robot_name: str, cmd_id: int) -> None:
         try:
             response = future.result()
@@ -175,6 +249,10 @@ class RosFleetClient:
         future = self._stop_client.call_async(req)
         future.add_done_callback(lambda done: self._on_stop_ack(done, robot_name, cmd_id))
         return True
+
+    def _command_stop(self, robot_name: str, cmd_id: int) -> bool:
+        """Transport hook used by the shared per-robot facade."""
+        return self.call_stop(robot_name, cmd_id)
 
     def _on_stop_ack(self, future, robot_name: str, cmd_id: int) -> None:
         try:
@@ -237,6 +315,30 @@ class RosFleetClient:
         future.add_done_callback(lambda done: self._on_attach_ack(done, robot_name, cmd_id))
         return True
 
+    def _command_attach(
+        self,
+        robot_name: str,
+        cmd_id: int,
+        *,
+        attach: bool,
+        object_name: str = "",
+        parent_link: str = "",
+        offset_position: tuple = (0.0, 0.0, 0.0),
+        offset_orientation: tuple = (0.0, 0.0, 0.0, 1.0),
+        search_radius: float = 0.0,
+    ) -> bool:
+        """Transport hook used by the shared per-robot facade."""
+        return self.call_attach(
+            robot_name,
+            cmd_id,
+            attach=attach,
+            object_name=object_name,
+            parent_link=parent_link,
+            offset_position=offset_position,
+            offset_orientation=offset_orientation,
+            search_radius=search_radius,
+        )
+
     def _on_attach_ack(self, future, robot_name: str, cmd_id: int) -> None:
         try:
             response = future.result()
@@ -253,46 +355,13 @@ class RosFleetClient:
         self.mark_completed(robot_name, cmd_id)
 
 
-class RosFleetRobotClient:
+class RosFleetRobotClient(_FleetRobotClientBase):
     """Per-robot facade over :class:`RosFleetClient`."""
 
     def __init__(self, robot_name: str, fleet: RosFleetClient) -> None:
-        self._name = robot_name
-        self._fleet = fleet
+        super().__init__(robot_name, fleet)
         self._node = fleet._node
-        self._map_name = fleet._default_map_name
-        self._active_cmd_id = 0
-        self._active_target: Optional[list] = None
         self._charging_client = self._node.create_client(SetBool, f"/{robot_name}/set_charging")
-
-    def get_data(self) -> RobotUpdateData | None:
-        data = self._fleet.get_state(self._name)
-        if data is None:
-            return None
-        reached_target = (
-            self._active_target is not None
-            and _distance_xy(data.position, self._active_target) <= self._fleet._completion_radius
-        )
-        if reached_target:
-            self._fleet.mark_completed(self._name, self._active_cmd_id)
-            data.last_completed_cmd_id = max(data.last_completed_cmd_id, self._active_cmd_id)
-            self._active_target = None
-        return data
-
-    def set_map_name(self, map_name: str) -> None:
-        self._map_name = map_name
-        self._fleet.set_robot_map_name(self._name, map_name)
-
-    def navigate(self, cmd_id: int, position: list, map_name: str, speed_limit: float = 0.0) -> bool:
-        del speed_limit
-        self._active_cmd_id = cmd_id
-        self._active_target = list(position)
-        return self._fleet.call_navigate(self._name, cmd_id, position, map_name)
-
-    def stop(self) -> bool:
-        self._active_cmd_id += 1
-        self._active_target = None
-        return self._fleet.call_stop(self._name, self._active_cmd_id)
 
     def start_charge(self, cmd_id: int) -> bool:
         self._active_cmd_id = cmd_id
@@ -310,37 +379,6 @@ class RosFleetRobotClient:
         future = self._charging_client.call_async(_set_bool_request(False))
         future.add_done_callback(lambda done: self._log_set_bool_result(done, "stop_charge"))
         return True
-
-    def toggle_attach(self, attach: bool, cmd_id: int) -> bool:
-        self._active_cmd_id = cmd_id
-        return self._fleet.call_attach(
-            self._name,
-            cmd_id,
-            attach=attach,
-            search_radius=1.0,
-        )
-
-    def attach_object(
-        self,
-        attach: bool,
-        cmd_id: int,
-        object_name: str = "",
-        parent_link: str = "",
-        offset_position: tuple = (0.0, 0.0, 0.0),
-        offset_orientation: tuple = (0.0, 0.0, 0.0, 1.0),
-        search_radius: float = 0.0,
-    ) -> bool:
-        self._active_cmd_id = cmd_id
-        return self._fleet.call_attach(
-            self._name,
-            cmd_id,
-            attach=attach,
-            object_name=object_name,
-            parent_link=parent_link,
-            offset_position=offset_position,
-            offset_orientation=offset_orientation,
-            search_radius=search_radius,
-        )
 
     def _on_set_bool_done(self, future, cmd_id: int, label: str) -> None:
         self._log_set_bool_result(future, label)
@@ -433,7 +471,7 @@ class PythonFleetClient:
         with self._lock:
             self._completed[robot_name] = max(self._completed.get(robot_name, 0), int(cmd_id))
 
-    def navigate(self, robot_name: str, cmd_id: int, position: list, map_name: str) -> bool:
+    def _command_navigate(self, robot_name: str, cmd_id: int, position: list, map_name: str) -> bool:
         """Dispatch one direct fleet navigation command."""
         del map_name
         ack = self._dispatcher.navigate(
@@ -450,7 +488,7 @@ class PythonFleetClient:
         )
         return _ack_accepts(ack, robot_name, "navigate")
 
-    def stop(self, robot_name: str, cmd_id: int) -> bool:
+    def _command_stop(self, robot_name: str, cmd_id: int) -> bool:
         """Dispatch one direct fleet stop command."""
         ack = self._dispatcher.stop([robot_name], source="rmf-python", command_id=str(cmd_id))
         if not _ack_accepts(ack, robot_name, "stop"):
@@ -458,7 +496,7 @@ class PythonFleetClient:
         self.mark_completed(robot_name, cmd_id)
         return True
 
-    def attach(
+    def _command_attach(
         self,
         robot_name: str,
         cmd_id: int,
@@ -502,6 +540,38 @@ class PythonFleetClient:
         self.mark_completed(robot_name, cmd_id)
         return True
 
+    def navigate(self, robot_name: str, cmd_id: int, position: list, map_name: str) -> bool:
+        """Backward-compatible direct navigation helper."""
+        return self._command_navigate(robot_name, cmd_id, position, map_name)
+
+    def stop(self, robot_name: str, cmd_id: int) -> bool:
+        """Backward-compatible direct stop helper."""
+        return self._command_stop(robot_name, cmd_id)
+
+    def attach(
+        self,
+        robot_name: str,
+        cmd_id: int,
+        *,
+        attach: bool,
+        object_name: str = "",
+        parent_link: str = "",
+        offset_position: tuple = (0.0, 0.0, 0.0),
+        offset_orientation: tuple = (0.0, 0.0, 0.0, 1.0),
+        search_radius: float = 0.0,
+    ) -> bool:
+        """Backward-compatible direct attach/detach helper."""
+        return self._command_attach(
+            robot_name,
+            cmd_id,
+            attach=attach,
+            object_name=object_name,
+            parent_link=parent_link,
+            offset_position=offset_position,
+            offset_orientation=offset_orientation,
+            search_radius=search_radius,
+        )
+
     def set_charging(self, robot_name: str, cmd_id: int, charging: bool) -> bool:
         """Set charging directly on an agent when the core agent supports it."""
         agent = _direct_agent_by_name(self._dispatcher.sim_core, robot_name)
@@ -514,44 +584,11 @@ class PythonFleetClient:
         return True
 
 
-class PythonFleetRobotClient:
+class PythonFleetRobotClient(_FleetRobotClientBase):
     """Per-robot RMF facade over :class:`PythonFleetClient`."""
 
     def __init__(self, robot_name: str, fleet: PythonFleetClient) -> None:
-        self._name = robot_name
-        self._fleet = fleet
-        self._map_name = fleet._default_map_name
-        self._active_cmd_id = 0
-        self._active_target: Optional[list] = None
-
-    def get_data(self) -> RobotUpdateData | None:
-        data = self._fleet.get_state(self._name)
-        if data is None:
-            return None
-        reached_target = (
-            self._active_target is not None
-            and _distance_xy(data.position, self._active_target) <= self._fleet._completion_radius
-        )
-        if reached_target:
-            self._fleet.mark_completed(self._name, self._active_cmd_id)
-            data.last_completed_cmd_id = max(data.last_completed_cmd_id, self._active_cmd_id)
-            self._active_target = None
-        return data
-
-    def set_map_name(self, map_name: str) -> None:
-        self._map_name = map_name
-        self._fleet.set_robot_map_name(self._name, map_name)
-
-    def navigate(self, cmd_id: int, position: list, map_name: str, speed_limit: float = 0.0) -> bool:
-        del speed_limit
-        self._active_cmd_id = cmd_id
-        self._active_target = list(position)
-        return self._fleet.navigate(self._name, cmd_id, position, map_name)
-
-    def stop(self) -> bool:
-        self._active_cmd_id += 1
-        self._active_target = None
-        return self._fleet.stop(self._name, self._active_cmd_id)
+        super().__init__(robot_name, fleet)
 
     def start_charge(self, cmd_id: int) -> bool:
         self._active_cmd_id = cmd_id
@@ -559,32 +596,6 @@ class PythonFleetRobotClient:
 
     def stop_charge(self) -> bool:
         return self._fleet.set_charging(self._name, self._active_cmd_id, False)
-
-    def toggle_attach(self, attach: bool, cmd_id: int) -> bool:
-        self._active_cmd_id = cmd_id
-        return self._fleet.attach(self._name, cmd_id, attach=attach, search_radius=1.0)
-
-    def attach_object(
-        self,
-        attach: bool,
-        cmd_id: int,
-        object_name: str = "",
-        parent_link: str = "",
-        offset_position: tuple = (0.0, 0.0, 0.0),
-        offset_orientation: tuple = (0.0, 0.0, 0.0, 1.0),
-        search_radius: float = 0.0,
-    ) -> bool:
-        self._active_cmd_id = cmd_id
-        return self._fleet.attach(
-            self._name,
-            cmd_id,
-            attach=attach,
-            object_name=object_name,
-            parent_link=parent_link,
-            offset_position=offset_position,
-            offset_orientation=offset_orientation,
-            search_radius=search_radius,
-        )
 
 
 def create_rmf_client_factory(
