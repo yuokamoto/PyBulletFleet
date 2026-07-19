@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import math
 import sys
 
 import rclpy
@@ -131,6 +132,37 @@ def _has_entity(node: BridgeIntegrationCheck, name: str) -> bool:
     return name in set(response.entities)
 
 
+def _entity_xy(node: BridgeIntegrationCheck, name: str) -> tuple[float, float]:
+    request = GetEntityState.Request()
+    request.entity = name
+    response = node.call_service(node.get_entity_state, request, CALL_TIMEOUT)
+    if not _result_ok(response):
+        raise RuntimeError(f"/sim/get_entity_state failed for {name}: {_result_message(response)}")
+    pos = response.state.pose.position
+    return float(pos.x), float(pos.y)
+
+
+def _distance_xy(a: tuple[float, float], b: tuple[float, float]) -> float:
+    return math.hypot(a[0] - b[0], a[1] - b[1])
+
+
+def _wait_until_moved(
+    node: BridgeIntegrationCheck,
+    name: str,
+    start: tuple[float, float],
+    min_distance: float,
+    timeout: float,
+) -> tuple[bool, tuple[float, float]]:
+    last = start
+
+    def moved() -> bool:
+        nonlocal last
+        last = _entity_xy(node, name)
+        return _distance_xy(last, start) >= min_distance
+
+    return node.spin_until(moved, timeout), last
+
+
 def _check_sim_crud(node: BridgeIntegrationCheck) -> bool:
     name = "smoke_spawned"
 
@@ -228,7 +260,9 @@ def main() -> int:
         twist.linear.x = 1.0
         node.cmd_vel.publish(twist)
         node.spin_for(0.5)
-        print("  OK /robot0/cmd_vel publish path is available")
+        node.cmd_vel.publish(Twist())
+        node.spin_for(0.2)
+        print("  OK /robot0/cmd_vel publish path is available and reset")
 
         print("--- Testing simulation services ---")
         entities = node.call_service(node.get_entities, GetEntities.Request(), CALL_TIMEOUT)
@@ -244,24 +278,40 @@ def main() -> int:
             return 1
 
         print("--- Testing fleet services ---")
+        nav_robot = "robot1"
+        nav_start = _entity_xy(node, nav_robot)
         nav_req = FleetNavigate.Request()
         _stamp_command(node, nav_req)
         nav_req.command_id = "smoke-nav"
         nav_req.source = "smoke"
-        nav_req.goals_2d = [RobotGoal2D(name="robot0", position=[1.0, 0.0], yaw=0.0, z=0.05)]
+        nav_req.goals_2d = [RobotGoal2D(name=nav_robot, position=[5.0, 0.0], yaw=0.0, z=0.05)]
         nav_resp = node.call_service(node.fleet_nav, nav_req, CALL_TIMEOUT)
-        if "robot0" not in nav_resp.ack.accepted_names:
+        if nav_robot not in nav_resp.ack.accepted_names:
             print(f"  FAIL /fleet/navigate ack: {nav_resp.ack}")
+            return 1
+        moved, moving_pos = _wait_until_moved(node, nav_robot, nav_start, 0.15, CALL_TIMEOUT)
+        if not moved:
+            print(f"  FAIL /fleet/navigate did not start motion: start={nav_start}, last={moving_pos}")
             return 1
 
         stop_req = FleetStop.Request()
         _stamp_command(node, stop_req)
         stop_req.command_id = "smoke-stop"
         stop_req.source = "smoke"
-        stop_req.names = ["robot0"]
+        stop_req.names = [nav_robot]
         stop_resp = node.call_service(node.fleet_stop, stop_req, CALL_TIMEOUT)
-        if "robot0" not in stop_resp.ack.accepted_names:
+        if nav_robot not in stop_resp.ack.accepted_names:
             print(f"  FAIL /fleet/stop ack: {stop_resp.ack}")
+            return 1
+        stopped_pos = _entity_xy(node, nav_robot)
+        node.spin_for(0.8)
+        post_stop_pos = _entity_xy(node, nav_robot)
+        drift = _distance_xy(post_stop_pos, stopped_pos)
+        if drift > 0.05:
+            print(
+                f"  FAIL /fleet/stop did not halt {nav_robot}: "
+                f"stopped={stopped_pos}, after={post_stop_pos}, drift={drift:.3f}"
+            )
             return 1
 
         attach_req = FleetAttach.Request()
@@ -304,6 +354,7 @@ def main() -> int:
             "/fleet/execute_action, "
             "and /fleet/joint_command responded"
         )
+        print(f"  OK /fleet/stop halted {nav_robot} after motion started")
         return 0
     finally:
         node.destroy_node()
