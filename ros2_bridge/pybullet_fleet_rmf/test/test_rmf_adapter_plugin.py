@@ -26,6 +26,37 @@ def test_planner_cache_reset_size_rejects_invalid_values():
     assert _planner_cache_reset_size({"planner_cache_reset_size": 0}) == 1
 
 
+def test_create_rmf_subscriptions_includes_lift_state_map_updates():
+    from rmf_lift_msgs.msg import LiftState
+
+    from pybullet_fleet_rmf.fleet_adapter import create_rmf_subscriptions
+
+    node = MagicMock()
+    node.create_publisher.return_value = MagicMock()
+    node.create_subscription.side_effect = lambda *args, **kwargs: MagicMock()
+
+    api = MagicMock()
+    robot = MagicMock()
+    robot.api = api
+    robots = {"tinyRobot1": robot}
+    fleet_handle = MagicMock()
+    fleet_handle.more.return_value.fleet_name = "tinyRobot"
+
+    subscriptions = create_rmf_subscriptions(node, robots, fleet_handle)
+
+    assert len(subscriptions) == 4
+    lift_call = node.create_subscription.call_args_list[-1]
+    assert lift_call.args[0] is LiftState
+    assert lift_call.args[1] == "lift_states"
+
+    msg = LiftState()
+    msg.session_id = "tinyRobot/tinyRobot1"
+    msg.current_floor = "L2"
+    lift_call.args[2](msg)
+
+    api.set_map_name.assert_called_once_with("L2")
+
+
 def test_rmf_adapter_bridge_plugin_starts_runtime_with_sim_core(monkeypatch):
     from pybullet_fleet_rmf.rmf_adapter_plugin import RmfAdapterBridgePlugin
 

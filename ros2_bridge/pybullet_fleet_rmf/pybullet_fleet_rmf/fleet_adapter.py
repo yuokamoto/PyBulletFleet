@@ -225,28 +225,6 @@ def start_adapter_runtime(
 
     node.get_logger().info(f"EasyFullControl fleet adapter started: {len(robots)} robots")
 
-    # Subscribe to /lift_states for multi-floor map tracking.
-    # When a lift session ends (session_id cleared), the robot's map name
-    # is updated to the elevator's current floor.
-    def _on_lift_state(msg):
-        """Track elevator floor and update robot map names."""
-        session_id = msg.session_id
-        if not session_id:
-            return
-        # session_id format: "fleetName/robotName" (from RMF lift protocol)
-        parts = session_id.split("/")
-        robot_name = parts[-1] if parts else session_id
-        robot = robots.get(robot_name)
-        if robot is None:
-            return
-        # Update the robot's map to the elevator's current floor
-        if msg.current_floor:
-            robot.api.set_map_name(msg.current_floor)
-
-    from rmf_lift_msgs.msg import LiftState as LiftStateMsg
-
-    lift_state_sub = node.create_subscription(LiftStateMsg, "lift_states", _on_lift_state, 10)
-
     # Background update loop
     reassign_task_interval = config_yaml.get("rmf_fleet", {}).get(
         "reassign_task_interval", 60
@@ -275,9 +253,8 @@ def start_adapter_runtime(
     update_thread = threading.Thread(target=update_loop, daemon=True)
     update_thread.start()
 
-    # Connect to ROS 2 topics for lane closure, speed limits, and mode changes
-    connections = [lift_state_sub]
-    connections.extend(ros_connections(node, robots, fleet_handle))
+    # Connect to ROS 2 topics for RMF auxiliary state/control notices.
+    connections = create_rmf_subscriptions(node, robots, fleet_handle)
 
     return RmfAdapterRuntime(
         node=node,
@@ -664,14 +641,17 @@ class Teleoperation:
                 self.last_position = data.position
 
 
-def ros_connections(node, robots, fleet_handle):
-    """Subscribe to ROS 2 topics for lane closure, speed limits, and mode changes.
+def create_rmf_subscriptions(node, robots, fleet_handle):
+    """Subscribe to ROS 2 topics for RMF auxiliary state/control notices.
 
     These subscriptions allow the rmf-web dashboard and external tools to:
     - Open / close navigation lanes
     - Set per-lane speed limits
     - Signal teleop completion via ModeRequest
+    - Track robot floor transitions from lift state
     """
+    from rmf_lift_msgs.msg import LiftState as LiftStateMsg
+
     fleet_name = fleet_handle.more().fleet_name
 
     transient_qos = QoSProfile(
@@ -684,6 +664,19 @@ def ros_connections(node, robots, fleet_handle):
     closed_lanes_pub = node.create_publisher(ClosedLanes, "closed_lanes", qos_profile=transient_qos)
 
     closed_lanes: set[int] = set()
+
+    def lift_state_cb(msg):
+        session_id = msg.session_id
+        if not session_id:
+            return
+        # session_id format: "fleetName/robotName" (from RMF lift protocol)
+        parts = session_id.split("/")
+        robot_name = parts[-1] if parts else session_id
+        robot = robots.get(robot_name)
+        if robot is None:
+            return
+        if msg.current_floor:
+            robot.api.set_map_name(msg.current_floor)
 
     def lane_request_cb(msg):
         if msg.fleet_name and msg.fleet_name != fleet_name:
@@ -749,7 +742,9 @@ def ros_connections(node, robots, fleet_handle):
         qos_profile=qos_profile_system_default,
     )
 
-    return [lane_request_sub, speed_limit_request_sub, mode_request_sub]
+    lift_state_sub = node.create_subscription(LiftStateMsg, "lift_states", lift_state_cb, 10)
+
+    return [lane_request_sub, speed_limit_request_sub, mode_request_sub, lift_state_sub]
 
 
 def _parallel(f):
