@@ -1146,7 +1146,9 @@ class TestAgentMotionUpdate:
             agent.update(dt)
 
         moving_pos = np.array(agent.get_pose().position)
+        goal_pos = np.array([10.0, 0.0, 0.0])
         assert moving_pos[0] > 0.01
+        assert np.linalg.norm(goal_pos - moving_pos) > 1.0
         assert np.linalg.norm(agent.velocity) > 0.0
 
         agent.stop()

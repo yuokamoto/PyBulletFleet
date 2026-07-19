@@ -284,7 +284,8 @@ def main() -> int:
         _stamp_command(node, nav_req)
         nav_req.command_id = "smoke-nav"
         nav_req.source = "smoke"
-        nav_req.goals_2d = [RobotGoal2D(name=nav_robot, position=[5.0, 0.0], yaw=0.0, z=0.05)]
+        nav_goal = (5.0, 0.0)
+        nav_req.goals_2d = [RobotGoal2D(name=nav_robot, position=list(nav_goal), yaw=0.0, z=0.05)]
         nav_resp = node.call_service(node.fleet_nav, nav_req, CALL_TIMEOUT)
         if nav_robot not in nav_resp.ack.accepted_names:
             print(f"  FAIL /fleet/navigate ack: {nav_resp.ack}")
@@ -292,6 +293,10 @@ def main() -> int:
         moved, moving_pos = _wait_until_moved(node, nav_robot, nav_start, 0.15, CALL_TIMEOUT)
         if not moved:
             print(f"  FAIL /fleet/navigate did not start motion: start={nav_start}, last={moving_pos}")
+            return 1
+        remaining = _distance_xy(moving_pos, nav_goal)
+        if remaining < 1.0:
+            print(f"  FAIL /fleet/navigate reached goal before stop test: pos={moving_pos}, goal={nav_goal}")
             return 1
 
         stop_req = FleetStop.Request()
