@@ -187,7 +187,9 @@ bridge_plugins:
 The standalone `fleet_adapter` executable can select `per_robot_ros` or
 `fleet_ros`. It accepts `python_fleet` for factory validation, but that mode
 requires an in-process `sim_core` and is therefore intended for the bridge
-plugin path rather than a separate ROS process.
+plugin path rather than a separate ROS process. The shared RMF launch helper
+routes `client_mode:=python_fleet` to this bridge plugin and skips the
+standalone `fleet_adapter` node.
 
 The RMF planner cache reset size defaults to `2500` and can be tuned from the
 RMF fleet config:
@@ -201,6 +203,7 @@ The office demo exposes this experimental path directly:
 
 ```bash
 ros2 launch pybullet_fleet_rmf office_pybullet.launch.py client_mode:=fleet_ros
+ros2 launch pybullet_fleet_rmf office_pybullet.launch.py client_mode:=python_fleet
 ```
 
 Supported RMF task actions:

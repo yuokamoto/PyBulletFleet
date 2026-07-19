@@ -15,6 +15,7 @@ Usage::
     ros2 launch pybullet_fleet_rmf office_pybullet.launch.py
     ros2 launch pybullet_fleet_rmf office_pybullet.launch.py gui:=true
     ros2 launch pybullet_fleet_rmf office_pybullet.launch.py client_mode:=fleet_ros
+    ros2 launch pybullet_fleet_rmf office_pybullet.launch.py client_mode:=python_fleet
 
     # With web dashboard (start api-server + dashboard via docker compose):
     ros2 launch pybullet_fleet_rmf office_pybullet.launch.py \\
@@ -61,7 +62,7 @@ def generate_launch_description():
             DeclareLaunchArgument(
                 "client_mode",
                 default_value="per_robot_ros",
-                description="RMF client transport: per_robot_ros or fleet_ros",
+                description="RMF client transport: per_robot_ros, fleet_ros, or python_fleet",
             ),
             DeclareLaunchArgument(
                 "headless",

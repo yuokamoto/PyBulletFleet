@@ -239,9 +239,7 @@ Current implementation notes:
   `/fleet/execute_action`; charging still uses per-robot compatibility
   services until a fleet-level charge API exists.
 - `python_fleet` is available as the direct in-process RMF client transport.
-  It uses `FleetStateProvider` and `FleetCommandDispatcher` directly; the
-  plugin-only launch/runtime path that constructs and passes the shared
-  simulation core is still pending.
+  It uses `FleetStateProvider` and `FleetCommandDispatcher` directly.
 
 Exit criteria:
 
@@ -293,6 +291,8 @@ Current implementation notes:
 - `pybullet_fleet_rmf.rmf_adapter_plugin.RmfAdapterBridgePlugin` starts the RMF
   adapter inside `bridge_node` and passes the shared `sim_core` to
   `PythonRmfFleetClient`.
+- `pybullet_common.launch.py` routes `client_mode:=python_fleet` to the
+  in-process plugin and skips the standalone `fleet_adapter` process.
 - The standalone executable still cannot use `python_fleet` by itself because a
   separate ROS process has no direct simulation core reference.
 
