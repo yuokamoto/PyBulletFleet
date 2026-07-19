@@ -434,11 +434,10 @@ Do not make RMF performance benchmarks blocking in CI until they are stable and
 have clear thresholds. Initially they should publish artifacts or local JSON
 files only. Correctness gates remain the existing smoke/E2E tests.
 
-## Phase 6 — Extension, Optimization, and Replay
+## Phase 6 — Extension, Benchmark Refresh, and Replay
 
 Purpose: keep Phase 5 focused on RMF migration while moving extension hooks,
-optimization work, benchmark refreshes, and replayability into a follow-up
-phase.
+benchmark refreshes, and replayability into a follow-up phase.
 
 ### Phase 6a — Generic Fleet Command Extension
 
@@ -618,6 +617,76 @@ Exit criteria:
 - A recorded command trace can be replayed without a ROS graph.
 - Snapshot and command event schemas are stable enough for CI regression tests.
 
+## Phase 7 — Internal Batch Optimization
+
+Purpose: optimize the implementation behind fleet-level commands after the
+typed ingress and RMF migration paths are stable. These optimizations should not
+change the public fleet command API.
+
+### Phase 7a — Batched Attach Target Resolution
+
+Purpose: improve nearest-object attach performance for large fleets without
+pretending attach/detach is the same kind of vectorized numeric control as
+mobile movement.
+
+Tasks:
+
+- Split attach/detach into two layers:
+  - command ingress and acknowledgement in `FleetCommandDispatcher.attach()`;
+  - target resolution in a dedicated resolver.
+- Add an `AttachmentResolver` or equivalent component that can resolve many
+  attach requests together.
+- Reuse spatial information where possible:
+  - broadphase/collision or contact results;
+  - AABB data;
+  - pickable object pose arrays;
+  - grid/hash/k-d tree style candidate filtering.
+- Batch validate object ownership/reservation so two robots do not attach the
+  same object in one command batch.
+- Keep detach simple unless profiling shows it matters; detach normally only
+  needs the robot's attached-object list.
+
+Exit criteria:
+
+- Multiple nearest-pickable attach requests can be resolved with less repeated
+  robot-by-object scanning.
+- Ownership conflicts are deterministic and visible in `CommandAck.rejected`.
+- Existing per-robot and fleet attach semantics remain compatible.
+
+### Phase 7b — Batched Movement Intents for Actions
+
+Purpose: let action workflows benefit from batch controllers by routing their
+movement phases through the same batched movement layer used by direct
+navigation.
+
+Tasks:
+
+- Separate action planning/state-machine logic from movement execution:
+  - action decides the next movement intent;
+  - controller layer owns movement toward the active intent;
+  - action observes arrival/progress and advances to the next phase.
+- Route movement-bearing actions through batch-capable goal tables:
+  - `MoveAction`;
+  - `PickAction` approach movement;
+  - `DropAction` approach/drop movement;
+  - cleaning/coverage waypoints;
+  - patrol/route-following style custom actions.
+- Preserve non-movement action phases as normal per-agent state-machine work:
+  - attach/detach;
+  - wait;
+  - plugin-specific side effects;
+  - action completion/failure handling.
+- Define metrics that separate action orchestration cost from movement update
+  cost.
+
+Exit criteria:
+
+- Action workflows with movement phases can use batch controllers without
+  changing the public action command API.
+- Non-movement action semantics remain deterministic and debuggable.
+- Benchmarks show whether movement-heavy action workloads benefit from the
+  batched movement path.
+
 ## Recommended PR Order
 
 1. Config parsing helpers and tests.
@@ -635,6 +704,8 @@ Exit criteria:
 13. ROS bridge performance benchmark refresh.
 14. Scale example config cleanup.
 15. Trace/replay hooks.
+16. Batched attach target resolution.
+17. Batched movement intents for actions.
 
 ## Implementation Notes
 
