@@ -39,6 +39,7 @@ from rclpy.duration import Duration
 from rclpy.parameter import Parameter
 
 logger = logging.getLogger(__name__)
+_RMF_RCLCPP_INITIALIZED = False
 
 try:
     import rmf_adapter
@@ -64,62 +65,65 @@ if HAS_RMF:
     from pybullet_fleet_rmf.fleet_clients import create_rmf_client_factory
 
 
-def main(argv=sys.argv):
-    """Entry point for fleet_adapter executable."""
-    faulthandler.enable()  # Print traceback on segfault (rmf_adapter / PyBullet C extensions)
-    rclpy.init(args=argv)
+class RmfAdapterRuntime:
+    """Running EasyFullControl adapter state.
 
+    The runtime keeps references to background threads and ROS subscriptions so
+    the same adapter setup can be used by the standalone executable and by an
+    in-process bridge plugin.
+    """
+
+    def __init__(self, *, node, adapter, robots, update_thread, connections) -> None:
+        self.node = node
+        self.adapter = adapter
+        self.robots = robots
+        self.update_thread = update_thread
+        self.connections = connections
+
+
+def _ensure_rmf_adapter_initialized() -> None:
+    global _RMF_RCLCPP_INITIALIZED
+    if not _RMF_RCLCPP_INITIALIZED:
+        rmf_adapter.init_rclcpp()
+        _RMF_RCLCPP_INITIALIZED = True
+
+
+def _enable_sim_time(node) -> None:
+    """Enable ROS sim time on a node, declaring the parameter if needed."""
+    try:
+        if hasattr(node, "has_parameter") and not node.has_parameter("use_sim_time"):
+            node.declare_parameter("use_sim_time", True)
+        node.set_parameters([Parameter("use_sim_time", Parameter.Type.BOOL, True)])
+    except Exception as exc:  # noqa: B902
+        node.get_logger().warning(f"Failed to set use_sim_time on RMF adapter node: {exc}")
+
+
+def start_adapter_runtime(
+    *,
+    node,
+    config_path: str,
+    nav_graph_path: str = "",
+    use_sim_time: bool = False,
+    client_mode: str | None = None,
+    sim_core=None,
+    server_uri: str | None = None,
+) -> RmfAdapterRuntime | None:
+    """Start the EasyFullControl adapter on an existing ROS node.
+
+    ``sim_core`` is only required for ``python_fleet`` mode. ROS-backed modes
+    keep using bridge topics/services/actions and can run in a separate process.
+    """
     if not HAS_RMF:
-        node = rclpy.node.Node("pybullet_fleet_adapter")
-        node.get_logger().error("rmf_adapter not available. " "Build rmf_fleet_adapter_python from source (see docs/README).")
-        node.destroy_node()
-        rclpy.shutdown()
-        return
+        node.get_logger().error("rmf_adapter not available. Build rmf_fleet_adapter_python from source (see docs/README).")
+        return None
 
-    rmf_adapter.init_rclcpp()
-    args_without_ros = rclpy.utilities.remove_ros_args(argv)
-
-    parser = argparse.ArgumentParser(
-        prog="fleet_adapter",
-        description="PyBulletFleet Open-RMF EasyFullControl adapter",
-    )
-    parser.add_argument(
-        "-c",
-        "--config_file",
-        type=str,
-        required=True,
-        help="Path to the fleet config YAML file",
-    )
-    parser.add_argument(
-        "-n",
-        "--nav_graph",
-        type=str,
-        default="",
-        help="Path to the nav_graph for this fleet (optional for PyBulletFleet)",
-    )
-    parser.add_argument(
-        "-sim",
-        "--use_sim_time",
-        action="store_true",
-        help="Use sim time (default: false)",
-    )
-    parser.add_argument(
-        "--client-mode",
-        choices=["per_robot_ros", "fleet_ros"],
-        default=None,
-        help="RMF client transport (default: pybullet_fleet.rmf_client_mode or per_robot_ros)",
-    )
-    args = parser.parse_args(args_without_ros[1:])
-
-    config_path = args.config_file
-    nav_graph_path = args.nav_graph
+    _ensure_rmf_adapter_initialized()
 
     # Parse config for EasyFullControl
     fleet_config = rmf_easy.FleetConfiguration.from_config_files(config_path, nav_graph_path)
     if fleet_config is None:
-        print(f"[ERROR] Failed to parse config file [{config_path}]")
-        rclpy.shutdown()
-        return
+        node.get_logger().error(f"Failed to parse config file [{config_path}]")
+        return None
 
     # Parse the YAML in Python to get PyBulletFleet-specific settings
     with open(config_path, "r") as f:
@@ -132,20 +136,14 @@ def main(argv=sys.argv):
     # Gazebo's fleet_manager uses. Maps {activity: {label: {map_name, path}}}.
     action_paths = config_yaml.get("fleet_manager", {}).get("action_paths", {})
 
-    # ROS 2 node for the command handle
-    node = rclpy.node.Node(f"{fleet_name}_command_handle")
-
     adapter = Adapter.make(f"{fleet_name}_fleet_adapter")
     if adapter is None:
-        node.get_logger().error("Unable to initialize fleet adapter. " "Please ensure RMF Schedule Node is running.")
-        node.destroy_node()
-        rclpy.shutdown()
-        return
+        node.get_logger().error("Unable to initialize fleet adapter. Please ensure RMF Schedule Node is running.")
+        return None
 
     # Enable sim time
-    if args.use_sim_time:
-        param = Parameter("use_sim_time", Parameter.Type.BOOL, True)
-        node.set_parameters([param])
+    if use_sim_time:
+        _enable_sim_time(node)
         adapter.node.use_sim_time()
 
     adapter.start()
@@ -153,8 +151,9 @@ def main(argv=sys.argv):
 
     # Forward server_uri to EasyFullControl so the fleet adapter pushes
     # fleet-state / fleet-log updates to the rmf-web API server via WebSocket.
-    node.declare_parameter("server_uri", "")
-    server_uri = node.get_parameter("server_uri").get_parameter_value().string_value
+    if server_uri is None:
+        node.declare_parameter("server_uri", "")
+        server_uri = node.get_parameter("server_uri").get_parameter_value().string_value
     if server_uri:
         fleet_config.server_uri = server_uri
         node.get_logger().info(f"Fleet adapter server_uri: {server_uri}")
@@ -187,15 +186,13 @@ def main(argv=sys.argv):
     # Build RMF client wrappers for each robot
     pybullet_config = config_yaml.get("pybullet_fleet", {})
     update_period = 1.0 / pybullet_config.get("robot_state_update_frequency", 10.0)
-    client_mode = args.client_mode or pybullet_config.get("rmf_client_mode", "per_robot_ros")
+    resolved_client_mode = client_mode or pybullet_config.get("rmf_client_mode", "per_robot_ros")
     try:
-        client_factory = create_rmf_client_factory(client_mode, node)
+        client_factory = create_rmf_client_factory(resolved_client_mode, node, sim_core=sim_core)
     except ValueError as exc:
         node.get_logger().error(str(exc))
-        node.destroy_node()
-        rclpy.shutdown()
-        return
-    node.get_logger().info(f"RMF client mode: {client_mode}")
+        return None
+    node.get_logger().info(f"RMF client mode: {resolved_client_mode}")
 
     # The nav graph is used to detect charger waypoints via the
     # is_charger attribute (set in the building.yaml / nav_graph).
@@ -237,7 +234,7 @@ def main(argv=sys.argv):
 
     from rmf_lift_msgs.msg import LiftState as LiftStateMsg
 
-    _lift_state_sub = node.create_subscription(LiftStateMsg, "lift_states", _on_lift_state, 10)
+    lift_state_sub = node.create_subscription(LiftStateMsg, "lift_states", _on_lift_state, 10)
 
     # Background update loop
     reassign_task_interval = config_yaml.get("rmf_fleet", {}).get(
@@ -268,7 +265,81 @@ def main(argv=sys.argv):
     update_thread.start()
 
     # Connect to ROS 2 topics for lane closure, speed limits, and mode changes
-    _connections = ros_connections(node, robots, fleet_handle)
+    connections = [lift_state_sub]
+    connections.extend(ros_connections(node, robots, fleet_handle))
+
+    return RmfAdapterRuntime(
+        node=node,
+        adapter=adapter,
+        robots=robots,
+        update_thread=update_thread,
+        connections=connections,
+    )
+
+
+def main(argv=sys.argv):
+    """Entry point for fleet_adapter executable."""
+    faulthandler.enable()  # Print traceback on segfault (rmf_adapter / PyBullet C extensions)
+    rclpy.init(args=argv)
+
+    if not HAS_RMF:
+        node = rclpy.node.Node("pybullet_fleet_adapter")
+        node.get_logger().error("rmf_adapter not available. " "Build rmf_fleet_adapter_python from source (see docs/README).")
+        node.destroy_node()
+        rclpy.shutdown()
+        return
+
+    args_without_ros = rclpy.utilities.remove_ros_args(argv)
+
+    parser = argparse.ArgumentParser(
+        prog="fleet_adapter",
+        description="PyBulletFleet Open-RMF EasyFullControl adapter",
+    )
+    parser.add_argument(
+        "-c",
+        "--config_file",
+        type=str,
+        required=True,
+        help="Path to the fleet config YAML file",
+    )
+    parser.add_argument(
+        "-n",
+        "--nav_graph",
+        type=str,
+        default="",
+        help="Path to the nav_graph for this fleet (optional for PyBulletFleet)",
+    )
+    parser.add_argument(
+        "-sim",
+        "--use_sim_time",
+        action="store_true",
+        help="Use sim time (default: false)",
+    )
+    parser.add_argument(
+        "--client-mode",
+        choices=["per_robot_ros", "fleet_ros", "python_fleet"],
+        default=None,
+        help="RMF client transport (default: pybullet_fleet.rmf_client_mode or per_robot_ros)",
+    )
+    args = parser.parse_args(args_without_ros[1:])
+
+    # ROS 2 node for the command handle
+    with open(args.config_file, "r") as f:
+        config_yaml = yaml.safe_load(f)
+    fleet_name = config_yaml.get("rmf_fleet", {}).get("name", "pybullet_fleet")
+    node = rclpy.node.Node(f"{fleet_name}_command_handle")
+
+    runtime = start_adapter_runtime(
+        node=node,
+        config_path=args.config_file,
+        nav_graph_path=args.nav_graph,
+        use_sim_time=args.use_sim_time,
+        client_mode=args.client_mode,
+    )
+    if runtime is None:
+        node.destroy_node()
+        rclpy.shutdown()
+        return
 
     # Spin
     rclpy_executor = rclpy.executors.SingleThreadedExecutor()

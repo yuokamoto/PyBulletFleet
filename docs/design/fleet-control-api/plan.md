@@ -285,12 +285,25 @@ Tasks:
 - Wire launch/config so `python_fleet` receives the shared simulation core
   instead of requiring ROS bridge endpoints.
 
+Current implementation notes:
+
+- `fleet_adapter.start_adapter_runtime()` factors the EasyFullControl setup so
+  it can run from either the standalone executable or an in-process bridge
+  plugin.
+- `pybullet_fleet_rmf.rmf_adapter_plugin.RmfAdapterBridgePlugin` starts the RMF
+  adapter inside `bridge_node` and passes the shared `sim_core` to
+  `PythonFleetClient`.
+- The standalone executable still cannot use `python_fleet` by itself because a
+  separate ROS process has no direct simulation core reference.
+
 Exit criteria:
 
 - A basic RMF patrol scenario can run without bridge topics/services in the
   control path.
 
 ### Phase 5d — Plugin + Bridge Launch Path
+
+Status: in progress.
 
 Tasks:
 

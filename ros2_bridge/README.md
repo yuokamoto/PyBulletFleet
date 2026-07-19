@@ -166,11 +166,28 @@ fleet_api:
 Delivery attach/drop can use `/fleet/attach` in `fleet_ros` mode. Charging
 still uses per-robot services until a fleet-level charge API is added.
 
-The direct in-process `python_fleet` client is implemented for Plugin Only
-deployments. It uses `FleetStateProvider` and `FleetCommandDispatcher` directly,
-without ROS bridge endpoints in the control path. Launch/config wiring that
-constructs and passes the shared simulation core is still pending, so this mode
-is not exposed by the standard RMF launch files yet.
+The direct in-process `python_fleet` client is implemented for Plugin Only and
+Plugin + Bridge deployments. It uses `FleetStateProvider` and
+`FleetCommandDispatcher` directly, without ROS bridge endpoints in the RMF
+control path. In Plugin + Bridge mode, run the RMF adapter as a bridge plugin so
+it receives the same simulation core as `bridge_node`:
+
+```yaml
+bridge_plugins:
+  - class: pybullet_fleet_rmf.workcell_handler.WorkcellHandler
+    config: { ... }
+  - class: pybullet_fleet_rmf.rmf_adapter_plugin.RmfAdapterBridgePlugin
+    config:
+      config_file: /path/to/rmf_fleet_config.yaml
+      nav_graph: /path/to/nav_graph.yaml
+      client_mode: python_fleet
+      use_sim_time: true
+```
+
+The standalone `fleet_adapter` executable can select `per_robot_ros` or
+`fleet_ros`. It accepts `python_fleet` for factory validation, but that mode
+requires an in-process `sim_core` and is therefore intended for the bridge
+plugin path rather than a separate ROS process.
 
 The office demo exposes this experimental path directly:
 
