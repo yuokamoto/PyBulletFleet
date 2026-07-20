@@ -312,6 +312,28 @@ def test_python_fleet_client_reads_provider_state_and_tracks_map(mock_node):
     assert data.battery_soc == pytest.approx(0.75)
 
 
+def test_python_fleet_client_applies_rmf_frame_offset(mock_node):
+    del mock_node
+    from pybullet_fleet_rmf.fleet_clients import PythonRmfFleetClient
+
+    agent = _FakeAgent("tinyRobot1")
+    sim = _FakeSim([agent])
+    robot = PythonRmfFleetClient.from_sim_core(
+        sim,
+        map_name="L1",
+        rmf_frame_offset=(100.0, 200.0),
+    ).robot("tinyRobot1")
+
+    data = robot.get_data()
+    assert data is not None
+    assert data.position == pytest.approx([100.0, 200.0, 0.0])
+
+    assert robot.navigate(3, [101.0, 202.0, 0.5], "L1")
+    assert agent.goal_calls[0].x == pytest.approx(1.0)
+    assert agent.goal_calls[0].y == pytest.approx(2.0)
+    assert agent.goal_calls[0].yaw == pytest.approx(0.5)
+
+
 def test_python_fleet_robot_client_dispatches_navigation_stop_and_attach(mock_node):
     del mock_node
     from pybullet_fleet_rmf.fleet_clients import PythonRmfFleetClient

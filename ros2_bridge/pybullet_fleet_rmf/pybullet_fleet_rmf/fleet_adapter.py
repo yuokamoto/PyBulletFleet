@@ -117,6 +117,7 @@ def start_adapter_runtime(
     client_mode: str | None = None,
     sim_core=None,
     server_uri: str | None = None,
+    rmf_frame_offset=None,
 ) -> RmfAdapterRuntime | None:
     """Start the EasyFullControl adapter on an existing ROS node.
 
@@ -207,7 +208,12 @@ def start_adapter_runtime(
     update_period = 1.0 / pybullet_config.get("robot_state_update_frequency", 10.0)
     resolved_client_mode = client_mode or pybullet_config.get("rmf_client_mode", "per_robot_ros")
     try:
-        client_factory = create_rmf_client_factory(resolved_client_mode, node, sim_core=sim_core)
+        client_factory = create_rmf_client_factory(
+            resolved_client_mode,
+            node,
+            sim_core=sim_core,
+            rmf_frame_offset=rmf_frame_offset,
+        )
     except ValueError as exc:
         node.get_logger().error(str(exc))
         return None

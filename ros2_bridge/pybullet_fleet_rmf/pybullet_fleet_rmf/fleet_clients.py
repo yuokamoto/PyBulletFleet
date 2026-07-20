@@ -411,11 +411,13 @@ class PythonRmfFleetClient:
         map_name: str = "L1",
         *,
         completion_radius: float = 0.25,
+        rmf_frame_offset=None,
     ) -> None:
         self._provider = provider
         self._dispatcher = dispatcher
         self._default_map_name = map_name
         self._completion_radius = float(completion_radius)
+        self._rmf_frame_offset = _xy_offset(rmf_frame_offset)
         self._lock = threading.Lock()
         self._map_names: dict[str, str] = {}
         self._completed: dict[str, int] = {}
@@ -427,6 +429,7 @@ class PythonRmfFleetClient:
         map_name: str = "L1",
         *,
         completion_radius: float = 0.25,
+        rmf_frame_offset=None,
     ) -> "PythonRmfFleetClient":
         """Build provider and dispatcher from one simulation core."""
         return cls(
@@ -434,6 +437,7 @@ class PythonRmfFleetClient:
             FleetCommandDispatcher(sim_core),
             map_name=map_name,
             completion_radius=completion_radius,
+            rmf_frame_offset=rmf_frame_offset,
         )
 
     def robot(self, robot_name: str) -> "PythonRmfFleetRobotClient":
@@ -449,7 +453,11 @@ class PythonRmfFleetClient:
                 completed = self._completed.get(robot_name, 0)
             return RobotUpdateData(
                 map=map_name,
-                position=[float(state.position[0]), float(state.position[1]), yaw],
+                position=[
+                    float(state.position[0]) + self._rmf_frame_offset[0],
+                    float(state.position[1]) + self._rmf_frame_offset[1],
+                    yaw,
+                ],
                 battery_soc=float(state.battery_soc if state.battery_soc is not None else 1.0),
                 last_completed_cmd_id=completed,
             )
@@ -478,7 +486,10 @@ class PythonRmfFleetClient:
             [
                 RobotGoalCommand2D(
                     name=robot_name,
-                    position=(float(position[0]), float(position[1])),
+                    position=(
+                        float(position[0]) - self._rmf_frame_offset[0],
+                        float(position[1]) - self._rmf_frame_offset[1],
+                    ),
                     yaw=float(position[2]) if len(position) > 2 else 0.0,
                     z=0.0,
                 )
@@ -606,6 +617,7 @@ def create_rmf_client_factory(
     sim_core: Any | None = None,
     provider: FleetStateProvider | None = None,
     dispatcher: FleetCommandDispatcher | None = None,
+    rmf_frame_offset=None,
 ):
     """Create an RMF client factory for ``mode``."""
     normalized = (mode or "per_robot_ros").strip().lower()
@@ -617,8 +629,8 @@ def create_rmf_client_factory(
         if provider is None or dispatcher is None:
             if sim_core is None:
                 raise ValueError("python_fleet mode requires sim_core or provider+dispatcher")
-            return PythonRmfFleetClient.from_sim_core(sim_core, map_name=map_name)
-        return PythonRmfFleetClient(provider, dispatcher, map_name=map_name)
+            return PythonRmfFleetClient.from_sim_core(sim_core, map_name=map_name, rmf_frame_offset=rmf_frame_offset)
+        return PythonRmfFleetClient(provider, dispatcher, map_name=map_name, rmf_frame_offset=rmf_frame_offset)
     raise ValueError(f"Unknown RMF client mode: {mode!r}")
 
 
@@ -640,6 +652,15 @@ def _command_header(node: Node, frame_id: str = "odom") -> Header:
 
 def _distance_xy(a: list, b: list) -> float:
     return math.hypot(float(a[0]) - float(b[0]), float(a[1]) - float(b[1]))
+
+
+def _xy_offset(value) -> tuple[float, float]:
+    if value is None:
+        return (0.0, 0.0)
+    try:
+        return (float(value[0]), float(value[1]))
+    except (IndexError, TypeError, ValueError):
+        return (0.0, 0.0)
 
 
 def _ack_accepts(ack, robot_name: str, command_type: str) -> bool:

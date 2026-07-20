@@ -20,7 +20,7 @@ def _load_pybullet_common_launch():
     return module
 
 
-def test_bridge_config_for_non_python_fleet_does_not_append_rmf_plugin(tmp_path):
+def test_bridge_config_for_fleet_ros_enables_required_fleet_api(tmp_path):
     module = _load_pybullet_common_launch()
     config_path = tmp_path / "bridge.yaml"
     config_path.write_text("simulation: {}\n")
@@ -29,6 +29,31 @@ def test_bridge_config_for_non_python_fleet_does_not_append_rmf_plugin(tmp_path)
         config_yaml=str(config_path),
         rmf_adapters=yaml.safe_dump([{"config_file": "/tmp/fleet.yaml", "nav_graph": "/tmp/nav.yaml"}]),
         client_mode="fleet_ros",
+    )
+
+    assert result != str(config_path)
+    generated = yaml.safe_load(Path(result).read_text())
+    assert generated == {
+        "simulation": {},
+        "fleet_api": {
+            "enabled": True,
+            "states": True,
+            "navigate": True,
+            "stop": True,
+            "attach": True,
+        },
+    }
+
+
+def test_bridge_config_for_per_robot_ros_does_not_append_rmf_plugin(tmp_path):
+    module = _load_pybullet_common_launch()
+    config_path = tmp_path / "bridge.yaml"
+    config_path.write_text("simulation: {}\n")
+
+    result = module._bridge_config_for_client_mode(
+        config_yaml=str(config_path),
+        rmf_adapters=yaml.safe_dump([{"config_file": "/tmp/fleet.yaml", "nav_graph": "/tmp/nav.yaml"}]),
+        client_mode="per_robot_ros",
     )
 
     assert result != str(config_path)
@@ -106,6 +131,7 @@ def test_bridge_config_for_python_fleet_appends_single_rmf_plugin(tmp_path):
             {
                 "simulation": {"gui": False},
                 "bridge_plugins": [{"class": "existing.Plugin", "config": {}}],
+                "rmf_frame_offset": [22000.0, 31500.0],
             }
         )
     )
@@ -130,6 +156,7 @@ def test_bridge_config_for_python_fleet_appends_single_rmf_plugin(tmp_path):
         "client_mode": "python_fleet",
         "server_uri": "ws://localhost:8000/_internal",
         "use_sim_time": True,
+        "rmf_frame_offset": [22000.0, 31500.0],
     }
 
 

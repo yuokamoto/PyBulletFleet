@@ -24,6 +24,7 @@ class RmfAdapterBridgePlugin(BridgePlugin):
         client_mode: str = "python_fleet",
         use_sim_time: bool = True,
         server_uri: str = "",
+        rmf_frame_offset=None,
     ) -> None:
         super().__init__(node, sim_core)
         self.config_file = config_file
@@ -31,6 +32,7 @@ class RmfAdapterBridgePlugin(BridgePlugin):
         self.client_mode = client_mode
         self.use_sim_time = bool(use_sim_time)
         self.server_uri = server_uri
+        self.rmf_frame_offset = rmf_frame_offset or (0.0, 0.0)
         self.runtime: RmfAdapterRuntime | None = None
 
     def on_init(self) -> None:
@@ -43,6 +45,7 @@ class RmfAdapterBridgePlugin(BridgePlugin):
             client_mode=self.client_mode,
             sim_core=self.sim_core,
             server_uri=self.server_uri,
+            rmf_frame_offset=self.rmf_frame_offset,
         )
         if self.runtime is None:
             raise RuntimeError("failed to start in-process RMF adapter")

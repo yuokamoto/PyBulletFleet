@@ -96,6 +96,7 @@ def _append_in_process_rmf_plugin(
     client_mode: str = "python_fleet",
     server_uri: str = "",
     use_sim_time: bool = True,
+    rmf_frame_offset=None,
 ) -> dict:
     """Return bridge config with the in-process RMF adapter plugin added."""
     updated = dict(bridge_config)
@@ -118,10 +119,28 @@ def _append_in_process_rmf_plugin(
                 "client_mode": client_mode,
                 "server_uri": server_uri,
                 "use_sim_time": bool(use_sim_time),
+                "rmf_frame_offset": list(rmf_frame_offset or [0.0, 0.0]),
             },
         }
     )
     updated["bridge_plugins"] = plugins
+    return updated
+
+
+def _enable_fleet_api_for_rmf_client(bridge_config: dict) -> dict:
+    """Return bridge config with the fleet ROS endpoints required by RMF enabled."""
+    updated = dict(bridge_config)
+    fleet_api = dict(updated.get("fleet_api") or {})
+    fleet_api.update(
+        {
+            "enabled": True,
+            "states": True,
+            "navigate": True,
+            "stop": True,
+            "attach": True,
+        }
+    )
+    updated["fleet_api"] = fleet_api
     return updated
 
 
@@ -158,6 +177,7 @@ def _bridge_config_for_client_mode(
     bridge_config = resolve_package_uris(bridge_config)
     adapters = _rmf_adapters_from_yaml(rmf_adapters)
     if client_mode == "python_fleet":
+        rmf_frame_offset = bridge_config.get("rmf_frame_offset", [0.0, 0.0])
         for adapter in adapters:
             bridge_config = _append_in_process_rmf_plugin(
                 bridge_config,
@@ -166,7 +186,10 @@ def _bridge_config_for_client_mode(
                 client_mode=adapter.get("client_mode", client_mode),
                 server_uri=adapter.get("server_uri", server_uri),
                 use_sim_time=adapter.get("use_sim_time", use_sim_time),
+                rmf_frame_offset=adapter.get("rmf_frame_offset", rmf_frame_offset),
             )
+    elif client_mode == "fleet_ros":
+        bridge_config = _enable_fleet_api_for_rmf_client(bridge_config)
     fd, path = tempfile.mkstemp(prefix="pbf_rmf_bridge_", suffix=".yaml")
     with os.fdopen(fd, "w") as f:
         yaml.safe_dump(bridge_config, f, sort_keys=False)
