@@ -28,7 +28,9 @@ Three packages provide a clean separation between general ROS 2 connectivity, Op
 
 ## Quick Start
 
-See **[docker/README.md](../docker/README.md)** for build instructions and demo walkthroughs.
+For Docker-based setup, see **[docker/README.md](../docker/README.md)**. For a
+native Ubuntu 24.04 + ROS 2 Jazzy workflow, see
+**[NATIVE_ROS2.md](NATIVE_ROS2.md)**.
 
 ---
 
@@ -142,7 +144,16 @@ Fleet adapter and infrastructure handlers for [Open-RMF](https://www.open-rmf.or
 
 ### Fleet Adapter
 
-`fleet_adapter` registers simulated robots with the RMF fleet manager via `rmf_adapter.easy_full_control`. Commands are forwarded through an RMF client abstraction. The default client is the existing per-robot ROS implementation:
+`fleet_adapter` registers simulated robots with the RMF fleet manager via
+`rmf_adapter.easy_full_control`. Commands are forwarded through an RMF client
+abstraction. RMF demo launch files default to the in-process `python_fleet`
+plugin path:
+
+```
+RMF Schedule ← RmfAdapterBridgePlugin → Python fleet client → PyBulletFleet
+```
+
+The existing per-robot ROS implementation remains available for compatibility:
 
 ```
 RMF Schedule ← FleetAdapterNode → per-robot ROS client → BridgeNode → PyBulletFleet
@@ -160,7 +171,6 @@ fleet_api:
   navigate: true
   stop: true
   attach: true
-  execute_action: true
 ```
 
 Delivery attach/drop can use `/fleet/attach` in `fleet_ros` mode. Charging
@@ -184,12 +194,34 @@ bridge_plugins:
       use_sim_time: true
 ```
 
+Multi-fleet demos register one `RmfAdapterBridgePlugin` per RMF fleet when
+`client_mode:=python_fleet`, all sharing the same simulation core.
+The shared RMF launch helper takes a single `rmf_adapters` YAML/JSON list for
+both single- and multi-fleet demos. It rejects an empty list, adds every entry
+as an in-process plugin for `python_fleet`, and launches one standalone
+`fleet_adapter` node per entry for `per_robot_ros` and `fleet_ros`.
+
+`client_mode` and the bridge's exported ROS APIs are independent settings.
+`client_mode` selects how the RMF adapter commands the simulator; `fleet_api`
+and `per_robot_api` select which ROS interfaces `bridge_node` exposes to other
+tools. For example, `client_mode:=python_fleet` can still publish `/fleet/*`
+or per-robot endpoints for debugging if the bridge YAML enables them. For the
+lowest-overhead Plugin Only pattern, disable both exported API groups:
+
+```yaml
+fleet_api:
+  enabled: false
+
+per_robot_api:
+  enabled: false
+```
+
 The standalone `fleet_adapter` executable can select `per_robot_ros` or
 `fleet_ros`. It accepts `python_fleet` for factory validation, but that mode
 requires an in-process `sim_core` and is therefore intended for the bridge
 plugin path rather than a separate ROS process. The shared RMF launch helper
-routes `client_mode:=python_fleet` to this bridge plugin and skips the
-standalone `fleet_adapter` node.
+routes `client_mode:=python_fleet` to bridge plugin registration and skips
+standalone `fleet_adapter` nodes.
 
 The RMF planner cache reset size defaults to `2500` and can be tuned from the
 RMF fleet config:
@@ -199,11 +231,12 @@ pybullet_fleet:
   planner_cache_reset_size: 2500
 ```
 
-The office demo exposes this experimental path directly:
+RMF demos accept `client_mode`:
 
 ```bash
+ros2 launch pybullet_fleet_rmf office_pybullet.launch.py
 ros2 launch pybullet_fleet_rmf office_pybullet.launch.py client_mode:=fleet_ros
-ros2 launch pybullet_fleet_rmf office_pybullet.launch.py client_mode:=python_fleet
+ros2 launch pybullet_fleet_rmf hotel_pybullet.launch.py client_mode:=per_robot_ros
 ```
 
 Supported RMF task actions:
@@ -212,9 +245,11 @@ Supported RMF task actions:
 - **delivery_dropoff** — `toggle_attach(False)` → DropAction
 - **stop** — Cancel current navigation
 
-Currently supported RMF task types: **patrol** and **delivery** only.
+Currently supported RMF task types: **patrol**, **delivery**, and configured
+**clean** coverage paths.
 `charge` is not simulated (sim battery is always 100%; `finishing_request` should be `"nothing"` or `"park"` to avoid deadlock).
-`clean` is a no-op (immediately finishes without zone patrol).
+Unknown RMF custom action categories log a warning and finish without
+simulator-side execution until explicit category mappings are added.
 
 ### Infrastructure Handlers
 
@@ -238,6 +273,22 @@ cd docker && docker compose up
 ```
 
 See **[docker/README.md](../docker/README.md)** for detailed setup and walkthroughs.
+
+RMF demo bridge configs use ROS package URIs for assets, so the same YAML can
+run in Docker, native overlays, or apt-installed environments:
+
+```yaml
+world:
+  world_file: "package://rmf_demos_maps/maps/office/office.world"
+
+entities:
+  - name: tinyRobot1
+    sdf_path: "package://rmf_demos_assets/models/TinyRobot/model.sdf"
+```
+
+`bridge_node` resolves `package://` paths through the ROS 2 ament index before
+passing the config to PyBulletFleet core. User packages can use the same pattern
+for their own world, SDF, URDF, and mesh assets.
 
 ---
 
@@ -389,7 +440,8 @@ rmf_demos でも airport_terminal のみ使用。
 - Add a dedicated ReadTheDocs `ROS 2 Bridge` section after the fleet API and
   scale examples stabilize. Candidate pages:
   - `quickstart.md` — build/source/run bridge, Docker entrypoints
-  - `configuration.md` — `fleet_api`, `per_robot_api`, handler groups
+  - `configuration.md` — `client_mode` vs exported ROS APIs, `fleet_api`,
+    `per_robot_api`, handler groups
   - `examples.md` — RMF demos, scale checks, debugging flows
   - `performance.md` — move the current `ros2_bridge/PERFORMANCE.md` content
   - `troubleshooting.md` — DDS graph limits, endpoint count, action server scale

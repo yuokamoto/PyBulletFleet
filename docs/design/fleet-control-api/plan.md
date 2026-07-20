@@ -233,11 +233,14 @@ Tasks:
 
 Current implementation notes:
 
-- `per_robot_ros` remains the default and preserves existing demos.
+- RMF demo launch files default to `python_fleet` so RMF control uses the
+  in-process plugin path by default.
+- `per_robot_ros` remains available and preserves existing demos as an explicit
+  compatibility mode.
 - `fleet_ros` is available as an experimental RMF client mode for
-  `/fleet/states` + `/fleet/navigate` + `/fleet/stop` + `/fleet/attach` +
-  `/fleet/execute_action`; charging still uses per-robot compatibility
-  services until a fleet-level charge API exists.
+  `/fleet/states` + `/fleet/navigate` + `/fleet/stop` + `/fleet/attach`;
+  charging still uses per-robot compatibility services until a fleet-level
+  charge API exists.
 - `python_fleet` is available as the direct in-process RMF client transport.
   It uses `FleetStateProvider` and `FleetCommandDispatcher` directly.
 
@@ -249,6 +252,8 @@ Exit criteria:
 
 ### Phase 5b — RMF over Typed Fleet Commands
 
+Status: in progress.
+
 Tasks:
 
 - Let RMF consume fleet state snapshots instead of per-robot state publishers.
@@ -257,18 +262,30 @@ Tasks:
 - Add `/fleet/stop` / dispatcher-backed stop support to the client abstraction.
 - Add `/fleet/attach` / dispatcher-backed attach support to the client
   abstraction.
-- Add `/fleet/execute_action` / dispatcher-backed generic action enqueue
-  support.
 - Keep existing per-robot command/service/action paths initially for delivery
   and compatibility.
+
+Current implementation notes:
+
+- RMF navigation, stop, and delivery attach/drop are routed through the
+  transport-neutral RMF client contract.
+- `fleet_ros` maps RMF navigation, stop, and attach to `/fleet/navigate`,
+  `/fleet/stop`, and `/fleet/attach`.
+- `python_fleet` maps the same RMF navigation, stop, and attach calls directly
+  to `FleetCommandDispatcher`.
+- Generic RMF categories are not mapped automatically yet. The adapter logs a
+  warning and finishes unknown categories so users do not accidentally believe
+  an undefined simulator action ran.
+- Future generic action support should define an explicit RMF category to
+  PyBulletFleet action mapping and decide whether RMF completion means
+  "accepted", "queued", or "action finished".
 
 Exit criteria:
 
 - Patrol can run with fleet state, fleet navigation, and fleet stop.
 - Delivery attach/drop can use fleet attach instead of per-robot attach
   services.
-- Generic PyBulletFleet actions can be queued through a fleet endpoint; RMF
-  category mapping remains explicit in the adapter.
+- Generic/custom RMF action mapping remains deferred to Phase 6a.
 
 ### Phase 5c — Plugin Only Launch Path
 
@@ -292,7 +309,11 @@ Current implementation notes:
   adapter inside `bridge_node` and passes the shared `sim_core` to
   `PythonRmfFleetClient`.
 - `pybullet_common.launch.py` routes `client_mode:=python_fleet` to the
-  in-process plugin and skips the standalone `fleet_adapter` process.
+  in-process plugin and skips standalone `fleet_adapter` processes.
+- Single- and multi-fleet launch files pass a required `rmf_adapters` list to
+  `pybullet_common.launch.py`. Each entry becomes one `RmfAdapterBridgePlugin`
+  when `client_mode:=python_fleet`, or one standalone `fleet_adapter` node when
+  using `per_robot_ros` or `fleet_ros`.
 - The standalone executable still cannot use `python_fleet` by itself because a
   separate ROS process has no direct simulation core reference.
 
@@ -300,6 +321,8 @@ Exit criteria:
 
 - A basic RMF patrol scenario can run without bridge topics/services in the
   control path.
+- Multi-fleet RMF demos can run every fleet adapter in-process with shared
+  `sim_core`.
 
 ### Phase 5d — Plugin + Bridge Launch Path
 
@@ -493,6 +516,14 @@ Tasks:
 - Ensure unknown command types are rejected explicitly and logged.
 - Decide whether generic command payloads should use JSON only, or allow a
   typed envelope plus JSON parameters.
+- Define an explicit RMF custom action mapping layer before wiring unknown
+  RMF `execute_action` categories to simulator actions:
+  - map RMF `category` + `description` to either a typed fleet command, a
+    `/fleet/execute_action` payload, or a registered custom fleet command;
+  - keep unmapped RMF categories warning-only and finish them without
+    simulator-side execution;
+  - define completion semantics per mapping: accepted, queued, or action
+    finished.
 
 Exit criteria:
 
@@ -501,6 +532,8 @@ Exit criteria:
 - Typed standard fleet APIs remain unchanged and continue to be the RMF-facing
   default.
 - Custom command events are recorded with enough metadata for trace/replay.
+- RMF custom action categories are never forwarded implicitly; each supported
+  category has an explicit mapping and documented completion behavior.
 
 ### Phase 6b — RMF Command Coalescing
 
@@ -645,6 +678,43 @@ Exit criteria:
 
 - A recorded command trace can be replayed without a ROS graph.
 - Snapshot and command event schemas are stable enough for CI regression tests.
+
+### Phase 6f — ROS Bridge Test Naming Cleanup
+
+Purpose: make the ROS bridge test layers easier to review by aligning script
+names with the layer they validate. The current `integration`, `smoke`, and
+`e2e` names are historically accurate but easy to confuse.
+
+Tasks:
+
+- Keep the current names during Phase 5 to avoid broad CI/doc churn while the
+  RMF migration is still being reviewed.
+- Add a short test hierarchy table to the ROS bridge docs before renaming,
+  covering:
+  - core `pytest tests/`;
+  - ROS package `colcon test`;
+  - bridge API smoke;
+  - RMF stack smoke;
+  - RMF dispatch flow;
+  - RMF client-mode matrix;
+  - fleet scale/performance checks.
+- Rename scripts in a focused cleanup PR:
+  - `docker/test_integration.sh` -> `docker/test_bridge_api.sh`;
+  - `docker/integration_check.py` -> `docker/bridge_api_check.py`;
+  - `docker/test_rmf_smoke.sh` -> `docker/test_rmf_stack.sh`;
+  - `docker/rmf_smoke_check.py` -> `docker/rmf_stack_check.py`;
+  - keep `docker/test_rmf_e2e.sh` or rename it to
+    `docker/test_rmf_dispatch.sh` if the docs also switch to "dispatch flow";
+  - keep `docker/test_rmf_client_modes.sh` and `docker/test_fleet_scale.sh`
+    because their purpose is already clear.
+- Update `.github/workflows/bridge.yml`, Docker README commands, Make targets,
+  and any copied native instructions in the same cleanup PR.
+
+Exit criteria:
+
+- A reviewer can identify each test's entry point and layer from its filename.
+- CI behavior is unchanged after the rename.
+- Existing correctness gates remain separate from optional performance checks.
 
 ## Phase 7 — Internal Batch Optimization
 

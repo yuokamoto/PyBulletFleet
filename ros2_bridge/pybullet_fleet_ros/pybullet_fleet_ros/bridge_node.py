@@ -37,6 +37,7 @@ from .interface_config import BridgeApiConfig, resolve_bridge_api_config
 from .param_utils import get_bool_param, get_float_param
 from .robot_handler import RobotHandler
 from .robot_handler_base import RobotHandlerBase
+from .uri_utils import resolve_package_uris
 
 logger = logging.getLogger(__name__)
 
@@ -122,6 +123,7 @@ class BridgeNode(Node):
             bridge_config: Dict[str, Any] = {}
         else:
             bridge_config = load_yaml_config(config_yaml)
+        bridge_config = resolve_package_uris(bridge_config)
 
         sim_cfg = bridge_config.get("simulation", {})
 

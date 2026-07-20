@@ -29,7 +29,7 @@ simulation:
     camera_target: [30, -25, 0]
 
 world:
-  world_file: "/rmf_demos_ws/install/rmf_demos_maps/share/rmf_demos_maps/maps/clinic/clinic.world"
+  world_file: "package://rmf_demos_maps/maps/clinic/clinic.world"
   skip_models:
     - DeliveryRobot
     - TinyRobot
@@ -39,7 +39,7 @@ world:
 entities:
   # ── Fleet: deliveryRobot (nav_graph 0) ──────────────
   - name: deliveryRobot_0
-    sdf_path: "/rmf_demos_ws/install/rmf_demos_assets/share/rmf_demos_assets/models/DeliveryRobot/model.sdf"
+    sdf_path: "package://rmf_demos_assets/models/DeliveryRobot/model.sdf"
     pose: [5, -5, 0.0]
     yaw: 0.0
     motion_mode: "differential"
@@ -48,7 +48,7 @@ entities:
       max_linear_accel: 0.5
       navigation_2d: true
   - name: deliveryRobot_1
-    sdf_path: "/rmf_demos_ws/install/rmf_demos_assets/share/rmf_demos_assets/models/DeliveryRobot/model.sdf"
+    sdf_path: "package://rmf_demos_assets/models/DeliveryRobot/model.sdf"
     pose: [8.007, -31.734, 0.0]
     yaw: -3.1398
     motion_mode: "differential"
@@ -59,7 +59,7 @@ entities:
 
   # ── Fleet: tinyRobot (nav_graph 1) ─────────────────
   - name: tinyRobot_0
-    sdf_path: "/rmf_demos_ws/install/rmf_demos_assets/share/rmf_demos_assets/models/TinyRobot/model.sdf"
+    sdf_path: "package://rmf_demos_assets/models/TinyRobot/model.sdf"
     pose: [15, -5, 0.0]
     yaw: 0.0
     motion_mode: "differential"
@@ -68,7 +68,7 @@ entities:
       max_linear_accel: 0.75
       navigation_2d: true
   - name: tinyRobot_1
-    sdf_path: "/rmf_demos_ws/install/rmf_demos_assets/share/rmf_demos_assets/models/TinyRobot/model.sdf"
+    sdf_path: "package://rmf_demos_assets/models/TinyRobot/model.sdf"
     pose: [54.763, -10.800, 10.0]
     yaw: 3.1343
     motion_mode: "differential"

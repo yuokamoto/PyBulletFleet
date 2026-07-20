@@ -12,6 +12,7 @@ Usage::
     ros2 run rmf_demos_tasks dispatch_patrol -- -p <waypoint> -n 1
 """
 
+import json
 import os
 
 from ament_index_python.packages import get_package_share_directory
@@ -31,6 +32,7 @@ def generate_launch_description():
     campus_config_dir = os.path.join(rmf_demos_dir, "config", "campus")
     fleet_config = os.path.join(campus_config_dir, "deliveryRobot_config.yaml")
     nav_graph = os.path.join(rmf_demos_maps_dir, "maps", "campus", "nav_graphs", "0.yaml")
+    rmf_adapters = [{"config_file": fleet_config, "nav_graph": nav_graph}]
     building_yaml = os.path.join(rmf_demos_maps_dir, "campus", "campus.building.yaml")
     rviz_config = os.path.join(rmf_demos_dir, "include", "campus", "campus.rviz")
 
@@ -45,6 +47,11 @@ def generate_launch_description():
             ),
             DeclareLaunchArgument("headless", default_value="false", description="Skip rviz launch"),
             DeclareLaunchArgument("use_sim_time", default_value="true", description="Use simulation clock"),
+            DeclareLaunchArgument(
+                "client_mode",
+                default_value="python_fleet",
+                description="RMF client transport: per_robot_ros, fleet_ros, or python_fleet",
+            ),
             # RMF common infra (traffic schedule, map server, task dispatcher, rviz)
             IncludeLaunchDescription(
                 AnyLaunchDescriptionSource(os.path.join(rmf_demos_dir, "common.launch.xml")),
@@ -62,11 +69,11 @@ def generate_launch_description():
                 PythonLaunchDescriptionSource(os.path.join(pkg_dir, "launch", "pybullet_common.launch.py")),
                 launch_arguments={
                     "config_yaml": bridge_config,
-                    "fleet_config": fleet_config,
-                    "nav_graph": nav_graph,
+                    "rmf_adapters": json.dumps(rmf_adapters),
                     "gui": LaunchConfiguration("gui"),
                     "target_rtf": LaunchConfiguration("target_rtf"),
                     "server_uri": LaunchConfiguration("server_uri"),
+                    "client_mode": LaunchConfiguration("client_mode"),
                     "use_sim_time": LaunchConfiguration("use_sim_time"),
                 }.items(),
             ),

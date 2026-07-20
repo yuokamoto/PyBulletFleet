@@ -173,7 +173,15 @@ def start_adapter_runtime(
     pybullet_config = config_yaml.get("pybullet_fleet", {})
 
     fleet_handle = adapter.add_easy_fleet(fleet_config)
-    fleet_handle.more().set_planner_cache_reset_size(_planner_cache_reset_size(pybullet_config))
+    more = fleet_handle.more()
+    cache_reset_size = _planner_cache_reset_size(pybullet_config)
+    if hasattr(more, "set_planner_cache_reset_size"):
+        more.set_planner_cache_reset_size(cache_reset_size)
+    else:
+        node.get_logger().warning(
+            "RMF binding does not expose set_planner_cache_reset_size; "
+            f"ignoring planner_cache_reset_size={cache_reset_size}"
+        )
 
     # Register performable actions from config (e.g. teleop, clean).
     # Standard delivery tasks (dispatch_delivery) are handled by RMF's
@@ -192,7 +200,7 @@ def start_adapter_runtime(
             node.get_logger().info(f"Accepted action '{_name}': {desc}")
             return confirmation
 
-        fleet_handle.more().add_performable_action(action_name, _consider_action)
+        more.add_performable_action(action_name, _consider_action)
         node.get_logger().info(f"Performable action '{action_name}' registered")
 
     # Build RMF client wrappers for each robot
@@ -519,7 +527,9 @@ class RobotAdapter:
         - ``clean``: Follow the zone's coverage path (from the fleet config's
           ``fleet_manager.action_paths``); update() advances the waypoints and
           finishes the action. No configured path → log and finish.
-        - Others: Log warning and finish immediately.
+        - Others: Log a warning and finish immediately. Generic RMF-to-
+          PyBulletFleet action mapping is intentionally left as future work
+          until the category mapping and completion semantics are defined.
         """
         self.cmd_id += 1
         self.execution = execution
@@ -570,7 +580,10 @@ class RobotAdapter:
                 execution.finished()
                 self.execution = None
         else:
-            self.node.get_logger().warn(f"[{self.name}] Action '{category}' not supported, " "finishing.")
+            self.node.get_logger().warn(
+                f"[{self.name}] Action '{category}' is not mapped to a PyBulletFleet action yet; "
+                "finishing without simulator-side execution."
+            )
             execution.finished()
             self.execution = None
 

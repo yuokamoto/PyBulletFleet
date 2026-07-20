@@ -28,6 +28,7 @@ Usage::
     ros2 run rmf_demos_tasks dispatch_go_to_place -- -p pantry
 """
 
+import json
 import os
 
 from ament_index_python.packages import get_package_share_directory
@@ -47,6 +48,7 @@ def generate_launch_description():
     office_config_dir = os.path.join(rmf_demos_dir, "config", "office")
     fleet_config = os.path.join(office_config_dir, "tinyRobot_config.yaml")
     nav_graph = os.path.join(rmf_demos_maps_dir, "maps", "office", "nav_graphs", "0.yaml")
+    rmf_adapters = [{"config_file": fleet_config, "nav_graph": nav_graph}]
     building_yaml = os.path.join(rmf_demos_maps_dir, "office", "office.building.yaml")
     rviz_config = os.path.join(rmf_demos_dir, "include", "office", "office.rviz")
 
@@ -61,7 +63,7 @@ def generate_launch_description():
             ),
             DeclareLaunchArgument(
                 "client_mode",
-                default_value="per_robot_ros",
+                default_value="python_fleet",
                 description="RMF client transport: per_robot_ros, fleet_ros, or python_fleet",
             ),
             DeclareLaunchArgument(
@@ -98,8 +100,7 @@ def generate_launch_description():
                 PythonLaunchDescriptionSource(os.path.join(pkg_dir, "launch", "pybullet_common.launch.py")),
                 launch_arguments={
                     "config_yaml": bridge_config,
-                    "fleet_config": fleet_config,
-                    "nav_graph": nav_graph,
+                    "rmf_adapters": json.dumps(rmf_adapters),
                     "gui": LaunchConfiguration("gui"),
                     "target_rtf": LaunchConfiguration("target_rtf"),
                     "server_uri": LaunchConfiguration("server_uri"),

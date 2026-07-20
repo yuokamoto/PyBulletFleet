@@ -13,14 +13,15 @@ arguments to configure it for each map/scenario.
 
 Required launch arguments (must be declared by the parent launch):
     config_yaml:  Path to PyBulletFleet bridge YAML config file
-    fleet_config: Path to RMF fleet adapter config YAML
-    nav_graph:    Path to RMF navigation graph YAML
+    rmf_adapters: YAML/JSON list of RMF adapter configs. Each entry needs
+                  ``config_file`` and may include ``nav_graph``, ``name``,
+                  ``server_uri``, ``client_mode``, and ``use_sim_time``.
 
 Optional launch arguments (defaults provided):
     gui:          Enable PyBullet GUI (default: use YAML config)
     target_rtf:   Target real-time factor (default: use YAML config)
     server_uri:   API server WebSocket URI (default: ``""``)
-    client_mode:  RMF client transport (default: ``per_robot_ros``)
+    client_mode:  RMF client transport (default: ``python_fleet``)
 
 Example (from a demo launch file)::
 
@@ -30,19 +31,22 @@ Example (from a demo launch file)::
         ),
         launch_arguments={
             "config_yaml": bridge_config,
-            "fleet_config": fleet_config,
-            "nav_graph": nav_graph,
+            "rmf_adapters": json.dumps(
+                [{"config_file": fleet_config, "nav_graph": nav_graph}]
+            ),
         }.items(),
     )
 """
 
 import os
+import subprocess
 import tempfile
 
 import yaml
 from launch import LaunchContext, LaunchDescription
 from launch.actions import DeclareLaunchArgument, OpaqueFunction
 from launch_ros.actions import Node
+from pybullet_fleet_ros.uri_utils import resolve_package_uris
 
 RMF_ADAPTER_PLUGIN_CLASS = "pybullet_fleet_rmf.rmf_adapter_plugin.RmfAdapterBridgePlugin"
 
@@ -51,6 +55,37 @@ def _as_bool(value: str, default: bool = False) -> bool:
     if value == "":
         return default
     return value.lower() in ("true", "1", "yes")
+
+
+def _native_python_env() -> dict:
+    """Expose the repo venv to ROS console scripts in native development."""
+    paths = []
+    repo_root = os.environ.get("PBF_REPO_ROOT", "")
+    if repo_root:
+        paths.append(repo_root)
+    venv = os.environ.get("PBF_VENV", "")
+    if venv:
+        python = os.path.join(venv, "bin", "python")
+        try:
+            site_packages = subprocess.check_output(
+                [
+                    python,
+                    "-c",
+                    "import sysconfig; print(sysconfig.get_paths()['purelib'])",
+                ],
+                text=True,
+                stderr=subprocess.DEVNULL,
+            ).strip()
+        except (OSError, subprocess.SubprocessError, KeyError):
+            site_packages = ""
+        if site_packages:
+            paths.append(site_packages)
+    if not paths:
+        return {}
+    pythonpath = os.environ.get("PYTHONPATH", "")
+    if pythonpath:
+        paths.append(pythonpath)
+    return {"PYTHONPATH": ":".join(paths)}
 
 
 def _append_in_process_rmf_plugin(
@@ -65,7 +100,13 @@ def _append_in_process_rmf_plugin(
     """Return bridge config with the in-process RMF adapter plugin added."""
     updated = dict(bridge_config)
     plugins = list(updated.get("bridge_plugins", []))
-    if any(entry.get("class") == RMF_ADAPTER_PLUGIN_CLASS for entry in plugins if isinstance(entry, dict)):
+    if any(
+        entry.get("class") == RMF_ADAPTER_PLUGIN_CLASS
+        and entry.get("config", {}).get("config_file") == config_file
+        and entry.get("config", {}).get("nav_graph", "") == nav_graph
+        for entry in plugins
+        if isinstance(entry, dict)
+    ):
         return updated
 
     plugins.append(
@@ -84,29 +125,48 @@ def _append_in_process_rmf_plugin(
     return updated
 
 
+def _rmf_adapters_from_yaml(value: str) -> list[dict]:
+    """Parse the required YAML/JSON adapter list from a launch argument."""
+    if not value:
+        raise ValueError("rmf_adapters must contain at least one adapter")
+    loaded = yaml.safe_load(value)
+    if not isinstance(loaded, list):
+        raise ValueError("rmf_adapters must be a YAML/JSON list")
+    if not loaded:
+        raise ValueError("rmf_adapters must contain at least one adapter")
+    adapters = []
+    for item in loaded:
+        if not isinstance(item, dict):
+            raise ValueError("each rmf_adapters entry must be a mapping")
+        if not item.get("config_file"):
+            raise ValueError("each rmf_adapters entry needs config_file")
+        adapters.append(dict(item))
+    return adapters
+
+
 def _bridge_config_for_client_mode(
     *,
     config_yaml: str,
-    fleet_config: str,
-    nav_graph: str,
+    rmf_adapters: str,
     client_mode: str,
     server_uri: str = "",
     use_sim_time: bool = True,
 ) -> str:
     """Return bridge config path, generating a merged temp config if needed."""
-    if client_mode != "python_fleet":
-        return config_yaml
-
     with open(config_yaml, "r") as f:
         bridge_config = yaml.safe_load(f) or {}
-    bridge_config = _append_in_process_rmf_plugin(
-        bridge_config,
-        config_file=fleet_config,
-        nav_graph=nav_graph,
-        client_mode=client_mode,
-        server_uri=server_uri,
-        use_sim_time=use_sim_time,
-    )
+    bridge_config = resolve_package_uris(bridge_config)
+    adapters = _rmf_adapters_from_yaml(rmf_adapters)
+    if client_mode == "python_fleet":
+        for adapter in adapters:
+            bridge_config = _append_in_process_rmf_plugin(
+                bridge_config,
+                config_file=adapter["config_file"],
+                nav_graph=adapter.get("nav_graph", ""),
+                client_mode=adapter.get("client_mode", client_mode),
+                server_uri=adapter.get("server_uri", server_uri),
+                use_sim_time=adapter.get("use_sim_time", use_sim_time),
+            )
     fd, path = tempfile.mkstemp(prefix="pbf_rmf_bridge_", suffix=".yaml")
     with os.fdopen(fd, "w") as f:
         yaml.safe_dump(bridge_config, f, sort_keys=False)
@@ -116,12 +176,11 @@ def _bridge_config_for_client_mode(
 def _bridge_node_setup(context: LaunchContext):
     """Build bridge_node with conditional parameter overrides."""
     use_sim_time = context.launch_configurations.get("use_sim_time", "true")
-    client_mode = context.launch_configurations.get("client_mode", "per_robot_ros").strip().lower()
+    client_mode = context.launch_configurations.get("client_mode", "python_fleet").strip().lower()
     effective_use_sim_time = _as_bool(use_sim_time, True)
     config_yaml = _bridge_config_for_client_mode(
         config_yaml=context.launch_configurations["config_yaml"],
-        fleet_config=context.launch_configurations["fleet_config"],
-        nav_graph=context.launch_configurations["nav_graph"],
+        rmf_adapters=context.launch_configurations["rmf_adapters"],
         client_mode=client_mode,
         server_uri=context.launch_configurations.get("server_uri", ""),
         use_sim_time=effective_use_sim_time,
@@ -144,6 +203,7 @@ def _bridge_node_setup(context: LaunchContext):
             executable="bridge_node",
             name="pybullet_fleet_bridge",
             parameters=[params],
+            additional_env=_native_python_env(),
             output="screen",
         ),
     ]
@@ -151,36 +211,40 @@ def _bridge_node_setup(context: LaunchContext):
 
 def _fleet_adapter_setup(context: LaunchContext):
     """Build the standalone RMF adapter unless bridge_node owns it in-process."""
-    client_mode = context.launch_configurations.get("client_mode", "per_robot_ros").strip().lower()
+    client_mode = context.launch_configurations.get("client_mode", "python_fleet").strip().lower()
     if client_mode == "python_fleet":
         return []
 
     use_sim_time = context.launch_configurations.get("use_sim_time", "true")
-    arguments = [
-        "-c",
-        context.launch_configurations["fleet_config"],
-        "-n",
-        context.launch_configurations["nav_graph"],
-    ]
-    if _as_bool(use_sim_time, True):
-        arguments.append("-sim")
-    arguments.extend(["--client-mode", client_mode])
-
-    return [
-        Node(
-            package="pybullet_fleet_rmf",
-            executable="fleet_adapter",
-            name="pybullet_fleet_adapter",
-            arguments=arguments,
-            parameters=[
-                {
-                    "server_uri": context.launch_configurations.get("server_uri", ""),
-                    "use_sim_time": _as_bool(use_sim_time, True),
-                }
-            ],
-            output="screen",
+    default_use_sim_time = _as_bool(use_sim_time, True)
+    nodes = []
+    for index, adapter in enumerate(_rmf_adapters_from_yaml(context.launch_configurations["rmf_adapters"])):
+        adapter_use_sim_time = _as_bool(str(adapter.get("use_sim_time", use_sim_time)), default_use_sim_time)
+        adapter_client_mode = adapter.get("client_mode", client_mode)
+        arguments = ["-c", adapter["config_file"]]
+        nav_graph = adapter.get("nav_graph", "")
+        if nav_graph:
+            arguments.extend(["-n", nav_graph])
+        if adapter_use_sim_time:
+            arguments.append("-sim")
+        arguments.extend(["--client-mode", adapter_client_mode])
+        nodes.append(
+            Node(
+                package="pybullet_fleet_rmf",
+                executable="fleet_adapter",
+                name=adapter.get("name", f"pybullet_fleet_adapter_{index}"),
+                arguments=arguments,
+                parameters=[
+                    {
+                        "server_uri": adapter.get("server_uri", context.launch_configurations.get("server_uri", "")),
+                        "use_sim_time": adapter_use_sim_time,
+                    }
+                ],
+                additional_env=_native_python_env(),
+                output="screen",
+            )
         )
-    ]
+    return nodes
 
 
 def generate_launch_description():
@@ -194,12 +258,8 @@ def generate_launch_description():
                 description="Path to PyBulletFleet bridge YAML config file",
             ),
             DeclareLaunchArgument(
-                "fleet_config",
-                description="Path to RMF fleet adapter config YAML",
-            ),
-            DeclareLaunchArgument(
-                "nav_graph",
-                description="Path to RMF navigation graph YAML",
+                "rmf_adapters",
+                description="YAML/JSON list of RMF adapter configs",
             ),
             DeclareLaunchArgument("gui", default_value=""),
             DeclareLaunchArgument("target_rtf", default_value=""),
@@ -210,7 +270,7 @@ def generate_launch_description():
             ),
             DeclareLaunchArgument(
                 "client_mode",
-                default_value="per_robot_ros",
+                default_value="python_fleet",
                 description="RMF client transport: per_robot_ros, fleet_ros, or python_fleet",
             ),
             DeclareLaunchArgument(

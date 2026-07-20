@@ -27,7 +27,7 @@ simulation:
 # Outdoor campus environment — full .world from rmf_demos_maps.
 # Robot models are spawned separately as agents, so skip them in world loading.
 world:
-  world_file: "/rmf_demos_ws/install/rmf_demos_maps/share/rmf_demos_maps/maps/campus/campus.world"
+  world_file: "package://rmf_demos_maps/maps/campus/campus.world"
   skip_models:
     - DeliveryRobot
   # The campus environment is a single 50-material OBJ; PyBullet can only apply
@@ -39,7 +39,7 @@ entities:
   # ── Fleet: deliveryRobot (nav_graph 0) ───────────────────────────
   # Spawn positions from campus.world include poses.
   - name: deliveryRobot_1
-    sdf_path: "/rmf_demos_ws/install/rmf_demos_assets/share/rmf_demos_assets/models/DeliveryRobot/model.sdf"
+    sdf_path: "package://rmf_demos_assets/models/DeliveryRobot/model.sdf"
     pose: [119.378, -72.659, 0.0]
     yaw: 2.643
     motion_mode: "differential"
@@ -54,7 +54,7 @@ entities:
           charge_rate: 0.005
 
   - name: deliveryRobot_2
-    sdf_path: "/rmf_demos_ws/install/rmf_demos_assets/share/rmf_demos_assets/models/DeliveryRobot/model.sdf"
+    sdf_path: "package://rmf_demos_assets/models/DeliveryRobot/model.sdf"
     pose: [109.921, -86.530, 0.0]
     yaw: 2.583
     motion_mode: "differential"
@@ -69,7 +69,7 @@ entities:
           charge_rate: 0.005
 
   - name: deliveryRobot_3
-    sdf_path: "/rmf_demos_ws/install/rmf_demos_assets/share/rmf_demos_assets/models/DeliveryRobot/model.sdf"
+    sdf_path: "package://rmf_demos_assets/models/DeliveryRobot/model.sdf"
     pose: [218.547, -134.264, 0.0]
     yaw: -0.509
     motion_mode: "differential"

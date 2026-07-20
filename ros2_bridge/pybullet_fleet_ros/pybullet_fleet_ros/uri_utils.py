@@ -6,6 +6,8 @@ ROS 2 packages.
 """
 
 import os
+from collections.abc import Mapping
+from typing import Any
 
 
 def resolve_uri(uri: str) -> str:
@@ -31,3 +33,16 @@ def resolve_uri(uri: str) -> str:
     from ament_index_python.packages import get_package_share_directory
 
     return os.path.join(get_package_share_directory(pkg_name), rel_path)
+
+
+def resolve_package_uris(value: Any) -> Any:
+    """Recursively resolve ``package://`` strings in a config structure."""
+    if isinstance(value, str):
+        return resolve_uri(value)
+    if isinstance(value, list):
+        return [resolve_package_uris(item) for item in value]
+    if isinstance(value, tuple):
+        return tuple(resolve_package_uris(item) for item in value)
+    if isinstance(value, Mapping):
+        return {key: resolve_package_uris(item) for key, item in value.items()}
+    return value

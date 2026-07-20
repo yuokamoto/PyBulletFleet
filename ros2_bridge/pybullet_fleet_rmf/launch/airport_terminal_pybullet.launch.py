@@ -1,8 +1,9 @@
 """Launch Open-RMF airport_terminal demo with PyBulletFleet and multiple fleets.
 
-Demonstrates multi-fleet support: four independent fleet_adapters sharing
-a single bridge_node instance.  Each fleet uses its own rmf_demos fleet-config
-and nav-graph.
+Demonstrates multi-fleet support: four RMF fleets sharing a single bridge_node.
+Each fleet uses its own rmf_demos fleet config and nav graph. In
+``python_fleet`` mode they run as in-process bridge plugins over the shared
+simulation core; ROS-backed modes keep standalone fleet_adapter nodes.
 
 Usage::
 
@@ -16,6 +17,7 @@ Usage::
     ros2 run rmf_demos_tasks dispatch_clean -cs zone_1 --use_sim_time
 """
 
+import json
 import os
 
 from ament_index_python.packages import get_package_share_directory
@@ -23,7 +25,6 @@ from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
 from launch.launch_description_sources import AnyLaunchDescriptionSource, PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
-from launch_ros.actions import Node
 
 
 def generate_launch_description():
@@ -61,9 +62,14 @@ def generate_launch_description():
         ),
     }
 
-    # Primary fleet (included via pybullet_common.launch.py)
-    primary_fleet = "tinyRobot"
-    primary_config, primary_nav = fleet_configs[primary_fleet]
+    rmf_adapters = [
+        {
+            "name": f"{fleet_name}_fleet_adapter",
+            "config_file": config_path,
+            "nav_graph": nav_path,
+        }
+        for fleet_name, (config_path, nav_path) in fleet_configs.items()
+    ]
 
     launch_items = [
         DeclareLaunchArgument("gui", default_value="true"),
@@ -71,6 +77,11 @@ def generate_launch_description():
         DeclareLaunchArgument("server_uri", default_value="", description="API server WebSocket URI"),
         DeclareLaunchArgument("headless", default_value="false", description="Skip rviz launch"),
         DeclareLaunchArgument("use_sim_time", default_value="true", description="Use simulation clock"),
+        DeclareLaunchArgument(
+            "client_mode",
+            default_value="python_fleet",
+            description="RMF client transport: per_robot_ros, fleet_ros, or python_fleet",
+        ),
         # ── RMF common infra ────────────────────────────────────────
         IncludeLaunchDescription(
             AnyLaunchDescriptionSource(os.path.join(rmf_demos_dir, "common.launch.xml")),
@@ -83,39 +94,19 @@ def generate_launch_description():
                 "use_sim_time": LaunchConfiguration("use_sim_time"),
             }.items(),
         ),
-        # ── PyBulletFleet bridge + primary fleet adapter ────────────
+        # ── PyBulletFleet bridge + RMF fleet adapters ───────────────
         IncludeLaunchDescription(
             PythonLaunchDescriptionSource(os.path.join(pkg_dir, "launch", "pybullet_common.launch.py")),
             launch_arguments={
                 "config_yaml": bridge_config,
-                "fleet_config": primary_config,
-                "nav_graph": primary_nav,
+                "rmf_adapters": json.dumps(rmf_adapters),
                 "gui": LaunchConfiguration("gui"),
                 "target_rtf": LaunchConfiguration("target_rtf"),
                 "server_uri": LaunchConfiguration("server_uri"),
+                "client_mode": LaunchConfiguration("client_mode"),
                 "use_sim_time": LaunchConfiguration("use_sim_time"),
             }.items(),
         ),
     ]
-
-    # ── Additional fleet adapters (one Node per fleet) ──────────────
-    for fleet_name, (config_path, nav_path) in fleet_configs.items():
-        if fleet_name == primary_fleet:
-            continue  # Already launched via pybullet_common
-        launch_items.append(
-            Node(
-                package="pybullet_fleet_rmf",
-                executable="fleet_adapter",
-                name=f"{fleet_name}_fleet_adapter",
-                arguments=["-c", config_path, "-n", nav_path, "-sim"],
-                parameters=[
-                    {
-                        "server_uri": LaunchConfiguration("server_uri"),
-                        "use_sim_time": LaunchConfiguration("use_sim_time"),
-                    }
-                ],
-                output="screen",
-            ),
-        )
 
     return LaunchDescription(launch_items)

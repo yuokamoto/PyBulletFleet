@@ -3,7 +3,7 @@
 
 .DEFAULT_GOAL := help
 
-.PHONY: help lint format typecheck test test-fast verify docs bench-smoke bench-full clean
+.PHONY: help lint format typecheck test test-fast verify docs bench-smoke bench-full rmf-demos-setup ros-native-setup rmf-matrix clean
 
 help:  ## Show available targets
 	@grep -E '^[a-zA-Z_-]+:[^#]*## .*$$' $(MAKEFILE_LIST) | sort | \
@@ -37,6 +37,15 @@ bench-smoke:  ## Quick benchmark (~10 seconds)
 
 bench-full:  ## Full benchmark sweep
 	python benchmark/run_benchmark.py --sweep 100 500 1000
+
+rmf-demos-setup:  ## Build native Open-RMF demos workspace for Jazzy
+	bash scripts/setup_rmf_demos_jazzy.sh
+
+ros-native-setup:  ## Build native ROS 2 Jazzy overlay workspace
+	bash scripts/setup_native_ros2_jazzy.sh
+
+rmf-matrix:  ## Run native RMF client-mode matrix (requires source .ros2_native_env)
+	bash docker/test_rmf_client_modes.sh
 
 clean:  ## Remove build artifacts and caches
 	rm -rf build/ dist/ .coverage htmlcov/ .pytest_cache/
