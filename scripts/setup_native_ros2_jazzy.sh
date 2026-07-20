@@ -37,7 +37,7 @@ if [ ! -d "$PBF_VENV" ]; then
 fi
 
 "$PBF_VENV/bin/python" -m pip install -U pip
-"$PBF_VENV/bin/python" -m pip install -e "${REPO_ROOT}[sdf,dev]" "numpy<2" "pytest<9" catkin_pkg empy lark
+"$PBF_VENV/bin/python" -m pip install -e "${REPO_ROOT}[sdf,dev]" "numpy<2" "pytest<9" catkin_pkg "empy==3.3.4" lark
 PBF_VENV_SITE="$("$PBF_VENV/bin/python" -c "import sysconfig; print(sysconfig.get_paths()['purelib'])")"
 
 mkdir -p "$PBF_ROS_WS/src"

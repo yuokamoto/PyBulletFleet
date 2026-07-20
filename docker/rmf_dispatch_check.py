@@ -15,12 +15,10 @@ Scenarios are given as argv tokens ``type:arg1,arg2,...`` with an optional
     delivery:pantry,coke_dispenser,hardware_2,coke_ingestor
     clean:clean_lobby
 
-Each scenario PASSES when its dispatched task is observed to complete within
-``SCENARIO_TIMEOUT``. The portable completion signal is ``/fleet_states``:
-the task id must first be assigned to a robot and then clear from that robot's
-state. This works across the Docker image and native Jazzy setups, even when
-``/task_state_update`` or ``/task_summaries`` are not published by the launched
-RMF stack.
+Each scenario PASSES when its dispatched task reaches an explicit successful
+terminal state within ``SCENARIO_TIMEOUT``. ``/fleet_states`` is used to verify
+that a task was assigned to a robot, but clearing a task id is not treated as
+success because failed/canceled tasks also become unassigned.
 
 ``/task_state_update`` and ``/task_summaries`` are still consumed when present
 and can provide an earlier explicit ``completed``/terminal status. They are
@@ -369,6 +367,7 @@ def run_scenario(node, log, scenario) -> bool:
     seen_underway = False
     seen_motion = False
     seen_robot_task = False
+    warned_task_cleared = False
     max_zrise = 0.0
     while time.monotonic() < deadline and rclpy.ok():
         node.spin_for(1.0)
@@ -388,22 +387,9 @@ def run_scenario(node, log, scenario) -> bool:
         if status in TERMINAL_BAD:
             log.error(f"[{scenario}] FAIL: task reached terminal `{status}`")
             return False
-        if (
-            seen_robot_task
-            and not node.task_is_assigned(task_id)
-            and _extras_ready(node, kind, zrise_req, max_zrise, disp0, ing0)
-        ):
-            return _check_extras(
-                node,
-                log,
-                scenario,
-                kind,
-                zrise_req,
-                max_zrise,
-                disp0,
-                ing0,
-                "fleet state task cleared",
-            )
+        if seen_robot_task and not node.task_is_assigned(task_id) and not warned_task_cleared:
+            warned_task_cleared = True
+            log.warning(f"[{scenario}] task id cleared from /fleet_states without terminal success; continuing")
     log.error(
         f"[{scenario}] FAIL after {SCENARIO_TIMEOUT:.0f}s — last status="
         f"{node._task_status.get(task_id)}, underway={seen_underway}, moved={seen_motion}"
