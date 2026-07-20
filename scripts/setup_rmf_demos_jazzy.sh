@@ -14,7 +14,7 @@ if [ ! -f "$ROS_SETUP" ]; then
 fi
 
 sudo apt update
-sudo apt install -y git python3-vcstool python3-rosdep python3-catkin-pkg python3-empy python3-lark ros-jazzy-rmf-dev ros-jazzy-rmf-demos-assets ros-jazzy-rmf-demos-bridges ros-jazzy-rmf-demos-fleet-adapter ros-jazzy-rmf-demos-tasks ros-jazzy-nav2-msgs ros-jazzy-control-msgs ros-jazzy-tf2-ros ros-jazzy-tf2-geometry-msgs ros-jazzy-trajectory-msgs ros-jazzy-diagnostic-msgs ros-jazzy-simulation-interfaces ros-jazzy-teleop-twist-keyboard ros-jazzy-xacro ros-jazzy-turtlebot3-description ros-jazzy-ur-description python3-tk
+sudo apt install -y git python3-colcon-common-extensions python3-vcstool python3-rosdep python3-catkin-pkg python3-empy python3-lark ros-jazzy-rmf-dev ros-jazzy-rmf-demos-assets ros-jazzy-rmf-demos-bridges ros-jazzy-rmf-demos-fleet-adapter ros-jazzy-rmf-demos-tasks ros-jazzy-nav2-msgs ros-jazzy-control-msgs ros-jazzy-tf2-ros ros-jazzy-tf2-geometry-msgs ros-jazzy-trajectory-msgs ros-jazzy-diagnostic-msgs ros-jazzy-simulation-interfaces ros-jazzy-teleop-twist-keyboard ros-jazzy-xacro ros-jazzy-turtlebot3-description ros-jazzy-ur-description python3-tk
 
 if [ ! -f /etc/ros/rosdep/sources.list.d/20-default.list ]; then
     sudo rosdep init
