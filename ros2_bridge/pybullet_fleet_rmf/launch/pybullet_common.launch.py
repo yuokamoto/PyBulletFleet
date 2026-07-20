@@ -163,6 +163,17 @@ def _rmf_adapters_from_yaml(value: str) -> list[dict]:
     return adapters
 
 
+def _validate_adapter_client_modes(adapters: list[dict], client_mode: str) -> None:
+    """Reject per-adapter client_mode overrides that cannot be routed safely."""
+    for adapter in adapters:
+        adapter_mode = str(adapter.get("client_mode", client_mode)).strip().lower()
+        if adapter_mode != client_mode:
+            raise ValueError(
+                "rmf_adapters client_mode overrides must match the global "
+                f"client_mode ({client_mode!r}); got {adapter_mode!r}"
+            )
+
+
 def _bridge_config_for_client_mode(
     *,
     config_yaml: str,
@@ -176,6 +187,7 @@ def _bridge_config_for_client_mode(
         bridge_config = yaml.safe_load(f) or {}
     bridge_config = resolve_package_uris(bridge_config)
     adapters = _rmf_adapters_from_yaml(rmf_adapters)
+    _validate_adapter_client_modes(adapters, client_mode)
     if client_mode == "python_fleet":
         rmf_frame_offset = bridge_config.get("rmf_frame_offset", [0.0, 0.0])
         for adapter in adapters:
@@ -241,16 +253,17 @@ def _fleet_adapter_setup(context: LaunchContext):
     use_sim_time = context.launch_configurations.get("use_sim_time", "true")
     default_use_sim_time = _as_bool(use_sim_time, True)
     nodes = []
-    for index, adapter in enumerate(_rmf_adapters_from_yaml(context.launch_configurations["rmf_adapters"])):
+    adapters = _rmf_adapters_from_yaml(context.launch_configurations["rmf_adapters"])
+    _validate_adapter_client_modes(adapters, client_mode)
+    for index, adapter in enumerate(adapters):
         adapter_use_sim_time = _as_bool(str(adapter.get("use_sim_time", use_sim_time)), default_use_sim_time)
-        adapter_client_mode = adapter.get("client_mode", client_mode)
         arguments = ["-c", adapter["config_file"]]
         nav_graph = adapter.get("nav_graph", "")
         if nav_graph:
             arguments.extend(["-n", nav_graph])
         if adapter_use_sim_time:
             arguments.append("-sim")
-        arguments.extend(["--client-mode", adapter_client_mode])
+        arguments.extend(["--client-mode", client_mode])
         nodes.append(
             Node(
                 package="pybullet_fleet_rmf",

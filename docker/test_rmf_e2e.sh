@@ -73,10 +73,10 @@ case "$LAUNCH" in
         EXPECTED_ROBOTS="deliveryRobot_0,deliveryRobot_1,tinyRobot_0,tinyRobot_1"
         ;;
     airport_terminal_pybullet)
-        EXPECTED_ROBOTS="tinyRobot_0,tinyRobot_1,tinyRobot_2,tinyRobot_3,deliveryRobot_0,deliveryRobot_1,cleanerBotA_0,cleanerBotE_0"
+        EXPECTED_ROBOTS="tinyRobot_0,tinyRobot_1,tinyRobot_2,tinyRobot_3,deliveryRobot_0,deliveryRobot_1,deliveryRobot_2,cleanerBotA_0,cleanerBotE_0,cleanerBotE_1"
         ;;
     campus_pybullet)
-        EXPECTED_ROBOTS="deliveryRobot_0"
+        EXPECTED_ROBOTS="deliveryRobot_1,deliveryRobot_2,deliveryRobot_3"
         ;;
     battle_royale_pybullet)
         EXPECTED_ROBOTS="tinyRobotA,tinyRobot_1,tinyRobot_2,tinyRobot_3"

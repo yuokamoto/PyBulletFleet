@@ -178,6 +178,14 @@ class FleetRosInterface:
         return response
 
     def _dispatch_navigate(self, msg: FleetNavigate) -> PbfCommandAck:
+        frame_rejections = _navigation_frame_rejections(msg)
+        if frame_rejections:
+            return PbfCommandAck(
+                command_id=msg.command_id or "invalid",
+                source=_source_from_msg(msg),
+                sim_time=float(getattr(self.command_dispatcher.sim_core, "sim_time", 0.0)),
+                rejected=frame_rejections,
+            )
         return self.command_dispatcher.navigate(
             _navigation_goals_from_msg(msg, xy_offset=self._rmf_frame_offset),
             source=_source_from_msg(msg),
@@ -337,6 +345,14 @@ def _navigation_goals_from_msg(
     return [_goal_2d_from_msg(goal, xy_offset=xy_offset) for goal in msg.goals_2d] + [
         _goal_3d_from_msg(goal, xy_offset=xy_offset) for goal in msg.goals_3d
     ]
+
+
+def _navigation_frame_rejections(msg: FleetNavigate) -> dict[str, str]:
+    frame_id = getattr(getattr(msg, "header", None), "frame_id", "")
+    if frame_id in ("", "odom"):
+        return {}
+    names = [goal.name for goal in msg.goals_2d] + [goal.name for goal in msg.goals_3d]
+    return {name: f"unsupported frame_id {frame_id!r}; expected 'odom'" for name in names}
 
 
 def _attach_commands_from_msg(msg: FleetAttach) -> list[RobotAttachCommand]:

@@ -212,6 +212,10 @@ class DispatchChecker(Node):
                 return True
         return False
 
+    def expected_robots_registered(self) -> bool:
+        """Return True once every expected robot has appeared on RMF /fleet_states."""
+        return self._expected_robots.issubset(self._robot_task_ids)
+
     def wait_until_settled(self, max_wait, window, eps) -> bool:
         deadline = time.monotonic() + max_wait
         ref = dict(self._pos)
@@ -365,8 +369,6 @@ def run_scenario(node, log, scenario) -> bool:
     seen_underway = False
     seen_motion = False
     seen_robot_task = False
-    motion_settle_start = None
-    motion_settle_ref = None
     max_zrise = 0.0
     while time.monotonic() < deadline and rclpy.ok():
         node.spin_for(1.0)
@@ -402,33 +404,6 @@ def run_scenario(node, log, scenario) -> bool:
                 ing0,
                 "fleet state task cleared",
             )
-        if seen_motion and status == "dispatched" and _extras_ready(node, kind, zrise_req, max_zrise, disp0, ing0):
-            moved = max(
-                (
-                    math.hypot(node._pos[r][0] - motion_settle_ref[r][0], node._pos[r][1] - motion_settle_ref[r][1])
-                    for r in node._pos
-                    if node._pos.get(r) and motion_settle_ref and motion_settle_ref.get(r)
-                ),
-                default=0.0,
-            )
-            if motion_settle_ref is None or moved > SETTLE_EPS:
-                motion_settle_ref = dict(node._pos)
-                motion_settle_start = time.monotonic()
-            elif motion_settle_start is not None and time.monotonic() - motion_settle_start >= SETTLE_WINDOW:
-                log.warning(
-                    f"[{scenario}] no task completion update observed; " "accepting DISPATCHED + motion + settled robot state"
-                )
-                return _check_extras(
-                    node,
-                    log,
-                    scenario,
-                    kind,
-                    zrise_req,
-                    max_zrise,
-                    disp0,
-                    ing0,
-                    "DISPATCHED + motion + settled",
-                )
     log.error(
         f"[{scenario}] FAIL after {SCENARIO_TIMEOUT:.0f}s — last status="
         f"{node._task_status.get(task_id)}, underway={seen_underway}, moved={seen_motion}"
@@ -448,6 +423,10 @@ def main(scenarios, *, ready_only: bool = False, expected_robots=None) -> int:
     log.info(f"fleet up: robots={sorted(node._pos)}")
     log.info(f"waiting {ADAPTER_READY_GRACE:.0f}s for RMF adapter robot registration")
     node.spin_for(ADAPTER_READY_GRACE)
+    if expected_robots and not node.expected_robots_registered():
+        missing = sorted(set(expected_robots) - set(node._robot_task_ids))
+        log.error(f"expected robots missing from RMF /fleet_states: {missing}")
+        return 1
     if ready_only:
         return 0
 

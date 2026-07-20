@@ -196,6 +196,27 @@ def test_bridge_config_for_python_fleet_appends_multiple_rmf_plugins(tmp_path):
     assert all(plugin["config"]["client_mode"] == "python_fleet" for plugin in plugins)
 
 
+def test_bridge_config_rejects_mixed_adapter_client_mode(tmp_path):
+    module = _load_pybullet_common_launch()
+    config_path = tmp_path / "bridge.yaml"
+    config_path.write_text("simulation: {}\n")
+
+    with pytest.raises(ValueError, match="client_mode overrides must match"):
+        module._bridge_config_for_client_mode(
+            config_yaml=str(config_path),
+            client_mode="fleet_ros",
+            rmf_adapters=yaml.safe_dump(
+                [
+                    {
+                        "config_file": "/tmp/fleet.yaml",
+                        "nav_graph": "/tmp/nav.yaml",
+                        "client_mode": "python_fleet",
+                    }
+                ]
+            ),
+        )
+
+
 def test_rmf_adapters_requires_at_least_one_adapter():
     module = _load_pybullet_common_launch()
 

@@ -208,6 +208,26 @@ def test_fleet_navigate_service_applies_frame_offset():
     assert agent.goal_calls[0].y == pytest.approx(2.0)
 
 
+def test_fleet_navigate_service_rejects_unsupported_frame():
+    msgs, srvs = _fleet_msg_types()
+    node = _node()
+    agent = FakeAgent("robot0", 1)
+    interface = FleetRosInterface(node, FakeSim([agent]), FleetApiConfig(enabled=True, navigate=True))
+    request = srvs.FleetNavigate.Request()
+    request.header.frame_id = "map"
+    request.command_id = "cmd-map"
+    request.goals_2d = [msgs.RobotGoal2D(name="robot0", position=[1.0, 2.0], yaw=0.5, z=0.0)]
+    response = srvs.FleetNavigate.Response()
+
+    result = interface._on_navigate_service(request, response)
+
+    assert result.ack.command_id == "cmd-map"
+    assert result.ack.accepted_names == []
+    assert result.ack.rejected_names == ["robot0"]
+    assert "unsupported frame_id 'map'" in result.ack.reject_reasons[0]
+    assert agent.goal_calls == []
+
+
 def test_fleet_navigate_topic_logs_rejected_targets():
     msgs, _ = _fleet_msg_types()
     node = _node()
