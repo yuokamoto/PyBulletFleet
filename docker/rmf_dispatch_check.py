@@ -50,10 +50,16 @@ from rclpy.node import Node
 from rmf_dispenser_msgs.msg import DispenserResult
 from rmf_fleet_msgs.msg import FleetState
 from rmf_ingestor_msgs.msg import IngestorResult
-from rmf_task_msgs.msg import DispatchState
-from rmf_task_msgs.msg import DispatchStates
-from rmf_task_msgs.msg import TaskSummary
 from std_msgs.msg import String
+
+try:
+    from rmf_task_msgs.msg import DispatchState
+    from rmf_task_msgs.msg import DispatchStates
+    from rmf_task_msgs.msg import TaskSummary
+except ImportError:
+    DispatchState = None
+    DispatchStates = None
+    TaskSummary = None
 
 MOVE_THRESHOLD = 0.3  # metres; comfortably above odom noise
 # Task ids look like "<category>.dispatch-<hex>". Note clean dispatches a *composed*
@@ -116,8 +122,10 @@ class DispatchChecker(Node):
         self._disp_success = 0  # count of DispenserResult.SUCCESS seen
         self._ing_success = 0  # count of IngestorResult.SUCCESS seen
         self.create_subscription(FleetState, "/fleet_states", self._on_fleet, 10)
-        self.create_subscription(DispatchStates, "/dispatch_states", self._on_dispatch_states, 10)
-        self.create_subscription(TaskSummary, "/task_summaries", self._on_task_summary, 10)
+        if DispatchStates is not None and DispatchState is not None:
+            self.create_subscription(DispatchStates, "/dispatch_states", self._on_dispatch_states, 10)
+        if TaskSummary is not None:
+            self.create_subscription(TaskSummary, "/task_summaries", self._on_task_summary, 10)
         self.create_subscription(String, "/task_state_update", self._on_task_state, 10)
         self.create_subscription(DispenserResult, "/dispenser_results", self._on_disp_result, 10)
         self.create_subscription(IngestorResult, "/ingestor_results", self._on_ing_result, 10)

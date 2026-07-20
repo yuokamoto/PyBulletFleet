@@ -326,6 +326,14 @@ class FleetCommandDispatcher:
                 continue
             targets[name] = target
 
+        event = self._emit_command_event(
+            "attach",
+            resolved_id,
+            source,
+            tuple(command.name for command in command_tuple),
+            accepted,
+            rejected,
+        )
         for name, agent in tuple(accepted.items()):
             command = by_name[name]
             target = targets[name]
@@ -341,14 +349,7 @@ class FleetCommandDispatcher:
                 rejected[name] = "attach mutation failed" if command.attach else "detach mutation failed"
                 del accepted[name]
 
-        return self._ack(
-            "attach",
-            resolved_id,
-            source,
-            tuple(command.name for command in command_tuple),
-            accepted,
-            rejected,
-        )
+        return self._command_ack(event, accepted, rejected)
 
     def execute_action(
         self,
@@ -414,6 +415,18 @@ class FleetCommandDispatcher:
         accepted: Mapping[str, Any],
         rejected: Mapping[str, str],
     ) -> CommandAck:
+        event = self._emit_command_event(command_type, command_id, source, target_names, accepted, rejected)
+        return self._command_ack(event, accepted, rejected)
+
+    def _emit_command_event(
+        self,
+        command_type: str,
+        command_id: str,
+        source: str,
+        target_names: tuple[str, ...],
+        accepted: Mapping[str, Any],
+        rejected: Mapping[str, str],
+    ) -> CommandEvent:
         sim_time = float(getattr(self.sim_core, "sim_time", 0.0))
         accepted_names = tuple(accepted.keys())
         event = CommandEvent(
@@ -429,11 +442,19 @@ class FleetCommandDispatcher:
         events = getattr(self.sim_core, "events", None)
         if events is not None and hasattr(events, "emit"):
             events.emit(FLEET_COMMAND_EVENT, command_event=event)
+        return event
+
+    def _command_ack(
+        self,
+        event: CommandEvent,
+        accepted: Mapping[str, Any],
+        rejected: Mapping[str, str],
+    ) -> CommandAck:
         return CommandAck(
-            command_id=command_id,
-            source=source,
-            sim_time=sim_time,
-            accepted_names=accepted_names,
+            command_id=event.command_id,
+            source=event.source,
+            sim_time=event.sim_time,
+            accepted_names=tuple(accepted.keys()),
             rejected=dict(rejected),
         )
 

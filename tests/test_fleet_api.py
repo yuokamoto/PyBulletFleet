@@ -264,6 +264,11 @@ def test_dispatcher_attach_by_name_and_detach_attached_object():
     box = FakeObject("box")
     sim = FakeSim([robot0])
     sim.sim_objects = [box]
+    emitted = []
+    sim.events.on(
+        FLEET_COMMAND_EVENT,
+        lambda command_event: emitted.append((command_event, len(robot0.attach_calls))),
+    )
     dispatcher = FleetCommandDispatcher(sim)
 
     attach_ack = dispatcher.attach(
@@ -289,6 +294,8 @@ def test_dispatcher_attach_by_name_and_detach_attached_object():
     assert robot0.attach_calls[0][1] == "tool"
     assert robot0.attach_calls[0][2].z == pytest.approx(0.2)
     assert robot0.detach_calls == [box]
+    assert emitted[0][0].command_type == "attach"
+    assert emitted[0][1] == 0
 
 
 def test_dispatcher_attach_defaults_non_positive_search_radius():
@@ -336,6 +343,8 @@ def test_dispatcher_attach_rejects_failed_mutation():
 
     assert ack.accepted_names == ()
     assert ack.rejected == {"robot0": "attach mutation failed"}
+    assert dispatcher.command_events[0].accepted_names == ("robot0",)
+    assert dispatcher.command_events[0].rejected == {}
 
 
 def test_dispatcher_execute_action_queues_parsed_actions():
