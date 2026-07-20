@@ -23,10 +23,9 @@ def is_scalar(v: ScalarOrAxes) -> bool:
     Accepts Python ``int``/``float`` or a 0-d numpy array. Anything else (list,
     tuple, 1-d ndarray, …) is treated as per-axis.
     """
-    if isinstance(v, (int, float)):
+    if isinstance(v, (int, float, np.number)):
         return True
-    arr = np.asarray(v)
-    return arr.ndim == 0
+    return isinstance(v, np.ndarray) and getattr(v, "ndim", None) == 0
 
 
 def as_axes(v: ScalarOrAxes, dim: int = 3) -> np.ndarray:

@@ -16,6 +16,8 @@ from scipy.spatial.transform import Rotation as R, Slerp
 from pybullet_fleet.geometry import (
     Path,
     Pose,
+    as_axes,
+    is_scalar,
     quat_angle_between,
     quat_from_rotvec,
     quat_multiply,
@@ -28,6 +30,16 @@ from pybullet_fleet.geometry import (
 
 # Helper functions for testing
 IDENTITY_QUAT = [0, 0, 0, 1]  # Identity quaternion (no rotation)
+
+
+def test_scalar_helpers_accept_only_numeric_scalars():
+    assert is_scalar(1.0)
+    assert is_scalar(np.float32(1.0))
+    assert is_scalar(np.array(1.0))
+    assert not is_scalar([1.0, 2.0, 3.0])
+    assert not is_scalar("1.0")
+    assert not is_scalar(None)
+    np.testing.assert_array_equal(as_axes(2.0), np.array([2.0, 2.0, 2.0]))
 
 
 def assert_pose_equal(pose: Pose, expected_position: list, expected_orientation: list = None, decimal: int = 3):

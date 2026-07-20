@@ -57,6 +57,32 @@ def test_create_rmf_subscriptions_includes_lift_state_map_updates():
     api.set_map_name.assert_called_once_with("L2")
 
 
+def test_rmf_adapter_runtime_shutdown_destroys_connections():
+    from pybullet_fleet_rmf.fleet_adapter import RmfAdapterRuntime
+
+    node = MagicMock()
+    update_thread = MagicMock()
+    update_thread.is_alive.return_value = False
+    stop_event = MagicMock()
+    sub_a = MagicMock()
+    sub_b = MagicMock()
+    runtime = RmfAdapterRuntime(
+        node=node,
+        adapter=MagicMock(),
+        robots={},
+        update_thread=update_thread,
+        stop_event=stop_event,
+        connections=[sub_a, sub_b],
+    )
+
+    runtime.shutdown()
+
+    stop_event.set.assert_called_once()
+    node.destroy_subscription.assert_any_call(sub_a)
+    node.destroy_subscription.assert_any_call(sub_b)
+    assert runtime.connections == []
+
+
 def test_rmf_adapter_bridge_plugin_starts_runtime_with_sim_core(monkeypatch):
     from pybullet_fleet_rmf.rmf_adapter_plugin import RmfAdapterBridgePlugin
 
