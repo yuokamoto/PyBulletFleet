@@ -45,7 +45,8 @@ class FakeAgent:
         self.detach_calls = []
         self.action_calls = []
         self.attached_objects = []
-        self.pickable_object = None
+        self.pickable_object: FakeObject | None = None
+        self.search_radii = []
         self.sim_core = None
 
     def get_pose(self) -> Pose:
@@ -64,6 +65,7 @@ class FakeAgent:
         self.joint_calls.append(("named", dict(positions_by_name), max_force))
 
     def find_nearest_pickable(self, search_radius=0.5):
+        self.search_radii.append(search_radius)
         return self.pickable_object
 
     def attach_object(self, obj, parent_link_index="base_link", relative_pose=None) -> bool:
@@ -287,6 +289,22 @@ def test_dispatcher_attach_by_name_and_detach_attached_object():
     assert robot0.attach_calls[0][1] == "tool"
     assert robot0.attach_calls[0][2].z == pytest.approx(0.2)
     assert robot0.detach_calls == [box]
+
+
+def test_dispatcher_attach_defaults_non_positive_search_radius():
+    robot0 = FakeAgent("robot0", 1)
+    box = FakeObject("box")
+    robot0.pickable_object = box
+    dispatcher = FleetCommandDispatcher(FakeSim([robot0]))
+
+    ack = dispatcher.attach(
+        [RobotAttachCommand("robot0", attach=True, search_radius=-1.0)],
+        command_id="cmd-attach-nearest",
+    )
+
+    assert ack.ok
+    assert robot0.search_radii == [0.5]
+    assert robot0.attach_calls[0][0] is box
 
 
 def test_dispatcher_attach_rejects_missing_object_before_mutation():

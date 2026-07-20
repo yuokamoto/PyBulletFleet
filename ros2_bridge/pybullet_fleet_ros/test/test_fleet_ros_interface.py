@@ -62,6 +62,7 @@ class FakeAgent:
         self.action_calls = []
         self.attached_objects = []
         self.pickable_object = None
+        self.search_radii = []
         self.sim_core = None
 
     def get_pose(self):
@@ -77,6 +78,7 @@ class FakeAgent:
         self.stop_calls += 1
 
     def find_nearest_pickable(self, search_radius=0.5):
+        self.search_radii.append(search_radius)
         return self.pickable_object
 
     def attach_object(self, obj, parent_link_index="base_link", relative_pose=None):
@@ -327,6 +329,31 @@ def test_fleet_attach_service_dispatches_object_commands():
     assert robot0.attach_calls[0][0] is box
     assert robot0.attach_calls[0][1] == "tool"
     assert robot0.attach_calls[0][2].z == pytest.approx(0.2)
+
+
+def test_fleet_attach_service_defaults_non_positive_search_radius():
+    msgs, srvs = _fleet_msg_types()
+    node = _node()
+    robot0 = FakeAgent("robot0", 1)
+    robot0.pickable_object = FakeObject("box")
+    sim = FakeSim([robot0])
+    interface = FleetRosInterface(
+        node,
+        sim,
+        FleetApiConfig(enabled=True, attach=True),
+    )
+    request = srvs.FleetAttach.Request()
+    command = msgs.RobotAttachCommand()
+    command.name = "robot0"
+    command.attach = True
+    command.search_radius = -1.0
+    request.commands = [command]
+    response = srvs.FleetAttach.Response()
+
+    result = interface._on_attach_service(request, response)
+
+    assert result.ack.accepted_names == ["robot0"]
+    assert robot0.search_radii == [0.5]
 
 
 def test_fleet_execute_action_service_dispatches_action_commands():

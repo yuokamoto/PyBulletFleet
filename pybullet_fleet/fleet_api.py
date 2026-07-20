@@ -540,9 +540,12 @@ def _resolve_attach_target(agent: Any, command: RobotAttachCommand) -> tuple[Any
         finder = getattr(agent, "find_nearest_pickable", None)
         if finder is None:
             return None, "robot does not support nearest pickable search"
-        obj = finder(search_radius=float(command.search_radius or 0.5))
+        search_radius = float(command.search_radius)
+        if search_radius <= 0.0:
+            search_radius = 0.5
+        obj = finder(search_radius=search_radius)
         if obj is None:
-            return None, f"no pickable object within {float(command.search_radius or 0.5):.3g}m"
+            return None, f"no pickable object within {search_radius:.3g}m"
         return obj, None
 
     attached_getter = getattr(agent, "get_attached_objects", None)

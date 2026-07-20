@@ -367,6 +367,9 @@ def _attach_commands_from_msg(msg: FleetAttach) -> list[RobotAttachCommand]:
         ]
         if all(v == 0.0 for v in offset_orientation):
             offset_orientation = [0.0, 0.0, 0.0, 1.0]
+        search_radius = float(command.search_radius)
+        if search_radius <= 0.0:
+            search_radius = 0.5
         commands.append(
             RobotAttachCommand(
                 name=command.name,
@@ -381,7 +384,7 @@ def _attach_commands_from_msg(msg: FleetAttach) -> list[RobotAttachCommand]:
                     ],
                     orientation=offset_orientation,
                 ),
-                search_radius=float(command.search_radius or 0.5),
+                search_radius=search_radius,
             )
         )
     return commands

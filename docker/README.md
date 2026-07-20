@@ -489,23 +489,23 @@ docker compose run --rm --no-deps \
   bridge bash /docker/test_fleet_scale.sh --robots 100 --interface-mode per_robot \
     --command-interface per_robot --publish-rate 5
 
-	# Optional side-by-side command path check. Hybrid mode creates both fleet and
-	# per-robot command interfaces, then the checker exercises both on one bridge run.
-	docker compose run --rm --no-deps \
-	  -v "$(pwd):/docker:ro" \
-	  bridge bash /docker/test_fleet_scale.sh --robots 100 --interface-mode hybrid \
-	    --command-interface all --publish-rate 5 --target-rtf 0.0
+# Optional side-by-side command path check. Hybrid mode creates both fleet and
+# per-robot command interfaces, then the checker exercises both on one bridge run.
+docker compose run --rm --no-deps \
+  -v "$(pwd):/docker:ro" \
+  bridge bash /docker/test_fleet_scale.sh --robots 100 --interface-mode hybrid \
+    --command-interface all --publish-rate 5 --target-rtf 0.0
 
-	# Optional RMF client-mode matrix. The default matrix runs office and hotel in
-	# per_robot_ros, fleet_ros, and python_fleet modes. Add --full for readiness
-	# checks across the remaining RMF demos.
-	docker compose run --rm --no-deps \
-	  -v "$(pwd):/docker:ro" \
-	  bridge bash /docker/test_rmf_client_modes.sh
+# Optional RMF client-mode matrix. The default matrix runs office and hotel in
+# per_robot_ros, fleet_ros, and python_fleet modes. Add --full for readiness
+# checks across the remaining RMF demos.
+docker compose run --rm --no-deps \
+  -v "$(pwd):/docker:ro" \
+  bridge bash /docker/test_rmf_client_modes.sh
 
-	docker compose run --rm --no-deps \
-	  -v "$(pwd):/docker:ro" \
-	  bridge bash /docker/test_rmf_client_modes.sh --full
+docker compose run --rm --no-deps \
+  -v "$(pwd):/docker:ro" \
+  bridge bash /docker/test_rmf_client_modes.sh --full
 
 # Hybrid debug: enable only selected per-robot interface groups to isolate which
 # ROS entities add latency. Valid groups are state_publishers, tf, command_topics,

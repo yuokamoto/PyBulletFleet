@@ -55,6 +55,7 @@ class _FakeAgent:
         self.attach_calls = []
         self.detach_calls = []
         self.attached = []
+        self.search_radii = []
         self.sim_core = None
 
     def get_pose(self):
@@ -83,7 +84,7 @@ class _FakeAgent:
         return list(self.attached)
 
     def find_nearest_pickable(self, search_radius=0.5):
-        del search_radius
+        self.search_radii.append(search_radius)
         return self.sim_core.sim_objects[0] if self.sim_core.sim_objects else None
 
     def set_charging(self, charging: bool):
@@ -358,6 +359,22 @@ def test_python_fleet_robot_client_dispatches_navigation_stop_and_attach(mock_no
     assert agent.attach_calls[0][1] == "tool"
     assert agent.attach_calls[0][2].z == pytest.approx(0.2)
     assert robot.get_data().last_completed_cmd_id == 7
+
+
+def test_python_fleet_robot_client_defaults_non_positive_attach_search_radius(mock_node):
+    del mock_node
+    from pybullet_fleet_rmf.fleet_clients import PythonRmfFleetClient
+
+    box = _FakeObject("box")
+    agent = _FakeAgent("tinyRobot1")
+    sim = _FakeSim([agent], [box])
+    fleet = PythonRmfFleetClient.from_sim_core(sim, map_name="L1")
+    robot = fleet.robot("tinyRobot1")
+
+    assert robot.attach_object(True, 7, search_radius=-1.0)
+
+    assert agent.search_radii == [0.5]
+    assert agent.attach_calls[0][0] is box
 
 
 def test_python_fleet_robot_client_sets_charging_directly(mock_node):

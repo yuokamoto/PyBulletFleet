@@ -520,6 +520,9 @@ class PythonRmfFleetClient:
         search_radius: float = 0.0,
     ) -> bool:
         """Dispatch one direct fleet attach/detach command."""
+        radius = float(search_radius)
+        if radius <= 0.0:
+            radius = 0.5
         ack = self._dispatcher.attach(
             [
                 PbfRobotAttachCommand(
@@ -540,7 +543,7 @@ class PythonRmfFleetClient:
                             float(offset_orientation[3]),
                         ],
                     ),
-                    search_radius=float(search_radius or 0.5),
+                    search_radius=radius,
                 )
             ],
             source="rmf-python",
