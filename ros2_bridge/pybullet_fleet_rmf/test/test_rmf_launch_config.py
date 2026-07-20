@@ -56,9 +56,8 @@ def test_bridge_config_for_per_robot_ros_does_not_append_rmf_plugin(tmp_path):
         client_mode="per_robot_ros",
     )
 
-    assert result != str(config_path)
-    generated = yaml.safe_load(Path(result).read_text())
-    assert generated == {"simulation": {}}
+    assert result == str(config_path)
+    assert yaml.safe_load(config_path.read_text()) == {"simulation": {}}
 
 
 def test_bridge_config_resolves_package_uris(tmp_path, monkeypatch):

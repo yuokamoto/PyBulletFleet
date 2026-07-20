@@ -183,11 +183,14 @@ def _bridge_config_for_client_mode(
     use_sim_time: bool = True,
 ) -> str:
     """Return bridge config path, generating a merged temp config if needed."""
+    adapters = _rmf_adapters_from_yaml(rmf_adapters)
+    _validate_adapter_client_modes(adapters, client_mode)
+    if client_mode not in {"python_fleet", "fleet_ros"}:
+        return config_yaml
+
     with open(config_yaml, "r") as f:
         bridge_config = yaml.safe_load(f) or {}
     bridge_config = resolve_package_uris(bridge_config)
-    adapters = _rmf_adapters_from_yaml(rmf_adapters)
-    _validate_adapter_client_modes(adapters, client_mode)
     if client_mode == "python_fleet":
         rmf_frame_offset = bridge_config.get("rmf_frame_offset", [0.0, 0.0])
         for adapter in adapters:
@@ -200,7 +203,7 @@ def _bridge_config_for_client_mode(
                 use_sim_time=adapter.get("use_sim_time", use_sim_time),
                 rmf_frame_offset=adapter.get("rmf_frame_offset", rmf_frame_offset),
             )
-    elif client_mode == "fleet_ros":
+    else:
         bridge_config = _enable_fleet_api_for_rmf_client(bridge_config)
     fd, path = tempfile.mkstemp(prefix="pbf_rmf_bridge_", suffix=".yaml")
     with os.fdopen(fd, "w") as f:
