@@ -96,6 +96,7 @@ def test_rmf_adapter_bridge_plugin_starts_runtime_with_sim_core(monkeypatch):
             "client_mode": "python_fleet",
             "sim_core": sim_core,
             "server_uri": "ws://localhost:8000/_internal",
+            "rmf_frame_offset": (0.0, 0.0),
         }
     ]
 
