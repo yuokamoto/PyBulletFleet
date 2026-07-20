@@ -269,17 +269,12 @@ def dispatch(node, log, scenario):
     task_id = m.group(0) if m else None
     if task_id is None:
         log.warning(
-            "dispatch output did not include a task id; "
-            f"stdout={out.stdout.strip()!r} stderr={out.stderr.strip()!r}"
+            "dispatch output did not include a task id; " f"stdout={out.stdout.strip()!r} stderr={out.stderr.strip()!r}"
         )
         deadline = time.monotonic() + 10.0
         while time.monotonic() < deadline and rclpy.ok():
             node.spin_for(0.5)
-            new_task_ids = [
-                task_id
-                for task_id in node._task_status
-                if task_id not in known_task_ids
-            ]
+            new_task_ids = [task_id for task_id in node._task_status if task_id not in known_task_ids]
             if new_task_ids:
                 task_id = sorted(new_task_ids)[-1]
                 log.info(f"dispatch task_id recovered from /dispatch_states: {task_id}")
@@ -391,8 +386,10 @@ def run_scenario(node, log, scenario) -> bool:
         if status in TERMINAL_BAD:
             log.error(f"[{scenario}] FAIL: task reached terminal `{status}`")
             return False
-        if seen_robot_task and not node.task_is_assigned(task_id) and _extras_ready(
-            node, kind, zrise_req, max_zrise, disp0, ing0
+        if (
+            seen_robot_task
+            and not node.task_is_assigned(task_id)
+            and _extras_ready(node, kind, zrise_req, max_zrise, disp0, ing0)
         ):
             return _check_extras(
                 node,
@@ -419,8 +416,7 @@ def run_scenario(node, log, scenario) -> bool:
                 motion_settle_start = time.monotonic()
             elif motion_settle_start is not None and time.monotonic() - motion_settle_start >= SETTLE_WINDOW:
                 log.warning(
-                    f"[{scenario}] no task completion update observed; "
-                    "accepting DISPATCHED + motion + settled robot state"
+                    f"[{scenario}] no task completion update observed; " "accepting DISPATCHED + motion + settled robot state"
                 )
                 return _check_extras(
                     node,

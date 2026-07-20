@@ -370,9 +370,7 @@ def main() -> int:
             print(f"  FAIL /fleet/joint_command ack: {joint_resp.ack}")
             return 1
         print(
-            "  OK /fleet/navigate, /fleet/stop, /fleet/attach, "
-            "/fleet/execute_action, "
-            "and /fleet/joint_command responded"
+            "  OK /fleet/navigate, /fleet/stop, /fleet/attach, " "/fleet/execute_action, " "and /fleet/joint_command responded"
         )
         print(f"  OK /fleet/stop halted {nav_robot} after motion started")
         return 0

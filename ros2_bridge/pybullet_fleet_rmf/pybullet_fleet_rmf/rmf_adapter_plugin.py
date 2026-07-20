@@ -46,4 +46,3 @@ class RmfAdapterBridgePlugin(BridgePlugin):
         )
         if self.runtime is None:
             raise RuntimeError("failed to start in-process RMF adapter")
-

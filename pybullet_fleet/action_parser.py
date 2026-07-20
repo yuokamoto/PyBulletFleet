@@ -56,12 +56,7 @@ def _infer_conv(annotation) -> _Conv:
 def _discover_actions() -> Dict[str, Type[Action]]:
     registry: Dict[str, Type[Action]] = {}
     for name, cls in inspect.getmembers(_action_module, inspect.isclass):
-        if (
-            issubclass(cls, Action)
-            and cls is not Action
-            and not inspect.isabstract(cls)
-            and name.endswith("Action")
-        ):
+        if issubclass(cls, Action) and cls is not Action and not inspect.isabstract(cls) and name.endswith("Action"):
             registry[name[: -len("Action")].lower()] = cls
     return registry
 
@@ -77,10 +72,7 @@ def _build_action(cls: Type[Action], params: dict) -> Action:
             continue
 
         conv = _infer_conv(field.type)
-        has_default = (
-            field.default is not dataclasses.MISSING
-            or field.default_factory is not dataclasses.MISSING
-        )
+        has_default = field.default is not dataclasses.MISSING or field.default_factory is not dataclasses.MISSING
 
         if has_default:
             if field.name in params:

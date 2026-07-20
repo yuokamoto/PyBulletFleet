@@ -964,8 +964,9 @@ class DifferentialController(KinematicController):
         self._forward_total_distance_3d = float(np.linalg.norm(direction_vec))
 
         if self._forward_total_distance_3d > 1e-6:
-            self._forward_direction_3d = goal_pos - current_pos
-            self._forward_direction_unit = self._forward_direction_3d / self._forward_total_distance_3d
+            forward_direction_3d = goal_pos - current_pos
+            self._forward_direction_3d = forward_direction_3d
+            self._forward_direction_unit = forward_direction_3d / self._forward_total_distance_3d
         else:
             self._forward_direction_3d = np.zeros(3)
             self._forward_direction_unit = np.zeros(3)

@@ -27,9 +27,7 @@ def test_bridge_config_for_non_python_fleet_does_not_append_rmf_plugin(tmp_path)
 
     result = module._bridge_config_for_client_mode(
         config_yaml=str(config_path),
-        rmf_adapters=yaml.safe_dump(
-            [{"config_file": "/tmp/fleet.yaml", "nav_graph": "/tmp/nav.yaml"}]
-        ),
+        rmf_adapters=yaml.safe_dump([{"config_file": "/tmp/fleet.yaml", "nav_graph": "/tmp/nav.yaml"}]),
         client_mode="fleet_ros",
     )
 
@@ -57,9 +55,7 @@ def test_bridge_config_resolves_package_uris(tmp_path, monkeypatch):
     config_path.write_text(
         yaml.safe_dump(
             {
-                "simulation": {
-                    "world_file": "package://rmf_demos_maps/maps/office/office.world"
-                },
+                "simulation": {"world_file": "package://rmf_demos_maps/maps/office/office.world"},
                 "robots": [
                     {
                         "name": "tinyRobot1",
@@ -72,9 +68,7 @@ def test_bridge_config_resolves_package_uris(tmp_path, monkeypatch):
 
     result = module._bridge_config_for_client_mode(
         config_yaml=str(config_path),
-        rmf_adapters=yaml.safe_dump(
-            [{"config_file": "/tmp/fleet.yaml", "nav_graph": "/tmp/nav.yaml"}]
-        ),
+        rmf_adapters=yaml.safe_dump([{"config_file": "/tmp/fleet.yaml", "nav_graph": "/tmp/nav.yaml"}]),
         client_mode="fleet_ros",
     )
 
@@ -89,18 +83,14 @@ def test_bridge_config_leaves_non_package_paths_unchanged(tmp_path):
     config_path.write_text(
         yaml.safe_dump(
             {
-                "simulation": {
-                    "world_file": "/tmp/custom_maps/maps/office/office.world"
-                },
+                "simulation": {"world_file": "/tmp/custom_maps/maps/office/office.world"},
             }
         )
     )
 
     result = module._bridge_config_for_client_mode(
         config_yaml=str(config_path),
-        rmf_adapters=yaml.safe_dump(
-            [{"config_file": "/tmp/fleet.yaml", "nav_graph": "/tmp/nav.yaml"}]
-        ),
+        rmf_adapters=yaml.safe_dump([{"config_file": "/tmp/fleet.yaml", "nav_graph": "/tmp/nav.yaml"}]),
         client_mode="fleet_ros",
     )
 
@@ -122,9 +112,7 @@ def test_bridge_config_for_python_fleet_appends_single_rmf_plugin(tmp_path):
 
     result = module._bridge_config_for_client_mode(
         config_yaml=str(config_path),
-        rmf_adapters=yaml.safe_dump(
-            [{"config_file": "/tmp/fleet.yaml", "nav_graph": "/tmp/nav.yaml"}]
-        ),
+        rmf_adapters=yaml.safe_dump([{"config_file": "/tmp/fleet.yaml", "nav_graph": "/tmp/nav.yaml"}]),
         client_mode="python_fleet",
         server_uri="ws://localhost:8000/_internal",
         use_sim_time=True,
