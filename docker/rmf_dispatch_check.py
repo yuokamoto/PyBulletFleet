@@ -329,14 +329,6 @@ def _check_extras(node, log, scenario, kind, zrise_req, max_zrise, disp0, ing0, 
     return ok
 
 
-def _extras_ready(node, kind, zrise_req, max_zrise, disp0, ing0) -> bool:
-    if kind == "delivery" and (node._disp_success <= disp0 or node._ing_success <= ing0):
-        return False
-    if zrise_req is not None and max_zrise < zrise_req:
-        return False
-    return True
-
-
 def run_scenario(node, log, scenario) -> bool:
     """Dispatch one scenario, wait for completion, then assert extra signals.
 

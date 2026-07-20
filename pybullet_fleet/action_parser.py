@@ -5,14 +5,14 @@ from __future__ import annotations
 import dataclasses
 import inspect
 import json
-import logging
 from typing import Callable, Dict, Optional, Type, Union
 
 import pybullet_fleet.action as _action_module
 from pybullet_fleet.action import Action
 from pybullet_fleet.geometry import Path, Pose
+from pybullet_fleet.logging_utils import get_lazy_logger
 
-logger = logging.getLogger(__name__)
+logger = get_lazy_logger(__name__)
 
 _PASS = None
 _Conv = Optional[Callable]
