@@ -155,7 +155,7 @@ def start_adapter_runtime(
 
     # Parse the YAML in Python to get PyBulletFleet-specific settings
     with open(config_path, "r") as f:
-        config_yaml = yaml.safe_load(f)
+        config_yaml = yaml.safe_load(f) or {}
 
     fleet_name = config_yaml.get("rmf_fleet", {}).get("name", "pybullet_fleet")
 
@@ -347,7 +347,7 @@ def main(argv=sys.argv):
 
     # ROS 2 node for the command handle
     with open(args.config_file, "r") as f:
-        config_yaml = yaml.safe_load(f)
+        config_yaml = yaml.safe_load(f) or {}
     fleet_name = config_yaml.get("rmf_fleet", {}).get("name", "pybullet_fleet")
     node = rclpy.node.Node(f"{fleet_name}_command_handle")
 

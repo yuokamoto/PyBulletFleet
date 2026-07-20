@@ -38,6 +38,7 @@ Example (from a demo launch file)::
     )
 """
 
+import atexit
 import os
 import subprocess
 import tempfile
@@ -49,6 +50,13 @@ from launch_ros.actions import Node
 from pybullet_fleet_ros.uri_utils import resolve_package_uris
 
 RMF_ADAPTER_PLUGIN_CLASS = "pybullet_fleet_rmf.rmf_adapter_plugin.RmfAdapterBridgePlugin"
+
+
+def _cleanup_temp_file(path: str) -> None:
+    try:
+        os.unlink(path)
+    except FileNotFoundError:
+        pass
 
 
 def _as_bool(value: str, default: bool = False) -> bool:
@@ -208,6 +216,7 @@ def _bridge_config_for_client_mode(
     fd, path = tempfile.mkstemp(prefix="pbf_rmf_bridge_", suffix=".yaml")
     with os.fdopen(fd, "w") as f:
         yaml.safe_dump(bridge_config, f, sort_keys=False)
+    atexit.register(_cleanup_temp_file, path)
     return path
 
 

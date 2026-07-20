@@ -45,6 +45,23 @@ def test_bridge_config_for_fleet_ros_enables_required_fleet_api(tmp_path):
     }
 
 
+def test_bridge_config_registers_temp_file_cleanup(tmp_path, monkeypatch):
+    module = _load_pybullet_common_launch()
+    config_path = tmp_path / "bridge.yaml"
+    config_path.write_text("simulation: {}\n")
+    registered = []
+
+    monkeypatch.setattr(module.atexit, "register", lambda func, path: registered.append((func, path)))
+
+    result = module._bridge_config_for_client_mode(
+        config_yaml=str(config_path),
+        rmf_adapters=yaml.safe_dump([{"config_file": "/tmp/fleet.yaml", "nav_graph": "/tmp/nav.yaml"}]),
+        client_mode="fleet_ros",
+    )
+
+    assert registered == [(module._cleanup_temp_file, result)]
+
+
 def test_bridge_config_for_per_robot_ros_does_not_append_rmf_plugin(tmp_path):
     module = _load_pybullet_common_launch()
     config_path = tmp_path / "bridge.yaml"
