@@ -74,12 +74,23 @@ class RmfAdapterRuntime:
     in-process bridge plugin.
     """
 
-    def __init__(self, *, node, adapter, robots, update_thread, connections) -> None:
+    def __init__(self, *, node, adapter, robots, update_thread, stop_event, connections) -> None:
         self.node = node
         self.adapter = adapter
         self.robots = robots
         self.update_thread = update_thread
+        self.stop_event = stop_event
         self.connections = connections
+        self._shutdown = False
+
+    def shutdown(self, timeout: float = 2.0) -> None:
+        """Stop background adapter work owned by this runtime."""
+        if self._shutdown:
+            return
+        self._shutdown = True
+        self.stop_event.set()
+        if self.update_thread.is_alive():
+            self.update_thread.join(timeout=timeout)
 
 
 def _ensure_rmf_adapter_initialized() -> None:
@@ -244,10 +255,12 @@ def start_adapter_runtime(
         "reassign_task_interval", 60
     )  # seconds — periodically re-optimize task assignments
 
+    stop_event = threading.Event()
+
     def update_loop():
         asyncio.set_event_loop(asyncio.new_event_loop())
         last_task_replan = node.get_clock().now()
-        while rclpy.ok():
+        while rclpy.ok() and not stop_event.is_set():
             now = node.get_clock().now()
             update_jobs = []
             for robot in robots.values():
@@ -261,7 +274,7 @@ def start_adapter_runtime(
                 last_task_replan = now
 
             next_wakeup = now + Duration(nanoseconds=update_period * 1e9)
-            while node.get_clock().now() < next_wakeup:
+            while node.get_clock().now() < next_wakeup and not stop_event.is_set():
                 time.sleep(0.001)
 
     update_thread = threading.Thread(target=update_loop, daemon=True)
@@ -275,6 +288,7 @@ def start_adapter_runtime(
         adapter=adapter,
         robots=robots,
         update_thread=update_thread,
+        stop_event=stop_event,
         connections=connections,
     )
 

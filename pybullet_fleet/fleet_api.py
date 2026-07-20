@@ -326,7 +326,22 @@ class FleetCommandDispatcher:
                 continue
             targets[name] = target
 
-        ack = self._ack(
+        for name, agent in tuple(accepted.items()):
+            command = by_name[name]
+            target = targets[name]
+            if command.attach:
+                ok = agent.attach_object(
+                    target,
+                    parent_link_index=command.parent_link or "base_link",
+                    relative_pose=command.offset,
+                )
+            else:
+                ok = agent.detach_object(target)
+            if not ok:
+                rejected[name] = "attach mutation failed" if command.attach else "detach mutation failed"
+                del accepted[name]
+
+        return self._ack(
             "attach",
             resolved_id,
             source,
@@ -334,19 +349,6 @@ class FleetCommandDispatcher:
             accepted,
             rejected,
         )
-        for name in ack.accepted_names:
-            command = by_name[name]
-            agent = accepted[name]
-            target = targets[name]
-            if command.attach:
-                agent.attach_object(
-                    target,
-                    parent_link_index=command.parent_link or "base_link",
-                    relative_pose=command.offset,
-                )
-            else:
-                agent.detach_object(target)
-        return ack
 
     def execute_action(
         self,

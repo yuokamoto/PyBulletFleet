@@ -101,6 +101,23 @@ def test_rmf_adapter_bridge_plugin_starts_runtime_with_sim_core(monkeypatch):
     ]
 
 
+def test_rmf_adapter_bridge_plugin_destroy_shuts_down_runtime(monkeypatch):
+    from pybullet_fleet_rmf.rmf_adapter_plugin import RmfAdapterBridgePlugin
+
+    runtime = MagicMock()
+    monkeypatch.setattr(
+        "pybullet_fleet_rmf.rmf_adapter_plugin.start_adapter_runtime",
+        lambda **kwargs: runtime,
+    )
+    plugin = RmfAdapterBridgePlugin(MagicMock(), MagicMock(), config_file="/tmp/fleet.yaml")
+
+    plugin.on_init()
+    plugin.destroy()
+
+    runtime.shutdown.assert_called_once()
+    assert plugin.runtime is None
+
+
 def test_rmf_adapter_bridge_plugin_raises_when_runtime_fails(monkeypatch):
     from pybullet_fleet_rmf.rmf_adapter_plugin import RmfAdapterBridgePlugin
 

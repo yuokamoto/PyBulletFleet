@@ -49,3 +49,9 @@ class RmfAdapterBridgePlugin(BridgePlugin):
         )
         if self.runtime is None:
             raise RuntimeError("failed to start in-process RMF adapter")
+
+    def destroy(self) -> None:
+        """Stop the in-process RMF adapter runtime before bridge reset/shutdown."""
+        if self.runtime is not None:
+            self.runtime.shutdown()
+            self.runtime = None

@@ -303,6 +303,23 @@ def test_dispatcher_attach_rejects_missing_object_before_mutation():
     assert robot0.attach_calls == []
 
 
+def test_dispatcher_attach_rejects_failed_mutation():
+    robot0 = FakeAgent("robot0", 1)
+    robot0.attach_object = lambda *args, **kwargs: False
+    box = FakeObject("box")
+    sim = FakeSim([robot0])
+    sim.sim_objects = [box]
+    dispatcher = FleetCommandDispatcher(sim)
+
+    ack = dispatcher.attach(
+        [RobotAttachCommand("robot0", attach=True, object_name="box")],
+        command_id="cmd-attach-fail",
+    )
+
+    assert ack.accepted_names == ()
+    assert ack.rejected == {"robot0": "attach mutation failed"}
+
+
 def test_dispatcher_execute_action_queues_parsed_actions():
     robot0 = FakeAgent("robot0", 1)
     dispatcher = FleetCommandDispatcher(FakeSim([robot0]))
