@@ -66,12 +66,12 @@ class FakeAgent:
     def find_nearest_pickable(self, search_radius=0.5):
         return self.pickable_object
 
-    def attach_object(self, obj, parent_link_index="base_link", relative_pose=None):
+    def attach_object(self, obj, parent_link_index="base_link", relative_pose=None) -> bool:
         self.attach_calls.append((obj, parent_link_index, relative_pose))
         self.attached_objects.append(obj)
         return True
 
-    def detach_object(self, obj):
+    def detach_object(self, obj) -> bool:
         self.detach_calls.append(obj)
         self.attached_objects.remove(obj)
         return True
