@@ -230,6 +230,23 @@ def test_fleet_navigate_service_rejects_unsupported_frame():
     assert agent.goal_calls == []
 
 
+def test_fleet_navigate_service_rejects_unsupported_frame_with_empty_command_id():
+    msgs, srvs = _fleet_msg_types()
+    node = _node()
+    agent = FakeAgent("robot0", 1)
+    interface = FleetRosInterface(node, FakeSim([agent]), FleetApiConfig(enabled=True, navigate=True))
+    request = srvs.FleetNavigate.Request()
+    request.header.frame_id = "map"
+    request.goals_2d = [msgs.RobotGoal2D(name="robot0", position=[1.0, 2.0], yaw=0.5, z=0.0)]
+    response = srvs.FleetNavigate.Response()
+
+    result = interface._on_navigate_service(request, response)
+
+    assert result.ack.command_id == ""
+    assert result.ack.rejected_names == ["robot0"]
+    assert agent.goal_calls == []
+
+
 def test_fleet_navigate_topic_logs_rejected_targets():
     msgs, _ = _fleet_msg_types()
     node = _node()
@@ -405,6 +422,27 @@ def test_named_joint_service_rejects_mismatched_arrays():
 
     assert result.ack.command_id == "cmd-2"
     assert result.ack.accepted_names == []
+    assert result.ack.rejected_names == ["robot0"]
+    assert "2 joint names" in result.ack.reject_reasons[0]
+
+
+def test_named_joint_service_rejects_mismatched_arrays_with_empty_command_id():
+    msgs, srvs = _fleet_msg_types()
+    node = _node()
+    interface = FleetRosInterface(
+        node,
+        FakeSim([FakeAgent("robot0", 1)]),
+        FleetApiConfig(enabled=True, joint_command=True),
+    )
+    request = srvs.FleetJointCommand.Request()
+    request.named_joint_position_commands = [
+        msgs.RobotNamedJointPositionsCommand(name="robot0", joint_names=["joint1", "joint2"], positions=[1.0])
+    ]
+    response = srvs.FleetJointCommand.Response()
+
+    result = interface._on_joint_command_service(request, response)
+
+    assert result.ack.command_id == ""
     assert result.ack.rejected_names == ["robot0"]
     assert "2 joint names" in result.ack.reject_reasons[0]
 

@@ -181,7 +181,7 @@ class FleetRosInterface:
         frame_rejections = _navigation_frame_rejections(msg)
         if frame_rejections:
             return PbfCommandAck(
-                command_id=msg.command_id or "invalid",
+                command_id=msg.command_id,
                 source=_source_from_msg(msg),
                 sim_time=float(getattr(self.command_dispatcher.sim_core, "sim_time", 0.0)),
                 rejected=frame_rejections,
@@ -247,7 +247,7 @@ class FleetRosInterface:
         commands, validation_rejected = _joint_commands_from_msg(msg)
         if not commands:
             return PbfCommandAck(
-                command_id=command_id or "invalid",
+                command_id=msg.command_id,
                 source=source,
                 sim_time=float(getattr(self.command_dispatcher.sim_core, "sim_time", 0.0)),
                 rejected=validation_rejected,
