@@ -1158,10 +1158,10 @@ class TestAgentMotionUpdate:
             agent.update(dt)
 
         final_pos = np.array(agent.get_pose().position)
-        assert np.allclose(final_pos, stopped_pos, atol=1e-6)
+        assert np.allclose(final_pos, stopped_pos)
         assert not agent.is_moving
         assert agent.goal_pose is None
-        assert np.allclose(agent.velocity, [0, 0, 0], atol=1e-9)
+        assert np.allclose(agent.velocity, [0, 0, 0])
 
     def test_omni_final_orientation_align(self, pybullet_env):
         """Omnidirectional agent should align to goal orientation after reaching position.

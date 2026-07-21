@@ -14,7 +14,7 @@
 #   "joint" — JointAction  (set joint positions)
 #
 # command.action_params_json encodes parameters as a JSON object.
-# See pybullet_fleet_ros/action_parser.py for the schema per type.
+# See pybullet_fleet/action_parser.py for the schema per type.
 #
 # Examples:
 #
