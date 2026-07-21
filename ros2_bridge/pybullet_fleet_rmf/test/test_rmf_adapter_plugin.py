@@ -1,5 +1,6 @@
 """Unit tests for the in-process RMF adapter bridge plugin."""
 
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
@@ -136,6 +137,34 @@ def test_rmf_adapter_runtime_shutdown_continues_when_adapter_stop_fails():
     adapter.stop.assert_called_once()
     node.destroy_subscription.assert_called_once_with(sub)
     assert runtime.connections == []
+
+
+def test_fleet_adapter_main_shuts_down_runtime(monkeypatch, tmp_path):
+    from pybullet_fleet_rmf import fleet_adapter
+
+    config = tmp_path / "fleet.yaml"
+    config.write_text("rmf_fleet:\n  name: tinyRobot\n", encoding="utf-8")
+
+    node = MagicMock()
+    runtime = MagicMock()
+    executor = MagicMock()
+    executor.spin.side_effect = KeyboardInterrupt()
+    fake_rclpy = SimpleNamespace(
+        init=MagicMock(),
+        shutdown=MagicMock(),
+        utilities=SimpleNamespace(remove_ros_args=lambda argv: argv),
+        node=SimpleNamespace(Node=MagicMock(return_value=node)),
+        executors=SimpleNamespace(SingleThreadedExecutor=MagicMock(return_value=executor)),
+    )
+    monkeypatch.setattr(fleet_adapter, "rclpy", fake_rclpy)
+    monkeypatch.setattr(fleet_adapter, "start_adapter_runtime", MagicMock(return_value=runtime))
+
+    fleet_adapter.main(["fleet_adapter", "-c", str(config)])
+
+    runtime.shutdown.assert_called_once()
+    node.destroy_node.assert_called_once()
+    executor.shutdown.assert_called_once()
+    fake_rclpy.shutdown.assert_called_once()
 
 
 def test_rmf_adapter_bridge_plugin_starts_runtime_with_sim_core(monkeypatch):

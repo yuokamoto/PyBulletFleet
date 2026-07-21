@@ -390,6 +390,7 @@ def main(argv=sys.argv):
     except KeyboardInterrupt:
         pass
     finally:
+        runtime.shutdown()
         node.destroy_node()
         rclpy_executor.shutdown()
         rclpy.shutdown()

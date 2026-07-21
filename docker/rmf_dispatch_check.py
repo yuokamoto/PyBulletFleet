@@ -490,8 +490,7 @@ if __name__ == "__main__":
             scenario_args.append(arg)
     if not scenario_args and not ready_only:
         print(
-            "usage: rmf_dispatch_check.py [--ready-only] [--allow-fleet-state-clear-fallback] "
-            "<type:args[;assert]> [...]",
+            "usage: rmf_dispatch_check.py [--ready-only] [--allow-fleet-state-clear-fallback] " "<type:args[;assert]> [...]",
             file=sys.stderr,
         )
         sys.exit(2)
