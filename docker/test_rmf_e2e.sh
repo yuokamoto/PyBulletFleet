@@ -30,6 +30,10 @@ if [ ! -f "$CHECKER" ]; then
     CHECKER=/rmf_dispatch_check.py
 fi
 
+usage() {
+    echo "usage: test_rmf_e2e.sh [--client-mode per_robot_ros|fleet_ros|python_fleet] [--ready-only] <launch_stem> [<scenario> ...]" >&2
+}
+
 # Validate arg count before `shift` — under `set -e`, `shift` with no args would
 # abort with "shift count out of range" before we could print usage.
 CLIENT_MODE=python_fleet
@@ -37,6 +41,10 @@ READY_ONLY=false
 while [ "$#" -gt 0 ]; do
     case "$1" in
         --client-mode)
+            if [ "$#" -lt 2 ]; then
+                usage
+                exit 2
+            fi
             CLIENT_MODE="$2"
             shift 2
             ;;
@@ -55,7 +63,7 @@ while [ "$#" -gt 0 ]; do
 done
 
 if [ "$#" -lt 1 ] || { [ "$READY_ONLY" = false ] && [ "$#" -lt 2 ]; }; then
-    echo "usage: test_rmf_e2e.sh [--client-mode per_robot_ros|fleet_ros|python_fleet] [--ready-only] <launch_stem> [<scenario> ...]" >&2
+    usage
     exit 2
 fi
 LAUNCH="$1"

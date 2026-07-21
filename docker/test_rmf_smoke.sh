@@ -25,15 +25,23 @@ if [ ! -f "$CHECKER" ]; then
     CHECKER=/rmf_smoke_check.py
 fi
 
+usage() {
+    echo "usage: test_rmf_smoke.sh [--client-mode per_robot_ros|fleet_ros|python_fleet]" >&2
+}
+
 CLIENT_MODE=python_fleet
 while [ "$#" -gt 0 ]; do
     case "$1" in
         --client-mode)
+            if [ "$#" -lt 2 ]; then
+                usage
+                exit 2
+            fi
             CLIENT_MODE="$2"
             shift 2
             ;;
         *)
-            echo "usage: test_rmf_smoke.sh [--client-mode per_robot_ros|fleet_ros|python_fleet]" >&2
+            usage
             exit 2
             ;;
     esac
