@@ -709,12 +709,69 @@ Tasks:
     because their purpose is already clear.
 - Update `.github/workflows/bridge.yml`, Docker README commands, Make targets,
   and any copied native instructions in the same cleanup PR.
+- Revisit the hotel RMF dispatch test before release. It is currently kept as a
+  readiness/smoke gate instead of a blocking dispatch E2E because CI task
+  completion is less stable for the multi-fleet + lift/door scenario. The
+  minimum acceptable coverage is that hotel launches, expected robots appear on
+  `/fleet_states`, and lift-related configuration loads without startup errors.
+  This does not currently prove lift motion. Add a focused lift smoke/check, or
+  document a manual lift-motion verification, before relying on hotel as lift
+  integration coverage.
+- Document and tighten `python_fleet` command completion semantics before using
+  lift-heavy hotel dispatch as a blocking CI gate. Today direct in-process
+  navigation completion is derived from simulator pose proximity
+  (`completion_radius`) and then reported back to RMF as command completion; it
+  is not based solely on RMF task terminal topics. Keep this acceptable for
+  simple office dispatch coverage, but add focused checks or stronger
+  completion criteria for lift/map-transition scenarios before claiming hotel
+  full dispatch E2E coverage.
+- Keep RMF dispatch completion strict by default. Any `/fleet_states` task-clear
+  fallback must remain an explicit test option and must require task assignment,
+  underway status, observed robot motion, scenario-specific physical signals,
+  and a grace period with no failed/canceled terminal status.
 
 Exit criteria:
 
 - A reviewer can identify each test's entry point and layer from its filename.
 - CI behavior is unchanged after the rename.
 - Existing correctness gates remain separate from optional performance checks.
+- Hotel's role is explicit: readiness and lift-config coverage now, focused
+  lift-motion coverage before release, full dispatch E2E only after
+  `python_fleet`/RMF completion checks are stable enough for CI.
+
+### Phase 6g — Shared Command Type Module Cleanup
+
+Purpose: promote command payload types that started in `fleet_api.py` but are
+now shared by fleet, per-robot ROS, RMF Python, and RMF ROS paths into a neutral
+module before release.
+
+Tasks:
+
+- Add a shared command type module, for example `pybullet_fleet/commands.py`.
+- Move or re-export common command payloads from that module:
+  - `RobotGoalCommand2D`;
+  - `RobotGoalCommand3D`;
+  - `RobotAttachCommand`;
+  - `RobotActionCommand`;
+  - `RobotJointPositionsCommand`;
+  - `RobotNamedJointPositionsCommand`;
+  - `CommandAck`;
+  - `CommandEvent`.
+- Define shared command defaults there, including
+  `DEFAULT_ATTACH_SEARCH_RADIUS = 0.5`, so per-robot and fleet attach paths use
+  one semantic default instead of duplicated literals.
+- Keep `pybullet_fleet.fleet_api` and `pybullet_fleet.__init__` re-exports so
+  existing imports continue to work.
+- Update ROS bridge and RMF imports to use the neutral command module where it
+  improves clarity.
+
+Exit criteria:
+
+- Attach search-radius fallback is defined once and used by per-robot and
+  fleet attach paths.
+- Command dataclasses no longer appear fleet-only when they are shared across
+  public APIs.
+- Existing public imports remain compatible for the release.
 
 ## Phase 7 — Internal Batch Optimization
 

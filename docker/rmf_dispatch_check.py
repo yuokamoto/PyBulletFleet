@@ -15,10 +15,17 @@ Scenarios are given as argv tokens ``type:arg1,arg2,...`` with an optional
     delivery:pantry,coke_dispenser,hardware_2,coke_ingestor
     clean:clean_lobby
 
-Each scenario PASSES when its dispatched task reaches an explicit successful
-terminal state within ``SCENARIO_TIMEOUT``. ``/fleet_states`` is used to verify
-that a task was assigned to a robot, but clearing a task id is not treated as
-success because failed/canceled tasks also become unassigned.
+By default, each scenario PASSES only when its dispatched task reaches an
+explicit successful terminal state within ``SCENARIO_TIMEOUT``.
+``/fleet_states`` is used to verify that a task was assigned to a robot, but
+clearing a task id is not treated as success because failed/canceled tasks also
+become unassigned.
+
+``--allow-fleet-state-clear-fallback`` enables a test-only portability fallback:
+if terminal task topics are missing or delayed, a task-id clear may count as
+success only after underway + motion + scenario-specific physical signals and a
+short grace period with no failed/canceled terminal status. Keep this explicit
+so CI compatibility logic does not masquerade as the normal completion rule.
 
 ``/task_state_update`` and ``/task_summaries`` are still consumed when present
 and can provide an earlier explicit ``completed``/terminal status. They are
@@ -347,7 +354,7 @@ def _extras_observed(node, kind, zrise_req, max_zrise, disp0, ing0) -> bool:
     return True
 
 
-def run_scenario(node, log, scenario) -> bool:
+def run_scenario(node, log, scenario, *, allow_fleet_state_clear_fallback: bool = False) -> bool:
     """Dispatch one scenario, wait for completion, then assert extra signals.
 
     Scenario may carry an assertion clause after ``;``, e.g.
@@ -398,7 +405,7 @@ def run_scenario(node, log, scenario) -> bool:
         if status in TERMINAL_BAD:
             log.error(f"[{scenario}] FAIL: task reached terminal `{status}`")
             return False
-        if seen_robot_task and not node.task_is_assigned(task_id):
+        if allow_fleet_state_clear_fallback and seen_robot_task and not node.task_is_assigned(task_id):
             if task_cleared_at is None:
                 task_cleared_at = time.monotonic()
             if not warned_task_cleared:
@@ -429,7 +436,7 @@ def run_scenario(node, log, scenario) -> bool:
     return False
 
 
-def main(scenarios, *, ready_only: bool = False, expected_robots=None) -> int:
+def main(scenarios, *, ready_only: bool = False, expected_robots=None, allow_fleet_state_clear_fallback: bool = False) -> int:
     rclpy.init()
     node = DispatchChecker(expected_robots)
     log = node.get_logger()
@@ -448,7 +455,15 @@ def main(scenarios, *, ready_only: bool = False, expected_robots=None) -> int:
     if ready_only:
         return 0
 
-    results = {s: run_scenario(node, log, s) for s in scenarios}
+    results = {
+        s: run_scenario(
+            node,
+            log,
+            s,
+            allow_fleet_state_clear_fallback=allow_fleet_state_clear_fallback,
+        )
+        for s in scenarios
+    }
     ok = all(results.values())
     log.info(f"RESULTS: {results}")
     return 0 if ok else 1
@@ -456,12 +471,15 @@ def main(scenarios, *, ready_only: bool = False, expected_robots=None) -> int:
 
 if __name__ == "__main__":
     ready_only = False
+    allow_fleet_state_clear_fallback = False
     expected_robots = []
     scenario_args = []
     args = iter(sys.argv[1:])
     for arg in args:
         if arg == "--ready-only":
             ready_only = True
+        elif arg == "--allow-fleet-state-clear-fallback":
+            allow_fleet_state_clear_fallback = True
         elif arg == "--expected-robots":
             try:
                 expected_robots = [name for name in next(args).split(",") if name]
@@ -471,7 +489,11 @@ if __name__ == "__main__":
         else:
             scenario_args.append(arg)
     if not scenario_args and not ready_only:
-        print("usage: rmf_dispatch_check.py [--ready-only] <type:args[;assert]> [...]", file=sys.stderr)
+        print(
+            "usage: rmf_dispatch_check.py [--ready-only] [--allow-fleet-state-clear-fallback] "
+            "<type:args[;assert]> [...]",
+            file=sys.stderr,
+        )
         sys.exit(2)
     # Validate every scenario token up front (both the dispatch part and any
     # ;assertion clause) so a typo in bridge.yml fails fast with a clear message
@@ -486,7 +508,12 @@ if __name__ == "__main__":
             sys.exit(2)
     rc = 1
     try:
-        rc = main(scenario_args, ready_only=ready_only, expected_robots=expected_robots)
+        rc = main(
+            scenario_args,
+            ready_only=ready_only,
+            expected_robots=expected_robots,
+            allow_fleet_state_clear_fallback=allow_fleet_state_clear_fallback,
+        )
     finally:
         try:
             rclpy.shutdown()

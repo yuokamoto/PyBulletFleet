@@ -6,6 +6,10 @@ find_package(rosidl_default_generators REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(std_msgs REQUIRED)
 
+# Keep ROS interfaces explicitly listed instead of globbed. These files are the
+# package's public API; updating CMakeLists.txt makes additions/removals visible
+# in review and forces CMake/colcon to reconfigure when the interface set
+# changes.
 rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/CommandAck.msg"
   "msg/ExecuteActionGoal.msg"

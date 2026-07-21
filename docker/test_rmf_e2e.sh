@@ -1,11 +1,12 @@
 #!/bin/bash
-# docker/test_rmf_e2e.sh [--client-mode MODE] <launch_stem> <scenario> [<scenario> ...]
+# docker/test_rmf_e2e.sh [--client-mode MODE] [--allow-fleet-state-clear-fallback] <launch_stem> <scenario> [<scenario> ...]
 #
 # Parametrized RMF dispatch end-to-end test. Launches an RMF demo headless and
-# runs rmf_dispatch_check.py with the given scenarios; each dispatched task must
-# finish according to the portable /fleet_states task assignment signal, with
-# /task_state_update and /task_summaries used only when the launched RMF stack
-# publishes them. Used for several demo/task combinations from bridge.yml:
+# runs rmf_dispatch_check.py with the given scenarios; by default each
+# dispatched task must reach an explicit successful terminal state. The
+# --allow-fleet-state-clear-fallback option permits a guarded /fleet_states
+# fallback for CI environments where terminal task topics are missing or delayed.
+# Used for several demo/task combinations from bridge.yml:
 #
 #   bash test_rmf_e2e.sh --client-mode fleet_ros office_pybullet \
 #       "patrol:lounge,coe" \
@@ -31,13 +32,14 @@ if [ ! -f "$CHECKER" ]; then
 fi
 
 usage() {
-    echo "usage: test_rmf_e2e.sh [--client-mode per_robot_ros|fleet_ros|python_fleet] [--ready-only] <launch_stem> [<scenario> ...]" >&2
+    echo "usage: test_rmf_e2e.sh [--client-mode per_robot_ros|fleet_ros|python_fleet] [--ready-only] [--allow-fleet-state-clear-fallback] <launch_stem> [<scenario> ...]" >&2
 }
 
 # Validate arg count before `shift` — under `set -e`, `shift` with no args would
 # abort with "shift count out of range" before we could print usage.
 CLIENT_MODE=python_fleet
 READY_ONLY=false
+ALLOW_FLEET_STATE_CLEAR_FALLBACK=false
 while [ "$#" -gt 0 ]; do
     case "$1" in
         --client-mode)
@@ -50,6 +52,10 @@ while [ "$#" -gt 0 ]; do
             ;;
         --ready-only)
             READY_ONLY=true
+            shift
+            ;;
+        --allow-fleet-state-clear-fallback)
+            ALLOW_FLEET_STATE_CLEAR_FALLBACK=true
             shift
             ;;
         --)
@@ -143,7 +149,11 @@ set +e
 if [ "$READY_ONLY" = true ]; then
     python3 "$CHECKER" --ready-only --expected-robots "$EXPECTED_ROBOTS"
 else
-    python3 "$CHECKER" --expected-robots "$EXPECTED_ROBOTS" "${SCENARIOS[@]}"
+    CHECK_ARGS=(--expected-robots "$EXPECTED_ROBOTS")
+    if [ "$ALLOW_FLEET_STATE_CLEAR_FALLBACK" = true ]; then
+        CHECK_ARGS+=(--allow-fleet-state-clear-fallback)
+    fi
+    python3 "$CHECKER" "${CHECK_ARGS[@]}" "${SCENARIOS[@]}"
 fi
 RC=$?
 set -e

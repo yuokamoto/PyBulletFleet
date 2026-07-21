@@ -94,7 +94,7 @@ jobs:
           docker compose run --rm --no-deps \
             -v "$(pwd)/test_rmf_e2e.sh:/test_rmf_e2e.sh:ro" \
             -v "$(pwd)/rmf_dispatch_check.py:/rmf_dispatch_check.py:ro" \
-            bridge bash /test_rmf_e2e.sh office_pybullet \
+            bridge bash /test_rmf_e2e.sh --allow-fleet-state-clear-fallback office_pybullet \
               "patrol:lounge,coe" \
               "delivery:pantry,coke_dispenser,hardware_2,coke_ingestor"
 

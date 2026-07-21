@@ -625,6 +625,18 @@ docker compose run --rm bridge \
   ros2 run rmf_demos_tasks dispatch_patrol -p pantry lounge -n 3
 ```
 
+### Dispatch Test Completion
+
+`docker/rmf_dispatch_check.py` treats explicit RMF terminal task success as the
+normal pass condition. `/fleet_states` is used to confirm robot assignment, but
+task-id clearing alone is not success because failed or canceled tasks also
+become unassigned.
+
+`--allow-fleet-state-clear-fallback` is available for CI portability only. When
+enabled, a cleared `/fleet_states` task id can pass after task underway, robot
+motion, scenario-specific physical checks, and a short grace period with no
+failed or canceled terminal status.
+
 ### Architecture
 
 ```
