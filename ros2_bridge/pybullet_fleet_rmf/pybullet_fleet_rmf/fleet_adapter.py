@@ -41,6 +41,7 @@ from rclpy.parameter import Parameter
 logger = logging.getLogger(__name__)
 _RMF_RCLCPP_INITIALIZED = False
 DEFAULT_PLANNER_CACHE_RESET_SIZE = 2500
+DEFAULT_ROBOT_STATE_UPDATE_FREQUENCY = 10.0
 
 try:
     import rmf_adapter
@@ -129,6 +130,18 @@ def _planner_cache_reset_size(pybullet_config: dict) -> int:
         return max(1, int(value))
     except (TypeError, ValueError):
         return DEFAULT_PLANNER_CACHE_RESET_SIZE
+
+
+def _robot_state_update_frequency(pybullet_config: dict) -> float:
+    """Return a positive RMF robot-state update frequency in Hz."""
+    value = pybullet_config.get("robot_state_update_frequency", DEFAULT_ROBOT_STATE_UPDATE_FREQUENCY)
+    try:
+        frequency = float(value)
+    except (TypeError, ValueError):
+        return DEFAULT_ROBOT_STATE_UPDATE_FREQUENCY
+    if not math.isfinite(frequency) or frequency <= 0.0:
+        return DEFAULT_ROBOT_STATE_UPDATE_FREQUENCY
+    return frequency
 
 
 def start_adapter_runtime(
@@ -228,7 +241,7 @@ def start_adapter_runtime(
         node.get_logger().info(f"Performable action '{action_name}' registered")
 
     # Build RMF client wrappers for each robot
-    update_period = 1.0 / pybullet_config.get("robot_state_update_frequency", 10.0)
+    update_period = 1.0 / _robot_state_update_frequency(pybullet_config)
     resolved_client_mode = client_mode or pybullet_config.get("rmf_client_mode", "per_robot_ros")
     try:
         client_factory = create_rmf_client_factory(

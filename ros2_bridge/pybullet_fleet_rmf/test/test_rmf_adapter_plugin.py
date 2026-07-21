@@ -26,6 +26,33 @@ def test_planner_cache_reset_size_rejects_invalid_values():
     assert _planner_cache_reset_size({"planner_cache_reset_size": 0}) == 1
 
 
+def test_robot_state_update_frequency_uses_default():
+    from pybullet_fleet_rmf.fleet_adapter import (
+        DEFAULT_ROBOT_STATE_UPDATE_FREQUENCY,
+        _robot_state_update_frequency,
+    )
+
+    assert _robot_state_update_frequency({}) == DEFAULT_ROBOT_STATE_UPDATE_FREQUENCY
+
+
+def test_robot_state_update_frequency_accepts_config_value():
+    from pybullet_fleet_rmf.fleet_adapter import _robot_state_update_frequency
+
+    assert _robot_state_update_frequency({"robot_state_update_frequency": "20"}) == 20.0
+
+
+def test_robot_state_update_frequency_rejects_invalid_values():
+    from pybullet_fleet_rmf.fleet_adapter import (
+        DEFAULT_ROBOT_STATE_UPDATE_FREQUENCY,
+        _robot_state_update_frequency,
+    )
+
+    assert _robot_state_update_frequency({"robot_state_update_frequency": "bad"}) == DEFAULT_ROBOT_STATE_UPDATE_FREQUENCY
+    assert _robot_state_update_frequency({"robot_state_update_frequency": ""}) == DEFAULT_ROBOT_STATE_UPDATE_FREQUENCY
+    assert _robot_state_update_frequency({"robot_state_update_frequency": 0}) == DEFAULT_ROBOT_STATE_UPDATE_FREQUENCY
+    assert _robot_state_update_frequency({"robot_state_update_frequency": -1}) == DEFAULT_ROBOT_STATE_UPDATE_FREQUENCY
+
+
 def test_create_rmf_subscriptions_includes_lift_state_map_updates():
     from rmf_lift_msgs.msg import LiftState
 
