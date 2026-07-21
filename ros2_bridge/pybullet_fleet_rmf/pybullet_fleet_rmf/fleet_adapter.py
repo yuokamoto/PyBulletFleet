@@ -91,6 +91,12 @@ class RmfAdapterRuntime:
         self.stop_event.set()
         if self.update_thread.is_alive():
             self.update_thread.join(timeout=timeout)
+        stop_adapter = getattr(self.adapter, "stop", None)
+        if callable(stop_adapter):
+            try:
+                stop_adapter()
+            except Exception:  # noqa: B902
+                pass
         for connection in list(self.connections):
             try:
                 self.node.destroy_subscription(connection)

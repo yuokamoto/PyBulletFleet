@@ -64,11 +64,12 @@ def test_rmf_adapter_runtime_shutdown_destroys_connections():
     update_thread = MagicMock()
     update_thread.is_alive.return_value = False
     stop_event = MagicMock()
+    adapter = MagicMock()
     sub_a = MagicMock()
     sub_b = MagicMock()
     runtime = RmfAdapterRuntime(
         node=node,
-        adapter=MagicMock(),
+        adapter=adapter,
         robots={},
         update_thread=update_thread,
         stop_event=stop_event,
@@ -78,8 +79,35 @@ def test_rmf_adapter_runtime_shutdown_destroys_connections():
     runtime.shutdown()
 
     stop_event.set.assert_called_once()
+    adapter.stop.assert_called_once()
     node.destroy_subscription.assert_any_call(sub_a)
     node.destroy_subscription.assert_any_call(sub_b)
+    assert runtime.connections == []
+
+
+def test_rmf_adapter_runtime_shutdown_continues_when_adapter_stop_fails():
+    from pybullet_fleet_rmf.fleet_adapter import RmfAdapterRuntime
+
+    node = MagicMock()
+    update_thread = MagicMock()
+    update_thread.is_alive.return_value = False
+    stop_event = MagicMock()
+    adapter = MagicMock()
+    adapter.stop.side_effect = RuntimeError("stop failed")
+    sub = MagicMock()
+    runtime = RmfAdapterRuntime(
+        node=node,
+        adapter=adapter,
+        robots={},
+        update_thread=update_thread,
+        stop_event=stop_event,
+        connections=[sub],
+    )
+
+    runtime.shutdown()
+
+    adapter.stop.assert_called_once()
+    node.destroy_subscription.assert_called_once_with(sub)
     assert runtime.connections == []
 
 
