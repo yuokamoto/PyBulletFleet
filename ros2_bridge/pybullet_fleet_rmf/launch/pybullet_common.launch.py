@@ -93,7 +93,7 @@ def _native_python_env() -> dict:
     pythonpath = os.environ.get("PYTHONPATH", "")
     if pythonpath:
         paths.append(pythonpath)
-    return {"PYTHONPATH": ":".join(paths)}
+    return {"PYTHONPATH": os.pathsep.join(paths)}
 
 
 def _append_in_process_rmf_plugin(
