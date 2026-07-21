@@ -8,6 +8,25 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+_ROS_IMPORT_ROOTS = {
+    "action_msgs",
+    "geometry_msgs",
+    "nav2_msgs",
+    "nav_msgs",
+    "pybullet_fleet_msgs",
+    "rclpy",
+    "sensor_msgs",
+    "std_srvs",
+}
+
+
+def _is_missing_ros_dependency(exc: ImportError) -> bool:
+    """Return True only for missing external ROS/RMF dependencies."""
+    missing_name = getattr(exc, "name", None)
+    if not missing_name:
+        return False
+    return missing_name.split(".", 1)[0] in _ROS_IMPORT_ROOTS
+
 
 @pytest.fixture(autouse=True)
 def _patch_action_client():
@@ -20,9 +39,11 @@ def _patch_action_client():
     """
     try:
         import pybullet_fleet_rmf.per_robot_ros_client  # noqa: F401
-    except ImportError:
+    except ImportError as exc:
         # Only swallow missing-dependency (ROS unavailable) cases; let other
         # import-time errors surface instead of masquerading as "ROS missing".
+        if not _is_missing_ros_dependency(exc):
+            raise
         yield
         return
     with patch("pybullet_fleet_rmf.per_robot_ros_client.ActionClient"):
