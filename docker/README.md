@@ -496,6 +496,17 @@ docker compose run --rm --no-deps \
   bridge bash /docker/test_fleet_scale.sh --robots 100 --interface-mode hybrid \
     --command-interface all --publish-rate 5 --target-rtf 0.0
 
+# Optional RMF client-mode matrix. The default matrix runs office and hotel in
+# per_robot_ros, fleet_ros, and python_fleet modes. Add --full for readiness
+# checks across the remaining RMF demos.
+docker compose run --rm --no-deps \
+  -v "$(pwd):/docker:ro" \
+  bridge bash /docker/test_rmf_client_modes.sh
+
+docker compose run --rm --no-deps \
+  -v "$(pwd):/docker:ro" \
+  bridge bash /docker/test_rmf_client_modes.sh --full
+
 # Hybrid debug: enable only selected per-robot interface groups to isolate which
 # ROS entities add latency. Valid groups are state_publishers, tf, command_topics,
 # services, and actions. Use default (state_publishers,tf,command_topics), all,
@@ -613,6 +624,18 @@ docker compose run --rm bridge \
 docker compose run --rm bridge \
   ros2 run rmf_demos_tasks dispatch_patrol -p pantry lounge -n 3
 ```
+
+### Dispatch Test Completion
+
+`docker/rmf_dispatch_check.py` treats explicit RMF terminal task success as the
+normal pass condition. `/fleet_states` is used to confirm robot assignment, but
+task-id clearing alone is not success because failed or canceled tasks also
+become unassigned.
+
+`--allow-fleet-state-clear-fallback` is available for CI portability only. When
+enabled, a cleared `/fleet_states` task id can pass after task underway, robot
+motion, scenario-specific physical checks, and a short grace period with no
+failed or canceled terminal status.
 
 ### Architecture
 

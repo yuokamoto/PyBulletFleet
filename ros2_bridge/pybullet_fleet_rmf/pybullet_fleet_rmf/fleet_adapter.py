@@ -39,6 +39,9 @@ from rclpy.duration import Duration
 from rclpy.parameter import Parameter
 
 logger = logging.getLogger(__name__)
+_RMF_RCLCPP_INITIALIZED = False
+DEFAULT_PLANNER_CACHE_RESET_SIZE = 2500
+DEFAULT_ROBOT_STATE_UPDATE_FREQUENCY = 10.0
 
 try:
     import rmf_adapter
@@ -61,7 +64,258 @@ if HAS_RMF:
     from rmf_fleet_msgs.msg import RobotMode
     from rmf_fleet_msgs.msg import SpeedLimitRequest
 
-    from pybullet_fleet_rmf.robot_client_api import RobotClientAPI
+    from pybullet_fleet_rmf.fleet_clients import create_rmf_client_factory
+
+
+class RmfAdapterRuntime:
+    """Running EasyFullControl adapter state.
+
+    The runtime keeps references to background threads and ROS subscriptions so
+    the same adapter setup can be used by the standalone executable and by an
+    in-process bridge plugin.
+    """
+
+    def __init__(self, *, node, adapter, robots, update_thread, stop_event, connections) -> None:
+        self.node = node
+        self.adapter = adapter
+        self.robots = robots
+        self.update_thread = update_thread
+        self.stop_event = stop_event
+        self.connections = connections
+        self._shutdown = False
+
+    def shutdown(self, timeout: float = 2.0) -> None:
+        """Stop background adapter work owned by this runtime."""
+        if self._shutdown:
+            return
+        self._shutdown = True
+        self.stop_event.set()
+        if self.update_thread.is_alive():
+            self.update_thread.join(timeout=timeout)
+        stop_adapter = getattr(self.adapter, "stop", None)
+        if callable(stop_adapter):
+            try:
+                stop_adapter()
+            except Exception:  # noqa: B902
+                pass
+        for connection in list(self.connections):
+            try:
+                self.node.destroy_subscription(connection)
+            except Exception:  # noqa: B902
+                pass
+        self.connections.clear()
+
+
+def _ensure_rmf_adapter_initialized() -> None:
+    global _RMF_RCLCPP_INITIALIZED
+    if not _RMF_RCLCPP_INITIALIZED:
+        rmf_adapter.init_rclcpp()
+        _RMF_RCLCPP_INITIALIZED = True
+
+
+def _enable_sim_time(node) -> None:
+    """Enable ROS sim time on a node, declaring the parameter if needed."""
+    try:
+        if hasattr(node, "has_parameter") and not node.has_parameter("use_sim_time"):
+            node.declare_parameter("use_sim_time", True)
+        node.set_parameters([Parameter("use_sim_time", Parameter.Type.BOOL, True)])
+    except Exception as exc:  # noqa: B902
+        node.get_logger().warning(f"Failed to set use_sim_time on RMF adapter node: {exc}")
+
+
+def _planner_cache_reset_size(pybullet_config: dict) -> int:
+    """Return RMF planner cache reset size from PyBulletFleet config."""
+    value = pybullet_config.get("planner_cache_reset_size", DEFAULT_PLANNER_CACHE_RESET_SIZE)
+    try:
+        return max(1, int(value))
+    except (TypeError, ValueError):
+        return DEFAULT_PLANNER_CACHE_RESET_SIZE
+
+
+def _robot_state_update_frequency(pybullet_config: dict) -> float:
+    """Return a positive RMF robot-state update frequency in Hz."""
+    value = pybullet_config.get("robot_state_update_frequency", DEFAULT_ROBOT_STATE_UPDATE_FREQUENCY)
+    try:
+        frequency = float(value)
+    except (TypeError, ValueError):
+        return DEFAULT_ROBOT_STATE_UPDATE_FREQUENCY
+    if not math.isfinite(frequency) or frequency <= 0.0:
+        return DEFAULT_ROBOT_STATE_UPDATE_FREQUENCY
+    return frequency
+
+
+def start_adapter_runtime(
+    *,
+    node,
+    config_path: str,
+    nav_graph_path: str = "",
+    use_sim_time: bool = False,
+    client_mode: str | None = None,
+    sim_core=None,
+    server_uri: str | None = None,
+    rmf_frame_offset=None,
+) -> RmfAdapterRuntime | None:
+    """Start the EasyFullControl adapter on an existing ROS node.
+
+    ``sim_core`` is only required for ``python_fleet`` mode. ROS-backed modes
+    keep using bridge topics/services/actions and can run in a separate process.
+    """
+    if not HAS_RMF:
+        node.get_logger().error("rmf_adapter not available. Build rmf_fleet_adapter_python from source (see docs/README).")
+        return None
+
+    _ensure_rmf_adapter_initialized()
+
+    # Parse config for EasyFullControl
+    fleet_config = rmf_easy.FleetConfiguration.from_config_files(config_path, nav_graph_path)
+    if fleet_config is None:
+        node.get_logger().error(f"Failed to parse config file [{config_path}]")
+        return None
+
+    # Parse the YAML in Python to get PyBulletFleet-specific settings
+    with open(config_path, "r") as f:
+        config_yaml = yaml.safe_load(f) or {}
+
+    fleet_name = config_yaml.get("rmf_fleet", {}).get("name", "pybullet_fleet")
+
+    # Coverage paths for performable actions (e.g. cleaning zones), authored in
+    # the rmf_demos fleet config under fleet_manager.action_paths — same data
+    # Gazebo's fleet_manager uses. Maps {activity: {label: {map_name, path}}}.
+    action_paths = config_yaml.get("fleet_manager", {}).get("action_paths", {})
+
+    adapter = Adapter.make(f"{fleet_name}_fleet_adapter")
+    if adapter is None:
+        node.get_logger().error("Unable to initialize fleet adapter. Please ensure RMF Schedule Node is running.")
+        return None
+
+    # Enable sim time
+    if use_sim_time:
+        _enable_sim_time(node)
+        adapter.node.use_sim_time()
+
+    adapter.start()
+    time.sleep(1.0)
+
+    # Forward server_uri to EasyFullControl so the fleet adapter pushes
+    # fleet-state / fleet-log updates to the rmf-web API server via WebSocket.
+    if server_uri is None:
+        node.declare_parameter("server_uri", "")
+        server_uri = node.get_parameter("server_uri").get_parameter_value().string_value
+    if server_uri:
+        fleet_config.server_uri = server_uri
+        node.get_logger().info(f"Fleet adapter server_uri: {server_uri}")
+    else:
+        node.get_logger().info("No server_uri configured — fleet state will not be pushed to API server")
+
+    pybullet_config = config_yaml.get("pybullet_fleet", {})
+
+    fleet_handle = adapter.add_easy_fleet(fleet_config)
+    more = fleet_handle.more()
+    cache_reset_size = _planner_cache_reset_size(pybullet_config)
+    if hasattr(more, "set_planner_cache_reset_size"):
+        more.set_planner_cache_reset_size(cache_reset_size)
+    else:
+        node.get_logger().warning(
+            "RMF binding does not expose set_planner_cache_reset_size; "
+            f"ignoring planner_cache_reset_size={cache_reset_size}"
+        )
+
+    # Register performable actions from config (e.g. teleop, clean).
+    # Standard delivery tasks (dispatch_delivery) are handled by RMF's
+    # built-in delivery category — no fleet_adapter code needed.
+    # Cart delivery (dispatch_cart_delivery) uses delivery_pickup /
+    # delivery_dropoff PerformAction phases — handled by execute_action()
+    # if present in the config's actions list.
+    rmf_fleet_cfg = config_yaml.get("rmf_fleet", {})
+    configured_actions = rmf_fleet_cfg.get("actions", [])
+
+    for action_name in configured_actions:
+
+        def _consider_action(desc, _name=action_name):
+            confirmation = rmf_adapter.fleet_update_handle.Confirmation()
+            confirmation.accept()
+            node.get_logger().info(f"Accepted action '{_name}': {desc}")
+            return confirmation
+
+        more.add_performable_action(action_name, _consider_action)
+        node.get_logger().info(f"Performable action '{action_name}' registered")
+
+    # Build RMF client wrappers for each robot
+    update_period = 1.0 / _robot_state_update_frequency(pybullet_config)
+    resolved_client_mode = client_mode or pybullet_config.get("rmf_client_mode", "per_robot_ros")
+    try:
+        client_factory = create_rmf_client_factory(
+            resolved_client_mode,
+            node,
+            sim_core=sim_core,
+            rmf_frame_offset=rmf_frame_offset,
+        )
+    except ValueError as exc:
+        node.get_logger().error(str(exc))
+        return None
+    node.get_logger().info(f"RMF client mode: {resolved_client_mode}")
+
+    # The nav graph is used to detect charger waypoints via the
+    # is_charger attribute (set in the building.yaml / nav_graph).
+    nav_graph = fleet_config.graph
+
+    robots: dict[str, "RobotAdapter"] = {}
+    for robot_name in fleet_config.known_robots:
+        robot_config = fleet_config.get_known_robot_configuration(robot_name)
+        api = client_factory.robot(robot_name)
+        robots[robot_name] = RobotAdapter(
+            robot_name,
+            robot_config,
+            node,
+            api,
+            fleet_handle,
+            nav_graph=nav_graph,
+            action_paths=action_paths,
+        )
+
+    node.get_logger().info(f"EasyFullControl fleet adapter started: {len(robots)} robots")
+
+    # Background update loop
+    reassign_task_interval = config_yaml.get("rmf_fleet", {}).get(
+        "reassign_task_interval", 60
+    )  # seconds — periodically re-optimize task assignments
+
+    stop_event = threading.Event()
+
+    def update_loop():
+        asyncio.set_event_loop(asyncio.new_event_loop())
+        last_task_replan = node.get_clock().now()
+        while rclpy.ok() and not stop_event.is_set():
+            now = node.get_clock().now()
+            update_jobs = []
+            for robot in robots.values():
+                update_jobs.append(_update_robot(robot))
+            asyncio.get_event_loop().run_until_complete(asyncio.wait(update_jobs))
+
+            # Periodically reassign dispatched tasks for better allocation
+            interval_sec = (now.nanoseconds - last_task_replan.nanoseconds) / 1e9
+            if interval_sec > reassign_task_interval:
+                fleet_handle.more().reassign_dispatched_tasks()
+                last_task_replan = now
+
+            next_wakeup = now + Duration(nanoseconds=update_period * 1e9)
+            while node.get_clock().now() < next_wakeup and not stop_event.is_set():
+                time.sleep(0.001)
+
+    update_thread = threading.Thread(target=update_loop, daemon=True)
+    update_thread.start()
+
+    # Connect to ROS 2 topics for RMF auxiliary state/control notices.
+    connections = create_rmf_subscriptions(node, robots, fleet_handle)
+
+    return RmfAdapterRuntime(
+        node=node,
+        adapter=adapter,
+        robots=robots,
+        update_thread=update_thread,
+        stop_event=stop_event,
+        connections=connections,
+    )
 
 
 def main(argv=sys.argv):
@@ -76,7 +330,6 @@ def main(argv=sys.argv):
         rclpy.shutdown()
         return
 
-    rmf_adapter.init_rclcpp()
     args_without_ros = rclpy.utilities.remove_ros_args(argv)
 
     parser = argparse.ArgumentParser(
@@ -103,157 +356,31 @@ def main(argv=sys.argv):
         action="store_true",
         help="Use sim time (default: false)",
     )
+    parser.add_argument(
+        "--client-mode",
+        choices=["per_robot_ros", "fleet_ros", "python_fleet"],
+        default=None,
+        help="RMF client transport (default: pybullet_fleet.rmf_client_mode or per_robot_ros)",
+    )
     args = parser.parse_args(args_without_ros[1:])
 
-    config_path = args.config_file
-    nav_graph_path = args.nav_graph
-
-    # Parse config for EasyFullControl
-    fleet_config = rmf_easy.FleetConfiguration.from_config_files(config_path, nav_graph_path)
-    if fleet_config is None:
-        print(f"[ERROR] Failed to parse config file [{config_path}]")
-        rclpy.shutdown()
-        return
-
-    # Parse the YAML in Python to get PyBulletFleet-specific settings
-    with open(config_path, "r") as f:
-        config_yaml = yaml.safe_load(f)
-
-    fleet_name = config_yaml.get("rmf_fleet", {}).get("name", "pybullet_fleet")
-
-    # Coverage paths for performable actions (e.g. cleaning zones), authored in
-    # the rmf_demos fleet config under fleet_manager.action_paths — same data
-    # Gazebo's fleet_manager uses. Maps {activity: {label: {map_name, path}}}.
-    action_paths = config_yaml.get("fleet_manager", {}).get("action_paths", {})
-
     # ROS 2 node for the command handle
+    with open(args.config_file, "r") as f:
+        config_yaml = yaml.safe_load(f) or {}
+    fleet_name = config_yaml.get("rmf_fleet", {}).get("name", "pybullet_fleet")
     node = rclpy.node.Node(f"{fleet_name}_command_handle")
 
-    adapter = Adapter.make(f"{fleet_name}_fleet_adapter")
-    if adapter is None:
-        node.get_logger().error("Unable to initialize fleet adapter. " "Please ensure RMF Schedule Node is running.")
+    runtime = start_adapter_runtime(
+        node=node,
+        config_path=args.config_file,
+        nav_graph_path=args.nav_graph,
+        use_sim_time=args.use_sim_time,
+        client_mode=args.client_mode,
+    )
+    if runtime is None:
         node.destroy_node()
         rclpy.shutdown()
         return
-
-    # Enable sim time
-    if args.use_sim_time:
-        param = Parameter("use_sim_time", Parameter.Type.BOOL, True)
-        node.set_parameters([param])
-        adapter.node.use_sim_time()
-
-    adapter.start()
-    time.sleep(1.0)
-
-    # Forward server_uri to EasyFullControl so the fleet adapter pushes
-    # fleet-state / fleet-log updates to the rmf-web API server via WebSocket.
-    node.declare_parameter("server_uri", "")
-    server_uri = node.get_parameter("server_uri").get_parameter_value().string_value
-    if server_uri:
-        fleet_config.server_uri = server_uri
-        node.get_logger().info(f"Fleet adapter server_uri: {server_uri}")
-    else:
-        node.get_logger().info("No server_uri configured — fleet state will not be pushed to API server")
-
-    fleet_handle = adapter.add_easy_fleet(fleet_config)
-    fleet_handle.more().set_planner_cache_reset_size(2500)
-
-    # Register performable actions from config (e.g. teleop, clean).
-    # Standard delivery tasks (dispatch_delivery) are handled by RMF's
-    # built-in delivery category — no fleet_adapter code needed.
-    # Cart delivery (dispatch_cart_delivery) uses delivery_pickup /
-    # delivery_dropoff PerformAction phases — handled by execute_action()
-    # if present in the config's actions list.
-    rmf_fleet_cfg = config_yaml.get("rmf_fleet", {})
-    configured_actions = rmf_fleet_cfg.get("actions", [])
-
-    for action_name in configured_actions:
-
-        def _consider_action(desc, _name=action_name):
-            confirmation = rmf_adapter.fleet_update_handle.Confirmation()
-            confirmation.accept()
-            node.get_logger().info(f"Accepted action '{_name}': {desc}")
-            return confirmation
-
-        fleet_handle.more().add_performable_action(action_name, _consider_action)
-        node.get_logger().info(f"Performable action '{action_name}' registered")
-
-    # Build RobotClientAPI wrappers for each robot
-    pybullet_config = config_yaml.get("pybullet_fleet", {})
-    update_period = 1.0 / pybullet_config.get("robot_state_update_frequency", 10.0)
-
-    # The nav graph is used to detect charger waypoints via the
-    # is_charger attribute (set in the building.yaml / nav_graph).
-    nav_graph = fleet_config.graph
-
-    robots: dict[str, "RobotAdapter"] = {}
-    for robot_name in fleet_config.known_robots:
-        robot_config = fleet_config.get_known_robot_configuration(robot_name)
-        api = RobotClientAPI(robot_name=robot_name, node=node)
-        robots[robot_name] = RobotAdapter(
-            robot_name,
-            robot_config,
-            node,
-            api,
-            fleet_handle,
-            nav_graph=nav_graph,
-            action_paths=action_paths,
-        )
-
-    node.get_logger().info(f"EasyFullControl fleet adapter started: {len(robots)} robots")
-
-    # Subscribe to /lift_states for multi-floor map tracking.
-    # When a lift session ends (session_id cleared), the robot's map name
-    # is updated to the elevator's current floor.
-    def _on_lift_state(msg):
-        """Track elevator floor and update robot map names."""
-        session_id = msg.session_id
-        if not session_id:
-            return
-        # session_id format: "fleetName/robotName" (from RMF lift protocol)
-        parts = session_id.split("/")
-        robot_name = parts[-1] if parts else session_id
-        robot = robots.get(robot_name)
-        if robot is None:
-            return
-        # Update the robot's map to the elevator's current floor
-        if msg.current_floor:
-            robot.api.set_map_name(msg.current_floor)
-
-    from rmf_lift_msgs.msg import LiftState as LiftStateMsg
-
-    _lift_state_sub = node.create_subscription(LiftStateMsg, "lift_states", _on_lift_state, 10)
-
-    # Background update loop
-    reassign_task_interval = config_yaml.get("rmf_fleet", {}).get(
-        "reassign_task_interval", 60
-    )  # seconds — periodically re-optimize task assignments
-
-    def update_loop():
-        asyncio.set_event_loop(asyncio.new_event_loop())
-        last_task_replan = node.get_clock().now()
-        while rclpy.ok():
-            now = node.get_clock().now()
-            update_jobs = []
-            for robot in robots.values():
-                update_jobs.append(_update_robot(robot))
-            asyncio.get_event_loop().run_until_complete(asyncio.wait(update_jobs))
-
-            # Periodically reassign dispatched tasks for better allocation
-            interval_sec = (now.nanoseconds - last_task_replan.nanoseconds) / 1e9
-            if interval_sec > reassign_task_interval:
-                fleet_handle.more().reassign_dispatched_tasks()
-                last_task_replan = now
-
-            next_wakeup = now + Duration(nanoseconds=update_period * 1e9)
-            while node.get_clock().now() < next_wakeup:
-                time.sleep(0.001)
-
-    update_thread = threading.Thread(target=update_loop, daemon=True)
-    update_thread.start()
-
-    # Connect to ROS 2 topics for lane closure, speed limits, and mode changes
-    _connections = ros_connections(node, robots, fleet_handle)
 
     # Spin
     rclpy_executor = rclpy.executors.SingleThreadedExecutor()
@@ -263,6 +390,7 @@ def main(argv=sys.argv):
     except KeyboardInterrupt:
         pass
     finally:
+        runtime.shutdown()
         node.destroy_node()
         rclpy_executor.shutdown()
         rclpy.shutdown()
@@ -445,7 +573,9 @@ class RobotAdapter:
         - ``clean``: Follow the zone's coverage path (from the fleet config's
           ``fleet_manager.action_paths``); update() advances the waypoints and
           finishes the action. No configured path → log and finish.
-        - Others: Log warning and finish immediately.
+        - Others: Log a warning and finish immediately. Generic RMF-to-
+          PyBulletFleet action mapping is intentionally left as future work
+          until the category mapping and completion semantics are defined.
         """
         self.cmd_id += 1
         self.execution = execution
@@ -496,7 +626,10 @@ class RobotAdapter:
                 execution.finished()
                 self.execution = None
         else:
-            self.node.get_logger().warn(f"[{self.name}] Action '{category}' not supported, " "finishing.")
+            self.node.get_logger().warn(
+                f"[{self.name}] Action '{category}' is not mapped to a PyBulletFleet action yet; "
+                "finishing without simulator-side execution."
+            )
             execution.finished()
             self.execution = None
 
@@ -567,14 +700,17 @@ class Teleoperation:
                 self.last_position = data.position
 
 
-def ros_connections(node, robots, fleet_handle):
-    """Subscribe to ROS 2 topics for lane closure, speed limits, and mode changes.
+def create_rmf_subscriptions(node, robots, fleet_handle):
+    """Subscribe to ROS 2 topics for RMF auxiliary state/control notices.
 
     These subscriptions allow the rmf-web dashboard and external tools to:
     - Open / close navigation lanes
     - Set per-lane speed limits
     - Signal teleop completion via ModeRequest
+    - Track robot floor transitions from lift state
     """
+    from rmf_lift_msgs.msg import LiftState as LiftStateMsg
+
     fleet_name = fleet_handle.more().fleet_name
 
     transient_qos = QoSProfile(
@@ -587,6 +723,19 @@ def ros_connections(node, robots, fleet_handle):
     closed_lanes_pub = node.create_publisher(ClosedLanes, "closed_lanes", qos_profile=transient_qos)
 
     closed_lanes: set[int] = set()
+
+    def lift_state_cb(msg):
+        session_id = msg.session_id
+        if not session_id:
+            return
+        # session_id format: "fleetName/robotName" (from RMF lift protocol)
+        parts = session_id.split("/")
+        robot_name = parts[-1] if parts else session_id
+        robot = robots.get(robot_name)
+        if robot is None:
+            return
+        if msg.current_floor:
+            robot.api.set_map_name(msg.current_floor)
 
     def lane_request_cb(msg):
         if msg.fleet_name and msg.fleet_name != fleet_name:
@@ -652,7 +801,9 @@ def ros_connections(node, robots, fleet_handle):
         qos_profile=qos_profile_system_default,
     )
 
-    return [lane_request_sub, speed_limit_request_sub, mode_request_sub]
+    lift_state_sub = node.create_subscription(LiftStateMsg, "lift_states", lift_state_cb, 10)
+
+    return [lane_request_sub, speed_limit_request_sub, mode_request_sub, lift_state_sub]
 
 
 def _parallel(f):

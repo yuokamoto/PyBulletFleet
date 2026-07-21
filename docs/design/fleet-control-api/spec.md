@@ -88,9 +88,9 @@ The fleet APIs are the preferred scalable path:
 - `/fleet/states`
 - `/fleet/navigate`
 - `/fleet/joint_command`
-- future `/fleet/stop`
-- future `/fleet/execute_action`
-- future `/fleet/attach`
+- `/fleet/stop`
+- `/fleet/attach`
+- `/fleet/execute_action`
 - future `/fleet/set_charging`
 
 Per-robot APIs remain available for compatibility, RMF migration, and debugging,
@@ -102,6 +102,17 @@ Fleet-level command callbacks should enqueue commands into the dispatcher and
 return acknowledgements. They should not run long blocking robot actions inside
 the ROS callback thread.
 
+Fleet ROS command messages and service requests carry `std_msgs/Header`:
+
+- `header.stamp` is the command issue time from the caller's ROS clock. A zero
+  stamp means the receiver may use its current time.
+- `header.frame_id` is the command frame for pose-bearing commands. The default
+  bridge convention is `odom`.
+- `command_id` remains the logical command identifier used for acknowledgement,
+  trace, replay, and RMF completion tracking.
+- `source` identifies the caller, such as `rmf`, `fleet-scale-check`, or a
+  future plugin.
+
 ## Configuration Model
 
 Use explicit capability groups rather than one exclusive mode flag.
@@ -112,9 +123,9 @@ fleet_api:
   states: true
   navigate: true
   joint_command: true
-  stop: false
-  execute_action: false
-  attach: false
+  stop: true
+  execute_action: true
+  attach: true
   charging: false
 
 per_robot_api:
@@ -244,8 +255,8 @@ The practical sequence is:
 
 1. Use `/fleet/states` as the main robot-state source.
 2. Keep per-robot command/service/action endpoints for RMF compatibility.
-3. Add `/fleet/navigate` support in `RobotClientAPI` for navigation dispatch.
-4. Add fleet-level stop/action/attach APIs.
+3. Add `/fleet/navigate` support in `RosRmfFleetClient` for navigation dispatch.
+4. Add `/fleet/stop` support in `RosRmfFleetClient` for cancellation/stop.
 5. Move RMF adapter command paths from per-robot endpoints to fleet-level
    endpoints as those APIs become available.
 
@@ -282,9 +293,9 @@ These can be exposed through future services such as `/fleet/get_robot_info`,
 snapshot/replay records where message size is less critical.
 
 Patrol-style RMF tasks can use `/fleet/states` and `/fleet/navigate`.
-Delivery-style tasks also need stop/cancel and attach/drop or generic action
-support, so `/fleet/execute_action` and/or `/fleet/attach` should be added
-before claiming full RMF batch support.
+Delivery-style tasks use fleet attach/drop. Generic PyBulletFleet actions can
+use `/fleet/execute_action`, but RMF category-to-action mapping should remain
+explicit so unsupported task categories do not silently enqueue arbitrary work.
 
 ## Message Shape: 2D and 3D
 

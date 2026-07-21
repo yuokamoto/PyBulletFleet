@@ -3,41 +3,31 @@
 # More flexible than toggle_attach (SetBool), which is the
 # rmf_demos-compatible interface for cart delivery.
 # This service allows specifying exactly which object, which link,
-# and what offset to use.
+# and what offset to use. The request reuses RobotAttachCommand so
+# per-robot attach_object and fleet attach share the same command payload.
 #
 # Usage examples:
 #
 #   # Attach nearest object (like toggle_attach but with search_radius)
 #   ros2 service call /{robot}/attach_object pybullet_fleet_msgs/srv/AttachObject
-#     "{attach: true, search_radius: 1.0}"
+#     "{command: {name: '{robot}', attach: true, search_radius: 1.0}}"
 #
 #   # Attach specific object by name
 #   ros2 service call /{robot}/attach_object pybullet_fleet_msgs/srv/AttachObject
-#     "{attach: true, object_name: 'pallet_01'}"
+#     "{command: {name: '{robot}', attach: true, object_name: 'pallet_01'}}"
 #
 #   # Attach to a specific link with offset
 #   ros2 service call /{robot}/attach_object pybullet_fleet_msgs/srv/AttachObject
-#     "{attach: true, object_name: 'box_A', parent_link: 'end_effector',
-#       offset: {position: {x: 0, y: 0, z: 0.1}}}"
+#     "{command: {name: '{robot}', attach: true, object_name: 'box_A',
+#       parent_link: 'end_effector', offset: {position: {x: 0, y: 0, z: 0.1}}}}"
 #
 #   # Detach specific object
 #   ros2 service call /{robot}/attach_object pybullet_fleet_msgs/srv/AttachObject
-#     "{attach: false, object_name: 'pallet_01'}"
+#     "{command: {name: '{robot}', attach: false, object_name: 'pallet_01'}}"
 
 # --- Request ---
 
-bool attach                          # true = attach, false = detach
-
-string object_name                   # Target object name (empty = nearest for attach,
-                                     # first attached for detach)
-
-string parent_link                   # Link name to attach to (empty = base_link)
-
-geometry_msgs/Pose offset            # Attachment offset in parent link frame
-                                     # (identity = no offset)
-
-float32 search_radius                # Search radius for nearest-object mode (default 0 = 0.5m)
-                                     # Only used when object_name is empty and attach=true
+RobotAttachCommand command            # Target robot and attach parameters
 
 ---
 # --- Response ---

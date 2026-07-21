@@ -8,24 +8,45 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+_ROS_IMPORT_ROOTS = {
+    "action_msgs",
+    "geometry_msgs",
+    "nav2_msgs",
+    "nav_msgs",
+    "pybullet_fleet_msgs",
+    "rclpy",
+    "sensor_msgs",
+    "std_srvs",
+}
+
+
+def _is_missing_ros_dependency(exc: ImportError) -> bool:
+    """Return True only for missing external ROS/RMF dependencies."""
+    missing_name = getattr(exc, "name", None)
+    if not missing_name:
+        return False
+    return missing_name.split(".", 1)[0] in _ROS_IMPORT_ROOTS
+
 
 @pytest.fixture(autouse=True)
 def _patch_action_client():
-    """Stub the ActionClient bound in robot_client_api.
+    """Stub the ActionClient bound in per_robot_ros_client.
 
     ``rclpy.action.ActionClient`` is a pybind11 C-binding that rejects a
-    ``MagicMock`` node. ``robot_client_api`` imports it at module scope, so we
+    ``MagicMock`` node. ``per_robot_ros_client`` imports it at module scope, so we
     patch the bound name there (cf. test_sim_services patching ActionServer).
     No-op when the module can't be imported (ROS unavailable → tests skip).
     """
     try:
-        import pybullet_fleet_rmf.robot_client_api  # noqa: F401
-    except ImportError:
+        import pybullet_fleet_rmf.per_robot_ros_client  # noqa: F401
+    except ImportError as exc:
         # Only swallow missing-dependency (ROS unavailable) cases; let other
         # import-time errors surface instead of masquerading as "ROS missing".
+        if not _is_missing_ros_dependency(exc):
+            raise
         yield
         return
-    with patch("pybullet_fleet_rmf.robot_client_api.ActionClient"):
+    with patch("pybullet_fleet_rmf.per_robot_ros_client.ActionClient"):
         yield
 
 
@@ -43,7 +64,7 @@ def mock_node():
     - ``side_effect`` runs the lambda *per call*, returning a *fresh* mock each
       time — mirroring a real node (each pub/sub is its own object). Tests rely on
       this to assert against a specific resource (e.g. DoorHandler._shared_pub,
-      RobotClientAPI's separate odom vs battery subscriptions).
+      PerRobotRosClient's separate odom vs battery subscriptions).
     """
     node = MagicMock()
     node.get_logger.return_value = MagicMock()  # so get_logger().info(...) is a no-op

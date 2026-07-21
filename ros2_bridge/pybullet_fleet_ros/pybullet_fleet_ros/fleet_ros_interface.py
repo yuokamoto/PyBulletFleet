@@ -11,41 +11,56 @@ from pybullet_fleet.fleet_api import (
     CommandAck as PbfCommandAck,
     FleetCommandDispatcher,
     FleetStateProvider,
+    RobotActionCommand,
+    RobotAttachCommand,
     RobotGoalCommand2D,
     RobotGoalCommand3D,
     RobotJointPositionsCommand,
     RobotNamedJointPositionsCommand,
     RobotState3D,
 )
+from pybullet_fleet.geometry import Pose as PbfPose
 
 try:
     from pybullet_fleet_msgs.msg import (
         CommandAck,
+        FleetAttach,
+        FleetExecuteAction,
         FleetJointCommand,
         FleetNavigate,
         FleetState,
+        FleetStop,
         RobotGoal2D,
         RobotGoal3D,
         RobotJointPositionsCommand as RobotJointPositionsCommandMsg,
         RobotNamedJointPositionsCommand as RobotNamedJointPositionsCommandMsg,
         RobotState3D as RobotState3DMsg,
     )
+    from pybullet_fleet_msgs.srv import FleetAttach as FleetAttachSrv
+    from pybullet_fleet_msgs.srv import FleetExecuteAction as FleetExecuteActionSrv
     from pybullet_fleet_msgs.srv import FleetJointCommand as FleetJointCommandSrv
     from pybullet_fleet_msgs.srv import FleetNavigate as FleetNavigateSrv
+    from pybullet_fleet_msgs.srv import FleetStop as FleetStopSrv
 
     _FLEET_MSGS_IMPORT_ERROR: ImportError | None = None
 except ImportError as exc:
     CommandAck = None
+    FleetAttach = None
+    FleetExecuteAction = None
     FleetJointCommand = None
     FleetNavigate = None
     FleetState = None
+    FleetStop = None
     RobotGoal2D = None
     RobotGoal3D = None
     RobotJointPositionsCommandMsg = None
     RobotNamedJointPositionsCommandMsg = None
     RobotState3DMsg = None
+    FleetAttachSrv = None
+    FleetExecuteActionSrv = None
     FleetJointCommandSrv = None
     FleetNavigateSrv = None
+    FleetStopSrv = None
     _FLEET_MSGS_IMPORT_ERROR = exc
 
 from .interface_config import FleetApiConfig
@@ -70,6 +85,12 @@ class FleetRosInterface:
         self._state_pub = None
         self._navigate_sub = None
         self._navigate_srv = None
+        self._stop_sub = None
+        self._stop_srv = None
+        self._attach_sub = None
+        self._attach_srv = None
+        self._execute_action_sub = None
+        self._execute_action_srv = None
         self._joint_sub = None
         self._joint_srv = None
 
@@ -86,6 +107,24 @@ class FleetRosInterface:
         if config.navigate:
             self._navigate_sub = node.create_subscription(FleetNavigate, "/fleet/navigate", self._on_navigate, 10)
             self._navigate_srv = node.create_service(FleetNavigateSrv, "/fleet/navigate", self._on_navigate_service)
+        if config.stop:
+            self._stop_sub = node.create_subscription(FleetStop, "/fleet/stop", self._on_stop, 10)
+            self._stop_srv = node.create_service(FleetStopSrv, "/fleet/stop", self._on_stop_service)
+        if config.attach:
+            self._attach_sub = node.create_subscription(FleetAttach, "/fleet/attach", self._on_attach, 10)
+            self._attach_srv = node.create_service(FleetAttachSrv, "/fleet/attach", self._on_attach_service)
+        if config.execute_action:
+            self._execute_action_sub = node.create_subscription(
+                FleetExecuteAction,
+                "/fleet/execute_action",
+                self._on_execute_action,
+                10,
+            )
+            self._execute_action_srv = node.create_service(
+                FleetExecuteActionSrv,
+                "/fleet/execute_action",
+                self._on_execute_action_service,
+            )
         if config.joint_command:
             self._joint_sub = node.create_subscription(
                 FleetJointCommand,
@@ -117,6 +156,12 @@ class FleetRosInterface:
             ("_state_pub", self.node.destroy_publisher),
             ("_navigate_sub", self.node.destroy_subscription),
             ("_navigate_srv", self.node.destroy_service),
+            ("_stop_sub", self.node.destroy_subscription),
+            ("_stop_srv", self.node.destroy_service),
+            ("_attach_sub", self.node.destroy_subscription),
+            ("_attach_srv", self.node.destroy_service),
+            ("_execute_action_sub", self.node.destroy_subscription),
+            ("_execute_action_srv", self.node.destroy_service),
             ("_joint_sub", self.node.destroy_subscription),
             ("_joint_srv", self.node.destroy_service),
         ):
@@ -133,8 +178,58 @@ class FleetRosInterface:
         return response
 
     def _dispatch_navigate(self, msg: FleetNavigate) -> PbfCommandAck:
+        frame_rejections = _navigation_frame_rejections(msg)
+        if frame_rejections:
+            return PbfCommandAck(
+                command_id=msg.command_id,
+                source=_source_from_msg(msg),
+                sim_time=float(getattr(self.command_dispatcher.sim_core, "sim_time", 0.0)),
+                rejected=frame_rejections,
+            )
         return self.command_dispatcher.navigate(
             _navigation_goals_from_msg(msg, xy_offset=self._rmf_frame_offset),
+            source=_source_from_msg(msg),
+            command_id=msg.command_id or None,
+        )
+
+    def _on_stop(self, msg: FleetStop) -> None:
+        self._log_rejections(self._dispatch_stop(msg))
+
+    def _on_stop_service(self, request, response):
+        response.ack = command_ack_to_msg(self._dispatch_stop(request))
+        return response
+
+    def _dispatch_stop(self, msg: FleetStop) -> PbfCommandAck:
+        return self.command_dispatcher.stop(
+            tuple(msg.names),
+            source=_source_from_msg(msg),
+            command_id=msg.command_id or None,
+        )
+
+    def _on_attach(self, msg: FleetAttach) -> None:
+        self._log_rejections(self._dispatch_attach(msg))
+
+    def _on_attach_service(self, request, response):
+        response.ack = command_ack_to_msg(self._dispatch_attach(request))
+        return response
+
+    def _dispatch_attach(self, msg: FleetAttach) -> PbfCommandAck:
+        return self.command_dispatcher.attach(
+            _attach_commands_from_msg(msg),
+            source=_source_from_msg(msg),
+            command_id=msg.command_id or None,
+        )
+
+    def _on_execute_action(self, msg: FleetExecuteAction) -> None:
+        self._log_rejections(self._dispatch_execute_action(msg))
+
+    def _on_execute_action_service(self, request, response):
+        response.ack = command_ack_to_msg(self._dispatch_execute_action(request))
+        return response
+
+    def _dispatch_execute_action(self, msg: FleetExecuteAction) -> PbfCommandAck:
+        return self.command_dispatcher.execute_action(
+            _action_commands_from_msg(msg),
             source=_source_from_msg(msg),
             command_id=msg.command_id or None,
         )
@@ -152,7 +247,7 @@ class FleetRosInterface:
         commands, validation_rejected = _joint_commands_from_msg(msg)
         if not commands:
             return PbfCommandAck(
-                command_id=command_id or "invalid",
+                command_id=msg.command_id,
                 source=source,
                 sim_time=float(getattr(self.command_dispatcher.sim_core, "sim_time", 0.0)),
                 rejected=validation_rejected,
@@ -249,6 +344,61 @@ def _navigation_goals_from_msg(
 ) -> list[RobotGoalCommand2D | RobotGoalCommand3D]:
     return [_goal_2d_from_msg(goal, xy_offset=xy_offset) for goal in msg.goals_2d] + [
         _goal_3d_from_msg(goal, xy_offset=xy_offset) for goal in msg.goals_3d
+    ]
+
+
+def _navigation_frame_rejections(msg: FleetNavigate) -> dict[str, str]:
+    frame_id = getattr(getattr(msg, "header", None), "frame_id", "")
+    if frame_id in ("", "odom"):
+        return {}
+    names = [goal.name for goal in msg.goals_2d] + [goal.name for goal in msg.goals_3d]
+    return {name: f"unsupported frame_id {frame_id!r}; expected 'odom'" for name in names}
+
+
+def _attach_commands_from_msg(msg: FleetAttach) -> list[RobotAttachCommand]:
+    commands = []
+    for command in msg.commands:
+        offset = command.offset
+        offset_orientation = [
+            float(offset.orientation.x),
+            float(offset.orientation.y),
+            float(offset.orientation.z),
+            float(offset.orientation.w),
+        ]
+        if all(v == 0.0 for v in offset_orientation):
+            offset_orientation = [0.0, 0.0, 0.0, 1.0]
+        search_radius = float(command.search_radius)
+        if search_radius <= 0.0:
+            search_radius = 0.5
+        commands.append(
+            RobotAttachCommand(
+                name=command.name,
+                attach=bool(command.attach),
+                object_name=command.object_name,
+                parent_link=command.parent_link or "base_link",
+                offset=PbfPose(
+                    position=[
+                        float(offset.position.x),
+                        float(offset.position.y),
+                        float(offset.position.z),
+                    ],
+                    orientation=offset_orientation,
+                ),
+                search_radius=search_radius,
+            )
+        )
+    return commands
+
+
+def _action_commands_from_msg(msg: FleetExecuteAction) -> list[RobotActionCommand]:
+    return [
+        RobotActionCommand(
+            name=command.name,
+            action_type=command.action_type,
+            action_params_json=command.action_params_json,
+            command_id=msg.command_id or None,
+        )
+        for command in msg.commands
     ]
 
 

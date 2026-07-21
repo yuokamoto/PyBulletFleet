@@ -572,12 +572,20 @@ class ExecuteActionHandler(RobotInterfaceGroup):
         from .action_parser import parse_action_goal
 
         owner = self.owner
-        action = parse_action_goal(msg.action_type, msg.action_params_json)
+        command = msg.command
+        if command.name and command.name != owner._ns:
+            logger.error(
+                "'%s': execute_action topic target mismatch: command target='%s'",
+                owner._ns,
+                command.name,
+            )
+            return
+        action = parse_action_goal(command.action_type, command.action_params_json)
         if action is None:
             logger.error(
                 "'%s': failed to parse execute_action topic: type='%s'",
                 owner._ns,
-                msg.action_type,
+                command.action_type,
             )
             return
         owner.agent.add_action(action)
@@ -603,13 +611,20 @@ class ExecuteActionHandler(RobotInterfaceGroup):
         from .action_parser import parse_action_goal
 
         owner = self.owner
-        goal_msg = goal_handle.request.goal
-        action = parse_action_goal(goal_msg.action_type, goal_msg.action_params_json)
+        command = goal_handle.request.goal.command
+        if command.name and command.name != owner._ns:
+            goal_handle.abort()
+            result = ExecuteAction.Result()
+            result.success = False
+            result.message = f"Command target '{command.name}' does not match robot '{owner._ns}'"
+            return result
+
+        action = parse_action_goal(command.action_type, command.action_params_json)
         if action is None:
             goal_handle.abort()
             result = ExecuteAction.Result()
             result.success = False
-            result.message = f"Failed to parse action: type='{goal_msg.action_type}'"
+            result.message = f"Failed to parse action: type='{command.action_type}'"
             return result
 
         owner.agent.add_action(action)
@@ -739,26 +754,33 @@ class ServiceHandler(RobotInterfaceGroup):
         from pybullet_fleet.geometry import Pose as PbfPose
 
         owner = self.owner
-        object_name = request.object_name if request.object_name else ""
-        parent_link = request.parent_link if request.parent_link else "base_link"
-        search_radius = request.search_radius if request.search_radius > 0 else 0.5
+        command = request.command
+        if command.name and command.name != owner._ns:
+            response.success = False
+            response.message = f"Command target '{command.name}' does not match service robot '{owner._ns}'"
+            response.attached_object_name = ""
+            return response
+
+        object_name = command.object_name if command.object_name else ""
+        parent_link = command.parent_link if command.parent_link else "base_link"
+        search_radius = command.search_radius if command.search_radius > 0 else 0.5
 
         offset_pos = [
-            request.offset.position.x,
-            request.offset.position.y,
-            request.offset.position.z,
+            command.offset.position.x,
+            command.offset.position.y,
+            command.offset.position.z,
         ]
         offset_ori = [
-            request.offset.orientation.x,
-            request.offset.orientation.y,
-            request.offset.orientation.z,
-            request.offset.orientation.w,
+            command.offset.orientation.x,
+            command.offset.orientation.y,
+            command.offset.orientation.z,
+            command.offset.orientation.w,
         ]
         if all(v == 0.0 for v in offset_ori):
             offset_ori = [0.0, 0.0, 0.0, 1.0]
         attach_offset = PbfPose(position=offset_pos, orientation=offset_ori)
 
-        if request.attach:
+        if command.attach:
             target_obj = None
             if object_name:
                 sim_core = getattr(owner.agent, "sim_core", None)

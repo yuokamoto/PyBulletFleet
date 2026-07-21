@@ -40,6 +40,11 @@ def _fleet_msg_types():
 
 
 @dataclass
+class FakeObject:
+    name: str
+
+
+@dataclass
 class FakeAgent:
     name: str
     object_id: int
@@ -51,6 +56,14 @@ class FakeAgent:
     def __post_init__(self):
         self.goal_calls = []
         self.joint_calls = []
+        self.stop_calls = 0
+        self.attach_calls = []
+        self.detach_calls = []
+        self.action_calls = []
+        self.attached_objects = []
+        self.pickable_object = None
+        self.search_radii = []
+        self.sim_core = None
 
     def get_pose(self):
         return self.pose
@@ -61,11 +74,37 @@ class FakeAgent:
     def set_joints_targets_by_name(self, positions):
         self.joint_calls.append(dict(positions))
 
+    def stop(self):
+        self.stop_calls += 1
+
+    def find_nearest_pickable(self, search_radius=0.5):
+        self.search_radii.append(search_radius)
+        return self.pickable_object
+
+    def attach_object(self, obj, parent_link_index="base_link", relative_pose=None):
+        self.attach_calls.append((obj, parent_link_index, relative_pose))
+        self.attached_objects.append(obj)
+        return True
+
+    def detach_object(self, obj):
+        self.detach_calls.append(obj)
+        self.attached_objects.remove(obj)
+        return True
+
+    def get_attached_objects(self):
+        return list(self.attached_objects)
+
+    def add_action(self, action):
+        self.action_calls.append(action)
+
 
 class FakeSim:
     def __init__(self, agents):
         self.agents = agents
         self.sim_time = 12.5
+        self.sim_objects = []
+        for agent in self.agents:
+            agent.sim_core = self
 
 
 def _node():
@@ -171,6 +210,43 @@ def test_fleet_navigate_service_applies_frame_offset():
     assert agent.goal_calls[0].y == pytest.approx(2.0)
 
 
+def test_fleet_navigate_service_rejects_unsupported_frame():
+    msgs, srvs = _fleet_msg_types()
+    node = _node()
+    agent = FakeAgent("robot0", 1)
+    interface = FleetRosInterface(node, FakeSim([agent]), FleetApiConfig(enabled=True, navigate=True))
+    request = srvs.FleetNavigate.Request()
+    request.header.frame_id = "map"
+    request.command_id = "cmd-map"
+    request.goals_2d = [msgs.RobotGoal2D(name="robot0", position=[1.0, 2.0], yaw=0.5, z=0.0)]
+    response = srvs.FleetNavigate.Response()
+
+    result = interface._on_navigate_service(request, response)
+
+    assert result.ack.command_id == "cmd-map"
+    assert result.ack.accepted_names == []
+    assert result.ack.rejected_names == ["robot0"]
+    assert "unsupported frame_id 'map'" in result.ack.reject_reasons[0]
+    assert agent.goal_calls == []
+
+
+def test_fleet_navigate_service_rejects_unsupported_frame_with_empty_command_id():
+    msgs, srvs = _fleet_msg_types()
+    node = _node()
+    agent = FakeAgent("robot0", 1)
+    interface = FleetRosInterface(node, FakeSim([agent]), FleetApiConfig(enabled=True, navigate=True))
+    request = srvs.FleetNavigate.Request()
+    request.header.frame_id = "map"
+    request.goals_2d = [msgs.RobotGoal2D(name="robot0", position=[1.0, 2.0], yaw=0.5, z=0.0)]
+    response = srvs.FleetNavigate.Response()
+
+    result = interface._on_navigate_service(request, response)
+
+    assert result.ack.command_id == ""
+    assert result.ack.rejected_names == ["robot0"]
+    assert agent.goal_calls == []
+
+
 def test_fleet_navigate_topic_logs_rejected_targets():
     msgs, _ = _fleet_msg_types()
     node = _node()
@@ -212,6 +288,121 @@ def test_fleet_navigate_service_dispatches_3d_pose_goal():
     assert agent.goal_calls[0].orientation == pytest.approx([0.0, 0.0, 0.707, 0.707])
 
 
+def test_fleet_stop_service_dispatches_named_targets():
+    _, srvs = _fleet_msg_types()
+    node = _node()
+    robot0 = FakeAgent("robot0", 1)
+    robot1 = FakeAgent("robot1", 2)
+    interface = FleetRosInterface(
+        node,
+        FakeSim([robot0, robot1]),
+        FleetApiConfig(enabled=True, stop=True),
+    )
+    request = srvs.FleetStop.Request()
+    request.command_id = "stop-1"
+    request.source = "test"
+    request.names = ["robot0", "missing"]
+    response = srvs.FleetStop.Response()
+
+    result = interface._on_stop_service(request, response)
+
+    assert result.ack.command_id == "stop-1"
+    assert result.ack.source == "test"
+    assert result.ack.accepted_names == ["robot0"]
+    assert result.ack.rejected_names == ["missing"]
+    assert robot0.stop_calls == 1
+    assert robot1.stop_calls == 0
+
+
+def test_fleet_attach_service_dispatches_object_commands():
+    msgs, srvs = _fleet_msg_types()
+    node = _node()
+    robot0 = FakeAgent("robot0", 1)
+    box = FakeObject("box")
+    sim = FakeSim([robot0])
+    sim.sim_objects = [box]
+    interface = FleetRosInterface(
+        node,
+        sim,
+        FleetApiConfig(enabled=True, attach=True),
+    )
+    request = srvs.FleetAttach.Request()
+    request.command_id = "attach-1"
+    request.source = "test"
+    command = msgs.RobotAttachCommand()
+    command.name = "robot0"
+    command.attach = True
+    command.object_name = "box"
+    command.parent_link = "tool"
+    command.offset.position.z = 0.2
+    request.commands = [command]
+    response = srvs.FleetAttach.Response()
+
+    result = interface._on_attach_service(request, response)
+
+    assert result.ack.command_id == "attach-1"
+    assert result.ack.accepted_names == ["robot0"]
+    assert result.ack.rejected_names == []
+    assert robot0.attach_calls[0][0] is box
+    assert robot0.attach_calls[0][1] == "tool"
+    assert robot0.attach_calls[0][2].z == pytest.approx(0.2)
+
+
+def test_fleet_attach_service_defaults_non_positive_search_radius():
+    msgs, srvs = _fleet_msg_types()
+    node = _node()
+    robot0 = FakeAgent("robot0", 1)
+    robot0.pickable_object = FakeObject("box")
+    sim = FakeSim([robot0])
+    interface = FleetRosInterface(
+        node,
+        sim,
+        FleetApiConfig(enabled=True, attach=True),
+    )
+    request = srvs.FleetAttach.Request()
+    command = msgs.RobotAttachCommand()
+    command.name = "robot0"
+    command.attach = True
+    command.search_radius = -1.0
+    request.commands = [command]
+    response = srvs.FleetAttach.Response()
+
+    result = interface._on_attach_service(request, response)
+
+    assert result.ack.accepted_names == ["robot0"]
+    assert robot0.search_radii == [0.5]
+
+
+def test_fleet_execute_action_service_dispatches_action_commands():
+    msgs, srvs = _fleet_msg_types()
+    node = _node()
+    robot0 = FakeAgent("robot0", 1)
+    interface = FleetRosInterface(
+        node,
+        FakeSim([robot0]),
+        FleetApiConfig(enabled=True, execute_action=True),
+    )
+    request = srvs.FleetExecuteAction.Request()
+    request.command_id = "action-1"
+    request.source = "test"
+    request.commands = [
+        msgs.RobotActionCommand(
+            name="robot0",
+            action_type="wait",
+            action_params_json='{"duration": 0.1}',
+        )
+    ]
+    response = srvs.FleetExecuteAction.Response()
+
+    result = interface._on_execute_action_service(request, response)
+
+    assert result.ack.command_id == "action-1"
+    assert result.ack.accepted_names == ["robot0"]
+    assert result.ack.rejected_names == []
+    assert len(robot0.action_calls) == 1
+    assert type(robot0.action_calls[0]).__name__ == "WaitAction"
+
+
 def test_named_joint_service_rejects_mismatched_arrays():
     msgs, srvs = _fleet_msg_types()
     node = _node()
@@ -231,6 +422,27 @@ def test_named_joint_service_rejects_mismatched_arrays():
 
     assert result.ack.command_id == "cmd-2"
     assert result.ack.accepted_names == []
+    assert result.ack.rejected_names == ["robot0"]
+    assert "2 joint names" in result.ack.reject_reasons[0]
+
+
+def test_named_joint_service_rejects_mismatched_arrays_with_empty_command_id():
+    msgs, srvs = _fleet_msg_types()
+    node = _node()
+    interface = FleetRosInterface(
+        node,
+        FakeSim([FakeAgent("robot0", 1)]),
+        FleetApiConfig(enabled=True, joint_command=True),
+    )
+    request = srvs.FleetJointCommand.Request()
+    request.named_joint_position_commands = [
+        msgs.RobotNamedJointPositionsCommand(name="robot0", joint_names=["joint1", "joint2"], positions=[1.0])
+    ]
+    response = srvs.FleetJointCommand.Response()
+
+    result = interface._on_joint_command_service(request, response)
+
+    assert result.ack.command_id == ""
     assert result.ack.rejected_names == ["robot0"]
     assert "2 joint names" in result.ack.reject_reasons[0]
 

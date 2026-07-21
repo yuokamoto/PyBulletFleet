@@ -1,4 +1,4 @@
-"""Unit tests for RobotClientAPI (RMF EasyFullControl ↔ bridge client).
+"""Unit tests for PerRobotRosClient (RMF EasyFullControl ↔ bridge client).
 
 Mock-based; require ROS 2 message types. Run inside Docker or a sourced ROS 2
 workspace.
@@ -11,7 +11,7 @@ import pytest
 
 # importorskip the module under test: it pulls rclpy + all the ROS/RMF message
 # deps used below, so a single guard covers them all (skips outside a ROS env).
-pytest.importorskip("pybullet_fleet_rmf.robot_client_api", reason="ROS 2 / RMF not available")
+pytest.importorskip("pybullet_fleet_rmf.per_robot_ros_client", reason="ROS 2 / RMF not available")
 
 from action_msgs.msg import GoalStatus
 from nav_msgs.msg import Odometry
@@ -19,9 +19,9 @@ from sensor_msgs.msg import BatteryState
 
 
 def _api(mock_node, name="tinyRobot1"):
-    from pybullet_fleet_rmf.robot_client_api import RobotClientAPI
+    from pybullet_fleet_rmf.per_robot_ros_client import PerRobotRosClient
 
-    return RobotClientAPI(name, mock_node, map_name="L1")
+    return PerRobotRosClient(name, mock_node, map_name="L1")
 
 
 def _odom_at(api, x, y, yaw):
@@ -35,7 +35,7 @@ def _odom_at(api, x, y, yaw):
 
 
 def test_update_data_is_command_completed():
-    from pybullet_fleet_rmf.robot_client_api import RobotUpdateData
+    from pybullet_fleet_rmf.client_interface import RobotUpdateData
 
     d = RobotUpdateData(map="L1", position=[0.0, 0.0, 0.0], battery_soc=1.0, last_completed_cmd_id=5)
     assert d.is_command_completed(5)
@@ -115,6 +115,37 @@ def test_stop_cancels_active_goal(mock_node):
 
 def test_stop_when_idle_is_noop(mock_node):
     assert _api(mock_node).stop() is True  # cancelling when idle is fine
+
+
+def test_attach_object_uses_shared_robot_attach_command(mock_node):
+    api = _api(mock_node, name="robot0")
+    future = MagicMock()
+    api._attach_object_client.wait_for_service.return_value = True
+    api._attach_object_client.call_async.return_value = future
+
+    assert api.attach_object(
+        True,
+        12,
+        object_name="box",
+        parent_link="tool",
+        offset_position=(0.1, 0.2, 0.3),
+        offset_orientation=(0.0, 0.0, 0.5, 0.5),
+        search_radius=0.75,
+    )
+
+    api._attach_object_client.call_async.assert_called_once()
+    req = api._attach_object_client.call_async.call_args.args[0]
+    assert req.command.name == "robot0"
+    assert req.command.attach is True
+    assert req.command.object_name == "box"
+    assert req.command.parent_link == "tool"
+    assert req.command.offset.position.x == pytest.approx(0.1)
+    assert req.command.offset.position.y == pytest.approx(0.2)
+    assert req.command.offset.position.z == pytest.approx(0.3)
+    assert req.command.offset.orientation.z == pytest.approx(0.5)
+    assert req.command.offset.orientation.w == pytest.approx(0.5)
+    assert req.command.search_radius == pytest.approx(0.75)
+    future.add_done_callback.assert_called_once()
 
 
 def test_on_nav_complete_marks_completed_on_success(mock_node):

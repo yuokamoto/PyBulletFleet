@@ -19,3 +19,10 @@ def test_version_looks_like_semver_or_fallback():
 
 def test_version_in_all():
     assert "__version__" in pybullet_fleet.__all__
+
+
+def test_fleet_command_types_are_reexported():
+    assert pybullet_fleet.RobotAttachCommand.__name__ == "RobotAttachCommand"
+    assert pybullet_fleet.RobotActionCommand.__name__ == "RobotActionCommand"
+    assert "RobotAttachCommand" in pybullet_fleet.__all__
+    assert "RobotActionCommand" in pybullet_fleet.__all__

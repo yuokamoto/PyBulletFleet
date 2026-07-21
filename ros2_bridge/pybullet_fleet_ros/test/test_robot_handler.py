@@ -187,6 +187,44 @@ def test_pre_step_without_controller_is_safe(mock_node, mock_agent):
     handler.pre_step(dt=0.01, stamp=TimeMsg(sec=1, nanosec=0))  # should not raise
 
 
+def test_execute_action_topic_uses_shared_robot_action_command(mock_node, mock_agent):
+    """execute_action topic reuses RobotActionCommand inside ExecuteActionGoal."""
+    from pybullet_fleet_msgs.msg import ExecuteActionGoal, RobotActionCommand
+
+    from pybullet_fleet_ros.robot_handler import RobotHandler
+
+    handler = RobotHandler(mock_node, mock_agent)
+    msg = ExecuteActionGoal()
+    msg.command = RobotActionCommand(
+        name="test_robot",
+        action_type="wait",
+        action_params_json='{"duration": 0.1}',
+    )
+
+    handler._execute_actions.execute_action_topic_cb(msg)
+
+    mock_agent.add_action.assert_called_once()
+
+
+def test_execute_action_topic_rejects_mismatched_robot_name(mock_node, mock_agent):
+    """execute_action topic rejects commands targeted at another robot."""
+    from pybullet_fleet_msgs.msg import ExecuteActionGoal, RobotActionCommand
+
+    from pybullet_fleet_ros.robot_handler import RobotHandler
+
+    handler = RobotHandler(mock_node, mock_agent)
+    msg = ExecuteActionGoal()
+    msg.command = RobotActionCommand(
+        name="other_robot",
+        action_type="wait",
+        action_params_json='{"duration": 0.1}',
+    )
+
+    handler._execute_actions.execute_action_topic_cb(msg)
+
+    mock_agent.add_action.assert_not_called()
+
+
 def test_post_step_publishes_odom(mock_node, mock_agent):
     """post_step sends Odometry message."""
     from pybullet_fleet_ros.robot_handler import RobotHandler

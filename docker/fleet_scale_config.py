@@ -56,7 +56,7 @@ def generate_bridge_config(
     per_robot_enabled = interface_mode in {"per_robot", "hybrid"}
 
     with template_path.open("r", encoding="utf-8") as stream:
-        config = yaml.safe_load(stream)
+        config = yaml.safe_load(stream) or {}
 
     config.setdefault("simulation", {})
     config["simulation"]["gui"] = gui

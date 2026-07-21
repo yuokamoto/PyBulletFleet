@@ -6,14 +6,33 @@ find_package(rosidl_default_generators REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(std_msgs REQUIRED)
 
-# Auto-collect all .msg, .srv, .action files
-file(GLOB MSG_FILES RELATIVE "${CMAKE_CURRENT_SOURCE_DIR}" "msg/*.msg")
-file(GLOB SRV_FILES RELATIVE "${CMAKE_CURRENT_SOURCE_DIR}" "srv/*.srv")
-file(GLOB ACTION_FILES RELATIVE "${CMAKE_CURRENT_SOURCE_DIR}" "action/*.action")
-set(INTERFACE_FILES ${MSG_FILES} ${SRV_FILES} ${ACTION_FILES})
-
+# Keep ROS interfaces explicitly listed instead of globbed. These files are the
+# package's public API; updating CMakeLists.txt makes additions/removals visible
+# in review and forces CMake/colcon to reconfigure when the interface set
+# changes.
 rosidl_generate_interfaces(${PROJECT_NAME}
-  ${INTERFACE_FILES}
+  "msg/CommandAck.msg"
+  "msg/ExecuteActionGoal.msg"
+  "msg/FleetAttach.msg"
+  "msg/FleetExecuteAction.msg"
+  "msg/FleetJointCommand.msg"
+  "msg/FleetNavigate.msg"
+  "msg/FleetState.msg"
+  "msg/FleetStop.msg"
+  "msg/RobotActionCommand.msg"
+  "msg/RobotAttachCommand.msg"
+  "msg/RobotGoal2D.msg"
+  "msg/RobotGoal3D.msg"
+  "msg/RobotJointPositionsCommand.msg"
+  "msg/RobotNamedJointPositionsCommand.msg"
+  "msg/RobotState3D.msg"
+  "srv/AttachObject.srv"
+  "srv/FleetAttach.srv"
+  "srv/FleetExecuteAction.srv"
+  "srv/FleetJointCommand.srv"
+  "srv/FleetNavigate.srv"
+  "srv/FleetStop.srv"
+  "action/ExecuteAction.action"
   DEPENDENCIES geometry_msgs std_msgs
 )
 

@@ -17,6 +17,15 @@
 handler_map:
   "*_door": pybullet_fleet_rmf.door_handler.DoorHandler
 
+fleet_api:
+  enabled: true
+  states: true
+  navigate: true
+  stop: true
+  attach: true
+  execute_action: true
+  joint_command: false
+
 simulation:
   gui: true
   physics: false
@@ -33,7 +42,7 @@ simulation:
 # Parsed by load_sdf_world_file(): resolves <include> elements,
 # downloads Gazebo Fuel models (chairs, desks, etc.) on first run.
 world:
-  world_file: "/rmf_demos_ws/install/rmf_demos_maps/share/rmf_demos_maps/maps/office/office.world"
+  world_file: "package://rmf_demos_maps/maps/office/office.world"
   # Robot/plugin models handled separately — skip in world loading
   skip_models:
     - TinyRobot
@@ -73,7 +82,7 @@ bridge_plugins:
 
 entities:
   - name: tinyRobot1
-    sdf_path: "/rmf_demos_ws/install/rmf_demos_assets/share/rmf_demos_assets/models/TinyRobot/model.sdf"
+    sdf_path: "package://rmf_demos_assets/models/TinyRobot/model.sdf"
     pose: [10.433, -5.575, 0.0]
     yaw: 0.0
     motion_mode: "differential"
@@ -91,7 +100,7 @@ entities:
 
 
   - name: tinyRobot2
-    sdf_path: "/rmf_demos_ws/install/rmf_demos_assets/share/rmf_demos_assets/models/TinyRobot/model.sdf"
+    sdf_path: "package://rmf_demos_assets/models/TinyRobot/model.sdf"
     pose: [20.422, -5.312, 0.0]
     yaw: 0.0
     motion_mode: "differential"

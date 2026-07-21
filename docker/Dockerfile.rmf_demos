@@ -92,6 +92,9 @@ COPY ros2_bridge/pybullet_fleet_rmf /rmf_demos_ws/src/pybullet_fleet_rmf
 WORKDIR /rmf_demos_ws
 RUN source /opt/ros/jazzy/setup.bash && \
     source /rmf_demos_ws/install/setup.bash && \
+    rm -rf \
+      build/pybullet_fleet_msgs build/pybullet_fleet_ros build/pybullet_fleet_rmf \
+      install/pybullet_fleet_msgs install/pybullet_fleet_ros install/pybullet_fleet_rmf && \
     colcon build --symlink-install \
     --packages-select pybullet_fleet_msgs pybullet_fleet_ros pybullet_fleet_rmf \
     --cmake-args -DCMAKE_BUILD_TYPE=Release

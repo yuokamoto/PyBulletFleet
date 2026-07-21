@@ -211,19 +211,38 @@ share the same success condition and should be evaluated together.
 
 ### Phase 5a — RMF Client Abstraction
 
+Status: in progress.
+
 Tasks:
 
-- Extract the RMF-facing client contract from `RobotClientAPI`.
-- Define a transport-independent client interface:
-  - `get_states()`
-  - `navigate(goals)`
-  - `stop(names)`
-  - `execute_action(commands)`
-  - `attach(commands)`
-- Implement `RosFleetClient` using ROS `/fleet/*` endpoints.
-- Implement `PythonFleetClient` using `FleetStateProvider` and
+- Extract the RMF-facing client contract from the per-robot ROS client.
+- Define a transport-independent per-robot facade consumed by
+  `RobotAdapter`:
+  - `get_data()`
+  - `navigate(cmd_id, position, map_name, speed_limit)`
+  - `stop()`
+  - `start_charge(cmd_id)` / `stop_charge()`
+  - `toggle_attach(attach, cmd_id)`
+- Add a client factory so the adapter can choose the transport without
+  changing RMF callback logic.
+- Implement `RosRmfFleetClient` using ROS `/fleet/states` and `/fleet/navigate`
+  for patrol/navigation.
+- Implement `PythonRmfFleetClient` using `FleetStateProvider` and
   `FleetCommandDispatcher` directly.
 - Keep the existing per-robot ROS client path as a compatibility implementation.
+
+Current implementation notes:
+
+- RMF demo launch files default to `python_fleet` so RMF control uses the
+  in-process plugin path by default.
+- `per_robot_ros` remains available and preserves existing demos as an explicit
+  compatibility mode.
+- `fleet_ros` is available as an experimental RMF client mode for
+  `/fleet/states` + `/fleet/navigate` + `/fleet/stop` + `/fleet/attach`;
+  charging still uses per-robot compatibility services until a fleet-level
+  charge API exists.
+- `python_fleet` is available as the direct in-process RMF client transport.
+  It uses `FleetStateProvider` and `FleetCommandDispatcher` directly.
 
 Exit criteria:
 
@@ -231,35 +250,83 @@ Exit criteria:
   topics/actions/services.
 - Existing per-robot ROS RMF demos still work.
 
-### Phase 5b — RMF over Fleet State and Navigation
+### Phase 5b — RMF over Typed Fleet Commands
+
+Status: in progress.
 
 Tasks:
 
 - Let RMF consume fleet state snapshots instead of per-robot state publishers.
 - Add `/fleet/navigate` / dispatcher-backed navigation support to the client
   abstraction.
+- Add `/fleet/stop` / dispatcher-backed stop support to the client abstraction.
+- Add `/fleet/attach` / dispatcher-backed attach support to the client
+  abstraction.
 - Keep existing per-robot command/service/action paths initially for delivery
   and compatibility.
 
+Current implementation notes:
+
+- RMF navigation, stop, and delivery attach/drop are routed through the
+  transport-neutral RMF client contract.
+- `fleet_ros` maps RMF navigation, stop, and attach to `/fleet/navigate`,
+  `/fleet/stop`, and `/fleet/attach`.
+- `python_fleet` maps the same RMF navigation, stop, and attach calls directly
+  to `FleetCommandDispatcher`.
+- Generic RMF categories are not mapped automatically yet. The adapter logs a
+  warning and finishes unknown categories so users do not accidentally believe
+  an undefined simulator action ran.
+- Future generic action support should define an explicit RMF category to
+  PyBulletFleet action mapping and decide whether RMF completion means
+  "accepted", "queued", or "action finished".
+
 Exit criteria:
 
-- Patrol can run with fleet state and fleet navigation.
+- Patrol can run with fleet state, fleet navigation, and fleet stop.
+- Delivery attach/drop can use fleet attach instead of per-robot attach
+  services.
+- Generic/custom RMF action mapping remains deferred to Phase 6a.
 
 ### Phase 5c — Plugin Only Launch Path
+
+Status: in progress.
 
 Tasks:
 
 - Add a launch/runtime path where RMF adapter, simulation core,
   `FleetStateProvider`, and `FleetCommandDispatcher` run in one Python process.
 - No ROS bridge is required in the control path.
-- Use the same RMF client abstraction with `PythonFleetClient`.
+- Use the same RMF client abstraction with `PythonRmfFleetClient`.
+- Wire launch/config so `python_fleet` receives the shared simulation core
+  instead of requiring ROS bridge endpoints.
+
+Current implementation notes:
+
+- `fleet_adapter.start_adapter_runtime()` factors the EasyFullControl setup so
+  it can run from either the standalone executable or an in-process bridge
+  plugin.
+- `pybullet_fleet_rmf.rmf_adapter_plugin.RmfAdapterBridgePlugin` starts the RMF
+  adapter inside `bridge_node` and passes the shared `sim_core` to
+  `PythonRmfFleetClient`.
+- `pybullet_common.launch.py` routes `client_mode:=python_fleet` to the
+  in-process plugin and skips standalone `fleet_adapter` processes.
+- Single- and multi-fleet launch files pass a required `rmf_adapters` list to
+  `pybullet_common.launch.py`. Each entry becomes one `RmfAdapterBridgePlugin`
+  when `client_mode:=python_fleet`, or one standalone `fleet_adapter` node when
+  using `per_robot_ros` or `fleet_ros`.
+- The standalone executable still cannot use `python_fleet` by itself because a
+  separate ROS process has no direct simulation core reference.
 
 Exit criteria:
 
 - A basic RMF patrol scenario can run without bridge topics/services in the
   control path.
+- Multi-fleet RMF demos can run every fleet adapter in-process with shared
+  `sim_core`.
 
 ### Phase 5d — Plugin + Bridge Launch Path
+
+Status: in progress.
 
 Tasks:
 
@@ -273,107 +340,9 @@ Exit criteria:
 
 - Plugin + Bridge can observe and optionally command the same simulation without
   maintaining a separate control implementation.
-- Delivery remains supported through per-robot compatibility paths until
-  fleet-level `stop`, `execute_action`, and `attach` APIs are ready.
-
-### Phase 5e — Post Fleet-API Performance Refresh
-
-Purpose: refresh performance results after the fleet API and batch-controller
-paths are in place, using comparable conditions instead of mixing older
-PyBulletFleet-only numbers with ROS bridge measurements.
-
-Tasks:
-
-- Define a common 1000-robot benchmark matrix:
-  - PyBulletFleet only, per-agent command path;
-  - PyBulletFleet only, batch controller with per-agent command ingress;
-  - PyBulletFleet only, batch controller with fleet command ingress;
-  - ROS bridge fleet-only with `/fleet/navigate` service;
-  - ROS bridge fleet-only with `/fleet/navigate` topic and motion verification;
-  - ROS bridge hybrid profiles for selected per-robot groups;
-  - Plugin Only;
-  - Plugin + Bridge.
-- Keep the Docker fleet scale checker as a smoke/diagnostic tool before the
-  full benchmark refresh:
-  - service `/fleet/navigate` should verify ack and motion;
-  - topic `/fleet/navigate` should verify publish matching and motion;
-  - detailed service-vs-topic performance comparison remains part of this
-    Phase 5e refresh.
-- Add a separate joint-command benchmark case instead of folding it into the
-  mobile navigation path:
-  - PyBulletFleet only, arm or mixed mobile-manipulator joint commands;
-  - update `benchmark/arm_benchmark.py` with a mobile-benchmark-equivalent
-    command-interface switch once fleet joint commands are implemented;
-  - reuse the existing benchmark CLI vocabulary where applicable
-    (`--agents`, `--collision-freq`, `--mode`, `--controller`,
-    `--command-interface`) so mobile and arm control-path measurements stay
-    comparable;
-  - ROS bridge `/fleet/joint_command` topic/service;
-  - hybrid mode with any required per-robot compatibility interfaces;
-  - Plugin Only joint command dispatch through `FleetCommandDispatcher`.
-- Keep key conditions explicit and aligned:
-  - robot model and controller;
-  - `physics=false`;
-  - `gui=false`;
-  - `timestep=0.1`;
-  - `target_rtf=0` for maximum RTF;
-  - matching movement workload and command cadence;
-  - matching robot count and grid spacing.
-- Record both maximum RTF and latency metrics:
-  - sim step time;
-  - service command request -> ack latency;
-  - topic command publish time and publish -> first motion latency;
-  - command request -> first motion latency;
-  - joint command request -> ack latency and first joint motion latency;
-  - fleet state snapshot/publish time;
-  - memory and startup time where available.
-- Update or replace stale benchmark summaries in:
-  - `docs/benchmarking/results.md`;
-  - `benchmark/README.md`;
-  - future ROS 2 Bridge ReadTheDocs performance page;
-  - `ros2_bridge/PERFORMANCE.md` until the ReadTheDocs page exists.
-- Clearly label historical results that use different hardware, timestep,
-  controller, or workload so they are not used for direct ROS-vs-non-ROS
-  claims.
-
-Exit criteria:
-
-- PyBulletFleet-only and ROS bridge fleet API numbers are measured on the same
-  machine with the same 1000-robot workload.
-- Any claim about ROS overhead is backed by an aligned PyBulletFleet-only
-  baseline.
-- ReadTheDocs and local benchmark docs no longer present mixed-condition values
-  as directly comparable.
-
-### Phase 5f — Scale Example Config Cleanup
-
-Purpose: align non-ROS scale examples with the newer `entities[].grid` config
-pattern used by the core config loader and ROS bridge examples, without
-breaking existing example configs immediately.
-
-Tasks:
-
-- Update `pybullet_fleet/config/100robots_config.yaml` to make
-  `entities[].grid` the primary example scene definition.
-- Keep the old top-level `num_robots`, `grid`, `spacing`, `offset`, and
-  robot-specific sections as commented legacy examples or compatibility notes.
-- Update `pybullet_fleet/examples/scale/100robots_grid_demo.py` to prefer
-  `entities[]` when present while retaining fallback support for the current
-  top-level example format.
-- Document that new scale examples should use `entities[].grid` so scene
-  definitions can be shared more easily across non-ROS examples, benchmarks,
-  and ROS bridge configs.
-- Review other `pybullet_fleet/examples/scale/*` demos for ad hoc grid setup
-  and leave follow-up notes where converting to `entities[]` would reduce
-  duplication.
-
-Exit criteria:
-
-- The 100-robot grid demo still runs with existing configs.
-- The default example config uses `entities[].grid` as the visible primary
-  pattern.
-- Legacy top-level scale keys remain understandable but are no longer the
-  recommended pattern.
+- Delivery remains supported through fleet attach; remaining per-robot
+  compatibility paths are mainly charging and any RMF custom categories that
+  are not yet mapped onto fleet endpoints.
 
 ### Phase 5 Performance Notes
 
@@ -430,8 +399,8 @@ Current observations from the Docker scale checker:
 
 ## RMF Performance Measurement Pattern
 
-Add this before or alongside Phase 5 so later changes have a baseline. It should
-be an optional benchmark, not a blocking CI gate at first.
+Track this under Phase 6c. It should be an optional benchmark, not a blocking
+CI gate at first.
 
 ### Benchmark Modes
 
@@ -449,10 +418,10 @@ Measure the same RMF scenario through multiple transport/configuration modes:
    - `/fleet/navigate` and later `/fleet/execute_action` / `/fleet/attach`;
    - minimal per-robot ROS interfaces.
 4. **Plugin Only**
-   - RMF adapter calls `PythonFleetClient`;
+   - RMF adapter calls `PythonRmfFleetClient`;
    - no ROS bridge in the control path.
 5. **Plugin + Bridge**
-   - RMF adapter uses `PythonFleetClient`;
+   - RMF adapter uses `PythonRmfFleetClient`;
    - ROS bridge remains active for observation/debug/external control.
 
 ### Scenarios
@@ -507,7 +476,187 @@ Do not make RMF performance benchmarks blocking in CI until they are stable and
 have clear thresholds. Initially they should publish artifacts or local JSON
 files only. Correctness gates remain the existing smoke/E2E tests.
 
-## Phase 6 — Trace, Snapshot, and Replay Hooks
+## Phase 6 — Extension, Benchmark Refresh, and Replay
+
+Purpose: keep Phase 5 focused on RMF migration while moving extension hooks,
+benchmark refreshes, and replayability into a follow-up phase.
+
+### Phase 6a — Generic Fleet Command Extension
+
+Purpose: let users add fleet-level commands without requiring a new built-in
+ROS message and dispatcher method for every project-specific behavior.
+
+Tasks:
+
+- Add a generic fleet command surface, separate from the typed standard APIs:
+  - candidate ROS endpoint: `/fleet/custom_command` or `/fleet/command`;
+  - candidate payload fields: `command_id`, `source`, `command_type`,
+    `names`, and `params_json`.
+- Add a Python-side command handler registry on or beside
+  `FleetCommandDispatcher`:
+  - `register_command_handler(command_type, handler)`;
+  - handler receives resolved agents, command params, source, and command id;
+  - handler returns accepted/rejected details or raises a validation error.
+- Keep typed APIs as the recommended path for standard behavior:
+  - `/fleet/navigate`;
+  - `/fleet/stop`;
+  - `/fleet/attach`;
+  - `/fleet/execute_action`;
+  - `/fleet/joint_command`.
+- Factor the repeated typed-command dispatch structure into small helper
+  methods before adding the generic command path:
+  - command tuple normalization and command-id resolution;
+  - robot target resolution and duplicate/ambiguous-name rejection;
+  - pre-apply validation hooks for command-specific preparation such as attach
+    target lookup or action parsing;
+  - common acknowledgement/event creation before mutating simulation state.
+  Keep command-specific mutation logic (`set_goal_pose`, `stop`,
+  `attach_object`, `queue_action`, joint target writes) explicit so the
+  dispatcher stays readable.
+- Ensure unknown command types are rejected explicitly and logged.
+- Decide whether generic command payloads should use JSON only, or allow a
+  typed envelope plus JSON parameters.
+- Define an explicit RMF custom action mapping layer before wiring unknown
+  RMF `execute_action` categories to simulator actions:
+  - map RMF `category` + `description` to either a typed fleet command, a
+    `/fleet/execute_action` payload, or a registered custom fleet command;
+  - keep unmapped RMF categories warning-only and finish them without
+    simulator-side execution;
+  - define completion semantics per mapping: accepted, queued, or action
+    finished.
+
+Exit criteria:
+
+- A user/plugin can register and execute one custom fleet command without
+  modifying core message definitions.
+- Typed standard fleet APIs remain unchanged and continue to be the RMF-facing
+  default.
+- Custom command events are recorded with enough metadata for trace/replay.
+- RMF custom action categories are never forwarded implicitly; each supported
+  category has an explicit mapping and documented completion behavior.
+
+### Phase 6b — RMF Command Coalescing
+
+Purpose: reduce burst load when RMF issues many per-robot callbacks in a short
+window while preserving RMF's per-robot callback contract.
+
+Tasks:
+
+- Add optional command coalescing in `RosRmfFleetClient`:
+  collect per-robot RMF `navigate()` callbacks that arrive within a short flush
+  window and send them as one `/fleet/navigate` request.
+- Keep coalescing conservative or disabled by default until ack/rejection and
+  latency semantics are validated.
+- Measure RMF per-robot navigate callback -> coalesced `/fleet/navigate` flush
+  latency.
+- Compare coalescing on/off for command latency and task-completion impact.
+
+Exit criteria:
+
+- Optional coalescing can be enabled without changing `RobotAdapter` callback
+  code.
+- Single-robot navigation remains the default behavior.
+
+### Phase 6c — Post Fleet-API Performance Refresh
+
+Purpose: refresh performance results after the fleet API and batch-controller
+paths are in place, using comparable conditions instead of mixing older
+PyBulletFleet-only numbers with ROS bridge measurements.
+
+Tasks:
+
+- Define a common 1000-robot benchmark matrix:
+  - PyBulletFleet only, per-agent command path;
+  - PyBulletFleet only, batch controller with per-agent command ingress;
+  - PyBulletFleet only, batch controller with fleet command ingress;
+  - ROS bridge fleet-only with `/fleet/navigate` service;
+  - ROS bridge fleet-only with `/fleet/navigate` topic and motion verification;
+  - ROS bridge hybrid profiles for selected per-robot groups;
+  - Plugin Only;
+  - Plugin + Bridge.
+- Keep the Docker fleet scale checker as a smoke/diagnostic tool before the
+  full benchmark refresh:
+  - service `/fleet/navigate` should verify ack and motion;
+  - topic `/fleet/navigate` should verify publish matching and motion;
+  - detailed service-vs-topic performance comparison remains part of this
+    refresh.
+- Add a separate joint-command benchmark case instead of folding it into the
+  mobile navigation path:
+  - PyBulletFleet only, arm or mixed mobile-manipulator joint commands;
+  - update `benchmark/arm_benchmark.py` with a mobile-benchmark-equivalent
+    command-interface switch once fleet joint commands are implemented;
+  - reuse the existing benchmark CLI vocabulary where applicable
+    (`--agents`, `--collision-freq`, `--mode`, `--controller`,
+    `--command-interface`) so mobile and arm control-path measurements stay
+    comparable;
+  - ROS bridge `/fleet/joint_command` topic/service;
+  - hybrid mode with any required per-robot compatibility interfaces;
+  - Plugin Only joint command dispatch through `FleetCommandDispatcher`.
+- Keep key conditions explicit and aligned:
+  - robot model and controller;
+  - `physics=false`;
+  - `gui=false`;
+  - `timestep=0.1`;
+  - `target_rtf=0` for maximum RTF;
+  - matching movement workload and command cadence;
+  - matching robot count and grid spacing.
+- Record both maximum RTF and latency metrics:
+  - sim step time;
+  - service command request -> ack latency;
+  - topic command publish time and publish -> first motion latency;
+  - command request -> first motion latency;
+  - joint command request -> ack latency and first joint motion latency;
+  - fleet state snapshot/publish time;
+  - memory and startup time where available.
+- Update or replace stale benchmark summaries in:
+  - `docs/benchmarking/results.md`;
+  - `benchmark/README.md`;
+  - future ROS 2 Bridge ReadTheDocs performance page;
+  - `ros2_bridge/PERFORMANCE.md` until the ReadTheDocs page exists.
+- Clearly label historical results that use different hardware, timestep,
+  controller, or workload so they are not used for direct ROS-vs-non-ROS
+  claims.
+
+Exit criteria:
+
+- PyBulletFleet-only and ROS bridge fleet API numbers are measured on the same
+  machine with the same 1000-robot workload.
+- Any claim about ROS overhead is backed by an aligned PyBulletFleet-only
+  baseline.
+- ReadTheDocs and local benchmark docs no longer present mixed-condition values
+  as directly comparable.
+
+### Phase 6d — Scale Example Config Cleanup
+
+Purpose: align non-ROS scale examples with the newer `entities[].grid` config
+pattern used by the core config loader and ROS bridge examples, without
+breaking existing example configs immediately.
+
+Tasks:
+
+- Update `pybullet_fleet/config/100robots_config.yaml` to make
+  `entities[].grid` the primary example scene definition.
+- Keep the old top-level `num_robots`, `grid`, `spacing`, `offset`, and
+  robot-specific sections as commented legacy examples or compatibility notes.
+- Update `pybullet_fleet/examples/scale/100robots_grid_demo.py` to prefer
+  `entities[]` when present while retaining fallback support for the current
+  top-level example format.
+- Document that new scale examples should use `entities[].grid` so scene
+  definitions can be shared more easily across non-ROS examples, benchmarks,
+  and ROS bridge configs.
+- Review other `pybullet_fleet/examples/scale/*` demos for ad hoc grid setup
+  and leave follow-up notes where converting to `entities[]` would reduce
+  duplication.
+
+Exit criteria:
+
+- The 100-robot grid demo still runs with existing configs.
+- The default example config uses `entities[].grid` as the visible primary
+  pattern.
+- Legacy top-level scale keys remain understandable but are no longer the
+  recommended pattern.
+
+### Phase 6e — Trace, Snapshot, and Replay Hooks
 
 Purpose: make fleet APIs replayable without ROS.
 
@@ -515,6 +664,8 @@ Tasks:
 
 - Persist `CommandEvent` records from `FleetCommandDispatcher`.
 - Persist fleet snapshots from `FleetStateProvider`.
+- Include typed fleet commands and generic custom commands in the same trace
+  stream.
 - Keep recorder format open:
   - JSONL;
   - SQLite;
@@ -528,6 +679,170 @@ Exit criteria:
 - A recorded command trace can be replayed without a ROS graph.
 - Snapshot and command event schemas are stable enough for CI regression tests.
 
+### Phase 6f — ROS Bridge Test Naming Cleanup
+
+Purpose: make the ROS bridge test layers easier to review by aligning script
+names with the layer they validate. The current `integration`, `smoke`, and
+`e2e` names are historically accurate but easy to confuse.
+
+Tasks:
+
+- Keep the current names during Phase 5 to avoid broad CI/doc churn while the
+  RMF migration is still being reviewed.
+- Add a short test hierarchy table to the ROS bridge docs before renaming,
+  covering:
+  - core `pytest tests/`;
+  - ROS package `colcon test`;
+  - bridge API smoke;
+  - RMF stack smoke;
+  - RMF dispatch flow;
+  - RMF client-mode matrix;
+  - fleet scale/performance checks.
+- Rename scripts in a focused cleanup PR:
+  - `docker/test_integration.sh` -> `docker/test_bridge_api.sh`;
+  - `docker/integration_check.py` -> `docker/bridge_api_check.py`;
+  - `docker/test_rmf_smoke.sh` -> `docker/test_rmf_stack.sh`;
+  - `docker/rmf_smoke_check.py` -> `docker/rmf_stack_check.py`;
+  - keep `docker/test_rmf_e2e.sh` or rename it to
+    `docker/test_rmf_dispatch.sh` if the docs also switch to "dispatch flow";
+  - keep `docker/test_rmf_client_modes.sh` and `docker/test_fleet_scale.sh`
+    because their purpose is already clear.
+- Update `.github/workflows/bridge.yml`, Docker README commands, Make targets,
+  and any copied native instructions in the same cleanup PR.
+- Revisit the hotel RMF dispatch test before release. It is currently kept as a
+  readiness/smoke gate instead of a blocking dispatch E2E because CI task
+  completion is less stable for the multi-fleet + lift/door scenario. The
+  minimum acceptable coverage is that hotel launches, expected robots appear on
+  `/fleet_states`, and lift-related configuration loads without startup errors.
+  This does not currently prove lift motion. Add a focused lift smoke/check, or
+  document a manual lift-motion verification, before relying on hotel as lift
+  integration coverage.
+- Document and tighten `python_fleet` command completion semantics before using
+  lift-heavy hotel dispatch as a blocking CI gate. Today direct in-process
+  navigation completion is derived from simulator pose proximity
+  (`completion_radius`) and then reported back to RMF as command completion; it
+  is not based solely on RMF task terminal topics. Keep this acceptable for
+  simple office dispatch coverage, but add focused checks or stronger
+  completion criteria for lift/map-transition scenarios before claiming hotel
+  full dispatch E2E coverage.
+- Keep RMF dispatch completion strict by default. Any `/fleet_states` task-clear
+  fallback must remain an explicit test option and must require task assignment,
+  underway status, observed robot motion, scenario-specific physical signals,
+  and a grace period with no failed/canceled terminal status.
+
+Exit criteria:
+
+- A reviewer can identify each test's entry point and layer from its filename.
+- CI behavior is unchanged after the rename.
+- Existing correctness gates remain separate from optional performance checks.
+- Hotel's role is explicit: readiness and lift-config coverage now, focused
+  lift-motion coverage before release, full dispatch E2E only after
+  `python_fleet`/RMF completion checks are stable enough for CI.
+
+### Phase 6g — Shared Command Type Module Cleanup
+
+Purpose: promote command payload types that started in `fleet_api.py` but are
+now shared by fleet, per-robot ROS, RMF Python, and RMF ROS paths into a neutral
+module before release.
+
+Tasks:
+
+- Add a shared command type module, for example `pybullet_fleet/commands.py`.
+- Move or re-export common command payloads from that module:
+  - `RobotGoalCommand2D`;
+  - `RobotGoalCommand3D`;
+  - `RobotAttachCommand`;
+  - `RobotActionCommand`;
+  - `RobotJointPositionsCommand`;
+  - `RobotNamedJointPositionsCommand`;
+  - `CommandAck`;
+  - `CommandEvent`.
+- Define shared command defaults there, including
+  `DEFAULT_ATTACH_SEARCH_RADIUS = 0.5`, so per-robot and fleet attach paths use
+  one semantic default instead of duplicated literals.
+- Keep `pybullet_fleet.fleet_api` and `pybullet_fleet.__init__` re-exports so
+  existing imports continue to work.
+- Update ROS bridge and RMF imports to use the neutral command module where it
+  improves clarity.
+
+Exit criteria:
+
+- Attach search-radius fallback is defined once and used by per-robot and
+  fleet attach paths.
+- Command dataclasses no longer appear fleet-only when they are shared across
+  public APIs.
+- Existing public imports remain compatible for the release.
+
+## Phase 7 — Internal Batch Optimization
+
+Purpose: optimize the implementation behind fleet-level commands after the
+typed ingress and RMF migration paths are stable. These optimizations should not
+change the public fleet command API.
+
+### Phase 7a — Batched Attach Target Resolution
+
+Purpose: improve nearest-object attach performance for large fleets without
+pretending attach/detach is the same kind of vectorized numeric control as
+mobile movement.
+
+Tasks:
+
+- Split attach/detach into two layers:
+  - command ingress and acknowledgement in `FleetCommandDispatcher.attach()`;
+  - target resolution in a dedicated resolver.
+- Add an `AttachmentResolver` or equivalent component that can resolve many
+  attach requests together.
+- Reuse spatial information where possible:
+  - broadphase/collision or contact results;
+  - AABB data;
+  - pickable object pose arrays;
+  - grid/hash/k-d tree style candidate filtering.
+- Batch validate object ownership/reservation so two robots do not attach the
+  same object in one command batch.
+- Keep detach simple unless profiling shows it matters; detach normally only
+  needs the robot's attached-object list.
+
+Exit criteria:
+
+- Multiple nearest-pickable attach requests can be resolved with less repeated
+  robot-by-object scanning.
+- Ownership conflicts are deterministic and visible in `CommandAck.rejected`.
+- Existing per-robot and fleet attach semantics remain compatible.
+
+### Phase 7b — Batched Movement Intents for Actions
+
+Purpose: let action workflows benefit from batch controllers by routing their
+movement phases through the same batched movement layer used by direct
+navigation.
+
+Tasks:
+
+- Separate action planning/state-machine logic from movement execution:
+  - action decides the next movement intent;
+  - controller layer owns movement toward the active intent;
+  - action observes arrival/progress and advances to the next phase.
+- Route movement-bearing actions through batch-capable goal tables:
+  - `MoveAction`;
+  - `PickAction` approach movement;
+  - `DropAction` approach/drop movement;
+  - cleaning/coverage waypoints;
+  - patrol/route-following style custom actions.
+- Preserve non-movement action phases as normal per-agent state-machine work:
+  - attach/detach;
+  - wait;
+  - plugin-specific side effects;
+  - action completion/failure handling.
+- Define metrics that separate action orchestration cost from movement update
+  cost.
+
+Exit criteria:
+
+- Action workflows with movement phases can use batch controllers without
+  changing the public action command API.
+- Non-movement action semantics remain deterministic and debuggable.
+- Benchmarks show whether movement-heavy action workloads benefit from the
+  batched movement path.
+
 ## Recommended PR Order
 
 1. Config parsing helpers and tests.
@@ -536,13 +851,17 @@ Exit criteria:
 4. Python fleet state/command abstractions.
 5. ROS `/fleet/states`, `/fleet/navigate`, `/fleet/joint_command` wrappers.
 6. Fleet API examples and integration checks.
-7. RMF client abstraction (`RosFleetClient`, `PythonFleetClient`, legacy client).
-8. RMF state-source and navigation migration.
+7. RMF client abstraction (`RosRmfFleetClient`, `PythonRmfFleetClient`, legacy client).
+8. RMF state-source and typed fleet command migration.
 9. Plugin Only launch path.
 10. Plugin + Bridge launch path.
-11. ROS bridge performance benchmarks.
-12. Fleet action/attach/stop APIs.
-13. Trace/replay hooks.
+11. Generic custom fleet command extension.
+12. RMF command coalescing.
+13. ROS bridge performance benchmark refresh.
+14. Scale example config cleanup.
+15. Trace/replay hooks.
+16. Batched attach target resolution.
+17. Batched movement intents for actions.
 
 ## Implementation Notes
 

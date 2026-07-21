@@ -20,10 +20,12 @@ ScalarOrAxes = Union[float, Sequence[float], np.ndarray]
 def is_scalar(v: ScalarOrAxes) -> bool:
     """Return ``True`` if *v* should be treated as a scalar (broadcastable) value.
 
-    Accepts Python ``int``/``float`` or a 0-d numpy array. Anything else (list,
-    tuple, 1-d ndarray, …) is treated as per-axis.
+    Accepts Python ``int``/``float``, numpy numeric scalars, or a 0-d numpy
+    array. Anything else (list, tuple, 1-d ndarray, …) is treated as per-axis.
     """
-    return isinstance(v, (int, float)) or (isinstance(v, np.ndarray) and v.ndim == 0)
+    if isinstance(v, (int, float, np.number)):
+        return True
+    return isinstance(v, np.ndarray) and getattr(v, "ndim", None) == 0
 
 
 def as_axes(v: ScalarOrAxes, dim: int = 3) -> np.ndarray:

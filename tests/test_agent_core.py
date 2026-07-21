@@ -1135,6 +1135,34 @@ class TestAgentMotionUpdate:
         assert agent.goal_pose is None
         assert np.allclose(agent.velocity, [0, 0, 0])
 
+    def test_omni_stop_halts_motion_after_updates(self, pybullet_env):
+        """Calling stop() should prevent further pose changes on later updates."""
+        agent, sim_core = self._create_agent_with_simcore(Pose.from_xyz(0, 0, 0))
+        dt = 0.1
+        agent.set_goal_pose(Pose.from_xyz(10, 0, 0))
+
+        for _ in range(30):
+            sim_core.tick()
+            agent.update(dt)
+
+        moving_pos = np.array(agent.get_pose().position)
+        goal_pos = np.array([10.0, 0.0, 0.0])
+        assert moving_pos[0] > 0.01
+        assert np.linalg.norm(goal_pos - moving_pos) > 1.0
+        assert np.linalg.norm(agent.velocity) > 0.0
+
+        agent.stop()
+        stopped_pos = np.array(agent.get_pose().position)
+        for _ in range(20):
+            sim_core.tick()
+            agent.update(dt)
+
+        final_pos = np.array(agent.get_pose().position)
+        assert np.allclose(final_pos, stopped_pos)
+        assert not agent.is_moving
+        assert agent.goal_pose is None
+        assert np.allclose(agent.velocity, [0, 0, 0])
+
     def test_omni_final_orientation_align(self, pybullet_env):
         """Omnidirectional agent should align to goal orientation after reaching position.
 

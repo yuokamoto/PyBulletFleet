@@ -1,7 +1,7 @@
-"""Robot client API for PyBulletFleet bridge (EasyFullControl pattern).
+"""Per-robot ROS client for PyBulletFleet RMF integration.
 
-Provides a ``RobotClientAPI`` that communicates with the PyBulletFleet
-bridge node via ROS 2 topics and actions:
+Provides a ``PerRobotRosClient`` that communicates with the PyBulletFleet
+bridge node via per-robot ROS 2 topics, actions, and services:
 
 - **State**: Subscribes to ``/<robot>/odom`` for position/orientation
   and ``/<robot>/battery_state`` for battery state.
@@ -9,14 +9,13 @@ bridge node via ROS 2 topics and actions:
 - **Stop**: Cancels active NavigateToPose goals.
 - **Charging**: Calls ``/<robot>/set_charging`` service to start/stop charging.
 
-This replaces the old ``PybulletCommandHandle`` and follows the
-pattern established by ``rmf_demos_fleet_adapter/RobotClientAPI.py``.
+This replaces the old ``PybulletCommandHandle`` and keeps the
+rmf_demos-style per-robot transport available beside the fleet-level client.
 """
 
 import logging
 import math
 import threading
-from dataclasses import dataclass
 from typing import Optional
 
 from action_msgs.msg import GoalStatus
@@ -28,27 +27,15 @@ from rclpy.node import Node
 from sensor_msgs.msg import BatteryState
 from std_srvs.srv import SetBool
 
+from pybullet_fleet_msgs.msg import RobotAttachCommand
 from pybullet_fleet_msgs.srv import AttachObject
+from pybullet_fleet_rmf.client_interface import RobotUpdateData
 
 logger = logging.getLogger(__name__)
 
 
-@dataclass
-class RobotUpdateData:
-    """Snapshot of robot state for EasyFullControl updates."""
-
-    map: str
-    position: list  # [x, y, yaw]
-    battery_soc: float
-    last_completed_cmd_id: int
-
-    def is_command_completed(self, cmd_id: int) -> bool:
-        """Check if the given command has been completed."""
-        return self.last_completed_cmd_id >= cmd_id
-
-
-class RobotClientAPI:
-    """Per-robot API wrapper for communicating with PyBulletFleet bridge.
+class PerRobotRosClient:
+    """Per-robot ROS wrapper for communicating with PyBulletFleet bridge.
 
     Subscribes to ``/<robot_name>/odom`` for state and sends
     ``NavigateToPose`` action goals for navigation commands.
@@ -345,10 +332,12 @@ class RobotClientAPI:
         from geometry_msgs.msg import Pose as RosPose, Point, Quaternion
 
         req = AttachObject.Request()
-        req.attach = attach
-        req.object_name = object_name
-        req.parent_link = parent_link
-        req.offset = RosPose(
+        req.command = RobotAttachCommand()
+        req.command.name = self._name
+        req.command.attach = attach
+        req.command.object_name = object_name
+        req.command.parent_link = parent_link
+        req.command.offset = RosPose(
             position=Point(x=offset_position[0], y=offset_position[1], z=offset_position[2]),
             orientation=Quaternion(
                 x=offset_orientation[0],
@@ -357,7 +346,7 @@ class RobotClientAPI:
                 w=offset_orientation[3],
             ),
         )
-        req.search_radius = float(search_radius)
+        req.command.search_radius = float(search_radius)
 
         future = self._attach_object_client.call_async(req)
         future.add_done_callback(self._on_attach_object_done)
