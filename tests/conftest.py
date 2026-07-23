@@ -42,6 +42,7 @@ class MockSimCore:
         # set_pose calls take the immediate path (legacy behaviour for tests).
         self._in_step: bool = False
         self._pending_pose_ids: set = set()
+        self._link_attachment_parent_ids: set[int] = set()
 
     @property
     def client(self) -> int:
@@ -56,6 +57,12 @@ class MockSimCore:
 
     def _mark_object_moved(self, object_id):
         pass
+
+    def _register_link_attachment_parent(self, object_id: int) -> None:
+        self._link_attachment_parent_ids.add(object_id)
+
+    def _unregister_link_attachment_parent(self, object_id: int) -> None:
+        self._link_attachment_parent_ids.discard(object_id)
 
     @contextmanager
     def batch_spawn(self):

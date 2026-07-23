@@ -1286,7 +1286,7 @@ class SimObject:
         obj._attach_offset = relative_pose
         obj._attached_to = self
         obj._attached_link_index = parent_link_index
-        if parent_link_index >= 0 and hasattr(self, "update_attached_objects_kinematics"):
+        if parent_link_index >= 0 and self.sim_core is not None and hasattr(self, "update_attached_objects_kinematics"):
             self.sim_core._register_link_attachment_parent(self.object_id)
         self._log.debug(
             lambda: f"attach_object: obj={obj.body_id} _attach_offset.position={obj._attach_offset.position} "
@@ -1374,6 +1374,7 @@ class SimObject:
         self.attached_objects.remove(obj)
         if (
             obj._attached_link_index >= 0
+            and self.sim_core is not None
             and not any(attached._attached_link_index >= 0 for attached in self.attached_objects)
         ):
             self.sim_core._unregister_link_attachment_parent(self.object_id)

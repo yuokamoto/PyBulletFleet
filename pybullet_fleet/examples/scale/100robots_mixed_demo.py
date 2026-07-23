@@ -64,9 +64,7 @@ config = merge_configs(
 )
 entities = config.get("entities") or []
 if not entities:
-    raise ValueError(
-        "100robots_mixed_demo.py requires a config with entities[].grid"
-    )
+    raise ValueError("100robots_mixed_demo.py requires a config with entities[].grid")
 
 for entity in entities:
     robot_type = (entity.get("user_data") or {}).get("robot_type")
@@ -78,10 +76,7 @@ for entity in entities:
         entity.pop("batch_controller", None)
 
 config.setdefault("simulation", {})["physics"] = True
-num_robots = sum(
-    int((entry.get("grid") or {}).get("count", 1))
-    for entry in entities
-)
+num_robots = sum(int((entry.get("grid") or {}).get("count", 1)) for entry in entities)
 
 print("=== 100 Robots Mixed Demo ===")
 print(f"Config: {args.config}")
@@ -91,20 +86,9 @@ print(f"Controller implementation: {args.controller}")
 
 sim_core = MultiRobotSimulationCore.from_dict(config)
 agents = [obj for obj in sim_core.sim_objects if isinstance(obj, Agent)]
-mobile_agents = [
-    agent
-    for agent in agents
-    if agent.user_data.get("robot_type") == "mobile_robot"
-]
-arm_agents = [
-    agent
-    for agent in agents
-    if agent.user_data.get("robot_type") == "arm_robot"
-]
-print(
-    f"✓ Loaded {len(mobile_agents)} mobile robots and "
-    f"{len(arm_agents)} arm robots from entities[].grid"
-)
+mobile_agents = [agent for agent in agents if agent.user_data.get("robot_type") == "mobile_robot"]
+arm_agents = [agent for agent in agents if agent.user_data.get("robot_type") == "arm_robot"]
+print(f"✓ Loaded {len(mobile_agents)} mobile robots and " f"{len(arm_agents)} arm robots from entities[].grid")
 
 camera_config = sim_core.params.camera_config
 if camera_config:
@@ -113,10 +97,7 @@ if camera_config:
         camera_config=camera_config,
         entity_positions=agent_positions,
     )
-    print(
-        "✓ Camera configured from config file: "
-        f"{camera_config.get('camera_mode', 'auto')} mode"
-    )
+    print("✓ Camera configured from config file: " f"{camera_config.get('camera_mode', 'auto')} mode")
 
 
 def _move_mobile_random(agent: Agent, dt: float) -> None:

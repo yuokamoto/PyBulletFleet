@@ -76,9 +76,7 @@ config = merge_configs(
 )
 entities = config.get("entities") or []
 if not entities:
-    raise ValueError(
-        "100robots_grid_demo.py requires a config with entities[].grid"
-    )
+    raise ValueError("100robots_grid_demo.py requires a config with entities[].grid")
 
 for entity in entities:
     if args.controller == "batch":
@@ -87,10 +85,7 @@ for entity in entities:
         entity.pop("batch_controller", None)
 
 config.setdefault("simulation", {})["physics"] = False
-num_robots = sum(
-    int((entry.get("grid") or {}).get("count", 1))
-    for entry in entities
-)
+num_robots = sum(int((entry.get("grid") or {}).get("count", 1)) for entry in entities)
 
 print("=== 100 Robots Grid Demo ===")
 print(f"Config: {args.config}")
@@ -173,10 +168,7 @@ if camera_config:
         camera_config=camera_config,
         entity_positions=agent_positions,
     )
-    print(
-        "✓ Camera configured from config file: "
-        f"{camera_config.get('camera_mode', 'auto')} mode"
-    )
+    print("✓ Camera configured from config file: " f"{camera_config.get('camera_mode', 'auto')} mode")
 
 
 def random_movement_callback(_sim_core, dt):
@@ -215,17 +207,11 @@ if args.movement == "random":
     print("✓ Registered random movement callback")
 elif args.movement == "goal":
     sim_core.register_callback(goal_command_callback, frequency=1)
-    print(
-        "✓ Registered repeated goal command callback "
-        f"(period={GOAL_PERIOD_S:.1f}s)"
-    )
+    print("✓ Registered repeated goal command callback " f"(period={GOAL_PERIOD_S:.1f}s)")
 else:
     state_start = time.perf_counter()
     state_count = len(fleet_state_provider.get_states())
     state_elapsed = time.perf_counter() - state_start
-    print(
-        f"✓ Spawn-only mode; state_snapshot={state_count} "
-        f"in {state_elapsed:.6f}s"
-    )
+    print(f"✓ Spawn-only mode; state_snapshot={state_count} " f"in {state_elapsed:.6f}s")
 
 sim_core.run_simulation(duration=args.duration)
