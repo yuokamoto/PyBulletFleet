@@ -336,6 +336,39 @@ class TestAttachedPropagationDuringStep:
         sim.register_callback(cb)
         sim.step_once()
 
+    def test_link_attached_object_uses_current_base_pose_after_flush(self, sim):
+        """EE-attached objects must not lag one step behind buffered base motion."""
+        agent = Agent.from_params(
+            AgentSpawnParams(
+                urdf_path="robots/mobile_manipulator.urdf",
+                initial_pose=Pose.from_xyz(0.0, 0.0, 0.3),
+                motion_mode=MotionMode.DIFFERENTIAL,
+                mass=0.0,
+                use_fixed_base=False,
+            ),
+            sim_core=sim,
+        )
+        ee_link_index = 6
+        offset = Pose.from_xyz(0.0, 0.0, 0.06)
+        box = _make_box(sim, 0.0, 0.0, 0.1, half=0.05)
+        assert agent.attach_object(box, parent_link_index=ee_link_index, relative_pose=offset)
+
+        def cb(_sim, _dt):
+            agent.set_pose(Pose.from_xyz(1.0, 0.0, 0.3))
+
+        sim.register_callback(cb)
+        sim.step_once()
+
+        link_state = p.getLinkState(agent.body_id, ee_link_index, computeForwardKinematics=1, physicsClientId=sim.client)
+        expected_pos, _ = p.multiplyTransforms(
+            link_state[0],
+            link_state[1],
+            offset.position,
+            offset.orientation,
+        )
+        box_pos, _ = p.getBasePositionAndOrientation(box.body_id, physicsClientId=sim.client)
+        assert box_pos == pytest.approx(expected_pos, abs=1e-6)
+
 
 class TestProfilingFields:
     """Task 5: step_once(return_profiling=True) populates the new phase keys."""

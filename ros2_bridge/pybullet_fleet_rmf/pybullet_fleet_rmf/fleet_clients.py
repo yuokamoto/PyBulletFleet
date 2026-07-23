@@ -17,12 +17,10 @@ from pybullet_fleet_msgs.srv import FleetAttach as FleetAttachSrv
 from pybullet_fleet_msgs.srv import FleetNavigate as FleetNavigateSrv
 from pybullet_fleet_msgs.srv import FleetStop as FleetStopSrv
 
-from pybullet_fleet.fleet_api import (
-    FleetCommandDispatcher,
-    FleetStateProvider,
-    RobotAttachCommand as PbfRobotAttachCommand,
-    RobotGoalCommand2D,
-)
+from pybullet_fleet.commands import DEFAULT_ATTACH_SEARCH_RADIUS
+from pybullet_fleet.commands import RobotAttachCommand as PbfRobotAttachCommand
+from pybullet_fleet.commands import RobotGoalCommand2D
+from pybullet_fleet.fleet_api import FleetCommandDispatcher, FleetStateProvider
 from pybullet_fleet.geometry import Pose as PbfPose
 from pybullet_fleet_rmf.client_interface import RobotUpdateData
 from pybullet_fleet_rmf.per_robot_ros_client import PerRobotRosClient
@@ -522,7 +520,7 @@ class PythonRmfFleetClient:
         """Dispatch one direct fleet attach/detach command."""
         radius = float(search_radius)
         if radius <= 0.0:
-            radius = 0.5
+            radius = DEFAULT_ATTACH_SEARCH_RADIUS
         ack = self._dispatcher.attach(
             [
                 PbfRobotAttachCommand(

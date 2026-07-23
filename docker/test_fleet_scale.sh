@@ -1,7 +1,7 @@
 #!/bin/bash
 # docker/test_fleet_scale.sh
 # Run a ROS fleet API scale check with the same launcher/checker split as
-# test_integration.sh.
+# test_bridge_api.sh.
 set -e
 
 ROBOTS=100

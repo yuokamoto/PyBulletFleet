@@ -3,7 +3,7 @@
 
 Verifies the RMF stack stands up on the bridge and that the bridge executes RMF
 navigation commands — WITHOUT depending on RMF's dispatcher or traffic schedule
-(the full dispatch path is covered separately by test_rmf_e2e.sh).
+(the full dispatch path is covered separately by test_rmf_dispatch.sh).
 Keeping this gate dispatcher-free makes it a fast, deterministic signal.
 
 Gates (all required):
@@ -17,7 +17,7 @@ Gates (all required):
      deterministically (no bidding / no traffic negotiation), so it is stable on
      both WSL2 and CI.
 
-The wrapper (test_rmf_smoke.sh) only launches the demo and runs this checker; all
+The wrapper (test_rmf_stack.sh) only launches the demo and runs this checker; all
 readiness waiting lives here.
 
 Exit 0 on pass, 1 on failure.
@@ -57,7 +57,7 @@ MOVE_TIMEOUT = 60.0  # wait for the robot to drive after the goal is sent
 
 class SmokeChecker(Node):
     def __init__(self):
-        super().__init__("rmf_smoke_check")
+        super().__init__("rmf_stack_check")
         self._fleet_robots = set()  # names seen on /fleet_states
         self._pos = None  # latest (x, y) of NAV_ROBOT
         self.create_subscription(FleetState, "/fleet_states", self._on_fleet, 10)

@@ -28,7 +28,8 @@ from benchmark.tools import get_system_info, get_memory_info, force_cleanup, cpu
 from pybullet_fleet.core_simulation import MultiRobotSimulationCore, SimulationParams
 from pybullet_fleet.agent_manager import AgentManager, GridSpawnParams
 from pybullet_fleet.agent import AgentSpawnParams, MotionMode
-from pybullet_fleet.fleet_api import FleetCommandDispatcher, RobotGoalCommand2D
+from pybullet_fleet.commands import RobotGoalCommand2D
+from pybullet_fleet.fleet_api import FleetCommandDispatcher
 from pybullet_fleet.geometry import Pose
 
 

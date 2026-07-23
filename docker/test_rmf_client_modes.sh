@@ -25,13 +25,13 @@ run_e2e() {
     local mode="$1"
     local launch="$2"
     shift 2
-    bash "${ROOT_DIR}/test_rmf_e2e.sh" --client-mode "$mode" "$launch" "$@"
+    bash "${ROOT_DIR}/test_rmf_dispatch.sh" --client-mode "$mode" "$launch" "$@"
 }
 
 run_ready() {
     local mode="$1"
     local launch="$2"
-    bash "${ROOT_DIR}/test_rmf_e2e.sh" --client-mode "$mode" --ready-only "$launch"
+    bash "${ROOT_DIR}/test_rmf_dispatch.sh" --client-mode "$mode" --ready-only "$launch"
 }
 
 echo "=== RMF client-mode matrix ==="

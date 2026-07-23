@@ -2,12 +2,30 @@
 # Shared helpers for Docker-based ROS bridge checks.
 
 source_ros_env() {
-    source /opt/ros/jazzy/setup.bash
-    source /rmf_demos_ws/install/setup.bash
+    local ros_setup="${ROS_SETUP:-/opt/ros/jazzy/setup.bash}"
+    if [ -f "$ros_setup" ]; then
+        source "$ros_setup"
+    fi
+    if [ -n "${RMF_SETUP:-}" ] && [ -f "$RMF_SETUP" ]; then
+        source "$RMF_SETUP"
+    elif [ -f /rmf_demos_ws/install/setup.bash ]; then
+        source /rmf_demos_ws/install/setup.bash
+    elif [ -f "$HOME/rmf_demos_ws/install/setup.bash" ]; then
+        source "$HOME/rmf_demos_ws/install/setup.bash"
+    fi
+    if [ -n "${PBF_ROS_SETUP:-}" ] && [ -f "$PBF_ROS_SETUP" ]; then
+        source "$PBF_ROS_SETUP"
+    elif [ -f .ros2_ws/install/setup.bash ]; then
+        source .ros2_ws/install/setup.bash
+    fi
 }
 
 bridge_repo_root() {
-    cd /opt/pybullet_fleet
+    if [ -n "${PBF_REPO_ROOT:-}" ]; then
+        cd "$PBF_REPO_ROOT"
+    elif [ -d /opt/pybullet_fleet ]; then
+        cd /opt/pybullet_fleet
+    fi
 }
 
 start_bridge_node() {

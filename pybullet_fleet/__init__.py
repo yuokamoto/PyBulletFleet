@@ -24,22 +24,26 @@ from pybullet_fleet.types import (  # noqa: F401
 # Geometry primitives
 from pybullet_fleet.geometry import Path, Pose
 
-# Fleet API
-from pybullet_fleet.fleet_api import (
+# Fleet command types
+from pybullet_fleet.commands import (
+    DEFAULT_ATTACH_SEARCH_RADIUS,
     FLEET_COMMAND_EVENT,
     CommandAck,
     CommandEvent,
-    FleetCommandDispatcher,
-    FleetStateProvider,
     RobotActionCommand,
     RobotAttachCommand,
     RobotGoalCommand2D,
     RobotGoalCommand3D,
     RobotJointPositionsCommand,
     RobotNamedJointPositionsCommand,
-    RobotState2D,
-    RobotState3D,
 )
+
+# Fleet API
+from pybullet_fleet.fleet_api import (
+    FleetCommandDispatcher,
+    FleetStateProvider,
+)
+from pybullet_fleet.states import RobotState2D, RobotState3D
 
 # Robot/Agent management
 from pybullet_fleet.agent import Agent, AgentSpawnParams, IKParams
@@ -156,6 +160,7 @@ __all__ = [
     "Path",
     # Fleet API
     "FLEET_COMMAND_EVENT",
+    "DEFAULT_ATTACH_SEARCH_RADIUS",
     "RobotState2D",
     "RobotState3D",
     "RobotGoalCommand2D",

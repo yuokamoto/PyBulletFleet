@@ -32,6 +32,21 @@ For Docker-based setup, see **[docker/README.md](../docker/README.md)**. For a
 native Ubuntu 24.04 + ROS 2 Jazzy workflow, see
 **[NATIVE_ROS2.md](NATIVE_ROS2.md)**.
 
+### Documentation Map
+
+Use this file as the ROS 2 bridge entry point. The repository keeps Docker
+files under `docker/` because they build the whole ROS/RMF test environment,
+but those Docker workflows are still part of the ROS 2 bridge documentation.
+
+| Document | Scope |
+|----------|-------|
+| `ros2_bridge/README.md` | ROS 2 bridge architecture, interfaces, RMF client modes, and shared test matrix |
+| `docker/README.md` | Docker image, compose commands, GUI/RViz forwarding, and Docker-specific demo commands |
+| `ros2_bridge/NATIVE_ROS2.md` | Ubuntu 24.04 + ROS 2 Jazzy native setup, overlay build, and native test commands |
+
+To avoid drift, shared concepts such as interface modes and test purpose should
+live here. Environment-specific pages should focus on setup and command lines.
+
 ---
 
 ## pybullet_fleet_ros — ROS 2 Bridge
@@ -113,6 +128,18 @@ generic action payloads stay aligned with their fleet-level equivalents.
 | `/sim/get_simulator_features` | Query supported features |
 | `/sim/simulate_steps` | Step simulation (action, with feedback) |
 
+### Test Layers
+
+| Layer | Entry Point | Purpose |
+|-------|-------------|---------|
+| Core Python unit tests | `pytest tests/` | PyBulletFleet runtime behavior without ROS |
+| ROS package tests | `colcon test` | Installed ROS package/unit behavior |
+| Bridge API check | `docker/test_bridge_api.sh` | ROS bridge topics, services, fleet endpoints, and basic motion |
+| RMF stack check | `docker/test_rmf_stack.sh` | RMF handlers/adapters launch and expose expected stack interfaces |
+| RMF dispatch flow | `docker/test_rmf_dispatch.sh` | RMF dispatcher -> adapter -> bridge/plugin -> simulator task flow |
+| RMF client-mode matrix | `docker/test_rmf_client_modes.sh` | `per_robot_ros`, `fleet_ros`, and `python_fleet` launch coverage |
+| Fleet scale check | `docker/test_fleet_scale.sh` | Endpoint scale and fleet/per-robot command diagnostics |
+
 ### Bridge Test TODO
 
 - Factor repeated `simulation_interfaces` service-call assertions into a small
@@ -135,6 +162,24 @@ generic action payloads stay aligned with their fleet-level equivalents.
   bridge startup time.
 - Add parity checks for service/topic/action variants when fleet-level command
   APIs are added, so request semantics do not drift across transports.
+
+### Documentation And Release TODO
+
+- Add a ReadTheDocs ROS 2 bridge section that mirrors this structure:
+  overview/interfaces here, Docker commands under a Docker page, and native
+  setup under a native ROS 2 page.
+- Keep Docker and native docs from duplicating the same conceptual text. The
+  environment pages should link back to this README for interface modes,
+  deployment patterns, and the test matrix.
+- Before apt packaging or release, validate an external install that does not
+  rely on a source checkout:
+  - core examples from `pip install pybullet-fleet`;
+  - ROS packages discoverable from an installed prefix via `ros2 pkg prefix`;
+  - launch files resolving configs and assets through `package://` URIs;
+  - a minimal non-RMF bridge demo without `rmf_demos`;
+  - RMF demos as optional examples with clearly documented `rmf_demos`
+    dependency;
+  - Docker and native commands still working after install-path changes.
 
 ---
 

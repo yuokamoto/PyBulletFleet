@@ -64,7 +64,8 @@ from pybullet_fleet import (  # noqa: E402
     SimulationParams,
 )
 from pybullet_fleet.agent_manager import AgentManager, GridSpawnParams  # noqa: E402
-from pybullet_fleet.fleet_api import FleetCommandDispatcher, FleetStateProvider, RobotGoalCommand2D  # noqa: E402
+from pybullet_fleet.commands import RobotGoalCommand2D  # noqa: E402
+from pybullet_fleet.fleet_api import FleetCommandDispatcher, FleetStateProvider  # noqa: E402
 from pybullet_fleet.robot_models import resolve_model  # noqa: E402
 from pybullet_fleet.types import CollisionMode, SpatialHashCellSizeMode  # noqa: E402
 

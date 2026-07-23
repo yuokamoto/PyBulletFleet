@@ -1,24 +1,24 @@
 #!/bin/bash
-# docker/test_rmf_e2e.sh [--client-mode MODE] [--allow-fleet-state-clear-fallback] <launch_stem> <scenario> [<scenario> ...]
+# docker/test_rmf_dispatch.sh [--client-mode MODE] [--allow-fleet-state-clear-fallback] <launch_stem> <scenario> [<scenario> ...]
 #
 # Parametrized RMF dispatch end-to-end test. Launches an RMF demo headless and
-# runs rmf_dispatch_check.py with the given scenarios; by default each
+# runs rmf_dispatch_flow_check.py with the given scenarios; by default each
 # dispatched task must reach an explicit successful terminal state. The
 # --allow-fleet-state-clear-fallback option permits a guarded /fleet_states
 # fallback for CI environments where terminal task topics are missing or delayed.
 # Used for several demo/task combinations from bridge.yml:
 #
-#   bash test_rmf_e2e.sh --client-mode fleet_ros office_pybullet \
+#   bash test_rmf_dispatch.sh --client-mode fleet_ros office_pybullet \
 #       "patrol:lounge,coe" \
 #       "delivery:pantry,coke_dispenser,hardware_2,coke_ingestor"
-#   bash test_rmf_e2e.sh hotel_pybullet \
+#   bash test_rmf_dispatch.sh hotel_pybullet \
 #       "patrol:lobby,L2_room1" "clean:clean_lobby"
 #
-# Mounted into the container (cf. test_integration.sh):
+# Mounted into the container (cf. test_bridge_api.sh):
 #   docker compose run --rm --no-deps \
-#     -v "$(pwd)/test_rmf_e2e.sh:/test_rmf_e2e.sh:ro" \
-#     -v "$(pwd)/rmf_dispatch_check.py:/rmf_dispatch_check.py:ro" \
-#     bridge bash /test_rmf_e2e.sh <launch_stem> <scenario...>
+#     -v "$(pwd)/test_rmf_dispatch.sh:/test_rmf_dispatch.sh:ro" \
+#     -v "$(pwd)/rmf_dispatch_flow_check.py:/rmf_dispatch_flow_check.py:ro" \
+#     bridge bash /test_rmf_dispatch.sh <launch_stem> <scenario...>
 #
 # target_rtf:=1.0 is essential: the office/hotel YAML defaults leave RTF uncapped,
 # so a headless run advances sim time ~10x and desyncs RMF. Pacing at real time
@@ -26,13 +26,13 @@
 set -e
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-CHECKER="${ROOT_DIR}/rmf_dispatch_check.py"
+CHECKER="${ROOT_DIR}/rmf_dispatch_flow_check.py"
 if [ ! -f "$CHECKER" ]; then
-    CHECKER=/rmf_dispatch_check.py
+    CHECKER=/rmf_dispatch_flow_check.py
 fi
 
 usage() {
-    echo "usage: test_rmf_e2e.sh [--client-mode per_robot_ros|fleet_ros|python_fleet] [--ready-only] [--allow-fleet-state-clear-fallback] <launch_stem> [<scenario> ...]" >&2
+    echo "usage: test_rmf_dispatch.sh [--client-mode per_robot_ros|fleet_ros|python_fleet] [--ready-only] [--allow-fleet-state-clear-fallback] <launch_stem> [<scenario> ...]" >&2
 }
 
 # Validate arg count before `shift` — under `set -e`, `shift` with no args would
@@ -144,7 +144,7 @@ trap cleanup EXIT
 
 echo "--- ${LAUNCH} launched (pid $LAUNCH_PID); running dispatch checker ---"
 
-# rmf_dispatch_check.py waits for the fleet to come up itself.
+# rmf_dispatch_flow_check.py waits for the fleet to come up itself.
 set +e
 if [ "$READY_ONLY" = true ]; then
     python3 "$CHECKER" --ready-only --expected-robots "$EXPECTED_ROBOTS"

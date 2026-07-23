@@ -49,7 +49,7 @@ jobs:
         # launch_testing's TestCases each call rclpy.init() in setUpClass and
         # conflict when co-run in one pytest process ("Context.init() must only be
         # called once"). The running-bridge behaviour they cover is exercised by the
-        # integration smoke below; run them standalone with `launch_test`.
+        # bridge API check below; run them standalone with `launch_test`.
         run: |
           docker compose -f docker/docker-compose.yaml run --rm --no-deps bridge bash -c '
             source /opt/ros/jazzy/setup.bash
@@ -60,17 +60,17 @@ jobs:
               --pytest-args -m "not launch_test"
           '
 
-      - name: Run integration smoke test
-        # test_integration.sh spawns robot0/1/2 from bridge_test.yaml (gui:=false)
-        # and integration_check.py checks topics, services, cmd_vel, simulation_interfaces,
+      - name: Run bridge API check
+        # test_bridge_api.sh spawns robot0/1/2 from bridge_test.yaml (gui:=false)
+        # and bridge_api_check.py checks topics, services, cmd_vel, simulation_interfaces,
         # and fleet API calls.
         run: |
           cd docker
           docker compose run --rm --no-deps \
             -v "$(pwd):/docker:ro" \
-            bridge bash /docker/test_integration.sh
+            bridge bash /docker/test_bridge_api.sh
 
-      - name: Run RMF integration smoke test
+      - name: Run RMF stack check
         # Launches the headless office RMF demo and asserts the RMF stack stands
         # up (fleet/door/lift/dispenser/ingestor topics) and the bridge executes
         # a direct NavigateToPose (deterministic: no dispatcher/traffic-schedule
@@ -78,11 +78,11 @@ jobs:
         run: |
           cd docker
           docker compose run --rm --no-deps \
-            -v "$(pwd)/test_rmf_smoke.sh:/test_rmf_smoke.sh:ro" \
-            -v "$(pwd)/rmf_smoke_check.py:/rmf_smoke_check.py:ro" \
-            bridge bash /test_rmf_smoke.sh
+            -v "$(pwd)/test_rmf_stack.sh:/test_rmf_stack.sh:ro" \
+            -v "$(pwd)/rmf_stack_check.py:/rmf_stack_check.py:ro" \
+            bridge bash /test_rmf_stack.sh
 
-      - name: Run RMF dispatch E2E (office — patrol + delivery)
+      - name: Run RMF dispatch flow (office — patrol + delivery)
         # Full dispatch chain through RMF's dispatcher + traffic schedule, each task
         # asserted to reach `completed`. Office covers navigation (patrol) and the
         # workcell pick/drop path (delivery: coke_dispenser -> coke_ingestor).
@@ -92,9 +92,9 @@ jobs:
         run: |
           cd docker
           docker compose run --rm --no-deps \
-            -v "$(pwd)/test_rmf_e2e.sh:/test_rmf_e2e.sh:ro" \
-            -v "$(pwd)/rmf_dispatch_check.py:/rmf_dispatch_check.py:ro" \
-            bridge bash /test_rmf_e2e.sh --allow-fleet-state-clear-fallback office_pybullet \
+            -v "$(pwd)/test_rmf_dispatch.sh:/test_rmf_dispatch.sh:ro" \
+            -v "$(pwd)/rmf_dispatch_flow_check.py:/rmf_dispatch_flow_check.py:ro" \
+            bridge bash /test_rmf_dispatch.sh --allow-fleet-state-clear-fallback office_pybullet \
               "patrol:lounge,coe" \
               "delivery:pantry,coke_dispenser,hardware_2,coke_ingestor"
 
@@ -103,10 +103,10 @@ jobs:
         # patrol/clean scenarios are intentionally not a blocking CI gate yet:
         # with python_fleet completion is currently proximity-based, and the hotel
         # demo can replan long enough that terminal task success is not reliable
-        # within CI time limits. Office remains the full dispatch E2E gate.
+        # within CI time limits. Office remains the full dispatch-flow gate.
         run: |
           cd docker
           docker compose run --rm --no-deps \
-            -v "$(pwd)/test_rmf_e2e.sh:/test_rmf_e2e.sh:ro" \
-            -v "$(pwd)/rmf_dispatch_check.py:/rmf_dispatch_check.py:ro" \
-            bridge bash /test_rmf_e2e.sh --ready-only hotel_pybullet
+            -v "$(pwd)/test_rmf_dispatch.sh:/test_rmf_dispatch.sh:ro" \
+            -v "$(pwd)/rmf_dispatch_flow_check.py:/rmf_dispatch_flow_check.py:ro" \
+            bridge bash /test_rmf_dispatch.sh --ready-only hotel_pybullet

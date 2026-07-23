@@ -1,0 +1,56 @@
+# ========================================
+# 100 Robots Mixed Demo Configuration
+# ========================================
+#
+# Config-driven mixed fleet scene:
+# - 50 Husky mobile robots
+# - 50 fixed-base Panda arms
+
+simulation:
+  target_rtf: 0
+  gui: true
+  timestep: 0.1
+  physics: true
+  monitor: true
+  enable_monitor_gui: true
+  log_level: info
+  enable_time_profiling: true
+  profiling_interval: 100
+  camera:
+    camera_mode: auto
+    camera_view_type: perspective
+    camera_auto_scale: 0.6
+
+entities:
+  - name: mobile
+    urdf_path: "husky"
+    motion_mode: omnidirectional
+    batch_controller: batch_omni
+    use_fixed_base: false
+    controller:
+      type: "omni"
+      max_linear_vel: 2.0
+      max_linear_accel: 5.0
+    user_data:
+      robot_type: "mobile_robot"
+    grid:
+      count: 50
+      columns: 7
+      spacing: [2.0, 2.0, 0.0]
+      offset: [-9.0, -4.0, 0.3]
+
+  - name: arm
+    urdf_path: "arm_robot"
+    motion_mode: differential
+    use_fixed_base: true
+    mass: 1.0
+    controller:
+      max_linear_vel: 0.0
+      max_linear_accel: 0.0
+    user_data:
+      robot_type: "arm_robot"
+    grid:
+      count: 50
+      columns: 7
+      spacing: [2.0, 2.0, 0.0]
+      offset: [-8.0, -3.0, 0.0]

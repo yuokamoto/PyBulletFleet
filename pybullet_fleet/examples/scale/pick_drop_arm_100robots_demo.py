@@ -10,6 +10,7 @@ Demonstrates:
 - JointAction, PickAction, DropAction coordination
 """
 import argparse
+import math
 import os
 import sys
 
@@ -33,9 +34,13 @@ from pybullet_fleet.robot_models import resolve_model
 
 parser = argparse.ArgumentParser(description="100 robot arms pick & drop demo")
 parser.add_argument("--robot", default="panda", help="Robot name (e.g. panda, kuka_iiwa, arm_robot) or URDF path")
+parser.add_argument("--robots", type=int, default=100, help="Number of robot arms to spawn (default: 100)")
 parser.add_argument("--duration", type=float, default=None, help="Simulation duration in seconds (default: run forever)")
 parser.add_argument("--rtf", type=float, default=None, help="Target real-time factor override")
+parser.add_argument("--no-gui", action="store_true", help="Disable the PyBullet GUI")
 args = parser.parse_args()
+if args.robots <= 0:
+    raise SystemExit("--robots must be positive")
 
 # ── Per-robot joint presets (pick / place / init targets + box positions) ──
 JOINT_PRESETS = {
@@ -73,6 +78,10 @@ _OVERRIDES = {
     }
 }
 config = merge_configs(load_yaml_config(_BASE_CONFIG), _OVERRIDES)
+if args.no_gui:
+    config.setdefault("simulation", {})["gui"] = False
+    config["simulation"]["monitor"] = False
+    config["simulation"]["enable_monitor_gui"] = False
 sim_core = MultiRobotSimulationCore.from_dict(config)
 if args.rtf is not None:
     sim_core.params.target_rtf = args.rtf
@@ -80,9 +89,9 @@ if args.rtf is not None:
 # Create AgentManager
 agent_manager = AgentManager(sim_core=sim_core, update_frequency=10.0)
 
-# Grid configuration for 100 robots (10x10 grid)
-NUM_ROBOTS = 100
-GRID_SIZE = 10  # 10x10 = 100 robots
+# Grid configuration
+NUM_ROBOTS = args.robots
+GRID_SIZE = math.ceil(math.sqrt(NUM_ROBOTS))
 SPACING = 1.0  # Distance between robots (meters)
 
 # Joint configurations from preset
@@ -101,7 +110,7 @@ place_offset = list(_P["box_place"])
 # Storage for boxes (one per robot)
 box_objects = []
 
-print("\n=== Spawning 100 Robot Arms using AgentManager ===")
+print(f"\n=== Spawning {NUM_ROBOTS} Robot Arms using AgentManager ===")
 
 # Setup grid spawn parameters
 arm_urdf = resolve_model(args.robot)
@@ -251,7 +260,7 @@ def action_repeat_callback(manager: AgentManager, dt: float):
 
 
 # Setup initial sequence for all robots
-print("=== Setting up Action Sequences for 100 Robots ===")
+print(f"=== Setting up Action Sequences for {NUM_ROBOTS} Robots ===")
 print("Each robot will:")
 print("  Cycle 1: Pick from right (0.3, 0, 0.1) -> Drop on left (-0.3, 0, 0.1)")
 print("  Cycle 2: Pick from left (-0.3, 0, 0.1) -> Drop on right (0.3, 0, 0.1)")
@@ -278,17 +287,21 @@ agent_positions = [agent.get_pose().position for agent in arm_agents]
 sim_core.setup_camera(
     camera_config={
         "camera_mode": "manual",
-        "camera_distance": 3.0,
+        "camera_distance": max(3.0, GRID_SIZE * SPACING * 0.4),
         "camera_yaw": 45,
         "camera_pitch": -35,
-        "camera_target": [7.5, 0.5, 0.5],
+        "camera_target": [
+            (GRID_SIZE - 1) * SPACING * 0.5,
+            (GRID_SIZE - 1) * SPACING * 0.5,
+            0.5,
+        ],
     }
 )
 
 # Run simulation
 print("Starting simulation...")
 print(f"Watch all {len(arm_agents)} robot arms pick and drop boxes in synchronized cycles.")
-print("Camera positioned to view entire 10x10 grid.")
+print(f"Camera positioned to view the {GRID_SIZE}x{GRID_SIZE} grid.")
 print("AgentManager handles bulk action coordination.")
 print("Press Ctrl+C to stop.\n")
 

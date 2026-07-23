@@ -430,6 +430,10 @@ class MultiRobotSimulationCore:
         # See docs/design/two-phase-step/spec.md.
         self._in_step: bool = False
         self._pending_pose_ids: Set[int] = set()
+        # Parent object ids that have link-level kinematic attachments.
+        # Used to avoid scanning every flushed object in the hot path when no
+        # link attachments exist.
+        self._link_attachment_parent_ids: Set[int] = set()
 
         # --- Plugins ---
         self._plugins: List["SimPlugin"] = []
@@ -1146,6 +1150,53 @@ class MultiRobotSimulationCore:
                 p.resetBaseVelocity(obj.body_id, linear_vel, angular_vel, physicsClientId=self._client)
             else:
                 p.resetBasePositionAndOrientation(obj.body_id, position, orientation, physicsClientId=self._client)
+
+    def _register_link_attachment_parent(self, object_id: int) -> None:
+        """Track an object whose link-level attachments need post-flush sync."""
+        self._link_attachment_parent_ids.add(object_id)
+
+    def _unregister_link_attachment_parent(self, object_id: int) -> None:
+        """Stop tracking an object with no remaining link-level attachments."""
+        self._link_attachment_parent_ids.discard(object_id)
+
+    def _sync_link_attachments_after_pose_flush(self, ids: Set[int]) -> Set[int]:
+        """
+        Recompute link-level attachments after parent poses have been flushed.
+
+        Link attachments read parent link poses via PyBullet FK. During
+        ``step_once()``, parent base poses are buffered until Phase 2, so the
+        normal ``Agent.update()`` call can see a one-step-old link transform
+        when the base moved in the same step. Running this immediately after
+        the parent pose flush keeps EE-attached objects visually locked to the
+        current-frame link pose while preserving the two-phase write path.
+
+        Returns:
+            Object ids whose poses were updated by the attachment sync.
+        """
+        if not ids or not self._link_attachment_parent_ids:
+            return set()
+        all_synced_ids: Set[int] = set()
+        to_sync = ids & self._link_attachment_parent_ids
+        # Link-level attachment chains can require multiple passes:
+        # parent Agent pose flush -> child Agent link sync -> grandchild sync.
+        # Base-link descendants are handled by SimObject._propagate_to_attached()
+        # within each pose update, so this loop only needs to revisit objects
+        # that were newly flushed by link-level FK sync.
+        while to_sync:
+            for object_id in to_sync:
+                obj = self._sim_objects_dict.get(object_id)
+                if not isinstance(obj, Agent) or not obj.attached_objects:
+                    continue
+                obj.update_attached_objects_kinematics()
+
+            synced_ids = self._pending_pose_ids
+            self._pending_pose_ids = set()
+            if not synced_ids:
+                break
+            self._flush_pending_poses(synced_ids)
+            all_synced_ids.update(synced_ids)
+            to_sync = synced_ids & self._link_attachment_parent_ids
+        return all_synced_ids
 
     def _flush_aabb_and_grid(self, ids: Set[int]) -> None:
         """
@@ -3524,6 +3575,8 @@ class MultiRobotSimulationCore:
             flushed_ids = self._pending_pose_ids
             self._pending_pose_ids = set()
             self._flush_pending_poses(flushed_ids)
+            synced_link_attachment_ids = self._sync_link_attachments_after_pose_flush(flushed_ids)
+            flushed_ids = flushed_ids | synced_link_attachment_ids
             if measure_timing:
                 self._profiling_stats["phase2_pose_flush"][-1] = (time.perf_counter() - t_phase2) * 1000
 

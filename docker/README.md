@@ -3,6 +3,9 @@
 Docker environment for the [`ros2_bridge/`](../ros2_bridge/) package (ROS 2 Jazzy).
 The Dockerfile builds `pybullet_fleet`, `pybullet_fleet_ros`, and `pybullet_fleet_rmf`
 inside a single colcon workspace.
+Use [`ros2_bridge/README.md`](../ros2_bridge/README.md) as the architecture and
+interface entry point; this page intentionally focuses on Docker-specific setup
+and commands.
 
 ## Build
 
@@ -438,7 +441,7 @@ docker exec pbf_bridge bash -c 'source /rmf_demos_ws/install/setup.bash && \
 | `config/bridge_arm.yaml` | Generic arm robot joint control (used by `arm_demo.launch.py`) |
 | `config/bridge_omni_demo.yaml` | Omni + 6-DoF cube demo (2 mobile robots + 1 floating cube) |
 | `config/bridge_attach_demo.yaml` | Attach/detach demo — robot + pickable boxes (used by `attach_demo.launch.py`) |
-| `config/bridge_test.yaml` | 3 mobile robots for the integration smoke test |
+| `config/bridge_test.yaml` | 3 mobile robots for the bridge API check |
 
 The bridge is **`config_yaml`-driven**: pass a config to spawn robots (there is no
 `num_robots`/`robot_urdf` fallback). Without `config_yaml` it starts with no robots.
@@ -466,11 +469,11 @@ contents.
 ```bash
 cd docker
 
-# Integration smoke test (headless) — spawns 3 robots from bridge_test.yaml and
+# Bridge API check (headless) — spawns 3 robots from bridge_test.yaml and
 # checks topics, services, cmd_vel, simulation_interfaces, and fleet API calls.
 docker compose run --rm --no-deps \
   -v "$(pwd):/docker:ro" \
-  bridge bash /docker/test_integration.sh
+  bridge bash /docker/test_bridge_api.sh
 
 # Optional fleet API scale check. The shell wrapper derives a temporary config
 # from pybullet_fleet_ros/config/bridge_fleet_scale.yaml, updates the grid count,
@@ -627,7 +630,7 @@ docker compose run --rm bridge \
 
 ### Dispatch Test Completion
 
-`docker/rmf_dispatch_check.py` treats explicit RMF terminal task success as the
+`docker/rmf_dispatch_flow_check.py` treats explicit RMF terminal task success as the
 normal pass condition. `/fleet_states` is used to confirm robot assignment, but
 task-id clearing alone is not success because failed or canceled tasks also
 become unassigned.

@@ -211,7 +211,7 @@ share the same success condition and should be evaluated together.
 
 ### Phase 5a — RMF Client Abstraction
 
-Status: in progress.
+Status: implemented; validation and performance characterization remain.
 
 Tasks:
 
@@ -252,7 +252,8 @@ Exit criteria:
 
 ### Phase 5b — RMF over Typed Fleet Commands
 
-Status: in progress.
+Status: implemented for navigation, stop, and attach; generic/custom action
+mapping remains deferred to Phase 6a.
 
 Tasks:
 
@@ -289,7 +290,7 @@ Exit criteria:
 
 ### Phase 5c — Plugin Only Launch Path
 
-Status: in progress.
+Status: implemented for launch-time in-process RMF adapters.
 
 Tasks:
 
@@ -326,7 +327,8 @@ Exit criteria:
 
 ### Phase 5d — Plugin + Bridge Launch Path
 
-Status: in progress.
+Status: implemented for observation/debug bridge wrappers over the same
+provider/dispatcher path.
 
 Tasks:
 
@@ -455,7 +457,7 @@ Collect both wall-clock and sim-time metrics:
 
 Extend existing smoke scripts instead of replacing them:
 
-- keep `docker/test_rmf_smoke.sh` and `docker/test_rmf_e2e.sh` as correctness
+- keep `docker/test_rmf_stack.sh` and `docker/test_rmf_dispatch.sh` as correctness
   gates;
 - add `docker/rmf_perf_check.py` for metric collection;
 - add `docker/test_rmf_perf.sh` as an opt-in benchmark wrapper;
@@ -629,18 +631,21 @@ Exit criteria:
 ### Phase 6d — Scale Example Config Cleanup
 
 Purpose: align non-ROS scale examples with the newer `entities[].grid` config
-pattern used by the core config loader and ROS bridge examples, without
-breaking existing example configs immediately.
+pattern used by the core config loader and ROS bridge examples.
+
+Status: implemented for the 100-robot grid demo; remaining scale examples can
+be converted opportunistically.
 
 Tasks:
 
 - Update `pybullet_fleet/config/100robots_config.yaml` to make
   `entities[].grid` the primary example scene definition.
-- Keep the old top-level `num_robots`, `grid`, `spacing`, `offset`, and
-  robot-specific sections as commented legacy examples or compatibility notes.
-- Update `pybullet_fleet/examples/scale/100robots_grid_demo.py` to prefer
-  `entities[]` when present while retaining fallback support for the current
-  top-level example format.
+- Remove legacy top-level `num_robots`, `grid`, `spacing`, `offset`, mixed-mode,
+  and robot-specific fallback paths from `100robots_grid_demo.py`.
+- Keep `100robots_grid_demo.py` focused on the config-driven 100 mobile robot
+  `entities[].grid` scene.
+- Add `100robots_mixed_demo.py` and `100robots_mixed_config.yaml` as the
+  representative Husky + Panda mixed scene, also using `entities[].grid`.
 - Document that new scale examples should use `entities[].grid` so scene
   definitions can be shared more easily across non-ROS examples, benchmarks,
   and ROS bridge configs.
@@ -650,11 +655,10 @@ Tasks:
 
 Exit criteria:
 
-- The 100-robot grid demo still runs with existing configs.
-- The default example config uses `entities[].grid` as the visible primary
-  pattern.
-- Legacy top-level scale keys remain understandable but are no longer the
-  recommended pattern.
+- The 100-robot grid demo runs from `config/100robots_config.yaml`.
+- The default example config uses `entities[].grid` as the scene definition.
+- Mixed mobile/arm scale scenes, if needed, should be added as separate
+  examples/configs instead of hidden fallback code in `100robots_grid_demo.py`.
 
 ### Phase 6e — Trace, Snapshot, and Replay Hooks
 
@@ -685,11 +689,18 @@ Purpose: make the ROS bridge test layers easier to review by aligning script
 names with the layer they validate. The current `integration`, `smoke`, and
 `e2e` names are historically accurate but easy to confuse.
 
+Status: implemented for the blocking Docker entry points.
+
 Tasks:
 
-- Keep the current names during Phase 5 to avoid broad CI/doc churn while the
-  RMF migration is still being reviewed.
-- Add a short test hierarchy table to the ROS bridge docs before renaming,
+- Docker entry points now use layer-oriented names:
+  - `docker/test_bridge_api.sh`;
+  - `docker/bridge_api_check.py`;
+  - `docker/test_rmf_stack.sh`;
+  - `docker/rmf_stack_check.py`;
+  - `docker/test_rmf_dispatch.sh`;
+  - `docker/rmf_dispatch_flow_check.py`.
+- Add a short test hierarchy table to the ROS bridge docs,
   covering:
   - core `pytest tests/`;
   - ROS package `colcon test`;
@@ -698,17 +709,8 @@ Tasks:
   - RMF dispatch flow;
   - RMF client-mode matrix;
   - fleet scale/performance checks.
-- Rename scripts in a focused cleanup PR:
-  - `docker/test_integration.sh` -> `docker/test_bridge_api.sh`;
-  - `docker/integration_check.py` -> `docker/bridge_api_check.py`;
-  - `docker/test_rmf_smoke.sh` -> `docker/test_rmf_stack.sh`;
-  - `docker/rmf_smoke_check.py` -> `docker/rmf_stack_check.py`;
-  - keep `docker/test_rmf_e2e.sh` or rename it to
-    `docker/test_rmf_dispatch.sh` if the docs also switch to "dispatch flow";
-  - keep `docker/test_rmf_client_modes.sh` and `docker/test_fleet_scale.sh`
-    because their purpose is already clear.
-- Update `.github/workflows/bridge.yml`, Docker README commands, Make targets,
-  and any copied native instructions in the same cleanup PR.
+- Keep `docker/test_rmf_client_modes.sh` and `docker/test_fleet_scale.sh`
+  unchanged because their purpose is already clear.
 - Revisit the hotel RMF dispatch test before release. It is currently kept as a
   readiness/smoke gate instead of a blocking dispatch E2E because CI task
   completion is less stable for the multi-fleet + lift/door scenario. The
@@ -744,6 +746,8 @@ Exit criteria:
 Purpose: promote command payload types that started in `fleet_api.py` but are
 now shared by fleet, per-robot ROS, RMF Python, and RMF ROS paths into a neutral
 module before release.
+
+Status: implemented for shared dataclasses and attach defaults.
 
 Tasks:
 

@@ -120,7 +120,7 @@ def build_dispatch(scenario: str):
 
 class DispatchChecker(Node):
     def __init__(self, expected_robots=None):
-        super().__init__("rmf_dispatch_check")
+        super().__init__("rmf_dispatch_flow_check")
         self._expected_robots = set(expected_robots or [])
         self._pos = {}  # robot name -> latest (x, y)
         self._z = {}  # robot name -> latest z (for lift checks)
@@ -490,7 +490,8 @@ if __name__ == "__main__":
             scenario_args.append(arg)
     if not scenario_args and not ready_only:
         print(
-            "usage: rmf_dispatch_check.py [--ready-only] [--allow-fleet-state-clear-fallback] " "<type:args[;assert]> [...]",
+            "usage: rmf_dispatch_flow_check.py [--ready-only] "
+            "[--allow-fleet-state-clear-fallback] <type:args[;assert]> [...]",
             file=sys.stderr,
         )
         sys.exit(2)

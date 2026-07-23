@@ -18,11 +18,12 @@ to be watched, not run in CI. Some `models/` demos need extras:
 
 | Demo | Role |
 |------|------|
-| `scale/100robots_grid_demo.py` | Primary config-driven mixed-fleet demo. Use it to try controller, command-interface, and movement switches in a user-facing scene. |
+| `scale/100robots_grid_demo.py` | Primary config-driven 100 mobile robot grid demo. Use it to try controller, command-interface, and movement switches in a user-facing scene. |
+| `scale/100robots_mixed_demo.py` | Representative mixed fleet scene with 60 Husky robots and 40 fixed-base Panda arms, using `entities[].grid` groups. |
 | `scale/100robots_cube_patrol_demo.py` | Tutorial-style 100 mobile robot patrol scene using `managers:` and `fleet_controller:` config. |
 | `scale/batch_controller_scale_demo.py` | Focused batch-controller scale demo. Robot count is `--n` (default 500); use it for quick fleet API and command setup checks, not rigorous benchmarking. |
-| `scale/pick_drop_mobile_100robots_demo.py` | 100 mobile manipulators using pick/drop action sequences and object management. |
-| `scale/pick_drop_arm_100robots_demo.py` | 100 fixed-base arms using synchronized joint/action pick-drop cycles. |
+| `scale/pick_drop_mobile_100robots_demo.py` | Mobile robots using pick/drop action sequences and object management. `--robots` controls the count, and `--no-gui` is available for headless checks. |
+| `scale/pick_drop_arm_100robots_demo.py` | Fixed-base arms using synchronized joint/action pick-drop cycles. `--robots` controls the count, and `--no-gui` is available for headless checks. |
 
 ## Fleet API Verification
 
@@ -45,19 +46,19 @@ Both modes print command setup time and fleet state snapshot time so local runs
 can compare the control path without changing the scene, robot count, or loop.
 
 `scale/100robots_grid_demo.py` is a config-driven example for trying the same
-switches in a user-facing demo. `config/100robots_config.yaml` controls the
-standard scene, and CLI flags choose the controller and command path:
+switches in a user-facing demo. `config/100robots_config.yaml` uses
+`entities[].grid` as the primary scene definition, and CLI flags choose the
+controller and command path.
 
 ```bash
 # Default: batch controller, fleet command interface, random movement.
 python3 pybullet_fleet/examples/scale/100robots_grid_demo.py --duration 5
 
-# Compare command APIs on a repeated goal-command run. In mixed mode, arm robots
-# keep moving through random joint commands while mobile robots receive goals.
+# Compare command APIs on a repeated goal-command run.
 python3 pybullet_fleet/examples/scale/100robots_grid_demo.py \
-  --mode single --movement goal --command-interface per_agent --duration 5
+  --movement goal --command-interface per_agent --duration 5
 python3 pybullet_fleet/examples/scale/100robots_grid_demo.py \
-  --mode single --movement goal --command-interface fleet --duration 5
+  --movement goal --command-interface fleet --duration 5
 ```
 
 For repeatable timing comparisons, use the benchmark runner:
@@ -65,6 +66,15 @@ For repeatable timing comparisons, use the benchmark runner:
 ```bash
 python3 benchmark/run_benchmark.py --type mobile \
   --controller per_agent batch --command-interface per_agent fleet --agents 500 --steps 600
+```
+
+`scale/100robots_mixed_demo.py` keeps the mixed fleet showcase separate from
+the controller/API comparison demo:
+
+```bash
+python3 pybullet_fleet/examples/scale/100robots_mixed_demo.py --duration 10
+python3 pybullet_fleet/examples/scale/100robots_mixed_demo.py \
+  --controller per_agent --duration 10
 ```
 
 For ROS bridge verification, run the Docker smoke and optional scale checks

@@ -1,5 +1,5 @@
 #!/bin/bash
-# docker/test_integration.sh
+# docker/test_bridge_api.sh
 # Run inside Docker container to verify full stack
 set -e
 
@@ -14,14 +14,17 @@ if [ ! -f "$LIB" ]; then
 fi
 source "$LIB"
 
-# URDF paths are relative to pybullet_fleet root
 source_ros_env
 bridge_repo_root
 
 # Start bridge in background.
 # The bridge is config_yaml-driven (num_robots/robot_urdf were removed); spawn
 # the three test robots (robot0/1/2) from bridge_test.yaml.
-TEST_CONFIG=/rmf_demos_ws/install/pybullet_fleet_ros/share/pybullet_fleet_ros/config/bridge_test.yaml
+TEST_CONFIG=${TEST_CONFIG:-}
+if [ -z "$TEST_CONFIG" ]; then
+    PKG_PREFIX=$(ros2 pkg prefix pybullet_fleet_ros)
+    TEST_CONFIG="${PKG_PREFIX}/share/pybullet_fleet_ros/config/bridge_test.yaml"
+fi
 start_bridge_node "$TEST_CONFIG" false 10.0
 
 cleanup() {
@@ -31,12 +34,15 @@ cleanup() {
 }
 trap cleanup EXIT
 
-CHECKER=${INTEGRATION_CHECK:-/integration_check.py}
+CHECKER=${BRIDGE_API_CHECK:-${INTEGRATION_CHECK:-/bridge_api_check.py}}
 if [ ! -f "$CHECKER" ]; then
-    CHECKER=/docker/integration_check.py
+    CHECKER=/docker/bridge_api_check.py
 fi
 if [ ! -f "$CHECKER" ]; then
-    CHECKER=/opt/pybullet_fleet/docker/integration_check.py
+    CHECKER=docker/bridge_api_check.py
+fi
+if [ ! -f "$CHECKER" ]; then
+    CHECKER=/opt/pybullet_fleet/docker/bridge_api_check.py
 fi
 python3 "$CHECKER"
 
