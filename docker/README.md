@@ -33,7 +33,8 @@ docker compose run --rm --name pbf_bridge bridge \
   ros2 launch pybullet_fleet_ros tb3_demo.launch.py gui:=true
 ```
 
-**Terminal 2** — send a navigation goal:
+**Terminal 2** — send a navigation goal through the ROS API
+(`/tb3_0/goal_pose`, `geometry_msgs/PoseStamped`):
 
 ```bash
 docker exec pbf_bridge bash -c 'source /rmf_demos_ws/install/setup.bash && \
@@ -47,6 +48,61 @@ RViz (Odometry arrow, Path, Current Goal, RobotModel) update in real time.
 You can also use the Waffle model: `model:=waffle`.
 
 Stop with **Ctrl+C** in Terminal 1.
+
+### Fleet API Navigation Demo — Batched Goals Before RMF
+
+This is the bridge-level fleet API path without RMF. It launches a generated
+fleet config with only fleet-level ROS interfaces enabled, then sends one
+batched navigation request to `/fleet/navigate`.
+
+**Terminal 1** — generate and launch a fleet API config:
+
+```bash
+cd docker
+xhost +local:docker
+
+docker compose run --rm --name pbf_bridge \
+  -v "$(pwd):/docker:ro" \
+  bridge bash /docker/run_fleet_api_demo.sh \
+    --robots 100 --robot-model simple_cube --gui true --target-rtf 1.0
+```
+
+Change `--robot-model simple_cube` to `mobile_robot`, `tb3_burger`, or
+`tb3_waffle` to try the same fleet API path with another robot model.
+
+**Terminal 2** — inspect fleet state and send batched goals through the ROS API.
+The helper script is a thin ROS client: it reads `/fleet/states`, selects the
+first N robots, and sends one `/fleet/navigate` service request.
+
+```bash
+# Fleet state topic: one message contains all robot states
+docker exec pbf_bridge bash -c 'source /rmf_demos_ws/install/setup.bash && \
+  ros2 topic echo /fleet/states --once'
+
+# Fleet navigation service: one request contains multiple RobotGoal2D commands
+docker exec pbf_bridge bash -c 'source /rmf_demos_ws/install/setup.bash && \
+  python3 /opt/pybullet_fleet/scripts/send_fleet_nav_goals.py \
+    --robots 50 --dx 0.5 --transport service'
+```
+
+Use `--transport topic` to publish the same command to the `/fleet/navigate`
+topic instead of calling the service.
+
+Equivalent raw ROS command for reference:
+
+```bash
+docker exec pbf_bridge bash -c 'source /rmf_demos_ws/install/setup.bash && \
+  ros2 service call /fleet/navigate pybullet_fleet_msgs/srv/FleetNavigate \
+    "{command_id: demo_batch_nav, source: docker_readme, goals_2d: [
+      {name: robot_0, position: [2.0, 0.0], yaw: 0.0, z: 0.05},
+      {name: robot_1, position: [2.0, 2.0], yaw: 0.0, z: 0.05},
+      {name: robot_2, position: [2.0, 4.0], yaw: 0.0, z: 0.05}
+    ], goals_3d: []}"'
+```
+
+For scale/performance checks, use `test_fleet_scale.sh` in the automated test
+section. It exercises the same `/fleet/states` and `/fleet/navigate` interfaces
+headlessly and can switch between fleet, per-robot, and hybrid interface modes.
 
 ### Arm Demo — UR5e (Fixed-Base 6-DOF Arm + RViz)
 
@@ -62,7 +118,9 @@ docker compose run --rm --name pbf_bridge bridge \
   ros2 launch pybullet_fleet_ros ur5e_demo.launch.py gui:=true
 ```
 
-**Terminal 2** — send a joint trajectory via action (with feedback):
+**Terminal 2** — send a joint trajectory through the ROS API
+(`/ur5e_0/follow_joint_trajectory`, `control_msgs/FollowJointTrajectory`
+action):
 
 ```bash
 docker exec pbf_bridge bash -c 'source /rmf_demos_ws/install/setup.bash && \
@@ -138,7 +196,14 @@ docker compose run --rm --name pbf_bridge bridge \
   ros2 launch pybullet_fleet_ros attach_demo.launch.py gui:=true
 ```
 
-**Terminal 2** — navigate to box_A and attach it:
+**Terminal 2** — navigate to box_A and attach it. The helper scripts call the
+same ROS APIs exposed by the bridge:
+
+| Helper | ROS API |
+|--------|---------|
+| `send_nav_goal.py` | `/<robot>/navigate_to_pose` action |
+| `attach_object.py --attach/--detach` | `/<robot>/attach_object` service |
+| `attach_object.py --toggle` | `/<robot>/toggle_attach` service |
 
 ```bash
 # Navigate close to box_A (at x=0.5)
@@ -246,6 +311,9 @@ Inside the container these live under
 While the bridge is running in Terminal 1, use Terminal 2 for interaction.
 
 > Helper scripts in `ros2_bridge/scripts/` are volume-mounted at `/opt/pybullet_fleet/scripts/`.
+> They are thin ROS clients, not direct PyBulletFleet calls. Use them for
+> copy/paste-safe examples while still exercising the bridge's ROS topics,
+> services, and actions.
 
 ### Introspection
 
@@ -275,11 +343,11 @@ docker exec pbf_bridge bash -c 'source /rmf_demos_ws/install/setup.bash && \
   ros2 topic pub --once /tb3_0/goal_pose geometry_msgs/PoseStamped \
     "{header: {frame_id: odom}, pose: {position: {x: 2.0, y: 1.0, z: 0.01}, orientation: {w: 1.0}}}"'
 
-# Send square path (script)
+# Send square path (script -> /tb3_0/path topic)
 docker exec pbf_bridge bash -c 'source /rmf_demos_ws/install/setup.bash && \
   python3 /opt/pybullet_fleet/scripts/send_path.py --robot tb3_0 --size 2.0'
 
-# NavigateToPose action (with distance_remaining feedback)
+# NavigateToPose action (script -> /tb3_0/navigate_to_pose action, with feedback)
 docker exec pbf_bridge bash -c 'source /rmf_demos_ws/install/setup.bash && \
   python3 /opt/pybullet_fleet/scripts/send_nav_goal.py --robot tb3_0 --x 2.0 --y 1.0'
 
@@ -293,12 +361,13 @@ docker exec pbf_bridge bash -c 'source /rmf_demos_ws/install/setup.bash && \
 ### Arm Control (joint_trajectory / action)
 
 ```bash
-# FollowJointTrajectory action (with actual/desired/error feedback — recommended)
+# FollowJointTrajectory action (script -> /ur5e_0/follow_joint_trajectory action;
+# with actual/desired/error feedback — recommended)
 docker exec pbf_bridge bash -c 'source /rmf_demos_ws/install/setup.bash && \
   python3 /opt/pybullet_fleet/scripts/send_joint_goal_ur5e.py --robot ur5e_0 \
     --positions 0.0 -1.57 1.57 -1.57 -1.57 0.0'
 
-# Joint trajectory topic (fire-and-forget)
+# Joint trajectory topic (script -> /ur5e_0/joint_trajectory topic; fire-and-forget)
 docker exec pbf_bridge bash -c 'source /rmf_demos_ws/install/setup.bash && \
   python3 /opt/pybullet_fleet/scripts/send_joint_trajectory.py --robot ur5e_0 \
     --positions 0.0 -1.57 1.57 -1.57 -1.57 0.0'
@@ -311,7 +380,7 @@ docker exec pbf_bridge bash -c 'source /rmf_demos_ws/install/setup.bash && \
 ### Velocity Control
 
 ```bash
-# Script — move for 5 seconds
+# Script -> /tb3_0/cmd_vel topic, repeated for 5 seconds
 docker exec pbf_bridge bash -c 'source /rmf_demos_ws/install/setup.bash && \
   python3 /opt/pybullet_fleet/scripts/teleop_cmd_vel.py --robot tb3_0 --vx 0.2 --wz 0.5 --duration 5.0'
 
@@ -342,7 +411,7 @@ docker compose run --rm --name pbf_bridge bridge \
 docker exec pbf_bridge bash -c 'source /rmf_demos_ws/install/setup.bash && \
   python3 /opt/pybullet_fleet/scripts/send_nav_goal.py --robot tb3_0 --x 0.3 --y 0.0'
 
-# Attach nearest pickable object (script)
+# Attach nearest pickable object (script -> /tb3_0/attach_object service)
 docker exec pbf_bridge bash -c 'source /rmf_demos_ws/install/setup.bash && \
   python3 /opt/pybullet_fleet/scripts/attach_object.py --robot tb3_0 --attach'
 
@@ -371,7 +440,7 @@ docker exec pbf_bridge bash -c 'source /rmf_demos_ws/install/setup.bash && \
 Alternatively, use `toggle_attach` (rmf_demos compatible SetBool service):
 
 ```bash
-# Attach nearest (toggle mode)
+# Attach nearest (toggle mode, script -> /tb3_0/toggle_attach service)
 docker exec pbf_bridge bash -c 'source /rmf_demos_ws/install/setup.bash && \
   python3 /opt/pybullet_fleet/scripts/attach_object.py --robot tb3_0 --attach --toggle'
 
@@ -510,6 +579,21 @@ docker compose run --rm --no-deps \
   -v "$(pwd):/docker:ro" \
   bridge bash /docker/test_rmf_client_modes.sh --full
 
+# Fast RMF stack check. This launches office headless, verifies RMF protocol
+# topics/handlers are up, confirms the expected robots are registered, and sends
+# a direct NavigateToPose goal through the selected client mode.
+docker compose run --rm --no-deps \
+  -v "$(pwd):/docker:ro" \
+  bridge bash /docker/test_rmf_stack.sh --client-mode python_fleet
+
+# RMF dispatch flow check. This launches one RMF demo and requires dispatched
+# tasks to reach explicit successful terminal state by default.
+docker compose run --rm --no-deps \
+  -v "$(pwd):/docker:ro" \
+  bridge bash /docker/test_rmf_dispatch.sh --client-mode python_fleet office_pybullet \
+    "patrol:lounge" \
+    "delivery:pantry,coke_dispenser,hardware_2,coke_ingestor"
+
 # Hybrid debug: enable only selected per-robot interface groups to isolate which
 # ROS entities add latency. Valid groups are state_publishers, tf, command_topics,
 # services, and actions. Use default (state_publishers,tf,command_topics), all,
@@ -540,7 +624,7 @@ docker compose run --rm bridge bash -c "\
   colcon test --packages-select pybullet_fleet_ros --event-handlers console_direct+"
 ```
 
-## Smoke Test (Manual)
+## Manual Bridge Smoke Test
 
 **Terminal 1**:
 
@@ -640,6 +724,16 @@ enabled, a cleared `/fleet_states` task id can pass after task underway, robot
 motion, scenario-specific physical checks, and a short grace period with no
 failed or canceled terminal status.
 
+### Client Modes
+
+The RMF launch files expose `client_mode:=...`:
+
+| Mode | Path | Use case |
+|------|------|----------|
+| `python_fleet` | RMF adapter calls the in-process PyBulletFleet API through bridge plugins | Default path for lowest ROS overhead |
+| `fleet_ros` | RMF adapter calls fleet-level ROS interfaces such as `/fleet/state` and `/fleet/navigate` | ROS-visible fleet API path |
+| `per_robot_ros` | RMF adapter calls per-robot ROS topics/actions/services | Compatibility/debug path |
+
 ### Architecture
 
 ```
@@ -649,14 +743,17 @@ Open-RMF Traffic Schedule
 FleetAdapterNode (fleet_adapter.py)
     │  EasyFullControl API → RobotCallbacks.navigate()
     ▼
-RobotClientAPI → NavigateToPose action goal
+RmfFleetClient facade
     │
-    ▼
-BridgeNode → RobotHandler → Agent.set_goal_pose()
+    ├─ python_fleet: in-process PyBulletFleet API / bridge plugins
+    ├─ fleet_ros: fleet-level ROS API
+    └─ per_robot_ros: per-robot ROS API
     │
     ▼
 PyBulletFleet (kinematic navigation)
 ```
 
-Fleet adapter subscribes to each robot's `/odom` topic to report position
-to Open-RMF continuously via `RobotState` updates.
+The fleet adapter reports robot state to Open-RMF continuously via `RobotState`
+updates. The state source depends on `client_mode`: `python_fleet` reads directly
+from the simulation, `fleet_ros` uses fleet state, and `per_robot_ros` uses
+per-robot odometry.
