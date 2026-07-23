@@ -59,6 +59,14 @@ def _cleanup_temp_file(path: str) -> None:
         pass
 
 
+def _write_temp_yaml(prefix: str, data: dict) -> str:
+    fd, path = tempfile.mkstemp(prefix=prefix, suffix=".yaml")
+    with os.fdopen(fd, "w") as f:
+        yaml.safe_dump(data, f, sort_keys=False)
+    atexit.register(_cleanup_temp_file, path)
+    return path
+
+
 def _as_bool(value: str, default: bool = False) -> bool:
     if value == "":
         return default
@@ -213,11 +221,7 @@ def _bridge_config_for_client_mode(
             )
     else:
         bridge_config = _enable_fleet_api_for_rmf_client(bridge_config)
-    fd, path = tempfile.mkstemp(prefix="pbf_rmf_bridge_", suffix=".yaml")
-    with os.fdopen(fd, "w") as f:
-        yaml.safe_dump(bridge_config, f, sort_keys=False)
-    atexit.register(_cleanup_temp_file, path)
-    return path
+    return _write_temp_yaml("pbf_rmf_bridge_", bridge_config)
 
 
 def _bridge_node_setup(context: LaunchContext):

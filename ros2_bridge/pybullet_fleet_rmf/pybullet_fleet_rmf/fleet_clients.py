@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import logging
 import math
+import queue
 import threading
+from enum import Enum
 from typing import Any, Optional
 
 from geometry_msgs.msg import Pose as RosPose, Point, Quaternion
@@ -26,6 +28,15 @@ from pybullet_fleet_rmf.client_interface import RobotUpdateData
 from pybullet_fleet_rmf.per_robot_ros_client import PerRobotRosClient
 
 logger = logging.getLogger(__name__)
+
+
+class _QueuedCommandType(str, Enum):
+    """Command kinds queued for simulation-thread execution."""
+
+    NAVIGATE = "navigate"
+    STOP = "stop"
+    ATTACH = "attach"
+    CHARGING = "charging"
 
 
 class PerRobotRosClientFactory:
@@ -419,6 +430,7 @@ class PythonRmfFleetClient:
         self._lock = threading.Lock()
         self._map_names: dict[str, str] = {}
         self._completed: dict[str, int] = {}
+        self._commands: queue.SimpleQueue[tuple[_QueuedCommandType, str, Any]] = queue.SimpleQueue()
 
     @classmethod
     def from_sim_core(
@@ -477,8 +489,51 @@ class PythonRmfFleetClient:
         with self._lock:
             self._completed[robot_name] = max(self._completed.get(robot_name, 0), int(cmd_id))
 
+    def drain_commands(self) -> None:
+        """Run pending simulator mutations from the simulation step thread."""
+        handlers = {
+            _QueuedCommandType.NAVIGATE: self._drain_navigate_command,
+            _QueuedCommandType.STOP: self._drain_stop_command,
+            _QueuedCommandType.ATTACH: self._drain_attach_command,
+            _QueuedCommandType.CHARGING: self._drain_charging_command,
+        }
+        while True:
+            try:
+                command_type, robot_name, payload = self._commands.get_nowait()
+            except queue.Empty:
+                return
+            handler = handlers.get(command_type)
+            if handler is None:
+                logger.warning("[%s] dropping unknown queued RMF command: %s", robot_name, command_type)
+                continue
+            try:
+                handler(robot_name, payload)
+            except Exception as exc:  # noqa: B902
+                logger.error("[%s] queued RMF command %s failed: %s", robot_name, command_type.value, exc)
+
+    def _drain_navigate_command(self, robot_name: str, payload: Any) -> None:
+        cmd_id, position, map_name = payload
+        self._dispatch_navigate(robot_name, cmd_id, position, map_name)
+
+    def _drain_stop_command(self, robot_name: str, payload: Any) -> None:
+        (cmd_id,) = payload
+        self._dispatch_stop(robot_name, cmd_id)
+
+    def _drain_attach_command(self, robot_name: str, payload: Any) -> None:
+        cmd_id, kwargs = payload
+        self._dispatch_attach(robot_name, cmd_id, **kwargs)
+
+    def _drain_charging_command(self, robot_name: str, payload: Any) -> None:
+        cmd_id, charging = payload
+        self._dispatch_charging(robot_name, cmd_id, charging)
+
     def _command_navigate(self, robot_name: str, cmd_id: int, position: list, map_name: str) -> bool:
-        """Dispatch one direct fleet navigation command."""
+        """Queue one direct fleet navigation command."""
+        self._commands.put((_QueuedCommandType.NAVIGATE, robot_name, (cmd_id, list(position), map_name)))
+        return True
+
+    def _dispatch_navigate(self, robot_name: str, cmd_id: int, position: list, map_name: str) -> bool:
+        """Dispatch one direct fleet navigation command on the simulation thread."""
         del map_name
         ack = self._dispatcher.navigate(
             [
@@ -498,7 +553,12 @@ class PythonRmfFleetClient:
         return _ack_accepts(ack, robot_name, "navigate")
 
     def _command_stop(self, robot_name: str, cmd_id: int) -> bool:
-        """Dispatch one direct fleet stop command."""
+        """Queue one direct fleet stop command."""
+        self._commands.put((_QueuedCommandType.STOP, robot_name, (cmd_id,)))
+        return True
+
+    def _dispatch_stop(self, robot_name: str, cmd_id: int) -> bool:
+        """Dispatch one direct fleet stop command on the simulation thread."""
         ack = self._dispatcher.stop([robot_name], source="rmf-python", command_id=str(cmd_id))
         if not _ack_accepts(ack, robot_name, "stop"):
             return False
@@ -517,7 +577,39 @@ class PythonRmfFleetClient:
         offset_orientation: tuple = (0.0, 0.0, 0.0, 1.0),
         search_radius: float = 0.0,
     ) -> bool:
-        """Dispatch one direct fleet attach/detach command."""
+        """Queue one direct fleet attach/detach command."""
+        self._commands.put(
+            (
+                _QueuedCommandType.ATTACH,
+                robot_name,
+                (
+                    cmd_id,
+                    {
+                        "attach": attach,
+                        "object_name": object_name,
+                        "parent_link": parent_link,
+                        "offset_position": offset_position,
+                        "offset_orientation": offset_orientation,
+                        "search_radius": search_radius,
+                    },
+                ),
+            )
+        )
+        return True
+
+    def _dispatch_attach(
+        self,
+        robot_name: str,
+        cmd_id: int,
+        *,
+        attach: bool,
+        object_name: str = "",
+        parent_link: str = "",
+        offset_position: tuple = (0.0, 0.0, 0.0),
+        offset_orientation: tuple = (0.0, 0.0, 0.0, 1.0),
+        search_radius: float = 0.0,
+    ) -> bool:
+        """Dispatch one direct fleet attach/detach command on the simulation thread."""
         radius = float(search_radius)
         if radius <= 0.0:
             radius = DEFAULT_ATTACH_SEARCH_RADIUS
@@ -585,6 +677,11 @@ class PythonRmfFleetClient:
         )
 
     def set_charging(self, robot_name: str, cmd_id: int, charging: bool) -> bool:
+        """Queue a charging-state update for one agent."""
+        self._commands.put((_QueuedCommandType.CHARGING, robot_name, (cmd_id, bool(charging))))
+        return True
+
+    def _dispatch_charging(self, robot_name: str, cmd_id: int, charging: bool) -> bool:
         """Set charging directly on an agent when the core agent supports it."""
         agent = _direct_agent_by_name(self._dispatcher.sim_core, robot_name)
         if agent is None:
