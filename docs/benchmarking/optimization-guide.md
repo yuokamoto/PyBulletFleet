@@ -104,7 +104,9 @@ enable_shadows: false
 # collision_mode is per-agent: AgentSpawnParams(..., collision_mode=CollisionMode.NORMAL_2D)
 ```
 
-**Expected:** ~6.8× RTF (500 agents), ~2.4× RTF (1000 agents)
+**Expected:** environment-dependent. On the 2026-07-24 WSL2 benchmark
+host, the default every-step collision benchmark measured ~23.5× RTF at 500
+agents and ~10.1× RTF at 1000 agents.
 
 ---
 
@@ -131,17 +133,18 @@ enable_time_profiling: true
 ### Benchmark Results
 
 <!-- sync with results.md -->
-Based on latest measurement (2026-03-12, kinematics mode, 50% agents moving, headless):
+Based on latest measurement (2026-07-24, `simple_cube` robots, kinematics mode,
+50% agents moving, headless, batch controller, fleet command interface):
 
 | Agents | RTF  | Step Time    |
 |--------|------|--------------|
-| 100    | 48×  | 2.10 ± 0.09 ms |
-| 250    | 16×  | 6.45 ± 0.30 ms |
-| 500    | 6.8× | 14.66 ± 0.18 ms |
-| 1000   | 2.4× | 40.94 ± 2.39 ms |
-| 2000   | 1.1× | 94.82 ± 5.81 ms |
+| 100    | 143.5× | 0.70 ± 0.06 ms |
+| 250    | 56.8×  | 1.76 ± 0.12 ms |
+| 500    | 23.5×  | 4.25 ± 0.30 ms |
+| 1000   | 10.1×  | 9.88 ± 0.08 ms |
+| 2000   | 4.3×   | 23.25 ± 1.07 ms |
 
-Scalability: O(n^1.3) — near-linear up to 500 agents, slightly super-linear above.
+Scalability: ~O(n^1.2) across the measured 100-2000 robot sweep on this WSL2 host.
 
 ### Step Time Targets
 

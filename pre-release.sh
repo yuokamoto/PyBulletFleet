@@ -13,6 +13,10 @@ set -euo pipefail
 #   3. Generates draft release notes from conventional commits
 #   4. Updates CHANGELOG.md with the draft
 #
+# Before running this script, refresh performance results when relevant:
+#   - make bench-release
+#   - docker/test_fleet_scale.sh for ROS bridge fleet/per_robot/hybrid changes
+#
 # After running this script, review and rewrite CHANGELOG.md, then run
 # publish-release.sh to commit, tag, and push.
 # =============================================================================
@@ -95,6 +99,9 @@ if git rev-parse "refs/tags/${TAG}" >/dev/null 2>&1; then
 fi
 
 info "All preconditions passed"
+
+warn "Pre-release reminder: performance results should already be refreshed if this release changes runtime behavior."
+warn "Run 'make bench-release' for core numbers, and docker/test_fleet_scale.sh for ROS bridge changes."
 
 # ---------------------------------------------------------------------------
 # 2. Semver validation

@@ -189,7 +189,7 @@ def test_memory_usage_within_limits():
 
 ### ❌ DON'T
 
-1. **Don't enable memory profiling in production** (slight performance overhead)
+1. **Don't enable memory profiling in production or timing benchmarks**
 2. **Don't panic over small growth values** (< 2MB per 100 steps is normal)
 3. **Don't rely only on memory profiling** - use time profiling together
 4. **Don't forget to close simulation** after profiling
@@ -198,12 +198,18 @@ def test_memory_usage_within_limits():
 
 ## Performance Impact
 
-Memory profiling uses Python's `tracemalloc` module, which has minimal overhead:
+Memory profiling uses Python's `tracemalloc` module. It is useful for leak
+investigation, but it can materially slow allocation-heavy hot loops:
 
-- **CPU overhead**: < 1% in most cases
+- **CPU overhead**: workload-dependent; can be large in step-time / RTF benchmarks
 - **Memory overhead**: ~5-10% additional memory for tracking
 - **Recommended for**: Development, testing, debugging
-- **Not recommended for**: Production deployments requiring maximum performance
+- **Not recommended for**: Production deployments or benchmark runs measuring
+  maximum RTF / step time
+
+The benchmark workers keep `tracemalloc` out of the timed simulation section for
+this reason. Use RSS-based process memory for release benchmark tables, and use
+`tracemalloc` separately when the goal is memory leak diagnosis.
 
 ---
 

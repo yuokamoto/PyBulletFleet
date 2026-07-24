@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+from dataclasses import dataclass
 import math
 import sys
 import time
@@ -17,6 +18,20 @@ from rosgraph_msgs.msg import Clock
 from simulation_interfaces.srv import GetEntitiesStates
 
 from ros_check_utils import RosCheckNode
+
+
+@dataclass(frozen=True)
+class MotionReport:
+    ok: bool
+    elapsed: float
+    moved: int
+    first_moved: float | None
+    p50_moved: float | None
+    p90_moved: float | None
+    p99_moved: float | None
+    all_moved: float | None
+    missing: list[str]
+    final_positions: dict[str, tuple[float, float]]
 
 
 class FleetScaleClient(RosCheckNode):
@@ -177,33 +192,76 @@ def _wait_for_motion_started(
     timeout: float,
     *,
     prefer_fleet_state: bool,
-) -> tuple[bool, float, int]:
-    """Wait until every robot has moved measurably toward its x-offset goal."""
+) -> MotionReport:
+    """Measure how long each robot takes to move after a command is accepted."""
     expected_targets = _target_x_by_name(robot_count)
     threshold = 0.01
     start = time.perf_counter()
-    last_count = 0
+    moved_at: dict[str, float] = {}
+    last_positions: dict[str, tuple[float, float]] = {}
 
-    def count_moved_from_positions(positions: dict[str, tuple[float, float]]) -> int:
-        moved = 0
+    def record_moved_from_positions(positions: dict[str, tuple[float, float]], elapsed: float) -> None:
         for name, target_x in expected_targets.items():
             pos = positions.get(name)
-            if pos is not None and pos[0] >= target_x - 0.5 + threshold:
-                moved += 1
-        return moved
+            if pos is not None and pos[0] >= target_x - 0.5 + threshold and name not in moved_at:
+                moved_at[name] = elapsed
+
+    def percentile(values: list[float], ratio: float) -> float | None:
+        if not values:
+            return None
+        index = min(len(values) - 1, math.ceil(len(values) * ratio) - 1)
+        return values[index]
 
     while time.perf_counter() - start < timeout:
         rclpy.spin_once(node, timeout_sec=0.05)
         if prefer_fleet_state:
-            last_count = count_moved_from_positions(node.positions)
+            last_positions = dict(node.positions)
         else:
             try:
-                last_count = count_moved_from_positions(node.poll_entity_positions(timeout=5.0))
+                remaining = max(timeout - (time.perf_counter() - start), 0.1)
+                last_positions = node.poll_entity_positions(timeout=min(1.0, remaining))
             except RuntimeError:
-                last_count = 0
-        if last_count == robot_count:
-            return True, time.perf_counter() - start, last_count
-    return False, time.perf_counter() - start, last_count
+                last_positions = {}
+
+        elapsed = time.perf_counter() - start
+        record_moved_from_positions(last_positions, elapsed)
+        if len(moved_at) == robot_count:
+            break
+
+    elapsed = time.perf_counter() - start
+    moved_times = sorted(moved_at.values())
+    missing = sorted(set(expected_targets) - set(moved_at))
+    return MotionReport(
+        ok=not missing,
+        elapsed=elapsed,
+        moved=len(moved_at),
+        first_moved=moved_times[0] if moved_times else None,
+        p50_moved=percentile(moved_times, 0.50),
+        p90_moved=percentile(moved_times, 0.90),
+        p99_moved=percentile(moved_times, 0.99),
+        all_moved=moved_times[-1] if len(moved_times) == robot_count else None,
+        missing=missing,
+        final_positions=last_positions,
+    )
+
+
+def _format_latency(value: float | None) -> str:
+    return "n/a" if value is None else f"{value:.3f}s"
+
+
+def _print_motion_report(label: str, report: MotionReport, robot_count: int) -> None:
+    print(
+        f"{label}: motion after ack moved={report.moved}/{robot_count}, "
+        f"first={_format_latency(report.first_moved)}, "
+        f"p50={_format_latency(report.p50_moved)}, "
+        f"p90={_format_latency(report.p90_moved)}, "
+        f"p99={_format_latency(report.p99_moved)}, "
+        f"all={_format_latency(report.all_moved)}, "
+        f"elapsed={report.elapsed:.3f}s"
+    )
+    if report.missing:
+        samples = [f"{name}@{report.final_positions.get(name, ('missing', 'missing'))}" for name in report.missing[:10]]
+        print(f"{label}: missing moved robots={len(report.missing)}; first missing={samples}")
 
 
 def _wait_for_fleet_state(node: FleetScaleClient, robot_count: int, timeout: float) -> set[str] | None:
@@ -234,16 +292,15 @@ def _check_fleet_navigate_service(node: FleetScaleClient, robot_count: int, time
         return 1
     print(f"PASS: /fleet/navigate accepted {len(accepted)} robots in {elapsed:.3f}s")
     if verify_motion:
-        ok, motion_elapsed, moved = _wait_for_motion_started(
+        report = _wait_for_motion_started(
             node,
             robot_count,
             timeout,
             prefer_fleet_state=True,
         )
-        if not ok:
-            print(f"FAIL: only {moved}/{robot_count} robots moved after fleet command in {motion_elapsed:.3f}s")
+        _print_motion_report("PASS" if report.ok else "FAIL", report, robot_count)
+        if not report.ok:
             return 1
-        print(f"PASS: {moved} fleet-commanded robots started moving in {motion_elapsed:.3f}s")
     return 0
 
 
@@ -258,16 +315,15 @@ def _check_fleet_navigate_topic(node: FleetScaleClient, robot_count: int, timeou
         return 1
     print(f"PASS: published /fleet/navigate topic command for {robot_count} robots in {elapsed:.3f}s")
     if verify_motion:
-        ok, motion_elapsed, moved = _wait_for_motion_started(
+        report = _wait_for_motion_started(
             node,
             robot_count,
             timeout,
             prefer_fleet_state=True,
         )
-        if not ok:
-            print(f"FAIL: only {moved}/{robot_count} robots moved after fleet topic command in {motion_elapsed:.3f}s")
+        _print_motion_report("PASS" if report.ok else "FAIL", report, robot_count)
+        if not report.ok:
             return 1
-        print(f"PASS: {moved} fleet-topic-commanded robots started moving in {motion_elapsed:.3f}s")
     return 0
 
 
@@ -299,16 +355,15 @@ def _check_per_robot_goal_pose_topics(
         return 1
     print(f"PASS: published {robot_count} per-robot goal_pose commands " f"({publish_repeats} repeat(s)) in {elapsed:.3f}s")
     if verify_motion:
-        ok, motion_elapsed, moved = _wait_for_motion_started(
+        report = _wait_for_motion_started(
             node,
             robot_count,
             timeout,
             prefer_fleet_state=prefer_fleet_state,
         )
-        if not ok:
-            print(f"FAIL: only {moved}/{robot_count} robots moved after per-robot commands in {motion_elapsed:.3f}s")
+        _print_motion_report("PASS" if report.ok else "FAIL", report, robot_count)
+        if not report.ok:
             return 1
-        print(f"PASS: {moved} per-robot-commanded robots started moving in {motion_elapsed:.3f}s")
     return 0
 
 
@@ -337,7 +392,10 @@ def main() -> int:
         "--command-interface",
         choices=["fleet", "fleet_topic", "per_robot", "all"],
         default="fleet",
-        help="Command path to exercise; fleet uses /fleet/navigate service, fleet_topic uses the topic",
+        help=(
+            "Advanced measurement option: command path exercised by the checker. "
+            "Usually match --interface-mode; mismatches are for hybrid overhead/debug comparisons."
+        ),
     )
     parser.add_argument("--no-verify-motion", action="store_true", help="Skip waiting for commanded robots to move")
     parser.add_argument(

@@ -106,12 +106,12 @@ roadmap
 
 | Agents | Real-Time Factor | Step Time |
 |--------|-----------------|-----------|
-| 100    | 64× | 1.6 ms  |
-| 500    | 10.2×| 9.8 ms |
-| 1000   | 4.4×| 22.8 ms |
-| 2000   | 1.1×| 94.8 ms |
+| 100    | 143.5× | 0.7 ms  |
+| 500    | 23.5× | 4.2 ms |
+| 1000   | 10.1× | 9.9 ms |
+| 2000   | 4.3× | 23.3 ms |
 
-Kinematics mode (physics OFF), headless. See {doc}`benchmarking/benchmark-suite` for full data, component breakdown, and methodology.
+Kinematics mode (physics OFF), headless, `simple_cube` robots, batch controller + fleet command interface. Measured on 2026-07-24. See {doc}`benchmarking/benchmark-suite` for full data, component breakdown, and methodology.
 
 See the {doc}`roadmap` for upcoming features and integrations.
 

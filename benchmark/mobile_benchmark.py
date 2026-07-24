@@ -11,6 +11,7 @@ This is a clean worker process that:
 Usage (typically called by run_benchmark.py):
     python benchmark/mobile_benchmark.py --agents 1000 --duration 10
 """
+
 import os
 import sys
 import time
@@ -141,6 +142,11 @@ def run_benchmark(
 
     # Memory after spawning
     mem_after_spawn = get_memory_info()
+    # tracemalloc adds large per-allocation overhead in the timed simulation
+    # loop. Use it only for spawn-time Python allocation sampling; RSS remains
+    # available for the after-simulation memory measurement below.
+    if tracemalloc.is_tracing():
+        tracemalloc.stop()
 
     # Set random goals for some agents (to simulate real usage)
     import random

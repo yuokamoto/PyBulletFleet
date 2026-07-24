@@ -17,7 +17,10 @@ promoted into the ReadTheDocs ROS 2 Bridge section.
 
 ## Scope
 
-The numbers below were collected with the Docker fleet scale checker:
+The numbers below were collected with the Docker fleet scale checker. Unless
+otherwise stated, scale checks use lightweight `simple_cube` robots as the
+large-fleet baseline; detailed mobile or manipulator models should be measured
+separately.
 
 ```bash
 cd docker
@@ -31,6 +34,12 @@ docker compose run --rm --no-deps \
 The checker sends commands and verifies that commanded robots start moving. For
 per-robot topic commands this is important: publish-loop time alone is not an
 end-to-end performance metric.
+
+`--interface-mode` configures which ROS interfaces the bridge exposes.
+`--command-interface` is an advanced checker option that selects which command
+path is exercised during the measurement. In normal runs they should match
+(`fleet/fleet` or `per_robot/per_robot`). Mismatched combinations are mainly for
+hybrid overhead and compatibility debugging.
 
 Use `--target-rtf 0 --measure-rtf` when measuring the maximum observed RTF. The
 RTF value is computed from `/clock` simulation time over wall time after the
@@ -64,6 +73,14 @@ publishers, TF, command topics, services, or actions can add seconds of
 when state publishers and TF are enabled, but it does not remove the endpoint
 count cost.
 
+The slowdown is primarily visible before command ack, not after ack. In hybrid
+mode the bridge still accepts one fleet-level command, but the same ROS node also
+owns many per-robot publishers/subscriptions/timers and may be constructing and
+publishing per-robot state and TF messages while servicing `/fleet/navigate`.
+Those per-robot ROS entities increase executor and DDS graph overhead, and the
+extra publish work competes with service handling. Once the fleet command is
+accepted, all robots still start moving quickly in the measured cases.
+
 Per-robot topic commands are not equivalent to fleet service commands. They are
 fire-and-forget and can look fast if only publish time is measured. With motion
 verification enabled, hundreds of per-robot topic commands did not reliably
@@ -77,14 +94,33 @@ DDS/RCL layer.
 
 These are single-run diagnostic numbers, not stable CI thresholds.
 
-| Mode | Robots | Groups | publish_rate | target_rtf | Result |
-|------|--------|--------|--------------|------------|--------|
-| `fleet` | 1000 | none | 5 Hz | 1.0 | `/fleet/navigate` ack ~0.03 s |
-| `fleet` | 1000 | none | 5 Hz | 0 | `/fleet/navigate` ack 0.40 s, motion start 0.14 s, max RTF 8.82x |
-| `hybrid` | 1000 | `state_publishers,tf,command_topics` | 1 Hz | 1.0 | `/fleet/navigate` ack ~2.4 s |
-| `hybrid` | 1000 | `state_publishers,tf,command_topics` | 5 Hz | 1.0 | `/fleet/navigate` ack ~10 s |
-| `hybrid` | 1000 | `command_topics` | 5 Hz | 1.0 | `/fleet/navigate` ack ~2 s |
-| `hybrid` | 1000 | `actions` | 5 Hz | 1.0 | DDS/RCL abort observed |
+| Mode | Robots | Groups | publish_rate | target_rtf | Command ack | All moved after ack (wall) | Result |
+|------|--------|--------|--------------|------------|-------------|----------------------------|--------|
+| `fleet` | 100 | none | 5 Hz | 0 | 0.048 s | 0.008 s | max RTF 110.20x |
+| `fleet` | 500 | none | 5 Hz | 0 | 0.181 s | 0.043 s | max RTF 21.03x |
+| `fleet` | 1000 | none | 5 Hz | 1.0 | 0.027 s | 0.173 s | target-rate command check |
+| `fleet` | 1000 | none | 5 Hz | 0 | 0.502 s | 0.063 s | max RTF 9.73x |
+| `hybrid` | 1000 | `command_topics` | 5 Hz | 1.0 | 0.527 s | 0.112 s | target-rate command check |
+| `hybrid` | 1000 | `state_publishers,tf,command_topics` | 1 Hz | 1.0 | 1.878 s | 0.229 s | target-rate command check |
+| `hybrid` | 1000 | `state_publishers,tf,command_topics` | 5 Hz | 1.0 | 8.657 s | 0.323 s | target-rate command check |
+| `hybrid` | 1000 | `actions` | 5 Hz | 1.0 | not available | not measured | DDS/RCL abort observed |
+
+`Command ack` is the `/fleet/navigate` service response time. `All moved after
+ack` is a separate checker result based on observed robot state after the
+command is accepted. Ack and motion-verification latency values are wall time,
+while max RTF is derived from `/clock` simulation time over wall time. Use
+`--no-verify-motion` for RTF-only measurements, and use motion verification when
+debugging command delivery semantics.
+Because motion verification is based on observed state updates, this wall-time
+latency is affected by `target_rtf`, timestep, and publish timing.
+Current checker output reports motion latency after command ack as first, p50,
+p90, p99, and all-moved timings, plus missing robot names and final observed
+positions when not all robots move within the checker window.
+
+Per-robot publish-only command checks completed quickly in this environment:
+100 robots in 0.172 s, 500 robots in 0.128 s, and 1000 robots in 0.235 s.
+Those numbers only measure topic publication from the checker and should not be
+compared directly with acknowledged fleet service calls.
 
 ## Recommendations
 

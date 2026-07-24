@@ -3,7 +3,7 @@
 
 .DEFAULT_GOAL := help
 
-.PHONY: help lint format typecheck test test-fast verify docs bench-smoke bench-full rmf-demos-setup ros-native-setup rmf-matrix clean
+.PHONY: help lint format typecheck test test-fast verify docs bench-smoke bench-full bench-release rmf-demos-setup ros-native-setup rmf-matrix clean
 
 help:  ## Show available targets
 	@grep -E '^[a-zA-Z_-]+:[^#]*## .*$$' $(MAKEFILE_LIST) | sort | \
@@ -37,6 +37,10 @@ bench-smoke:  ## Quick benchmark (~10 seconds)
 
 bench-full:  ## Full benchmark sweep
 	python benchmark/run_benchmark.py --sweep 100 500 1000
+
+bench-release:  ## Release benchmark sweep for docs refresh
+	python benchmark/run_benchmark.py --sweep 100 250 500 1000 2000 --duration 10 --repetitions 3
+	python benchmark/run_benchmark.py --type mobile_control_path --controller per_agent batch --command-interface per_agent fleet --sweep 100 500 1000 --steps 600 --repetitions 3
 
 rmf-demos-setup:  ## Build native Open-RMF demos workspace for Jazzy
 	bash scripts/setup_rmf_demos_jazzy.sh

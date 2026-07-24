@@ -4,6 +4,16 @@ This repository is used by automated coding agents and human maintainers. Keep
 changes small, verify the same checks that CI will run, and do not push unless
 the user explicitly asks for it.
 
+## Repo-Local Skills
+
+Repo-local skills live under `.copilot/skills/`. Claude uses the same files via
+`.claude/skills -> ../.copilot/skills`. Some agents do not automatically list
+repo-local skills in their active tool-provided skill registry, so inspect these
+files explicitly when the task matches their scope.
+
+- Release work: `.copilot/skills/releasing/SKILL.md`
+- Performance work: `.copilot/skills/pybullet-performance-workflow/SKILL.md`
+
 ## Before Pushing
 
 Run the core CI subset before pushing any branch that changes Python source,
@@ -53,3 +63,28 @@ The normal CI install is `pip install -e ".[dev]"`. Optional extras such as
 `robot_descriptions`. If local failures only appear with optional extras
 installed, call that out explicitly and verify the CI-equivalent environment
 when practical.
+
+## Pre-Release Performance Refresh
+
+Before a release, refresh performance numbers rather than relying on stale docs:
+
+```bash
+make bench-release
+```
+
+Also refresh ROS bridge performance when `ros2_bridge/`, `docker/`, RMF client
+modes, fleet API, or batch controller behavior changed. Use the Docker scale
+checker for at least the release-relevant fleet/per_robot/hybrid cases, for
+example:
+
+```bash
+cd docker
+docker compose run --rm --no-deps -v "$(pwd):/docker:ro" \
+  bridge bash /docker/test_fleet_scale.sh --robots 1000 \
+  --interface-mode fleet --command-interface fleet \
+  --publish-rate 5 --target-rtf 0 --measure-rtf
+```
+
+After benchmarking, sync the documented numbers in `docs/benchmarking/results.md`,
+the README performance table, `docs/index.md`, and `ros2_bridge/PERFORMANCE.md`
+when ROS bridge numbers changed.
