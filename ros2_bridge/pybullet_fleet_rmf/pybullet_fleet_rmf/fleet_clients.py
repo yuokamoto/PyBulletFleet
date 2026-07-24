@@ -508,8 +508,8 @@ class PythonRmfFleetClient:
                 continue
             try:
                 handler(robot_name, payload)
-            except Exception as exc:  # noqa: B902
-                logger.error("[%s] queued RMF command %s failed: %s", robot_name, command_type.value, exc)
+            except Exception:  # noqa: B902
+                logger.exception("[%s] queued RMF command %s failed", robot_name, command_type.value)
 
     def _drain_navigate_command(self, robot_name: str, payload: Any) -> None:
         cmd_id, position, map_name = payload

@@ -641,7 +641,7 @@ class RobotAdapter:
                         map_name, list(path), self._estimate_path_duration(path)
                     )
                 except Exception as exc:  # noqa: B902
-                    self.node.get_logger().warn(f"[{self.name}] clean override_schedule failed: {exc}")
+                    self.node.get_logger().warning(f"[{self.name}] clean override_schedule failed: {exc}")
                     self._coverage_override = None
                 self._coverage_queue = path
                 self.node.get_logger().info(f"[{self.name}] Cleaning zone '{zone}': following {len(path)} coverage waypoints")
@@ -657,7 +657,7 @@ class RobotAdapter:
                 execution.finished()
                 self.execution = None
         else:
-            self.node.get_logger().warn(
+            self.node.get_logger().warning(
                 f"[{self.name}] Action '{category}' is not mapped to a PyBulletFleet action yet; "
                 "finishing without simulator-side execution."
             )
@@ -692,7 +692,7 @@ class RobotAdapter:
                         break
                 except Exception as exc:  # noqa: B902
                     self.node.get_logger().error(f"Command attempt failed for robot [{self.name}]: {exc}")
-                self.node.get_logger().warn(f"Failed to contact robot [{self.name}], retrying...")
+                self.node.get_logger().warning(f"Failed to contact robot [{self.name}], retrying...")
                 if self.cancel_cmd_event.wait(1.0):
                     break
 

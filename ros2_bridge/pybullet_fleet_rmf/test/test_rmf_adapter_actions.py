@@ -24,8 +24,8 @@ def test_unknown_execute_action_warns_and_finishes():
 
     adapter.execute_action("inspect", {"zone": "A"}, execution)
 
-    logger.warn.assert_called_once()
-    assert "not mapped to a PyBulletFleet action yet" in logger.warn.call_args.args[0]
+    logger.warning.assert_called_once()
+    assert "not mapped to a PyBulletFleet action yet" in logger.warning.call_args.args[0]
     execution.finished.assert_called_once()
     assert adapter.execution is None
     api.execute_action.assert_not_called()
