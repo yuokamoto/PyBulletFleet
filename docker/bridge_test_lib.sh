@@ -25,6 +25,9 @@ bridge_repo_root() {
         cd "$PBF_REPO_ROOT"
     elif [ -d /opt/pybullet_fleet ]; then
         cd /opt/pybullet_fleet
+    else
+        echo "ERROR: cannot locate PyBulletFleet repo root. Set PBF_REPO_ROOT or mount /opt/pybullet_fleet." >&2
+        return 1
     fi
 }
 

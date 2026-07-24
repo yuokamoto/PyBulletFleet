@@ -400,6 +400,20 @@ def test_python_fleet_robot_client_sets_charging_directly(mock_node):
     assert agent.is_charging is False
 
 
+def test_python_fleet_robot_client_rejects_unknown_robot_before_enqueue(mock_node):
+    del mock_node
+    from pybullet_fleet_rmf.fleet_clients import PythonRmfFleetClient
+
+    fleet = PythonRmfFleetClient.from_sim_core(_FakeSim([_FakeAgent("tinyRobot1")]), map_name="L1")
+    robot = fleet.robot("missing")
+
+    assert robot.navigate(1, [1.0, 0.0, 0.0], "L1") is False
+    assert robot.stop() is False
+    assert robot.attach_object(True, 2) is False
+    assert robot.start_charge(3) is False
+    assert fleet._commands.empty()  # type: ignore[attr-defined]
+
+
 def test_python_fleet_client_drops_unknown_queued_command(mock_node):
     del mock_node
     from pybullet_fleet_rmf.fleet_clients import PythonRmfFleetClient

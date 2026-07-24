@@ -101,3 +101,46 @@ def test_charger_navigation_starts_charging_after_arrival(monkeypatch):
     api.start_charge.assert_called_once_with(2)
     execution.finished.assert_called_once()
     assert adapter.execution is None
+
+
+def test_non_charger_navigation_clears_pending_charger_command(monkeypatch):
+    from pybullet_fleet_rmf.fleet_adapter import RobotAdapter
+
+    node = MagicMock()
+    api = MagicMock()
+    api.navigate.return_value = True
+    api.start_charge.return_value = True
+    execution = MagicMock()
+    data = MagicMock()
+    data.is_command_completed.return_value = True
+
+    charger_destination = MagicMock()
+    charger_destination.position = [1.0, 2.0, 0.0]
+    charger_destination.map = "L1"
+    charger_destination.speed_limit = None
+    charger_destination.name = "tinyRobot1_charger"
+
+    normal_destination = MagicMock()
+    normal_destination.position = [2.0, 3.0, 0.0]
+    normal_destination.map = "L1"
+    normal_destination.speed_limit = None
+    normal_destination.name = "lounge"
+
+    adapter = RobotAdapter(
+        name="tinyRobot1",
+        configuration=MagicMock(compatible_chargers=["tinyRobot1_charger"]),
+        node=node,
+        api=api,
+        fleet_handle=MagicMock(),
+    )
+    monkeypatch.setattr(adapter, "_is_charger_waypoint", lambda _: False)
+
+    adapter.navigate(charger_destination, execution)
+    assert adapter._pending_charger_cmd == ("tinyRobot1_charger", 2)
+
+    adapter.navigate(normal_destination, execution)
+    assert adapter._pending_charger_cmd is None
+
+    adapter.update(MagicMock(), data)
+
+    api.start_charge.assert_not_called()

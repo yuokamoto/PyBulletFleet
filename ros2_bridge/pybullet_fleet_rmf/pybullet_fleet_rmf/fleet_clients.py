@@ -529,6 +529,8 @@ class PythonRmfFleetClient:
 
     def _command_navigate(self, robot_name: str, cmd_id: int, position: list, map_name: str) -> bool:
         """Queue one direct fleet navigation command."""
+        if not self._has_direct_agent(robot_name, "navigate"):
+            return False
         self._commands.put((_QueuedCommandType.NAVIGATE, robot_name, (cmd_id, list(position), map_name)))
         return True
 
@@ -554,6 +556,8 @@ class PythonRmfFleetClient:
 
     def _command_stop(self, robot_name: str, cmd_id: int) -> bool:
         """Queue one direct fleet stop command."""
+        if not self._has_direct_agent(robot_name, "stop"):
+            return False
         self._commands.put((_QueuedCommandType.STOP, robot_name, (cmd_id,)))
         return True
 
@@ -578,6 +582,8 @@ class PythonRmfFleetClient:
         search_radius: float = 0.0,
     ) -> bool:
         """Queue one direct fleet attach/detach command."""
+        if not self._has_direct_agent(robot_name, "attach"):
+            return False
         self._commands.put(
             (
                 _QueuedCommandType.ATTACH,
@@ -678,6 +684,8 @@ class PythonRmfFleetClient:
 
     def set_charging(self, robot_name: str, cmd_id: int, charging: bool) -> bool:
         """Queue a charging-state update for one agent."""
+        if not self._has_direct_agent(robot_name, "set_charging"):
+            return False
         self._commands.put((_QueuedCommandType.CHARGING, robot_name, (cmd_id, bool(charging))))
         return True
 
@@ -691,6 +699,12 @@ class PythonRmfFleetClient:
         if charging:
             self.mark_completed(robot_name, cmd_id)
         return True
+
+    def _has_direct_agent(self, robot_name: str, command_type: str) -> bool:
+        if _direct_agent_by_name(self._dispatcher.sim_core, robot_name) is not None:
+            return True
+        logger.warning("[%s] direct %s rejected: unknown or ambiguous robot", robot_name, command_type)
+        return False
 
 
 class PythonRmfFleetRobotClient(_RmfRobotClientBase):

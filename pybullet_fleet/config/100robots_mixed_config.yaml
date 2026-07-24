@@ -4,7 +4,7 @@
 #
 # Config-driven mixed fleet scene:
 # - 50 Husky mobile robots
-# - 50 fixed-base Panda arms
+# - 50 fixed-base arm_robot arms
 
 simulation:
   target_rtf: 0

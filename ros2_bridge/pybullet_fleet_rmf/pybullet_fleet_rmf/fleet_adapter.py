@@ -548,6 +548,10 @@ class RobotAdapter:
             f": cmd_id {self.cmd_id}"
         )
 
+        # A later non-charger navigation supersedes any charge command that was
+        # waiting for a previous charger navigation to complete.
+        self._pending_charger_cmd = None
+
         # Stop charging whenever we navigate (we're leaving the charger)
         self.api.stop_charge()
 

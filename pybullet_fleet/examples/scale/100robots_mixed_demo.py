@@ -6,14 +6,15 @@ Config-driven representative mixed fleet demo.
 The scene is loaded from config/100robots_mixed_config.yaml and uses
 entities[].grid for both robot groups:
 
-- 60 mobile robots
-- 40 fixed-base arm robots
+- 50 mobile robots
+- 50 fixed-base arm robots
 
 Examples:
   python 100robots_mixed_demo.py
   python 100robots_mixed_demo.py --duration=10
   python 100robots_mixed_demo.py --controller=per_agent --duration=10
 """
+
 import argparse
 import os
 import sys
@@ -35,7 +36,6 @@ except ModuleNotFoundError:
 from pybullet_fleet.agent import Agent, Pose
 from pybullet_fleet.config_utils import load_yaml_config, merge_configs
 from pybullet_fleet.core_simulation import MultiRobotSimulationCore
-
 
 parser = argparse.ArgumentParser(description="100 Robots Mixed Demo")
 parser.add_argument(

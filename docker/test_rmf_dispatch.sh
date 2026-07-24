@@ -93,7 +93,7 @@ case "$LAUNCH" in
         EXPECTED_ROBOTS="deliveryRobot_1,deliveryRobot_2,deliveryRobot_3"
         ;;
     battle_royale_pybullet)
-        EXPECTED_ROBOTS="tinyRobotA,tinyRobot_1,tinyRobot_2,tinyRobot_3"
+        EXPECTED_ROBOTS="tinyRobotA,tinyRobotB,tinyRobotC,tinyRobotD"
         ;;
     *)
         EXPECTED_ROBOTS=""
