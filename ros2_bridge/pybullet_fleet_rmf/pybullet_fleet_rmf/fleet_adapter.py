@@ -75,14 +75,20 @@ class RmfAdapterRuntime:
     in-process bridge plugin.
     """
 
-    def __init__(self, *, node, adapter, robots, update_thread, stop_event, connections) -> None:
+    def __init__(self, *, node, adapter, robots, update_thread, stop_event, connections, command_drain=None) -> None:
         self.node = node
         self.adapter = adapter
         self.robots = robots
         self.update_thread = update_thread
         self.stop_event = stop_event
         self.connections = connections
+        self._command_drain = command_drain
         self._shutdown = False
+
+    def drain_commands(self) -> None:
+        """Run queued direct simulator commands, when the active client has any."""
+        if self._command_drain is not None:
+            self._command_drain()
 
     def shutdown(self, timeout: float = 2.0) -> None:
         """Stop background adapter work owned by this runtime."""
@@ -254,6 +260,7 @@ def start_adapter_runtime(
         node.get_logger().error(str(exc))
         return None
     node.get_logger().info(f"RMF client mode: {resolved_client_mode}")
+    command_drain = getattr(client_factory, "drain_commands", None)
 
     # The nav graph is used to detect charger waypoints via the
     # is_charger attribute (set in the building.yaml / nav_graph).
@@ -315,6 +322,7 @@ def start_adapter_runtime(
         update_thread=update_thread,
         stop_event=stop_event,
         connections=connections,
+        command_drain=command_drain,
     )
 
 
@@ -438,6 +446,7 @@ class RobotAdapter:
         self._coverage_queue: list = []
         self._coverage_map = None
         self._coverage_override = None
+        self._pending_charger_cmd: tuple[str, int] | None = None
 
     def update(self, state, data):
         """Update RMF with robot state and check command completion."""
@@ -454,6 +463,19 @@ class RobotAdapter:
                     if self.api.navigate(new_cmd, nxt, self._coverage_map, None):
                         self.cmd_id = new_cmd
                         self._coverage_queue.pop(0)
+                elif self._pending_charger_cmd is not None:
+                    wp_name, charge_cmd = self._pending_charger_cmd
+                    self._pending_charger_cmd = None
+                    self.node.get_logger().info(f"[{self.name}] Arrived at charger '{wp_name}' — starting charge")
+                    self.cmd_id = charge_cmd
+                    self.attempt_cmd_until_success(
+                        cmd=self.api.start_charge,
+                        args=(self.cmd_id,),
+                    )
+                    self.execution.finished()
+                    self.execution = None
+                    self.teleoperation = None
+                    self._coverage_override = None
                 else:
                     self.execution.finished()
                     self.execution = None
@@ -495,28 +517,40 @@ class RobotAdapter:
         except Exception:
             return False
 
+    def _is_assigned_charger_destination(self, destination) -> bool:
+        """Return whether destination is this robot's configured charger."""
+        wp_name = getattr(destination, "name", "") or ""
+        if not wp_name:
+            return False
+        chargers = getattr(self.configuration, "compatible_chargers", None) or []
+        return wp_name in chargers
+
     def navigate(self, destination, execution):
         """Navigate to a destination via NavigateToPose action.
 
-        When the destination is a charger waypoint (detected via the
-        nav graph's ``is_charger`` attribute), navigates to the
-        position first, then starts charging via the bridge's
-        ``set_charging`` service.  When navigating away from a
-        charger, charging is stopped automatically.
+        When the destination is this robot's configured charger, navigate
+        first, then start charging via the bridge's ``set_charging`` service.
+        RMF may use other charger waypoints as reservation waitpoints, so the
+        nav graph's generic ``is_charger`` attribute is logged but is not enough
+        to start charging.
         """
         self.cmd_id += 1
         self.execution = execution
 
-        # Detect charger destination from nav graph is_charger attribute.
         wp_name = getattr(destination, "name", "") or ""
         is_charger = self._is_charger_waypoint(destination)
+        is_assigned_charger = self._is_assigned_charger_destination(destination)
 
         self.node.get_logger().info(
             f"Commanding [{self.name}] to navigate to "
             f"{destination.position} on map [{destination.map}] "
-            f"(wp={wp_name}, charger={is_charger})"
+            f"(wp={wp_name}, charger={is_charger}, assigned_charger={is_assigned_charger})"
             f": cmd_id {self.cmd_id}"
         )
+
+        # A later non-charger navigation supersedes any charge command that was
+        # waiting for a previous charger navigation to complete.
+        self._pending_charger_cmd = None
 
         # Stop charging whenever we navigate (we're leaving the charger)
         self.api.stop_charge()
@@ -531,14 +565,11 @@ class RobotAdapter:
             ),
         )
 
-        # After arriving at charger waypoint, start charging
-        if is_charger:
-            self.node.get_logger().info(f"[{self.name}] Arrived at charger '{wp_name}' — starting charge")
-            self.cmd_id += 1
-            self.attempt_cmd_until_success(
-                cmd=self.api.start_charge,
-                args=(self.cmd_id,),
-            )
+        # Start charging only after the navigation command completes. Starting
+        # it here would advance the command-completion watermark before RMF has
+        # observed arrival at the charger waypoint.
+        if is_assigned_charger:
+            self._pending_charger_cmd = (wp_name, self.cmd_id + 1)
 
     def stop(self, activity):
         """Cancel current navigation with retry."""
@@ -610,7 +641,7 @@ class RobotAdapter:
                         map_name, list(path), self._estimate_path_duration(path)
                     )
                 except Exception as exc:  # noqa: B902
-                    self.node.get_logger().warn(f"[{self.name}] clean override_schedule failed: {exc}")
+                    self.node.get_logger().warning(f"[{self.name}] clean override_schedule failed: {exc}")
                     self._coverage_override = None
                 self._coverage_queue = path
                 self.node.get_logger().info(f"[{self.name}] Cleaning zone '{zone}': following {len(path)} coverage waypoints")
@@ -626,7 +657,7 @@ class RobotAdapter:
                 execution.finished()
                 self.execution = None
         else:
-            self.node.get_logger().warn(
+            self.node.get_logger().warning(
                 f"[{self.name}] Action '{category}' is not mapped to a PyBulletFleet action yet; "
                 "finishing without simulator-side execution."
             )
@@ -655,8 +686,13 @@ class RobotAdapter:
         self.cancel_cmd_attempt()
 
         def loop():
-            while not cmd(*args):
-                self.node.get_logger().warn(f"Failed to contact robot [{self.name}], retrying...")
+            while True:
+                try:
+                    if cmd(*args):
+                        break
+                except Exception as exc:  # noqa: B902
+                    self.node.get_logger().error(f"Command attempt failed for robot [{self.name}]: {exc}")
+                self.node.get_logger().warning(f"Failed to contact robot [{self.name}], retrying...")
                 if self.cancel_cmd_event.wait(1.0):
                     break
 

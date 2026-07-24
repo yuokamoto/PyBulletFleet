@@ -1,4 +1,4 @@
-# Bridge config for the integration smoke test (docker/test_integration.sh).
+# Bridge config for the integration smoke test (docker/test_bridge_api.sh).
 #
 # Three differential-drive mobile robots (robot0, robot1, robot2) — matches the
 # topics the integration test checks (/robot0/odom, /robot1/odom, /robot2/odom).

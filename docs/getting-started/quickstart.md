@@ -146,8 +146,8 @@ For step-by-step walkthroughs, see the **[Tutorials](../examples/index)** page.
 | `100robots_grid_demo.py` | Grid-based multi-agent demo — best starting point |
 | `100robots_cube_patrol_demo.py` | 100 agents patrolling between cubes |
 | `batch_controller_scale_demo.py` | Batch-controller scale demo; `--n` controls robot count, default 500 |
-| `pick_drop_arm_100robots_demo.py` | 100 arm robots with synchronised pick-and-drop |
-| `pick_drop_mobile_100robots_demo.py` | 100 mobile robots picking and dropping objects |
+| `pick_drop_arm_100robots_demo.py` | Arm robots with synchronised pick-and-drop; `--robots` controls the count |
+| `pick_drop_mobile_100robots_demo.py` | Mobile robots picking and dropping objects; `--robots` controls the count |
 
 ### Models (`examples/models/`)
 

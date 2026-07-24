@@ -28,7 +28,7 @@ entities:
       max_linear_accel: 0.75
       navigation_2d: true
 
-  - name: tinyRobot_1
+  - name: tinyRobotB
     sdf_path: "package://rmf_demos_assets/models/TinyRobot/model.sdf"
     pose: [2.038, -5.676, 0.0]
     yaw: 0.0
@@ -39,7 +39,7 @@ entities:
       max_linear_accel: 0.75
       navigation_2d: true
 
-  - name: tinyRobot_2
+  - name: tinyRobotC
     sdf_path: "package://rmf_demos_assets/models/TinyRobot/model.sdf"
     pose: [16.966, -2.033, 0.0]
     yaw: -1.5708
@@ -50,7 +50,7 @@ entities:
       max_linear_accel: 0.75
       navigation_2d: true
 
-  - name: tinyRobot_3
+  - name: tinyRobotD
     sdf_path: "package://rmf_demos_assets/models/TinyRobot/model.sdf"
     pose: [2.029, -16.979, 0.0]
     yaw: -3.1393

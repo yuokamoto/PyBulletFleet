@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ROS 2 bridge integration checks for docker/test_integration.sh."""
+"""ROS 2 bridge API checks for docker/test_bridge_api.sh."""
 
 from __future__ import annotations
 
@@ -75,7 +75,7 @@ CALL_TIMEOUT = 10.0
 
 class BridgeIntegrationCheck(RosCheckNode):
     def __init__(self) -> None:
-        super().__init__("pybullet_fleet_bridge_integration_check")
+        super().__init__("pybullet_fleet_bridge_api_check")
         self.clock_seen = False
         self.odom_seen = False
         self.fleet_names: set[str] = set()

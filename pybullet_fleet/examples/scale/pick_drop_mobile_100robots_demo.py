@@ -11,6 +11,7 @@ Demonstrates:
 - Two-area shuttle system: All robots move from Area A to Area B, then back
 """
 import argparse
+import math
 import os
 import sys
 
@@ -37,8 +38,10 @@ from pybullet_fleet.robot_models import resolve_model
 
 parser = argparse.ArgumentParser(description="100 mobile robots pick & drop shuttle demo")
 parser.add_argument("--robot", default="husky", help="Robot name (e.g. husky, mobile_robot, racecar) or URDF path")
+parser.add_argument("--robots", type=int, default=100, help="Number of mobile robots to spawn (default: 100)")
 parser.add_argument("--duration", type=float, default=None, help="Simulation duration in seconds (default: run forever)")
 parser.add_argument("--rtf", type=float, default=None, help="Target real-time factor override")
+parser.add_argument("--no-gui", action="store_true", help="Disable the PyBullet GUI")
 parser.add_argument(
     "--controller",
     choices=["batch", "per_agent"],
@@ -46,6 +49,8 @@ parser.add_argument(
     help="Controller type: 'per_agent' (default) or 'batch' (faster at scale)",
 )
 args = parser.parse_args()
+if args.robots <= 0:
+    raise SystemExit("--robots must be positive")
 
 # Simulation setup — base config + demo-specific overrides (no separate YAML needed)
 _BASE_CONFIG = "config/config.yaml"
@@ -55,6 +60,10 @@ _OVERRIDES = {
     }
 }
 config = merge_configs(load_yaml_config(_BASE_CONFIG), _OVERRIDES)
+if args.no_gui:
+    config.setdefault("simulation", {})["gui"] = False
+    config["simulation"]["monitor"] = False
+    config["simulation"]["enable_monitor_gui"] = False
 sim_core = MultiRobotSimulationCore.from_dict(config)
 if args.rtf is not None:
     sim_core.params.target_rtf = args.rtf
@@ -68,8 +77,8 @@ agent_manager = AgentManager(sim_core=sim_core, update_frequency=10.0, batch_con
 pallet_manager = SimObjectManager(sim_core=sim_core)
 
 # Configuration
-NUM_ROBOTS = 100  # Number of robots to spawn
-GRID_SIZE = 10  # 10x10 = 100 robots
+NUM_ROBOTS = args.robots
+GRID_SIZE = math.ceil(math.sqrt(NUM_ROBOTS))
 SPACING = 1.5  # Distance between robots (meters)
 
 # Define two areas
@@ -94,7 +103,7 @@ class SimulationState:
 
 state = SimulationState()
 
-print("\n=== Spawning 100 Mobile Robots using AgentManager ===")
+print(f"\n=== Spawning {NUM_ROBOTS} Mobile Robots using AgentManager ===")
 
 # Setup grid spawn parameters for Area A
 grid_params_A = GridSpawnParams(
@@ -381,8 +390,6 @@ print("=" * 60 + "\n")
 
 # Use helper method for bulk action assignment
 agent_manager.add_action_sequence_all(lambda robot: create_action_sequence_A_to_B(robot, robot.user_data["pallet"]))
-print(f"✓ All {len(mobile_agents)} robots configured!\n")
-
 print(f"✓ All {len(mobile_agents)} robots configured!\n")
 
 # Register callback with AgentManager

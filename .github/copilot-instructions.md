@@ -60,20 +60,33 @@ MultiRobotSimulationCore  (core_simulation.py)
 
 - Work on a feature branch, never `main`. Commit and push **only when asked**.
 - Backward compatibility is not a concern for this repo.
-- `ros2_bridge/` is excluded from pre-commit and not covered by pytest, so bridge
-  bugs only surface on a manual Docker run. **Before pushing:**
-  1. **Core (always):** `make verify` (lint + test; baseline 1587 passed).
+- **Before pushing, always run the same core checks as CI:**
+  ```bash
+  make verify
+  ```
+  This runs `pre-commit run --all-files --show-diff-on-failure` and
+  `pytest tests/ -v --tb=short --cov=pybullet_fleet --cov-report=term-missing --cov-fail-under=75`.
+- If an agent sandbox cannot write to `~/.cache/pre-commit`, use a temporary
+  cache: `PRE_COMMIT_HOME=/tmp/pbf-pre-commit make lint`.
+- The same pytest command is also available as a manual pre-commit hook:
+  `pre-commit run --hook-stage manual ci-pytest --all-files`.
+- `ros2_bridge/` is excluded from the default pre-commit hooks and the core
+  pytest suite, so bridge changes also need ROS 2 checks. **Before pushing bridge
+  or RMF changes:**
+  1. **Core (always):** `make verify`.
   2. **Bridge integration smoke test** (when anything under `ros2_bridge/`,
-     `docker/`, `robots/`, or `config/` changed):
+     `docker/`, launch/config files, or RMF integration code changed):
      ```bash
      cd docker
      docker compose run --rm --no-deps \
        -v "$(pwd):/docker:ro" \
-       bridge bash /docker/test_integration.sh
+       bridge bash /docker/test_bridge_api.sh
      # expect: "=== All integration tests PASSED ===" (exit 0)
      ```
-  Do not push if either step fails. (Goal: replace the manual bridge step with a
-  CI Docker job.)
+  Do not push if either step fails.
+- CI installs `pip install -e ".[dev]"`. Optional extras such as `.[models]` can
+  change local behavior, especially around `robot_descriptions`; call out that
+  environment difference when interpreting local-only failures.
 - **Packaging (when bundled data or `pyproject.toml` packaging changes):**
   `make test-clean-install` builds a wheel, installs it in a clean venv (no repo
   mount), and runs a smoke test from a temp dir — catching missing bundled
@@ -90,7 +103,7 @@ MultiRobotSimulationCore  (core_simulation.py)
 5. **Never import without `TYPE_CHECKING` guard** when it would cause circular deps.
 6. **Prefer `get_lazy_logger(__name__)`** for new code — avoids expensive f-string evaluation when log level is disabled.
 7. **Never call `__init__()` directly** on Agent or SimObject — use factory methods. `SimulationParams(...)` is fine.
-8. **Always run `make verify` before claiming work is done.**
+8. **Always run `make verify` before claiming work is done or pushing.**
 
 ## Common Patterns
 

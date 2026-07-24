@@ -8,156 +8,25 @@ and call sites without depending on a specific transport.
 from __future__ import annotations
 
 from collections import Counter
-from dataclasses import dataclass, field
 from numbers import Real
-from types import MappingProxyType
 from typing import Any, Iterable, Mapping, Sequence
 from uuid import uuid4
 
-from pybullet_fleet.geometry import Pose
-
-
-FLEET_COMMAND_EVENT = "fleet_command"
-
-
-Vec2 = tuple[float, float]
-Vec3 = tuple[float, float, float]
-Quat = tuple[float, float, float, float]
-
-
-@dataclass(frozen=True)
-class RobotState2D:
-    """Minimal planar state for one robot."""
-
-    name: str
-    object_id: int
-    position: Vec2
-    yaw: float
-    linear_velocity: Vec2 = (0.0, 0.0)
-    angular_velocity: float = 0.0
-    is_moving: bool = False
-    battery_soc: float | None = None
-    is_charging: bool | None = None
-
-
-@dataclass(frozen=True)
-class RobotState3D:
-    """Minimal 3D state for one robot."""
-
-    name: str
-    object_id: int
-    position: Vec3
-    orientation: Quat
-    linear_velocity: Vec3 = (0.0, 0.0, 0.0)
-    angular_velocity: Vec3 = (0.0, 0.0, 0.0)
-    is_moving: bool = False
-    battery_soc: float | None = None
-    is_charging: bool | None = None
-
-
-@dataclass(frozen=True)
-class RobotGoalCommand2D:
-    """Planar navigation command for one robot."""
-
-    name: str
-    position: Vec2
-    yaw: float = 0.0
-    z: float = 0.0
-    command_id: str | None = None
-
-    def to_pose(self) -> Pose:
-        """Convert this command to a simulation ``Pose``."""
-        return Pose.from_yaw(self.position[0], self.position[1], self.z, self.yaw)
-
-
-@dataclass(frozen=True)
-class RobotGoalCommand3D:
-    """3D navigation command for one robot."""
-
-    name: str
-    position: Vec3
-    orientation: Quat = (0.0, 0.0, 0.0, 1.0)
-    command_id: str | None = None
-
-    def to_pose(self) -> Pose:
-        """Convert this command to a simulation ``Pose``."""
-        return Pose(position=list(self.position), orientation=list(self.orientation))
-
-
-@dataclass(frozen=True)
-class RobotJointPositionsCommand:
-    """Ordered joint target command for one robot."""
-
-    name: str
-    positions: tuple[float, ...]
-
-
-@dataclass(frozen=True)
-class RobotNamedJointPositionsCommand:
-    """Named joint target command for one robot."""
-
-    name: str
-    positions: Mapping[str, float]
-
-    def __post_init__(self) -> None:
-        object.__setattr__(self, "positions", MappingProxyType(dict(self.positions)))
-
-
-@dataclass(frozen=True)
-class RobotAttachCommand:
-    """Attach or detach a simulation object for one robot."""
-
-    name: str
-    attach: bool
-    object_name: str = ""
-    parent_link: str = "base_link"
-    offset: Pose = field(default_factory=lambda: Pose.from_xyz(0.0, 0.0, 0.0))
-    search_radius: float = 0.5
-
-
-@dataclass(frozen=True)
-class RobotActionCommand:
-    """Generic PyBulletFleet action command for one robot."""
-
-    name: str
-    action_type: str
-    action_params_json: str = ""
-    command_id: str | None = None
-
-
-@dataclass(frozen=True)
-class CommandAck:
-    """Result of accepting or rejecting a fleet command."""
-
-    command_id: str
-    source: str
-    sim_time: float
-    accepted_names: tuple[str, ...] = field(default_factory=tuple)
-    rejected: Mapping[str, str] = field(default_factory=dict)
-
-    def __post_init__(self) -> None:
-        object.__setattr__(self, "rejected", MappingProxyType(dict(self.rejected)))
-
-    @property
-    def ok(self) -> bool:
-        """Whether at least one target was accepted and none were rejected."""
-        return bool(self.accepted_names) and not self.rejected
-
-
-@dataclass(frozen=True)
-class CommandEvent:
-    """Command trace event emitted before mutating simulation state."""
-
-    command_id: str
-    source: str
-    sim_time: float
-    command_type: str
-    target_names: tuple[str, ...]
-    accepted_names: tuple[str, ...]
-    rejected: Mapping[str, str] = field(default_factory=dict)
-
-    def __post_init__(self) -> None:
-        object.__setattr__(self, "rejected", MappingProxyType(dict(self.rejected)))
+from pybullet_fleet.commands import (
+    DEFAULT_ATTACH_SEARCH_RADIUS,
+    FLEET_COMMAND_EVENT,
+    CommandAck,
+    CommandEvent,
+    Quat,
+    RobotActionCommand,
+    RobotAttachCommand,
+    RobotGoalCommand2D,
+    RobotGoalCommand3D,
+    RobotJointPositionsCommand,
+    RobotNamedJointPositionsCommand,
+    Vec3,
+)
+from pybullet_fleet.states import RobotState2D, RobotState3D
 
 
 class FleetStateProvider:
@@ -563,7 +432,7 @@ def _resolve_attach_target(agent: Any, command: RobotAttachCommand) -> tuple[Any
             return None, "robot does not support nearest pickable search"
         search_radius = float(command.search_radius)
         if search_radius <= 0.0:
-            search_radius = 0.5
+            search_radius = DEFAULT_ATTACH_SEARCH_RADIUS
         obj = finder(search_radius=search_radius)
         if obj is None:
             return None, f"no pickable object within {search_radius:.3g}m"

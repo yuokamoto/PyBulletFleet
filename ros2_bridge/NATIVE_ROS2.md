@@ -155,7 +155,7 @@ The Docker test wrappers also work natively after `.ros2_native_env` is sourced:
 ```bash
 source .ros2_native_env
 
-bash docker/test_rmf_smoke.sh
+bash docker/test_rmf_stack.sh
 bash docker/test_rmf_client_modes.sh
 bash docker/test_rmf_client_modes.sh --full
 ```
@@ -169,18 +169,38 @@ make rmf-matrix
 Individual checks:
 
 ```bash
-bash docker/test_rmf_e2e.sh --client-mode python_fleet office_pybullet \
+bash docker/test_rmf_dispatch.sh --client-mode python_fleet office_pybullet \
   "patrol:lounge,coe" \
   "delivery:pantry,coke_dispenser,hardware_2,coke_ingestor"
 
-bash docker/test_rmf_e2e.sh --client-mode fleet_ros hotel_pybullet \
+bash docker/test_rmf_dispatch.sh --client-mode fleet_ros hotel_pybullet \
   "patrol:lobby,L2_room1;zrise=2.0" \
   "clean:clean_lobby"
 
-bash docker/test_rmf_e2e.sh --client-mode python_fleet --ready-only clinic_pybullet
+bash docker/test_rmf_dispatch.sh --client-mode python_fleet --ready-only clinic_pybullet
 ```
 
 ## Launch Manually
+
+Non-RMF bridge demos only need `pybullet_fleet_msgs` and `pybullet_fleet_ros`
+from the native overlay:
+
+```bash
+source .ros2_native_env
+
+ros2 launch pybullet_fleet_ros tb3_demo.launch.py gui:=false rviz:=false
+ros2 launch pybullet_fleet_ros attach_demo.launch.py gui:=false
+ros2 launch pybullet_fleet_ros ur5e_demo.launch.py gui:=false rviz:=false
+```
+
+The bridge API check also runs natively:
+
+```bash
+source .ros2_native_env
+ROS_LOG_DIR=/tmp/pbf_ros_log bash docker/test_bridge_api.sh
+```
+
+Use `gui:=true` when running from a desktop/WSLg session.
 
 ```bash
 source .ros2_native_env

@@ -330,6 +330,7 @@ def test_python_fleet_client_applies_rmf_frame_offset(mock_node):
     assert data.position == pytest.approx([100.0, 200.0, 0.0])
 
     assert robot.navigate(3, [101.0, 202.0, 0.5], "L1")
+    robot._fleet.drain_commands()
     assert agent.goal_calls[0].x == pytest.approx(1.0)
     assert agent.goal_calls[0].y == pytest.approx(2.0)
     assert agent.goal_calls[0].yaw == pytest.approx(0.5)
@@ -346,15 +347,18 @@ def test_python_fleet_robot_client_dispatches_navigation_stop_and_attach(mock_no
     robot = fleet.robot("tinyRobot1")
 
     assert robot.navigate(3, [1.0, 2.0, 0.5], "L1")
+    fleet.drain_commands()
     assert agent.goal_calls[0].x == pytest.approx(1.0)
     assert agent.goal_calls[0].y == pytest.approx(2.0)
     assert agent.goal_calls[0].yaw == pytest.approx(0.5)
 
     assert robot.stop()
+    fleet.drain_commands()
     assert agent.stop_calls == 1
     assert robot.get_data().last_completed_cmd_id == 4
 
     assert robot.attach_object(True, 7, object_name="box", parent_link="tool", offset_position=(0.0, 0.0, 0.2))
+    fleet.drain_commands()
     assert agent.attach_calls[0][0] is box
     assert agent.attach_calls[0][1] == "tool"
     assert agent.attach_calls[0][2].z == pytest.approx(0.2)
@@ -372,6 +376,7 @@ def test_python_fleet_robot_client_defaults_non_positive_attach_search_radius(mo
     robot = fleet.robot("tinyRobot1")
 
     assert robot.attach_object(True, 7, search_radius=-1.0)
+    robot._fleet.drain_commands()
 
     assert agent.search_radii == [0.5]
     assert agent.attach_calls[0][0] is box
@@ -386,8 +391,39 @@ def test_python_fleet_robot_client_sets_charging_directly(mock_node):
     robot = PythonRmfFleetClient.from_sim_core(sim, map_name="L1").robot("tinyRobot1")
 
     assert robot.start_charge(8)
+    robot._fleet.drain_commands()
     assert agent.is_charging is True
     assert robot.get_data().last_completed_cmd_id == 8
 
     assert robot.stop_charge()
+    robot._fleet.drain_commands()
     assert agent.is_charging is False
+
+
+def test_python_fleet_robot_client_rejects_unknown_robot_before_enqueue(mock_node):
+    del mock_node
+    from pybullet_fleet_rmf.fleet_clients import PythonRmfFleetClient
+
+    fleet = PythonRmfFleetClient.from_sim_core(_FakeSim([_FakeAgent("tinyRobot1")]), map_name="L1")
+    robot = fleet.robot("missing")
+
+    assert robot.navigate(1, [1.0, 0.0, 0.0], "L1") is False
+    assert robot.stop() is False
+    assert robot.attach_object(True, 2) is False
+    assert robot.start_charge(3) is False
+    assert fleet._commands.empty()  # type: ignore[attr-defined]
+
+
+def test_python_fleet_client_drops_unknown_queued_command(mock_node):
+    del mock_node
+    from pybullet_fleet_rmf.fleet_clients import PythonRmfFleetClient
+
+    agent = _FakeAgent("tinyRobot1")
+    sim = _FakeSim([agent])
+    fleet = PythonRmfFleetClient.from_sim_core(sim, map_name="L1")
+    fleet._commands.put(("future_command", "tinyRobot1", ()))  # type: ignore[attr-defined]
+
+    fleet.drain_commands()
+
+    assert agent.goal_calls == []
+    assert agent.stop_calls == 0

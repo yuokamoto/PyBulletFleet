@@ -1,8 +1,8 @@
 #!/bin/bash
-# docker/test_rmf_smoke.sh
+# docker/test_rmf_stack.sh
 # Reliable RMF integration smoke test. Run inside the bridge container (image
 # pybullet-fleet-rmf:jazzy). Thin wrapper: launches the office demo fully headless
-# and runs rmf_smoke_check.py, which does all the asserting —
+# and runs rmf_stack_check.py, which does all the asserting —
 #   - the RMF protocol topics for every handler are present (door/lift/dispenser/
 #     ingestor/fleet) -> the handlers loaded;
 #   - the fleet adapter reports all robots, and a direct NavigateToPose goal drives
@@ -10,23 +10,23 @@
 #
 # This is deterministic (no RMF dispatcher / traffic-schedule dependency), so it
 # is the fast blocking RMF gate. The full dispatch chain is covered separately by
-# test_rmf_e2e.sh (also blocking).
+# test_rmf_dispatch.sh (also blocking).
 #
-# Mounted into the container (cf. test_integration.sh):
+# Mounted into the container (cf. test_bridge_api.sh):
 #   docker compose run --rm --no-deps \
-#     -v "$(pwd)/test_rmf_smoke.sh:/test_rmf_smoke.sh:ro" \
-#     -v "$(pwd)/rmf_smoke_check.py:/rmf_smoke_check.py:ro" \
-#     bridge bash /test_rmf_smoke.sh
+#     -v "$(pwd)/test_rmf_stack.sh:/test_rmf_stack.sh:ro" \
+#     -v "$(pwd)/rmf_stack_check.py:/rmf_stack_check.py:ro" \
+#     bridge bash /test_rmf_stack.sh
 set -e
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-CHECKER="${ROOT_DIR}/rmf_smoke_check.py"
+CHECKER="${ROOT_DIR}/rmf_stack_check.py"
 if [ ! -f "$CHECKER" ]; then
-    CHECKER=/rmf_smoke_check.py
+    CHECKER=/rmf_stack_check.py
 fi
 
 usage() {
-    echo "usage: test_rmf_smoke.sh [--client-mode per_robot_ros|fleet_ros|python_fleet]" >&2
+    echo "usage: test_rmf_stack.sh [--client-mode per_robot_ros|fleet_ros|python_fleet]" >&2
 }
 
 CLIENT_MODE=python_fleet
@@ -83,7 +83,7 @@ trap cleanup EXIT
 
 echo "--- Office demo launched (pid $LAUNCH_PID); running smoke checker ---"
 
-# rmf_smoke_check.py does all readiness waiting itself: it waits for the RMF
+# rmf_stack_check.py does all readiness waiting itself: it waits for the RMF
 # protocol topics (fleet/door/lift/dispenser/ingestor), the fleet adapter, and
 # odom, then drives a direct NavigateToPose.
 set +e

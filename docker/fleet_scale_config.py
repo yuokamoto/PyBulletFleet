@@ -50,6 +50,7 @@ def generate_bridge_config(
     target_rtf: float,
     interface_mode: str,
     per_robot_groups: set[str],
+    robot_model: str,
 ) -> None:
     side = int(math.ceil(math.sqrt(robot_count)))
     fleet_enabled = interface_mode in {"fleet", "hybrid"}
@@ -78,15 +79,63 @@ def generate_bridge_config(
     }
 
     entity = config["entities"][0]
+    _apply_robot_model(entity, robot_model)
     entity.setdefault("grid", {})
     entity["grid"]["count"] = robot_count
     entity["grid"]["columns"] = side
     output_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
 
 
+def _apply_robot_model(entity: dict, robot_model: str) -> None:
+    if robot_model == "simple_cube":
+        entity["urdf_path"] = "robots/simple_cube.urdf"
+        entity["motion_mode"] = "omnidirectional"
+        entity["batch_controller"] = "batch_omni"
+        entity["controller"] = {
+            "type": "omni",
+            "max_linear_vel": 2.0,
+            "max_angular_vel": 3.0,
+        }
+        entity.setdefault("grid", {})["spacing"] = [2.0, 2.0, 0.0]
+        entity["grid"]["offset"] = [0.0, 0.0, 0.05]
+    elif robot_model == "mobile_robot":
+        entity["urdf_path"] = "robots/mobile_robot.urdf"
+        entity["motion_mode"] = "omnidirectional"
+        entity["batch_controller"] = "batch_omni"
+        entity["controller"] = {
+            "type": "omni",
+            "max_linear_vel": 2.0,
+            "max_linear_accel": 5.0,
+        }
+        entity.setdefault("grid", {})["spacing"] = [2.0, 2.0, 0.0]
+        entity["grid"]["offset"] = [0.0, 0.0, 0.3]
+    elif robot_model in {"tb3_burger", "tb3_waffle"}:
+        model_name = "turtlebot3_burger" if robot_model == "tb3_burger" else "turtlebot3_waffle"
+        entity["urdf_path"] = model_name
+        entity["motion_mode"] = "differential"
+        entity["batch_controller"] = "batch_differential"
+        entity["controller"] = {
+            "type": "differential",
+            "max_linear_vel": 0.22,
+            "max_linear_accel": 2.5,
+            "max_angular_vel": 2.84,
+            "max_angular_accel": 10.0,
+        }
+        entity.setdefault("grid", {})["spacing"] = [1.0, 1.0, 0.0]
+        entity["grid"]["offset"] = [0.0, 0.0, 0.01]
+    else:
+        raise ValueError(f"unknown robot model: {robot_model}")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--robots", type=int, default=100, help="Number of robots to spawn")
+    parser.add_argument(
+        "--robot-model",
+        choices=["simple_cube", "mobile_robot", "tb3_burger", "tb3_waffle"],
+        default="simple_cube",
+        help="Robot model to place in the generated grid",
+    )
     parser.add_argument("--gui", action="store_true", help="Set generated bridge config simulation.gui=true")
     parser.add_argument("--target-rtf", type=float, default=0.0, help="Simulation target RTF")
     parser.add_argument(
@@ -114,6 +163,7 @@ def main() -> int:
         target_rtf=args.target_rtf,
         interface_mode=args.interface_mode,
         per_robot_groups=args.per_robot_groups,
+        robot_model=args.robot_model,
     )
     print(f"[config] wrote generated bridge config: {args.config_out} (template={template_path})")
     return 0

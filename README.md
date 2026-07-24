@@ -4,8 +4,8 @@
 
 <table align="center">
 <tr>
-<td align="center"><b>Mixed Fleet Grid</b><br><sub>100robots_grid_demo.py</sub><br>
-<img src="docs/media/100robots_grid_mixed.gif" width="380" alt="Mixed Fleet Grid"></td>
+<td align="center"><b>100 Robot Grid</b><br><sub>100robots_grid_demo.py</sub><br>
+<img src="docs/media/100robots_grid_mixed.gif" width="380" alt="100 Robot Grid"></td>
 <td align="center"><b>Cube Patrol</b><br><sub>100robots_cube_patrol_demo.py</sub><br>
 <img src="docs/media/100robots_cube_patrol.gif" width="380" alt="Cube Patrol"></td>
 </tr>
@@ -74,12 +74,12 @@ pybullet-fleet examples --path                           # where they're install
 
 `--run` takes the file name as shown by `--list` (the `.py` is optional).
 
-Most demo scripts accept a `--robot` argument to swap the robot model (forwarded
+Many demo scripts accept a `--robot` argument to swap the robot model (forwarded
 through `--run`). Pass a model name (resolved via `resolve_model()`) or a direct
 URDF path:
 
 ```bash
-pybullet-fleet examples --run 100robots_grid_demo.py --robot racecar
+pybullet-fleet examples --run path_following_demo.py --robot racecar
 pybullet-fleet examples --run pick_drop_arm_demo.py --robot kuka_iiwa
 # (resolve_model_demo has its own --list; copy it out and run it directly)
 ```
@@ -92,10 +92,13 @@ From a source checkout you can also run the files directly, e.g.
 | Arm demos | `pick_drop_arm_*.py`, `rail_arm_demo.py` | `panda` | `kuka_iiwa`, `arm_robot` |
 | Mobile demos | `path_following_demo.py` | `husky` | `racecar`, `mobile_robot` |
 | Scale demos (mobile) | `100robots_cube_patrol_demo.py`, `pick_drop_mobile_100robots_demo.py` | `husky` | `racecar`, `mobile_robot` |
+| Scale demos (mixed) | `100robots_mixed_demo.py` | `husky` + `panda` | config-driven `entities[].grid` |
 | Scale demos (arm) | `pick_drop_arm_100robots_demo.py` | `panda` | `kuka_iiwa`, `arm_robot` |
 | Model demos | `resolve_model_demo.py`, `robot_descriptions_demo.py` | `panda` / `tiago` | any registered model |
 
-`100robots_grid_demo.py` has two arguments: `--robot` for the mobile robot (default: `husky`) and `--arm-robot` for the arm (default: `panda`).
+`100robots_grid_demo.py` defaults to a 100 mobile robot `entities[].grid` scene.
+Use `--config` to point it at another `entities[].grid` scene.
+`100robots_mixed_demo.py` is the separate Husky + Panda mixed showcase.
 
 See [Tutorial 6 — Robot Models](https://pybulletfleet.readthedocs.io/en/latest/examples/robot-models.html) for the full model resolution system.
 

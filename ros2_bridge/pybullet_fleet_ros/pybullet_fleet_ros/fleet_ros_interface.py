@@ -7,16 +7,19 @@ from typing import Iterable
 from geometry_msgs.msg import Point, Pose, Quaternion, Twist, Vector3
 from std_msgs.msg import Header
 
-from pybullet_fleet.fleet_api import (
+from pybullet_fleet.commands import (
     CommandAck as PbfCommandAck,
-    FleetCommandDispatcher,
-    FleetStateProvider,
+    DEFAULT_ATTACH_SEARCH_RADIUS,
     RobotActionCommand,
     RobotAttachCommand,
     RobotGoalCommand2D,
     RobotGoalCommand3D,
     RobotJointPositionsCommand,
     RobotNamedJointPositionsCommand,
+)
+from pybullet_fleet.fleet_api import (
+    FleetCommandDispatcher,
+    FleetStateProvider,
     RobotState3D,
 )
 from pybullet_fleet.geometry import Pose as PbfPose
@@ -369,7 +372,7 @@ def _attach_commands_from_msg(msg: FleetAttach) -> list[RobotAttachCommand]:
             offset_orientation = [0.0, 0.0, 0.0, 1.0]
         search_radius = float(command.search_radius)
         if search_radius <= 0.0:
-            search_radius = 0.5
+            search_radius = DEFAULT_ATTACH_SEARCH_RADIUS
         commands.append(
             RobotAttachCommand(
                 name=command.name,

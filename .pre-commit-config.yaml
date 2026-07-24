@@ -55,3 +55,14 @@ repos:
           '--extend-ignore=E203,W503,D,Q,I,F401,F841,W291,W293,E128,B902,E402,CNL100',
         ]
         # exclude: '^benchmark/'
+
+  # Manual CI parity checks. These are intentionally not part of the default
+  # pre-commit stage because the full pytest suite is too slow for every commit.
+  - repo: local
+    hooks:
+      - id: ci-pytest
+        name: pytest CI subset
+        entry: pytest tests/ -q --tb=short --cov=pybullet_fleet --cov-report=term-missing --cov-fail-under=75
+        language: system
+        pass_filenames: false
+        stages: [manual]

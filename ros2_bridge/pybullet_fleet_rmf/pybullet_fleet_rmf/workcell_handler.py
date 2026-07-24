@@ -261,7 +261,7 @@ class WorkcellHandler(BridgePlugin):
             self._past_requests[dedup_key] = status
             info.mode = DispenserState.IDLE
             info.request_guid = ""
-            self._node.get_logger().warn(
+            self._node.get_logger().warning(
                 f"[WorkcellHandler] Dispenser '{target}': no robot found -> "
                 f"{'FAILED' if self._fail_on_no_robot else 'SUCCESS'}"
             )
@@ -368,7 +368,7 @@ class WorkcellHandler(BridgePlugin):
             self._past_requests[dedup_key] = status
             info.mode = IngestorState.IDLE
             info.request_guid = ""
-            self._node.get_logger().warn(
+            self._node.get_logger().warning(
                 f"[WorkcellHandler] Ingestor '{target}': no carrier robot found -> "
                 f"{'FAILED' if self._fail_on_no_robot else 'SUCCESS'}"
             )

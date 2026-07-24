@@ -57,7 +57,8 @@ from pybullet_fleet import (
     SimulationParams,
 )
 from pybullet_fleet.agent_manager import AgentManager, GridSpawnParams
-from pybullet_fleet.fleet_api import FleetCommandDispatcher, FleetStateProvider, RobotGoalCommand2D
+from pybullet_fleet.commands import RobotGoalCommand2D
+from pybullet_fleet.fleet_api import FleetCommandDispatcher, FleetStateProvider
 from pybullet_fleet.types import CollisionMode, SpatialHashCellSizeMode
 
 

@@ -50,6 +50,12 @@ class RmfAdapterBridgePlugin(BridgePlugin):
         if self.runtime is None:
             raise RuntimeError("failed to start in-process RMF adapter")
 
+    def post_step(self, sim_time: float) -> None:
+        """Run queued direct Python fleet commands on the simulation thread."""
+        del sim_time
+        if self.runtime is not None:
+            self.runtime.drain_commands()
+
     def destroy(self) -> None:
         """Stop the in-process RMF adapter runtime before bridge reset/shutdown."""
         if self.runtime is not None:
