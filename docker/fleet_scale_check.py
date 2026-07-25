@@ -221,7 +221,7 @@ def _wait_for_motion_started(
                 remaining = max(timeout - (time.perf_counter() - start), 0.1)
                 last_positions = node.poll_entity_positions(timeout=remaining)
             except RuntimeError:
-                last_positions = {}
+                pass
 
         elapsed = time.perf_counter() - start
         record_moved_from_positions(last_positions, elapsed)
