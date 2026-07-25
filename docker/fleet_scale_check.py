@@ -249,9 +249,9 @@ def _format_latency(value: float | None) -> str:
     return "n/a" if value is None else f"{value:.3f}s"
 
 
-def _print_motion_report(label: str, report: MotionReport, robot_count: int) -> None:
+def _print_motion_report(label: str, report: MotionReport, robot_count: int, *, motion_boundary: str) -> None:
     print(
-        f"{label}: motion after ack moved={report.moved}/{robot_count}, "
+        f"{label}: motion after {motion_boundary} moved={report.moved}/{robot_count}, "
         f"first={_format_latency(report.first_moved)}, "
         f"p50={_format_latency(report.p50_moved)}, "
         f"p90={_format_latency(report.p90_moved)}, "
@@ -298,7 +298,7 @@ def _check_fleet_navigate_service(node: FleetScaleClient, robot_count: int, time
             timeout,
             prefer_fleet_state=True,
         )
-        _print_motion_report("PASS" if report.ok else "FAIL", report, robot_count)
+        _print_motion_report("PASS" if report.ok else "FAIL", report, robot_count, motion_boundary="ack")
         if not report.ok:
             return 1
     return 0
@@ -321,7 +321,12 @@ def _check_fleet_navigate_topic(node: FleetScaleClient, robot_count: int, timeou
             timeout,
             prefer_fleet_state=True,
         )
-        _print_motion_report("PASS" if report.ok else "FAIL", report, robot_count)
+        _print_motion_report(
+            "PASS" if report.ok else "FAIL",
+            report,
+            robot_count,
+            motion_boundary="command publication",
+        )
         if not report.ok:
             return 1
     return 0
@@ -361,7 +366,12 @@ def _check_per_robot_goal_pose_topics(
             timeout,
             prefer_fleet_state=prefer_fleet_state,
         )
-        _print_motion_report("PASS" if report.ok else "FAIL", report, robot_count)
+        _print_motion_report(
+            "PASS" if report.ok else "FAIL",
+            report,
+            robot_count,
+            motion_boundary="command publication",
+        )
         if not report.ok:
             return 1
     return 0

@@ -106,16 +106,17 @@ These are single-run diagnostic numbers, not stable CI thresholds.
 | `hybrid` | 1000 | `actions` | 5 Hz | 1.0 | not available | not measured | DDS/RCL abort observed |
 
 `Command ack` is the `/fleet/navigate` service response time. `All moved after
-ack` is a separate checker result based on observed robot state after the
-command is accepted. Ack and motion-verification latency values are wall time,
-while max RTF is derived from `/clock` simulation time over wall time. Use
-`--no-verify-motion` for RTF-only measurements, and use motion verification when
-debugging command delivery semantics.
+ack` or `All moved after command publication` is a separate checker result based
+on observed robot state after the command is accepted or published. Ack and
+motion-verification latency values are wall time, while max RTF is derived from
+`/clock` simulation time over wall time. Use `--no-verify-motion` for RTF-only
+measurements, and use motion verification when debugging command delivery
+semantics.
 Because motion verification is based on observed state updates, this wall-time
 latency is affected by `target_rtf`, timestep, and publish timing.
-Current checker output reports motion latency after command ack as first, p50,
-p90, p99, and all-moved timings, plus missing robot names and final observed
-positions when not all robots move within the checker window.
+Current checker output reports motion latency after the relevant boundary as
+first, p50, p90, p99, and all-moved timings, plus missing robot names and final
+observed positions when not all robots move within the checker window.
 
 Per-robot publish-only command checks completed quickly in this environment:
 100 robots in 0.172 s, 500 robots in 0.128 s, and 1000 robots in 0.235 s.
