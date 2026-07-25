@@ -157,9 +157,11 @@ generic action payloads stay aligned with their fleet-level equivalents.
   publish path is available.
 - Keep integration coverage for all interface modes: `per_robot`, `fleet`, and
   `hybrid`, including dynamic spawn/delete behavior after startup.
-- Add scale/performance checks with loose regression thresholds for ROS graph
-  size, `/fleet/states` publish latency, `/fleet/navigate` command latency, and
-  bridge startup time.
+- Initial Docker scale/performance checks are documented in
+  `ros2_bridge/PERFORMANCE.md` and `docs/benchmarking/results.md`. Add loose
+  regression thresholds for ROS graph size, `/fleet/states` publish latency,
+  `/fleet/navigate` command latency, and bridge startup time in the next
+  benchmark pass.
 - Add parity checks for service/topic/action variants when fleet-level command
   APIs are added, so request semantics do not drift across transports.
 

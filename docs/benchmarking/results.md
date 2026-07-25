@@ -41,6 +41,23 @@ and should be benchmarked separately. Timed simulation runs keep
 `tracemalloc` disabled because Python allocation tracing materially distorts
 step-time and RTF measurements; memory deltas are RSS-based.
 
+## ROS 2 Bridge Scale Check
+
+Measured 2026-07-25 with Docker, headless `simple_cube` robots, physics off,
+`timestep=0.1`, `publish_rate=5 Hz`, and `target_rtf=0`. These are diagnostic
+single-run values and are not comparable to the core simulation table above.
+
+| Mode | Robots | Command result | Max RTF |
+|------|--------|----------------|---------|
+| `fleet` | 1000 | ack 0.486 s; all moved in 0.104 s | 9.37x |
+| `per_robot` | 1000 | publish 0.217 s; 0/1000 moved in 60 s | 0.64x |
+| `per_robot` | 100 | publish 0.056 s; all moved in 15.033 s | not measured |
+| `hybrid` | 1000 | fleet ack 7.998 s; per-robot publish 0.220 s | 0.30x |
+
+The 1000-robot per-robot result shows why topic publication latency must not be
+treated as end-to-end command latency. See `ros2_bridge/PERFORMANCE.md` for
+the bridge-specific methodology and recommendations.
+
 ## Mobile Control Path Comparison
 
 **Script:** `benchmark/run_benchmark.py --type mobile_control_path --controller per_agent batch --command-interface per_agent fleet --sweep 100 500 1000 --steps 600 --repetitions 3`
