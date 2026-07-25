@@ -193,7 +193,7 @@ def _wait_for_motion_started(
     *,
     prefer_fleet_state: bool,
 ) -> MotionReport:
-    """Measure how long each robot takes to move after a command is accepted."""
+    """Measure how long each robot takes to move after the relevant command boundary."""
     expected_targets = _target_x_by_name(robot_count)
     threshold = 0.01
     start = time.perf_counter()

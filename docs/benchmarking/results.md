@@ -19,7 +19,7 @@ see [Benchmark Suite](benchmark-suite) and [Profiling Guide](profiling-guide).
 
 ## Simulation Throughput
 
-**Script:** `make bench-release` → `benchmark/run_benchmark.py --sweep 100 250 500 1000 2000 --duration 10 --repetitions 3`
+**Command:** `make bench-release` (runs the core throughput sweep and the mobile control-path comparison)
 **Config:** `benchmark/configs/general.yaml` — `simple_cube` robots, `collision_check_frequency=null` (every step), 50% agents moving, batch controller, fleet command interface
 **Last measured:** 2026-07-24
 
