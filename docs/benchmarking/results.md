@@ -49,10 +49,10 @@ single-run values and are not comparable to the core simulation table above.
 
 | Mode | Robots | Command result | Max RTF |
 |------|--------|----------------|---------|
-| `fleet` | 1000 | ack 0.486 s; all moved in 0.104 s | 9.37x |
-| `per_robot` | 1000 | publish 0.217 s; 0/1000 moved in 60 s | 0.64x |
+| `fleet` | 1000 | ack 0.486 s; all moved in 0.104 s | 9.37× |
+| `per_robot` | 1000 | publish 0.217 s; 0/1000 moved in 60 s | 0.64× |
 | `per_robot` | 100 | publish 0.056 s; all moved in 15.033 s | not measured |
-| `hybrid` | 1000 | fleet ack 7.998 s; per-robot publish 0.220 s | 0.30x |
+| `hybrid` | 1000 | fleet ack 7.998 s; per-robot publish 0.220 s | 0.30× |
 
 The 1000-robot per-robot result shows why topic publication latency must not be
 treated as end-to-end command latency. See `ros2_bridge/PERFORMANCE.md` for

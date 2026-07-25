@@ -113,7 +113,7 @@ roadmap
 
 Kinematics mode (physics OFF), headless, `simple_cube` robots, batch controller + fleet command interface. Measured on 2026-07-24. See {doc}`benchmarking/benchmark-suite` for full data, component breakdown, and methodology.
 
-ROS 2 bridge scale checks on 2026-07-25 measured 1000-robot maximum RTF of 9.37x in fleet mode, 0.64x in per-robot mode, and 0.30x in hybrid mode. Per-robot topic publication completed in 0.217 s, but motion verification reached 0/1000 within 60 s; see the bridge performance notes.
+ROS 2 bridge scale checks on 2026-07-25 measured 1000-robot maximum RTF of 9.37× in fleet mode, 0.64× in per-robot mode, and 0.30× in hybrid mode. Per-robot topic publication completed in 0.217 s, but motion verification reached 0/1000 within 60 s; see {doc}`benchmarking/results` for the bridge scale details.
 
 See the {doc}`roadmap` for upcoming features and integrations.
 
