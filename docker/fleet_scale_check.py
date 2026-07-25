@@ -219,7 +219,7 @@ def _wait_for_motion_started(
         else:
             try:
                 remaining = max(timeout - (time.perf_counter() - start), 0.1)
-                last_positions = node.poll_entity_positions(timeout=min(1.0, remaining))
+                last_positions = node.poll_entity_positions(timeout=remaining)
             except RuntimeError:
                 last_positions = {}
 
