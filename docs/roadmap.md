@@ -404,7 +404,14 @@ See `docs/design/observability/spec.md` for full design.
 
 ## Long-Term: Backend Abstraction & Beyond PyBullet
 
-Current architecture is tightly coupled to PyBullet (`body_id`, per-entity FFI calls). At 1000 agents PyBullet's per-call overhead dominates step time (88% of 40.9 ms). The following items explore decoupling from PyBullet to unlock 10–100× performance gains while keeping the Python user API unchanged.
+Current architecture is tightly coupled to PyBullet (`body_id`, per-entity FFI calls). At 1000 agents, fixed-window profiling shows moving-agent update as the largest component (~46% of a ~9.6 ms step), with AABB/spatial-grid refresh and collision checking together contributing a comparable share (~44%). The following items explore decoupling from PyBullet to unlock 10–100× performance gains while keeping the Python user API unchanged.
+
+### Short / Mid-Term Performance TODOs
+
+- **Release-like profiler mode** — Add a fixed first-window profile mode (for example 1000 agents, 50% moving, first 100 measured steps after warmup) so profiler output matches release benchmark conditions. Long profiling runs can understate moving-agent cost after robots reach their goals.
+- **Active moving set** — Keep an explicit set of moving agents so stationary agents skip more of the hot path.
+- **AABB/grid flush reduction** — Audit whether low-frequency or disabled collision modes still refresh more AABB/spatial-grid state than needed.
+- **Ground-robot 2D path** — Make the 2D collision/grid path easier to use for AGV-style fleets where Z-axis neighbor checks are unnecessary.
 
 ### Phase 1: SimBackend ABC + Numpy Pure Kinematic Backend
 

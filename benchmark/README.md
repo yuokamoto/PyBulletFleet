@@ -2,7 +2,7 @@
 
 This directory contains the benchmark scripts, profiling tools, experiment scripts, and configuration files for PyBulletFleet performance measurement and optimization. This file also renders as part of the project documentation on ReadTheDocs.
 
-Last Updated: 2026-03-15
+Last Updated: 2026-07-24
 
 ---
 
@@ -117,27 +117,36 @@ python benchmark/profiling/agent_update.py --agents=1000 --test=cprofile
 
 ### TL;DR
 
-| Agents | RTF (×) | Step Time (ms) | Collisions Scale |
-|--------|---------|-----------------|------------------|
-| 100    | 47.7    | 2.1             | Excellent        |
-| 500    | 6.8     | 14.7            | Excellent        |
-| 1000   | 2.4     | 40.9            | Excellent        |
-| 2000   | 1.1     | 94.8            | Good             |
+| Agents | RTF (×) | Step Time (ms) |
+|--------|---------|----------------|
+| 100    | 143.5   | 0.7            |
+| 500    | 23.5    | 4.2            |
+| 1000   | 10.1    | 9.9            |
+| 2000   | 4.3     | 23.3           |
 
 **Real-Time Factor (RTF):** How many seconds of simulation time per 1 second of wall-clock time (higher is better; >1.0 = faster than real-time).
 
 **Assessment:** ✅ Excellent: RTF > 2.0 · ⚠️ Good: RTF 1.0 – 2.0 · ❌ Poor: RTF < 1.0
 
-All runs use kinematics mode (physics OFF), headless (DIRECT), half of agents moving.
+All measured runs use lightweight `simple_cube` robots, kinematics mode
+(physics OFF), headless (DIRECT), half of agents moving, batch controller, and
+fleet command interface.
+The default `collision_check_frequency=null` setting means collision checks run
+every simulation step.
+More detailed robot models have higher spawn and update costs and should be
+benchmarked separately from this large-scale baseline.
+Timed simulation runs keep `tracemalloc` disabled because Python allocation
+tracing materially distorts step-time and RTF measurements; memory deltas are
+RSS-based.
 
 ### Test Environment
 
-- **CPU**: Intel Core i7-1185G7 (11th Gen, 4C/8T, 3.0 GHz / 4.8 GHz turbo)
-- **Memory**: 32 GB RAM
-- **OS**: Ubuntu 20.04.1 LTS (Linux 5.15.0-139-generic)
-- **Python**: 3.8.10, PyBullet latest
+- **CPU**: AMD Ryzen AI 7 PRO 350 w/ Radeon 860M (8C/16T)
+- **Memory**: 29 GB RAM
+- **OS**: Ubuntu 24.04 on WSL2 (Linux 6.6 microsoft-standard-WSL2)
+- **Python**: 3.12.3, PyBullet build time Jul 4 2026
 - **Mode**: DIRECT (headless), kinematics
-- **Methodology**: 3 repetitions, 10 s duration each, mean ± std reported
+- **Methodology**: 3 repetitions, 10 s duration each, median ± stdev reported
 
 ### Performance Summary
 
@@ -145,43 +154,65 @@ All runs use kinematics mode (physics OFF), headless (DIRECT), half of agents mo
 
 | Agents | RTF (×) | Step Time (ms) | Spawn Time (s) | Memory Delta (MB) |
 |--------|---------|----------------|------------------|--------------------|
-| 100    | 47.65±2.24 | 2.10±0.09  | 0.027±0.002      | −23.84±0.09        |
-| 250    | 15.52±0.74 | 6.45±0.30  | 0.065±0.001      | −19.70±0.04        |
-| 500    |  6.82±0.08 | 14.66±0.18 | 0.134±0.001      | −12.28±0.07        |
-| 1000   |  2.44±0.16 | 40.94±2.39 | 0.368±0.004      |  +2.96±0.04        |
-| 2000   |  1.05±0.07 | 94.82±5.81 | 0.731±0.088      | +29.57±0.06        |
+| 100    | 143.46±14.49 | 0.70±0.06  | 0.059±0.004      | +2.55±0.00         |
+| 250    | 56.82±3.89   | 1.76±0.12  | 0.140±0.004      | +6.24±0.01         |
+| 500    | 23.54±1.81   | 4.25±0.30  | 0.294±0.011      | +12.53±0.10        |
+| 1000   | 10.12±0.08   | 9.88±0.08  | 0.604±0.038      | +25.00±0.02        |
+| 2000   | 4.30±0.19    | 23.25±1.07 | 1.241±0.023      | +48.07±0.06        |
 
-Negative memory delta = OS page-cache effects (process used less than baseline).
+Memory delta is process RSS and should be treated as environment-dependent,
+especially on WSL2.
 
 ### Component Breakdown
 
-> **Script:** `profiling/simulation_profiler.py` (1000 agents, 100 steps)
+> **Script:** supplemental profiling with 1000 agents, 50% moving,
+> `collision_check_frequency=null` (collision checks every simulation step), and
+> the first 100 measured steps after warmup.
 
-| Component        | Time (ms) | Share (%) |
-|------------------|-----------|-----------|
-| Agent Update     | 12.35     | 88.2      |
-| Collision Check  | 1.76      | 11.2      |
-| Monitor Update   | 0.08      | 0.5       |
-| Step Simulation  | 0.00      | 0.0       |
-| **Total**        | **14.19** | **100.0** |
+| Component | Mean Time | Share |
+|-----------|-----------|-------|
+| Agent / controller update | 4.43 ms | ~46% |
+| Pose flush | 0.98 ms | ~10% |
+| AABB / spatial-grid flush | 2.07 ms | ~22% |
+| Collision check | 2.07 ms | ~22% |
+| Monitor update | 0.04 ms | <1% |
+| Step simulation | 0 ms | 0% |
 
-Agent Update dominates (path-following, velocity computation, `resetBasePositionAndOrientation()` per agent per step). Step Simulation is 0 ms because `physics=false`.
+Moving-agent update is the largest component, while AABB/grid refresh and
+collision checking together are comparable. Step Simulation is 0 ms because
+`physics=false`.
 
 ### Scaling Analysis
 
 > **Script:** Same sweep as Performance Summary above (`run_benchmark.py --sweep`)
 
 ```text
-Agents:     100  →   250  →   500  →  1000  →  2000
-Step (ms):  2.10 →  6.45 → 14.66 → 40.94 → 94.82
-Ratio:      1.0x →  3.1x →  7.0x → 19.5x → 45.2x
+Agents:     100  →  250  →  500  → 1000  → 2000
+Step (ms):  0.70 → 1.76 → 4.25 → 9.88 → 23.25
+Ratio:      1.0x → 2.5x → 6.1x → 14.1x → 33.2x
 ```
 
-- **Step Time:** ~O(n^1.3). Near-linear below 500 agents; super-linear above due to collision-pair density.
+- **Step Time:** ~O(n^1.2) across the measured 100-2000 robot sweep on this WSL2 host.
 - **Spawn Time:** Linear (~0.25 ms per agent).
 - **Memory:** Linear above ~500 agents (~20 KB per agent).
 
-*Data collected 2026-03-12 on the test environment described above.*
+*Rows collected 2026-07-24 on the test environment described above.*
+
+### Mobile Control Path Comparison
+
+> **Script:** `run_benchmark.py --type mobile_control_path --controller per_agent batch --command-interface per_agent fleet --sweep 100 500 1000 --steps 600 --repetitions 3`
+
+This benchmark isolates controller update and command-ingress cost in the
+Python simulation loop.
+
+| Agents | Controller | Command Interface | Setup Time (s) | Step Time (ms) | P95 Step (ms) |
+|--------|------------|-------------------|----------------|----------------|---------------|
+| 100    | per-agent  | per-agent         | 0.0020         | 0.118          | 0.149         |
+| 100    | batch      | fleet             | 0.0016         | 0.112          | 0.124         |
+| 500    | per-agent  | per-agent         | 0.0283         | 0.666          | 0.563         |
+| 500    | batch      | fleet             | 0.0082         | 0.661          | 0.383         |
+| 1000   | per-agent  | per-agent         | 0.0245         | 1.526          | 1.592         |
+| 1000   | batch      | fleet             | 0.0162         | 1.290          | 1.397         |
 
 ---
 
@@ -332,4 +363,4 @@ defaults.  Pass a scenario name with `--scenario` or `--compare`:
 - **Experiments Guide** (`experiments/README.md`) — Algorithm and API comparison scripts
 - **Optimization Guide** (`docs/benchmarking/optimization-guide.md`) — Parameter tuning, configuration examples, use case recommendations
 
-**Last Updated:** 2026-03-15
+**Last Updated:** 2026-07-24

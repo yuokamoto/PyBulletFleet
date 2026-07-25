@@ -12,49 +12,78 @@ see [Benchmark Suite](benchmark-suite) and [Profiling Guide](profiling-guide).
 | OS | Ubuntu (Linux 6.6 microsoft-standard-WSL2) |
 | CPU | AMD Ryzen AI 7 PRO 350 w/ Radeon 860M (8 cores / 16 logical) |
 | RAM | 29 GB |
-| Python | 3.10.12 |
+| Python | 3.12.3 |
 | Conditions | Headless (`gui=false`), `physics=false`, `timestep=0.1`, 3 repetitions |
 
 ---
 
 ## Simulation Throughput
 
-**Script:** `make bench-full` → `benchmark/run_benchmark.py --sweep 100 500 1000`
-**Config:** `benchmark/configs/general.yaml` — `collision_check_frequency=null` (every step), 50% agents moving
-**Last measured:** 2026-06-22 (v0.4.0)
+**Command:** `make bench-release` (runs the core throughput sweep and the mobile control-path comparison)
+**Config:** `benchmark/configs/general.yaml` — `simple_cube` robots, `collision_check_frequency=null` (every step), 50% agents moving, batch controller, fleet command interface
+**Last measured:** 2026-07-24
 
 | Agents | Step Time (ms) | RTF   | Spawn Time | Memory Delta |
 |--------|----------------|-------|------------|--------------|
-| 100    | 1.56 ± 0.13    | 64.2× | 33 ms      | −25.0 MB     |
-| 250    | 6.45 ± 0.30    | 16×   | 65 ms      | −19.7 MB †   |
-| 500    | 9.84 ± 0.43    | 10.2× | 157 ms     | −14.3 MB     |
-| 1000   | 22.79 ± 1.61   | 4.4×  | 290 ms     | −1.5 MB      |
-| 2000   | 94.82 ± 5.81   | 1.1×  | 731 ms     | +29.6 MB †   |
-
-† Row from 2026-03-12; not included in `make bench-full` (100/500/1000 only).
+| 100    | 0.70 ± 0.06    | 143.5× | 59 ms     | +2.6 MB      |
+| 250    | 1.76 ± 0.12    | 56.8×  | 140 ms    | +6.2 MB      |
+| 500    | 4.25 ± 0.30    | 23.5×  | 294 ms    | +12.5 MB     |
+| 1000   | 9.88 ± 0.08    | 10.1×  | 604 ms    | +25.0 MB     |
+| 2000   | 23.25 ± 1.07   | 4.3×   | 1241 ms   | +48.1 MB     |
 
 **Source:** `benchmark/results/benchmark_sweep_10.0s.json`
 
-**Memory note:** Negative delta below ~1000 agents is a Python GC artifact. Actual per-agent overhead is ~15 KB above 1000 agents (linear).
+The 2026-07-24 sweep was collected on a WSL2 host using the lightweight
+`simple_cube` model as the large-scale baseline. The default
+`collision_check_frequency=null` setting means collision checks run every
+simulation step. More detailed robot models have higher spawn and update costs
+and should be benchmarked separately. Timed simulation runs keep
+`tracemalloc` disabled because Python allocation tracing materially distorts
+step-time and RTF measurements; memory deltas are RSS-based.
 
-**Scalability:** O(n^1.3) — near-linear up to ~500 agents, slightly super-linear above.
+## Mobile Control Path Comparison
+
+**Script:** `benchmark/run_benchmark.py --type mobile_control_path --controller per_agent batch --command-interface per_agent fleet --sweep 100 500 1000 --steps 600 --repetitions 3`
+**Source:** `benchmark/results/mobile_control_path_sweep_600steps.json`
+
+This benchmark isolates controller update and command-ingress cost in the
+Python simulation loop.
+
+| Agents | Controller | Command Interface | Setup Time | Step Time | P95 Step |
+|--------|------------|-------------------|------------|-----------|----------|
+| 100    | per-agent  | per-agent         | 0.0020 s   | 0.118 ms  | 0.149 ms |
+| 100    | batch      | fleet             | 0.0016 s   | 0.112 ms  | 0.124 ms |
+| 500    | per-agent  | per-agent         | 0.0283 s   | 0.666 ms  | 0.563 ms |
+| 500    | batch      | fleet             | 0.0082 s   | 0.661 ms  | 0.383 ms |
+| 1000   | per-agent  | per-agent         | 0.0245 s   | 1.526 ms  | 1.592 ms |
+| 1000   | batch      | fleet             | 0.0162 s   | 1.290 ms  | 1.397 ms |
+
+**Memory note:** Memory delta is process RSS and should be treated as
+environment-dependent, especially on WSL2.
+
+**Scalability:** ~O(n^1.2) across the measured 100-2000 robot sweep on this
+WSL2 host.
 
 ---
 
 ## Step Time Component Breakdown
 
-**Script:** `benchmark/profiling/simulation_profiler.py --test builtin --agents 500 --steps 500`
+**Script:** supplemental profiling with 1000 agents, 50% moving,
+`collision_check_frequency=null` (collision checks every simulation step), and
+the first 100 measured steps after warmup.
 
-| Component | Share | Notes |
-|-----------|-------|-------|
-| Agent Update | ~81% | Dominant cost; much higher for moving than stationary |
-| Collision Check | ~18% | Periodic (bursty); minimal cost on non-check steps |
-| Monitor Update | ~1% | Near-zero if monitor disabled |
-| Step Simulation | 0% | Physics off; up to ~40% with physics on |
+| Component | Mean Time | Share | Notes |
+|-----------|-----------|-------|-------|
+| Agent / controller update | 4.43 ms | ~46% | Dominant cost; much higher for moving than stationary |
+| Pose flush | 0.98 ms | ~10% | Buffered kinematic pose writes to PyBullet |
+| AABB / spatial-grid flush | 2.07 ms | ~22% | Refreshes moved-object collision state |
+| Collision check | 2.07 ms | ~22% | AABB filtering dominates within collision |
+| Monitor update | 0.04 ms | <1% | Near-zero if monitor GUI is disabled |
+| Step simulation | 0 ms | 0% | Physics off; up to ~40% with physics on |
 
-> **Note on variance:** Profiler timestamps show high variance (stdev > mean) because collision checks
-> fire in bursts and some steps include PyBullet warmup or GC pauses. The percentages above are
-> representative of steady-state operation.
+> **Profiler note:** Long profiling runs can understate moving-agent cost because
+> robots may reach their goals and become stationary. Use a fixed first-window
+> profile when comparing with the benchmark table.
 
 ---
 

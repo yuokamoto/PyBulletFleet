@@ -11,13 +11,17 @@ Performance targets, known bottlenecks, and detailed benchmark configuration.
 
 ## Performance Targets
 
-Known performance numbers from historical benchmarks (headless, physics=false):
+Current release-refresh numbers (2026-07-24, WSL2, headless, `simple_cube`
+robots, physics=false, timestep=0.1, 50% moving, batch controller, fleet command
+interface):
 
 | Scale | Target Step Time | Target FPS | Status |
 |-------|-----------------|------------|--------|
-| 100 agents | ≤4 ms/step | ~240 FPS | Achieved |
-| 1000 agents | ≤40 ms/step | ~24 FPS | Achieved |
-| 10,000 objects | ≤10 ms/step | — | PyBullet API bottleneck (54.69ms) |
+| 100 agents | ~0.70 ms/step | ~1430 FPS | Achieved |
+| 250 agents | ~1.76 ms/step | ~568 FPS | Achieved |
+| 500 agents | ~4.25 ms/step | ~235 FPS | Achieved |
+| 1000 agents | ~9.88 ms/step | ~101 FPS | Achieved |
+| 2000 agents | ~23.25 ms/step | ~43 FPS | Achieved |
 
 **To get current numbers, always re-run benchmarks** — these are reference points, not guarantees.
 
@@ -29,6 +33,7 @@ Known performance numbers from historical benchmarks (headless, physics=false):
 | `p.resetBasePositionAndOrientation()` | Agent.set_pose | ~5.5μs/object | Batch only moved objects |
 | `p.getBasePositionAndOrientation()` | SimObject.get_pose | Per-call overhead | Cached in get_pose() |
 | `p.getAABB()` | Broad-phase AABB update | Called per moved object | Incremental update (only moved) |
+| AABB / spatial-grid flush | Two-phase step Phase 3 | ~22% of release-like 1000-agent step | Reduce unnecessary flushes; use 2D ground path |
 | Shared shape cache miss | SimObject.create_shared_shapes | Redundant OpenGL shape creation | `_shared_shapes` dict (automatic) |
 | Python GIL | Entire sim loop | Single-threaded | Headless mode, minimize Python overhead |
 | `sim_object.py` wrapper overhead | Every PyBullet call | +7.6μs/object vs bare PyBullet | Accept or use raw IDs for hot paths |
@@ -59,7 +64,7 @@ Known performance numbers from historical benchmarks (headless, physics=false):
 | `spatial_hash_cell_size_mode` | auto_initial | Minor — constant is fastest |
 | `collision_margin` | 0.02 | Negligible |
 | `enable_time_profiling` | false | Negligible (<0.1%) |
-| `enable_memory_profiling` | false | Minor — tracemalloc overhead |
+| `enable_memory_profiling` | false | Major in timing loops — `tracemalloc` can distort RTF/step-time benchmarks |
 | `log_level` | warn | Minor — debug logging is expensive |
 
 **Optimal benchmark config:**
@@ -71,4 +76,5 @@ target_rtf: 0
 physics: false
 log_level: warn
 enable_time_profiling: true
+enable_memory_profiling: false
 ```

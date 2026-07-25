@@ -38,8 +38,8 @@ These require judgment — CI can't fully automate them.
 **2a. Performance Benchmark**
 
 ```bash
-# Run benchmark suite
-cd benchmark && python run_benchmark.py --config configs/general.yaml
+# Run release benchmark suite from the repository root
+make bench-release
 
 # Compare with previous results in results/
 # Look for:
@@ -50,21 +50,49 @@ cd benchmark && python run_benchmark.py --config configs/general.yaml
 
 Record results. Include summary in release notes.
 
-**Update performance tables** — after bench-full, sync both locations:
+If ROS bridge, RMF client modes, fleet API, or batch controller behavior changed,
+also refresh ROS bridge performance. These checks are intentionally not part of
+the default release script because they require Docker or a native ROS 2/RMF
+environment and take longer than the core benchmark suite.
+
+```bash
+cd docker
+
+# Fleet-only maximum RTF baseline
+docker compose run --rm --no-deps -v "$(pwd):/docker:ro" \
+  bridge bash /docker/test_fleet_scale.sh --robots 1000 \
+  --interface-mode fleet --command-interface fleet \
+  --publish-rate 5 --target-rtf 0 --measure-rtf
+
+# Compare endpoint overhead for release-relevant modes
+docker compose run --rm --no-deps -v "$(pwd):/docker:ro" \
+  bridge bash /docker/test_fleet_scale.sh --robots 1000 \
+  --interface-mode hybrid --command-interface fleet \
+  --per-robot-groups state_publishers,tf,command_topics \
+  --publish-rate 1 --target-rtf 1.0
+```
+
+Record ROS bridge results in `ros2_bridge/PERFORMANCE.md`. Keep raw logs or JSON
+under `benchmark/results/` only when they are intended to be versioned release
+artifacts.
+
+**Update performance tables** — after `make bench-release`, sync these locations:
 
 ```bash
 # 1. docs/benchmarking/results.md  — the canonical numbers table (used by ReadTheDocs)
-#    Update rows for 100 / 500 / 1000 agents with new Step Time, RTF, Spawn Time, Memory Delta.
-#    Update "Last measured:" date.  Leave 250/2000 rows as-is with † note if not re-run.
+#    Update rows for 100 / 250 / 500 / 1000 / 2000 agents with new Step Time, RTF, Spawn Time, Memory Delta.
+#    Update "Last measured:" date and keep the table free of mixed historical rows.
 #
 # 2. README.md Performance section  (<!-- sync with docs/benchmarking/results.md --> comment marks it)
 #    Update the compact table to match the same RTF / step-time values.
 #
 # 3. docs/index.md — the landing page quick-reference table
 #    Update the 100 / 500 / 1000 / 2000 rows to match README.md values.
+#
+# 4. ros2_bridge/PERFORMANCE.md — ROS bridge scale numbers, when bridge/RMF behavior changed.
 ```
 
-> All three files MUST be in sync before cutting the release tag.
+> All updated performance tables MUST be in sync before cutting the release tag.
 
 **2b. API Compatibility Check**
 
@@ -209,7 +237,9 @@ Pre-flight:
 - [ ] pyproject.toml version matches target
 
 Release checks:
-- [ ] Benchmark run, no significant regressions
+- [ ] Core benchmark run (`make bench-release`), no significant regressions
+- [ ] ROS bridge benchmark refreshed when bridge/RMF/fleet API behavior changed
+- [ ] Performance tables synced across docs/README/ros2_bridge as applicable
 - [ ] API compatibility reviewed (no unintended breaking changes)
 - [ ] Sphinx docs build clean
 - [ ] README version references current

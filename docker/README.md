@@ -562,7 +562,9 @@ docker compose run --rm --no-deps \
     --command-interface per_robot --publish-rate 5
 
 # Optional side-by-side command path check. Hybrid mode creates both fleet and
-# per-robot command interfaces, then the checker exercises both on one bridge run.
+# per-robot command interfaces, then the checker exercises both on one bridge
+# run. This is a measurement/debug pattern; normal demos should use matching
+# interface and command paths.
 docker compose run --rm --no-deps \
   -v "$(pwd):/docker:ro" \
   bridge bash /docker/test_fleet_scale.sh --robots 100 --interface-mode hybrid \
@@ -597,7 +599,8 @@ docker compose run --rm --no-deps \
 # Hybrid debug: enable only selected per-robot interface groups to isolate which
 # ROS entities add latency. Valid groups are state_publishers, tf, command_topics,
 # services, and actions. Use default (state_publishers,tf,command_topics), all,
-# or none as shorthands.
+# or none as shorthands. Here --command-interface selects the checker path, not
+# which interfaces the bridge exposes.
 docker compose run --rm --no-deps \
   -v "$(pwd):/docker:ro" \
   bridge bash /docker/test_fleet_scale.sh --robots 1000 --interface-mode hybrid \

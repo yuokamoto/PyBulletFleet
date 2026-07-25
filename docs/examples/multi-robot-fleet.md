@@ -409,7 +409,9 @@ sim.setup_camera(camera_config={
 sim.run_simulation()
 ```
 
-At 100 agents with `physics=False`, you should see ~40× RTF (≈ 2.4 ms per step).
+At 100 agents with `physics=False`, performance depends heavily on the host and
+display stack. The 2026-07-24 WSL2 benchmark measured ~143× RTF
+with the default batch controller + fleet command interface.
 See [Benchmark Results](../benchmarking/results) for the full throughput table.
 
 ### Scale Demos

@@ -15,6 +15,7 @@ Measures:
     - step_once() time with N arm robots executing JointAction sequences
     - Physics (mass=None, setJointMotorControl2) vs Kinematic (mass=0.0, resetJointState)
 """
+
 import os
 import sys
 import time
@@ -43,7 +44,6 @@ from pybullet_fleet.agent import Agent
 from pybullet_fleet.geometry import Pose
 from pybullet_fleet.action import JointAction
 from pybullet_fleet.robot_models import resolve_model
-
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -169,6 +169,11 @@ def run_benchmark(
 
     # Memory after spawning
     mem_after_spawn = get_memory_info()
+    # tracemalloc is useful for spawn-time allocation sampling, but it
+    # materially slows the measured simulation loop. Stop it before warmup and
+    # timed execution; RSS remains available after simulation.
+    if tracemalloc.is_tracing():
+        tracemalloc.stop()
 
     # Enqueue initial joint actions + refill callback
     enqueue_joint_cycle(agents)
