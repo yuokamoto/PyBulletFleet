@@ -99,7 +99,10 @@ These are single-run diagnostic numbers, not stable CI thresholds.
 | `fleet` | 100 | none | 5 Hz | 0 | 0.048 s | 0.008 s | max RTF 110.20x |
 | `fleet` | 500 | none | 5 Hz | 0 | 0.181 s | 0.043 s | max RTF 21.03x |
 | `fleet` | 1000 | none | 5 Hz | 1.0 | 0.027 s | 0.173 s | target-rate command check |
-| `fleet` | 1000 | none | 5 Hz | 0 | 0.502 s | 0.063 s | max RTF 9.73x |
+| `fleet` | 1000 | none | 5 Hz | 0 | 0.486 s | 0.104 s | max RTF 9.37x |
+| `per_robot` | 1000 | `state_publishers,tf,command_topics` | 5 Hz | 0 | publish 0.217 s | 0/1000 in 60 s | max RTF 0.64x |
+| `per_robot` | 100 | `state_publishers,tf,command_topics` | 5 Hz | 0 | publish 0.056 s | 15.033 s | 100/100 moved |
+| `hybrid` | 1000 | `state_publishers,tf,command_topics` | 5 Hz | 0 | fleet ack 7.998 s; per-robot publish 0.220 s | not verified | max RTF 0.30x |
 | `hybrid` | 1000 | `command_topics` | 5 Hz | 1.0 | 0.527 s | 0.112 s | target-rate command check |
 | `hybrid` | 1000 | `state_publishers,tf,command_topics` | 1 Hz | 1.0 | 1.878 s | 0.229 s | target-rate command check |
 | `hybrid` | 1000 | `state_publishers,tf,command_topics` | 5 Hz | 1.0 | 8.657 s | 0.323 s | target-rate command check |
@@ -118,10 +121,13 @@ Current checker output reports motion latency after the relevant boundary as
 first, p50, p90, p99, and all-moved timings, plus missing robot names and final
 observed positions when not all robots move within the checker window.
 
-Per-robot publish-only command checks completed quickly in this environment:
-100 robots in 0.172 s, 500 robots in 0.128 s, and 1000 robots in 0.235 s.
-Those numbers only measure topic publication from the checker and should not be
-compared directly with acknowledged fleet service calls.
+The latest 1000-robot publish-only check took 0.217 s for per-robot topics and
+0.220 s for the hybrid per-robot command phase. Those numbers only measure
+topic publication from the checker and should not be compared directly with
+acknowledged fleet service calls. At 100 robots, per-robot commands moved all
+robots in 15.033 s; at 1000 robots, no robot was observed moving within the
+60-second verification window. This is a command-delivery/scale limitation,
+not evidence that publish completion implies motion completion.
 
 ## Recommendations
 

@@ -211,7 +211,9 @@ share the same success condition and should be evaluated together.
 
 ### Phase 5a — RMF Client Abstraction
 
-Status: implemented; validation and performance characterization remain.
+Status: implemented and validated for office RMF dispatch/readiness across
+`per_robot_ros`, `fleet_ros`, and `python_fleet`; broader task and performance
+coverage continues below and in Phase 6c.
 
 Tasks:
 
@@ -252,8 +254,8 @@ Exit criteria:
 
 ### Phase 5b — RMF over Typed Fleet Commands
 
-Status: implemented for navigation, stop, and attach; generic/custom action
-mapping remains deferred to Phase 6a.
+Status: implemented and validated for navigation, stop, and attach; generic/
+custom action mapping remains deferred to Phase 6a.
 
 Tasks:
 
@@ -290,7 +292,8 @@ Exit criteria:
 
 ### Phase 5c — Plugin Only Launch Path
 
-Status: implemented for launch-time in-process RMF adapters.
+Status: implemented and validated for single- and multi-fleet readiness and
+office patrol dispatch in the in-process `python_fleet` path.
 
 Tasks:
 
@@ -328,7 +331,8 @@ Exit criteria:
 ### Phase 5d — Plugin + Bridge Launch Path
 
 Status: implemented for observation/debug bridge wrappers over the same
-provider/dispatcher path.
+provider/dispatcher path; office `fleet_ros` and `python_fleet` dispatch paths
+were validated in Docker.
 
 Tasks:
 
@@ -359,9 +363,10 @@ Expected direction:
 
 Current gap:
 
-- The repository has core simulation benchmarks, but no dedicated ROS bridge
-  performance measurement for endpoint count, publish cost, action/server
-  creation, or RMF adapter latency.
+- Initial ROS bridge scale measurements are now recorded in
+  `ros2_bridge/PERFORMANCE.md` and `docs/benchmarking/results.md`.
+- A dedicated RMF task-latency benchmark, startup/memory/DDS graph collection,
+  and stable regression thresholds remain Phase 6c work.
 
 Required before claiming a performance win:
 
@@ -396,13 +401,22 @@ Current observations from the Docker scale checker:
   performance claims: they are fire-and-forget and need motion verification.
   At hundreds of robots, not all commands were applied reliably in the current
   bridge setup.
+- In the current Docker/DDS environment, per-robot commands moved all 100
+  robots but did not move any of 1000 robots within the 60-second checker
+  window; fleet-level commands remain the large-fleet default.
+- RMF dispatch completed physically and cleared `/fleet_states`, but the
+  installed RMF stack did not publish an explicit `completed` task summary.
+  Dispatch E2E therefore uses the guarded fleet-state-clear fallback for this
+  environment; this is a validation compatibility issue, not a navigation
+  failure.
 - `publish_rate` must throttle fleet state and per-robot state/TF publishers,
   not just `/clock`; this is required before comparing hybrid modes.
 
 ## RMF Performance Measurement Pattern
 
-Track this under Phase 6c. It should be an optional benchmark, not a blocking
-CI gate at first.
+Track the dedicated RMF task benchmark under Phase 6c. It should be an
+optional benchmark, not a blocking CI gate at first. The initial bridge scale
+baseline is recorded above and in the benchmark/performance documents.
 
 ### Benchmark Modes
 
