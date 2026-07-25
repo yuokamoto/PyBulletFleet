@@ -268,7 +268,7 @@ def _print_motion_report(label: str, report: MotionReport, robot_count: int, *, 
     )
     if report.missing:
         samples = [f"{name}@{_format_missing_position(report, name)}" for name in report.missing[:10]]
-        print(f"{label}: missing moved robots={len(report.missing)}; first missing={samples}")
+        print(f"{label}: robots that did not move={len(report.missing)}; sample={samples}")
 
 
 def _wait_for_fleet_state(node: FleetScaleClient, robot_count: int, timeout: float) -> set[str] | None:
