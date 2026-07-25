@@ -249,6 +249,13 @@ def _format_latency(value: float | None) -> str:
     return "n/a" if value is None else f"{value:.3f}s"
 
 
+def _format_missing_position(report: MotionReport, name: str) -> str:
+    pos = report.final_positions.get(name)
+    if pos is None:
+        return "missing"
+    return f"({pos[0]:.3f}, {pos[1]:.3f})"
+
+
 def _print_motion_report(label: str, report: MotionReport, robot_count: int, *, motion_boundary: str) -> None:
     print(
         f"{label}: motion after {motion_boundary} moved={report.moved}/{robot_count}, "
@@ -260,7 +267,7 @@ def _print_motion_report(label: str, report: MotionReport, robot_count: int, *, 
         f"elapsed={report.elapsed:.3f}s"
     )
     if report.missing:
-        samples = [f"{name}@{report.final_positions.get(name, ('missing', 'missing'))}" for name in report.missing[:10]]
+        samples = [f"{name}@{_format_missing_position(report, name)}" for name in report.missing[:10]]
         print(f"{label}: missing moved robots={len(report.missing)}; first missing={samples}")
 
 
