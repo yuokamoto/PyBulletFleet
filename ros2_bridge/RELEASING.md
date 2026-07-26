@@ -72,7 +72,7 @@ a separate rosdistro release PR. Review the generated release entry before
 submitting it. It must include all three sibling ROS packages from the same
 source tag.
 
-## Validate Ros-Testing
+## Validate ros-testing
 
 After the release PR merges and packages reach ros-testing, test the actual
 Debian packages in a clean Jazzy environment:
