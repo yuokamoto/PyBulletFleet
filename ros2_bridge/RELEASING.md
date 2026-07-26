@@ -1,6 +1,6 @@
 # ROS 2 Apt Release Guide
 
-This guide covers release of the ROS 2 packages in this repository through
+This guide covers the release of the ROS 2 packages in this repository through
 rosdistro and Bloom. It is independent from the PyPI release of the simulation
 core.
 
