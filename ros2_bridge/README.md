@@ -32,6 +32,22 @@ For Docker-based setup, see **[docker/README.md](../docker/README.md)**. For a
 native Ubuntu 24.04 + ROS 2 Jazzy workflow, see
 **[NATIVE_ROS2.md](NATIVE_ROS2.md)**.
 
+### Apt Package Boundary
+
+The Jazzy ROS packages distribute the ROS interfaces, bridge node, and RMF
+adapter packages. The simulation core remains the separately distributed
+`pybullet-fleet` Python package because PyBullet is not available as a ROS
+binary dependency. Install the core into the Python environment used to run
+the ROS nodes before starting `bridge_node` or `fleet_adapter`.
+
+The RMF package includes the PyBulletFleet adapter, door/lift handlers, and
+launch files. The office, hotel, airport, clinic, campus, and battle-royale
+launch files additionally require a source-built `rmf_demos` overlay that
+provides `rmf_demos` and `rmf_demos_maps`. Those demo assets are not supplied
+by the Jazzy binary packages. Follow [NATIVE_ROS2.md](NATIVE_ROS2.md) for the
+native overlay setup, or use the Docker workflow for the fully provisioned
+RMF demo environment.
+
 ### Documentation Map
 
 Use this file as the ROS 2 bridge entry point. The repository keeps Docker
