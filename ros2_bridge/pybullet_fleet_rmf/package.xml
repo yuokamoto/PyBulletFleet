@@ -9,11 +9,22 @@
 
   <depend>rclpy</depend>
   <depend>pybullet_fleet_ros</depend>
+  <depend>pybullet_fleet_msgs</depend>
+  <depend>action_msgs</depend>
+  <depend>geometry_msgs</depend>
+  <depend>nav2_msgs</depend>
+  <depend>nav_msgs</depend>
+  <depend>sensor_msgs</depend>
+  <depend>std_msgs</depend>
+  <depend>std_srvs</depend>
+  <depend>rmf_fleet_adapter_python</depend>
   <depend>rmf_fleet_msgs</depend>
   <depend>rmf_door_msgs</depend>
   <depend>rmf_lift_msgs</depend>
   <depend>rmf_dispenser_msgs</depend>
   <depend>rmf_ingestor_msgs</depend>
+
+  <exec_depend>python3-yaml</exec_depend>
 
   <test_depend>ament_copyright</test_depend>
   <test_depend>ament_pep257</test_depend>
