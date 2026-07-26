@@ -32,6 +32,56 @@ For Docker-based setup, see **[docker/README.md](../docker/README.md)**. For a
 native Ubuntu 24.04 + ROS 2 Jazzy workflow, see
 **[NATIVE_ROS2.md](NATIVE_ROS2.md)**.
 
+### Apt Package Boundary
+
+The Jazzy ROS packages distribute the ROS interfaces, bridge node, and RMF
+adapter packages. The simulation core remains the separately distributed
+`pybullet-fleet` Python package because PyBullet is not available as a ROS
+binary dependency. Install the core into the Python environment used to run
+the ROS nodes before starting `bridge_node` or `fleet_adapter`.
+
+The RMF package includes the PyBulletFleet adapter, door/lift handlers, and
+launch files. The office, hotel, airport, clinic, campus, and battle-royale
+launch files additionally require a source-built `rmf_demos` overlay that
+provides `rmf_demos` and `rmf_demos_maps`. Those demo assets are not supplied
+by the Jazzy binary packages. Follow [NATIVE_ROS2.md](NATIVE_ROS2.md) for the
+native overlay setup, or use the Docker workflow for the fully provisioned
+RMF demo environment.
+
+### Jazzy Apt Installation
+
+Install the ROS bridge package and the Python simulation core under the same
+Unix account that will run `ros2`. Ubuntu 24.04 marks its system Python as
+externally managed (PEP 668), so use the user site rather than a virtual
+environment: ROS Python console scripts use `/usr/bin/python3` and cannot see
+packages installed only in an activated virtual environment.
+
+```bash
+sudo apt update
+sudo apt install -y \
+  ros-jazzy-pybullet-fleet-ros \
+  ros-jazzy-pybullet-fleet-msgs \
+  python3-pip python3-dev build-essential
+python3 -m pip install --user --break-system-packages pybullet-fleet
+```
+
+PyBullet currently builds from source on Python 3.12, which is why the C/C++
+build prerequisites are included. Verify the runtime before launching a demo:
+
+```bash
+source /opt/ros/jazzy/setup.bash
+python3 -c 'import pybullet, pybullet_fleet; print(pybullet.__file__)'
+ros2 run pybullet_fleet_ros bridge_node --ros-args \
+  -p config_yaml:="$(ros2 pkg prefix pybullet_fleet_ros)/share/pybullet_fleet_ros/config/bridge_test.yaml"
+```
+
+The bridge should report that it started with three robots; stop this smoke
+test with `Ctrl-C`.
+
+Install `ros-jazzy-pybullet-fleet-rmf` as well when using the RMF adapter. Its
+runtime has the same `pybullet-fleet` prerequisite; the RMF demo launch files
+still additionally require the `rmf_demos` source overlay described above.
+
 ### Documentation Map
 
 Use this file as the ROS 2 bridge entry point. The repository keeps Docker
