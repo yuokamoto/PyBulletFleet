@@ -48,6 +48,9 @@ by the Jazzy binary packages. Follow [NATIVE_ROS2.md](NATIVE_ROS2.md) for the
 native overlay setup, or use the Docker workflow for the fully provisioned
 RMF demo environment.
 
+Maintainers preparing a rosdistro or Bloom release should follow
+[RELEASING.md](RELEASING.md).
+
 ### Jazzy Apt Installation
 
 Install the ROS bridge package and the Python simulation core under the same
