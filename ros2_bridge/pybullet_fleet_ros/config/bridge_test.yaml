@@ -22,7 +22,6 @@ entities:
     urdf_path: "robots/mobile_robot.urdf"
     pose: [0.0, 0.0, 0.05]
     yaw: 0.0
-    motion_mode: "differential"
     controller:
       type: "differential"
       max_linear_vel: 2.0
@@ -32,7 +31,6 @@ entities:
     urdf_path: "robots/mobile_robot.urdf"
     pose: [2.0, 0.0, 0.05]
     yaw: 0.0
-    motion_mode: "differential"
     controller:
       type: "differential"
       max_linear_vel: 2.0
@@ -42,7 +40,6 @@ entities:
     urdf_path: "robots/mobile_robot.urdf"
     pose: [4.0, 0.0, 0.05]
     yaw: 0.0
-    motion_mode: "differential"
     controller:
       type: "differential"
       max_linear_vel: 2.0

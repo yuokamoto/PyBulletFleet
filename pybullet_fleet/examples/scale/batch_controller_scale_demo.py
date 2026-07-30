@@ -6,11 +6,12 @@ Spawns N robots on a grid and drives them with a shared batch controller
 via AgentManager.  Both omnidirectional and differential modes are supported.
 The controller implementation is always batch; --command-interface chooses
 whether commands are submitted per agent or via FleetCommandDispatcher.
-The robot count is controlled by --n and defaults to 500.
+The robot count is controlled by --robots and defaults to 500. The legacy --n
+alias remains accepted for compatibility.
 
 Key API shown
 -------------
-- AgentManager(sim_core=sim, batch_controller="batch_omni")
+- AgentManager(sim_core=sim, fleet_controller={"type": "batch_omni"})
 - mgr.spawn_agents_grid(n, grid_params, spawn_params, name_prefix="robot")
 - agent.set_path(waypoints)   # per-agent command interface
 - FleetCommandDispatcher.navigate([...])  # fleet command interface
@@ -33,7 +34,7 @@ Per-agent command interface comparison::
 
 Differential drive, 200 robots, custom robot::
 
-    python3 examples/scale/batch_controller_scale_demo.py --mode diff --n 200 --robot husky
+    python3 examples/scale/batch_controller_scale_demo.py --mode diff --robots 200 --robot husky
 
 Headless::
 
@@ -58,7 +59,6 @@ except ModuleNotFoundError:
 
 from pybullet_fleet import (  # noqa: E402
     AgentSpawnParams,
-    MotionMode,
     MultiRobotSimulationCore,
     Pose,
     SimulationParams,
@@ -145,7 +145,8 @@ def _set_fleet_goals(sim, agents, wp_fn) -> tuple[float, int, int]:
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--n", type=int, default=500, help="Number of robots (default: 500)")
+    ap.add_argument("--robots", type=int, default=500, help="Number of robots (default: 500)")
+    ap.add_argument("--n", dest="robots", type=int, help=argparse.SUPPRESS)  # Legacy alias for --robots.
     ap.add_argument("--robot", default="simple_cube", help="Robot name or URDF path (default: simple_cube)")
     ap.add_argument("--mode", choices=["omni", "diff"], default="omni", help="Batch controller type: omni (default) or diff")
     ap.add_argument(
@@ -161,19 +162,19 @@ def main() -> None:
     args = ap.parse_args()
 
     gui = not args.no_gui
-    motion_mode = MotionMode.OMNIDIRECTIONAL if args.mode == "omni" else MotionMode.DIFFERENTIAL
     batch_controller = "batch_omni" if args.mode == "omni" else "batch_differential"
+    controller_type = "omni" if args.mode == "omni" else "differential"
     wp_fn = _omni_waypoints if args.mode == "omni" else _diff_waypoints
     urdf_path = resolve_model(args.robot)
 
     sim = _make_sim(gui=gui)
 
     # Create an AgentManager with a shared batch controller for all agents.
-    mgr = AgentManager(sim_core=sim, batch_controller=batch_controller)
+    mgr = AgentManager(sim_core=sim, fleet_controller={"type": batch_controller} if batch_controller else None)
 
-    side = int(math.ceil(math.sqrt(args.n)))
+    side = int(math.ceil(math.sqrt(args.robots)))
     agents = mgr.spawn_agents_grid(
-        num_agents=args.n,
+        num_agents=args.robots,
         grid_params=GridSpawnParams(
             x_min=0,
             x_max=side - 1,
@@ -184,9 +185,9 @@ def main() -> None:
         ),
         spawn_params=AgentSpawnParams(
             urdf_path=urdf_path,
-            motion_mode=motion_mode,
             collision_mode=CollisionMode.NORMAL_3D,
             controller={
+                "type": controller_type,
                 "max_linear_vel": 1.5,
                 "max_linear_accel": 2.0,
                 "max_angular_vel": 2.0,
@@ -208,7 +209,7 @@ def main() -> None:
     state_count = len(state_provider.get_states())
     state_elapsed = time.perf_counter() - state_start
 
-    print(f"[{args.n} robots | mode={args.mode} | " f"controller={type(mgr.batch_controller).__name__}]")
+    print(f"[{args.robots} robots | mode={args.mode} | " f"controller={type(mgr.batch_controller).__name__}]")
     print(
         "[controller_impl=batch | command_interface=%s | accepted=%d | rejected=%d | command_setup=%.6fs | "
         "state_snapshot=%d in %.6fs]"

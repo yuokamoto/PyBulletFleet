@@ -34,16 +34,21 @@ simulation:
 # Entity Grid Spawn (Primary Pattern)
 # ========================================
 
+managers:
+  - name: mobile_fleet
+    fleet_controller:
+      type: batch_omni
+      max_linear_vel: 2.0
+      max_linear_accel: 5.0
+
 entities:
   - name: robot
     urdf_path: "robots/mobile_robot.urdf"
-    motion_mode: omnidirectional
-    batch_controller: batch_omni
     use_fixed_base: false
+    # Used when 100robots_grid_demo.py runs with --controller per_agent.
     controller:
       type: "omni"
-      max_linear_vel: 2.0
-      max_linear_accel: 5.0
+    manager: mobile_fleet
     user_data:
       robot_type: "mobile_robot"
     grid:

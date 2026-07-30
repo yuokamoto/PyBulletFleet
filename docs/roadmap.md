@@ -120,6 +120,16 @@ office, clinic, hotel, airport_terminal, battle_royale, **campus**. Outstanding:
 
 External communication layers:
 
+- **Fleet API actor scopes** — Separate simulation actor ownership from public
+  fleet visibility. Today `FleetStateProvider` publishes all `sim.agents` and
+  `FleetCommandDispatcher` resolves every named Agent, while `AgentManager`
+  groups execution only. Add a short-term filter for fleet-state publication
+  so mock people, external robots, and devices do not inflate `/fleet/states`.
+  Then add named API scopes that can be attached to one or more managers and
+  independently select state publication and command ingress (with distinct
+  endpoint namespaces when multiple fleets are exported). Keep the state and
+  command scopes explicit rather than inferring ownership from an Agent type.
+
 - **ROS 2** — Topic / service / action bridge for ROS 2 ecosystem integration (see `ros2_bridge/README.md`)
 - **gRPC** — Language-agnostic RPC interface for orchestrators, WMS, and fleet managers
 - **Distributed co-simulation (Robot Proxy layer)** — Per-robot proxy processes that translate between simulated robots and real Robot Apps (Nav2, task assigners, BTs). Enables running 100+ unmodified single-robot software stacks against a centralized batched simulator. Sim Central stays single-process and batched; only a thin fixed-schema boundary (`StateSnapshot` + `CommandBuffer` + Events) crosses the IPC. **Shares schema with Snapshot/Replay** — same `StateSnapshot` dataclass feeds live IPC, replay log, and observability sinks (define schema once, fan out to multiple consumers). See `docs/design/co-simulation/spec.md` for full design including layer separation, transport options (shared memory / gRPC / DDS), lockstep vs async sync modes, and 6-phase implementation plan.
@@ -217,24 +227,28 @@ Collision at 10 Hz adds only ~0.2 ms at 500 agents — negligible compared to ag
 | TPI-like trapezoidal profile | (per-agent) | 33 μs | — |
 | Per-agent cost | 23 μs/agent | ~0.01 μs/agent | — |
 
-### Two-Phase Step: Decouple Computation from PyBullet C API ✅ (batch controller path)
+### Two-Phase Pose Commit: Decouple Computation from PyBullet C API ✅ (batch controller path)
 
-Current `step_once()` iterates agents one-by-one, each calling `controller.compute()` (Python/NumPy) → `set_pose_raw()` (PyBullet C API + AABB update + spatial grid) interleaved. This prevents vectorization and adds per-agent Python↔C crossing overhead.
+The implemented `step_once()` path separates base-pose computation from its
+PyBullet commit, avoiding interleaved per-agent base-pose writes and enabling
+vectorized batch controllers.
 
-**Proposed split:**
+**Implemented flow:**
 
-| Phase | What | Hot path |
+| Stage | What | Hot path |
 |-------|------|----------|
-| **Phase 1 — Compute** | All controllers compute new poses; no side effects | Pure Python / NumPy |
-| **Phase 2 — Apply** | Tight loop of `p.resetBasePositionAndOrientation()` only | PyBullet C calls |
-| **Phase 3 — Bookkeep** | Batch AABB refresh (`p.performCollisionDetection()` + `p.getAABB()`) and spatial grid update | C calls + Python dict |
+| **Phase 1 — Compute / buffer** | Controllers and callbacks calculate or queue base-pose writes | Python / NumPy, with joint or user PyBullet calls still possible |
+| **Phase 2 — Pose commit** | Tight loop of `p.resetBasePositionAndOrientation()` | PyBullet C calls |
+| **Post-commit synchronization** | Physics step when enabled; AABB/grid refresh and collision processing | C calls + Python dict |
 
-This requires **removing direct `pybullet` API calls from `sim_object.py`, `agent.py`, and `controller.py`**. Instead, these modules produce *pose intents* (position + orientation tuples), and `core_simulation.py` flushes them to PyBullet in bulk.
+Framework base-pose writes now produce cached pose intents that
+`core_simulation.py` flushes in bulk. This does not prohibit all direct
+PyBullet calls: joint control and extension code can still require them.
 
 Key changes:
 - `SimObject.set_pose()` / `set_pose_raw()` writes to an internal buffer (cached pose + dirty flag) without calling `p.resetBasePositionAndOrientation()`
 - `Controller.compute()` returns `(new_pos, new_orn)` or writes to agent's pending pose buffer
-- `core_simulation.step_once()` collects dirty poses → batch `resetBasePositionAndOrientation` → batch AABB update
+- `core_simulation.step_once()` collects dirty poses → batch `resetBasePositionAndOrientation` → post-commit AABB/grid synchronization
 - Movement detection stays pure Python (already cached-pose-based), unaffected
 - Attached-object propagation runs after Phase 2 using the buffered parent poses
 

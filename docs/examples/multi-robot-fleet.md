@@ -2,10 +2,10 @@
 
 <table width="100%">
 <tr>
-<td align="center"><b>Mixed Fleet Grid</b><br><small>100robots_grid_demo.py</small><br>
-<video src="../100robots_grid_mixed.mp4" width="100%" autoplay loop muted playsinline></video></td>
 <td align="center"><b>Cube Patrol</b><br><small>100robots_cube_patrol_demo.py</small><br>
 <video src="../100robots_cube_patrol.mp4" width="100%" autoplay loop muted playsinline></video></td>
+<td align="center"><b>Mixed Fleet Grid</b><br><small>100robots_mixed_demo.py</small><br>
+<video src="../100robots_grid_mixed.mp4" width="100%" autoplay loop muted playsinline></video></td>
 </tr>
 <tr>
 <td align="center"><b>Mobile Pick & Drop</b><br><small>pick_drop_mobile_100robots_demo.py</small><br>
@@ -15,14 +15,19 @@
 </tr>
 </table>
 
-**Source file:** [`examples/scale/100robots_cube_patrol_demo.py`](https://github.com/yuokamoto/PyBulletFleet/blob/main/examples/scale/100robots_cube_patrol_demo.py)
+**Primary walkthrough:** [`100robots_cube_patrol_demo.py`](https://github.com/yuokamoto/PyBulletFleet/blob/main/pybullet_fleet/examples/scale/100robots_cube_patrol_demo.py)
 
-This tutorial scales up from a single agent to a fleet of 100 robots.
+**Related configuration-driven variants:** [`100robots_grid_demo.py`](https://github.com/yuokamoto/PyBulletFleet/blob/main/pybullet_fleet/examples/scale/100robots_grid_demo.py) and
+[`100robots_mixed_demo.py`](https://github.com/yuokamoto/PyBulletFleet/blob/main/pybullet_fleet/examples/scale/100robots_mixed_demo.py)
+
+This tutorial follows the Cube Patrol demo as it scales from one agent to two
+50-robot fleets. Grid and Mixed demos are related variants that use the same
+`from_dict()` configuration pattern with scene YAML files.
 You will learn how to:
 
 - Declare named managers with `managers:` config and route entity grids to them
-- Set fleet-wide controller defaults with `fleet_controller:`
-- Enable vectorised batch controllers via `batch_controller:`
+- Select per-agent or batch execution with `fleet_controller.type`
+- Set fleet-wide controller defaults alongside that execution choice
 - Retrieve managers at runtime with `sim.get_manager()`
 - Build `Path` objects with waypoints and assign them with `set_path`
 - Iterate over all agents to read state or assign individual paths
@@ -48,47 +53,80 @@ and supports all the same methods from Tutorial 1 and 2.
 
 ---
 
-## 2. Load Config from YAML
+## 2. Two Fleet Concepts, Two Layers
 
-For larger simulations, externalise parameters to a YAML file
-so you can change settings (number of agents, speed limits, collision mode)
-without editing Python code:
+The similar names describe different jobs. They can be combined, but none is a
+replacement for another.
 
-```python
-from pybullet_fleet.core_simulation import MultiRobotSimulationCore
+| Concept | Layer | Purpose | Typical use |
+| --- | --- | --- | --- |
+| `fleet_controller:` | Manager configuration | Selects batch execution with `type`, and supplies shared `ControllerParams` defaults | Choose `batch_omni` / `batch_differential` and set common limits |
+| Fleet command interface | Command ingress API | Resolves names, validates a command, records an ack, then invokes public Agent operations | External clients, ROS/RMF adapters, or comparing command submission paths |
 
-sim = MultiRobotSimulationCore.from_yaml("config/100robots_config.yaml")
-```
-
-`from_yaml` reads the nested YAML config (under the `simulation:` key) and creates the
-simulation core in one call. Any parameter not present in the file gets its default value.
-
-> The config files live in `config/`. See [Configuration Reference](../configuration/index)
-> for the full parameter list.
+`fleet_controller.type` selects how a manager executes movement; omitting
+`type` keeps per-agent execution. It does not define a command API; use the
+fleet command interface when commands need name-based targeting and
+acknowledgement semantics.
 
 ---
 
-## 3. Declare Named Managers in Config
+## 3. Load, Adapt, and Instantiate Config
 
-The recommended way to set up a multi-fleet simulation is a YAML config file with
-`managers:` and `entities:` sections.  The simulation core creates the managers,
-spawns the agents, and wires them together — no Python boilerplate required.
+For larger simulations, build the final configuration dictionary before
+creating the core. Cube Patrol loads the bundled base YAML, adds its runtime
+overrides and fleet definitions in Python, then calls `from_dict()`.
+This abbreviated control-flow snippet names the definitions expanded in the
+next section; use the linked runnable demo for the complete script.
 
-A complete example lives at [`config/cube_patrol_config.yaml`](https://github.com/yuokamoto/PyBulletFleet/blob/main/config/cube_patrol_config.yaml):
+```python
+from pybullet_fleet.config_utils import load_yaml_config, merge_configs
+from pybullet_fleet.core_simulation import MultiRobotSimulationCore
+
+overrides = {"simulation": {"target_rtf": 5}}
+cfg = merge_configs(load_yaml_config("config/config.yaml"), overrides)
+
+# The following sections define these lists from CLI choices and resolved models.
+cfg["managers"] = manager_definitions
+cfg["entities"] = entity_definitions
+
+sim = MultiRobotSimulationCore.from_dict(cfg)
+```
+
+This keeps runtime choices explicit and inspectable in Python. The Grid and
+Mixed variants instead merge `config/config.yaml` with their selected
+`--config` scene YAML, adjust the resulting dict, and also call `from_dict()`.
+
+> The bundled config files live in `pybullet_fleet/config/`. See [Configuration Reference](../configuration/index)
+> for the full parameter list.
+
+`MultiRobotSimulationCore.from_yaml("my_scene.yaml")` remains convenient for a
+completely static scenario, but it is not the initialization path used by these
+scale demos.
+
+---
+
+## 4. Declare Named Managers in Config
+
+The YAML/dict schema for a multi-fleet simulation has `managers:` and
+`entities:` sections. Once passed to `from_dict()`, the simulation core creates
+the managers, spawns the agents, and wires them together.
+
+The following YAML shows the `managers:` / `entities:` schema. Cube Patrol
+builds this same structure in its Python `cfg` dictionary:
 
 ```yaml
 managers:
   - name: omni_fleet
-    batch_controller: batch_omni       # vectorised batch controller
-    fleet_controller:                  # shared defaults for every agent in this fleet
+    fleet_controller:
+      type: batch_omni                 # omit type for per-agent execution
       max_linear_vel: 2.0
       max_linear_accel: 1.0
       max_angular_vel: 2.0
       max_angular_accel: 5.0
 
   - name: diff_fleet
-    batch_controller: batch_differential
     fleet_controller:
+      type: batch_differential
       max_linear_vel: 2.0
       max_linear_accel: 1.0
       max_angular_vel: 2.0
@@ -98,7 +136,6 @@ entities:
   - urdf_path: "robots/mobile_robot.urdf"
     mass: 0.0
     use_fixed_base: false
-    motion_mode: omnidirectional
     manager: omni_fleet          # route this group to omni_fleet
     grid:
       x_min: 0
@@ -111,7 +148,6 @@ entities:
   - urdf_path: "robots/mobile_robot.urdf"
     mass: 0.0
     use_fixed_base: false
-    motion_mode: differential
     manager: diff_fleet          # route this group to diff_fleet
     grid:
       x_min: 5
@@ -122,49 +158,60 @@ entities:
       offset: [-15.0, -15.0, 0.3]
 ```
 
-Load and retrieve managers:
+Instantiate the composed dictionary and retrieve its managers:
 
 ```python
 from pybullet_fleet.core_simulation import MultiRobotSimulationCore
 
-sim = MultiRobotSimulationCore.from_yaml("config/cube_patrol_config.yaml")
+sim = MultiRobotSimulationCore.from_dict(cfg)
 omni_manager = sim.get_manager("omni_fleet")
 diff_manager  = sim.get_manager("diff_fleet")
 ```
 
-> **Note — demo uses Python dicts instead of `from_yaml`:**
+> **How Cube Patrol builds this schema:**
 > `100robots_cube_patrol_demo.py` accepts a `--robot` argument that resolves the URDF
-> path at runtime via `resolve_model()`.  Because the path is dynamic, the demo merges
-> the base config with `managers:` / `entities:` programmatically (`from_dict`) rather
-> than reading a static YAML file.  The structure is identical to the YAML above.
+> path at runtime via `resolve_model()`. It then constructs `managers:` and
+> `entities:` in a Python dict, conditionally enables the batch controllers from
+> `--controller`, and passes the result to `from_dict()`. Treat it as the
+> reference example for programmatically composing a config-driven fleet; the
+> structure is identical to the YAML above.
+>
+> The runnable demo keeps an explicit entity `controller.type` even though this
+> batch-focused YAML omits it: when `--controller per_agent` removes
+> `fleet_controller.type`, that entity value selects the per-agent fallback.
 
-### fleet_controller — shared parameter defaults
+### fleet_controller — execution type and shared parameter defaults
 
-`fleet_controller` sets `ControllerParams` defaults for the whole fleet.
-When an agent spawns with no explicit `controller:` key, these values are used.
-Per-agent overrides (non-`None` fields) are never overwritten.
+`fleet_controller.type` selects the manager's execution path:
+
+| Value | Execution |
+| --- | --- |
+| omitted | Each Agent runs its own controller |
+| `batch_omni` | Shared vectorised omnidirectional controller |
+| `batch_differential` | Shared vectorised differential-drive controller |
+
+The remaining `fleet_controller` fields set `ControllerParams` defaults for
+the whole manager. Per-agent controller values take precedence for fields they
+set explicitly.
 
 See [Controller Config](../how-to/controller-config) for the full list of
 `ControllerParams` fields.
 
-### batch_controller — vectorised movement
+With a batch `type`, one `BatchKinematicController` advances every agent in the
+manager in a vectorised NumPy pass instead of calling `compute()` per agent.
+The performance benefit depends on the
+controller, movement workload, command path, and host environment; use it for
+large homogeneous fleets to reduce per-agent Python dispatch, then measure the
+target scenario. See [Benchmark Results](../benchmarking/results.md).
+for the current reproducible comparison.
 
-`batch_controller` enables a shared `BatchKinematicController` for all agents in the
-manager.  Instead of calling `compute()` per agent, the batch controller advances every
-agent in one vectorised NumPy pass.  At 100 agents this is roughly equivalent to
-per-agent; at 500+ it is 3–5× faster.
-
-| Value | Controller |
-|---|---|
-| `"batch_omni"` | Omnidirectional (XY + Z) |
-| `"batch_differential"` | Unicycle (rotate-then-forward) |
-
-> Agents with different motion modes must be in separate managers, because each batch
-> controller supports one motion model.
+> Agents with different controller types must be in separate batch managers,
+> because each batch type supports one motion model.
 
 ### Controller vs command interface
 
-Fleet-scale examples expose two independent comparison axes:
+The Grid scale demo exposes two independent comparison axes. These are separate
+from `fleet_controller:` configuration:
 
 | Axis | Values | Meaning |
 |------|--------|---------|
@@ -183,19 +230,21 @@ while keeping the scene and controller implementation unchanged.
 ```bash
 # User-facing scale demo: repeated goal commands.
 python examples/scale/100robots_grid_demo.py \
-  --mode single --movement goal --controller batch --command-interface fleet --duration 10
+  --movement goal --controller batch --command-interface fleet --duration 10
 
 python examples/scale/100robots_grid_demo.py \
-  --mode single --movement goal --controller batch --command-interface per_agent --duration 10
+  --movement goal --controller batch --command-interface per_agent --duration 10
 
 # Focused setup-time and state-snapshot smoke. Robot count is configurable.
 python examples/scale/batch_controller_scale_demo.py \
-  --no-gui --duration 5 --n 500 --command-interface fleet
+  --no-gui --duration 5 --robots 500 --command-interface fleet
 ```
 
-`100robots_grid_demo.py` keeps using `config/100robots_config.yaml` for the
-standard scene. In `--movement goal` mode, mobile robots receive repeated goals;
-in mixed mode, arm robots continue moving through random joint commands.
+`100robots_grid_demo.py` uses `config/100robots_config.yaml` for its standard
+mobile-only scene. In `--movement goal` mode, it sends repeated goals to those
+mobile robots. Use `100robots_mixed_demo.py` for the separate Husky + Panda
+mixed scene; it selects a scene with `--config`, rather than per-model CLI
+arguments.
 
 ### Alternative: Python API
 
@@ -204,9 +253,9 @@ at runtime):
 
 ```python
 from pybullet_fleet.agent_manager import AgentManager, GridSpawnParams
-from pybullet_fleet.agent import AgentSpawnParams, MotionMode
+from pybullet_fleet.agent import AgentSpawnParams
 
-omni_manager = AgentManager(sim_core=sim, batch_controller="batch_omni")
+omni_manager = AgentManager(sim_core=sim, fleet_controller={"type": "batch_omni"})
 omni_manager.spawn_agents_grid(
     num_agents=50,
     grid_params=GridSpawnParams(
@@ -216,8 +265,8 @@ omni_manager.spawn_agents_grid(
     ),
     spawn_params=AgentSpawnParams(
         urdf_path=urdf_path, mass=0.0,
-        motion_mode=MotionMode.OMNIDIRECTIONAL, use_fixed_base=False,
-        controller={"max_linear_vel": 2.0, "max_linear_accel": 1.0},
+        use_fixed_base=False,
+        controller={"type": "omni", "max_linear_vel": 2.0, "max_linear_accel": 1.0},
     ),
 )
 ```
@@ -233,10 +282,14 @@ why PyBulletFleet can run 100 robots at 40× real time. See the
 
 ---
 
-## 4. Build a Path and Assign it to an Agent
+## 5. Build a Path and Assign it to an Agent
 
 A `Path` is a sequence of `Pose` waypoints the agent follows in order,
 looping back to the start when it reaches the end.
+
+This is a short API primer. The Cube Patrol-specific nine-waypoint path and
+manager-specific assignment used by the runnable demo are shown in the next
+section.
 
 ```python
 from pybullet_fleet.geometry import Path, Pose
@@ -282,69 +335,64 @@ useful for robots that should always face a particular way (e.g., a forklift mas
 
 ---
 
-## 5. Assign Individual Paths to All 100 Agents
+## 6. Assign Individual Paths to All 100 Agents
 
-Here each robot patrols a cube centred on its own spawn position.
-The key is getting each robot's spawn pose to build a per-robot path:
+Cube Patrol gives every robot a 5 m × 5 m × 5 m path centred on its own spawn
+position. The following is the same path construction and manager-specific
+assignment flow as `100robots_cube_patrol_demo.py` (formatting only is
+simplified):
 
 ```python
-for robot in manager.objects:
-    spawn_pos = robot.get_pose().position    # current (= spawn) position
+import random
 
-    # Build a path centred at this robot's position
-    cx, cy = spawn_pos[0], spawn_pos[1]
-    half = 2.5
-    patrol_waypoints = [
-        Pose.from_euler(cx + half, cy + half, 0.3, roll=0, pitch=0, yaw=0),
-        Pose.from_euler(cx - half, cy + half, 0.3, roll=0, pitch=0, yaw=0),
-        Pose.from_euler(cx - half, cy - half, 0.3, roll=0, pitch=0, yaw=0),
-        Pose.from_euler(cx + half, cy - half, 0.3, roll=0, pitch=0, yaw=0),
+from pybullet_fleet.agent import MovementDirection
+from pybullet_fleet.geometry import Path, Pose
+
+
+def create_cube_patrol_path(cube_center, cube_size=5.0):
+    """Bottom XY circuit → climb → top XY circuit → descend."""
+    half = cube_size / 2.0
+    cx, cy, cz = cube_center
+    z_bot = cz - half + 0.3
+    z_top = cz + half
+    corners = [
+        [cx + half, cy + half, z_bot],
+        [cx - half, cy + half, z_bot],
+        [cx - half, cy - half, z_bot],
+        [cx + half, cy - half, z_bot],
+        [cx + half, cy - half, z_top],
+        [cx + half, cy + half, z_top],
+        [cx - half, cy + half, z_top],
+        [cx - half, cy - half, z_top],
+        [cx + half, cy - half, z_bot],
     ]
+    return Path(waypoints=[Pose.from_euler(x, y, z, 0, 0, 0) for x, y, z in corners])
 
-    if robot.motion_mode == MotionMode.DIFFERENTIAL:
-        import random
-        direction = random.choice([MovementDirection.FORWARD, MovementDirection.BACKWARD])
-        robot.set_path(patrol_waypoints, direction=direction)
-    else:
-        robot.set_path(patrol_waypoints)
+
+def cube_path_for(robot):
+    spawn_pos = robot.get_pose().position    # current (= spawn) position
+    path = create_cube_patrol_path([spawn_pos[0], spawn_pos[1], spawn_pos[2] + 2.5])
+    path.visualize(
+        show_lines=True,
+        line_color=[0.5, 0.5, 0.5],
+        line_width=1.0,
+        show_waypoints=True,
+        show_axes=False,
+        show_points=False,
+        lifetime=0,
+    )
+    return path
+
+for robot in omni_manager.objects:
+    robot.set_path(cube_path_for(robot).waypoints)
+
+for robot in diff_manager.objects:
+    direction = random.choice([MovementDirection.FORWARD, MovementDirection.BACKWARD])
+    robot.set_path(cube_path_for(robot).waypoints, direction=direction)
 ```
 
 This pattern — iterate `manager.objects`, get pose, compute per-robot data, call
 single-agent API — is the standard way to initialize heterogeneous fleets.
-
----
-
-## 6. Bulk Operations with the Manager
-
-`AgentManager` provides vectorised versions of the most common per-agent operations.
-These are more readable (and slightly faster) than manual loops:
-
-```python
-# Set a random goal for every agent
-import numpy as np
-
-manager.set_goal_pose_all(
-    lambda agent: Pose.from_xyz(
-        np.random.uniform(-10, 10),
-        np.random.uniform(-10, 10),
-        0.3,
-    )
-)
-
-# Get all poses at once
-poses = manager.get_poses_dict()   # {agent_index: Pose}
-
-# Teleport all agents to new poses
-manager.set_pose_all(
-    lambda agent: Pose.from_xyz(agent.get_pose().position[0], 0, 0.3)
-)
-```
-
-All bulk methods accept a **factory callable** `(Agent) → result` that is called
-once per agent.
-
-> **Note:** These snippets are not in the demo script `100robots_cube_patrol_demo.py`.
-> They show additional `AgentManager` APIs you can use in your own code.
 
 ---
 
@@ -420,15 +468,17 @@ The scale demos in `examples/scale/` have different roles:
 
 | Script | What it demonstrates |
 |--------|---------------------|
-| [`100robots_cube_patrol_demo.py`](https://github.com/yuokamoto/PyBulletFleet/blob/main/examples/scale/100robots_cube_patrol_demo.py) | 100 mobile robots patrolling cube paths — config-driven `managers:` + `fleet_controller:` (this tutorial) |
-| [`100robots_grid_demo.py`](https://github.com/yuokamoto/PyBulletFleet/blob/main/examples/scale/100robots_grid_demo.py) | Primary mixed-fleet grid demo; supports controller, command-interface, and movement switches |
-| [`batch_controller_scale_demo.py`](https://github.com/yuokamoto/PyBulletFleet/blob/main/examples/scale/batch_controller_scale_demo.py) | Focused batch-controller scale demo; `--n` controls robot count and defaults to 500 |
-| [`pick_drop_mobile_100robots_demo.py`](https://github.com/yuokamoto/PyBulletFleet/blob/main/examples/scale/pick_drop_mobile_100robots_demo.py) | 100 mobile robots with pick/drop action sequences and `SimObjectManager` |
-| [`pick_drop_arm_100robots_demo.py`](https://github.com/yuokamoto/PyBulletFleet/blob/main/examples/scale/pick_drop_arm_100robots_demo.py) | 100 fixed-base arms with `JointAction` pick/drop cycles |
+| [`100robots_cube_patrol_demo.py`](https://github.com/yuokamoto/PyBulletFleet/blob/main/pybullet_fleet/examples/scale/100robots_cube_patrol_demo.py) | 100 mobile robots patrolling cube paths; programmatically composes `managers:`/`entities:` and uses `from_dict()` (this tutorial) |
+| [`100robots_grid_demo.py`](https://github.com/yuokamoto/PyBulletFleet/blob/main/pybullet_fleet/examples/scale/100robots_grid_demo.py) | Mobile-only grid demo; merges YAML, applies controller/command choices, then uses `from_dict()` |
+| [`100robots_mixed_demo.py`](https://github.com/yuokamoto/PyBulletFleet/blob/main/pybullet_fleet/examples/scale/100robots_mixed_demo.py) | Husky + Panda mixed-fleet grid scene; merges YAML, adjusts mobile controllers, then uses `from_dict()` |
+| [`batch_controller_scale_demo.py`](https://github.com/yuokamoto/PyBulletFleet/blob/main/pybullet_fleet/examples/scale/batch_controller_scale_demo.py) | Focused batch-controller scale demo; `--robots` controls robot count and defaults to 500 |
+| [`pick_drop_mobile_100robots_demo.py`](https://github.com/yuokamoto/PyBulletFleet/blob/main/pybullet_fleet/examples/scale/pick_drop_mobile_100robots_demo.py) | 100 mobile robots with pick/drop action sequences and `SimObjectManager` |
+| [`pick_drop_arm_100robots_demo.py`](https://github.com/yuokamoto/PyBulletFleet/blob/main/pybullet_fleet/examples/scale/pick_drop_arm_100robots_demo.py) | 100 fixed-base arms with `JointAction` pick/drop cycles |
 
 ```bash
 python examples/scale/100robots_cube_patrol_demo.py
 python examples/scale/100robots_grid_demo.py
+python examples/scale/100robots_mixed_demo.py
 python examples/scale/batch_controller_scale_demo.py --no-gui --duration 5
 python examples/scale/pick_drop_mobile_100robots_demo.py
 python examples/scale/pick_drop_arm_100robots_demo.py
@@ -436,7 +486,7 @@ python examples/scale/pick_drop_arm_100robots_demo.py
 
 ### Switching Robot Models
 
-All scale demos accept a `--robot` argument to swap the robot model at runtime.
+Most scale demos accept a `--robot` argument to swap the robot model at runtime.
 Pass a model name resolved by `resolve_model()` or a direct URDF path:
 
 ```bash
@@ -448,14 +498,15 @@ python examples/scale/pick_drop_mobile_100robots_demo.py --robot mobile_robot
 # Arm demo — use arm models
 python examples/scale/pick_drop_arm_100robots_demo.py --robot kuka_iiwa
 
-# Grid demo — has both mobile and arm robots
-python examples/scale/100robots_grid_demo.py --robot racecar --arm-robot kuka_iiwa
+# Grid demos select entities through a config file instead of model arguments.
+python examples/scale/100robots_grid_demo.py --config config/100robots_config.yaml
+python examples/scale/100robots_mixed_demo.py --config config/100robots_mixed_config.yaml
 ```
 
 | Script | Argument | Default | Alternatives |
 |--------|----------|---------|-------------|
-| `100robots_grid_demo.py` | `--robot` (mobile) | `husky` | `racecar`, `mobile_robot` |
-| `100robots_grid_demo.py` | `--arm-robot` (arm) | `panda` | `kuka_iiwa`, `arm_robot` |
+| `100robots_grid_demo.py` | `--config` | mobile-only grid | another `entities[].grid` YAML scene |
+| `100robots_mixed_demo.py` | `--config` | Husky + Panda grid | another mixed `entities[].grid` YAML scene |
 | `100robots_cube_patrol_demo.py` | `--robot` (mobile) | `husky` | `racecar`, `mobile_robot` |
 | `batch_controller_scale_demo.py` | `--robot` (mobile) | `simple_cube` | `husky`, `racecar`, `mobile_robot` |
 | `pick_drop_mobile_100robots_demo.py` | `--robot` (mobile) | `husky` | `racecar`, `mobile_robot` |
@@ -472,16 +523,16 @@ and `python examples/models/resolve_model_demo.py --list` for all available name
   Physics stepping is O(n) even with kinematic control.
 - **`collision_check_frequency`** — set to `1.0` or lower for offline use; `null` (every step)
   for real-time collision monitoring. See the [Optimization Guide](../benchmarking/optimization-guide).
-- **Motion mode matters** — DIFFERENTIAL robots are ~5× more expensive to update than
-  OMNIDIRECTIONAL due to heading alignment computation.
-  Mixed fleets pay a weighted-average cost.
+- **Controller type matters** — differential movement has additional
+  heading-alignment work compared with omnidirectional movement. Measure the
+representative mix on the target host; see [Benchmark Results](../benchmarking/results.md).
 
 ---
 
 ## See Also
 
 - [Tutorial 1 — Spawning Objects](spawning-objects): single-agent basics
-- [Tutorial 2 — Action System](action-system): `add_action_sequence_all` for fleet-scale tasks
+- [Tutorial 2 — Action System](action-system): action queues for fleet-scale tasks
 - [Benchmark Results](../benchmarking/results): measured throughput at 100–2000 agents
 - [Optimization Guide](../benchmarking/optimization-guide): tuning `collision_check_frequency`, motion mode, physics flag
 - [Configuration Reference](../configuration/index): full YAML parameter list

@@ -66,8 +66,9 @@ simulation:
   #
   # Design philosophy:
   #   - closest_points: Stable with resetBasePositionAndOrientation, supports safety margin
-  #   - contact_points: Fast but requires stepSimulation(), unstable for kinematic-kinematic
-  #   - hybrid: Advanced use, slower due to branching
+  #   - contact_points: physics contact cache; refresh through an explicit
+  #     collision-detection pass, and prefer closest_points for kinematic pairs
+  #   - hybrid: contact_points if either object uses physics; otherwise closest_points
   collision_detection_method: "closest_points"
 
   # Collision safety margin (meters)

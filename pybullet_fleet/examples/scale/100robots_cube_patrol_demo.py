@@ -46,7 +46,7 @@ except ModuleNotFoundError:
     sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", ".."))
     import pybullet_fleet  # noqa: F401
 
-from pybullet_fleet.agent import MotionMode, MovementDirection
+from pybullet_fleet.agent import MovementDirection
 from pybullet_fleet.config_utils import load_yaml_config, merge_configs
 from pybullet_fleet.core_simulation import MultiRobotSimulationCore
 from pybullet_fleet.geometry import Path, Pose
@@ -121,13 +121,17 @@ def main():
     cfg["managers"] = [
         {
             "name": "omni_fleet",
-            "fleet_controller": _fleet_ctrl,
-            **({"batch_controller": "batch_omni"} if use_batch else {}),
+            "fleet_controller": {
+                **_fleet_ctrl,
+                **({"type": "batch_omni"} if use_batch else {}),
+            },
         },
         {
             "name": "diff_fleet",
-            "fleet_controller": _fleet_ctrl,
-            **({"batch_controller": "batch_differential"} if use_batch else {}),
+            "fleet_controller": {
+                **_fleet_ctrl,
+                **({"type": "batch_differential"} if use_batch else {}),
+            },
         },
     ]
     cfg["entities"] = [
@@ -135,7 +139,9 @@ def main():
             "urdf_path": urdf_path,
             "mass": 0.0,
             "use_fixed_base": False,
-            "motion_mode": "omnidirectional",
+            # Retained for --controller per_agent, which omits the manager's
+            # batch type and needs an explicit per-agent fallback.
+            "controller": {"type": "omni"},
             "manager": "omni_fleet",
             "grid": {
                 "x_min": 0,
@@ -150,7 +156,8 @@ def main():
             "urdf_path": urdf_path,
             "mass": 0.0,
             "use_fixed_base": False,
-            "motion_mode": "differential",
+            # Retained for --controller per_agent; see the omni group above.
+            "controller": {"type": "differential"},
             "manager": "diff_fleet",
             "grid": {
                 "x_min": 5,
@@ -180,8 +187,7 @@ def main():
     num_diff = len(diff_manager.objects)
     print(f"✓ Spawned {len(all_robots)} robots: omni={num_omni}, diff={num_diff}")
 
-    num_fwd = num_bwd = num_omni_count = 0
-    for robot in all_robots:
+    def _cube_path(robot):
         spawn_pos = robot.get_pose().position
         path = create_cube_patrol_path(cube_center=[spawn_pos[0], spawn_pos[1], spawn_pos[2] + 2.5])
         path.visualize(
@@ -193,19 +199,22 @@ def main():
             show_points=False,
             lifetime=0,
         )
-        if robot.motion_mode == MotionMode.DIFFERENTIAL:
-            d = random.choice([MovementDirection.FORWARD, MovementDirection.BACKWARD])
-            robot.set_path(path.waypoints, direction=d)
-            if d == MovementDirection.FORWARD:
-                num_fwd += 1
-            else:
-                num_bwd += 1
+        return path
+
+    for robot in omni_manager.objects:
+        robot.set_path(_cube_path(robot).waypoints)
+
+    num_fwd = num_bwd = 0
+    for robot in diff_manager.objects:
+        direction = random.choice([MovementDirection.FORWARD, MovementDirection.BACKWARD])
+        robot.set_path(_cube_path(robot).waypoints, direction=direction)
+        if direction == MovementDirection.FORWARD:
+            num_fwd += 1
         else:
-            robot.set_path(path.waypoints)
-            num_omni_count += 1
+            num_bwd += 1
 
     print("✓ Patrol paths assigned")
-    print(f"  omni={num_omni_count}  diff fwd={num_fwd}  diff bwd={num_bwd}")
+    print(f"  omni={len(omni_manager.objects)}  diff fwd={num_fwd}  diff bwd={num_bwd}")
 
     sim.setup_camera()
 

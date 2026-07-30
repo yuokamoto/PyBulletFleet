@@ -1,401 +1,237 @@
 # Custom Class Profiling Guide
 
-How to profile performance when you subclass `Agent` or `SimObject` with custom logic.
+Profile custom `Agent`, `SimObject`, controller, callback, and plugin logic
+without losing the framework's per-step timing breakdown.
 
----
+## Start with built-in timing
 
-## Overview
-
-When you extend PyBulletFleet with custom agent behavior (e.g., custom `update()`, custom actions, custom collision callbacks), the built-in profiling tools still work — but you may also want to measure your custom code specifically.
-
-This guide covers three approaches:
-
-| Approach | Best For | Overhead |
-|----------|----------|----------|
-| Built-in Profiling (`run_simulation`) | Component breakdown + custom field integration | < 0.1% |
-| cProfile | Finding which custom functions are slow | 5-50% |
-| Standalone `perf_counter` | Per-agent self-contained timing (non-integrated) | ~0% |
-
----
-
-## Approach 1: Built-in Profiling (Recommended First Step)
-
-Your custom `Agent.update()` is automatically measured as part of the `agent_update` component.
-Just enable profiling and run — no code changes needed:
+Enable built-in profiling first. A custom `Agent.update()` runs inside the
+normal step and is already included in both `agent_update` and the broader
+`phase1_update` timing.
 
 ```yaml
-# config.yaml
-enable_time_profiling: true
-profiling_interval: 100
-log_level: info
+simulation:
+  enable_time_profiling: true
+  profiling_interval: 100
+  log_level: info
 ```
 
 ```python
-from pybullet_fleet.core_simulation import SimulationParams, MultiRobotSimulationCore
+from pybullet_fleet.core_simulation import MultiRobotSimulationCore, SimulationParams
 
-params = SimulationParams(
-    gui=False, target_rtf=0, physics=False,
-    enable_time_profiling=True,
-    profiling_interval=100,
+sim = MultiRobotSimulationCore(
+    SimulationParams(
+        gui=False,
+        target_rtf=0,
+        physics=False,
+        enable_time_profiling=True,
+        profiling_interval=100,
+    )
 )
-sim = MultiRobotSimulationCore(params)
-# ... spawn agents, set goals ...
-sim.run_simulation(duration=10.0)
-# Profiling summaries are printed every 100 steps automatically:
-#   [PROFILING] Last 100 steps average: agent_update=1.23ms (45.0%),
-#     callbacks=0.01ms (0.4%), step_simulation=0.05ms (1.8%),
-#     collision_check=0.42ms (15.4%), monitor_update=0.00ms (0.0%),
-#     total=2.73ms (100.0%)
 ```
 
-If `agent_update` is unexpectedly high but you need more detail, read on.
+Use [Time Profiling](time-profiling) for the complete built-in field list.
+The fields most relevant to custom code are:
 
-### 1-1. Adding Custom Fields — Agent Subclass (`record_profiling`)
+| Field | Includes |
+|-------|----------|
+| `agent_update` | Per-object `update(dt)` calls, including custom `Agent.update()` logic. |
+| `callbacks` | Functions registered with `register_callback()`. |
+| `phase1_update` | Pre-step events, batch advance, object updates, callbacks, and simulation plugin hooks. |
+| `phase2_pose_flush` | Buffered base-pose writes committed to PyBullet. |
+| `phase3_aabb_grid_flush` | Post-commit kinematic AABB and spatial-grid synchronization. |
+| `total` | End-to-end framework step time. |
 
-Use `record_profiling()` to break down your custom logic into named fields
-that appear **in the same profiling output** as built-in fields.
-Fields are auto-registered on first call — no separate setup needed.
+`agent_update` is a subset of `phase1_update`; do not add the two values
+together. A custom timing field is also usually a subset of one of these
+fields, rather than an independent portion of `total`.
 
-**Why `+=` (accumulation)?** Each step, 100 agents each call `record_profiling("planner", 0.1)`.
-These are summed: the profiling output shows the **total** planner time across all agents for that step.
-If `=` were used, only the last agent's value would survive.
+## Add named custom fields
+
+Use `sim.record_profiling(name, value_ms)` from code that runs inside a
+simulation step. It auto-registers the field, accumulates contributions from
+all callers in that step, and appears alongside built-in fields in both
+periodic log output and `step_once(return_profiling=True)`.
+
+### Custom `Agent`
 
 ```python
 import time
+
 from pybullet_fleet.agent import Agent
 
 
 class ProfilingAgent(Agent):
-    """Agent subclass that reports custom timing to built-in profiling."""
-
     def update(self, dt: float) -> bool:
-        # Time your custom logic and report to sim_core
         t0 = time.perf_counter()
         self._do_custom_logic(dt)
-        self.sim_core.record_profiling(
-            "custom_logic", (time.perf_counter() - t0) * 1000
-        )
+        self.sim_core.record_profiling("custom_logic", (time.perf_counter() - t0) * 1000)
 
-        # Call parent update
-        t1 = time.perf_counter()
-        moved = super().update(dt)
-        self.sim_core.record_profiling(
-            "path_update", (time.perf_counter() - t1) * 1000
-        )
+        return super().update(dt)
 
-        return moved
-
-    def _do_custom_logic(self, dt: float):
-        # Your custom behavior here
+    def _do_custom_logic(self, dt: float) -> None:
         pass
 ```
 
-Setup and usage:
-
 ```python
-from pybullet_fleet.core_simulation import SimulationParams, MultiRobotSimulationCore
-
-params = SimulationParams(
-    gui=False, target_rtf=0, physics=False,
-    enable_time_profiling=True,  # Enable built-in profiling output
-    profiling_interval=100,
+agent = ProfilingAgent.from_urdf(
+    "robots/mobile_robot.urdf",
+    sim_core=sim,
+    controller={"type": "differential"},
 )
-sim = MultiRobotSimulationCore(params)
-
-# No registration needed — record_profiling() auto-registers on first call
-
-# Spawn your custom agents
-for i in range(100):
-    agent = ProfilingAgent.from_urdf("robots/mobile_robot.urdf", sim)
-    # ... set goals ...
-
-# Run — custom fields appear in the SAME profiling line as built-in fields!
-# Output example (single line, all fields together):
-#   [PROFILING] Last 100 steps average: agent_update=1.23ms (45.0%),
-#     callbacks=0.01ms (0.4%), step_simulation=0.05ms (1.8%),
-#     collision_check=0.42ms (15.4%), monitor_update=0.00ms (0.0%),
-#     total=2.73ms (100.0%), custom_logic=0.50ms (18.3%), path_update=0.73ms (26.7%)
-sim.run_simulation(duration=10.0)
 ```
 
-### 1-2. Adding Custom Fields — SimulationCore Subclass (Direct Write)
+If 100 agents report `"custom_logic"`, the value logged for a step is the
+sum of their 100 measurements. This is useful for finding fleet-wide work;
+use standalone timing below when you need per-agent distributions.
 
-If you subclass `MultiRobotSimulationCore` and override `step_once()`,
-you can write directly to `_profiling_stats` using the same `[-1] = value`
-pattern that built-in fields use. This is appropriate when **one** call
-produces the measurement (no accumulation needed).
+### Callback or plugin work
+
+The same public API works from a registered callback. The callback's complete
+cost remains included in `callbacks`, while the named field identifies the
+portion you chose to measure.
 
 ```python
 import time
-from pybullet_fleet.core_simulation import SimulationParams, MultiRobotSimulationCore
 
 
-class CustomSimCore(MultiRobotSimulationCore):
-    """SimulationCore subclass with a custom profiling field."""
+def planner_callback(sim_core, dt):
+    t0 = time.perf_counter()
+    run_planner(sim_core)
+    sim_core.record_profiling("planner", (time.perf_counter() - t0) * 1000)
 
-    def step_once(self, return_profiling=False):
-        # Let the parent do its normal step (which appends 0.0 to all fields)
-        result = super().step_once(return_profiling=return_profiling)
 
-        # Measure your custom post-step processing
-        measure_timing = self._enable_time_profiling or return_profiling
-        if measure_timing:
-            t0 = time.perf_counter()
-
-        self._custom_post_process()
-
-        if measure_timing:
-            elapsed_ms = (time.perf_counter() - t0) * 1000
-            # Auto-register on first use, then direct assignment (single call per step)
-            data = self._profiling_stats.get("post_process")
-            if data is None:
-                self._profiling_stats["post_process"] = [elapsed_ms]
-            else:
-                data[-1] = elapsed_ms  # Assignment, not +=
-
-        return result
-
-    def _custom_post_process(self):
-        # Your custom logic here
-        pass
+sim.register_callback(planner_callback, frequency=10.0)
 ```
+
+### Programmatic timing results
+
+`return_profiling=True` enables measurement for that call even when periodic
+profiling is disabled. Custom fields recorded during the step are returned in
+the same dictionary.
 
 ```python
-params = SimulationParams(
-    gui=False, target_rtf=0, physics=False,
-    enable_time_profiling=True,
-    profiling_interval=100,
-)
-sim = CustomSimCore(params)
-
-# Spawn agents...
-sim.run_simulation(duration=10.0)
-# Output:
-#   [PROFILING] Last 100 steps average: agent_update=1.23ms (45.0%), ...,
-#     total=2.73ms (100.0%), post_process=0.15ms (5.5%)
+timings = sim.step_once(return_profiling=True)
+print(timings["phase1_update"])
+print(timings.get("custom_logic", 0.0))
 ```
 
-### How the Unified Design Works
+When the simulation is driven by `run_simulation()`, a callback or `SimPlugin`
+can instead read `sim.last_profiling`. It is a read-only snapshot of the
+previous completed profiled step; custom fields are included alongside the
+built-in fields. It is therefore suitable for in-simulation monitoring, but
+not for retaining a history—copy values to your own collector when needed.
 
-All profiling data lives in a single `_profiling_stats: Dict[str, List[float]]` dict.
-Each step follows the same lifecycle:
+Do not write to `_profiling_stats` directly. It is an internal accumulator
+whose lifecycle differs between periodic logging and returned per-step timing.
 
-```
-step start → append(0.0) to ALL existing keys
-           → built-in fields:  _profiling_stats["agent_update"][-1] = value   (assignment)
-           → custom via record_profiling:  _profiling_stats["planner"][-1] += value  (accumulation)
-           → custom via direct write:      _profiling_stats["my_field"][-1] = value  (assignment)
-step end   → _print_profiling_summary() reads ALL keys uniformly
-```
+## Function-level profiling with `cProfile`
 
-There is no separate "custom fields" bucket — everything is a peer in the same dict.
-Built-in fields are defined in `__init__`; custom fields are appended when first used.
-
-**API reference:**
-
-| Method | Description |
-|--------|-------------|
-| `sim.record_profiling(name, value_ms)` | Record timing in ms. Auto-registers on first call. `+=` accumulation (ideal for Agent subclasses where many instances report per step). |
-| `self._profiling_stats[name][-1] = value` | Direct assignment (ideal for SimulationCore subclasses where one call produces the value). |
-
----
-
-## Approach 2: cProfile (Find Slow Custom Functions)
-
-Use Python's `cProfile` to get function-level call graphs that include your custom methods.
-
-### External (No Code Changes)
-
-The simplest way — just run your script with `python -m cProfile`:
+Use `cProfile` when a named custom field identifies a slow area and you need
+the individual functions responsible.
 
 ```bash
-# Sort by cumulative time, show top 30 functions
-python -m cProfile -s cumulative your_script.py 2>&1 | head -40
-
-# Filter to only your module
-python -m cProfile -s cumulative your_script.py 2>&1 | grep -E "ncalls|your_module"
+python -m cProfile -s cumulative your_script.py
 ```
 
-This profiles the entire script including all custom `update()`, action callbacks, and helper methods. No code changes needed.
-
-### Programmatic (Targeted Profiling)
-
-For more control (e.g., profiling only a specific section, excluding setup/teardown):
+For a targeted section, warm up first and then profile only simulation steps
+of interest:
 
 ```python
 import cProfile
 import pstats
-from pybullet_fleet.core_simulation import SimulationParams, MultiRobotSimulationCore
 
-params = SimulationParams(gui=False, target_rtf=0, physics=False)
-sim = MultiRobotSimulationCore(params)
-
-# ... spawn your custom agents, set goals ...
-
-# Warm up
 for _ in range(5):
     sim.step_once()
 
-# Profile
 profiler = cProfile.Profile()
 profiler.enable()
-
 for _ in range(100):
     sim.step_once()
-
 profiler.disable()
 
-# Print results sorted by cumulative time
-stats = pstats.Stats(profiler)
-stats.sort_stats("cumulative")
-stats.print_stats(30)  # Top 30 functions
+pstats.Stats(profiler).sort_stats("cumulative").print_stats(30)
 ```
 
-**Tip:** Filter results to see only your custom module:
+`cProfile` changes execution characteristics, so use it to locate expensive
+functions rather than to publish absolute throughput numbers.
+
+## Per-agent measurements
+
+Use `time.perf_counter()` and retain samples yourself when the distribution
+between agents matters more than fleet-wide totals.
 
 ```python
-stats.print_stats("your_module_name")  # Only functions matching this pattern
-```
-
-Your custom `update()`, action callbacks, and any helper methods will appear in the output with call counts and per-call timing. Look for functions with high `tottime` (time spent in the function itself, excluding callees).
-
----
-
-## Approach 3: Standalone `perf_counter` (Per-Agent, Non-Integrated)
-
-For per-agent timing data without integrating with the built-in profiling system.
-Useful when you want to analyze individual agent performance rather than step-level totals.
-
-```python
+import statistics
 import time
+
 from pybullet_fleet.agent import Agent
 
 
-class ProfilingAgent(Agent):
-    """Agent subclass with self-contained timing instrumentation."""
-
+class PerAgentProfilingAgent(Agent):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self._timing_data = {"custom_logic": [], "path_update": []}
+        self.custom_logic_ms = []
 
     def update(self, dt: float) -> bool:
         t0 = time.perf_counter()
         self._do_custom_logic(dt)
-        t1 = time.perf_counter()
-        self._timing_data["custom_logic"].append((t1 - t0) * 1000)
+        self.custom_logic_ms.append((time.perf_counter() - t0) * 1000)
+        return super().update(dt)
 
-        t2 = time.perf_counter()
-        moved = super().update(dt)
-        t3 = time.perf_counter()
-        self._timing_data["path_update"].append((t3 - t2) * 1000)
-
-        return moved
-
-    def _do_custom_logic(self, dt: float):
+    def _do_custom_logic(self, dt: float) -> None:
         pass
 
-    def print_timing_summary(self):
-        import statistics
-        for name, times in self._timing_data.items():
-            if times:
-                print(f"{name}: mean={statistics.mean(times):.3f}ms, "
-                      f"max={max(times):.3f}ms, calls={len(times)}")
+    def print_timing_summary(self) -> None:
+        if self.custom_logic_ms:
+            print(f"mean={statistics.mean(self.custom_logic_ms):.3f} ms, " f"max={max(self.custom_logic_ms):.3f} ms")
 ```
 
-Usage:
+This measurement is intentionally separate from framework profiling. Avoid
+retaining unbounded samples in long-running simulations; aggregate or export
+them periodically instead.
 
-```python
-from pybullet_fleet.core_simulation import SimulationParams, MultiRobotSimulationCore
-from pybullet_fleet.geometry import Pose
+## Compare a custom agent with the base class
 
-params = SimulationParams(gui=False, target_rtf=0, physics=False)
-sim = MultiRobotSimulationCore(params)
-
-# Spawn profiling agents
-agents = []
-for i in range(100):
-    agent = ProfilingAgent.from_urdf(
-        "robots/mobile_robot.urdf", sim,
-        pose=Pose.from_xyz(i * 2.0, 0, 0),
-    )
-    agents.append(agent)
-
-# Run simulation (standard workflow)
-sim.run_simulation(duration=10.0)
-
-# Print per-agent timing after simulation completes
-for agent in agents[:5]:  # Sample
-    agent.print_timing_summary()
-```
-
-> **Note:** `run_simulation()` is the standard way to run the simulation.
-> Inspect results with `print_timing_summary()` after the run completes.
-> You can also call `step_once()` directly if you need fine-grained loop control,
-> but `run_simulation()` is sufficient for most use cases.
-
----
-
-## Comparing Custom vs Base Performance
-
-To measure the overhead of your custom logic relative to base `Agent`:
+Use the same scene, controller, collision settings, warm-up, and step count
+for both runs. The following minimal helper uses the supported spawning API:
 
 ```python
 import time
-from pybullet_fleet.core_simulation import SimulationParams, MultiRobotSimulationCore
-from pybullet_fleet.agent import Agent, AgentSpawnParams
+
 from pybullet_fleet.geometry import Pose
 
 
-def benchmark(agent_class, label, num_agents=500, num_steps=100):
-    """Benchmark a specific agent class."""
-    params = SimulationParams(gui=False, target_rtf=0, physics=False)
-    sim = MultiRobotSimulationCore(params)
+def benchmark(agent_class, label, num_agents=100, num_steps=100):
+    sim = MultiRobotSimulationCore(SimulationParams(gui=False, target_rtf=0, physics=False))
+    try:
+        for i in range(num_agents):
+            agent = agent_class.from_urdf(
+                "robots/mobile_robot.urdf",
+                pose=Pose.from_xyz(i * 2.0, 0.0, 0.05),
+                mass=0.0,
+                sim_core=sim,
+                controller={"type": "differential"},
+            )
+            agent.set_goal_pose(Pose.from_xyz(i * 2.0 + 1.0, 0.0, 0.05))
 
-    for i in range(num_agents):
-        agent = sim.spawn_agent(
-            AgentSpawnParams(urdf_path="robots/mobile_robot.urdf"),
-            Pose.from_xyz(i * 2.0, 0, 0),
-        )
-        agent.set_goal_pose(Pose.from_xyz(i * 2.0 + 10, 5, 0))
+        for _ in range(5):
+            sim.step_once()
 
-    # Warm up
-    for _ in range(5):
-        sim.step_once()
-
-    # Measure
-    t0 = time.perf_counter()
-    for _ in range(num_steps):
-        sim.step_once()
-    elapsed = (time.perf_counter() - t0) * 1000  # ms
-
-    avg_step = elapsed / num_steps
-    print(f"{label}: {avg_step:.2f} ms/step ({num_agents} agents, {num_steps} steps)")
-
-    sim.cleanup()
-    return avg_step
-
-
-# Compare
-base_time = benchmark(Agent, "Base Agent")
-# custom_time = benchmark(MyCustomAgent, "Custom Agent")
-# overhead = (custom_time - base_time) / base_time * 100
-# print(f"Custom overhead: {overhead:.1f}%")
+        t0 = time.perf_counter()
+        for _ in range(num_steps):
+            sim.step_once()
+        print(f"{label}: {(time.perf_counter() - t0) * 1000 / num_steps:.2f} ms/step")
+    finally:
+        sim.cleanup()
 ```
 
----
+Run multiple trials and compare the resulting distributions. For repeatable
+repository benchmarks, use the benchmark suite rather than this exploratory
+helper.
 
-## Tips
+## See also
 
-- **Start with Approach 1** (`enable_time_profiling=True` + `run_simulation`) to see if `agent_update` is actually the bottleneck. Don't optimize what isn't slow.
-- **Use `target_rtf=0`** for benchmarks — eliminates sleep/sync noise.
-- **Use `gui=False`** — rendering adds significant overhead.
-- **Warm up** before measuring (3-5 steps) to avoid PyBullet initialization costs.
-- **Run multiple iterations** and report mean/median — single measurements are noisy.
-- **Profile with realistic conditions** — use the same agent count, collision settings, and goal patterns as production.
-
----
-
-## See Also
-
-- [Time Profiling User Guide](time-profiling) — Using `enable_time_profiling` and `step_once(return_profiling=True)`
-- [Profiling Guide](../benchmarking/profiling-guide) — Standalone benchmark scripts (`simulation_profiler.py`, `agent_update.py`, etc.) for deeper analysis
+- [Time Profiling User Guide](time-profiling) — Built-in fields and returned timing dictionaries
+- [Profiling Guide](../benchmarking/profiling-guide) — Repository benchmark tools
+- [Two-Phase Step](../architecture/two-phase-step) — Step lifecycle and buffered pose commits

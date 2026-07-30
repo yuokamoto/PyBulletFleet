@@ -2,7 +2,24 @@
 
 <video src="../robot_demo.mp4" width="100%" autoplay loop muted playsinline></video>
 
-**Source file:** [`examples/basics/robot_demo.py`](https://github.com/yuokamoto/PyBulletFleet/blob/main/examples/basics/robot_demo.py)
+**Runnable source:** [`pybullet_fleet/examples/basics/robot_demo.py`](https://github.com/yuokamoto/PyBulletFleet/blob/main/pybullet_fleet/examples/basics/robot_demo.py)
+
+## How this tutorial relates to the runnable demo
+
+`robot_demo.py` is the runnable backbone for this page. Its setup creates the
+pallet, PyBullet box, mesh agent, fixed-base arm, and the movement/joint
+callbacks described below. A few sections deliberately show standalone API
+variants so that the underlying tools are understandable outside that one demo.
+
+| Sections | Relationship to `robot_demo.py` |
+| --- | --- |
+| 2–5 | Same objects and agent types as the demo; paths and formatting are simplified for readability |
+| 6 | Standalone pose API example; not executed by the demo |
+| 7–9 | Derived from the demo callbacks and their public APIs |
+| 1 | Exact demo initialization, including YAML merge and `from_dict()` |
+
+When copying a snippet, treat it as a focused API example unless it is the
+complete runnable script linked above.
 
 This tutorial walks through the fundamental building blocks of every PyBulletFleet simulation:
 
@@ -22,13 +39,17 @@ After this tutorial you can move on to
 
 ## 1. Initialize the Simulation
 
-Every simulation starts by creating a `MultiRobotSimulationCore` — the recommended way is
-`from_yaml()`, which loads all parameters from a nested YAML config file in one call:
+Every simulation starts by creating a `MultiRobotSimulationCore`. The runnable
+demo loads the bundled base YAML, applies its scene-specific overrides, and then
+creates the core from the resulting dictionary:
 
 ```python
 from pybullet_fleet.core_simulation import MultiRobotSimulationCore
+from pybullet_fleet.config_utils import load_yaml_config, merge_configs
 
-sim_core = MultiRobotSimulationCore.from_yaml("config/config.yaml")
+base_config = load_yaml_config("config/config.yaml")
+overrides = {"simulation": {"timestep": 0.01, "physics": True}}
+sim_core = MultiRobotSimulationCore.from_dict(merge_configs(base_config, overrides))
 ```
 
 The YAML file uses a nested format under the `simulation:` key:
@@ -38,6 +59,17 @@ simulation:
   gui: true
   timestep: 0.01
   physics: true
+```
+
+The package-relative `config/config.yaml` path resolves both in a source
+checkout and from the installed wheel. Use the runnable script when you want
+the exact scene shown in the video.
+
+For a YAML file that needs no programmatic overrides, `from_yaml()` remains the
+shorter alternative:
+
+```python
+sim_core = MultiRobotSimulationCore.from_yaml("my_scenario.yaml")
 ```
 
 **Key parameters:**
@@ -147,20 +179,28 @@ cube_agent = Agent.from_mesh(
     ),
     collision_shape=ShapeParams(shape_type="box", half_extents=[0.3, 0.3, 0.3]),
     pose=Pose.from_xyz(0, 0, 0.5),
-    max_linear_vel=1.5,     # m/s
+    controller={"type": "differential", "max_linear_vel": 1.5},
     sim_core=sim_core,
 )
 ```
 
-**Key Agent parameters:**
+**Key factory and controller parameters:**
 
 | Parameter | Description |
 |-----------|-------------|
-| `max_linear_vel` | Maximum speed in m/s |
-| `max_linear_accel` | Acceleration limit in m/s² (smooth ramp-up) |
-| `max_angular_vel` | Maximum rotation speed in rad/s (differential drive) |
-| `motion_mode` | `MotionMode.OMNIDIRECTIONAL` (default) or `MotionMode.DIFFERENTIAL` |
+| `controller.max_linear_vel` | Maximum speed in m/s; supplied in the `controller={...}` dictionary |
+| `controller.max_linear_accel` | Acceleration limit in m/s² (smooth ramp-up) |
+| `controller.max_angular_vel` | Maximum rotation speed in rad/s (differential drive) |
+| `controller.type` | Explicit controller selection, for example `"omni"` or `"differential"` |
 | `mass` | `0.0` for kinematic (teleport-based), `> 0` for physics-driven |
+| `use_fixed_base` | Pin the agent base to the world frame |
+
+The motion limits belong inside `controller`, not as direct `Agent.from_mesh()`
+keyword arguments. See [Controller Configuration](../how-to/controller-config)
+for the complete controller forms and precedence rules.
+
+This example explicitly selects the differential controller. Specify the
+controller type in new code rather than relying on compatibility fallbacks.
 
 ### Understanding `mass` and Kinematic Mode
 
@@ -256,7 +296,7 @@ Leave it `False` for mobile robots.
 
 ---
 
-## 6. Getting and Setting Poses
+## 6. Getting and Setting Poses (standalone API example)
 
 All `SimObject` and `Agent` instances expose `get_pose()` and `set_pose()`:
 
@@ -326,9 +366,14 @@ sim_core.register_callback(cube_random_movement_callback, frequency=10)
 
 | Value | When the callback fires |
 |-------|------------------------|
-| `10` | At most 10 times per simulated second |
-| `1` | Once per simulated second |
+| `10` | On the first simulation step at or after each 0.1 s interval; normally 10 Hz when the timestep aligns |
+| `1` | On the first simulation step at or after each 1 s interval |
 | `None` | Every simulation step (no throttling) |
+
+`frequency` is evaluated against simulation time, not wall-clock time. Because
+callbacks run only at step boundaries and do not run extra times to catch up,
+it is a maximum scheduling rate rather than a guarantee of exactly N calls in
+every simulated second.
 
 **Useful `sim_core` attributes inside a callback:**
 
@@ -385,13 +430,30 @@ All registered callbacks fire automatically each step.
 
 ---
 
-## Full Example
+## Run the complete example
 
-The complete script is at `examples/basics/robot_demo.py`.
-Run it from the project root:
+The complete script is bundled with the package. Run it without a checkout:
 
 ```bash
+pybullet-fleet examples --run robot_demo.py
+```
+
+To inspect or modify it, copy the examples first and then run the copied file:
+
+```bash
+pybullet-fleet examples --copy ./examples
 python examples/basics/robot_demo.py
+```
+
+---
+
+```{note}
+**Spawning through ROS 2:** the bridge exposes `/sim/spawn_entity` for a
+runtime URDF Agent with a name and initial pose.  It is useful for test tools
+and simple scenario clients, but it does not expose the full Python spawn
+parameter set or create `SimObject`s.  See [dynamic spawning through the ROS 2
+bridge](../ros2/overview.md#dynamic-spawning) for the supported fields and choose
+YAML or the Python API when controller and object settings matter.
 ```
 
 ---
@@ -400,5 +462,5 @@ python examples/basics/robot_demo.py
 
 - [Tutorial 2 — Action System](action-system): sequence Pick, Drop, Move, and Wait tasks
 - [Tutorial 3 — Managing a Fleet](multi-robot-fleet): `AgentManager`, grid spawn, `set_path`
-- [`examples/mobile/path_following_demo.py`](https://github.com/yuokamoto/PyBulletFleet/blob/main/examples/mobile/path_following_demo.py): detailed `set_path` demo with 2D and 3D waypoints
+- [`examples/mobile/path_following_demo.py`](https://github.com/yuokamoto/PyBulletFleet/blob/main/pybullet_fleet/examples/mobile/path_following_demo.py): detailed `set_path` demo with 2D and 3D waypoints
 - [API Reference](../api/index): full Agent, SimObject, and related class documentation

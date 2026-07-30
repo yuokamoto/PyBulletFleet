@@ -131,12 +131,12 @@ All times are in milliseconds.
 
 | Key | What it measures |
 |-----|-----------------|
-| `phase1_update` | Full Phase 1: agent.update + callbacks + plugin on_step (buffered writes) |
+| `phase1_update` | Full Phase 1: pre-step events + batch-controller advance + object update + callbacks + plugin hooks (framework base-pose writes are buffered) |
 | `phase2_pose_flush` | Phase 2: flush buffered poses to PyBullet |
-| `phase3_aabb_grid_flush` | Phase 3: kinematic AABB refresh + spatial-grid update |
+| `phase3_aabb_grid_flush` | Post-commit synchronization: kinematic AABB refresh + spatial-grid update (the metric name is retained for compatibility) |
 | `agent_update` | Per-object update loop only (subset of `phase1_update`, kept for backward compat) |
 | `callbacks` | User-registered callbacks via `register_callback()` |
-| `step_simulation` | `p.stepSimulation()` — non-zero only when `physics=True` |
+| `step_simulation` | `p.stepSimulation()` plus physics-object AABB/grid refresh — non-zero only when `physics=True` |
 | `collision_check` | Broad phase (spatial hash) + narrow phase total |
 | `collision_breakdown` | Nested dict — present only when collision ran (see below) |
 | `events_pre_step` | EventBus `pre_step` dispatch |
@@ -174,6 +174,29 @@ for i in range(500):
 ```
 
 This is useful for custom analysis, plotting, or CI performance regression tests.
+
+### Latest completed result during `run_simulation()`
+
+When using `run_simulation()`, enable time profiling and read
+`sim.last_profiling` from a callback or `SimPlugin`. It is a read-only mapping
+for the **previous completed step**, so all phases (including physics and
+collision detection) have finished. It has the same fields and millisecond
+units as `step_once(return_profiling=True)`.
+
+```python
+def adaptive_monitor(sim, dt):
+    previous = sim.last_profiling
+    if previous is not None and previous["collision_check"] > 5.0:
+        print(f"collision work: {previous['collision_check']:.2f} ms")
+
+
+sim.register_callback(adaptive_monitor, frequency=10.0)
+sim.run_simulation()
+```
+
+The property is `None` until one profiled step has completed, and remains
+`None` while profiling is disabled. Use `step_once(return_profiling=True)`
+when every individual result must be retained or exported.
 
 ---
 

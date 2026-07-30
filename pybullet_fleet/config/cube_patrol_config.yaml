@@ -28,16 +28,16 @@ simulation:
 
 managers:
   - name: omni_fleet
-    batch_controller: batch_omni
     fleet_controller:
+      type: batch_omni
       max_linear_vel: 2.0
       max_linear_accel: 1.0
       max_angular_vel: 2.0
       max_angular_accel: 5.0
 
   - name: diff_fleet
-    batch_controller: batch_differential
     fleet_controller:
+      type: batch_differential
       max_linear_vel: 2.0
       max_linear_accel: 1.0
       max_angular_vel: 2.0
@@ -47,7 +47,9 @@ entities:
   - urdf_path: "robots/mobile_robot.urdf"  # replace with your robot
     mass: 0.0
     use_fixed_base: false
-    motion_mode: omnidirectional
+    # Per-agent fallback when the manager omits fleet_controller.type.
+    controller:
+      type: omni
     manager: omni_fleet
     grid:
       x_min: 0
@@ -60,7 +62,9 @@ entities:
   - urdf_path: "robots/mobile_robot.urdf"  # replace with your robot
     mass: 0.0
     use_fixed_base: false
-    motion_mode: differential
+    # Per-agent fallback when the manager omits fleet_controller.type.
+    controller:
+      type: differential
     manager: diff_fleet
     grid:
       x_min: 5

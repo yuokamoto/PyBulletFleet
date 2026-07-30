@@ -89,7 +89,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 import pybullet as p
 from pybullet_fleet.core_simulation import MultiRobotSimulationCore, SimulationParams
 from pybullet_fleet.agent_manager import AgentManager, GridSpawnParams
-from pybullet_fleet.agent import AgentSpawnParams, MotionMode
+from pybullet_fleet.agent import AgentSpawnParams
 
 
 def _mark_all_objects_moved(sim_core) -> None:
@@ -140,8 +140,8 @@ def setup_simulation(num_agents: int, spacing: float = 0.08):
     robot_urdf = "simple_cube"
     agent_spawn_params = AgentSpawnParams(
         urdf_path=robot_urdf,
-        motion_mode=MotionMode.OMNIDIRECTIONAL,
         controller={
+            "type": "omni",
             "max_linear_vel": 2.0,
             "max_angular_vel": 3.0,
         },

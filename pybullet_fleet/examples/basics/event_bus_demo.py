@@ -34,7 +34,7 @@ from pybullet_fleet.config_utils import load_yaml_config, merge_configs
 from pybullet_fleet.events import SimEvents
 from pybullet_fleet.geometry import Path
 from pybullet_fleet.sim_object import SimObject, SimObjectSpawnParams, ShapeParams
-from pybullet_fleet.types import MotionMode, CollisionMode
+from pybullet_fleet.types import CollisionMode
 
 
 _BASE_CONFIG = "config/config.yaml"
@@ -108,8 +108,7 @@ def main():
         AgentSpawnParams(
             urdf_path="robots/mobile_robot.urdf",
             initial_pose=Pose.from_xyz(0, 0, 0.1),
-            motion_mode=MotionMode.OMNIDIRECTIONAL,
-            controller={"max_linear_vel": 2.0},
+            controller={"type": "omni", "max_linear_vel": 2.0},
             collision_mode=CollisionMode.NORMAL_2D,
             name="robot_1",
         ),

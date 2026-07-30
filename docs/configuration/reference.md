@@ -1,257 +1,254 @@
-# Configuration Files Guide
+# Configuration Reference
 
-## Overview
-
-PyBulletFleet provides multiple configuration files for different simulation modes and benchmarking scenarios.
-
-## Configuration Files
-
-### Production Configurations
-
-#### `config.yaml` (Default)
-- General-purpose configuration
-- Auto-selects collision detection method based on physics mode
-- Recommended starting point for most use cases
-- **All parameters are documented with inline comments** — open [`config/config.yaml`](https://github.com/yuokamoto/PyBulletFleet/blob/main/config/config.yaml) for the full reference with explanations, recommended values, and usage examples
-
-#### `config_physics_off.yaml` (Kinematics Mode) ✅ Recommended
-- **Use case**: Path planning, collision avoidance, high-speed simulation
-- **Physics**: OFF (no `stepSimulation()`)
-- **Collision method**: `closest_points` (distance-based, kinematics-safe)
-- **Collision margin**: 2cm safety clearance
-- **Target RTF**: 100x real-time
-- **Key features**:
-  - Fast and deterministic
-  - Stable with `resetBasePositionAndOrientation()`
-  - Safety margin detection (near-miss detection)
-
-#### `config_physics_on.yaml` (Physics Mode) 🔬
-- **Use case**: Physics simulation, debugging, contact analysis
-- **Physics**: ON (`stepSimulation()` every step)
-- **Collision method**: `contact_points` (actual contact manifold)
-- **Target RTF**: 1x real-time
-- **Key features**:
-  - Realistic physics behavior (mass, friction, push-back)
-  - Actual contact logging
-  - Visual collision feedback (color change)
-
-#### `config_hybrid.yaml` (Mixed Mode) 🚧 Advanced
-- **Use case**: Mixed physics/kinematic scenarios
-- **Physics**: ON (required)
-- **Collision method**: `hybrid` (contact for physics, closest for kinematic)
-- **Collision margin**: 5cm safety for kinematic pairs
-- **Key features**:
-  - Different detection for different object types
-  - Slower due to branching overhead
-  - Requires careful tuning
-
-### Benchmark Configurations
-
-#### `benchmark_physics_off_closest.yaml`
-- Headless, profiling-enabled
-- Physics OFF + CLOSEST_POINTS
-- 10-second duration, maximum speed
-
-#### `benchmark_physics_on_contact.yaml`
-- Headless, profiling-enabled
-- Physics ON + CONTACT_POINTS
-- 10-second duration, maximum speed
-
-#### `benchmark_hybrid.yaml`
-- Headless, profiling-enabled
-- Physics ON + HYBRID
-- 10-second duration, maximum speed
-
-## Agent / Robot Spawn Schema
-
-Robot-spawn blocks (e.g. `mobile_robot:`, `arm_robot:` in
-[`config/100robots_config.yaml`](https://github.com/yuokamoto/PyBulletFleet/blob/main/config/100robots_config.yaml))
-are consumed by `AgentSpawnParams.from_dict` and then routed through
-`Agent.from_params`.  Controller-related fields live **only** under a
-nested `controller:` block — there is no top-level `max_linear_vel:` /
-`max_angular_vel:` shortcut.  This keeps a single source of truth for
-controller params across YAML, Python `dict`, and the Python kwarg API.
-
-### Canonical block
+`MultiRobotSimulationCore.from_yaml()` and `from_dict()` use this nested
+layout. A flat simulation-parameter dictionary is still supported for
+compatibility, but new configurations should use the nested form.
 
 ```yaml
-mobile_robot:
-  urdf_path: "robots/mobile_robot.urdf"
-  initial_z: 0.3
-  use_fixed_base: false
-  motion_mode: omnidirectional        # optional; deprecated as selector
-  controller:                         # single source of truth
-    type: omni                        # registry name (omni / differential / batch_omni / ...)
-    max_linear_vel: 2.0               # scalar (magnitude) or [vx, vy, vz] per-axis cap
-    max_angular_vel: 2.0              # scalar or [wx, wy, wz]
-    max_linear_accel: 5.0
-    max_angular_accel: 5.0
-    navigation_2d: true               # preserve z during pose-mode trajectories
-    cmd_vel_timeout: 0.5              # velocity-command watchdog (s); 0.0 disables
-    default_direction: forward        # differential-drive only; forward / backward / auto
-    # impl extras (routed to the controller subclass __init__):
-    wheel_separation: 0.3             # DifferentialController
+simulation: {}      # SimulationParams fields
+world: {}           # Optional SDF/world/mesh environment
+entity_classes: {}  # Optional custom entity type registry
+managers: []        # Optional named entity managers
+entities: []        # Agents, sim objects, and devices to spawn
+plugins: []         # Optional simulation-wide plugins
 ```
 
-### Key routing rules
-
-| YAML key | Where it goes | Notes |
-|----------|---------------|-------|
-| `controller.type` | Registry lookup → `Controller` subclass | Required for non-default controllers (everything except the `motion_mode` fallback). |
-| `controller.max_*` | `ControllerParams` fields | Scalar or 3-element list.  Same value seen by per-agent and batched controllers. |
-| `controller.navigation_2d`, `cmd_vel_timeout`, `default_direction` | `ControllerParams` fields | Behaviour flags shared by every controller. |
-| `controller.<other>` | Subclass `__init__` kwarg | Routed via `inspect.signature` in `Controller.from_config`.  Unknown-to-`ControllerParams` keys are silently dropped from the params dict. |
-| `motion_mode` | Fallback selector | Deprecated as a controller selector.  Only used when `controller=None` (no `type` given).  A warning is logged when `motion_mode` and `controller.type` disagree. |
-
-### Equivalence with the Python API
-
-The same dict is accepted verbatim by the Python kwarg `controller=`:
-
-```python
-agent = Agent.from_urdf(
-    "robots/mobile_robot.urdf",
-    controller={
-        "type": "omni",
-        "max_linear_vel": 2.0,
-        "max_angular_vel": 2.0,
-    },
-)
+```{note}
+`pybullet_fleet/config/config.yaml` is a runnable starting point, not the
+exhaustive parameter reference. This page describes the supported schema.
 ```
 
-See the [Controller Configuration how-to](../how-to/controller-config)
-for the full guide to all five accepted forms of `controller=` (None /
-string / dict / `Controller` instance / `ControllerParams` instance),
-custom controllers, and the `motion_mode` vs `controller.type`
-interaction rules.
+## Simulation
 
-## Centralized Default Management (`_defaults.py`)
+Keys under `simulation:` map to `SimulationParams`. `None` means automatic or
+disabled behaviour.
 
-All simulation parameter defaults live in a single module:
-**`pybullet_fleet/_defaults.py`**.
+| Key | Default | Meaning |
+|---|---:|---|
+| `target_rtf` | `1.0` | Real-time factor. `0` runs without pacing; a positive value is the target simulation-time / wall-time ratio. |
+| `timestep` | `0.1` | Simulation seconds per step. |
+| `duration` | `0` | Default `run_simulation()` duration; `0` runs until interrupted or the GUI closes. |
+| `gui` / `physics` | `true` / `false` | Open a GUI / call `p.stepSimulation()` and update physics bodies each step. |
+| `monitor` / `enable_monitor_gui` | `true` / `true` | Enable DataMonitor and its optional tkinter window. |
+| `log_level` | `warn` | Python logging level applied to the process root logger. |
+| `max_steps_per_frame` | `10` | Catch-up-step limit used by the pacing loop. |
+| `max_sleep_frames` | `4.0` | Maximum one pacing sleep in normal frame intervals. |
+| `gui_min_fps` | `30` | GUI responsiveness target used by the pacing loop. |
+| `enable_floor` | `true` | Load the default plane. `world:` disables it unless explicitly set. |
+| `model_paths` | `None` | Additional model-search directories. |
+| `window_width` / `window_height` | `1024` / `768` | PyBullet GUI window size. |
+| `monitor_width` / `monitor_height` | `200` / `290` | DataMonitor window size. |
+| `monitor_x` / `monitor_y` | `-1` / `-1` | DataMonitor location; `-1` leaves placement to the window manager. |
 
-```
-_DEFAULTS dict
-  └── simulation / agent / sim_object / shape / ik
-       └── key: value  (the ONLY place defaults are defined)
-```
+### Profiling
 
-### Override priority
+| Key | Default | Meaning |
+|---|---:|---|
+| `enable_time_profiling` | `false` | Collect and periodically log per-step timing fields. |
+| `enable_memory_profiling` | `false` | Collect Python allocation measurements through `tracemalloc`. |
+| `profiling_interval` | `100` | Steps per periodic time and memory report. |
 
-| Layer | Mechanism | Example |
-|-------|-----------|--------|
-| 1. Code defaults | `_DEFAULTS` dict in `_defaults.py` | `"timestep": 0.1` |
-| 2. `.env` file | Auto-loaded if `python-dotenv` is installed (`override=False` — fills missing keys only) | `PBF_SIMULATION_GUI=false` |
-| 3. Environment vars | `PBF_{SECTION}_{KEY}` — shell env vars override `.env` | `PBF_SIMULATION_TIMESTEP=0.05` |
-| 4. YAML config | `config.yaml` passed to `from_yaml()` | `timestep: 0.02` |
-| 5. Constructor args | Explicit `SimulationParams(...)` keyword | `SimulationParams(timestep=0.01)` |
+See [Time Profiling](../how-to/time-profiling) and
+[Memory Profiling](../how-to/memory-profiling). Set `log_level: info` to show
+their periodic reports.
 
-Later layers win.  The `_defaults.py` module exposes convenience dicts
-(`SIMULATION`, `AGENT`, `SIM_OBJECT`, etc.) for direct import.
+### Collision and visualisation
 
-### Using defaults in your code
+| Key | Default | Meaning |
+|---|---:|---|
+| `collision_check_frequency` | `None` | `None`: every step; `0`: disabled; positive value: Hz. |
+| `collision_detection_method` | automatic | `closest_points`, `contact_points`, or `hybrid`. Automatic selection is closest-points without physics and contact-points with physics. |
+| `collision_margin` | `0.02` | Metres used by closest-points checks; ignored by contact-points checks. |
+| `spatial_hash_cell_size_mode` | `auto_initial` | `auto_initial`, `auto_adaptive`, or `constant`. |
+| `spatial_hash_cell_size` | `None` | Fixed cell size in metres when mode is `constant`. |
+| `multi_cell_threshold` | `1.5` | Dimensionless cell-size multiplier for multi-cell registration. |
+| `ignore_static_collision` | `true` | Skip every pair containing an entity with `collision_mode: static`. |
+| `enable_collision_color_change` | `false` | Change object colour while a collision is active. |
+| `enable_collision_shapes` | `false` | Initially show collision-shape wireframes in the GUI. |
+| `enable_structure_transparency` | `false` | Initially render structure bodies semi-transparently. |
+| `enable_shadows` / `enable_gui_panel` | `true` / `false` | PyBullet visualiser options. |
 
-```python
-from pybullet_fleet._defaults import get
+See [Collision Configuration](../how-to/collision-config) and
+[Collision Internals](../architecture/collision-internals) for behaviour and
+tuning guidance.
 
-timestep = get("simulation", "timestep")   # 0.1 (or env-overridden)
-max_vel  = get("agent", "max_linear_vel")  # 2.0
-```
+### Camera
 
-## Usage Examples
+`camera` is accepted as an alias for `camera_config`.
 
-### Load Configuration in Python
-
-```python
-from pybullet_fleet.core_simulation import MultiRobotSimulationCore
-
-# Load default config
-sim = MultiRobotSimulationCore.from_yaml("config/config.yaml")
-
-# Load kinematics mode config
-sim = MultiRobotSimulationCore.from_yaml("config/config_physics_off.yaml")
-
-# Load physics mode config
-sim = MultiRobotSimulationCore.from_yaml("config/config_physics_on.yaml")
-```
-
-### Run Config-Based Benchmark
-
-```bash
-# Run comparison benchmark using all config files
-python benchmark/collision_methods_config_based.py
-```
-
-This will compare:
-1. Physics OFF + CLOSEST_POINTS (kinematics)
-2. Physics ON + CONTACT_POINTS (physics)
-3. Physics ON + HYBRID (mixed)
-
-## Key Parameters Explained
-
-This section highlights the most important parameters. For a **complete list with detailed explanations**, see the inline comments in [`config/config.yaml`](https://github.com/yuokamoto/PyBulletFleet/blob/main/config/config.yaml).
-
-### `physics` (bool)
-- `false`: Kinematics mode (no `stepSimulation()`, fast, deterministic)
-- `true`: Physics mode (`stepSimulation()` every step, realistic dynamics)
-
-### `collision_detection_method` (string)
-- `"closest_points"`: Distance-based detection (recommended for kinematics)
-- `"contact_points"`: Physics contact manifold (recommended for physics)
-- `"hybrid"`: Mixed approach — physics pairs use contact, kinematic pairs use closest (advanced)
-
-If omitted, the method is auto-selected based on `physics`:
-- `physics: false` → `"closest_points"`
-- `physics: true` → `"contact_points"`
-
-See [Collision Detection Narrow-Phase Details](narrow-phase-details-pybullet-apis) for design rationale, trade-offs, and method comparison.
-
-### `collision_margin` (float, meters)
-Safety clearance for `getClosestPoints()`. Default: `0.02` (2cm).
-Only affects `CLOSEST_POINTS` and `HYBRID` modes.
-
-See [Collision Configuration Guide](collision-margin) for tuning guidance.
-
-### `multi_cell_threshold` (float, dimensionless multiplier)
-Controls when objects are registered in multiple spatial-hash cells.
-Objects larger than `cell_size × multi_cell_threshold` span multiple cells.
-- `1.0`: Every object that exceeds one cell is multi-registered
-- `1.5`: Default — objects >1.5× the cell size span multiple cells ✅
-- `2.0+`: Only very large objects are multi-registered
-
-**Unit**: Dimensionless (multiplier of `cell_size`). For example, with `cell_size=2.0` and `multi_cell_threshold=1.5`, the threshold becomes 3.0 m.
-
-## Choosing the Right Configuration
-
-### Decision Tree
-
-```
-Are you doing physics simulation (mass, friction, dynamics)?
-├─ NO  → Use config_physics_off.yaml
-│        ✅ Fast, deterministic, kinematics-safe
-│        ✅ Safety margin detection
-│        ✅ High-speed simulation (100x+)
-│
-└─ YES → Are all objects physics-based (mass > 0)?
-         ├─ YES → Use config_physics_on.yaml
-         │        ✅ Fastest physics mode
-         │        ✅ Actual contact logging
-         │
-         └─ NO  → Use config_hybrid.yaml
-                  ⚠️ Slower but handles mixed scenarios
-                  ⚠️ Requires tuning
+```yaml
+simulation:
+  camera:
+    camera_mode: auto
+    camera_view_type: perspective
+    camera_auto_scale: 0.6
 ```
 
-### Common Use Cases
+Manual camera settings can specify `camera_distance`, `camera_yaw`,
+`camera_pitch`, and `camera_target`. Recording camera selection is documented
+in [Capturing Demo Videos](../how-to/capturing-demos).
 
-| Use Case | Recommended Config | Why |
-|----------|-------------------|-----|
-| Path planning | `config_physics_off.yaml` | Fast, deterministic, safety margin |
-| Multi-robot coordination | `config_physics_off.yaml` | High-speed, collision avoidance |
-| Physics simulation | `config_physics_on.yaml` | Realistic dynamics |
-| Mixed physics/kinematics | `config_hybrid.yaml` | Different detection per type |
+## World
+
+`world:` loads environment geometry before `entities:`. The loader selects one
+source in this order: `world_file`, `sdf`, then `mesh_dir`.
+
+```yaml
+world:
+  world_file: environments/office.world  # or: sdf: environments/office.sdf
+  skip_models: [existing_robot_name]
+  force_color: [0.7, 0.7, 0.7, 1.0]     # optional flat world-mesh colour
+```
+
+Use `mesh_dir: environments/meshes` to load a directory of OBJ/STL meshes.
+Named entities are automatically added to `skip_models` for a `world_file`, so
+they are not loaded twice.
+
+## Entity classes and entities
+
+`entities:` is a list. Each entry defaults to `type: agent`; use
+`type: sim_object` for a passive object, or register a custom type through
+`entity_classes:`.
+
+```yaml
+entity_classes:
+  forklift: my_package.entities.ForkliftAgent
+
+entities:
+  - name: robot_0
+    urdf_path: robots/mobile_robot.urdf
+    pose: [0.0, 0.0, 0.05]
+    mass: 0.0
+    controller:
+      type: differential
+
+  - type: sim_object
+    name: rack
+    visual_shape: {shape_type: box, half_extents: [1.0, 0.4, 1.0]}
+    collision_shape: {shape_type: box, half_extents: [1.0, 0.4, 1.0]}
+    pose: [3.0, 0.0, 1.0]
+    collision_mode: static
+```
+
+Common keys are `name`, `pose`, `mass`, `user_data`, `visual_shape`,
+`collision_shape`, and `collision_mode`. Agents also accept `urdf_path`,
+`sdf_path`, `use_fixed_base`, `controller`, and agent `plugins`.
+
+`collision_mode` is per entity: `normal_3d`, `normal_2d`, `static`, or
+`disabled`. `static` is for fixed structures; `ignore_static_collision` skips
+all pairs involving that object.
+
+### Grid entities
+
+Add `grid:` to expand an entity entry. The count-based form is concise:
+
+```yaml
+entities:
+  - name: robot
+    urdf_path: robots/mobile_robot.urdf
+    controller: {type: omni}
+    grid:
+      count: 100
+      columns: 10             # optional; defaults to ceil(sqrt(count))
+      spacing: [2.0, 2.0]
+      offset: [0.0, 0.0, 0.05]
+```
+
+The range-based form accepts `x_min`, `x_max`, `y_min`, `y_max`, `spacing`,
+and `offset`, with optional `z_min` / `z_max` for layers.
+
+### Controller selection
+
+Use explicit `controller.type` for new entities. `motion_mode` is a deprecated
+fallback and should not be added to new YAML.
+
+```yaml
+controller:
+  type: differential
+  max_linear_vel: 1.5
+  max_angular_vel: 2.0
+```
+
+The YAML value may be `null`, a registry-name string, a mapping, or a list of
+mappings for a controller chain. Python APIs also accept `Controller` and
+`ControllerParams` instances. See [Controller Configuration](../how-to/controller-config).
+
+## Named managers and fleet controllers
+
+Managers must be declared before entities that reference them. They own shared
+controller defaults and optional batch execution.
+
+```yaml
+managers:
+  - name: delivery_fleet
+    fleet_controller:
+      type: batch_differential
+      max_linear_vel: 1.5
+      max_linear_accel: 2.0
+
+entities:
+  - urdf_path: robots/mobile_robot.urdf
+    manager: delivery_fleet
+    grid:
+      count: 50
+      spacing: [2.0, 2.0]
+```
+
+Built-in batch types are `batch_omni` and `batch_differential`. A custom batch
+controller may use a registered name or dotted class path. Omit
+`fleet_controller.type` for per-agent execution with shared defaults.
+`batch_controller` and `fleet_controller` are not valid directly under an
+entity.
+
+## Plugins
+
+Simulation-wide plugins are root entries. Per-agent plugins are nested below
+an entity. Both accept registry `type` or dotted `class`, plus `config`.
+
+```yaml
+plugins:
+  - class: my_package.plugins.TrafficMonitor
+    frequency: 2.0
+    config:
+      log_interval: 5.0
+
+entities:
+  - urdf_path: robots/mobile_robot.urdf
+    plugins:
+      - type: battery
+        config:
+          capacity: 100.0
+```
+
+See [Plugins and Events](../architecture/plugins-events) for lifecycle and
+two-phase step ordering.
+
+## Defaults and environment overrides
+
+`pybullet_fleet/_defaults.py` holds built-in defaults. At module load time,
+`PBF_{SECTION}_{KEY}` environment variables replace non-`None` defaults; for
+example, `PBF_SIMULATION_TIMESTEP=0.05`. If `python-dotenv` is installed, a
+`.env` file fills otherwise unset environment variables.
+
+YAML values passed to `from_yaml()` / `from_dict()` and explicit
+`SimulationParams(...)` values override the defaults for the configuration
+being constructed. Use `_defaults.get("simulation", "timestep")` only in
+framework or extension code that intentionally needs the global default.
+
+## Included configurations and benchmarks
+
+`pybullet_fleet/config/` contains runnable scenario and mode examples.
+`config_physics_off.yaml`, `config_physics_on.yaml`, and `config_hybrid.yaml`
+illustrate collision-method choices; select them for the required fidelity, not
+a fixed performance claim.
+
+Benchmark inputs live under `benchmark/configs/`. See
+[Benchmark Suite](../benchmarking/benchmark-suite) for commands and result
+interpretation.
 
 ## See Also
 
-- [Collision Detection Overview](../architecture/collision-overview) - Design philosophy
-- [Collision Configuration Guide](../how-to/collision-config) - Practical collision settings
-- [Collision Detection Narrow-Phase Details](../architecture/collision-internals) - Implementation details
+- [Controller Configuration](../how-to/controller-config)
+- [Collision Configuration](../how-to/collision-config)
+- [Plugins and Events](../architecture/plugins-events)
+- [ROS 2 Configuration](../ros2/configuration)

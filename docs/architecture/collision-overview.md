@@ -1,7 +1,7 @@
 # Collision Detection Overview
 
 A high-level overview of PyBulletFleet's collision detection system — design goals,
-available modes, and the two-phase architecture.
+available modes, and the broad-phase/narrow-phase architecture.
 
 ---
 
@@ -69,6 +69,10 @@ PyBulletFleet's collision detection system is designed for **scalability, determ
 
 PyBulletFleet uses a classic **Broad-Phase → Narrow-Phase** pipeline:
 
+> This is the collision system's two-phase pipeline, not the simulator's
+> two-phase pose-commit contract. Pose commit and post-commit synchronization
+> happen before this pipeline runs in `step_once()`.
+
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                    Collision Detection Pipeline             │
@@ -95,7 +99,7 @@ PyBulletFleet uses a classic **Broad-Phase → Narrow-Phase** pipeline:
 ```
 
 → [Collision Detection Broad-Phase Details: Spatial Hash Grid](collision-spatial-hash)
-→ [Collision Detection Narrow-Phase Details](narrow-phase-details-pybullet-apis)
+→ [Collision Detection Narrow-Phase Details](collision-internals)
 
 ### Why Two Phases?
 
@@ -148,7 +152,9 @@ R2 only checks: 9 neighbor cells (NORMAL_2D) or 27 cells (NORMAL_3D)
 
 This section explains **when and how** AABBs and spatial grids are updated throughout an object's lifetime.
 
-**Note**: In standard usage with `run_simulation()`, movement and collision detection are automatically handled by the `step_once()` method. You don't need to manually call `check_collisions()` or `step_simulation()` unless you're implementing custom simulation logic.
+**Note**: In standard usage with `run_simulation()`, `step_once()` handles
+movement, physics, synchronization, and collision detection. You normally do
+not call `check_collisions()` yourself.
 
 ### Object Lifecycle
 
@@ -163,21 +169,22 @@ This section explains **when and how** AABBs and spatial grids are updated throu
 └──────────────────────────────────────────────────────────────┘
          ↓
 ┌──────────────────────────────────────────────────────────────┐
-│ 2. Object Movement (resetBasePositionAndOrientation)         │
+│ 2. Movement, pose commit, and synchronization                │
 ├──────────────────────────────────────────────────────────────┤
-│  → Update AABB via getAABB()                                 │
-│  → Update spatial grid registration                          │
-│  → Add to _moved_this_step set                              │
+│  Kinematic set_pose() inside step_once():                    │
+│  → Phase 1: update cached pose and mark the object moved     │
+│  → Phase 2: resetBasePositionAndOrientation()                │
+│  → Post-commit: refresh AABB and spatial-grid registration   │
 │                                                              │
 │  Mode-specific behavior:                                     │
-│  • NORMAL_3D/2D: Update every movement ✓                    │
+│  • NORMAL_3D/2D: Refresh after every committed movement ✓   │
 │  • STATIC: Never updated (optimization) ✓                   │
 │  • DISABLED: Not in grid (skip) ✓                           │
 │                                                              │
 │  Physics mode:                                               │
 │  • stepSimulation() updates all physics objects every step   │
 │  • All physics objects automatically marked as moved         │
-│  • Checked every frame regardless of explicit movement       │
+│  • Their AABBs and grid entries refresh after stepSimulation │
 └──────────────────────────────────────────────────────────────┘
          ↓
 ┌──────────────────────────────────────────────────────────────┐
@@ -212,80 +219,24 @@ This section explains **when and how** AABBs and spatial grids are updated throu
 └──────────────────────────────────────────────────────────────┘
 ```
 
-### Mode-Specific Flow Examples
+### Standard step ordering
 
-**Note**: The examples below show explicit `check_collisions()` and `step_simulation()` calls for educational purposes. In production code using `run_simulation()`, these are called automatically in `step_once()`.
+Use `run_simulation()` for normal applications, or call `step_once()` when an
+application owns the loop:
 
-**Standard Usage**:
 ```python
-# Typical simulation loop (automatic)
-sim_core.run_simulation(
-    agent_manager=agent_manager,
-    num_steps=1000
-)
-# → step_once() called every iteration
-#   → step_simulation() (if physics=True)
-#   → check_collisions() (automatic)
-#   → agent updates
+sim_core.step_once()
+# 1. agent/controller/callback/plugin updates queue kinematic poses
+# 2. framework commits queued poses to PyBullet
+# 3. physics step (when enabled) and AABB/grid synchronization
+# 4. broad-phase + narrow-phase collision detection (frequency-gated)
 ```
 
-**Educational Examples** (explicit calls to show internal flow):
-
-#### NORMAL_3D (Moving Robot - Kinematics Mode)
-```python
-# 1. Create
-robot = sim_core.add_object(body_id=1, collision_mode=CollisionMode.NORMAL_3D)
-# → AABB calculated, registered to cell (x, y, z), added to _moved_this_step
-
-# 2. Move
-robot.set_pose([1.5, 2.0, 0.5])
-# → AABB updated, grid cell updated, added to _moved_this_step
-
-# 3. Check collisions
-pairs = sim_core.check_collisions()
-# → 27 neighbor cells checked → AABB overlap → getClosestPoints() → _moved_this_step cleared
-```
-
-#### NORMAL_3D (Moving Robot - Physics Mode)
-```python
-# 1. Create
-robot = sim_core.add_object(body_id=1, collision_mode=CollisionMode.NORMAL_3D, mass=1.0)
-
-# 2. Every simulation step
-sim_core.step_simulation()
-# → stepSimulation() updates all physics objects, auto-marked as moved, AABB updated
-
-# 3. Check collisions (every step)
-pairs = sim_core.check_collisions()
-# → 27 neighbor cells checked → getContactPoints() or getClosestPoints()
-```
-
-#### STATIC (Fixed Wall)
-```python
-# 1. Create
-wall = sim_core.add_structure(mesh="wall.obj", collision_mode=CollisionMode.STATIC)
-# → AABB calculated ONCE, registered to grid cells (may be multi-cell)
-
-# 2. No movement — static!
-
-# 3. Check collisions
-pairs = sim_core.check_collisions()
-# → Wall is in grid, can be found by moving objects
-# → Wall itself never triggers checks (not in _moved_this_step)
-```
-
-#### DISABLED (Visualization Marker)
-```python
-# 1. Create
-marker = SimObject(body_id=3, collision_mode=CollisionMode.DISABLED)
-# → AABB NOT calculated, NOT in grid, PyBullet collision disabled
-
-# 2. Move (visual only)
-marker.set_pose([x, y, z])
-# → No AABB update, no grid update
-
-# 3. Completely ignored in collision checks ✓
-```
+Outside `step_once()`, `set_pose(Pose(...))` updates a kinematic object's
+PyBullet pose and collision caches immediately. Inside a controller, callback,
+or plugin update, the same call is buffered until the commit/synchronization
+sequence above. See [Two-Phase Step](two-phase-step) for the extension-author
+rules.
 
 ---
 
@@ -297,8 +248,8 @@ marker.set_pose([x, y, z])
 
 1. **Enable collision visualization**:
 ```python
-params = SimulationParams(gui=True)
-# Press 'c' key to toggle collision shapes
+params = SimulationParams(gui=True, enable_collision_shapes=True)
+# Or press PyBullet's built-in 'w' key to toggle wireframes at runtime.
 ```
 
 2. **Check AABB caches**:
@@ -342,6 +293,7 @@ python performance_benchmark.py
 - [Collision Detection Broad-Phase Details: Spatial Hash Grid](collision-spatial-hash) — Algorithm details, AABB caching, multi-cell registration
 - [Collision Detection Narrow-Phase Details](collision-internals) — PyBullet APIs, collision mode implementation details, configuration
 - [Collision Configuration Guide](../how-to/collision-config) — Practical configuration: detection method, modes, margins, cell size
+- [Visual Collision Demo](collision-features-demo) — Observe collision modes, highlighting, and multi-cell registration
 
 **Source code**:
 - `pybullet_fleet/core_simulation.py` — Main implementation

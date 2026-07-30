@@ -42,8 +42,8 @@ entities:
     sdf_path: "package://rmf_demos_assets/models/DeliveryRobot/model.sdf"
     pose: [5, -5, 0.0]
     yaw: 0.0
-    motion_mode: "differential"
     controller:
+      type: differential
       max_linear_vel: 0.7
       max_linear_accel: 0.5
       navigation_2d: true
@@ -51,8 +51,8 @@ entities:
     sdf_path: "package://rmf_demos_assets/models/DeliveryRobot/model.sdf"
     pose: [8.007, -31.734, 0.0]
     yaw: -3.1398
-    motion_mode: "differential"
     controller:
+      type: differential
       max_linear_vel: 0.7
       max_linear_accel: 0.5
       navigation_2d: true
@@ -62,8 +62,8 @@ entities:
     sdf_path: "package://rmf_demos_assets/models/TinyRobot/model.sdf"
     pose: [15, -5, 0.0]
     yaw: 0.0
-    motion_mode: "differential"
     controller:
+      type: differential
       max_linear_vel: 0.5
       max_linear_accel: 0.75
       navigation_2d: true
@@ -71,8 +71,8 @@ entities:
     sdf_path: "package://rmf_demos_assets/models/TinyRobot/model.sdf"
     pose: [54.763, -10.800, 10.0]
     yaw: 3.1343
-    motion_mode: "differential"
     controller:
+      type: differential
       max_linear_vel: 0.5
       max_linear_accel: 0.75
       navigation_2d: true

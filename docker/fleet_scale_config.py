@@ -79,18 +79,18 @@ def generate_bridge_config(
     }
 
     entity = config["entities"][0]
-    _apply_robot_model(entity, robot_model)
+    fleet_controller = config["managers"][0]["fleet_controller"]
+    _apply_robot_model(entity, fleet_controller, robot_model)
     entity.setdefault("grid", {})
     entity["grid"]["count"] = robot_count
     entity["grid"]["columns"] = side
     output_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
 
 
-def _apply_robot_model(entity: dict, robot_model: str) -> None:
+def _apply_robot_model(entity: dict, fleet_controller: dict, robot_model: str) -> None:
     if robot_model == "simple_cube":
         entity["urdf_path"] = "robots/simple_cube.urdf"
-        entity["motion_mode"] = "omnidirectional"
-        entity["batch_controller"] = "batch_omni"
+        fleet_controller["type"] = "batch_omni"
         entity["controller"] = {
             "type": "omni",
             "max_linear_vel": 2.0,
@@ -100,8 +100,7 @@ def _apply_robot_model(entity: dict, robot_model: str) -> None:
         entity["grid"]["offset"] = [0.0, 0.0, 0.05]
     elif robot_model == "mobile_robot":
         entity["urdf_path"] = "robots/mobile_robot.urdf"
-        entity["motion_mode"] = "omnidirectional"
-        entity["batch_controller"] = "batch_omni"
+        fleet_controller["type"] = "batch_omni"
         entity["controller"] = {
             "type": "omni",
             "max_linear_vel": 2.0,
@@ -112,8 +111,7 @@ def _apply_robot_model(entity: dict, robot_model: str) -> None:
     elif robot_model in {"tb3_burger", "tb3_waffle"}:
         model_name = "turtlebot3_burger" if robot_model == "tb3_burger" else "turtlebot3_waffle"
         entity["urdf_path"] = model_name
-        entity["motion_mode"] = "differential"
-        entity["batch_controller"] = "batch_differential"
+        fleet_controller["type"] = "batch_differential"
         entity["controller"] = {
             "type": "differential",
             "max_linear_vel": 0.22,

@@ -21,7 +21,7 @@ to be watched, not run in CI. Some `models/` demos need extras:
 | `scale/100robots_grid_demo.py` | Primary config-driven 100 mobile robot grid demo. Use it to try controller, command-interface, and movement switches in a user-facing scene. |
 | `scale/100robots_mixed_demo.py` | Representative mixed fleet scene with 50 Husky robots and 50 fixed-base `arm_robot` arms, using `entities[].grid` groups. |
 | `scale/100robots_cube_patrol_demo.py` | Tutorial-style 100 mobile robot patrol scene using `managers:` and `fleet_controller:` config. |
-| `scale/batch_controller_scale_demo.py` | Focused batch-controller scale demo. Robot count is `--n` (default 500); use it for quick fleet API and command setup checks, not rigorous benchmarking. |
+| `scale/batch_controller_scale_demo.py` | Focused batch-controller scale demo. Robot count is `--robots` (default 500); use it for quick fleet API and command setup checks, not rigorous benchmarking. |
 | `scale/pick_drop_mobile_100robots_demo.py` | Mobile robots using pick/drop action sequences and object management. `--robots` controls the count, and `--no-gui` is available for headless checks. |
 | `scale/pick_drop_arm_100robots_demo.py` | Fixed-base arms using synchronized joint/action pick-drop cycles. `--robots` controls the count, and `--no-gui` is available for headless checks. |
 

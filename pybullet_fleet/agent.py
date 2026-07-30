@@ -1133,7 +1133,7 @@ class Agent(SimObject):
                 raise ValueError(
                     f"controller.type={ctrl_type!r} is a batch controller type. "
                     "Batch controllers must be used through AgentManager: "
-                    "AgentManager(sim_core=sim, batch_controller='batch_differential')."
+                    "AgentManager(sim_core=sim, fleet_controller={'type': 'batch_differential'})."
                 )
             return create_controller(ctrl_type, cfg)
         return None
@@ -2320,9 +2320,11 @@ class Agent(SimObject):
         ``set_all_joints_targets()`` internally.  Actual movement happens
         in ``update()`` (fire-and-forget, like ``set_joint_target()``).
 
-        The joint targets are **always** set (best-effort), even when the
-        target is unreachable.  The return value tells the caller whether
-        the IK solution actually reaches the desired position.
+        When the solver returns an IK candidate, its joint targets are set
+        even when the target is unreachable (best-effort). If no candidate
+        is available, no new joint target is issued. The return value tells
+        the caller whether the IK solution actually reaches the desired
+        position.
 
         Args:
             target_position: Target EE position [x, y, z] in world frame.
@@ -2334,8 +2336,8 @@ class Agent(SimObject):
 
         Returns:
             True if the IK solution places the EE within *tolerance* of
-            the target (reachable).  False otherwise (best-effort targets
-            are still set).
+            the target (reachable). False otherwise. A best-effort candidate,
+            when available, is still commanded.
 
         Example::
 

@@ -165,7 +165,7 @@ generic action payloads stay aligned with their fleet-level equivalents.
 
 | Service | Description |
 |---------|-------------|
-| `/sim/spawn_entity` | Spawn robot or object |
+| `/sim/spawn_entity` | Spawn a URDF robot (Agent) with name and initial pose; see the ROS 2 docs for limits |
 | `/sim/delete_entity` | Remove entity |
 | `/sim/get_entity_state` | Query pose of an entity |
 | `/sim/set_entity_state` | Teleport entity |
@@ -394,65 +394,32 @@ for their own world, SDF, URDF, and mesh assets.
 
 ## Roadmap
 
-Future improvements. Items already implemented have been removed — see git log for history.
+Future improvements. The fleet-level ROS API, direct `python_fleet` path, and
+per-robot interface-group decomposition are implemented. Their current usage is
+documented in the [ReadTheDocs ROS 2 section](../docs/ros2/index.md).
 
 ---
 
 ### Near-Term
 
-#### Fleet-Level ROS Wrapper (Pattern 2)
+#### Fleet API and deployment patterns (implemented)
 
-The bridge can expose fleet-level state and command endpoints alongside the
-existing per-robot interfaces.
+`fleet_api` exposes `/fleet/states`, navigation, stop, attach, generic-action,
+and joint-command endpoints. `per_robot_api` independently selects the
+per-robot endpoint groups. The RMF adapter supports these deployment patterns:
 
-```
-fleet_adapter ↔ /fleet/states + /fleet/navigate + /fleet/stop + /fleet/attach + /fleet/execute_action ↔ bridge_node ↔ sim_core
-```
+| Name | Control path | ROS endpoints | Primary use |
+|---|---|---|---|
+| Per-Robot ROS | Per-robot ROS topics/actions/services | O(N) | Compatibility and debugging |
+| Fleet ROS | Batched `/fleet/*` endpoints | O(1) | ROS-visible fleet control at scale |
+| Plugin Only | Direct Python Fleet API | 0 | Headless/CI with lowest bridge overhead |
+| Plugin + Bridge | Direct Python RMF path plus selected bridge endpoints | Configurable | Development and observation |
 
-- `/fleet/states` publisher — N 台分を1メッセージ
-- `/fleet/navigate` topic/service — batch navigation
-- `/fleet/stop` topic/service — batch stop
-- `/fleet/attach` topic/service — batch attach/detach
-- `/fleet/execute_action` topic/service — batch generic actions
-- `/fleet/joint_command` topic/service — batch joint commands
-- 100 robots: 200 endpoints → 2–3 endpoints
-
-Enable these endpoints with the `fleet_api` config section.
-
----
+See the [bridge interface reference](../docs/ros2/overview.md),
+[configuration guide](../docs/ros2/configuration.md), and
+[RMF client-mode guide](../docs/ros2/rmf.md).
 
 ### Mid-Term
-
-#### Direct Python Connection (no ROS)
-
-`fleet_adapter` を `MultiRobotSimulationCore` に Python API で直接接続。
-ROS 2 topic/service 層をバイパスし、低レイテンシ・シンプルデプロイを実現。
-
-- EventBus でアダプタ ↔ sim_core 通信
-- 同一プロセスで実行、シリアライゼーションオーバーヘッドゼロ
-
-**Deployment Patterns:**
-
-| # | Name | 通信 | bridge | ROS endpoints | 用途 |
-|---|---|---|---|---|---|
-| 1 | Per-Robot ROS 2 | ROS topics | ✅ | O(N) | **現行 (v1)** |
-| 2 | Batch ROS 2 | ROS topics (batch) | ✅ | O(1) | Scalable |
-| 3 | Plugin Only | Direct Python | ❌ | 0 | CI / headless |
-| 4 | Plugin + Bridge | Direct Python | ✅ | 0 | Dev/Debug |
-
----
-
-#### Handler Decomposition
-
-`RobotHandler` を focused, composable handlers に分解 (Gazebo-plugin style):
-
-- **OdometryHandler** — `/odom` + TF `odom → base_link`
-- **JointStateHandler** — `/joint_states`
-- **CmdVelHandler** — `/cmd_vel` subscriber
-- **NavigationHandler** — `navigate_to_pose` action server
-- **DiagnosticsHandler** — Status/heartbeat
-
-`handler_classes:` config でロボットタイプごとに必要なハンドラだけを組み合わせ可能。
 
 ---
 

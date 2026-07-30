@@ -194,14 +194,14 @@ class CollisionDetectionMethod(Enum):
                        Best for: kinematics motion, safety clearance, collision avoidance
                        Works with: Physics ON/OFF, stable with resetBasePositionAndOrientation
 
-        CONTACT_POINTS: Use getContactPoints() - physics contact manifold (PHYSICS MODE)
-                       Best for: physics simulation, actual contact logging, debug/reproduction
-                       Requires: stepSimulation() to be called regularly
-                       Note: Unstable for kinematic-kinematic pairs
+        CONTACT_POINTS: Use getContactPoints() - physics contact manifold (PHYSICS MODE).
+                        Best for physics simulation, actual contact logging, and debugging.
+                        Requires an explicit collision-detection pass; stepSimulation() is
+                        the normal physics path. Cache/solver-dependent for kinematic pairs.
 
-        HYBRID: Use getContactPoints for physics, getClosestPoints for kinematic (ADVANCED)
-               Best for: Mixed physics/kinematics with different detection needs
-               Slower due to branching overhead
+        HYBRID: Use getContactPoints when either object uses physics; use
+                getClosestPoints only for kinematic-kinematic pairs (ADVANCED).
+                Best for mixed physics/kinematics with different detection needs.
 
     Recommended defaults:
         - physics_enabled=False → CLOSEST_POINTS (default)

@@ -26,17 +26,32 @@ modes, safety margin, spatial hash cell size, and multi-cell threshold.
 └─────────────────────────────────────────────────────────────┘
 ```
 
+(collision-features-demo)=
+## Try the visual collision demo
+
+Run `pybullet_fleet/examples/basics/collision_features_demo.py` to observe
+`NORMAL_3D`, `NORMAL_2D`, and `DISABLED` objects, collision highlighting, and
+large-object multi-cell registration in one scene:
+
+```bash
+python3 pybullet_fleet/examples/basics/collision_features_demo.py --duration 30
+```
+
+Press `w` in the PyBullet window to toggle collision-shape wireframes. The
+demo uses kinematics and `closest_points`, so it is intended to illustrate
+collision modes and broad-phase configuration rather than contact forces.
+
 ---
 
 ## Collision Detection Method
 
 Controls **how** collisions are confirmed in the narrow phase.
 
-| Method | Requires `stepSimulation()` | Safety Margin | Best For |
-|--------|-----------------------------|---------------|----------|
-| `closest_points` | No | ✅ Yes | Kinematics (default) |
-| `contact_points` | Yes | No | Physics |
-| `hybrid` | Yes | Partial | Mixed scenes |
+| Method | Freshness requirement | Safety margin | Best for |
+|--------|-----------------------|---------------|----------|
+| `closest_points` | Immediate query | ✅ Yes | Kinematics (default) |
+| `contact_points` | Explicit collision-detection pass | ❌ No query-distance parameter | Physics |
+| `hybrid` | Pass for pairs involving physics | Kinematic--kinematic pairs only | Mixed scenes |
 
 ### Configuration
 
@@ -111,7 +126,6 @@ wall = SimObject(
     body_id=body_id,
     sim_core=sim_core,
     collision_mode=CollisionMode.STATIC,
-    is_static=True,
 )
 
 # Visualization marker (no collision)
@@ -144,12 +158,9 @@ Safety clearance for `getClosestPoints()`. Only affects `CLOSEST_POINTS` and `HY
 collision_margin: 0.02  # meters (2cm default)
 ```
 
-| Use Case | Margin | Rationale |
-|----------|--------|-----------|
-| Tight spaces | 0.01–0.02 m | Minimal clearance |
-| Normal operation | 0.02–0.05 m | Comfortable safety |
-| Conservative | 0.05–0.10 m | Extra safety for high-speed |
-| Contact detection only | 0.0 m | Actual touching only |
+Set `collision_margin: 0.0` to exclude positive-clearance near misses; touching
+and penetrating geometry is still reported. Choose a non-zero margin from the
+clearance requirements of the robot and its task.
 
 ---
 
@@ -172,15 +183,16 @@ params = SimulationParams(
 )
 ```
 
-- ✅ Automatic tuning at startup
-- ✅ Zero runtime overhead after initialization
-- ✅ Best balance of performance and convenience
+- Calculates `max(median AABB extent × 2, 0.5 m)` from the objects present
+  when the grid is initialized
+- Does not recalculate on later add/remove operations unless you call the
+  recalculation method yourself
 - Spawn representative objects before first simulation step
-- Manually recalculate if object distribution changes >50%
+- Recalculate manually after a material change in object-size distribution
 
-### Mode 2: `constant` (Fastest)
+### Mode 2: `constant` (Fixed)
 
-Fixed cell size provided by user. No runtime overhead.
+Use a fixed cell size provided by the user.
 
 ```yaml
 spatial_hash_cell_size_mode: "constant"
@@ -194,15 +206,13 @@ params = SimulationParams(
 )
 ```
 
-- ✅ Zero overhead, predictable performance
-- ✅ Best for production with known workloads
-- Requires manual tuning / benchmarking
+- Predictable: add/remove operations do not recalculate the cell size
+- Requires tuning against a representative workload
 
-**Recommended `cell_size`**:
-- Typical robots (0.5–2 m): `2.0–4.0 m`
-- Small objects (< 0.5 m): `1.0–2.0 m`
-- Large structures (> 5 m): `5.0–10.0 m`
-- Mixed sizes: `2.0 × median_extent`
+Choose a value using the AABB extents of the collision-enabled objects and
+measure it with the intended scene. The automatic modes use twice the median
+of each AABB's largest extent, with a 0.5 m minimum, which is a useful initial
+value for a constant configuration.
 
 ### Mode 3: `auto_adaptive` (Dynamic)
 
@@ -218,9 +228,12 @@ params = SimulationParams(
 )
 ```
 
-- ✅ Always optimal for current object set
-- ✅ Handles dynamic workloads
-- Overhead on every add/remove (~0.5–2 ms per 1000 objects)
+- Recalculates the same median-based heuristic whenever an object is added or
+  removed
+- Rebuilds the spatial grid after each recalculation; batch spawning defers
+  this until the batch completes
+- Appropriate when the object set changes frequently enough to justify that
+  rebuild cost
 
 ### Manual Recalculation
 
@@ -240,13 +253,17 @@ sim.set_collision_spatial_hash_cell_size_mode(
 )
 ```
 
-### Performance Comparison
+### Recalculation Behavior
 
-| Mode | Initialization | Add/Remove | Collision Check | Best For |
-|------|---------------|------------|-----------------|----------|
-| `auto_initial` | O(N log N) | O(1) | O(N) | **Most use cases** |
-| `constant` | Manual | O(1) | O(N) | Production, known workloads |
-| `auto_adaptive` | O(N log N) | O(N log N) | O(N) | Dynamic environments |
+| Mode | Initial calculation | Add / remove | Use when |
+|------|---------------------|--------------|----------|
+| `auto_initial` | First grid initialization | Keeps the existing cell size | The initial scene is representative |
+| `constant` | User-provided value | Keeps the configured cell size | You have measured a suitable value |
+| `auto_adaptive` | First grid initialization | Recalculates and rebuilds the grid | Object sizes change during the run |
+
+All modes use the same incremental AABB/grid maintenance and moved-object
+candidate filtering during collision checks. Their trade-off is when the cell
+size and grid are rebuilt, not a fixed big-O cost for every collision check.
 
 For the cell size calculation algorithm, see [Cell Size & Grid Mapping](cell-size-and-grid-mapping).
 
@@ -273,33 +290,59 @@ For implementation details, see [Multi-Cell Registration](multi-cell-registratio
 
 ---
 
+## Static-Collision Filter
+
+`ignore_static_collision` controls whether collision checks include pairs with
+a `STATIC` object. Its default is `true`.
+
+```yaml
+# Set false to detect moving robots against walls, shelves, and other STATIC objects.
+ignore_static_collision: false
+```
+
+When it is `true`, the collision system skips **any pair containing a static
+object**—not only static--static pairs. Keep the default for scenes where
+static structures are only visual context; set it to `false` when structures
+are obstacles that must produce collision reports.
+
+`check_collisions(ignore_static=False)` provides the same override for one
+explicit collision check.
+
+---
+
 ## Complete YAML Reference
 
 ```yaml
-# Simulation mode
-physics: false  # true for physics, false for kinematics
+simulation:
+  # Simulation mode
+  physics: false  # true for physics, false for kinematics
 
-# Detection method (auto-selected if omitted)
-collision_detection_method: "closest_points"  # or "contact_points", "hybrid"
+  # Detection method (auto-selected if omitted)
+  collision_detection_method: "closest_points"  # or "contact_points", "hybrid"
 
-# Safety margin (CLOSEST_POINTS / HYBRID only)
-collision_margin: 0.02  # meters
+  # Safety margin (CLOSEST_POINTS / kinematic--kinematic HYBRID pairs only)
+  collision_margin: 0.02  # meters
 
-# Spatial hash cell size
-spatial_hash_cell_size_mode: "auto_initial"  # "constant" or "auto_adaptive"
-# spatial_hash_cell_size: 2.0  # required only for "constant" mode
+  # Spatial hash cell size
+  spatial_hash_cell_size_mode: "auto_initial"  # "constant" or "auto_adaptive"
+  # spatial_hash_cell_size: 2.0  # required only for "constant" mode
 
-# Large object threshold
-multi_cell_threshold: 1.5
+  # Large object threshold
+  multi_cell_threshold: 1.5
 
-# Static-static collision (usually not needed)
-ignore_static_collision: false
+  # Whether pairs containing STATIC objects are checked (default: true)
+  ignore_static_collision: true
 
-# NOTE: collision_mode is per-object (set on AgentSpawnParams / SimObject)
-# collision_mode: normal_2d  → 9 neighbors (XY plane)
-# collision_mode: normal_3d  → 27 neighbors (full 3D, default)
-# collision_mode: static     → Fixed, never updated
-# collision_mode: disabled   → No collision at all
+entities:
+  # collision_mode is per entity, not a simulation setting.
+  - urdf_path: robots/mobile_robot.urdf
+    collision_mode: normal_2d  # 9 neighbors in the XY grid search
+
+  - urdf_path: robots/simple_cube.urdf
+    collision_mode: static  # fixed; cannot be moved until its mode changes
+
+  - urdf_path: robots/simple_cube.urdf
+    collision_mode: disabled  # excluded from framework and PyBullet collision
 ```
 
 ---

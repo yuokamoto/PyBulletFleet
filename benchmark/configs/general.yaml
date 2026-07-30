@@ -31,7 +31,6 @@ agents:
   batch_controller: batch_omni  # Default overall mobile benchmark path: batch controller
   command_interface: fleet  # Default command ingress: fleet-level dispatcher
   urdf_path: "simple_cube"  # Bundled model name (resolve_model) or a path to a .urdf/.sdf
-  motion_mode: "OMNIDIRECTIONAL"  # OMNIDIRECTIONAL, DIFFERENTIAL, ACKERMANN
   controller:
     type: "omni"           # Controller registry name (recommended explicit form)
     max_linear_vel: 2.0    # Maximum linear velocity (m/s)

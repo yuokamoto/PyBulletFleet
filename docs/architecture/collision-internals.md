@@ -17,16 +17,15 @@ After broad-phase filtering, we use PyBullet's APIs for exact collision detectio
 
 | Feature | `getContactPoints()` | `getClosestPoints()` |
 |---------|----------------------|----------------------|
-| **Requires stepSimulation()** | ✅ Yes | ❌ No |
-| **Works with kinematics** | ⚠️ Limited | ✅ Yes |
+| **Freshness requirement** | Explicit collision-detection pass required | Query is immediate |
+| **Works with kinematics** | ⚠️ Cache/solver-dependent | ✅ Yes |
 | **Safety margin support** | ❌ No | ✅ Yes (distance param) |
-| **Physics-accurate** | ✅ Yes | ⚠️ Geometric only |
-| **Speed (typical)** | Fast (cached) | Slightly slower (GJK) |
+| **Result** | Contact manifold; solver results after a physics step | Geometric closest-point result |
 | **Best for** | Physics mode | Kinematics mode |
 
 ### `getClosestPoints(distance)` - Recommended for Kinematics
 
-**What it does**: Geometric closest point query using GJK algorithm
+**What it does**: Geometric closest-point query between two collision bodies.
 
 **Key Parameters**:
 ```python
@@ -39,8 +38,8 @@ closest_points = p.getClosestPoints(
 ```
 
 **Behavior**:
-- `distance > 0`: Returns points if objects are within margin
-- `distance = 0`: Returns points only if actually touching
+- `distance > 0`: Returns points when the closest separation is within the margin
+- `distance = 0`: Returns points for touching **or penetrating** geometry
 - `len(closest_points) > 0`: Collision detected
 
 **Advantages**:
@@ -53,11 +52,11 @@ closest_points = p.getClosestPoints(
 **Use cases**:
 - Kinematics-focused planning
 - Collision avoidance with safety buffer
-- High-speed simulation (no physics overhead)
+- High-speed simulation that does not need rigid-body integration or contact solving
 
 ### `getContactPoints()` - For Physics Mode
 
-**What it does**: Query contact manifold from physics engine
+**What it does**: Query PyBullet's most recently computed contact manifold.
 
 **Key Parameters**:
 ```python
@@ -69,30 +68,41 @@ contact_points = p.getContactPoints(
 ```
 
 **Behavior**:
-- Returns contact manifold from **last `stepSimulation()` call**
-- Includes penetration depth, normal, contact position
+- Returns the contact manifold from the latest collision-detection pass
+  (`stepSimulation()` or `performCollisionDetection()`)
+- Includes signed contact distance, normal, and contact position
+- Includes solver-derived normal force after `stepSimulation()`; a
+  `performCollisionDetection()`-only pass does not run the contact solver
 - Empty list if no contact
 
 **Advantages**:
 
-- ✅ Fast (contact cache already exists)
-- ✅ Physics-accurate (actual contact forces)
-- ✅ Contact normals and depths available
+- ✅ Represents contacts used by the physics simulation
+- ✅ Contact normals and signed distances are available
+- ✅ Normal force is available after the physics solver runs
 
 **Limitations**:
 
-- ❌ **Requires `stepSimulation()`**: Cannot skip physics update
-- ❌ Limited for kinematics: Designed for physics simulation with dynamic objects
-- ❌ No safety margin support: Only reports actual penetration
+- ❌ **Needs a collision-detection pass**: `stepSimulation()` is the normal
+  physics-mode path; `performCollisionDetection()` refreshes contacts without
+  advancing dynamics
+- ❌ Limited for kinematics: results depend on the contact cache and solver;
+  use `getClosestPoints()` for kinematic--kinematic checks
+- ❌ No caller-provided safety margin: unlike `getClosestPoints()`, this API
+  does not take a query distance
 
 **Why not ideal for kinematics**:
 - Kinematics mode uses `resetBasePositionAndOrientation()` to set positions directly
-- `getContactPoints()` relies on contact cache updated by `stepSimulation()`
-- Without physics simulation, contact information may be incomplete or outdated
-- You must call `stepSimulation()` even for kinematic objects, adding overhead
+- `getContactPoints()` reads a contact cache; a pose reset alone does not refresh it
+- `performCollisionDetection()` can refresh the cache, but does not calculate
+  contact forces or advance physics
+- `getClosestPoints()` is therefore the direct, margin-aware query for
+  kinematic objects
+
+**Use cases**:
 - Physics mode
-- Contact force analysis
-- Debugging actual collisions
+- Contact-force analysis after a physics step
+- Debugging actual contacts
 
 ### stepSimulation() - The Physics Update
 
@@ -118,7 +128,7 @@ physics: false
 collision_detection_method: CLOSEST_POINTS
 collision_margin: 0.02
 ```
-- No `stepSimulation()` → Fast
+- No rigid-body integration or contact solving
 - `getClosestPoints()` → Stable
 - Use case: Planning, coordination, high-speed simulation
 
@@ -134,11 +144,16 @@ collision_margin: 0.02
 
 **Hybrid Mode** (Advanced):
 ```python
-if obj_is_physics:
+if either_object_is_physics:
     use getContactPoints()  # Accurate for dynamics
 else:
     use getClosestPoints()  # Stable for kinematics
 ```
+
+In the current implementation, an object is physics-enabled when it has
+`mass > 0` and is not kinematic.  A pair uses `getContactPoints()` when either
+member is physics-enabled; only pairs where both members are kinematic use
+`getClosestPoints()` and `collision_margin`.
 
 ---
 

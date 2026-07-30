@@ -66,14 +66,12 @@ entities = config.get("entities") or []
 if not entities:
     raise ValueError("100robots_mixed_demo.py requires a config with entities[].grid")
 
-for entity in entities:
-    robot_type = (entity.get("user_data") or {}).get("robot_type")
-    if robot_type != "mobile_robot":
-        continue
-    if args.controller == "batch":
-        entity.setdefault("batch_controller", "batch_omni")
-    else:
-        entity.pop("batch_controller", None)
+mobile_manager = next(manager for manager in config["managers"] if manager["name"] == "mobile_fleet")
+fleet_controller = mobile_manager.setdefault("fleet_controller", {})
+if args.controller == "batch":
+    fleet_controller["type"] = "batch_omni"
+else:
+    fleet_controller.pop("type", None)
 
 config.setdefault("simulation", {})["physics"] = True
 num_robots = sum(int((entry.get("grid") or {}).get("count", 1)) for entry in entities)

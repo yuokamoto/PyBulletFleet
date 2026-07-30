@@ -51,7 +51,6 @@ import pybullet as p
 from pybullet_fleet import (
     Agent,
     AgentSpawnParams,
-    MotionMode,
     MultiRobotSimulationCore,
     Pose,
     SimulationParams,
@@ -95,10 +94,9 @@ def _make_spawn_params(mode: str) -> AgentSpawnParams:
     if mode == "diff":
         ctrl["max_angular_vel"] = 2.0
         ctrl["max_angular_accel"] = 4.0
-    motion_mode = MotionMode.OMNIDIRECTIONAL if mode == "omni" else MotionMode.DIFFERENTIAL
+    ctrl["type"] = "omni" if mode == "omni" else "differential"
     return AgentSpawnParams(
         urdf_path="robots/simple_cube.urdf",
-        motion_mode=motion_mode,
         collision_mode=CollisionMode.NORMAL_3D,
         controller=ctrl,
     )
@@ -125,7 +123,7 @@ def _make_manager_and_agents(
     batch_controller = None
     if controller == "batch":
         batch_controller = "batch_omni" if mode == "omni" else "batch_differential"
-    mgr = AgentManager(sim_core=sim, batch_controller=batch_controller)
+    mgr = AgentManager(sim_core=sim, fleet_controller={"type": batch_controller} if batch_controller else None)
     agents = mgr.spawn_agents_grid(n, _make_grid_params(n), _make_spawn_params(mode), name_prefix="robot")
     return sim, mgr, agents
 

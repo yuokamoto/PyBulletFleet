@@ -28,7 +28,7 @@ import pybullet as p
 from benchmark.tools import get_system_info, get_memory_info, force_cleanup, cpu_time_s, ensure_disconnected, load_config
 from pybullet_fleet.core_simulation import MultiRobotSimulationCore, SimulationParams
 from pybullet_fleet.agent_manager import AgentManager, GridSpawnParams
-from pybullet_fleet.agent import AgentSpawnParams, MotionMode
+from pybullet_fleet.agent import AgentSpawnParams
 from pybullet_fleet.commands import RobotGoalCommand2D
 from pybullet_fleet.fleet_api import FleetCommandDispatcher
 from pybullet_fleet.geometry import Pose
@@ -98,7 +98,7 @@ def run_benchmark(
     if command_interface not in ("per_agent", "fleet"):
         raise ValueError(f"Unsupported agents.command_interface: {command_interface!r}")
 
-    agent_manager = AgentManager(sim_core=sim_core, batch_controller=batch_controller)
+    agent_manager = AgentManager(sim_core=sim_core, fleet_controller={"type": batch_controller} if batch_controller else None)
 
     # Calculate grid size
     grid_size = int(math.ceil(math.sqrt(num_agents)))
@@ -118,8 +118,8 @@ def run_benchmark(
     robot_urdf = "simple_cube"
     agent_spawn_params = AgentSpawnParams(
         urdf_path=robot_urdf,
-        motion_mode=MotionMode.OMNIDIRECTIONAL,
         controller={
+            "type": "omni",
             "max_linear_vel": 2.0,
             "max_angular_vel": 3.0,
         },

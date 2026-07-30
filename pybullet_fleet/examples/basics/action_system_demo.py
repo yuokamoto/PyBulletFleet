@@ -25,7 +25,7 @@ except ModuleNotFoundError:
     sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", ".."))
     import pybullet_fleet  # noqa: F401
 
-from pybullet_fleet.agent import Agent, AgentSpawnParams, MotionMode
+from pybullet_fleet.agent import Agent, AgentSpawnParams
 from pybullet_fleet.core_simulation import MultiRobotSimulationCore
 from pybullet_fleet.geometry import Pose, Path
 from pybullet_fleet.sim_object import SimObject, SimObjectSpawnParams, ShapeParams
@@ -72,8 +72,8 @@ def main():
     agent_params = AgentSpawnParams(
         urdf_path=urdf_path,
         initial_pose=Pose.from_xyz(0, 0, 0.3),
-        motion_mode=MotionMode.DIFFERENTIAL,
         controller={
+            "type": "differential",
             "max_linear_vel": 2.0,
             "max_linear_accel": 5.0,
             "max_angular_vel": 2.0,

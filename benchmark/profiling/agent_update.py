@@ -103,6 +103,7 @@ from pybullet_fleet.geometry import Pose
 
 def create_test_agents(num_agents: int, motion_mode: MotionMode = MotionMode.DIFFERENTIAL):
     """Generate test Agents"""
+    controller_type = "differential" if motion_mode == MotionMode.DIFFERENTIAL else "omni"
     # Clean up any leftover connection before creating a fresh sim_core.
     if p.isConnected():
         p.disconnect()
@@ -122,8 +123,8 @@ def create_test_agents(num_agents: int, motion_mode: MotionMode = MotionMode.DIF
         spawn_params = AgentSpawnParams(
             urdf_path=robot_urdf,
             initial_pose=Pose.from_xyz(x, y, 0.1),
-            motion_mode=motion_mode,
             controller={
+                "type": controller_type,
                 "max_linear_vel": 1.0,
                 "max_angular_vel": 1.0,
             },
@@ -380,8 +381,8 @@ def analyze_stationary_vs_moving(num_agents: int = 1000):
             spawn_params = AgentSpawnParams(
                 urdf_path=robot_urdf,
                 initial_pose=Pose.from_xyz(x, y, 0.1),
-                motion_mode=MotionMode.DIFFERENTIAL,
                 controller={
+                    "type": "differential",
                     "max_linear_vel": 1.0,
                     "max_angular_vel": 1.0,
                 },
@@ -399,8 +400,8 @@ def analyze_stationary_vs_moving(num_agents: int = 1000):
             spawn_params = AgentSpawnParams(
                 urdf_path=robot_urdf,
                 initial_pose=Pose.from_xyz(x, y, 0.1),
-                motion_mode=MotionMode.DIFFERENTIAL,
                 controller={
+                    "type": "differential",
                     "max_linear_vel": 1.0,
                     "max_angular_vel": 1.0,
                 },

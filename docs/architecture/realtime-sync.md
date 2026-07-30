@@ -10,7 +10,8 @@ PyBulletFleet implements a real-time synchronization system to ensure smooth sim
 
 ### Absolute Time-based Control
 
-The synchronization system uses **absolute time calculation** for stable, predictable behavior:
+The synchronization system uses an **absolute time calculation** against a
+monotonic clock for stable, predictable behavior:
 
 ```python
 elapsed_time = current_time - start_time
@@ -23,6 +24,8 @@ time_diff = target_sim_time - current_sim_time
 - **Simple logic**: No complex history management or filtering
 - **Predictable**: Easy to reason about and debug
 - **Efficient**: Minimal computational overhead
+- **Clock-jump resistant**: `time.monotonic()` is unaffected by wall-clock
+  corrections, unlike `time.time()`
 
 ---
 
@@ -64,7 +67,9 @@ if time_diff > 0:
 When ahead of target:
 ```python
 if time_diff < 0:
-    sleep_time = abs(time_diff) - last_step_process_time
+    # time_diff is in simulation seconds; convert it to real seconds.
+    real_ahead = abs(time_diff) / target_rtf
+    sleep_time = real_ahead - last_step_process_time
 
     if sleep_time > 0:
         time.sleep(sleep_time)  # Exact sleep
@@ -72,9 +77,25 @@ if time_diff < 0:
         time.sleep(min_sleep)   # Minimum for GUI responsiveness
 ```
 
-**GUI responsiveness:**
-- `min_sleep = 1.0 / gui_min_fps` (default: 33ms for 30 FPS)
-- Ensures smooth rendering even when simulation is ahead
+**Minimum sleep:**
+- GUI: `min_sleep = 1.0 / gui_min_fps` (default: 33 ms at 30 FPS)
+- Headless: `min_sleep = timestep`
+- A minimum sleep is used only when the computed sleep is slightly negative;
+  it yields time for GUI event processing without deliberately idling for a
+  full frame.
+
+**Safety cap:**
+
+The calculated sleep is capped so an unexpected timing anomaly cannot freeze
+the simulation. The cap is:
+
+```python
+sleep_cap = max(min_sleep, timestep / target_rtf) * max_sleep_frames
+```
+
+`max_sleep_frames` defaults to `4.0`. This is the pacing counterpart to
+`max_steps_per_frame`: one bounds catch-up work when the simulation is behind,
+and the other bounds sleeping when it is ahead.
 
 ---
 
@@ -137,7 +158,7 @@ sim = MultiRobotSimulationCore.from_yaml("config.yaml")
 for i in range(100):
     sim.spawn_large_structure()  # May take 10 seconds total
 
-# Simulation starts HERE (start_time = time.time())
+# Simulation starts HERE (start_time = time.monotonic())
 sim.run_simulation(duration=60.0)  # Smooth, no spawn delay impact
 ```
 
@@ -155,3 +176,25 @@ sim.pause()
 # spawn objects here. Won't affect time_diff
 sim.resume()  # Auto-resets start_time
 ```
+
+---
+
+## Relationship to Simulation Steps
+
+Real-time synchronization decides whether an iteration executes one or more
+`step_once()` calls, or sleeps. It does not change what a step means: every
+`step_once()` still completes the normal pose-commit, physics, collision, and
+event sequence before the next catch-up step begins. See
+[Two-Phase Step](two-phase-step) for that per-step contract.
+
+## Maximum-Speed Mode
+
+Set `target_rtf` to `0` (or a negative value) to run at maximum speed. In this
+mode, `run_simulation()` calls `step_once()` continuously and skips all
+real-time pacing and sleeping. Use it for headless tests and throughput
+measurements; it is not intended for real-time playback.
+
+## See Also
+
+- [Two-Phase Step](two-phase-step) — Per-step pose commit and event ordering
+- [Time Profiling User Guide](../how-to/time-profiling) — Interpreting step costs
