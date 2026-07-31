@@ -8,7 +8,7 @@ and understanding the key configuration options.
 Make sure you have the following installed:
 
 - **Python 3.10+**
-- **PyBullet** — physics engine backend
+- **PyBullet** — robotics simulation foundation for URDF/SDF loading, joint and IK operations, collision queries, GUI rendering, and optional physics stepping
 - **NumPy** — numerical operations
 - **PyYAML** — configuration file parsing
 
@@ -38,33 +38,41 @@ the source editable.
 
 ## Running Your First Simulation
 
-Launch the 100-robot grid demo:
+The examples are bundled in the PyPI wheel. List and run one without cloning
+the repository:
+
+```bash
+pybullet-fleet examples --list
+pybullet-fleet examples --run 100robots_grid_demo.py
+pybullet-fleet examples --copy ./examples  # optional: copy files to edit
+```
+
+From a source checkout or after copying examples, launch the 100-robot grid
+demo directly:
 
 ```bash
 python examples/scale/100robots_grid_demo.py
 ```
 
 You should see a PyBullet GUI window open with 100 robots spawned in a grid
-formation. By default, mobile robots use a random kinematic movement callback
-and arm robots use random joint commands.
+formation. This default scene contains mobile robots only; by default they use
+a random kinematic movement callback. Use `--movement goal` to exercise the
+per-agent or fleet command path instead.
 
-To compare command APIs on the same scene, run the repeated goal-command mode:
+For the separate Husky + Panda mixed-fleet showcase, run:
 
 ```bash
-python examples/scale/100robots_grid_demo.py \
-  --mode single --movement goal --command-interface fleet --duration 5
-
-python examples/scale/100robots_grid_demo.py \
-  --mode single --movement goal --command-interface per_agent --duration 5
+python examples/scale/100robots_mixed_demo.py --duration 10
 ```
 
-`--command-interface per_agent|fleet` selects how goals are submitted while
-keeping the scene unchanged.
+For batch-controller and fleet-command comparisons, continue with the
+[Multi-Robot Fleet tutorial](../examples/multi-robot-fleet).
 
 ## YAML Configuration Basics
 
-Simulation behaviour is controlled via YAML config files.
-The default configuration lives at `config/config.yaml`.
+Simulation behaviour is controlled via YAML config files. The bundled default
+is `pybullet_fleet/config/config.yaml` in a source checkout; APIs and bundled
+examples may refer to it by the package-relative name `config/config.yaml`.
 
 Key settings you will want to tweak:
 
@@ -90,7 +98,7 @@ simulation:
   collision_detection_method: "contact_points"
 ```
 
-See [`config/config.yaml`](https://github.com/yuokamoto/PyBulletFleet/blob/main/config/config.yaml) for the full list of parameters — every key is documented with inline comments.
+See [`pybullet_fleet/config/config.yaml`](https://github.com/yuokamoto/PyBulletFleet/blob/main/pybullet_fleet/config/config.yaml) for the full list of parameters — every key is documented with inline comments.
 
 ## Keyboard Controls
 
@@ -111,7 +119,9 @@ For scenes with hundreds of objects this can be slow — prefer setting
 
 ## Examples
 
-All example scripts live in the `examples/` directory, organised by category.
+All example scripts are bundled under `pybullet_fleet/examples/` and are copied
+to `examples/` when you use `pybullet-fleet examples --copy`. They are organised
+by category.
 For step-by-step walkthroughs, see the **[Tutorials](../examples/index)** page.
 
 ### Basics (`examples/basics/`)
@@ -121,6 +131,7 @@ For step-by-step walkthroughs, see the **[Tutorials](../examples/index)** page.
 | `robot_demo.py` | Basic robot creation with `Agent.from_mesh()` / `Agent.from_urdf()` |
 | `action_system_demo.py` | High-level action system (MoveTo, Pick, Drop, Wait) |
 | `collision_features_demo.py` | Spatial-hash collision detection features and visualisation |
+| `event_bus_demo.py` | Simulation and per-entity EventBus subscriptions |
 
 ### Arm (`examples/arm/`)
 
@@ -145,7 +156,8 @@ For step-by-step walkthroughs, see the **[Tutorials](../examples/index)** page.
 |--------|-------------|
 | `100robots_grid_demo.py` | Grid-based multi-agent demo — best starting point |
 | `100robots_cube_patrol_demo.py` | 100 agents patrolling between cubes |
-| `batch_controller_scale_demo.py` | Batch-controller scale demo; `--n` controls robot count, default 500 |
+| `100robots_mixed_demo.py` | Husky + Panda mixed-fleet showcase |
+| `batch_controller_scale_demo.py` | Batch-controller scale demo; `--robots` controls robot count, default 500 |
 | `pick_drop_arm_100robots_demo.py` | Arm robots with synchronised pick-and-drop; `--robots` controls the count |
 | `pick_drop_mobile_100robots_demo.py` | Mobile robots picking and dropping objects; `--robots` controls the count |
 
@@ -156,6 +168,7 @@ For step-by-step walkthroughs, see the **[Tutorials](../examples/index)** page.
 | `resolve_model_demo.py` | URDF resolution patterns — by name, by path, and listing all models |
 | `model_catalog_demo.py` | Visual grid catalog of all registered models from `KNOWN_MODELS` |
 | `robot_descriptions_demo.py` | Using Tier 3 models from the `robot_descriptions` pip package |
+| `sdf_demo.py` | Multi-model SDF and bulk mesh loading |
 
 Run any example with:
 
@@ -169,5 +182,6 @@ python examples/<category>/<script_name>.py
   abstractions (simulation core, agents, actions, collision).
 - **How-to guides** — see the `docs/` directory for topic-specific guides
   (collision tuning, memory profiling, performance optimisation).
-- **Configuration reference** — [`config/config.yaml`](https://github.com/yuokamoto/PyBulletFleet/blob/main/config/config.yaml) documents every YAML key with inline comments. See also the [Configuration Files Guide](../configuration/reference).
-- **API reference** — auto-generated from docstrings (coming soon).
+- **Configuration reference** — [`pybullet_fleet/config/config.yaml`](https://github.com/yuokamoto/PyBulletFleet/blob/main/pybullet_fleet/config/config.yaml) documents every YAML key with inline comments. See also the [Configuration Files Guide](../configuration/reference).
+- **API reference** — [auto-generated from source docstrings](../api/index).
+- **ROS 2 and Open-RMF** — [bridge setup and integration guide](../ros2/index).

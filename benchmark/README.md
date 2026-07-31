@@ -21,7 +21,7 @@ flowchart TD
 
     Profile --> Analyze{What's slow?}
 
-    Analyze -->|Collision 10-15%| CollisionExp[🧪 collision_check.py<br/>Pipeline breakdown]
+    Analyze -->|Collision cost| CollisionExp[🧪 collision_check.py<br/>Pipeline breakdown]
     Analyze -->|Agent Update| AgentExp[🧪 agent_update.py<br/>Analyze update methods]
     Analyze -->|Other| GenericExp[🧪 experiments/<br/>Test hypotheses]
 
@@ -47,7 +47,7 @@ flowchart TD
 
 | Symptom | Tool | Common Fix |
 |---------|------|------------|
-| Collision Check > 20% | `collision_check.py` | 2D collision mode (~67% reduction), reduce frequency to 10 Hz |
+| Collision cost is significant | `collision_check.py` | Inspect the scene and reduce frequency or select a suitable collision mode |
 | Agent Update > 40% | `agent_update.py` | Skip stationary agents, reduce PyBullet API calls |
 | Goal setting > 100ms | `agent_manager_set_goal.py` | Cache trajectory calculations |
 | Joint Update slow | `arm_joint_update.py` | Compare physics vs kinematic mode |
@@ -55,7 +55,7 @@ flowchart TD
 ### Tool Categories
 
 - 🎯 **Benchmarking:** `run_benchmark.py`, `mobile_benchmark.py`, `arm_benchmark.py` — measure overall performance (RTF, step time, memory)
-- ⚡ **Controller comparison:** `run_benchmark.py --type mobile --controller ... --command-interface ...`, `batch_perf.py` — controller and command-interface timing with phase breakdown
+- ⚡ **Controller comparison:** `run_benchmark.py --type mobile_control_path --controller ... --command-interface ...`, `batch_perf.py` — controller and command-interface timing with phase breakdown
 - 🔍 **Profiling:** `profiling/` — identify *what is slow* (see `profiling/README.md`)
 - 🧪 **Experiments:** `experiments/` — compare *which is faster* (see `experiments/README.md`)
 
@@ -113,106 +113,29 @@ python benchmark/profiling/agent_update.py --agents=1000 --test=cprofile
 
 ---
 
-## Benchmark Results
+## Reading Benchmark Results
 
-### TL;DR
+The versioned result tables, test environment, and methodology are maintained
+in {doc}`Benchmark Results Reference <results>`. Keep published numbers there
+rather than duplicating them in this suite guide.
 
-| Agents | RTF (×) | Step Time (ms) |
-|--------|---------|----------------|
-| 100    | 143.5   | 0.7            |
-| 500    | 23.5    | 4.2            |
-| 1000   | 10.1    | 9.9            |
-| 2000   | 4.3     | 23.3           |
+For the default mobile benchmark, RTF is the simulation-loop value
+`duration / simulation_wall_s`. It measures only `run_simulation()` and excludes
+process startup, PyBullet setup, spawning, command setup, warmup, cleanup, and
+JSON aggregation. Use spawn time and command-setup time alongside RTF when
+evaluating end-to-end benchmark-worker cost.
 
-**Real-Time Factor (RTF):** How many seconds of simulation time per 1 second of wall-clock time (higher is better; >1.0 = faster than real-time).
+The default workload uses headless, kinematic `simple_cube` robots with the
+`batch_omni` fleet controller and fleet command interface. The mobile worker
+currently gives goals to half of the spawned agents. The
+`moving_agents_ratio` and `max_moving_agents` entries in `general.yaml` are not
+yet consumed by that worker.
 
-**Assessment:** ✅ Excellent: RTF > 2.0 · ⚠️ Good: RTF 1.0 – 2.0 · ❌ Poor: RTF < 1.0
-
-All measured runs use lightweight `simple_cube` robots, kinematics mode
-(physics OFF), headless (DIRECT), half of agents moving, batch controller, and
-fleet command interface.
-The default `collision_check_frequency=null` setting means collision checks run
-every simulation step.
-More detailed robot models have higher spawn and update costs and should be
-benchmarked separately from this large-scale baseline.
-Timed simulation runs keep `tracemalloc` disabled because Python allocation
-tracing materially distorts step-time and RTF measurements; memory deltas are
-RSS-based.
-
-### Test Environment
-
-- **CPU**: AMD Ryzen AI 7 PRO 350 w/ Radeon 860M (8C/16T)
-- **Memory**: 29 GB RAM
-- **OS**: Ubuntu 24.04 on WSL2 (Linux 6.6 microsoft-standard-WSL2)
-- **Python**: 3.12.3, PyBullet build time Jul 4 2026
-- **Mode**: DIRECT (headless), kinematics
-- **Methodology**: 3 repetitions, 10 s duration each, median ± stdev reported
-
-### Performance Summary
-
-> **Script:** `run_benchmark.py --sweep 100 250 500 1000 2000 --duration 10 --repetitions 3`
-
-| Agents | RTF (×) | Step Time (ms) | Spawn Time (s) | Memory Delta (MB) |
-|--------|---------|----------------|------------------|--------------------|
-| 100    | 143.46±14.49 | 0.70±0.06  | 0.059±0.004      | +2.55±0.00         |
-| 250    | 56.82±3.89   | 1.76±0.12  | 0.140±0.004      | +6.24±0.01         |
-| 500    | 23.54±1.81   | 4.25±0.30  | 0.294±0.011      | +12.53±0.10        |
-| 1000   | 10.12±0.08   | 9.88±0.08  | 0.604±0.038      | +25.00±0.02        |
-| 2000   | 4.30±0.19    | 23.25±1.07 | 1.241±0.023      | +48.07±0.06        |
-
-Memory delta is process RSS and should be treated as environment-dependent,
-especially on WSL2.
-
-### Component Breakdown
-
-> **Script:** supplemental profiling with 1000 agents, 50% moving,
-> `collision_check_frequency=null` (collision checks every simulation step), and
-> the first 100 measured steps after warmup.
-
-| Component | Mean Time | Share |
-|-----------|-----------|-------|
-| Agent / controller update | 4.43 ms | ~46% |
-| Pose flush | 0.98 ms | ~10% |
-| AABB / spatial-grid flush | 2.07 ms | ~22% |
-| Collision check | 2.07 ms | ~22% |
-| Monitor update | 0.04 ms | <1% |
-| Step simulation | 0 ms | 0% |
-
-Moving-agent update is the largest component, while AABB/grid refresh and
-collision checking together are comparable. Step Simulation is 0 ms because
-`physics=false`.
-
-### Scaling Analysis
-
-> **Script:** Same sweep as Performance Summary above (`run_benchmark.py --sweep`)
-
-```text
-Agents:     100  →  250  →  500  → 1000  → 2000
-Step (ms):  0.70 → 1.76 → 4.25 → 9.88 → 23.25
-Ratio:      1.0x → 2.5x → 6.1x → 14.1x → 33.2x
-```
-
-- **Step Time:** ~O(n^1.2) across the measured 100-2000 robot sweep on this WSL2 host.
-- **Spawn Time:** Linear (~0.25 ms per agent).
-- **Memory:** Linear above ~500 agents (~20 KB per agent).
-
-*Rows collected 2026-07-24 on the test environment described above.*
-
-### Mobile Control Path Comparison
-
-> **Script:** `run_benchmark.py --type mobile_control_path --controller per_agent batch --command-interface per_agent fleet --sweep 100 500 1000 --steps 600 --repetitions 3`
-
-This benchmark isolates controller update and command-ingress cost in the
-Python simulation loop.
-
-| Agents | Controller | Command Interface | Setup Time (s) | Step Time (ms) | P95 Step (ms) |
-|--------|------------|-------------------|----------------|----------------|---------------|
-| 100    | per-agent  | per-agent         | 0.0020         | 0.118          | 0.149         |
-| 100    | batch      | fleet             | 0.0016         | 0.112          | 0.124         |
-| 500    | per-agent  | per-agent         | 0.0283         | 0.666          | 0.563         |
-| 500    | batch      | fleet             | 0.0082         | 0.661          | 0.383         |
-| 1000   | per-agent  | per-agent         | 0.0245         | 1.526          | 1.592         |
-| 1000   | batch      | fleet             | 0.0162         | 1.290          | 1.397         |
+The control-path benchmark is a separate fixed-step micro-benchmark. Its
+default run uses differential controllers, collision checks at 60 Hz, five
+warmup steps, and 600 measured steps. Supplying multiple `--controller` and
+`--command-interface` values measures their Cartesian product; use its JSON
+output when comparing every combination.
 
 ---
 
@@ -234,7 +157,7 @@ benchmark/
 │
 ├── mobile_benchmark.py                # Worker: mobile agent benchmark
 ├── arm_benchmark.py                   # Worker: arm robot benchmark
-├── run_benchmark.py                   # Orchestrator: --type mobile|arm, sweep, comparison
+├── run_benchmark.py                   # Orchestrator: mobile, arm, and control-path runs
 │
 ├── profiling/                         # Profiling tools → see profiling/README.md
 │   ├── README.md
@@ -281,7 +204,8 @@ for mobile, arm, and mobile control-path runs.
 - Spawns worker processes, aggregates results
 - `--type mobile` (default): mobile agent benchmarks
 - `--type arm`: arm robot benchmarks (supports `--scenario physics|kinematic`)
-- `--type mobile --controller ... --command-interface ...`: separate comparison axes
+- `--type mobile_control_path --controller ... --command-interface ...`:
+  separate comparison axes
   for controller implementation (`per_agent`, `batch`) and command interface
   (`per_agent`, `fleet`)
 - **Modes:** Single Test · Sweep (multiple counts) · Compare (multiple scenarios)
@@ -297,7 +221,7 @@ python benchmark/run_benchmark.py --agents 1000 --scenario no_collision
 python benchmark/run_benchmark.py --sweep 100 500 1000 2000
 
 # Mobile: compare scenarios
-python benchmark/run_benchmark.py --compare no_collision collision_2d_10hz --agents 1000
+python benchmark/run_benchmark.py --compare no_collision collision_10hz --agents 1000
 
 # Arm: single test
 python benchmark/run_benchmark.py --type arm --agents 10 --scenario physics
@@ -313,18 +237,22 @@ python benchmark/arm_benchmark.py --agents 10 --duration 5 --scenario physics
 **Output Files:**
 - Mobile: `benchmark_results_<agents>agents_<duration>s.json`, `benchmark_sweep_<duration>s.json`
 - Arm: `arm_results_<arms>arms_<duration>s.json`, `arm_sweep_<duration>s.json`
+- Control path: `mobile_control_path_sweep_<steps>steps.json`,
+  `mobile_control_path_<controllers>__<interfaces>_<agents>agents.json`
 
 ---
 
 ## Benchmark Configs
 
-All config files in `benchmark/configs/` share these common settings:
+The mobile benchmark reads simulation settings from the `simulation:` mapping:
 
 ```yaml
-target_rtf: 0              # Maximum speed (no sleep)
-gui: false                  # Headless
-enable_time_profiling: true # Profiling enabled
-log_level: error            # Suppress logs
+simulation:
+  target_rtf: 0.0             # Maximum speed (no sleep)
+  physics: false              # Kinematic stepping
+  timestep: 0.1               # Simulation seconds per step
+  enable_time_profiling: true # Collect internal timing when requested
+  log_level: WARN             # Quiet benchmark output
 ```
 
 | Config | Physics | Detection Method | Collision Margin | Timestep |
@@ -334,7 +262,9 @@ log_level: error            # Suppress logs
 | `collision_physics_on.yaml` | ON | `contact_points` | 0.0 | 0.00417 (240 Hz) |
 | `collision_hybrid.yaml` | ON | `hybrid` | 0.02 (2 cm) | 0.00417 (240 Hz) |
 
-**Recommendation:** Use `collision_physics_off.yaml` for production workloads (fastest, deterministic).
+**Recommendation:** Start with `collision_physics_off.yaml` when a kinematic,
+distance-based collision baseline fits the scenario. Measure the target scene
+before treating it as the fastest or most appropriate production configuration.
 
 ### Scenarios (`general.yaml`)
 

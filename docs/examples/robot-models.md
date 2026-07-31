@@ -2,7 +2,7 @@
 
 ![Model Catalog](../media/model_catalog.png)
 
-**Source files:** [`examples/models/`](https://github.com/yuokamoto/PyBulletFleet/tree/main/examples/models)
+**Source files:** [`examples/models/`](https://github.com/yuokamoto/PyBulletFleet/tree/main/pybullet_fleet/examples/models)
 
 This tutorial shows how to load robots **by name** instead of by file path,
 browse the model catalog, and inspect robot capabilities automatically.
@@ -196,9 +196,12 @@ print(profile.joint_lower_limits)  # per-joint lower limits
 print(profile.joint_upper_limits)  # per-joint upper limits
 ```
 
-`auto_detect_profile()` also accepts a URDF path string — it will load the robot
-temporarily, inspect it, and remove it. Prefer passing `body_id` (int) when the
-robot is already spawned to avoid the load/remove overhead.
+`auto_detect_profile()` also accepts a URDF path string — it loads the robot
+temporarily, inspects it, and removes it. Prefer passing `body_id` (int) when
+the robot is already spawned. In a GUI application, do not use the string form
+against the GUI client because the temporary load/remove can disturb graphics
+resources. For pre-spawn inspection, use a separate PyBullet `DIRECT` client,
+as `robot_descriptions_demo.py` does.
 
 ---
 
@@ -253,11 +256,11 @@ Use `discover_models()` to see **all** discoverable models from a tier:
 ```python
 from pybullet_fleet.robot_models import discover_models
 
-# All ~1100 URDFs in pybullet_data
+# All discoverable URDF/SDF files in pybullet_data
 pb_models = discover_models("pybullet_data")
 print(f"{len(pb_models)} models in pybullet_data")
 
-# All ~87 URDF models in robot_descriptions
+# All discoverable robot_descriptions models
 rd_models = discover_models("robot_descriptions")
 print(f"{len(rd_models)} models in robot_descriptions")
 ```
@@ -286,7 +289,7 @@ agent = Agent.from_urdf(urdf_path=path, sim_core=sim)
 
 ### Installing `robot_descriptions`
 
-The `robot_descriptions` package provides 80+ robot URDFs:
+The `robot_descriptions` package provides optional robot URDF assets:
 
 ```bash
 pip install pybullet-fleet[models]
@@ -302,9 +305,10 @@ an install hint.
 
 | Script | What it demonstrates |
 |--------|---------------------|
-| [`resolve_model_demo.py`](https://github.com/yuokamoto/PyBulletFleet/blob/main/examples/models/resolve_model_demo.py) | Three URDF resolution patterns: by name, by direct path, and listing all models |
-| [`model_catalog_demo.py`](https://github.com/yuokamoto/PyBulletFleet/blob/main/examples/models/model_catalog_demo.py) | Visual grid catalog of all registered models from `KNOWN_MODELS` |
-| [`robot_descriptions_demo.py`](https://github.com/yuokamoto/PyBulletFleet/blob/main/examples/models/robot_descriptions_demo.py) | Using Tier 3 models from the `robot_descriptions` pip package |
+| [`resolve_model_demo.py`](https://github.com/yuokamoto/PyBulletFleet/blob/main/pybullet_fleet/examples/models/resolve_model_demo.py) | Three URDF resolution patterns: by name, by direct path, and listing all models |
+| [`model_catalog_demo.py`](https://github.com/yuokamoto/PyBulletFleet/blob/main/pybullet_fleet/examples/models/model_catalog_demo.py) | Visual grid catalog of all registered models from `KNOWN_MODELS` |
+| [`robot_descriptions_demo.py`](https://github.com/yuokamoto/PyBulletFleet/blob/main/pybullet_fleet/examples/models/robot_descriptions_demo.py) | Using Tier 3 models from the `robot_descriptions` pip package |
+| [`sdf_demo.py`](https://github.com/yuokamoto/PyBulletFleet/blob/main/pybullet_fleet/examples/models/sdf_demo.py) | Loading multi-model SDF assets and a directory of mesh files |
 
 ```bash
 # Try it:
@@ -331,8 +335,9 @@ python examples/mobile/path_following_demo.py --robot racecar
 python examples/scale/100robots_cube_patrol_demo.py --robot mobile_robot
 python examples/scale/pick_drop_arm_100robots_demo.py --robot kuka_iiwa
 
-# Grid demo has both --robot (mobile) and --arm-robot (arm)
-python examples/scale/100robots_grid_demo.py --robot racecar --arm-robot kuka_iiwa
+# Grid demos select their robot groups through the config file.
+python examples/scale/100robots_grid_demo.py --config config/100robots_config.yaml
+python examples/scale/100robots_mixed_demo.py --config config/100robots_mixed_config.yaml
 
 # Model demos — accepts any registered model
 python examples/models/robot_descriptions_demo.py --robot pr2
@@ -344,8 +349,8 @@ python examples/models/robot_descriptions_demo.py --robot pr2
 | Mobile demos (`examples/mobile/`) | `--robot` | `husky` | `racecar`, `mobile_robot` |
 | Scale demos — mobile | `--robot` | `husky` | `racecar`, `mobile_robot` |
 | Scale demos — arm | `--robot` | `panda` | `kuka_iiwa`, `arm_robot` |
-| `100robots_grid_demo.py` | `--robot` (mobile) | `husky` | `racecar`, `mobile_robot` |
-| `100robots_grid_demo.py` | `--arm-robot` (arm) | `panda` | `kuka_iiwa`, `arm_robot` |
+| `100robots_grid_demo.py` | `--config` | mobile-only grid | another `entities[].grid` YAML scene |
+| `100robots_mixed_demo.py` | `--config` | Husky + `arm_robot` grid | another mixed `entities[].grid` YAML scene |
 | `resolve_model_demo.py` | `--robot` | `panda` | any registered model |
 | `robot_descriptions_demo.py` | `--robot` | `tiago` | any `robot_descriptions` model |
 

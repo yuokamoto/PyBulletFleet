@@ -7,11 +7,7 @@ This demo showcases:
 1. Multi-cell registration: Large objects span multiple spatial grid cells
 2. Collision modes: NORMAL_3D, NORMAL_2D, DISABLED
 3. Collision visualization: Color changes when objects collide
-4.     print("This demo showcases:")
-    print("  1. Multi-cell registration for large objects")
-    print("  2. Collision modes: NORMAL_3D, NORMAL_2D, DISABLED")
-    print("  3. Collision visualization with color changes")
-    print("  4. Real-time performance monitoring")rmance monitoring: Real-time collision statistics
+4. Real-time collision statistics
 
 Features demonstrated:
 - NORMAL_3D mode (Green, Orange, Cyan): 27 neighbor cells checked (full 3D collision detection)
@@ -28,12 +24,12 @@ Layout:
 
 Usage:
     python examples/basics/collision_features_demo.py
-    python examples/basics/collision_features_demo.py --duration 30 --target-rtf 1.5
+    python examples/basics/collision_features_demo.py --duration 30 --rtf 1.5
 
-    Press 'c' to toggle collision shape visualization (wireframe)
-    Press 't' to toggle structure transparency
+    Press 'w' to toggle collision shape visualization (wireframe)
     Press SPACE to pause/resume simulation
 """
+
 import argparse
 import os
 import sys
@@ -357,7 +353,7 @@ def main():
     print("      * White: DISABLED mode (no collision detection)")
     print("  - Center: Large red object (multi-cell registration)")
     print("\nControls:")
-    print("  - Press 'c' to toggle collision shape visualization")
+    print("  - Press 'w' to toggle collision shape visualization")
     print("  - Press SPACE to pause/resume simulation")
     print("=" * 70)
 

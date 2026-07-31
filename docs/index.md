@@ -45,10 +45,10 @@ fleets rather than the software that *controls* individual robots.
   joint-level torque feedback.
 - **Scale over detail** — Validating behaviour at 100+ robot scale matters
   more than modelling individual link dynamics or sensor noise.
-- **Interoperability** — The simulation is designed around a callback-driven
-  step loop and snapshot-friendly state model, so that it can be plugged into
-  larger orchestration frameworks, replay pipelines, or external control
-  systems (e.g., gRPC / ROS 2) as those interfaces are built out.
+- **Interoperability** — The ROS 2 Jazzy bridge provides per-robot and
+  fleet-level interfaces, and the Open-RMF adapter supports direct Python,
+  fleet-level ROS, and per-robot ROS control paths. Other transports, including
+  gRPC, remain future work.
 - **Physics as an option** — When physical interaction *is* needed (grasping,
   conveyor dynamics, contact verification), full PyBullet physics can be
   switched on per-scenario without changing the rest of the stack.
@@ -64,6 +64,7 @@ how-to/index
 configuration/index
 benchmarking/index
 testing/index
+ros2/index
 api/index
 roadmap
 ```
@@ -81,6 +82,7 @@ roadmap
 | [Configuration](configuration/index) | YAML parameter reference | Looking up a specific setting |
 | [Architecture](architecture/index) › [Collision Overview](architecture/collision-overview) | Design goals, mode summary, two-phase pipeline | Understanding the collision system |
 | [Benchmarking](benchmarking/index) › [Optimization Guide](benchmarking/optimization-guide) | Performance tuning workflow | Improving simulation speed |
+| [ROS 2 & Open-RMF](ros2/index) | Bridge setup, interfaces, fleet API, and RMF demos | Integrating an external ROS or RMF system |
 | [API Reference](api/index) | Auto-generated module docs | Looking up a specific class or method |
 
 **🔧 PyBulletFleet Developers** — extending or debugging the framework:
@@ -92,6 +94,7 @@ roadmap
 | [How-to](how-to/index) › [Logging](how-to/logging) | LazyLogger, performance-safe logging | Adding or reviewing log output |
 | [Benchmarking](benchmarking/index) | Benchmark suite, profiling scripts, experiments | Deep performance analysis |
 | [Testing](testing/index) | Test strategy, running tests, coverage | Contributing or debugging |
+| [ROS 2 developer notes](ros2/index) | Bridge boundaries and verification entry points | Changing the bridge or RMF integration |
 
 ## Key Features
 

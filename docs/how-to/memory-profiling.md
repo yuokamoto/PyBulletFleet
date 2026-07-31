@@ -9,7 +9,11 @@ Memory profiling is an optional feature in PyBulletFleet that tracks memory usag
 - **Optimizing memory usage** by identifying memory-intensive operations
 - **Continuous Integration (CI)** testing to prevent memory regressions
 
-Memory profiling uses Python's built-in `tracemalloc` module, so no external dependencies are required.
+Memory profiling uses Python's built-in `tracemalloc` module, so no external
+dependencies are required. It measures Python allocations tracked by
+`tracemalloc`; it is not a measurement of process RSS or all memory allocated
+by native libraries such as PyBullet. Use an OS-level process monitor when RSS
+is the quantity you need to bound.
 
 ---
 
@@ -21,9 +25,10 @@ Add `enable_memory_profiling: true` to your YAML configuration file:
 
 ```yaml
 # config.yaml
-enable_time_profiling: true          # Time profiling (optional, independent)
-enable_memory_profiling: true   # Memory profiling
-profiling_interval: 100         # Report every 100 steps
+simulation:
+  enable_time_profiling: true      # Optional and independent
+  enable_memory_profiling: true
+  profiling_interval: 100         # Report every 100 steps
 ```
 
 ### 2. Run Your Simulation
@@ -32,7 +37,7 @@ profiling_interval: 100         # Report every 100 steps
 from pybullet_fleet.core_simulation import MultiRobotSimulationCore
 
 # Load configuration with memory profiling enabled
-sim = MultiRobotSimulationCore.from_config("config.yaml")
+sim = MultiRobotSimulationCore.from_yaml("config.yaml")
 
 # Run simulation
 sim.run_simulation(duration=60.0)  # 60 seconds simulation time
@@ -43,7 +48,7 @@ sim.run_simulation(duration=60.0)  # 60 seconds simulation time
 Memory statistics will be printed every `profiling_interval` steps:
 
 ```
-[MEMORY] Last 100 steps: current=245.32MB (min=243.18, max=246.57), peak=248.45MB (max=250.12), growth=+3.25MB
+[MEMORY] Last 100 steps: current=...MB (min=..., max=...), peak=...MB (max=...), growth=+...MB
 ```
 
 ---
@@ -54,22 +59,28 @@ Memory statistics will be printed every `profiling_interval` steps:
 
 **Configuration File:**
 ```yaml
-enable_memory_profiling: true   # Enable memory profiling
-profiling_interval: 100         # Report interval (steps)
+simulation:
+  enable_memory_profiling: true   # Enable memory profiling
+  profiling_interval: 100         # Report interval (steps)
 ```
 
 **Python API:**
 ```python
+from pybullet_fleet.core_simulation import SimulationParams
+
 sim = MultiRobotSimulationCore(
-    enable_memory_profiling=True,
-    profiling_interval=100
+    SimulationParams(
+        enable_memory_profiling=True,
+        profiling_interval=100,
+    )
 )
 ```
 
 ### Get Current Memory Usage
 
-`get_memory_usage()` can be called **at any time** while `tracemalloc` is active —
-including inside a callback during `run_simulation()`:
+`get_memory_usage()` can be called while `tracemalloc` is active, including
+inside a callback during `run_simulation()`. PyBulletFleet starts tracing during
+`initialize_simulation()`, so a newly constructed simulation has no value yet.
 
 ```python
 # Inside a callback: monitor memory every N steps
@@ -82,7 +93,7 @@ sim.register_callback(memory_monitor, frequency=10)
 sim.run_simulation()
 ```
 
-You can also call it after the simulation ends to get the final snapshot:
+You can also call it after `run_simulation()` returns to get the final snapshot:
 
 ```python
 mem_usage = sim.get_memory_usage()
@@ -95,8 +106,13 @@ if mem_usage:
 **Return Value:**
 - `None` if memory profiling is not enabled
 - Dictionary with keys:
-  - `current_mb`: Current memory usage in MB
-  - `peak_mb`: Peak memory usage since profiling started
+- `current_mb`: Current memory usage in MB
+- `peak_mb`: Peak memory usage since profiling started
+
+`tracemalloc` is process-global. If another library has already started it,
+PyBulletFleet reuses that session. The interval report resets the traced peak
+when Python provides `tracemalloc.reset_peak()`, so do not share the same
+tracing session when another component needs an independent cumulative peak.
 
 ---
 
@@ -105,7 +121,7 @@ if mem_usage:
 ### Memory Report Fields
 
 ```
-[MEMORY] Last 100 steps: current=245.32MB (min=243.18, max=246.57), peak=248.45MB (max=250.12), growth=+3.25MB
+[MEMORY] Last 100 steps: current=...MB (min=..., max=...), peak=...MB (max=...), growth=+...MB
 ```
 
 - **current**: Average current memory usage over last N steps
@@ -120,13 +136,11 @@ if mem_usage:
 
 ### Interpreting Growth Values
 
-| Growth Value | Interpretation |
-|--------------|----------------|
-| `+0.5MB` to `+2MB` | Normal for initialization or object spawning |
-| `+2MB` to `+10MB` | Monitor closely, may indicate inefficiency |
-| `+10MB` or more | Likely memory leak, investigate immediately |
-| `-1MB` to `+1MB` (steady) | Healthy, stable memory usage |
-| Consistently positive | Potential memory leak |
+Treat growth as a trend, not a universal threshold. Object creation, Python's
+allocator, caches, and the selected workload can all change the value. Compare
+multiple equivalent intervals after warm-up; persistent growth under the same
+workload is a reason to investigate, while a one-off increase is not by itself
+evidence of a leak.
 
 ---
 
@@ -134,11 +148,13 @@ if mem_usage:
 
 ```python
 config = {
-    "enable_memory_profiling": True,
-    "profiling_interval": 500,  # Report every 500 steps
+    "simulation": {
+        "enable_memory_profiling": True,
+        "profiling_interval": 500,  # Report every 500 steps
+    },
 }
 
-sim = MultiRobotSimulationCore.from_config(config)
+sim = MultiRobotSimulationCore.from_dict(config)
 # ... spawn agents ...
 sim.run_simulation()  # Ctrl+C or GUI close returns normally
 
@@ -151,18 +167,26 @@ if final_mem:
 During the run, watch the `growth` field in the periodic reports:
 
 ```
-[MEMORY] Last 500 steps: current=250.45MB (...), growth=+0.12MB   # stable ✓
-[MEMORY] Last 500 steps: current=250.58MB (...), growth=+0.15MB   # stable ✓
-[MEMORY] Last 500 steps: current=251.02MB (...), growth=+5.45MB   # investigate!
+[MEMORY] Last 500 steps: current=...MB (...), growth=+0.12MB
+[MEMORY] Last 500 steps: current=...MB (...), growth=+0.15MB
+[MEMORY] Last 500 steps: current=...MB (...), growth=+5.45MB
 ```
+
+The third value warrants comparison against repeated, warmed-up intervals; it
+is not automatically a leak solely because it is larger than the first two.
 
 For CI, assert a ceiling in a test:
 
 ```python
+from pybullet_fleet.core_simulation import MultiRobotSimulationCore, SimulationParams
+
+
 def test_memory_usage_within_limits():
     """Ensure simulation memory stays below threshold."""
     sim = MultiRobotSimulationCore(
-        enable_memory_profiling=True,
+        SimulationParams(
+            enable_memory_profiling=True,
+        )
     )
     # ... spawn agents, run ...
     mem = sim.get_memory_usage()
@@ -175,13 +199,12 @@ def test_memory_usage_within_limits():
 
 ### ✅ DO
 
-1. **Enable memory profiling for long-running simulations** (>1 minute)
+1. **Enable memory profiling for leak investigations and development runs**
 2. **Monitor growth values** to detect potential leaks
 3. **Set profiling_interval based on simulation length:**
-   - Short simulations (< 1 min): `profiling_interval: 50`
-   - Medium simulations (1-10 min): `profiling_interval: 100`
-   - Long simulations (> 10 min): `profiling_interval: 500`
-4. **Add memory assertions to tests:**
+   - Use a short interval to inspect short-lived spikes
+   - Use a longer interval to reduce log volume in long runs
+4. **Add workload-specific memory assertions to tests:**
    ```python
    assert mem["current_mb"] < MAX_MEMORY_MB
    ```
@@ -190,9 +213,9 @@ def test_memory_usage_within_limits():
 ### ❌ DON'T
 
 1. **Don't enable memory profiling in production or timing benchmarks**
-2. **Don't panic over small growth values** (< 2MB per 100 steps is normal)
+2. **Don't infer a leak from one interval alone**
 3. **Don't rely only on memory profiling** - use time profiling together
-4. **Don't forget to close simulation** after profiling
+4. **Don't treat traced Python heap as process RSS**
 
 ---
 
@@ -202,7 +225,7 @@ Memory profiling uses Python's `tracemalloc` module. It is useful for leak
 investigation, but it can materially slow allocation-heavy hot loops:
 
 - **CPU overhead**: workload-dependent; can be large in step-time / RTF benchmarks
-- **Memory overhead**: ~5-10% additional memory for tracking
+- **Memory overhead**: workload-dependent additional memory for allocation tracking
 - **Recommended for**: Development, testing, debugging
 - **Not recommended for**: Production deployments or benchmark runs measuring
   maximum RTF / step time
@@ -226,7 +249,8 @@ print(mem)  # None
 **Solution:**
 Ensure `enable_memory_profiling: true` in configuration:
 ```yaml
-enable_memory_profiling: true
+simulation:
+  enable_memory_profiling: true
 ```
 
 ### No memory statistics printed
@@ -249,14 +273,15 @@ Memory profiling enabled but no `[MEMORY]` logs appear.
 ```
 
 **Solution:**
-1. Check for memory leak candidates:
+1. Check for memory leak candidates. Prefer bounded buffers or aggregate values
+   rather than retaining one new value per step:
    ```python
-   # Bad: List comprehension creates new list every frame
-   self._data = [x for x in self._data if condition(x)]
+   from collections import deque
 
-   # Good: In-place removal
-   while self._data and not condition(self._data[0]):
-       self._data.pop(0)
+   # Initialise once, then retain only a bounded history.
+   self._recent_samples = deque(maxlen=1_000)
+   # Each update:
+   self._recent_samples.append(sample)
    ```
 
 2. Use external profilers for detailed analysis:
@@ -270,25 +295,27 @@ Memory profiling enabled but no `[MEMORY]` logs appear.
 
 ## Example Output
 
-### Normal Memory Usage (Healthy)
+### Illustrative Stable Trend
 
 ```
-[MEMORY] Last 100 steps: current=245.32MB (min=243.18, max=246.57), peak=248.45MB (max=250.12), growth=+0.15MB
-[MEMORY] Last 100 steps: current=245.48MB (min=244.32, max=246.89), peak=248.45MB (max=250.12), growth=+0.12MB
-[MEMORY] Last 100 steps: current=245.55MB (min=244.89, max=246.34), peak=248.45MB (max=250.12), growth=-0.05MB
+[MEMORY] Last 100 steps: current=...MB (min=..., max=...), peak=...MB (max=...), growth=+0.15MB
+[MEMORY] Last 100 steps: current=...MB (min=..., max=...), peak=...MB (max=...), growth=+0.12MB
+[MEMORY] Last 100 steps: current=...MB (min=..., max=...), peak=...MB (max=...), growth=-0.05MB
 ```
 
-**Interpretation:** Stable memory usage (~245MB), minimal growth, healthy simulation.
+**Interpretation:** Repeated intervals remain in a similar range after warm-up.
 
-### Memory Leak Detected (Unhealthy)
+### Illustrative Growth Requiring Investigation
 
 ```
-[MEMORY] Last 100 steps: current=245.32MB (min=243.18, max=246.57), peak=248.45MB (max=250.12), growth=+5.23MB
-[MEMORY] Last 100 steps: current=250.55MB (min=248.92, max=252.14), peak=253.67MB (max=255.34), growth=+4.87MB
-[MEMORY] Last 100 steps: current=255.42MB (min=253.78, max=257.09), peak=258.54MB (max=260.21), growth=+5.12MB
+[MEMORY] Last 100 steps: current=...MB (min=..., max=...), peak=...MB (max=...), growth=+5.23MB
+[MEMORY] Last 100 steps: current=...MB (min=..., max=...), peak=...MB (max=...), growth=+4.87MB
+[MEMORY] Last 100 steps: current=...MB (min=..., max=...), peak=...MB (max=...), growth=+5.12MB
 ```
 
-**Interpretation:** Continuous memory growth (+5MB per interval), potential memory leak, requires investigation.
+**Interpretation:** Repeated positive growth under an unchanged workload merits
+allocation-level investigation, but should be reproduced before concluding that
+there is a leak.
 
 ---
 

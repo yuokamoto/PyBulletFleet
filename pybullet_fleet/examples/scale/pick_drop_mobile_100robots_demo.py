@@ -27,7 +27,7 @@ except ModuleNotFoundError:
     sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", ".."))
     import pybullet_fleet  # noqa: F401
 
-from pybullet_fleet.agent import AgentSpawnParams, MotionMode
+from pybullet_fleet.agent import AgentSpawnParams
 from pybullet_fleet.agent_manager import AgentManager, GridSpawnParams, SimObjectManager
 from pybullet_fleet.config_utils import load_yaml_config, merge_configs
 from pybullet_fleet.core_simulation import MultiRobotSimulationCore
@@ -68,10 +68,15 @@ sim_core = MultiRobotSimulationCore.from_dict(config)
 if args.rtf is not None:
     sim_core.params.target_rtf = args.rtf
 
-# Create AgentManager — pass batch_controller when --controller batch is selected so
-# all differential agents are auto-registered with the vectorised controller.
+# Create AgentManager — set fleet_controller.type when --controller batch is
+# selected so all differential agents are auto-registered with the vectorized
+# controller.
 _batch_controller = "batch_differential" if args.controller == "batch" else None
-agent_manager = AgentManager(sim_core=sim_core, update_frequency=10.0, batch_controller=_batch_controller)
+agent_manager = AgentManager(
+    sim_core=sim_core,
+    update_frequency=10.0,
+    fleet_controller={"type": _batch_controller} if _batch_controller else None,
+)
 
 # Create SimObjectManager for pallets
 pallet_manager = SimObjectManager(sim_core=sim_core)
@@ -121,8 +126,8 @@ grid_params_A = GridSpawnParams(
 mobile_urdf = resolve_model(args.robot)
 agent_spawn_params = AgentSpawnParams(
     urdf_path=mobile_urdf,
-    motion_mode=MotionMode.DIFFERENTIAL,
     controller={
+        "type": "differential",
         "max_linear_vel": 3.0,
         "max_linear_accel": 5.0,
         "max_angular_vel": 2.0,

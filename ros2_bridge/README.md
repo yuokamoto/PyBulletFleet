@@ -28,6 +28,13 @@ Three packages provide a clean separation between general ROS 2 connectivity, Op
 
 ## Quick Start
 
+The user-facing setup and runnable demos are maintained in the
+[ROS 2 documentation](https://pybulletfleet.readthedocs.io/en/latest/ros2/index.html).
+Start with [Run Your First ROS 2 Demo](https://pybulletfleet.readthedocs.io/en/latest/ros2/quickstart.html)
+for Docker, fleet API, and RMF commands.  This README keeps the package
+boundary, a minimal installed-package smoke check, architecture reference, and
+bridge/RMF development notes.
+
 For Docker-based setup, see **[docker/README.md](../docker/README.md)**. For a
 native Ubuntu 24.04 + ROS 2 Jazzy workflow, see
 **[NATIVE_ROS2.md](NATIVE_ROS2.md)**.
@@ -93,12 +100,14 @@ but those Docker workflows are still part of the ROS 2 bridge documentation.
 
 | Document | Scope |
 |----------|-------|
-| `ros2_bridge/README.md` | ROS 2 bridge architecture, interfaces, RMF client modes, and shared test matrix |
-| `docker/README.md` | Docker image, compose commands, GUI/RViz forwarding, and Docker-specific demo commands |
-| `ros2_bridge/NATIVE_ROS2.md` | Ubuntu 24.04 + ROS 2 Jazzy native setup, overlay build, and native test commands |
+| [ReadTheDocs ROS 2 section](https://pybulletfleet.readthedocs.io/en/latest/ros2/index.html) | User-facing quickstart, interfaces, configuration, and RMF usage |
+| `ros2_bridge/README.md` | Package boundary, architecture reference, test matrix, and bridge/RMF development notes |
+| `docker/README.md` | Docker image, GUI/RViz forwarding, Docker operations, and automated checks |
+| `ros2_bridge/NATIVE_ROS2.md` | Ubuntu 24.04 + ROS 2 Jazzy native overlay setup and native checks |
 
-To avoid drift, shared concepts such as interface modes and test purpose should
-live here. Environment-specific pages should focus on setup and command lines.
+To avoid drift, user-facing concepts and runnable examples live in ReadTheDocs.
+Environment-specific repository pages focus on setup mechanics, operations,
+and test commands.
 
 ---
 
@@ -165,7 +174,7 @@ generic action payloads stay aligned with their fleet-level equivalents.
 
 | Service | Description |
 |---------|-------------|
-| `/sim/spawn_entity` | Spawn robot or object |
+| `/sim/spawn_entity` | Spawn a URDF robot (Agent) with name and initial pose; see the ROS 2 docs for limits |
 | `/sim/delete_entity` | Remove entity |
 | `/sim/get_entity_state` | Query pose of an entity |
 | `/sim/set_entity_state` | Teleport entity |
@@ -259,10 +268,12 @@ The existing per-robot ROS implementation remains available for compatibility:
 RMF Schedule ← FleetAdapterNode → per-robot ROS client → BridgeNode → PyBulletFleet
 ```
 
-An experimental fleet-level ROS client can be selected with
-`--client-mode fleet_ros` or `pybullet_fleet.rmf_client_mode: fleet_ros` in the
-fleet config. That mode consumes `/fleet/states` and sends navigation through
-the `/fleet/navigate` service, so the bridge config must enable:
+Use the term **Fleet ROS API** for the bridge's exported `fleet_api` endpoints,
+and **`fleet_ros` client mode** only for an RMF adapter that consumes those
+endpoints. `--client-mode fleet_ros` (or
+`pybullet_fleet.rmf_client_mode: fleet_ros`) selects that RMF transport. It
+consumes `/fleet/states` and sends navigation through `/fleet/navigate`, so the
+bridge config must enable:
 
 ```yaml
 fleet_api:
@@ -301,12 +312,13 @@ both single- and multi-fleet demos. It rejects an empty list, adds every entry
 as an in-process plugin for `python_fleet`, and launches one standalone
 `fleet_adapter` node per entry for `per_robot_ros` and `fleet_ros`.
 
-`client_mode` and the bridge's exported ROS APIs are independent settings.
-`client_mode` selects how the RMF adapter commands the simulator; `fleet_api`
-and `per_robot_api` select which ROS interfaces `bridge_node` exposes to other
-tools. For example, `client_mode:=python_fleet` can still publish `/fleet/*`
-or per-robot endpoints for debugging if the bridge YAML enables them. For the
-lowest-overhead Plugin Only pattern, disable both exported API groups:
+`client_mode` and the bridge's exported ROS APIs are independent settings:
+`client_mode` selects how the RMF adapter commands the simulator, while
+`fleet_api` and `per_robot_api` select which ROS interfaces `bridge_node`
+exposes to other tools. For example, `client_mode:=python_fleet` can still
+publish the Fleet ROS API (`/fleet/*`) or per-robot endpoints for debugging if
+the bridge YAML enables them. For the lowest-overhead Plugin Only pattern,
+disable both exported API groups:
 
 ```yaml
 fleet_api:
@@ -394,65 +406,32 @@ for their own world, SDF, URDF, and mesh assets.
 
 ## Roadmap
 
-Future improvements. Items already implemented have been removed — see git log for history.
+Future improvements. The fleet-level ROS API, direct `python_fleet` path, and
+per-robot interface-group decomposition are implemented. Their current usage is
+documented in the [ReadTheDocs ROS 2 section](../docs/ros2/index.md).
 
 ---
 
 ### Near-Term
 
-#### Fleet-Level ROS Wrapper (Pattern 2)
+#### Fleet API and deployment patterns (implemented)
 
-The bridge can expose fleet-level state and command endpoints alongside the
-existing per-robot interfaces.
+`fleet_api` exposes `/fleet/states`, navigation, stop, attach, generic-action,
+and joint-command endpoints. `per_robot_api` independently selects the
+per-robot endpoint groups. The RMF adapter supports these deployment patterns:
 
-```
-fleet_adapter ↔ /fleet/states + /fleet/navigate + /fleet/stop + /fleet/attach + /fleet/execute_action ↔ bridge_node ↔ sim_core
-```
+| Name | Control path | ROS endpoints | Primary use |
+|---|---|---|---|
+| Per-Robot ROS | Per-robot ROS topics/actions/services | O(N) | Compatibility and debugging |
+| Fleet ROS API transport | RMF adapter uses batched `/fleet/*` endpoints | O(1) | ROS-visible RMF control at scale |
+| Plugin Only | Direct Python Fleet API | 0 | Headless/CI with lowest bridge overhead |
+| Plugin + Bridge | Direct Python RMF path plus selected bridge endpoints | Configurable | Development and observation |
 
-- `/fleet/states` publisher — N 台分を1メッセージ
-- `/fleet/navigate` topic/service — batch navigation
-- `/fleet/stop` topic/service — batch stop
-- `/fleet/attach` topic/service — batch attach/detach
-- `/fleet/execute_action` topic/service — batch generic actions
-- `/fleet/joint_command` topic/service — batch joint commands
-- 100 robots: 200 endpoints → 2–3 endpoints
-
-Enable these endpoints with the `fleet_api` config section.
-
----
+See the [bridge interface reference](../docs/ros2/overview.md),
+[configuration guide](../docs/ros2/configuration.md), and
+[RMF client-mode guide](../docs/ros2/rmf.md).
 
 ### Mid-Term
-
-#### Direct Python Connection (no ROS)
-
-`fleet_adapter` を `MultiRobotSimulationCore` に Python API で直接接続。
-ROS 2 topic/service 層をバイパスし、低レイテンシ・シンプルデプロイを実現。
-
-- EventBus でアダプタ ↔ sim_core 通信
-- 同一プロセスで実行、シリアライゼーションオーバーヘッドゼロ
-
-**Deployment Patterns:**
-
-| # | Name | 通信 | bridge | ROS endpoints | 用途 |
-|---|---|---|---|---|---|
-| 1 | Per-Robot ROS 2 | ROS topics | ✅ | O(N) | **現行 (v1)** |
-| 2 | Batch ROS 2 | ROS topics (batch) | ✅ | O(1) | Scalable |
-| 3 | Plugin Only | Direct Python | ❌ | 0 | CI / headless |
-| 4 | Plugin + Bridge | Direct Python | ✅ | 0 | Dev/Debug |
-
----
-
-#### Handler Decomposition
-
-`RobotHandler` を focused, composable handlers に分解 (Gazebo-plugin style):
-
-- **OdometryHandler** — `/odom` + TF `odom → base_link`
-- **JointStateHandler** — `/joint_states`
-- **CmdVelHandler** — `/cmd_vel` subscriber
-- **NavigationHandler** — `navigate_to_pose` action server
-- **DiagnosticsHandler** — Status/heartbeat
-
-`handler_classes:` config でロボットタイプごとに必要なハンドラだけを組み合わせ可能。
 
 ---
 

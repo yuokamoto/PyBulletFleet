@@ -15,7 +15,23 @@ import tracemalloc  # Memory profiling (imported once at module level)
 from collections import deque
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Sequence, Set, Tuple, Type, TypeVar, Union, cast
+from types import MappingProxyType
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Callable,
+    Dict,
+    List,
+    Mapping,
+    Optional,
+    Sequence,
+    Set,
+    Tuple,
+    Type,
+    TypeVar,
+    Union,
+    cast,
+)
 
 import numpy as np
 
@@ -370,6 +386,10 @@ class MultiRobotSimulationCore:
             "monitor_update": [],
             "total": [],
         }
+        # Snapshot of the most recently completed profiled step.  This is
+        # intentionally separate from _profiling_stats, which is an internal
+        # interval accumulator and may be cleared after a periodic log report.
+        self._last_profiling: Optional[Mapping[str, Any]] = None
 
         # --- EventBus ---
         self.events: EventBus = EventBus()
@@ -493,6 +513,22 @@ class MultiRobotSimulationCore:
     def enable_memory_profiling(self) -> bool:
         """Whether memory profiling is enabled."""
         return self._enable_memory_profiling
+
+    @property
+    def last_profiling(self) -> Optional[Mapping[str, Any]]:
+        """Timing values from the most recently completed profiled step.
+
+        The mapping has the same timing fields (in milliseconds) as
+        :meth:`step_once` with ``return_profiling=True``, including custom
+        fields added by :meth:`record_profiling`.  It is updated only when
+        timing is measured: either time profiling is enabled or that step was
+        called with ``return_profiling=True``.  Otherwise it is ``None``.
+
+        Simulation plugins and callbacks execute before the current step's
+        later phases have completed, so they observe the previous completed
+        step through this property.  The returned mapping is read-only.
+        """
+        return self._last_profiling
 
     # ------------------------------------------------------------------
     # Plugin system
@@ -668,15 +704,14 @@ class MultiRobotSimulationCore:
         """Create :class:`~pybullet_fleet.agent_manager.AgentManager` instances
         from the ``managers:`` config section and register them.
 
-        Each entry must have a ``name:`` field.  Optional fields:
-
-        * ``batch_controller`` — batch controller registry name (``"batch_differential"``,
-          ``"batch_omni"``) or a dotted ``"module.ClassName"`` path to a custom
-          ``BatchKinematicController``; enables batch processing for all agents in this manager.
-        * ``controller`` — fleet-wide :class:`~pybullet_fleet.controller_params
-          .ControllerParams` defaults (e.g. ``{"max_linear_vel": 2.0,
-          "navigation_2d": true}``).  Applied to every agent that has no explicit
-          ``controller:`` block of its own.  Per-agent ``controller:`` always wins.
+        Each entry must have a ``name:`` field.  Its optional
+        ``fleet_controller:`` mapping combines manager-level execution and
+        shared :class:`~pybullet_fleet.controller_params.ControllerParams`
+        defaults. ``fleet_controller.type`` is either ``"batch_omni"`` or
+        ``"batch_differential"`` to enable that batch controller; omit it for
+        per-agent execution. Remaining fields (for example
+        ``max_linear_vel`` or ``navigation_2d``) are applied only where an
+        agent did not specify that controller parameter itself.
         * ``update_frequency`` — callback Hz (default ``10.0``).
         """
         from pybullet_fleet.agent_manager import AgentManager
@@ -689,21 +724,19 @@ class MultiRobotSimulationCore:
             if self.get_manager(name) is not None:
                 logger.warning("managers: duplicate name %r, skipping second entry", name)
                 continue
-            batch_controller = cfg.get("batch_controller")
-            fleet_controller = cfg.get("controller") or None
+            fleet_controller = dict(cfg.get("fleet_controller") or {})
             update_frequency = float(cfg.get("update_frequency", 10.0))
             mgr = AgentManager(
                 sim_core=self,
                 name=name,
                 update_frequency=update_frequency,
-                batch_controller=batch_controller,
-                fleet_controller=fleet_controller,
+                fleet_controller=fleet_controller or None,
             )
             logger.info(
                 "Created manager %r (batch_controller=%r, fleet_controller=%r, update_frequency=%s Hz)",
                 name,
-                batch_controller,
-                fleet_controller,
+                type(mgr.batch_controller).__name__ if mgr.batch_controller is not None else None,
+                mgr._fleet_controller,
                 update_frequency,
             )
 
@@ -2511,8 +2544,8 @@ class MultiRobotSimulationCore:
 
                 if detection_method == CollisionDetectionMethod.CONTACT_POINTS:
                     # Method 1: getContactPoints (physics mode, actual contact manifold)
-                    # Best for: physics simulation, requires stepSimulation()
-                    # Note: May be unstable for kinematic-kinematic pairs
+                    # Best for: physics simulation after a collision-detection pass.
+                    # Note: Cache/solver-dependent for kinematic-kinematic pairs.
                     contact_points = p.getContactPoints(obj_i.body_id, obj_j.body_id, physicsClientId=self._client)
                     has_collision = len(contact_points) > 0
 
@@ -2779,6 +2812,7 @@ class MultiRobotSimulationCore:
         # Clear profiling statistics (#4: prevents mixing data across runs)
         for key in self._profiling_stats:
             self._profiling_stats[key].clear()
+        self._last_profiling = None
 
         # Reset memory statistics (#5: prevents stale growth/average data)
         self._memory_stats = {
@@ -2988,7 +3022,7 @@ class MultiRobotSimulationCore:
 
             {
                 "urdf_path": "robots/mobile_robot.urdf",
-                "motion_mode": "omnidirectional",
+                "controller": {"type": "omni"},
                 "grid": {
                     "count": 50,
                     "spacing": [3.0, 3.0],
@@ -3013,29 +3047,20 @@ class MultiRobotSimulationCore:
         simulation, so objects are automatically synchronised on
         :meth:`remove_object` and :meth:`reset`.
 
-        **Batch processing**: Grid entries accept two keys for batch control:
+        **Batch processing**: Declare a named manager with
+        ``fleet_controller.type`` and route the entity group to it. All
+        entities in the group are added to that manager::
 
-        * ``batch_controller`` — batch controller registry name
-          (``"batch_differential"``, ``"batch_omni"``) or a dotted
-          ``"module.ClassName"`` path to a custom batch controller.  Shorthand: creates
-          an unnamed :class:`~pybullet_fleet.agent_manager.AgentManager` with
-          a batch controller for this group::
-
-              {
+              "managers": [{
+                  "name": "delivery_fleet",
+                  "fleet_controller": {"type": "batch_differential"},
+              }]
+              "entities": [{
                   "urdf_path": "robots/simple_cube.urdf",
-                  "motion_mode": "differential",
-                  "batch_controller": "batch_differential",
-                  "grid": {"count": 100, "spacing": [2, 2]},
-              }
-
-        * ``manager`` — name of a manager declared in the ``managers:`` config
-          section.  All entities in this group are added to that manager::
-
-              {
-                  "urdf_path": "robots/simple_cube.urdf",
+                  "controller": {"type": "differential"},
                   "manager": "delivery_fleet",
-                  "grid": {"count": 50, "spacing": [2, 2]},
-              }
+                  "grid": {"count": 100, "spacing": [2, 2]},
+              }]
 
         **Entity type dispatch**: If an entry contains a ``type`` key
         (e.g. ``"agent"``, ``"sim_object"``, or a custom registered
@@ -3053,11 +3078,11 @@ class MultiRobotSimulationCore:
             sim.spawn_robots_from_config([
                 # Individual robot
                 {"urdf_path": "robots/mobile_robot.urdf", "pose": [0, 0, 0.05]},
-                # Grid with batch controller (shorthand)
+                # Grid routed to a named batch manager
                 {
                     "urdf_path": "robots/mobile_robot.urdf",
-                    "motion_mode": "omnidirectional",
-                    "batch_controller": "batch_omni",
+                    "controller": {"type": "omni"},
+                    "manager": "delivery_fleet",
                     "grid": {"count": 20, "spacing": [3, 3]},
                 },
                 # Grid assigned to a named manager
@@ -3110,9 +3135,14 @@ class MultiRobotSimulationCore:
 
             _resolve_paths(d)
 
-            # Pop manager-routing keys before building SpawnParams.
-            batch_controller = d.pop("batch_controller", None)
-            fleet_controller = d.pop("fleet_controller", None) or None
+            # Entity groups are routed only through a named manager. Batch
+            # execution and shared controller parameters belong to that
+            # manager's ``fleet_controller:`` mapping, not this spawn entry.
+            if "batch_controller" in d or "fleet_controller" in d:
+                raise ValueError(
+                    "entities[].batch_controller and entities[].fleet_controller are unsupported; "
+                    "declare a named manager with fleet_controller.type and route the entity with manager:"
+                )
             manager_name = d.pop("manager", None)
 
             if grid_cfg is None:
@@ -3146,20 +3176,13 @@ class MultiRobotSimulationCore:
 
                 spawn_params = entity_cls._spawn_params_cls.from_dict(d)
 
-                # Resolve manager: explicit named > batch_controller shorthand > plain
+                # Resolve the optional named manager.
                 if manager_name is not None:
                     mgr = self.get_manager(manager_name)
                     if mgr is None:
                         raise KeyError(
                             f"manager {manager_name!r} not found. " "Declare it in the 'managers:' section before 'entities:'."
                         )
-                elif batch_controller is not None and issubclass(entity_cls, Agent):
-                    mgr = AgentManager(
-                        sim_core=self,
-                        batch_controller=batch_controller,
-                        fleet_controller=fleet_controller,
-                    )
-                    self.register_manager(mgr)
                 else:
                     mgr = SimObjectManager(sim_core=self, object_class=entity_cls)
                     self.register_manager(mgr)
@@ -3467,6 +3490,9 @@ class MultiRobotSimulationCore:
         """
         # Profiling: step start time (measure even if return_profiling=True)
         measure_timing = self._enable_time_profiling or return_profiling
+        if not measure_timing:
+            # Do not expose a stale result after profiling has been disabled.
+            self._last_profiling = None
         if measure_timing:
             t_step = time.perf_counter()
 
@@ -3676,11 +3702,21 @@ class MultiRobotSimulationCore:
                 self._profiling_stats["monitor_update"][-1] = (t_mon1 - t_mon0) * 1000
                 self._profiling_stats["total"][-1] = (t_end - t_step) * 1000
 
-            # Return profiling data if requested (pop values from _profiling_stats)
-            if return_profiling:
-                result: Dict[str, Any] = {name: data.pop() for name, data in self._profiling_stats.items() if data}
+                # Keep a stable public snapshot before return_profiling pops
+                # values or periodic logging clears the interval accumulator.
+                result: Dict[str, Any] = {name: data[-1] for name, data in self._profiling_stats.items() if data}
                 if collision_breakdown is not None:
                     result["collision_breakdown"] = collision_breakdown
+                snapshot = dict(result)
+                if collision_breakdown is not None:
+                    snapshot["collision_breakdown"] = MappingProxyType(dict(collision_breakdown))
+                self._last_profiling = MappingProxyType(snapshot)
+
+            # Return profiling data if requested (pop values from _profiling_stats)
+            if return_profiling:
+                for data in self._profiling_stats.values():
+                    if data:
+                        data.pop()
                 return result
 
             # Profiling output (only when time profiling is enabled and not returning data)

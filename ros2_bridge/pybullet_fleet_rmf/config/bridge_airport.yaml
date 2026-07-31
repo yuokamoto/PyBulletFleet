@@ -60,8 +60,8 @@ entities:
     sdf_path: "package://rmf_demos_assets/models/TinyRobot/model.sdf"
     pose: [28.72, -51.19, 0.0]
     yaw: -1.568
-    motion_mode: "differential"
     controller:
+      type: differential
       max_linear_vel: 0.5
       max_linear_accel: 0.75
       navigation_2d: true
@@ -76,8 +76,8 @@ entities:
     sdf_path: "package://rmf_demos_assets/models/TinyRobot/model.sdf"
     pose: [67.97, -49.36, 0.0]
     yaw: -1.598
-    motion_mode: "differential"
     controller:
+      type: differential
       max_linear_vel: 0.5
       max_linear_accel: 0.75
       navigation_2d: true
@@ -92,8 +92,8 @@ entities:
     sdf_path: "package://rmf_demos_assets/models/TinyRobot/model.sdf"
     pose: [86.50, -9.63, 0.0]
     yaw: -0.002
-    motion_mode: "differential"
     controller:
+      type: differential
       max_linear_vel: 0.5
       max_linear_accel: 0.75
       navigation_2d: true
@@ -108,8 +108,8 @@ entities:
     sdf_path: "package://rmf_demos_assets/models/TinyRobot/model.sdf"
     pose: [21.78, -27.45, 0.0]
     yaw: 1.582
-    motion_mode: "differential"
     controller:
+      type: differential
       max_linear_vel: 0.5
       max_linear_accel: 0.75
       navigation_2d: true
@@ -126,8 +126,8 @@ entities:
     sdf_path: "package://rmf_demos_assets/models/DeliveryRobot/model.sdf"
     pose: [96.60, -51.96, 0.0]
     yaw: -0.016
-    motion_mode: "differential"
     controller:
+      type: differential
       max_linear_vel: 0.7
       max_linear_accel: 0.5
       navigation_2d: true
@@ -142,8 +142,8 @@ entities:
     sdf_path: "package://rmf_demos_assets/models/DeliveryRobot/model.sdf"
     pose: [152.35, -44.32, 0.0]
     yaw: 0.031
-    motion_mode: "differential"
     controller:
+      type: differential
       max_linear_vel: 0.7
       max_linear_accel: 0.5
       navigation_2d: true
@@ -158,8 +158,8 @@ entities:
     sdf_path: "package://rmf_demos_assets/models/DeliveryRobot/model.sdf"
     pose: [14.78, -9.28, 0.0]
     yaw: 0.005
-    motion_mode: "differential"
     controller:
+      type: differential
       max_linear_vel: 0.7
       max_linear_accel: 0.5
       navigation_2d: true
@@ -175,8 +175,8 @@ entities:
     sdf_path: "package://rmf_demos_assets/models/CleanerBotA/model.sdf"
     pose: [117.41, -49.48, 0.0]
     yaw: -1.573
-    motion_mode: "differential"
     controller:
+      type: differential
       max_linear_vel: 0.7
       max_linear_accel: 0.5
       navigation_2d: true
@@ -192,8 +192,8 @@ entities:
     sdf_path: "package://rmf_demos_assets/models/CleanerBotE/model.sdf"
     pose: [159.70, -55.56, 0.0]
     yaw: 1.571
-    motion_mode: "differential"
     controller:
+      type: differential
       max_linear_vel: 0.7
       max_linear_accel: 0.5
       navigation_2d: true
@@ -208,8 +208,8 @@ entities:
     sdf_path: "package://rmf_demos_assets/models/CleanerBotE/model.sdf"
     pose: [163.42, -55.63, 0.0]
     yaw: 1.563
-    motion_mode: "differential"
     controller:
+      type: differential
       max_linear_vel: 0.7
       max_linear_accel: 0.5
       navigation_2d: true
@@ -267,26 +267,26 @@ entities:
     close_positions: {hinge: 0.0}
 
   # ── NPC: Caddy (autonomous patrol — no fleet adapter) ────────────
-  # Patrols the main terminal corridor.  Uses PatrolController on top
-  # of DifferentialController (auto-created from motion_mode).
+  # Patrols the main terminal corridor. Uses PatrolController on an explicit
+  # DifferentialController base.
   - name: caddy_0
     sdf_path: "package://rmf_demos_assets/models/Caddy/model.sdf"
     pose: [40.0, -35.0, 0.0]
     yaw: 0.0
-    motion_mode: "differential"
     controller:
-      type: patrol
-      max_linear_vel: 0.3
-      max_linear_accel: 0.5
-      navigation_2d: true
-      waypoints:
-        - [40.0, -35.0, 0.0]   # near n01_door
-        - [70.0, -35.0, 0.0]   # mid-corridor
-        - [100.0, -35.0, 0.0]  # near s04_door
-        - [130.0, -35.0, 0.0]  # near s08_door
-        - [155.0, -35.0, 0.0]  # near zone_4_door
-      wait_time: 3.0
-      loop: true
+      - type: differential
+        max_linear_vel: 0.3
+        max_linear_accel: 0.5
+      - type: patrol
+        navigation_2d: true
+        waypoints:
+          - [40.0, -35.0, 0.0]   # near n01_door
+          - [70.0, -35.0, 0.0]   # mid-corridor
+          - [100.0, -35.0, 0.0]  # near s04_door
+          - [130.0, -35.0, 0.0]  # near s08_door
+          - [155.0, -35.0, 0.0]  # near zone_4_door
+        wait_time: 3.0
+        loop: true
 
   # ── NPC: Pedestrians (autonomous random walk — no fleet adapter) ─
   # Simulated crowd wandering in the terminal concourse area.
@@ -298,39 +298,39 @@ entities:
     model_yaw_offset: 1.5708   # +90° so the human mesh faces its walking direction
     pose: [60.0, -30.0, 0.0]
     yaw: 0.0
-    motion_mode: "differential"
     controller:
-      type: random_walk
-      max_linear_vel: 0.8
-      max_linear_accel: 1.0
-      navigation_2d: true
-      radius: 8.0
-      wait_range: [1.0, 4.0]
+      - type: differential
+        max_linear_vel: 0.8
+        max_linear_accel: 1.0
+      - type: random_walk
+        navigation_2d: true
+        radius: 8.0
+        wait_range: [1.0, 4.0]
 
   - name: pedestrian_1
     sdf_path: "/root/.gz/fuel/fuel.gazebosim.org/openrobotics/models/malevisitoronphone/2/model.sdf"
     model_yaw_offset: 1.5708   # +90° so the human mesh faces its walking direction
     pose: [90.0, -25.0, 0.0]
     yaw: 0.0
-    motion_mode: "differential"
     controller:
-      type: random_walk
-      max_linear_vel: 0.8
-      max_linear_accel: 1.0
-      navigation_2d: true
-      radius: 8.0
-      wait_range: [1.0, 4.0]
+      - type: differential
+        max_linear_vel: 0.8
+        max_linear_accel: 1.0
+      - type: random_walk
+        navigation_2d: true
+        radius: 8.0
+        wait_range: [1.0, 4.0]
 
   - name: pedestrian_2
     sdf_path: "/root/.gz/fuel/fuel.gazebosim.org/openrobotics/models/femalevisitor/2/model.sdf"
     model_yaw_offset: 1.5708   # +90° so the human mesh faces its walking direction
     pose: [120.0, -30.0, 0.0]
     yaw: 0.0
-    motion_mode: "differential"
     controller:
-      type: random_walk
-      max_linear_vel: 0.8
-      max_linear_accel: 1.0
-      navigation_2d: true
-      radius: 8.0
-      wait_range: [1.0, 4.0]
+      - type: differential
+        max_linear_vel: 0.8
+        max_linear_accel: 1.0
+      - type: random_walk
+        navigation_2d: true
+        radius: 8.0
+        wait_range: [1.0, 4.0]

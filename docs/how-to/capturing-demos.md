@@ -1,15 +1,15 @@
 # Capturing Demo Videos
 
 Record demo videos for documentation and presentations.
-PyBulletFleet provides three recording approaches.
+PyBulletFleet provides four recording approaches.
 
 ## Capture Pipeline Overview
 
 | Method | Mode | Output | Requirements |
 |--------|------|--------|-------------|
-| **Python API** (`start_recording`) | Headless or GUI | MP4 / GIF | PyBullet only |
-| **`RECORD` env var** | `run_simulation()` auto-capture | MP4 / GIF | PyBullet only |
-| `capture_demo.py` | Batch headless | MP4 / GIF | PyBullet only |
+| **Python API** (`start_recording`) | Headless or GUI | MP4 / GIF | Pillow (GIF); `imageio[pyav]` (MP4) |
+| **`RECORD` env var** | `run_simulation()` auto-capture | MP4 / GIF | Pillow (GIF); `imageio[pyav]` (MP4) |
+| `capture_demo.py` | Batch headless | MP4 / GIF | Pillow (GIF); `imageio[pyav]` (MP4) |
 | `capture_screen_demo.py` | GUI screen recording | MP4 | X11 + ffmpeg + xdotool |
 
 ## Python API
@@ -38,6 +38,11 @@ Key parameters:
 | `camera_mode` | `"auto"` | `"auto"` \| `"gui"` \| `"orbit"` \| `"manual"` |
 | `time_base` | `"sim"` | `"sim"` (1× playback) or `"real"` (wall-clock speed) |
 
+`camera_mode="auto"` selects the GUI camera when `SimulationParams.gui=True`;
+otherwise it frames the scene from an automatically computed camera position.
+`camera_mode="gui"` explicitly requires a GUI connection. Use `"orbit"` or
+`"manual"` for a moving or fully specified headless camera.
+
 For advanced usage (manual start/stop, orbit camera, custom camera params), see the
 {class}`~pybullet_fleet.recorder.SimulationRecorder` API reference.
 
@@ -49,11 +54,11 @@ ends. No script changes are required.
 
 ```bash
 # Basic usage
-RECORD=output.mp4 python examples/scale/100robots_grid_demo.py
+RECORD=output.mp4 python pybullet_fleet/examples/scale/100robots_grid_demo.py
 
 # With custom settings
 RECORD=demo.gif RECORD_DURATION=6.0 RECORD_FPS=10 \
-  python examples/basics/action_system_demo.py
+  python pybullet_fleet/examples/basics/action_system_demo.py
 ```
 
 | Variable | Default | Description |
@@ -63,6 +68,11 @@ RECORD=demo.gif RECORD_DURATION=6.0 RECORD_FPS=10 \
 | `RECORD_FPS` | `15` | Frame rate |
 | `RECORD_WIDTH` / `RECORD_HEIGHT` | `800` / `600` | Frame resolution |
 | `RECORD_TIME_BASE` | `"sim"` | `"sim"` or `"real"` |
+| `RECORD_GUI` | unset | Set to `1` to keep a requested GUI connection and use its hardware OpenGL camera |
+
+For reproducible headless capture, `RECORD` forces `gui=False` when the
+simulation was configured with a GUI. Set `RECORD_GUI=1` when you intentionally
+want to keep the GUI window and capture from its camera.
 
 ## Batch Capture Scripts
 
@@ -74,10 +84,13 @@ Uses `SimulationRecorder` to render frames internally (no window needed).
 Works in CI and headless environments.
 
 ```bash
-# Record all demos as MP4
+# Record all demos as GIF (the default)
 python scripts/capture_demo.py
 
-# Single demo, custom format
+# Record all demos as MP4
+python scripts/capture_demo.py --format mp4
+
+# Single demo
 python scripts/capture_demo.py --demo 100robots_grid_mixed --format gif
 ```
 
@@ -102,11 +115,15 @@ python scripts/capture_screen_demo.py --list
 
 ### Parameter resolution (3-layer merge)
 
-Screen capture parameters are resolved in order (later wins):
+For `capture_demo.py`, recording parameters are resolved in order (later wins):
 
 1. **`format_defaults`** from `demos.yaml` (e.g. `mp4: {fps: 30, duration: 6.0}`)
 2. **CLI arguments** (`--fps`, `--duration`)
 3. **Per-demo overrides** in the YAML
+
+`capture_screen_demo.py` uses the MP4 defaults and accepts only `--fps` and
+`--duration` as recording overrides. Its per-demo `recording_duration`, when
+present, takes precedence over both the MP4 default and CLI `--duration`.
 
 ### Per-demo delay
 
@@ -116,11 +133,11 @@ Set `delay` per-demo in `demos.yaml`:
 ```yaml
 demos:
   pick_drop_arm_100robots:
-    script: examples/scale/pick_drop_arm_100robots_demo.py
+    script: pybullet_fleet/examples/scale/pick_drop_arm_100robots_demo.py
     delay: 5          # Wait 5s after window appears before recording
 
   action_system:
-    script: examples/basics/action_system_demo.py
+    script: pybullet_fleet/examples/basics/action_system_demo.py
     # No delay — starts recording immediately
 ```
 
@@ -146,9 +163,10 @@ format_defaults:
 
 demos:
   demo_name:
-    script: examples/path/to/demo.py      # Required
+    script: pybullet_fleet/examples/path/to/demo.py  # Required
     args: ["--mode=mixed"]                 # Optional CLI args for the demo
     delay: 3                               # Optional stabilize delay (seconds)
+    recording_duration: 8.0                # Screen-capture duration; takes priority
     mp4:                                   # Optional per-format overrides
       fps: 60
       duration: 10.0
@@ -159,6 +177,7 @@ demos:
 | `script` | str | *required* | Path to demo Python script |
 | `args` | list | `[]` | CLI arguments passed to the demo |
 | `delay` | int | CLI `--delay` or None | Stabilize delay before recording |
+| `recording_duration` | float | MP4 `duration` | Screen-capture duration in wall-clock seconds; overrides `--duration` |
 | `mp4` / `gif` | dict | `{}` | Per-format parameter overrides |
 
 ### Output

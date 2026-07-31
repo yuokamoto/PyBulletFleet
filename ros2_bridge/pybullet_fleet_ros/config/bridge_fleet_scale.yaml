@@ -24,15 +24,19 @@ per_robot_api:
   services: false
   actions: false
 
+managers:
+  - name: robot_fleet
+    fleet_controller:
+      type: batch_omni
+      max_linear_vel: 2.0
+      max_angular_vel: 3.0
+
 entities:
   - name: robot
     urdf_path: robots/simple_cube.urdf
-    motion_mode: omnidirectional
-    batch_controller: batch_omni
     controller:
       type: omni
-      max_linear_vel: 2.0
-      max_angular_vel: 3.0
+    manager: robot_fleet
     grid:
       count: 100
       columns: 10

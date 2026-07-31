@@ -6,6 +6,7 @@ dispense/ingest cycles can run without ROS.  The ROS bridge
 messaging (subscriptions, publishers, result/state messages).
 
 **Dispenser** flow:
+
 1. ``dispense(workcell_name, robot)`` checks for nearby pickable
    SimObjects (like Gazebo TeleportDispenser's ``fill_dispenser``).
    If none found, a fallback cargo box is spawned.
@@ -15,6 +16,7 @@ messaging (subscriptions, publishers, result/state messages).
    positions on completion, and emits completion events.
 
 **Ingestor** flow:
+
 1. ``ingest(workcell_name, robot)`` queues a ``DropAction`` on the
    carrier robot.
 2. On completion the item is scheduled for return-home (teleport back

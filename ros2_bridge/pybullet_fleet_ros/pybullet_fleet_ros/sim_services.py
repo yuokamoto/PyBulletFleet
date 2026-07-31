@@ -12,7 +12,6 @@ import pybullet as p
 
 from pybullet_fleet import AgentSpawnParams
 from pybullet_fleet.robot_models import resolve_model
-from pybullet_fleet.types import MotionMode
 
 from .constants import DEFAULT_SPAWN_URDF, FALLBACK_SPAWN_URDF, SUPPORTED_FEATURES, SUPPORTED_SPAWN_FORMATS
 from .conversions import pbf_pose_to_ros, ros_pose_to_pbf
@@ -191,7 +190,7 @@ class SimServices:
             params = AgentSpawnParams(
                 urdf_path=urdf_path,
                 initial_pose=initial_pose,
-                motion_mode=MotionMode.OMNIDIRECTIONAL,
+                controller={"type": "omni"},
                 name=name or None,
             )
             agent = self._bridge.spawn_robot(params)

@@ -7,22 +7,20 @@ This package provides a modular, reusable PyBullet simulation framework designed
 > **Note:** The methods, attributes, and parameters listed in this document are representative highlights — not exhaustive lists. Refer to the source code or API reference for the full interface of each class.
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                    User Application                          │
-└───────────────────┬─────────────────────────────────────────┘
-                    │
-    ┌───────────────┴───────────────┐
-    │  MultiRobotSimulationCore     │  ← Main simulation engine
-    │  (core_simulation.py)         │
-    └───────────────┬───────────────┘
-                    │
-    ┌───────────────┼───────────────┬───────────────┬──────────────┐
-    │               │               │               │              │
-┌───▼───┐    ┌─────▼──────┐  ┌────▼────┐    ┌────▼────┐   ┌────▼────┐
-│ Agent │    │ Agent      │  │ Action  │    │ Tools   │   │Visualizer│
-│       │    │ Manager    │  │ System  │    │ (utils) │   │ Monitor │
-└───────┘    └────────────┘  └─────────┘    └─────────┘   └─────────┘
+ Python application / ROS 2 bridge / RMF integration
+                         │
+              MultiRobotSimulationCore
+ ├── Entities: Agent, SimObject, AgentManager
+ ├── Control: Action system, per-agent Controller, fleet_controller, Fleet API
+ ├── Extension: SimPlugin, AgentPlugin, EventBus
+ ├── Simulation data: world/SDF/mesh loading, robot models, devices
+ ├── Observability: recorder, monitor, profiling
+ └── Runtime: two-phase step, physics, collision/spatial hash, visualizer
 ```
+
+The ROS 2 bridge and Open-RMF adapters are integrations at the boundary of the
+core, not core simulation components: they translate transport-specific data
+to the public Fleet API, Agent, and plugin interfaces.
 
 ## Core Components
 
@@ -43,13 +41,14 @@ The central orchestrator for PyBullet simulations.
 - Performance monitoring integration
 - Structure body tracking
 - Callback management for user-defined updates
+- Simulation plugin lifecycle and global EventBus ownership
 - Keyboard event handling (SPACE, v, c, t keys)
 - Collision detection system integration
 
 **Key Methods:**
 - `from_dict(config)` / `from_yaml(path)`: Factory methods for initialization
 - `run_simulation(update_callback, final_callback)`: Main simulation loop
-- `step_once()`: Single simulation step. Runs a **two-phase step** internally — Phase 1 (agent.update + callbacks + plugin on_step) buffers all kinematic pose writes; Phase 2 flushes them to PyBullet; `stepSimulation()` runs (when physics is on); Phase 3 refreshes AABBs + spatial grid for the flushed objects; collision detection then sees the new poses. See {doc}`two-phase-step` for details.
+- `step_once()`: Single simulation step. Its **two-phase pose-commit contract** buffers framework base-pose writes during Phase 1 (agent update, callbacks, and plugin hooks) and flushes them to PyBullet in Phase 2. Physics, post-commit AABB/spatial-grid synchronization, and collision detection then run against the committed scene. See {doc}`two-phase-step` for details.
 - `setup_camera()`: Camera positioning
 - `configure_visualizer()`: Visual settings configuration
 - `register_static_body(body_id)`: Track static structure elements
@@ -59,10 +58,24 @@ The central orchestrator for PyBullet simulations.
 **Associated Params:**
 - **`SimulationParams`** — Configuration dataclass holding all parameters for `MultiRobotSimulationCore`. Passed to the constructor to configure the simulation engine.
   - Attributes: `gui`, `timestep`, `target_rtf`, `duration` (core settings), `physics`, `monitor` (feature toggles), `enable_floor` (plane.urdf loading, default `True`), `camera_*` (camera config), `enable_*` (visualization), `spatial_hash_*` (collision detection)
-  - Creation: `SimulationParams(gui=False, target_rtf=0, ...)`, `SimulationParams.from_dict(config)`, `SimulationParams.from_config("config/config.yaml")`
+  - Normal creation: `MultiRobotSimulationCore.from_yaml(path)` and
+    `.from_dict(config)` extract the `simulation:` section and create
+    `SimulationParams` internally with `SimulationParams.from_dict()`. These
+    are the usual entry points for YAML/config-driven simulations.
+  - Direct creation: `SimulationParams(gui=False, target_rtf=0, ...)`,
+    `SimulationParams.from_dict(config)`, or
+    `SimulationParams.from_config("config/config.yaml")`, followed by
+    `MultiRobotSimulationCore(params)`. Use this form when Python code needs
+    to construct or adjust simulation-only parameters explicitly.
   - `enable_floor=False` skips loading `plane.urdf` in both `setup_pybullet()` and `reset()`, allowing custom floor handling (e.g., transparent floors, environment SDF meshes)
 
-##### SimObject
+---
+
+### 2. sim_object.py
+
+**Purpose**: Base entity implementation for single-body objects.
+
+#### SimObject
 Base class for all simulation objects (single rigid body, no joints or links).
 
 SimObject represents a **single-body** object in PyBullet — it has only a base link
@@ -96,15 +109,9 @@ multi-link bodies with joint control (e.g., URDF robots), use Agent instead.
 - `SimObjectSpawnParams` — Parameters for spawning a SimObject (visual/collision shapes, initial pose, mass, pickable, collision mode, name, user_data). Pass to `SimObject.from_params()`.
 - `ShapeParams` — Visual or collision shape definition (shape type, mesh path, half extents, radius, colour, frame offset). Referenced by `SimObjectSpawnParams.visual_shape` and `.collision_shape`.
 
-##### LogLevelManager
-Utility for managing PyBullet log verbosity.
-
-**Key Methods:**
-- `set_log_level(level)`: Control PyBullet logging output
-
 ---
 
-### 2. agent.py
+### 3. agent.py
 
 **Purpose**: Agent with goal-based navigation and action system
 
@@ -136,14 +143,15 @@ object attachment via `update_attached_objects_kinematics()`.
 - `pick(obj)`: Attach object to agent
 - `drop()`: Detach currently held object
 
-**Motion Modes:**
-- Omnidirectional: Move in any direction without rotation
-- Differential: Rotate towards goal then move forward
-
-**Control Algorithm:**
-- Proportional controller for position
-- Linear interpolation for smooth motion
-- Velocity clamping based on max_linear_vel and max_linear_accel
+**Controllers:**
+- A per-agent `Controller` owns movement behavior. Built-in kinematic
+  controllers are `omni` and `differential`; higher-level controllers such as
+  patrol can be layered on top.
+- Select the controller explicitly with `controller={"type": "omni"}` or
+  `controller={"type": "differential"}`. `motion_mode` is retained only as a
+  compatibility/default hint and should not be used in new configurations.
+- Controllers calculate movement during Phase 1 and write through the buffered
+  pose path, preserving the two-phase and collision guarantees.
 
 **Joint Control Modes:**
 - **Physics mode** (`mass > 0`, `physics=True`): `setJointMotorControl2` — PyBullet motor control with torque limits
@@ -162,7 +170,11 @@ object attachment via `update_attached_objects_kinematics()`.
 
 **Associated Params:**
 
-- `AgentSpawnParams` — Configuration for agent initialization: motion limits (`max_linear_vel`, `max_linear_accel`, `max_angular_vel`, `max_angular_accel`), motion mode (`"omnidirectional"` / `"differential"`), orientation, mass, collision toggle. Immutable after creation.
+- `AgentSpawnParams` — Configuration for agent initialization: motion limits
+  (`max_linear_vel`, `max_linear_accel`, `max_angular_vel`,
+  `max_angular_accel`), explicit `controller` selection/configuration,
+  orientation, mass, collision toggle, and optional per-agent `plugins`.
+  Immutable after creation.
 - `IKParams` — IK solver configuration dataclass: `max_outer_iterations`, `convergence_threshold`, `max_inner_iterations`, `residual_threshold`, `reachability_tolerance`, `seed_quartiles`, `ik_joint_names`. Passed to `Agent.from_urdf(ik_params=...)`. Default: 5 outer iterations, 0.01 m threshold.
   - `ik_joint_names` (optional `tuple[str, ...]`) — When set, only the named joints participate in IK; all other movable joints are locked at their current positions. When `None` (default), the solver auto-detects: `JOINT_FIXED` joints are skipped, and continuous joints (lower limit ≥ upper limit, e.g. wheels) are locked automatically. This makes IK work correctly on composite robots like mobile manipulators without manual configuration.
 
@@ -171,7 +183,27 @@ object attachment via `update_attached_objects_kinematics()`.
 
 ---
 
-### 3. agent_manager.py
+### 4. controller.py and fleet execution
+
+**Purpose**: Turn goals, paths, and velocity commands into movement updates.
+
+`Controller` is the per-agent extension point. `KinematicController` provides
+the common command-mode state machine, and `OmniController` and
+`DifferentialController` implement the built-in base-motion models. Controllers
+are resolved by registry name or dotted class path, so applications can add
+custom controllers without changing `Agent`.
+
+At fleet scale, a named `AgentManager` can own a shared batch controller via
+`fleet_controller.type` (for example, `batch_omni` or
+`batch_differential`). It vectorizes movement computation for the manager's
+agents; it does not change the public Agent or action lifecycle. This execution
+choice is independent from the transport-neutral `FleetCommandDispatcher`,
+which validates and routes whole-fleet commands.
+
+See {doc}`batch-execution`, {doc}`fleet-api`, and
+{doc}`../how-to/controller-config` for configuration and extension details.
+
+### 5. agent_manager.py
 
 **Purpose**: Multi-agent coordination and spawning
 
@@ -207,6 +239,12 @@ Extends SimObjectManager with `object_class=Agent`.
 **Note:**
 - Agent.update() is automatically called by MultiRobotSimulationCore.step_once()
 - AgentManager focuses on goal management, not movement updates
+- A manager groups execution (callbacks, controller defaults, and optional batch
+  execution); it is **not** currently a ROS or Fleet API visibility boundary.
+  The global `FleetStateProvider` and `FleetCommandDispatcher` iterate over all
+  `sim.agents`. Use `per_robot_api.include_robots` / `exclude_robots` to limit
+  per-robot ROS endpoints, and keep non-fleet actors out of a fleet endpoint
+  until fleet-level actor filtering is available.
 
 **Associated Params:**
 
@@ -214,7 +252,30 @@ Extends SimObjectManager with `object_class=Agent`.
 
 ---
 
-### 4. action.py
+### 6. sim_plugin.py, agent_plugin.py, and events.py
+
+**Purpose**: Reusable, lifecycle-managed behavior and event-driven integration.
+
+- **`SimPlugin`** extends one simulation. Its optional hooks are `on_init`,
+  `on_step`, `on_reset`, and `on_shutdown`; it is appropriate for reusable
+  world-level behavior such as a workcell integration.
+- **`AgentPlugin`** attaches state and behavior to one Agent. For example,
+  `BatteryPlugin` owns battery state and updates it with that agent.
+- **`EventBus`** (`sim.events`) delivers global lifecycle, object/agent,
+  collision, pause/resume, and fleet-command events. Objects also expose a
+  local event bus. Events complement plugins: use an event handler for a
+  transition and a plugin hook for owned lifecycle or regular step work.
+
+Callbacks remain useful for small, scenario-local update functions. Prefer a
+plugin when the behavior must be reused, configured, reset, or shut down
+predictably. Plugin hooks and callbacks run in Phase 1, so the pose visibility
+rule in {doc}`two-phase-step` applies to both.
+
+See {doc}`plugins-events` for lifecycle and ordering details.
+
+---
+
+### 7. action.py
 
 **Purpose**: High-level action system for agents
 
@@ -293,10 +354,12 @@ Move end-effector to a Cartesian target position via IK.
 of the target position. Calls `move_end_effector()` on start,
 then monitors `are_joints_at_targets()` and `are_ee_at_target()` each step.
 
-**Unreachable targets:** If the IK solver determines the target is unreachable, the action does not
-fail immediately. Best-effort joint targets are set and joints move toward them. After settling,
-the action completes with `ActionStatus.FAILED` (not `COMPLETED`). A warning is logged at start
-and the `error_message` attribute is set to `"IK target was not reachable"`.
+**Unreachable or non-convergent targets:** If the initial IK reachability check fails, the action
+does not fail immediately. When IK returns a candidate, it commands its best-effort joint targets,
+waits for them to settle, and then verifies the final EE Cartesian pose. The action completes with
+`ActionStatus.FAILED` unless both the initial reachability and final Cartesian checks pass. A
+failed initial check logs `"IK target is not reachable (best-effort movement will proceed)"`; on
+final failure, `error_message` is set to `"IK target was not reachable"`.
 
 **IK integration in Pick/Drop:**
 `PickAction` and `DropAction` accept an optional `ee_target_position` parameter.
@@ -307,25 +370,46 @@ proceeds even when the IK target is unreachable.
 
 ---
 
-### 5. geometry.py
+### 8. geometry.py
 
 **Purpose**: Geometric data structures (`Pose`, `Path`) used throughout the codebase for position/orientation representation and waypoint sequences.
 
 ---
 
-### 6. tools.py
+### 9. tools.py
 
 **Purpose**: Utility functions for pose calculation (approach/offset poses for pick/drop actions).
 
 ---
 
-### 7. data_monitor.py
+### 10. World, asset, and device loading
 
-**Purpose**: Optional real-time GUI monitor (`DataMonitor`) displaying FPS and step-time metrics in a tkinter window. Enabled via `monitor: true` in config.
+**Purpose**: Create the simulated environment and resolve robot assets.
+
+- `sdf_loader.py` loads SDF models/worlds and directories of mesh assets.
+  World loading produces registered `SimObject` instances, normally with
+  `CollisionMode.STATIC` for structures.
+- `robot_models.py` resolves URDF/SDF names across local assets,
+  `pybullet_data`, ROS installations, and optional robot-description packages;
+  it can also inspect a loaded model to produce a `RobotProfile`.
+- Device entities such as `Door` and `Elevator` model environment state that
+  applications, plugins, and integrations can control.
 
 ---
 
-### 8. robot_models.py
+### 11. data_monitor.py and recorder.py
+
+**Purpose**: Observe, profile, and record a simulation.
+
+- `DataMonitor` is an optional real-time GUI monitor for FPS and step-time
+  metrics, enabled with `monitor: true`.
+- `SimulationRecorder` records simulation frames for replay or offline output.
+- `MultiRobotSimulationCore.get_profiling_stats()` exposes phase timings,
+  including controller/plugin work, pose flush, and AABB/spatial-grid refresh.
+
+---
+
+### 12. robot_models.py
 
 **Purpose**: Robot model resolution and introspection. Provides a tiered registry (`KNOWN_MODELS`) that maps model names to URDF paths across multiple sources, plus auto-detection of robot capabilities.
 
@@ -401,4 +485,5 @@ Lightweight type detection (arm/mobile/mobile_manipulator/static) without full p
 8. **Cell Size Tuning**: Use `constant` mode with optimal cell_size for best performance
 
 
-See `docs/PERFORMANCE_ANALYSIS.md` and `docs/OPTIMIZATION_RESULTS.md` for detailed benchmarks.
+See {doc}`../benchmarking/index` for the maintained benchmark results and
+profiling guidance.

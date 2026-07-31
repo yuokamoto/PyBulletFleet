@@ -1,219 +1,185 @@
-# PyBullet Fleet - Performance Optimization Guide
+# Performance Optimization Guide
 
-This guide covers key parameters, configuration patterns, and troubleshooting for simulation performance.
+Optimise from measurements of the actual workload. Robot models, moving-agent
+ratio, collision settings, rendering, and command ingress all affect results.
+Use [Benchmark Results](results) for reproducible measurements and their test
+environment; this page explains how to locate and address a bottleneck.
 
----
+## Optimisation workflow
 
-## Key Parameters
-
-### RTF Control (`target_rtf`)
-
-| Value | Behavior | Use Case |
-|-------|----------|----------|
-| `0` | Maximum speed (no sleep) | Offline batch processing |
-| `1.0` | Real-time synchronization | Interactive development |
-| `2.0` | 2× real-time | Faster testing with GUI |
-
-`target_rtf=0` runs as fast as the CPU allows.
-
----
-
-### Timestep
-
-| Mode | Recommended Value |
-|------|-----------------|
-| Kinematics (physics off) | `0.1` (default) |
-| Physics enabled | `0.01` or smaller |
-| GUI visualization | `0.01` for smooth motion |
-
----
-
-### Collision Detection
-
-**Frequency** (`collision_check_frequency` on `SimulationParams`):
-
-Controls how many times per simulation-second collisions are checked. The effective check interval is:
-
-```
-interval (steps) = 1 / (frequency × timestep)
-```
-
-`null` means every step regardless of timestep.
-
-| Value | Behavior | Overhead | Use Case |
-|-------|----------|----------|----------|
-| `null` | Every step | High | Safety-critical / dense environments |
-| `N` Hz | Every `1/(N×timestep)` steps | Scales with N | General use |
-| `0` (disabled) | Never | None | Baseline performance testing |
-
-> **Example:** With `timestep=0.1`, `frequency=10.0` gives interval = 1 step (same as `null`). Use `1.0` Hz for an interval of 10 steps, or lower to meaningfully reduce overhead.
-
-**Dimension** (`collision_mode` on `AgentSpawnParams` — per-agent):
-
-| Mode | Neighbors | Speedup | Use Case |
-|------|-----------|---------|----------|
-| `CollisionMode.NORMAL_2D` | 9 (XY plane) | ~77% overhead vs disabled | Ground robots (AGVs) |
-| `CollisionMode.NORMAL_3D` | 27 (3D cube) | ~64% overhead vs disabled | Drones, lifts |
-| `CollisionMode.DISABLED` | 0 | no overhead | Visualization-only objects |
+1. Reproduce the workload headlessly where possible, with a fixed warm-up and
+   measured window.
+2. Collect built-in fields with `step_once(return_profiling=True)`, or enable
+   profiling and inspect `sim.last_profiling` from a callback or plugin.
+3. Identify the dominant field before changing settings.
+4. Change one axis at a time and record the scenario and environment.
 
 ```python
-from pybullet_fleet.types import CollisionMode
-from pybullet_fleet.agent import AgentSpawnParams
+for _ in range(100):                 # warm-up
+    sim.step_once()
 
-agent_params = AgentSpawnParams(
-    urdf_path="robots/mobile_robot.urdf",
-    collision_mode=CollisionMode.NORMAL_2D,  # 9 neighbors (XY only)
-)
+samples = [sim.step_once(return_profiling=True) for _ in range(300)]
+mean_total_ms = sum(s["total"] for s in samples) / len(samples)
+print(f"mean step: {mean_total_ms:.2f} ms")
 ```
 
----
+The two-phase fields distinguish `phase1_update`, `phase2_pose_flush`, and
+`phase3_aabb_grid_flush`. The legacy `agent_update` field is only the
+per-object update loop, and is a subset of Phase 1.
 
-### Profiling
+## Pacing and timestep
 
-| Setting | Overhead | Use Case |
-|---------|----------|----------|
-| `enable_time_profiling=False` | None | Production |
-| `enable_time_profiling=True` | ~5–10% | Development / optimization |
+| `target_rtf` | Behaviour | Typical use |
+|---|---|---|
+| `0` | No pacing sleep | Offline throughput measurement and batch processing |
+| `1.0` | Target real-time pacing | Interactive control and visualisation |
+| Other positive value | Target a faster or slower simulation-time / wall-time ratio | Scenario-specific integration testing |
 
-```python
-sim_core = MultiRobotSimulationCore(params)
-sim_core.set_profiling_log_frequency(10)  # Log every 10 steps
-```
+`target_rtf` changes pacing, not computation cost. Use `0` to measure maximum
+throughput and record the achieved RTF rather than assuming a value transfers
+to another host.
 
----
+Choose `timestep` for the required controller and physics fidelity. Larger
+values reduce steps per simulation second but can reduce trajectory and physics
+accuracy. Validate the value with the actual robot and contact behaviour.
 
-## Configuration Examples
+`max_steps_per_frame`, `max_sleep_frames`, and `gui_min_fps` are pacing safety
+and responsiveness controls, not normal throughput tuning knobs. See
+[Real-time Synchronization](../architecture/realtime-sync) before changing them.
 
-> **Note:** PyBulletFleet configs use flat top-level keys (not nested under `simulation:`).
-> See `config/config.yaml` for the canonical format.
+## Controllers and command ingress
 
-### Offline / Production
+Motion execution and command ingress are separate optimisation axes:
+
+| Axis | Choice | What it changes |
+|---|---|---|
+| Motion execution | Per-agent controller or manager batch controller | How movement is computed in the simulation loop |
+| Command ingress | Per-agent calls or `FleetCommandDispatcher` | How commands enter the simulation |
+
+For a large, homogeneous mobile fleet, declare a named manager and select a
+batch controller. It runs one vectorised `batch_advance()` in Phase 1; action
+queues and other per-agent work still run normally.
 
 ```yaml
-timestep: 0.1
-target_rtf: 0                    # Maximum speed
-physics: false
-gui: false
-collision_check_frequency: 1.0   # Every 10 steps with timestep=0.1 (use null for every step)
-ignore_static_collision: true
-monitor: true
-enable_monitor_gui: false
-enable_time_profiling: false
-enable_collision_shapes: false
-enable_shadows: false
-# collision_mode is per-agent: AgentSpawnParams(..., collision_mode=CollisionMode.NORMAL_2D)
+simulation:
+  gui: false
+  target_rtf: 0
+
+managers:
+  - name: delivery_fleet
+    fleet_controller:
+      type: batch_omni
+
+entities:
+  - urdf_path: robots/mobile_robot.urdf
+    manager: delivery_fleet
+    grid:
+      count: 500
+      spacing: [2.0, 2.0]
 ```
 
-**Expected:** environment-dependent. On the 2026-07-24 WSL2 benchmark
-host, the default every-step collision benchmark measured ~23.5× RTF at 500
-agents and ~10.1× RTF at 1000 agents.
+Use `FleetCommandDispatcher` when an application submits many commands as one
+fleet-level request. It does not replace the controller: a manager's
+`fleet_controller` selects execution, while the dispatcher changes command
+ingress. Measure those axes independently when setup latency matters.
 
----
+See [Controller Configuration](../how-to/controller-config),
+[Fleet API](../architecture/fleet-api), and
+[Batch Execution](../architecture/batch-execution).
 
-### Development / Debugging
+## Collision work
+
+`collision_check_frequency` controls collision scheduling in simulation time:
+
+| Value | Behaviour |
+|---|---|
+| `null` | Check every simulation step |
+| Positive Hz value | Check no more often than that simulation-time rate |
+| `0` | Disable collision checks |
+
+Select the rate from the required safety and response time, not an assumed
+step-count speedup. For a timestep `dt`, frequency `f` has an intended interval
+of `1 / f` simulation seconds.
+
+Set `collision_mode` per entity:
+
+- `normal_2d` for ground-constrained entities;
+- `normal_3d` for full 3D motion;
+- `static` for fixed structures;
+- `disabled` only when an object must not participate in collision detection.
+
+`ignore_static_collision: true` skips every pair involving `static` objects.
+Use it only when structure collision is deliberately out of scope.
+
+If collision is dominant, inspect `collision_breakdown` from
+`step_once(return_profiling=True)`, then evaluate spatial-hash settings:
+
+- `auto_initial`: choose cell size once after initial population;
+- `auto_adaptive`: recalculate when objects are added or removed;
+- `constant`: use a measured fixed `spatial_hash_cell_size`.
+
+`multi_cell_threshold` controls when large objects occupy multiple cells.
+Choose cell size and threshold against the representative scene.
+
+See [Collision Configuration](../how-to/collision-config) and
+[Collision Internals](../architecture/collision-internals).
+
+## Rendering, monitors, and profiling
+
+For headless throughput measurements, disable work not required by the
+scenario:
 
 ```yaml
-timestep: 0.01
-target_rtf: 1.0
-physics: false
-gui: true
-collision_check_frequency: null  # Every step
-enable_collision_shapes: true
-enable_collision_color_change: true
-monitor: true
-enable_monitor_gui: true
-enable_time_profiling: true
-# collision_mode is per-agent: AgentSpawnParams(..., collision_mode=CollisionMode.NORMAL_3D)
+simulation:
+  gui: false
+  monitor: false
+  enable_monitor_gui: false
+  enable_time_profiling: false
+  enable_memory_profiling: false
+  enable_collision_shapes: false
+  enable_shadows: false
 ```
 
----
+Enable time profiling while locating a bottleneck, then disable it for the
+final throughput measurement. Memory profiling uses `tracemalloc` and is for
+allocation/leak investigation, not RTF comparisons. GUI rendering, DataMonitor,
+recording, collision-shape wireframes, and shadows change the workload and
+should be recorded as benchmark conditions.
 
-## Performance Reference
+## Diagnose common bottlenecks
 
-### Benchmark Results
+| Dominant measurement | First checks |
+|---|---|
+| `phase1_update` / `agent_update` | Moving-agent ratio, controller chain, custom callbacks/plugins, batch eligibility |
+| `phase2_pose_flush` | Number of kinematic pose writes; redundant `set_pose()` calls |
+| `phase3_aabb_grid_flush` | Moved kinematic-object count, collision mode, spatial-hash settings |
+| `collision_check` | Collision rate, static filtering, 2D versus 3D mode, cell-size strategy |
+| `step_simulation` | Physics timestep, dynamic-body count, contact complexity |
+| `callbacks` or custom field | Frequency and algorithmic cost of application code |
+| `monitor_update` | Disable monitor/GUI for headless measurements |
 
-<!-- sync with results.md -->
-Based on latest measurement (2026-07-24, `simple_cube` robots, kinematics mode,
-50% agents moving, headless, batch controller, fleet command interface):
+For function-level attribution after finding a field, use the scripts in
+`benchmark/profiling/` or `cProfile`. Profilers alter execution
+characteristics, so use them to locate work rather than publish absolute
+throughput values.
 
-| Agents | RTF  | Step Time    |
-|--------|------|--------------|
-| 100    | 143.5× | 0.70 ± 0.06 ms |
-| 250    | 56.8×  | 1.76 ± 0.12 ms |
-| 500    | 23.5×  | 4.25 ± 0.30 ms |
-| 1000   | 10.1×  | 9.88 ± 0.08 ms |
-| 2000   | 4.3×   | 23.25 ± 1.07 ms |
+## Reproducible measurements
 
-Scalability: ~O(n^1.2) across the measured 100-2000 robot sweep on this WSL2 host.
-
-### Step Time Targets
-
-| Application | Target |
-|-------------|--------|
-| Real-time control (100 Hz) | < 10 ms |
-| Real-time visualization (60 FPS) | < 16.7 ms |
-| Offline processing | No strict limit |
-
-### Component Breakdown (1000 agents)
-
-```
-Agent Update     12.35 ms   88.2%
-Collision Check   1.76 ms   11.2%
-Monitor Update    0.08 ms    0.5%
-Step Simulation   0.00 ms    0.0%
-─────────────────────────────────
-Total            14.19 ms
-```
-
-### Memory
-
-~20 KB per agent above 500 agents (linear scaling). Below 500 agents, Python GC can show negative deltas.
-
----
-
-## Troubleshooting
-
-### Low RTF / High Step Time
-
-Run profiling to identify the bottleneck:
+Run the release benchmark suite for comparable core results:
 
 ```bash
-python benchmark/profiling/simulation_profiler.py --agents 1000 --steps 100
+make bench-release
 ```
 
-| Cause | Solution |
-|-------|----------|
-| Collision check dominating | Reduce `collision_check_frequency` to 1 Hz (with `timestep=0.1`, 10 Hz = every step); use `NORMAL_2D` per-agent |
-| GUI overhead | Set `gui: false`, `enable_monitor_gui: false` |
-| Profiling enabled | Set `enable_time_profiling: false` for production |
-
-### Memory Growth
-
-Expected ~20 KB/agent above 500 agents. If super-linear:
-- Check for memory leaks in custom callbacks
-- Verify objects are cleaned up with `del` or weak references
-
----
-
-## Performance Hierarchy
-
-From fastest to slowest collision configuration (assuming `timestep=0.1`):
-
-1. **Disabled** (`collision_check_frequency=0`) — ~6× speedup; baseline testing only
-2. **`NORMAL_2D` at 1 Hz** — every 10 steps; ~3× speedup; sparse environments
-3. **`NORMAL_2D` at 10 Hz / `null`** — every step; ~2× speedup; **recommended for production**
-4. **`NORMAL_3D` at 10 Hz / `null`** — every step; baseline; 3D movement (drones, lifts)
-
-> With `timestep=0.1`, `collision_check_frequency=10.0` and `null` are equivalent (both check every step).
-
----
+For controller and command-interface comparisons, use the mobile control-path
+benchmark with fixed agent count, step count, and repetitions. See
+[Benchmark Suite](benchmark-suite) and [Profiling Guide](profiling-guide) for
+commands and methodology.
 
 ## See Also
 
-- [Benchmark Results](results) — Collected results with design rationale
-- [Profiling Guide](profiling-guide) — Profiling tools
-- [Benchmark Experiments](experiments) — Algorithm comparison experiments
-
----
-
-**Last Updated:** 2026-03-12
+- [Benchmark Results](results)
+- [Benchmark Suite](benchmark-suite)
+- [Profiling Guide](profiling-guide)
+- [Time Profiling](../how-to/time-profiling)
+- [Memory Profiling](../how-to/memory-profiling)

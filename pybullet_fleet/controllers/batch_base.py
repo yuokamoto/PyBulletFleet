@@ -69,7 +69,7 @@ class BatchKinematicController(Controller):
             def batch_advance(self, dt): ...
 
         # Usage:
-        #   AgentManager(sim_core=sim, batch_controller="my_batch")
+        #   AgentManager(sim_core=sim, fleet_controller={"type": "my_batch"})
     """
 
     def __init_subclass__(cls, **kwargs: object) -> None:

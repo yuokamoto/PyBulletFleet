@@ -21,16 +21,25 @@ simulation:
     camera_view_type: perspective
     camera_auto_scale: 0.6
 
+managers:
+  - name: mobile_fleet
+    fleet_controller:
+      type: batch_omni
+      max_linear_vel: 2.0
+      max_linear_accel: 5.0
+  - name: arm_fleet
+    fleet_controller:
+      max_linear_vel: 0.0
+      max_linear_accel: 0.0
+
 entities:
   - name: mobile
     urdf_path: "husky"
-    motion_mode: omnidirectional
-    batch_controller: batch_omni
     use_fixed_base: false
+    # Used when 100robots_mixed_demo.py runs with --controller per_agent.
     controller:
       type: "omni"
-      max_linear_vel: 2.0
-      max_linear_accel: 5.0
+    manager: mobile_fleet
     user_data:
       robot_type: "mobile_robot"
     grid:
@@ -41,12 +50,11 @@ entities:
 
   - name: arm
     urdf_path: "arm_robot"
-    motion_mode: differential
     use_fixed_base: true
     mass: 1.0
     controller:
-      max_linear_vel: 0.0
-      max_linear_accel: 0.0
+      type: "differential"
+    manager: arm_fleet
     user_data:
       robot_type: "arm_robot"
     grid:

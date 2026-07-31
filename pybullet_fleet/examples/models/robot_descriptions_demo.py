@@ -12,8 +12,8 @@ Available Tier 3 models (registered in KNOWN_MODELS):
   - tiago   (PAL TIAGo service robot)
   - pr2     (Willow Garage PR2)
 
-The ``robot_descriptions`` package supports 80+ robots. To add more, register
-them in ``KNOWN_MODELS`` in ``pybullet_fleet/robot_models.py``.
+The ``robot_descriptions`` package provides many optional robot assets. To add
+more, register them in ``KNOWN_MODELS`` in ``pybullet_fleet/robot_models.py``.
 
 Usage::
 
@@ -31,6 +31,7 @@ import argparse
 import os
 import sys
 
+import pybullet as p
 
 # Run from a source checkout without installing: fall back to the repo root
 # so `import pybullet_fleet` resolves. Installed/editable users never hit this.
@@ -69,7 +70,7 @@ if args.list:
 print(f"Resolving '{args.robot}'...")
 try:
     urdf_path = resolve_model(args.robot)
-except FileNotFoundError as e:
+except (FileNotFoundError, OSError) as e:
     print(f"\n  ERROR: {e}")
     print("\n  To fix, run:")
     print("    pip install robot_descriptions")
@@ -99,8 +100,14 @@ _OVERRIDES = {
 }
 sim = MultiRobotSimulationCore.from_dict(merge_configs(load_yaml_config(_BASE_CONFIG), _OVERRIDES))
 
-# Auto-detect profile
-profile = auto_detect_profile(urdf_path, sim.client)
+# Inspect the path in a separate DIRECT client before spawning.  Passing a
+# string to auto_detect_profile() temporarily loads a body, which should not
+# be done in the GUI client used by the demo.
+profile_client = p.connect(p.DIRECT)
+try:
+    profile = auto_detect_profile(urdf_path, profile_client)
+finally:
+    p.disconnect(profile_client)
 print(f"\nRobotProfile for '{args.robot}':")
 print(f"  type:       {profile.robot_type}")
 print(f"  num_joints: {profile.num_joints}")

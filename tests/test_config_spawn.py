@@ -726,16 +726,16 @@ _SIM_BASE = {
 _GRID_10 = {"count": 10, "spacing": [2.0, 2.0], "offset": [0.0, 0.0, 0.1]}
 _SPAWN_OMNI = {
     "urdf_path": "robots/simple_cube.urdf",
-    "motion_mode": "omnidirectional",
+    "controller": {"type": "omni"},
 }
 _SPAWN_DIFF = {
     "urdf_path": "robots/simple_cube.urdf",
-    "motion_mode": "differential",
+    "controller": {"type": "differential"},
 }
 
 
 class TestManagersConfigSection:
-    """managers: section creates named AgentManagers with optional batch_controller."""
+    """managers: section creates named AgentManagers from fleet_controller."""
 
     def test_get_manager_returns_none_when_not_declared(self):
         import pybullet as p
@@ -753,7 +753,7 @@ class TestManagersConfigSection:
         from pybullet_fleet.agent_manager import AgentManager
         from pybullet_fleet.controllers.batch_omni import BatchOmniController
 
-        cfg = {**_SIM_BASE, "managers": [{"name": "fleet_a", "batch_controller": "batch_omni"}]}
+        cfg = {**_SIM_BASE, "managers": [{"name": "fleet_a", "fleet_controller": {"type": "batch_omni"}}]}
         sim = MultiRobotSimulationCore.from_dict(cfg)
         try:
             mgr = sim.get_manager("fleet_a")
@@ -774,8 +774,8 @@ class TestManagersConfigSection:
         cfg = {
             **_SIM_BASE,
             "managers": [
-                {"name": "omni_fleet", "batch_controller": "batch_omni"},
-                {"name": "diff_fleet", "batch_controller": "batch_differential"},
+                {"name": "omni_fleet", "fleet_controller": {"type": "batch_omni"}},
+                {"name": "diff_fleet", "fleet_controller": {"type": "batch_differential"}},
             ],
         }
         sim = MultiRobotSimulationCore.from_dict(cfg)
@@ -798,7 +798,12 @@ class TestManagersConfigSection:
 
         cfg = {
             **_SIM_BASE,
-            "managers": [{"name": "delivery", "batch_controller": "batch_omni"}],
+            "managers": [
+                {
+                    "name": "delivery",
+                    "fleet_controller": {"type": "batch_omni", "max_linear_vel": 1.25},
+                }
+            ],
             "entities": [{**_SPAWN_OMNI, "manager": "delivery", "grid": _GRID_10}],
         }
         sim = MultiRobotSimulationCore.from_dict(cfg)
@@ -808,27 +813,19 @@ class TestManagersConfigSection:
             bc = mgr.batch_controller
             for agent in mgr.objects:
                 assert agent._batch_controller is bc
+                assert agent.controller_params.max_linear_vel == 1.25
         finally:
             p.disconnect(sim.client)
 
-    def test_batch_mode_shorthand_on_entity_group(self):
+    def test_entity_batch_controller_key_is_rejected(self):
         import pybullet as p
-        from pybullet_fleet import MultiRobotSimulationCore
+        from pybullet_fleet import MultiRobotSimulationCore, SimulationParams
 
-        cfg = {
-            **_SIM_BASE,
-            "entities": [{**_SPAWN_DIFF, "batch_controller": "batch_differential", "grid": _GRID_10}],
-        }
-        sim = MultiRobotSimulationCore.from_dict(cfg)
+        cfg = {**_SIM_BASE, "entities": [{**_SPAWN_DIFF, "batch_controller": "batch_differential", "grid": _GRID_10}]}
+        sim = MultiRobotSimulationCore(SimulationParams(gui=False, monitor=False, physics=False, log_level="warning"))
         try:
-            agents = sim.agents
-            assert len(agents) == 10
-            # All should be batch-controlled
-            for agent in agents:
-                assert agent._batch_controller is not None
-            # All share the same BC
-            bcs = {id(a._batch_controller) for a in agents}
-            assert len(bcs) == 1
+            with pytest.raises(ValueError, match="fleet_controller.type"):
+                sim.spawn_robots_from_config(cfg["entities"])
         finally:
             p.disconnect(sim.client)
 
@@ -857,8 +854,8 @@ class TestManagersConfigSection:
         cfg = {
             **_SIM_BASE,
             "managers": [
-                {"name": "fleet_a", "batch_controller": "batch_omni"},
-                {"name": "fleet_b", "batch_controller": "batch_omni"},
+                {"name": "fleet_a", "fleet_controller": {"type": "batch_omni"}},
+                {"name": "fleet_b", "fleet_controller": {"type": "batch_omni"}},
             ],
             "entities": [
                 {**_SPAWN_OMNI, "manager": "fleet_a", "grid": {"count": 5, "spacing": [2, 2], "offset": [0, 0, 0.1]}},
@@ -884,7 +881,7 @@ class TestManagersConfigSection:
 
         cfg = {
             **_SIM_BASE,
-            "managers": [{"name": "fleet", "batch_controller": "batch_omni"}],
+            "managers": [{"name": "fleet", "fleet_controller": {"type": "batch_omni"}}],
             "entities": [{**_SPAWN_OMNI, "manager": "fleet", "grid": {"count": 3, "spacing": [3, 0], "offset": [0, 0, 0.1]}}],
         }
         sim = MultiRobotSimulationCore.from_dict(cfg)

@@ -2,7 +2,7 @@
 
 <video src="../action_system.mp4" width="100%" autoplay loop muted playsinline></video>
 
-**Source file:** [`examples/basics/action_system_demo.py`](https://github.com/yuokamoto/PyBulletFleet/blob/main/examples/basics/action_system_demo.py)
+**Source file:** [`examples/basics/action_system_demo.py`](https://github.com/yuokamoto/PyBulletFleet/blob/main/pybullet_fleet/examples/basics/action_system_demo.py)
 
 This tutorial introduces PyBulletFleet's **action queue system**: a way to give an agent
 an ordered list of tasks — pick up a pallet, carry it to a drop-off, drive to a charging
@@ -40,7 +40,7 @@ The action queue solves this:
 ## 2. Setup
 
 ```python
-from pybullet_fleet.agent import Agent, AgentSpawnParams, MotionMode
+from pybullet_fleet.agent import Agent, AgentSpawnParams
 from pybullet_fleet.core_simulation import MultiRobotSimulationCore
 from pybullet_fleet.geometry import Pose, Path
 from pybullet_fleet.sim_object import SimObject, SimObjectSpawnParams, ShapeParams
@@ -72,11 +72,13 @@ agent = Agent.from_params(
     AgentSpawnParams(
         urdf_path=urdf_path,
         initial_pose=Pose.from_xyz(0, 0, 0.3),
-        motion_mode=MotionMode.DIFFERENTIAL,
-        max_linear_vel=2.0,
-        max_linear_accel=5.0,
-        max_angular_vel=2.0,
-        max_angular_accel=5.0,
+        controller={
+            "type": "differential",
+            "max_linear_vel": 2.0,
+            "max_linear_accel": 5.0,
+            "max_angular_vel": 2.0,
+            "max_angular_accel": 5.0,
+        },
         mass=0.0,  # kinematic — no physics forces
     ),
     sim_core=sim,
@@ -123,6 +125,8 @@ at spawn time is often easier than editing the mesh or URDF.
 ## 4. MoveAction — Navigate Along a Path
 
 Use `MoveAction` when you want the agent to follow a path as part of a task sequence:
+in the runnable `action_system_demo.py`, this is **Task 3**, after the pallet
+has been picked and dropped.
 
 ```python
 path_to_charge = Path.from_positions([[2.5, 2.5, 0.3], [0, 0, 0.3]])
@@ -183,7 +187,7 @@ pallet_quat = p.getQuaternionFromEuler([np.pi / 2, 0, 0])  # horizontal orientat
 
 drop = DropAction(
     drop_pose=Pose(position=[5, 5, 0.1], orientation=list(pallet_quat)),
-    place_gently=True,      # set object velocity to 0 on release
+    place_gently=True,      # detach at drop_pose; no extra drop height or downward impulse
     use_approach=True,
     approach_offset=1.5,
     drop_offset=1.0,
@@ -282,12 +286,20 @@ The expected sequence you'll see in the GUI:
 4. Agent waits in place for 3 simulated seconds
 5. Console prints "All tasks completed"
 
----
-
 ## Full Example
 
 ```bash
-python examples/basics/action_system_demo.py
+pybullet-fleet examples --run action_system_demo.py
+```
+
+---
+
+```{note}
+**ROS 2 integration:** An external client can queue the same action types
+through the per-robot `execute_action` interfaces or the fleet-level
+`/fleet/execute_action` endpoint. Endpoint setup, command payloads, and
+acknowledgement semantics are maintained in [Bridge Interfaces](../ros2/overview)
+and [Bridge Configuration](../ros2/configuration).
 ```
 
 ---

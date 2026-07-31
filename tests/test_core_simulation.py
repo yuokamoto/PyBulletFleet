@@ -776,6 +776,34 @@ class TestStepOnce:
             assert phase in breakdown
             assert breakdown[phase] >= 0
 
+    def test_last_profiling_exposes_completed_step_snapshot(self, sim_core):
+        """Plugins and callbacks can inspect the preceding completed step."""
+        sim_core._enable_time_profiling = True
+        assert sim_core.last_profiling is None
+
+        sim_core.step_once()
+        first = sim_core.last_profiling
+        assert first is not None
+        assert first["total"] >= 0
+        with pytest.raises(TypeError):
+            first["total"] = 0
+
+        seen = []
+
+        def inspect_previous(sc, dt):
+            seen.append(sc.last_profiling)
+
+        sim_core.register_callback(inspect_previous)
+        sim_core.step_once()
+        assert seen == [first]
+
+    def test_last_profiling_matches_returned_measurement(self, sim_core):
+        """A return_profiling step also updates the public snapshot."""
+        result = sim_core.step_once(return_profiling=True)
+        assert result is not None
+        assert sim_core.last_profiling is not None
+        assert sim_core.last_profiling["total"] == result["total"]
+
     def test_multiple_steps_accumulate(self, sim_core):
         n = 50
         dt = sim_core.params.timestep

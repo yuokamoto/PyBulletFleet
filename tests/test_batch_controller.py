@@ -68,7 +68,7 @@ def _make_batch_manager(sim, batch_controller="batch_omni"):
     """Create an AgentManager with a batch controller, registered with sim_core."""
     from pybullet_fleet.agent_manager import AgentManager
 
-    return AgentManager(sim_core=sim, batch_controller=batch_controller)
+    return AgentManager(sim_core=sim, fleet_controller={"type": batch_controller})
 
 
 # ----------------------------------------------------------------------
@@ -258,7 +258,7 @@ class TestBatchOmniIntegration:
 
 
 class TestAgentManagerBatch:
-    """AgentManager.enable_batch / batch_controller= integration."""
+    """AgentManager.enable_batch / fleet_controller.type integration."""
 
     def test_enable_batch_returns_controller(self, sim):
         from pybullet_fleet.agent_manager import AgentManager
@@ -271,13 +271,13 @@ class TestAgentManagerBatch:
     def test_batch_mode_init_param(self, sim):
         from pybullet_fleet.agent_manager import AgentManager
 
-        mgr = AgentManager(sim_core=sim, batch_controller="batch_omni")
+        mgr = AgentManager(sim_core=sim, fleet_controller={"type": "batch_omni"})
         assert isinstance(mgr.batch_controller, BatchOmniController)
 
     def test_spawned_agents_auto_registered(self, sim):
         from pybullet_fleet.agent_manager import AgentManager, GridSpawnParams
 
-        mgr = AgentManager(sim_core=sim, batch_controller="batch_omni")
+        mgr = AgentManager(sim_core=sim, fleet_controller={"type": "batch_omni"})
         params = AgentSpawnParams(
             urdf_path="robots/simple_cube.urdf",
             initial_pose=Pose.from_xyz(0.0, 0.0, 0.1),
@@ -312,7 +312,7 @@ class TestAgentManagerBatch:
     def test_remove_object_unregisters_from_batch(self, sim):
         from pybullet_fleet.agent_manager import AgentManager
 
-        mgr = AgentManager(sim_core=sim, batch_controller="batch_omni")
+        mgr = AgentManager(sim_core=sim, fleet_controller={"type": "batch_omni"})
         a = _spawn_agent(sim)
         mgr.add_object(a)
         bc = mgr.batch_controller
@@ -325,7 +325,7 @@ class TestAgentManagerBatch:
     def test_disable_batch(self, sim):
         from pybullet_fleet.agent_manager import AgentManager
 
-        mgr = AgentManager(sim_core=sim, batch_controller="batch_omni")
+        mgr = AgentManager(sim_core=sim, fleet_controller={"type": "batch_omni"})
         a = _spawn_agent(sim)
         mgr.add_object(a)
         bc = mgr.batch_controller
@@ -350,7 +350,7 @@ class TestAgentManagerBatch:
         # via dotted path — exercising the resolve_class branch.
         mgr = AgentManager(
             sim_core=sim,
-            batch_controller="tests.test_batch_controller._NoopBatchController",
+            fleet_controller={"type": "tests.test_batch_controller._NoopBatchController"},
         )
         assert isinstance(mgr.batch_controller, _NoopBatchController)
 
@@ -366,7 +366,7 @@ class TestAgentManagerBatch:
         """End-to-end: agents registered via AgentManager actually move."""
         from pybullet_fleet.agent_manager import AgentManager
 
-        mgr = AgentManager(sim_core=sim, batch_controller="batch_omni")
+        mgr = AgentManager(sim_core=sim, fleet_controller={"type": "batch_omni"})
         a = _spawn_agent(sim, x=0.0)
         mgr.add_object(a)
 

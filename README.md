@@ -31,7 +31,10 @@ PyBulletFleet sits in a different part of the design space: it is a **kinematics
 - **Speed over fidelity** — Fleet algorithms (task allocation, traffic control, path planning) must be tested with hundreds to thousands of robots running *much faster* than real time. Kinematics-based stepping — teleporting each robot to its next pose without calling `stepSimulation()` — removes the physics bottleneck and enables N× real-time execution.
 - **System integration over low-level control** — The primary consumers are high-level systems: WMS (Warehouse Management Systems), task orchestrators, fleet managers, and monitoring dashboards. These systems issue goals, observe progress via state snapshots, and react to events — they do not need joint-level torque feedback.
 - **Scale over detail** — Validating behaviour at 100+ robot scale matters more than modelling individual link dynamics or sensor noise.
-- **Interoperability** — The simulation is designed around a callback-driven step loop and snapshot-friendly state model, so that it can be plugged into larger orchestration frameworks, replay pipelines, or external control systems (e.g., gRPC / ROS 2) as those interfaces are built out.
+- **Interoperability** — A ROS 2 Jazzy bridge exposes per-robot and fleet-level
+  topics, services, and actions, while the Open-RMF adapter supports direct
+  Python, fleet-level ROS, and per-robot ROS control paths. Other transports
+  such as gRPC remain future work.
 - **Physics as an option** — When physical interaction *is* needed (grasping, conveyor dynamics, contact verification), full PyBullet physics can be switched on per-scenario without changing the rest of the stack.
 
 ### Target Use Cases
@@ -146,6 +149,11 @@ Run `pybullet-fleet examples --copy ./examples && python ./examples/models/resol
 ## Documentation
 
 📖 **Full documentation:** [Read the Docs](https://pybulletfleet.readthedocs.io)
+
+For the ROS 2 bridge and Open-RMF integration, start with the
+[ROS 2 documentation](https://pybulletfleet.readthedocs.io/en/latest/ros2/index.html).
+The repository-level [bridge README](ros2_bridge/README.md) remains the detailed
+interface and release reference.
 
 For local builds:
 ```bash

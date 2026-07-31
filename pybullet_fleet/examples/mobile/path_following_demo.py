@@ -37,7 +37,6 @@ from pybullet_fleet.core_simulation import MultiRobotSimulationCore
 from pybullet_fleet.geometry import Path, Pose
 from pybullet_fleet.robot_models import resolve_model
 from pybullet_fleet.sim_object import ShapeParams
-from pybullet_fleet.types import MotionMode
 
 _parser = argparse.ArgumentParser(description="Path Following Demo")
 _parser.add_argument("--robot", default="husky", help="Robot name (e.g. husky, racecar) or URDF path for differential robots")
@@ -78,10 +77,10 @@ def main():
         initial_pose=Pose.from_xyz(-4.0, 0.0, 0.5),  # Larger circle
         mass=0.0,  # Kinematic control (no physics simulation)
         controller={
+            "type": "omni",
             "max_linear_vel": 2.0,  # Faster max speed
             "max_linear_accel": 0.5,  # MUCH slower acceleration for visible effect
         },
-        motion_mode=MotionMode.OMNIDIRECTIONAL,
     )
     robot_omni = Agent.from_params(omnidirectional_params, sim_core=sim)
 
@@ -94,11 +93,11 @@ def main():
         use_fixed_base=False,
         mass=0.0,  # Kinematic control (no physics simulation)
         controller={
+            "type": "differential",
             "max_linear_vel": 2.0,  # Faster max speed
             "max_linear_accel": 0.5,  # MUCH slower acceleration for visible effect
             "max_angular_vel": 1.0,  # Slower rotation
         },
-        motion_mode=MotionMode.DIFFERENTIAL,
     )
     robot_diff = Agent.from_params(differential_params, sim_core=sim)
 
@@ -111,10 +110,10 @@ def main():
         initial_pose=Pose.from_xyz(0.0, -6.0, 2.0),
         mass=0.0,  # Kinematic control (no physics simulation)
         controller={
+            "type": "omni",
             "max_linear_vel": 2.0,
             "max_linear_accel": 0.5,
         },
-        motion_mode=MotionMode.OMNIDIRECTIONAL,
     )
     robot_omni_3d = Agent.from_params(omni3d_params, sim_core=sim)
 
@@ -126,11 +125,11 @@ def main():
         use_fixed_base=False,
         mass=0.0,  # Kinematic control (no physics simulation)
         controller={
+            "type": "differential",
             "max_linear_vel": 2.0,
             "max_linear_accel": 0.5,
             "max_angular_vel": 1.0,
         },
-        motion_mode=MotionMode.DIFFERENTIAL,
     )
     robot_diff_full3d = Agent.from_params(diff_full3d_params, sim_core=sim)
 
@@ -142,12 +141,12 @@ def main():
         use_fixed_base=False,
         mass=0.0,  # Kinematic control
         controller={
+            "type": "differential",
             "max_linear_vel": 2.0,
             "max_linear_accel": 0.5,
             "max_angular_vel": 1.0,
             "max_angular_accel": 5.0,
         },
-        motion_mode=MotionMode.DIFFERENTIAL,
     )
     robot_climb = Agent.from_params(climb_params, sim_core=sim)
 

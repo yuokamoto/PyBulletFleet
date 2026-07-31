@@ -37,7 +37,7 @@ import pybullet as p
 from pybullet_fleet.core_simulation import MultiRobotSimulationCore, SimulationParams
 from pybullet_fleet.sim_object import SimObject, ShapeParams, SimObjectSpawnParams
 from pybullet_fleet.agent_manager import SimObjectManager, AgentManager, GridSpawnParams
-from pybullet_fleet.agent import Agent, AgentSpawnParams, MotionMode
+from pybullet_fleet.agent import Agent, AgentSpawnParams
 from pybullet_fleet.geometry import Pose
 
 
@@ -416,8 +416,8 @@ def test_agent_wrapper(num_objects: int) -> dict:
         spawn_params = AgentSpawnParams(
             urdf_path=robot_urdf,
             initial_pose=Pose.from_xyz(x, y, 0.1),
-            motion_mode=MotionMode.DIFFERENTIAL,
             controller={
+                "type": "differential",
                 "max_linear_vel": 1.0,
                 "max_angular_vel": 1.0,
             },
@@ -519,8 +519,8 @@ def test_agent_manager(num_objects: int) -> dict:
     robot_urdf = "simple_cube"
     agent_spawn_params = AgentSpawnParams(
         urdf_path=robot_urdf,
-        motion_mode=MotionMode.DIFFERENTIAL,
         controller={
+            "type": "differential",
             "max_linear_vel": 1.0,
             "max_angular_vel": 1.0,
         },

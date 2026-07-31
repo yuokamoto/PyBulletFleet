@@ -78,11 +78,11 @@ entities = config.get("entities") or []
 if not entities:
     raise ValueError("100robots_grid_demo.py requires a config with entities[].grid")
 
-for entity in entities:
-    if args.controller == "batch":
-        entity.setdefault("batch_controller", "batch_omni")
-    else:
-        entity.pop("batch_controller", None)
+fleet_controller = config["managers"][0].setdefault("fleet_controller", {})
+if args.controller == "batch":
+    fleet_controller["type"] = "batch_omni"
+else:
+    fleet_controller.pop("type", None)
 
 config.setdefault("simulation", {})["physics"] = False
 num_robots = sum(int((entry.get("grid") or {}).get("count", 1)) for entry in entities)

@@ -46,7 +46,6 @@ entities:
     sdf_path: "package://rmf_demos_assets/models/TinyRobot/model.sdf"
     pose: [23.54, -27.42, 0.0]
     yaw: 1.566
-    motion_mode: "differential"
     controller:
       type: differential
       max_linear_vel: 0.5
@@ -65,7 +64,6 @@ entities:
     sdf_path: "package://rmf_demos_assets/models/DeliveryRobot/model.sdf"
     pose: [14.56, -38.98, 0.0]
     yaw: 1.690
-    motion_mode: "differential"
     controller:
       type: differential
       max_linear_vel: 0.7
@@ -84,7 +82,6 @@ entities:
     sdf_path: "package://rmf_demos_assets/models/CleanerBotA/model.sdf"
     pose: [26.36, -27.75, 0.0]
     yaw: -1.194
-    motion_mode: "differential"
     controller:
       type: differential
       max_linear_vel: 0.7
@@ -102,7 +99,6 @@ entities:
     sdf_path: "package://rmf_demos_assets/models/CleanerBotA/model.sdf"
     pose: [29.24, -27.66, 0.0]
     yaw: 1.344
-    motion_mode: "differential"
     controller:
       type: differential
       max_linear_vel: 0.7

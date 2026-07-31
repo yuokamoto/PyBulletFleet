@@ -445,7 +445,10 @@ def list_all_models() -> Dict[str, dict]:
                 "available": os.path.isfile(path),
                 "path": path,
             }
-        except FileNotFoundError as e:
+        # Optional model packages can fail while downloading or importing an
+        # asset.  A catalog should report that model as unavailable rather
+        # than make ``--list`` and catalog demos fail as a whole.
+        except Exception as e:
             result[name] = {
                 "tier": entry.tier,
                 "available": False,

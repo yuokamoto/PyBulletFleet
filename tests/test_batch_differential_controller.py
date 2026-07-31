@@ -70,7 +70,7 @@ def _spawn_diff(sim, x=0.0, y=0.0, z=0.1, yaw=0.0, max_vel=1.0, max_ang_vel=2.0)
 def _make_diff_manager(sim):
     from pybullet_fleet.agent_manager import AgentManager
 
-    return AgentManager(sim_core=sim, batch_controller="batch_differential")
+    return AgentManager(sim_core=sim, fleet_controller={"type": "batch_differential"})
 
 
 # ----------------------------------------------------------------------

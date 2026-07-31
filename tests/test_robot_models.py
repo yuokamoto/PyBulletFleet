@@ -84,6 +84,24 @@ class TestListAvailableModels:
             assert result[name]["available"] is True, f"{name} should be available"
             assert result[name]["tier"] == "pybullet_data"
 
+    def test_optional_model_resolution_error_is_reported(self, monkeypatch):
+        """A failed optional asset download must not abort the whole catalog."""
+        import pybullet_fleet.robot_models as robot_models
+
+        def fail_for_one_model(name):
+            if name == "pr2":
+                raise OSError("optional asset cache is unavailable")
+            return "/tmp/available.urdf"
+
+        monkeypatch.setattr(robot_models, "resolve_model", fail_for_one_model)
+        result = robot_models.list_all_models()
+
+        assert result["pr2"] == {
+            "tier": "robot_descriptions",
+            "available": False,
+            "error": "optional asset cache is unavailable",
+        }
+
 
 class TestAutoDetectProfile:
     """auto_detect_profile() introspects URDF via PyBullet.

@@ -91,6 +91,7 @@ def create_test_agents(
     num_agents: int, sim_core: MultiRobotSimulationCore, motion_mode: MotionMode = MotionMode.OMNIDIRECTIONAL
 ):
     """Generate test Agents directly (without using AgentManager)"""
+    controller_type = "differential" if motion_mode == MotionMode.DIFFERENTIAL else "omni"
     robot_urdf = "simple_cube"
 
     agents = []
@@ -103,8 +104,8 @@ def create_test_agents(
         spawn_params = AgentSpawnParams(
             urdf_path=robot_urdf,
             initial_pose=Pose.from_xyz(x, y, 0.1),
-            motion_mode=motion_mode,
             controller={
+                "type": controller_type,
                 "max_linear_vel": 2.0,
                 "max_angular_vel": 3.0,
             },

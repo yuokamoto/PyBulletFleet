@@ -1,175 +1,149 @@
-# Logging Utilities - Usage Guide
+# Logging
 
-## Overview
+PyBulletFleet uses Python's standard `logging` package. This page distinguishes
+the log-level configuration used by simulation users from lazy message
+construction used by developers writing hot-path code.
 
-`logging_utils.py` provides lazy evaluation logging to prevent expensive string formatting (e.g., NumPy array conversion) when the log level is disabled.
+## Configure Simulation Logs
 
-## Performance Impact
+Set the level in the `simulation` section of a YAML configuration, or through
+`SimulationParams`. The default is `warn` (equivalent to Python's `WARNING`).
 
-**Without lazy evaluation:**
-```python
-# ❌ BAD: Array is converted to string even if DEBUG is disabled
-logger.debug(f"Array data: {numpy_array}")  # Slow: formats string every call
+```yaml
+simulation:
+  log_level: info
 ```
 
-**With lazy evaluation:**
 ```python
-# ✅ GOOD: Array conversion only happens if DEBUG is enabled
-lazy_logger.debug(lambda: f"Array data: {numpy_array}")  # Fast: skips formatting
+from pybullet_fleet.core_simulation import MultiRobotSimulationCore, SimulationParams
+
+sim = MultiRobotSimulationCore(
+    SimulationParams(
+        log_level="info",
+    )
+)
 ```
 
-**Performance: orders of magnitude faster** when log level is disabled.
+Use the usual Python logging names: `debug`, `info`, `warning` (or `warn`),
+`error`, and `critical`. For example, time and memory profiling summaries are
+logged at `INFO`, so use `log_level: info` when those summaries are required.
 
-## When to Use Lazy Logging
+### Application integration
 
-| Use Case | Method | Reason |
-|----------|--------|--------|
-| **NumPy arrays** | LazyLogger or isEnabledFor | Array to string conversion is expensive |
-| **Large objects** | LazyLogger or isEnabledFor | repr/str conversion is expensive |
-| **Expensive computations** | LazyLogger | Skip computation entirely |
-| **Simple strings/numbers** | Standard logger | No overhead benefit |
-| **INFO or higher levels** | Standard logger | Usually executed anyway |
+PyBulletFleet configures the Python root logger when
+`MultiRobotSimulationCore` is created. Consequently, `SimulationParams.log_level`
+affects other libraries that use the root logger in the same process. Configure
+handlers, output destinations, and application-wide formatting in the host
+application using the standard `logging` API.
 
-## Usage Examples
+`PYBULLET_LOG_LEVEL` is read when `pybullet_fleet.core_simulation` is imported,
+but creating a simulation subsequently applies its `SimulationParams.log_level`.
+Use the configuration field or constructor parameter as the authoritative
+per-simulation setup rather than relying on that environment variable.
 
-### Method 1: LazyLogger (Recommended for New Code)
+## Write Efficient Logs in Custom Code
+
+Python logging already defers interpolation when arguments are passed
+separately. Prefer this for simple values:
+
+```python
+logger.debug("agent=%s goal=%s", agent.name, goal)
+```
+
+Avoid eager f-strings for a disabled level:
+
+```python
+# Formats the array before logging decides whether DEBUG is enabled.
+logger.debug(f"pose={pose_array}")
+```
+
+Use `LazyLogger` when constructing the message requires an expensive
+calculation, array conversion, or another operation that should not run when
+the level is filtered out.
 
 ```python
 from pybullet_fleet.logging_utils import get_lazy_logger
 
-# Create lazy logger
-lazy_logger = get_lazy_logger(__name__)
-
-# Use with lambda for expensive operations
-import numpy as np
-arr = np.random.rand(1000)
-
-lazy_logger.debug(lambda: f"Array stats: mean={arr.mean()}, std={arr.std()}, data={arr[:10]}")
-lazy_logger.info(lambda: f"Large object: {expensive_object}")
-
-# Simple strings work too (lambda is optional but consistent)
-lazy_logger.debug(lambda: "Simple message")
-lazy_logger.debug("Simple message also works")  # Backward compatible
-```
-
-
-### Method 2: isEnabledFor Check (Good for Existing Code)
-```python
-def _init_differential_rotation_trajectory(self, goal):
-    # These lines caused significant overhead in hot paths!
-    logger.debug(f"Agent {self.body_id} checking orientation alignment:")
-    logger.debug(f"  Movement direction: {x_axis_target}")  # NumPy array
-    logger.debug(f"  Goal's X-axis: {x_axis_goal}")         # NumPy array
-    logger.debug(f"  Alignment: {alignment:.3f}")
-```
-
-**After optimization (significantly faster):**
-```python
-def _init_differential_rotation_trajectory(self, goal):
-    if logger.isEnabledFor(logging.DEBUG):
-        logger.debug(f"Agent {self.body_id} checking orientation alignment:")
-        logger.debug(f"  Movement direction: {x_axis_target}")
-        logger.debug(f"  Goal's X-axis: {x_axis_goal}")
-        logger.debug(f"  Alignment: {alignment:.3f}")
-```
-
-## API Reference
-
-### `get_lazy_logger(name: str) -> LazyLogger`
-
-Create a new lazy logger.
-
-```python
 logger = get_lazy_logger(__name__)
-logger.debug(lambda: f"Data: {array}")
+
+logger.debug(lambda: f"mean={samples.mean():.3f}, first={samples[:10]}")
 ```
 
-### `wrap_existing_logger(logger: logging.Logger) -> LazyLogger`
-
-Wrap an existing logger with lazy evaluation.
+For several related messages, an explicit standard logging guard is equally
+clear:
 
 ```python
-std_logger = logging.getLogger(__name__)
-lazy_logger = wrap_existing_logger(std_logger)
-lazy_logger.debug(lambda: f"Data: {array}")
+import logging
+
+if logger.isEnabledFor(logging.DEBUG):
+    logger.debug("direction=%s", direction)
+    logger.debug("alignment=%.3f", alignment)
 ```
 
-### `LazyLogger` Methods
+## Lazy Logger APIs
 
-All standard logging methods are supported:
-- `debug(msg_func, *args, **kwargs)`
-- `info(msg_func, *args, **kwargs)`
-- `warning(msg_func, *args, **kwargs)`
-- `error(msg_func, *args, **kwargs)`
-- `critical(msg_func, *args, **kwargs)`
+### Module-level logger
 
-**msg_func** can be:
-- A lambda/callable: `lambda: f"Data: {array}"` (lazy evaluation)
-- A plain string: `"Simple message"` (backward compatible)
+Use `get_lazy_logger(__name__)` for ordinary module-level logging.
 
-## Testing
+```python
+from pybullet_fleet.logging_utils import get_lazy_logger
 
-Run the test suite to verify functionality and see performance benchmarks:
+logger = get_lazy_logger(__name__)
+logger.info("World loaded")
+logger.debug(lambda: f"objects={len(objects)}, aabbs={aabbs}")
+```
+
+`debug`, `info`, `warning`, `error`, and `critical` accept either a plain
+string or a zero-argument callable. A plain string is already constructed
+before the call; use a callable only when deferring work matters.
+
+`LazyLogger.isEnabledFor(level)` and `LazyLogger.logger` expose the equivalent
+standard logging check and underlying `logging.Logger` when needed. Existing
+loggers can be wrapped with `wrap_existing_logger(logging.getLogger(__name__))`.
+
+### Instance-level logger with a prefix
+
+Use `get_named_lazy_logger()` when every record from an object should include a
+stable identifier. `set_prefix()` can update that identifier after construction.
+
+```python
+from pybullet_fleet.logging_utils import get_named_lazy_logger
+
+self._log = get_named_lazy_logger(__name__, prefix=f"[Agent:{self.object_id}] ")
+self._log.info("Path complete")
+self._log.debug(lambda: f"pose={self.get_pose()}")
+```
+
+The prefix and callable are applied only when that level is enabled.
+
+## Choosing an Approach
+
+| Situation | Preferred form |
+|---|---|
+| Constant or already-available scalar values | `logger.debug("count=%s", count)` |
+| Expensive computation only needed for a message | `lazy_logger.debug(lambda: f"stats={compute_stats()}")` |
+| Several related debug records | `if logger.isEnabledFor(logging.DEBUG): ...` |
+| Per-object records that need an identifier | `get_named_lazy_logger()` |
+
+Lazy logging avoids unnecessary work; its performance benefit depends on the
+message construction, logging configuration, and workload. Measure the real
+hot path before making broad changes.
+
+## Verify Changes
+
+Run the focused tests after changing the logging helpers:
 
 ```bash
-python PyBulletFleet/tests/test_logging_utils.py
+pytest tests/test_logging_utils.py
 ```
 
-Expected output:
-```
-Performance Benchmark (10,000 iterations)
-Standard logger:           slow (baseline)
-Standard with check:       fast (>99% faster)
-Lazy logger:               fast (>99% faster)
+For repository performance investigations, use the maintained profiling tools
+under `benchmark/profiling/`, such as
+`benchmark/profiling/agent_manager_set_goal.py`. See the
+[Profiling Guide](../benchmarking/profiling-guide) for the broader workflow.
 
-Conclusion: Lazy logger is orders of magnitude faster for disabled log levels
-```
+## See Also
 
-## Best Practices
-
-### ✅ DO
-
-```python
-# Use lazy logging for arrays and expensive operations
-lazy_logger.debug(lambda: f"Array: {np_array}")
-lazy_logger.debug(lambda: f"Mean: {data.mean()}")
-
-# Or use isEnabledFor for multiple related logs
-if logger.isEnabledFor(logging.DEBUG):
-    logger.debug(f"Array 1: {arr1}")
-    logger.debug(f"Array 2: {arr2}")
-```
-
-### ❌ DON'T
-
-```python
-# Don't use lazy logging for simple strings (unnecessary overhead)
-lazy_logger.debug(lambda: "Simple message")  # Just use: logger.debug("Simple message")
-
-# Don't forget the lambda
-lazy_logger.debug(f"Array: {arr}")  # ❌ Still evaluates f-string!
-lazy_logger.debug(lambda: f"Array: {arr}")  # ✅ Correct
-```
-
-## Performance Tips
-
-1. **Group expensive logs**: Use `isEnabledFor` to wrap multiple related DEBUG logs
-2. **Profile first**: Use `profile_agent_manager_set_goal.py` to identify bottlenecks
-3. **Focus on hot paths**: Optimize logs in frequently-called functions first
-4. **Keep it simple**: Don't over-optimize INFO/WARNING/ERROR logs
-
-## Migration Checklist
-
-- [ ] Identify hot paths (frequently called functions)
-- [ ] Search for DEBUG logs with arrays/objects: `logger.debug(f".*\{.*\[`
-- [ ] Add `isEnabledFor` checks or use `LazyLogger`
-- [ ] Run tests to verify functionality
-- [ ] Profile to measure improvement
-- [ ] Update documentation
-
-## Related Files
-
-- `pybullet_fleet/logging_utils.py` - Implementation
-- `tests/test_logging_utils.py` - Tests and benchmarks
-- `tests/profile_agent_manager_set_goal.py` - Real-world profiling example
-- `pybullet_fleet/agent.py` - Example of optimized logging in production code
+- [Time Profiling](time-profiling) — Per-step timing and programmatic results
+- [Custom Profiling](custom-profiling) — Custom timing fields in callbacks and plugins

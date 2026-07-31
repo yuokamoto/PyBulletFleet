@@ -10,8 +10,8 @@
 </table>
 
 **Source files:**
-- [`examples/arm/pick_drop_arm_ee_demo.py`](https://github.com/yuokamoto/PyBulletFleet/blob/main/examples/arm/pick_drop_arm_ee_demo.py) — low-level callback approach
-- [`examples/arm/pick_drop_arm_ee_action_demo.py`](https://github.com/yuokamoto/PyBulletFleet/blob/main/examples/arm/pick_drop_arm_ee_action_demo.py) — action-queue approach
+- [`examples/arm/pick_drop_arm_ee_demo.py`](https://github.com/yuokamoto/PyBulletFleet/blob/main/pybullet_fleet/examples/arm/pick_drop_arm_ee_demo.py) — low-level callback approach
+- [`examples/arm/pick_drop_arm_ee_action_demo.py`](https://github.com/yuokamoto/PyBulletFleet/blob/main/pybullet_fleet/examples/arm/pick_drop_arm_ee_action_demo.py) — action-queue approach
 
 This tutorial shows how to control a robot arm by specifying **end-effector (EE) positions**
 instead of joint angles. PyBulletFleet's built-in IK solver converts Cartesian targets
@@ -57,7 +57,7 @@ reachable = arm_agent.move_end_effector([0.0, -0.3, 0.3])
 if reachable:
     print("IK solution found — joints moving to target")
 else:
-    print("Target unreachable — best-effort joint targets set")
+    print("Target unreachable — a best-effort joint command may be used")
 ```
 
 `move_end_effector()` internally:
@@ -124,13 +124,19 @@ arm_agent.add_action_sequence(actions)
 
 **Completion:** Joints within default joint tolerance of the IK solution **and** EE within `tolerance` of the target position.
 
-**Unreachable targets:** When the IK solver determines the target is unreachable,
-`PoseAction` does **not** fail immediately. Instead:
+**Unreachable or non-convergent targets:** `PoseAction` does **not** fail as
+soon as the initial IK reachability check returns `False`. When IK returns a
+candidate solution, it commands those best-effort joint targets and then:
 
-1. A best-effort IK solution is computed and joint targets are set
-2. Joints move toward the best-effort targets and settle
-3. After settling, the action completes with `ActionStatus.FAILED`
-4. An error message is logged: `"IK target was not reachable"`
+1. waits for the joints to settle at their commanded targets;
+2. checks the final EE Cartesian pose; and
+3. completes with `ActionStatus.FAILED` unless both the initial reachability
+   check and the final Cartesian check pass.
+
+At the initial failed reachability check, it logs the warning
+`"IK target is not reachable (best-effort movement will proceed)"`. On final
+failure, `action.error_message` is `"IK target was not reachable"` and the
+action logger emits it as a failure.
 
 This means the action queue **does not stall** — the `FAILED` status propagates
 to the next action in the sequence. To handle failures explicitly, check the
@@ -143,9 +149,12 @@ if action.status == ActionStatus.FAILED:
     print(f"Failed: {action.error_message}")
 ```
 
-> **`move_end_effector()` behaviour:** Returns `False` for unreachable targets
-> but still sets joint targets (best-effort). The same applies to
-> `PickAction(ee_target_position=...)` and `DropAction(ee_target_position=...)`.
+> **`move_end_effector()` behaviour:** For an URDF robot, an unreachable target
+> normally still yields a best-effort IK candidate and joint targets are set.
+> If the solver cannot return any candidate (or the agent is not a URDF robot),
+> it returns `False` without issuing a new joint command. The same IK behaviour
+> is used by `PickAction(ee_target_position=...)` and
+> `DropAction(ee_target_position=...)`.
 
 ---
 
@@ -154,7 +163,7 @@ if action.status == ActionStatus.FAILED:
 `PickAction` and `DropAction` accept `ee_target_position` as an alternative to
 joint-level positioning. When set, the action uses IK to move the EE to the
 target position before picking/dropping
-(see [`pick_drop_arm_ee_action_demo.py`](https://github.com/yuokamoto/PyBulletFleet/blob/main/examples/arm/pick_drop_arm_ee_action_demo.py)):
+(see [`pick_drop_arm_ee_action_demo.py`](https://github.com/yuokamoto/PyBulletFleet/blob/main/pybullet_fleet/examples/arm/pick_drop_arm_ee_action_demo.py)):
 
 ```python
 from pybullet_fleet.action import PickAction, DropAction, PoseAction, WaitAction
@@ -189,8 +198,14 @@ arm_agent.add_action_sequence(actions)
 | Tutorial 4 (joint targets) | Tutorial 5 (EE position) |
 |----------------------------|--------------------------|
 | `JointAction(target_joint_positions=[...])` | `PoseAction(target_position=[x, y, z])` |
-| `PickAction(use_approach=False)` + separate `JointAction` | `PickAction(ee_target_position=[x, y, z])` |
+| `PickAction(joint_targets=[...])` | `PickAction(ee_target_position=[x, y, z])` |
 | User computes joint angles | IK solver computes angles |
+
+`PickAction` and `DropAction` support both positioning styles. Use
+`joint_targets` when you want to supply the arm configuration explicitly, or
+`ee_target_position` to have IK compute it. They are mutually exclusive for a
+single action. A standalone `JointAction` is still useful when the joint move
+is not part of a pick or drop operation.
 
 ---
 
@@ -233,22 +248,26 @@ the solver fails to converge for targets requiring large joint displacements.
 
 ## 6. Mobile Manipulator IK
 
-On composite robots (mobile base + arm), the IK solver must ignore the base joints
-and only solve for arm joints. PyBulletFleet handles this automatically:
+On composite robots (mobile base + arm), IK must solve the arm while leaving
+the base and drive joints alone. PyBulletFleet's default joint filtering helps
+with common URDFs:
 
 - **FIXED joints** are skipped (PyBullet excludes them from IK)
 - **Continuous joints** (lower limit ≥ upper limit, e.g. drive wheels) are **locked** at their current positions
 
-This means `move_end_effector()` works on a mobile manipulator without extra
-configuration — the wheels stay put while the arm moves to reach the target.
+This can make `move_end_effector()` work without extra configuration, but a
+mobile-manipulator application should explicitly name its arm chain when that
+joint set is known. The bundled demo does so, making the intended IK degrees of
+freedom unambiguous even if the URDF changes.
 
 ### Explicit control with `ik_joint_names`
 
-For cases where auto-detection isn't enough, use `ik_joint_names` to explicitly
-list the joints the IK solver is allowed to move:
+The bundled [`mobile_manipulator_demo.py`](https://github.com/yuokamoto/PyBulletFleet/blob/main/pybullet_fleet/examples/arm/mobile_manipulator_demo.py)
+uses `ik_joint_names` to explicitly list the joints that IK may move, and an
+explicit differential controller for base navigation:
 
 ```python
-from pybullet_fleet.agent import Agent, IKParams
+from pybullet_fleet.agent import Agent, AgentSpawnParams, IKParams
 
 ik_cfg = IKParams(
     ik_joint_names=(
@@ -259,20 +278,32 @@ ik_cfg = IKParams(
     ),
 )
 
-agent = Agent.from_urdf(
-    urdf_path="robots/mobile_manipulator.urdf",
-    pose=Pose.from_xyz(0, 0, 0),
-    sim_core=sim_core,
+spawn_params = AgentSpawnParams(
+    urdf_path="mobile_manipulator",
+    initial_pose=Pose.from_euler(0, 0, 0.3, yaw=0),
     ik_params=ik_cfg,
     mass=0.0,  # kinematic mode
+    use_fixed_base=False,
+    controller={
+        "type": "differential",
+        "max_linear_vel": 2.0,
+        "max_linear_accel": 3.0,
+        "max_angular_vel": 1.5,
+        "max_angular_accel": 3.0,
+    },
 )
+agent = Agent.from_params(spawn_params, sim_core=sim_core)
 ```
 
 All movable joints **not** in `ik_joint_names` are locked at their current positions.
 When `ik_joint_names` is `None` (default), auto-detection is used.
 
-See [`examples/arm/mobile_manipulator_demo.py`](https://github.com/yuokamoto/PyBulletFleet/blob/main/examples/arm/mobile_manipulator_demo.py)
-for a full mobile manipulator demo with IK-based pick/drop.
+The demo first runs a joint-target pick/drop sequence, then an IK sequence:
+`MoveAction` positions the base near the object, `PickAction` / `DropAction`
+use `ee_target_position` with the resolved EE link, and `JointAction` moves to
+the carry and home poses between them. Both drops use
+`drop_relative_pose=Pose.from_xyz(0, 0, 0)` so the object is released at the
+current EE position. See the source for the complete runnable sequence.
 
 ### `drop_relative_pose` — Relative Drop Positioning
 
@@ -305,24 +336,25 @@ When `drop_relative_pose` is set, the object's final position is computed as:
 
 ## 7. Low-Level Callback Approach
 
-For full control, use `move_end_effector()` in a state-machine callback
-(see `pick_drop_arm_ee_demo.py`):
+For full control, use `move_end_effector()` in a state-machine callback. The
+following is the minimal pattern used by
+[`pick_drop_arm_ee_demo.py`](https://github.com/yuokamoto/PyBulletFleet/blob/main/pybullet_fleet/examples/arm/pick_drop_arm_ee_demo.py):
 
 ```python
 step_state = 0
 _ee_set = False
 
-def pick_drop_callback(sim_core, dt):
+def pick_drop_ee_callback(sim_core, dt):
     global step_state, _ee_set
 
     def _move_ee_once(pos):
         global _ee_set
         if not _ee_set:
-            arm_agent.move_end_effector(pos)
+            arm_agent.move_end_effector(pos, target_orientation=EE_ORN)
             _ee_set = True
 
     def _at_target():
-        return arm_agent.are_joints_at_targets(tolerance=0.05)
+        return arm_agent.are_all_joints_at_targets(tolerance=0.05)
 
     def _advance(next_state):
         global step_state, _ee_set
@@ -345,8 +377,15 @@ def pick_drop_callback(sim_core, dt):
         arm_agent.detach_object(box)
         _advance(0)
 
-sim_core.register_callback(pick_drop_callback, frequency=10)
+sim_core.register_callback(pick_drop_ee_callback, frequency=10)
 ```
+
+The runnable demo adds per-robot pick/drop/home presets, passes
+`target_orientation=EE_ORN` for robots that benefit from orientation-constrained
+IK, and performs a home move plus a reverse pick/drop cycle before repeating.
+The callback issues each EE command once per state and waits for the commanded
+joints to converge; it is deliberately lower-level than `PoseAction` and does
+not perform `PoseAction`'s final Cartesian completion check.
 
 ---
 
@@ -392,7 +431,7 @@ The IK solver works with **prismatic (linear) joints** out of the box. A prismat
 joint in the kinematic chain lets the IK solver adjust both the linear position
 (e.g., rail height) and revolute angles to reach the target.
 
-[`examples/arm/rail_arm_demo.py`](https://github.com/yuokamoto/PyBulletFleet/blob/main/examples/arm/rail_arm_demo.py)
+[`examples/arm/rail_arm_demo.py`](https://github.com/yuokamoto/PyBulletFleet/blob/main/pybullet_fleet/examples/arm/rail_arm_demo.py)
 demonstrates a **rail arm** (1 prismatic Z-axis + 4 revolute = 5 DOF) picking a box
 from a high shelf and placing it at a low position:
 
@@ -456,6 +495,6 @@ reference (scalar, dict, agent-level fallback).
 
 - [Tutorial 4 — Arm Joint Control](arm-pick-drop): `JointAction`, joint-level pick/drop, tolerance reference
 - [Tutorial 2 — Action System](action-system): mobile robot pick/drop with `MoveAction`
-- [Rail Arm Demo](https://github.com/yuokamoto/PyBulletFleet/blob/main/examples/arm/rail_arm_demo.py): prismatic + revolute EE control
-- [Mobile Manipulator Demo](https://github.com/yuokamoto/PyBulletFleet/blob/main/examples/arm/mobile_manipulator_demo.py): kinematic mobile manipulator with IK pick/drop
+- [Rail Arm Demo](https://github.com/yuokamoto/PyBulletFleet/blob/main/pybullet_fleet/examples/arm/rail_arm_demo.py): prismatic + revolute EE control
+- [Mobile Manipulator Demo](https://github.com/yuokamoto/PyBulletFleet/blob/main/pybullet_fleet/examples/arm/mobile_manipulator_demo.py): kinematic mobile manipulator with IK pick/drop
 - [Architecture Overview](../architecture/overview): IK internals, joint control modes

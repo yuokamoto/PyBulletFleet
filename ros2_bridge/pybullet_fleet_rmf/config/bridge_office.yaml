@@ -85,7 +85,6 @@ entities:
     sdf_path: "package://rmf_demos_assets/models/TinyRobot/model.sdf"
     pose: [10.433, -5.575, 0.0]
     yaw: 0.0
-    motion_mode: "differential"
     controller:
       type: differential
       max_linear_vel: 0.5
@@ -103,7 +102,6 @@ entities:
     sdf_path: "package://rmf_demos_assets/models/TinyRobot/model.sdf"
     pose: [20.422, -5.312, 0.0]
     yaw: 0.0
-    motion_mode: "differential"
     controller:
       type: differential
       max_linear_vel: 0.5

@@ -8,6 +8,9 @@ Overview of PyBulletFleet's system design and core components.
 
 overview
 two-phase-step
+plugins-events
+batch-execution
+fleet-api
 ```
 
 ```{toctree}

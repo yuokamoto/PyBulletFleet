@@ -375,10 +375,11 @@ class PoseAction(Action):
     """
     End-effector pose control via inverse kinematics.
 
-    Calls ``agent.move_end_effector()`` on the first step.  Joint
-    targets are always set and the action waits for joints to settle.
-    After settling, the action completes with ``COMPLETED`` if the
-    target was reachable, or ``FAILED`` if it was not.
+    Calls ``agent.move_end_effector()`` on the first step. When IK returns
+    a candidate, the action waits for its joint targets to settle. After
+    settling, it completes with ``COMPLETED`` only when both the initial
+    reachability check and final EE Cartesian check pass; otherwise it
+    completes with ``FAILED``.
 
     ``tolerance`` is used for both the IK reachability pre-check
     (via ``move_end_effector()``) and the final EE Cartesian distance

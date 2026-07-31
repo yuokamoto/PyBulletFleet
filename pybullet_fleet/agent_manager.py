@@ -712,7 +712,7 @@ class AgentManager(SimObjectManager[Agent]):
     - Pose goal assignment to individual agents
     - Callback system for custom update logic (goals, state tracking, etc.)
     - Query moving/stopped agents
-    - Optional batch controller for vectorized kinematic updates (``batch_controller=`` or :meth:`enable_batch`)
+    - Optional batch controller for vectorized kinematic updates (``fleet_controller={"type": ...}`` or :meth:`enable_batch`)
 
     Key Features:
     - Auto-registers update callback to simulation loop
@@ -733,7 +733,6 @@ class AgentManager(SimObjectManager[Agent]):
         update_frequency: float = 10.0,
         object_class: type = Agent,
         enable_profiling: bool = False,
-        batch_controller: Optional[str] = None,
         fleet_controller: Optional[Dict[str, Any]] = None,
     ):
         """
@@ -749,35 +748,29 @@ class AgentManager(SimObjectManager[Agent]):
                           Pass an Agent subclass to manage custom agent types.
             enable_profiling: If ``True``, spawn methods log elapsed time.
                 Default ``False``.
-            batch_controller: Batch controller registry name
-                (e.g. ``"batch_omni"``, ``"batch_differential"``) or a dotted
-                import path to a custom ``BatchKinematicController`` subclass
-                (e.g. ``"my_pkg.MyBatchController"``).  When set,
-                every agent spawned through this manager is automatically
-                registered with the batch controller so movement is driven by
-                vectorized :meth:`batch_advance` rather than per-agent
-                ``compute()``.  Equivalent to calling
-                ``manager.enable_batch(batch_controller)`` after construction.
-            fleet_controller: Default ``controller:`` config applied to agents
-                that do not specify their own controller params at spawn time.
-                Accepts the same dict format as ``AgentSpawnParams.controller``
-                (e.g. ``{"max_linear_vel": 2.0, "max_angular_vel": 3.0}``).
-                Per-agent ``controller:`` values always take precedence.
+            fleet_controller: Manager controller configuration. ``type`` may
+                be ``"batch_omni"`` or ``"batch_differential"`` to enable
+                vectorized movement for every managed agent; omit it for
+                per-agent execution. The remaining keys are shared
+                ``ControllerParams`` defaults applied only where an agent did
+                not set that field in its own ``controller:`` config.
         """
         super().__init__(sim_core, object_class=object_class, enable_profiling=enable_profiling)
         self.name: Optional[str] = name
         self._callbacks: List[Dict[str, Any]] = []  # List of registered callbacks
         self._update_frequency: float = update_frequency  # Default callback frequency in Hz
         self._batch_controller: Optional[Any] = None
-        self._fleet_controller: Optional[Dict[str, Any]] = fleet_controller
+        fleet_config = dict(fleet_controller or {})
+        controller_type = fleet_config.pop("type", None)
+        self._fleet_controller: Optional[Dict[str, Any]] = fleet_config or None
 
         # Always register so sim_core.remove_object() and sim_core.reset() keep
         # the manager's tracking lists in sync, regardless of batch mode.
         if self.sim_core is not None:
             self.sim_core.register_manager(self)
 
-        if batch_controller is not None:
-            self.enable_batch(batch_controller)
+        if controller_type is not None:
+            self.enable_batch(controller_type)
 
     # ------------------------------------------------------------------
     # Batch controller lifecycle

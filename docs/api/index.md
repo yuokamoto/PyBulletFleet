@@ -1,6 +1,8 @@
 # API Reference
 
-API documentation is auto-generated from source code docstrings using Sphinx autodoc.
+The full reference is generated from source docstrings with Sphinx autodoc.
+Use the high-level guides for concepts and examples; use this section to look
+up exact Python signatures, parameters, and return values.
 
 ```{toctree}
 :hidden:
@@ -8,30 +10,43 @@ API documentation is auto-generated from source code docstrings using Sphinx aut
 generated/pybullet_fleet
 ```
 
-## Full API Documentation
+## Full Module Reference
 
-See [Full Module Reference](generated/pybullet_fleet) for all classes, methods, and parameters extracted from docstrings.
+See [Full Module Reference](generated/pybullet_fleet) for documented members of
+all non-private package modules. It includes advanced and developer-facing
+modules as well as the stable user-facing API.
 
-## Module Overview
+## User-Facing API
 
-| Module | Description |
-|--------|-------------|
-| `pybullet_fleet.core_simulation` | Main simulation engine (`CoreSimulation`) |
-| `pybullet_fleet.agent` | Robot agent with kinematics and path following |
-| `pybullet_fleet.agent_manager` | Agent lifecycle and goal management |
-| `pybullet_fleet.action` | Action system for pick/drop/move operations |
-| `pybullet_fleet.sim_object` | Static and dynamic simulation objects |
-| `pybullet_fleet.config_utils` | YAML configuration loading |
-| `pybullet_fleet.geometry` | Geometric utilities (poses, transforms) |
-| `pybullet_fleet.collision_visualizer` | *(Deprecated)* Collision visualization overlays |
-| `pybullet_fleet.data_monitor` | Runtime data monitoring |
-| `pybullet_fleet.logging_utils` | Logging configuration (`LazyLogger`) |
-| `pybullet_fleet.tools` | Utility functions |
-| `pybullet_fleet.types` | Type definitions and enums |
+| Area | Primary modules | Examples |
+|------|-----------------|----------|
+| Simulation and entities | `core_simulation`, `sim_object`, `agent`, `agent_manager` | `MultiRobotSimulationCore`, `SimulationParams`, `AgentSpawnParams` |
+| Controllers and actions | `controller`, `controllers`, `action` | `OmniController`, `DifferentialController`, action classes |
+| Fleet commands and state | `commands`, `fleet_api`, `states` | `FleetCommandDispatcher`, `FleetStateProvider`, command dataclasses |
+| Events and plugins | `events`, `sim_plugin`, `agent_plugin`, `plugins` | `EventBus`, `SimPlugin`, `AgentPlugin` |
+| Worlds and models | `robot_models`, `sdf_loader`, `world_loader` | `resolve_model`, SDF/world loading helpers |
+| Devices and recording | `devices`, `recorder` | `Door`, `Elevator`, `SimulationRecorder` |
+| Configuration and common values | `config_utils`, `geometry`, `types`, `tools` | YAML loading, `Pose`, enums, coordinate helpers |
+
+## Advanced and Developer Modules
+
+The full reference also includes implementation-support modules such as
+`controller_params`, `entity_registry`, `plugin_utils`, `data_monitor`, and
+`camera_controller`, plus command-line and compatibility modules. Prefer the
+user-facing API above unless you are extending the framework. In particular,
+`collision_visualizer` is retained for compatibility and is not part of the
+recommended public workflow.
 
 :::{tip}
-To regenerate API docs after code changes:
+To refresh the generated reference after adding or removing a package module:
 ```bash
-cd docs && sphinx-apidoc -o api/generated ../pybullet_fleet --force && make html
+source .venv/bin/activate
+sphinx-apidoc --force --no-toc \
+  --output-dir docs/api/generated pybullet_fleet
+cd docs && sphinx-build -W -b html . _build/html
 ```
+
+Review the generated files before committing them. The API index is the only
+toctree entry point, so do not add the `modules.rst` table-of-contents file
+created by older `sphinx-apidoc` runs.
 :::

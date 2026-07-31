@@ -26,7 +26,6 @@ entities:
     urdf_path: "turtlebot3_burger"
     pose: [0.0, 0.0, 0.01]
     yaw: 0.0
-    motion_mode: "differential"
     controller:
       type: "differential"
       max_linear_vel: 0.22

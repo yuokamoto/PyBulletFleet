@@ -63,7 +63,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 import pybullet as p
 from pybullet_fleet.core_simulation import MultiRobotSimulationCore, SimulationParams
 from pybullet_fleet.agent_manager import AgentManager, GridSpawnParams
-from pybullet_fleet.agent import AgentSpawnParams, MotionMode
+from pybullet_fleet.agent import AgentSpawnParams
 from pybullet_fleet.geometry import Pose
 
 
@@ -97,8 +97,8 @@ def profile_set_goal_pose(num_agents=1000):
     robot_urdf = "simple_cube"
     agent_spawn_params = AgentSpawnParams(
         urdf_path=robot_urdf,
-        motion_mode=MotionMode.DIFFERENTIAL,
         controller={
+            "type": "differential",
             "max_linear_vel": 1.0,
             "max_angular_vel": 1.0,
         },

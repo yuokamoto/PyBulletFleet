@@ -6,7 +6,9 @@ Uses different config files to compare:
 2. Physics ON + CONTACT_POINTS (physics mode)
 3. Physics ON + HYBRID (mixed mode)
 
-This demonstrates the practical difference between modes in realistic scenarios.
+The synthetic scene is useful for integration checks, but is not a production
+workload or an isolated collision-method comparison: physics and collision
+method vary together.
 """
 
 import sys
@@ -271,9 +273,11 @@ def main():
     print("CONCLUSION")
     print("=" * 70)
 
-    # Find fastest
+    # This is the lowest observed value for the fixed workload, not a general
+    # configuration recommendation: methods and physics modes have different
+    # semantics.
     fastest = min(results, key=lambda r: r["avg_collision"])
-    print(f"\n✅ Fastest collision detection: {fastest['method'].upper()}")
+    print(f"\nLowest measured collision-query time: {fastest['method'].upper()}")
     print(f"   Config: {fastest['config']}")
     print(f"   Average time: {fastest['avg_collision']:.3f}ms")
 
