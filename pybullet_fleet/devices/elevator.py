@@ -13,9 +13,9 @@ from dataclasses import dataclass, field, fields
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, cast
 
 from pybullet_fleet.action import JointAction
-from pybullet_fleet.agent import Agent, AgentSpawnParams, IKParams
-from pybullet_fleet.controller_params import ControllerParams
-from pybullet_fleet.controller import Controller
+from pybullet_fleet.agent import Agent, AgentSpawnParams, IKParams  # noqa: F401 - resolves inherited API type hints
+from pybullet_fleet.controller import Controller  # noqa: F401 - resolves inherited API type hints
+from pybullet_fleet.controller_params import ControllerParams  # noqa: F401 - resolves inherited API type hints
 from pybullet_fleet.logging_utils import get_lazy_logger
 from pybullet_fleet.types import ActionStatus
 

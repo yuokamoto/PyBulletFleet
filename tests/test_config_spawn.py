@@ -819,12 +819,10 @@ class TestManagersConfigSection:
 
     def test_entity_batch_controller_key_is_rejected(self):
         import pybullet as p
-        from pybullet_fleet import MultiRobotSimulationCore
+        from pybullet_fleet import MultiRobotSimulationCore, SimulationParams
 
         cfg = {**_SIM_BASE, "entities": [{**_SPAWN_DIFF, "batch_controller": "batch_differential", "grid": _GRID_10}]}
-        sim = MultiRobotSimulationCore(
-            __import__("pybullet_fleet").SimulationParams(gui=False, monitor=False, physics=False, log_level="warning")
-        )
+        sim = MultiRobotSimulationCore(SimulationParams(gui=False, monitor=False, physics=False, log_level="warning"))
         try:
             with pytest.raises(ValueError, match="fleet_controller.type"):
                 sim.spawn_robots_from_config(cfg["entities"])

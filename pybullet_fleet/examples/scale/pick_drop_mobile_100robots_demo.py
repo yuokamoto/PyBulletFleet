@@ -68,8 +68,9 @@ sim_core = MultiRobotSimulationCore.from_dict(config)
 if args.rtf is not None:
     sim_core.params.target_rtf = args.rtf
 
-# Create AgentManager — pass batch_controller when --controller batch is selected so
-# all differential agents are auto-registered with the vectorised controller.
+# Create AgentManager — set fleet_controller.type when --controller batch is
+# selected so all differential agents are auto-registered with the vectorized
+# controller.
 _batch_controller = "batch_differential" if args.controller == "batch" else None
 agent_manager = AgentManager(
     sim_core=sim_core,
