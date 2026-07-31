@@ -1,7 +1,9 @@
 # Roadmap
 
 Planned additions and improvements for PyBulletFleet.
-Items are grouped by category; ordering within a group does not imply priority.
+Items are grouped by category.  A roadmap item states the intended outcome and
+its boundary; implementation detail belongs in the linked architecture or
+design documentation.
 
 
 ## Assets
@@ -10,11 +12,16 @@ New robot and infrastructure models:
 
 - **Physics Mobile Robot** — Wheeled robot driven by PyBullet physics (motor torques, friction, contact forces)
 - **Physics Mobile Manipulator** — Physics-mode mobile manipulator with motor-driven base and arm
-- **Conveyor / Elevator / Mobile Rack** — Warehouse infrastructure entities for material handling scenarios
+- **Conveyor / Mobile Rack** — Warehouse infrastructure entities for material
+  handling scenarios.  Door and Elevator devices, and the WorkcellPlugin used
+  for RMF dispenser/ingestor flows, are available today.
 
-## Features
+## Simulation Capabilities
 
-- **Snapshot, Event log & Replay** *(EventBus steps 1–2 done ✅; steps 3–6 pending)* — Three-layer architecture sharing a single EventBus as data source. Enables replay, external synchronization ([USO](https://github.com/yuokamoto/Unified-Simulation-Orchestrator) integration), and downstream observability (see [Observability](#observability) below).
+- **Snapshot, Event log & Replay** *(event emission complete; recording and
+  replay pending)* — Three-layer architecture sharing a single EventBus as a
+  source. Enables replay, external synchronization ([USO](https://github.com/yuokamoto/Unified-Simulation-Orchestrator)
+  integration), and downstream observability (see [Observability](#observability) below).
 
   **Layer overview:**
 
@@ -24,7 +31,11 @@ New robot and infrastructure models:
   | **Event log** | Causal record of state transitions (input replay, audit) | Per state-change | Yes (must) | Yes (input replay) |
   | **Trace** | Operational observability (Grafana/Tempo) | Action-level spans | Sampling allowed | No (view only) |
 
-  **Design principle: same source, separate sinks.** All three are derived from the EventBus (`docs/design/eventbus/spec.md`) — emit once, fan out to multiple subscribers. Snapshot ≠ Event (different schemas, separate files), but share common header keys (`sim_time`, `step`, `wall_time`, `run_id`) so they can be merged on the time axis.
+  **Design principle: same source, separate sinks.** All three are derived from
+  the EventBus ([eventbus/spec.md](https://github.com/yuokamoto/PyBulletFleet/blob/main/docs/design/eventbus/spec.md))
+  — emit once, fan out to multiple subscribers. Snapshot ≠ Event (different
+  schemas, separate files), but share common header keys (`sim_time`, `step`,
+  `wall_time`, `run_id`) so they can be merged on the time axis.
 
   **Why trace alone cannot replay:** trace is sampled, coarse-grained (Action-level spans), drops non-deterministic inputs (RNG seed, callback returns), and has attribute-size limits unsuitable for `Path` waypoints / IK results. Replay needs Event log (input) + Snapshot (checkpoint).
 
@@ -39,18 +50,23 @@ New robot and infrastructure models:
 
   **Implementation order:**
 
-  1. EventBus core + `SimEvent` dataclass (see `docs/design/eventbus/spec.md`)
-  2. Publish from `Action` state transitions, `add_object` / `remove_object`, collision Enter/Exit
-  3. JSONL event writer subscriber (lossless input log)
-  4. `SimulationSnapshot` + `MultiRobotSimulationCore.snapshot()` / `restore()` (see `docs/design/snapshot-replay/spec.md`)
-  5. `replay.py`: snapshot + event log → re-execution
-  6. OTel exporter subscriber (covered in Observability section, independent of replay)
+  **Current state:** the EventBus and lifecycle, action, collision, pause, and
+  per-agent update events are available.  Handlers receive the current
+  event-name/keyword-argument API; there is no persisted, structured
+  `SimEvent` record yet.
 
-  Steps 3–6 are independent once 1–2 are in place.
+  **Remaining order:**
+
+  1. Define a versioned event-record schema and JSONL writer subscriber
+     (lossless input log).
+  2. Add `SimulationSnapshot` plus
+     `MultiRobotSimulationCore.snapshot()` / `restore()` (see
+     [snapshot-replay/spec.md](https://github.com/yuokamoto/PyBulletFleet/blob/main/docs/design/snapshot-replay/spec.md)).
+  3. Add `replay.py` for snapshot + event-log re-execution.
+  4. Add an OTel exporter subscriber (independent of replay; see
+     [Observability](#observability)).
 
 - **Behavior tree integration** — Create agent behavior from behavior trees
-- **`SimObject.from_sdf()` → `List[SimObject]`** ✅ — Factory method that loads an SDF file via `p.loadSDF()` and wraps each returned body_id in a `SimObject`. Collision detection and lifecycle management via `add_object()` are applied automatically. Required for Open-RMF SDF environment loading and official support for pybullet_data SDF models (kiva_shelf, wsg50_gripper, etc.).
-
 ### Crowd Simulation (lightweight)
 
 Lightweight crowd simulation for NPC pedestrians in RMF demo environments. Provides more realistic pedestrian behavior than the current `RandomWalkController` (random point within radius) while staying far simpler than Gazebo's full Menge/ORCA `crowd_simulator` plugin.
@@ -92,7 +108,11 @@ The higher-value use of a crowd is not visual fidelity but **turning crowd densi
 
 ### Devices
 
-See `ros2_bridge/README.md` for device enhancements (elevator doors, double-hinge doors, xacro-parameterised URDFs).
+Door, Elevator, and workcell simulation are implemented in the core/bridge
+integration.  ROS/RMF-specific gaps and device-model enhancements are tracked
+in `ros2_bridge/README.md`; this roadmap retains only cross-project asset work.
+See [device-external-agent/spec.md](https://github.com/yuokamoto/PyBulletFleet/blob/main/docs/design/2026-04-21-device-external-agent/spec.md)
+for the implemented device/external-actor model.
 
 ## RMF Demo Feature Coverage
 
@@ -100,6 +120,8 @@ Gaps between the standard Gazebo `rmf_demos` and the PyBulletFleet bridge. Core
 flows (navigation, doors, **lifts**, delivery pick/drop, battery/charging,
 **cleaning coverage**, **georeferenced maps**) are implemented. Ported demos:
 office, clinic, hotel, airport_terminal, battle_royale, **campus**. Outstanding:
+See [open-rmf/spec.md](https://github.com/yuokamoto/PyBulletFleet/blob/main/docs/design/open-rmf/spec.md)
+for the bridge design and the original integration boundary.
 
 **Demos not ported — require an RMF mode the bridge doesn't implement:**
 - `office_mock_traffic_light` and `triple_H` — both use the **`EasyTrafficLight`** adapter (the robot owns navigation; RMF only gates it with go/stop). This inverts the bridge's full-control model and is a poor fit for the kinematic, RMF-planned sim — see the [TrafficLight discussion]. Relevant only once a co-simulation/robot-proxy layer exists. Run them in Gazebo for now.
@@ -116,6 +138,9 @@ office, clinic, hotel, airport_terminal, battle_royale, **campus**. Outstanding:
 - Robot sensors (lidar/camera), physics dynamics (wheel torque/contact).
 - `rmf_obstacle` detection pipeline (also unused in stock Gazebo demos; see the "Crowd-as-dynamic-obstacle throughput benchmark" section above).
 
+Detailed ROS/RMF release and validation plans live in `ros2_bridge/README.md`;
+keep this section focused on user-visible feature coverage.
+
 ## Interfaces
 
 External communication layers:
@@ -129,10 +154,16 @@ External communication layers:
   independently select state publication and command ingress (with distinct
   endpoint namespaces when multiple fleets are exported). Keep the state and
   command scopes explicit rather than inferring ownership from an Agent type.
+  Acceptance criteria: a state-only filter can be deployed first; a named
+  scope can select one or more managers; and changing command ingress never
+  implicitly changes state publication (or vice versa).
+  See [fleet-control-api/spec.md](https://github.com/yuokamoto/PyBulletFleet/blob/main/docs/design/fleet-control-api/spec.md).
 
-- **ROS 2** — Topic / service / action bridge for ROS 2 ecosystem integration (see `ros2_bridge/README.md`)
+- **ROS 2** — Topic / service / action bridge for ROS 2 ecosystem integration
+  (see `ros2_bridge/README.md` and
+  [ros2-bridge/spec.md](https://github.com/yuokamoto/PyBulletFleet/blob/main/docs/design/ros2-bridge/spec.md))
 - **gRPC** — Language-agnostic RPC interface for orchestrators, WMS, and fleet managers
-- **Distributed co-simulation (Robot Proxy layer)** — Per-robot proxy processes that translate between simulated robots and real Robot Apps (Nav2, task assigners, BTs). Enables running 100+ unmodified single-robot software stacks against a centralized batched simulator. Sim Central stays single-process and batched; only a thin fixed-schema boundary (`StateSnapshot` + `CommandBuffer` + Events) crosses the IPC. **Shares schema with Snapshot/Replay** — same `StateSnapshot` dataclass feeds live IPC, replay log, and observability sinks (define schema once, fan out to multiple consumers). See `docs/design/co-simulation/spec.md` for full design including layer separation, transport options (shared memory / gRPC / DDS), lockstep vs async sync modes, and 6-phase implementation plan.
+- **Distributed co-simulation (Robot Proxy layer)** — Per-robot proxy processes that translate between simulated robots and real Robot Apps (Nav2, task assigners, BTs). Enables running 100+ unmodified single-robot software stacks against a centralized batched simulator. Sim Central stays single-process and batched; only a thin fixed-schema boundary (`StateSnapshot` + `CommandBuffer` + Events) crosses the IPC. **Shares schema with Snapshot/Replay** — same `StateSnapshot` dataclass feeds live IPC, replay log, and observability sinks (define schema once, fan out to multiple consumers). See [co-simulation/spec.md](https://github.com/yuokamoto/PyBulletFleet/blob/main/docs/design/co-simulation/spec.md) for layer separation, transport options (shared memory / gRPC / DDS), lockstep vs async sync modes, and the implementation phases.
 
 ## Refactoring
 
@@ -149,32 +180,22 @@ External communication layers:
   Natural stepping stone toward the SimBackend ABC (Long-Term Phase 1).
 
 - **Move `controller.py` into `controllers/` package** — Base controller classes (`Controller`, `KinematicController`, `OmniController`, `DifferentialController`, `create_controller`, `register_controller`) live in `pybullet_fleet/controller.py` while higher-level controllers (`PatrolController`, `RandomWalkController`) are already in `pybullet_fleet/controllers/`. Consolidate by moving the base module into the package as `controllers/base.py` (or splitting omni/differential into separate files) and re-exporting from `controllers/__init__.py`. Preserve the `from pybullet_fleet.controller import ...` path via a compatibility shim or `__init__.py` re-export.
+  See [controller-refactor/spec.md](https://github.com/yuokamoto/PyBulletFleet/blob/main/docs/design/controller-refactor/spec.md).
 
-- **Remove scipy dependency** — Currently only `scipy.spatial.transform.Rotation` is used (9 call sites for quat↔euler, quat↔matrix, relative rotation). Replace with PyBullet utilities + lightweight helpers in `geometry.py` to eliminate the ~150 MB transitive dependency. Low priority: no runtime performance impact, only install size.
-
-- **Manual quaternion helpers in `geometry.py`** — Extend the pattern established by `SlerpPrecomp` / `quat_slerp` (avoiding scipy, hand-written scalar math) by adding the following helpers to `geometry.py`. The goal is to eliminate scipy `Rotation` object creation overhead on hot paths.
-
-  Required helper functions:
-  - `quat_rotate_vector(q, v)` — Rotate vector `v` by quaternion `q` (body→world transform). Replaces `Rotation.from_quat(q).apply(v)`
-  - `quat_multiply(q1, q2)` — Quaternion product. Replaces `(Rotation.from_quat(q1) * Rotation.from_quat(q2)).as_quat()`
-  - `quat_from_rotvec(rotvec)` — Quaternion from rotation vector. Replaces `Rotation.from_rotvec(rotvec).as_quat()` (used in angular velocity → orientation update)
-
-  Primary application sites:
-  - `OmniVelocityController._apply_velocity()` — body→world velocity transform + quaternion update from angular velocity
-  - `tools.body_to_world_velocity_3d()` — same as above
-  - `Path._calculate_orientation_for_plane()` — rotation matrix → quaternion conversion
-  - `Path.visualize_waypoints()` — quaternion → rotation matrix conversion
-
-  Design policy:
-  - Pure Python scalar math (`math.sin`/`math.cos`) or small numpy array ops
-  - Same file and style as `SlerpPrecomp`
-  - Apply incrementally after profiling confirms bottleneck (YAGNI)
-  - Full scipy removal in a separate PR after all call sites are replaced
+- **Remove scipy runtime dependency** — Quaternion helpers now cover vector
+  rotation, multiplication, rotation-vector conversion, and angle comparison;
+  the batch omni hot path already uses them.  Audit and migrate the remaining
+  `Rotation` callers in `geometry.py`, `_motion_planning.py`, and the batch
+  differential controller, then remove the dependency only after equivalent
+  numerical tests cover the replacements.  This is an install-size and
+  dependency-simplification task, not a promised performance improvement.
 
 ## GUI / Interactive Tools
 
 Improve `p.GUI` interactivity for development and debugging.
 Long-term plan is to replace `p.GUI` with Rerun (see [Long-Term Phase 1](#long-term-backend-abstraction--beyond-pybullet)) where many of these capabilities come built-in. These items are the **interim layer** until that migration lands, and naturally collect under the planned `VisualizerController` (see Refactoring).
+The existing camera interaction boundary is described in
+[camera-control/spec.md](https://github.com/yuokamoto/PyBulletFleet/blob/main/docs/design/2026-04-18-camera-control/spec.md).
 
 Current state:
 - `sim.pause()` / `resume()` Python API ✅
@@ -201,116 +222,47 @@ Implementation notes:
 Near-term optimizations within the current PyBullet-backed architecture.
 Goal: reduce per-step cost at 100–1000 agents without a full backend swap (see Long-Term section for that).
 
-### Profiling Baseline (measured 2026-04-03)
-
-Benchmark: 500 agents, omnidirectional MoveAction, `collision_check_frequency=0` (disabled), `physics=False`, `simple_cube.urdf`.
-
-**Per-step breakdown (median):**
-
-| Component | Time | % of total | What |
-|---|---|---|---|
-| Python overhead (TPI + slerp + action queue + set_pose logic) | 11.5 ms | 88% | CPython for-loop + object dispatch |
-| `p.resetBasePositionAndOrientation` | 0.7 ms | 5% | PyBullet C API |
-| `p.getAABB` | 0.5 ms | 4% | PyBullet C API |
-| Movement detection | 0.3 ms | 3% | Pure Python arithmetic |
-| **Total** | **13.0 ms** | 100% | **FPS 77** |
-
-Key insight: **88% of step time is Pure Python overhead**, not C API calls.
-
-Collision at 10 Hz adds only ~0.2 ms at 500 agents — negligible compared to agent_update.
-
-**Vectorization micro-benchmark (500 agents):**
-
-| Operation | Python for-loop | NumPy vectorized | Speedup |
-|---|---|---|---|
-| Position compute (`start + dir × ratio`) | 1,150 μs | 5.6 μs | **205×** |
-| TPI-like trapezoidal profile | (per-agent) | 33 μs | — |
-| Per-agent cost | 23 μs/agent | ~0.01 μs/agent | — |
+Measured throughput and profiling methodology are maintained in
+[Benchmark Results](benchmarking/results) and the profiling guide.  They are
+configuration- and hardware-dependent, so this roadmap intentionally does not
+duplicate point-in-time timings or projected speedups.
 
 ### Two-Phase Pose Commit: Decouple Computation from PyBullet C API ✅ (batch controller path)
 
-The implemented `step_once()` path separates base-pose computation from its
-PyBullet commit, avoiding interleaved per-agent base-pose writes and enabling
-vectorized batch controllers.
-
-**Implemented flow:**
-
-| Stage | What | Hot path |
-|-------|------|----------|
-| **Phase 1 — Compute / buffer** | Controllers and callbacks calculate or queue base-pose writes | Python / NumPy, with joint or user PyBullet calls still possible |
-| **Phase 2 — Pose commit** | Tight loop of `p.resetBasePositionAndOrientation()` | PyBullet C calls |
-| **Post-commit synchronization** | Physics step when enabled; AABB/grid refresh and collision processing | C calls + Python dict |
-
-Framework base-pose writes now produce cached pose intents that
-`core_simulation.py` flushes in bulk. This does not prohibit all direct
-PyBullet calls: joint control and extension code can still require them.
-
-Key changes:
-- `SimObject.set_pose()` / `set_pose_raw()` writes to an internal buffer (cached pose + dirty flag) without calling `p.resetBasePositionAndOrientation()`
-- `Controller.compute()` returns `(new_pos, new_orn)` or writes to agent's pending pose buffer
-- `core_simulation.step_once()` collects dirty poses → batch `resetBasePositionAndOrientation` → post-commit AABB/grid synchronization
-- Movement detection stays pure Python (already cached-pose-based), unaffected
-- Attached-object propagation runs after Phase 2 using the buffered parent poses
+Base-pose updates are buffered during simulation work and committed together,
+which lets manager-level batch controllers vectorize compatible agents.  The
+public API remains pose/controller based; joint control and plugin code may
+still make necessary PyBullet calls.  See [Two-Phase Simulation Step](architecture/two-phase-step)
+for the operational model and extension boundaries, and
+[two-phase-step/spec.md](https://github.com/yuokamoto/PyBulletFleet/blob/main/docs/design/two-phase-step/spec.md)
+for the design record.
 
 ### Vectorized Agent Update (NumPy Batch) ✅
 
-For the common "N agents on straight-line TPI paths" case, Phase 1 can be further vectorized:
-
-- Store all active agents' `forward_start_pos`, `forward_direction`, and TPI parameters in contiguous `(N, 3)` NumPy arrays
-- Compute `new_positions = start_positions + directions * ratios[:, np.newaxis]` in one vectorized call
-- Slerp batch: pre-compute all `(start_quat, target_quat, t_fraction)` and batch `quat_slerp`
-- Fallback: agents with non-standard controllers (velocity mode, custom callbacks) use the existing per-agent path
-
-This is a "BatchController" or "VectorizedOmniController" that sits alongside the existing `Controller` ABC.
+`fleet_controller.type` selects the batch omni or differential implementation
+for a named manager.  Agents that are not compatible with that batch path keep
+their normal per-agent controller behavior.  See the fleet tutorial and
+controller configuration reference for user-facing configuration.
 
 ### C++ Extensions for Hot-Path Functions
 
-Profile-guided candidates for C++ (via pybind11) or Cython acceleration:
-
-| Function | Current | Why C++ helps |
-|----------|---------|---------------|
-| **TwoPointInterpolation** | Pure Python `math` | Called N× per step; tight numerical loop ideal for native code |
-| **`quat_slerp` / `quat_slerp_precompute`** | Python scalar math in `geometry.py` | N× per step; SIMD-friendly |
-| **Spatial hash broad-phase** | Python dict + set ops in `check_collisions()` | Dict overhead at 1000+ objects; Rust/C++ hash map faster |
-| **AABB overlap test** | Python comparisons in `_aabb_overlap_2d` | Tight inner loop; autovectorizable in C++ |
-| **`getClosestPoints` narrow-phase** | PyBullet C API (already native) | Already fast; not a candidate |
-
-Priority: TPI and slerp first (highest call frequency), then spatial hash (scales with agent count²).
+Consider native extensions only after a reproducible profile identifies a
+dominant Python hot path.  Likely candidates are interpolation/quaternion work
+and broad-phase spatial hashing; PyBullet narrow-phase calls are already
+native and are not an initial target.
 
 ### Deferred AABB Update
 
-Currently `set_pose()` calls `p.getAABB()` and updates the spatial grid **per object, immediately**. For kinematic-only mode:
-
-- Defer all AABB updates to a single `p.performCollisionDetection()` call after Phase 2
-- Batch `p.getAABB()` for all moved objects at once
-- Rebuild spatial grid once per step instead of incrementally per-object
-
-This removes N `p.getAABB()` C-API round-trips from the set_pose hot path.
-
-### Summary: Expected Impact (500 agents, measured baseline)
-
-| Optimization | Estimated step time | Estimated FPS | Speedup vs current | Effort |
-|---|---|---|---|---|
-| **Current** | 13.0 ms | 77 | 1.0× | — |
-| **NumPy vectorized controller** | ~1.2 ms | ~850 | **~11×** | Medium |
-| **+ C++ TPI/slerp extensions** | ~1.0 ms | ~1,000 | **~13×** | Medium |
-| **Theoretical floor** (C API only) | 0.7 ms | ~1,400 | ~18× | — |
-
-Scaling by agent count (current → vectorized estimate):
-
-| Agents | Current FPS | Est. vectorized FPS | Speedup |
-|---|---|---|---|
-| 100 | 225 | ~2,000+ | ~9× |
-| 500 | 77 | ~850 | ~11× |
-| 1,000 | 27 | ~450 | ~17× |
-
-> **Note:** Collision detection (10 Hz spatial hash) adds <1% overhead at 500 agents. C++ spatial hash becomes relevant at 1,000+ agents with higher collision frequencies.
-
-> **Relation to Long-Term Backend Abstraction:** The two-phase split and the "remove direct pybullet calls" refactoring are natural stepping stones toward the SimBackend ABC (Phase 1 of Long-Term). The buffered-pose pattern becomes the write side of `SimBackend.set_positions_batch()`.
+Audit whether collision-disabled or low-frequency configurations perform more
+AABB/grid work than required.  Any change must preserve collision-event timing
+and the current two-phase synchronization guarantees.
 
 ## SDF & DAE Support Improvements
 
 PyBulletFleet currently has two self-implemented workarounds for Gazebo ecosystem interop:
+
+See [sdf-loader/spec.md](https://github.com/yuokamoto/PyBulletFleet/blob/main/docs/design/sdf-loader/spec.md)
+for the original SDF-loading scope and constraints.
 
 1. **`resolve_sdf_to_urdf`** — Hand-rolled SDF→URDF XML converter (PyBullet cannot load SDF directly)
 2. **DAE defensive fallbacks** — Colour extraction, texture symlinks, collision try/except (PyBullet has poor DAE support)
@@ -403,22 +355,39 @@ Simulation environment assets (warehouse floors, factory layouts, etc.):
 
 - **GitHub Actions refactoring** — Streamlined CI pipeline
 - **Automated performance tracking** — Run time / memory benchmarks in CI, auto-update results in documentation, and alert on significant performance regressions
+  See [benchmark-refactor/spec.md](https://github.com/yuokamoto/PyBulletFleet/blob/main/docs/design/benchmark-refactor/spec.md).
 
 ## Observability
 
 Operational visibility for long benchmark runs and production deployments.
 **Shares the EventBus with Snapshot/Replay** — same emission point, different sinks.
-See `docs/design/observability/spec.md` for full design.
+See [observability/spec.md](https://github.com/yuokamoto/PyBulletFleet/blob/main/docs/design/observability/spec.md)
+for the design.
 
 - **Structured logging (JSON)** — Replace prefix-string `NamedLazyLogger` with `extra={...}` dict fields (`agent_id`, `object_id`, `sim_time`, `step`). Enables Loki/Grafana label queries.
 - **`sim_time` injection filter** — `logging.Filter` registered by `MultiRobotSimulationCore` auto-attaches `sim_time` and `step` to every record. Removes per-call boilerplate on hot paths.
 - **Prometheus / OTLP metrics** — Promote `DataMonitor` internals (`pbf_step_duration_seconds`, `pbf_active_agents`, `pbf_actions_total{type,status}`, `pbf_collision_pairs`) to scrapable metrics. Opt-in to keep default cost zero.
-- **OpenTelemetry trace exporter** — EventBus subscriber that converts `action.start` / `action.complete` event pairs into spans. Sampling allowed. `causation_id` aligned with OTel `span_id` so Tempo "Trace to Logs" jumps to the matching JSONL event in Loki.
+- **OpenTelemetry trace exporter** — EventBus subscriber that converts action
+  lifecycle events into spans.  Sampling is allowed; trace and operation IDs
+  are copied into structured event records so Tempo "Trace to Logs" can locate
+  the corresponding JSONL record in Loki.
+- **End-to-end robot-operation tracing** — Make a single fleet operation
+  debuggable across RMF task ingress, fleet/ROS command handling, the target
+  agent action, and workcell/plugin completion.  Propagate a trace context and
+  stable operation ID at each boundary; attach `fleet_id`, `robot_id`,
+  `task_id`, and request/command IDs to spans and structured logs.  The same
+  attribute vocabulary must work for a simulator-only run, ROS 2 deployment,
+  and a future Robot Proxy, so traces can be compared with real-robot
+  operations.  This is action/operation-level tracing, not a span per
+  simulation step.
 - **Hot-path safety** — All exporters use batch / async processors. Per-step spans are forbidden; Action-level granularity only. `LazyLogger.isEnabledFor()` semantics preserved.
 
 ## Long-Term: Backend Abstraction & Beyond PyBullet
 
-Current architecture is tightly coupled to PyBullet (`body_id`, per-entity FFI calls). At 1000 agents, fixed-window profiling shows moving-agent update as the largest component (~46% of a ~9.6 ms step), with AABB/spatial-grid refresh and collision checking together contributing a comparable share (~44%). The following items explore decoupling from PyBullet to unlock 10–100× performance gains while keeping the Python user API unchanged.
+Current architecture is tightly coupled to PyBullet (`body_id`, per-entity FFI
+calls).  The following exploratory items investigate a backend boundary while
+preserving the Python user API.  They require workload-specific benchmarks and
+are not performance commitments.
 
 ### Short / Mid-Term Performance TODOs
 
@@ -430,7 +399,10 @@ Current architecture is tightly coupled to PyBullet (`body_id`, per-entity FFI c
 ### Phase 1: SimBackend ABC + Numpy Pure Kinematic Backend
 
 - **SimBackend ABC** — Abstract interface (`set_positions_batch`, `detect_collisions`, `load_model`, `step_physics`) that `Agent` and `SimObject` program against instead of raw `pybullet` calls
-- **NumpyBackend (default)** — Contiguous numpy arrays for positions/orientations, `scipy.spatial.cKDTree` for collision. No physics engine dependency. Expected: 1000 agents in ~2–5 ms (RTF 20–50×), 5000+ agents at RTF > 1.0
+- **NumpyBackend (candidate default)** — Contiguous numpy arrays for
+  positions/orientations and a spatial-index collision implementation.  It
+  would have no physics-engine dependency in kinematic-only mode; validate
+  correctness and throughput before choosing it as the default.
 - **PyBulletBackend (compat)** — Wraps existing PyBullet calls behind SimBackend ABC for backward compatibility and physics-mode users
 - **URDF parsing without PyBullet** — Use `yourdfpy` or similar to parse URDF into internal model data, removing the last hard dependency on PyBullet for kinematic-only mode
 - **Visualization decoupling** — Replace `p.GUI` with Rerun, Open3D, or RViz for rendering. Backend-agnostic scene display
@@ -439,7 +411,9 @@ Current architecture is tightly coupled to PyBullet (`body_id`, per-entity FFI c
 
 Only justified if Phase 1 numpy performance is insufficient (e.g., 5000+ agents at 240 Hz).
 
-- **Rust kinematic core** — Position update, yaw integration, AABB collision in Rust. Exposed to Python via PyO3. Expected: further 3–10× over numpy (RTF 100–300× for 1000 agents)
+- **Rust kinematic core** — Position update, yaw integration, and AABB
+  collision in Rust, exposed through PyO3.  Evaluate only against a measured
+  NumpyBackend baseline.
 - **Batch collision in Rust** — Sweep-and-prune or spatial hash for O(n log n) broad-phase, replacing Python KDTree
 - **Zero-copy interop** — Share numpy arrays directly with Rust via buffer protocol (no serialization)
 

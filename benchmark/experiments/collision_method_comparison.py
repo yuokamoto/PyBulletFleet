@@ -5,8 +5,8 @@ Collision detection method comparison experiment
 
 Overview:
     Compares multiple collision detection methods:
-    1. Spatial Hashing (Current): Spatial partitioning + AABB filtering + getContactPoints
-    2. Brute Force AABB: All-pairs brute force + AABB overlap + getContactPoints
+    1. Spatial Hashing (Current): Spatial partitioning + AABB filtering + configured narrow phase
+    2. Brute Force AABB: All-pairs brute force + AABB overlap + getClosestPoints
     3. PyBullet getClosestPoints: PyBullet's standard getClosestPoints API
     4. getContactPoints() [No Args]: Batch retrieval of all contacts with no arguments
     5. getContactPoints(A,B) [Pairwise]: Individual getContactPoints calls for all pairs
@@ -15,14 +15,13 @@ Characteristics of Each Method:
     Spatial Hashing (Current):
         - O(N) spatial complexity, checks only neighbors
         - Narrows candidates with AABB filtering
-        - Final collision determination via getContactPoints
+        - Uses the simulation's configured collision pipeline
         - Suited for large-scale simulations
 
     Brute Force AABB:
         - O(N^2) checks all pairs
         - Performs AABB overlap check + getClosestPoints confirmation
-        - Fast for small simulations (<100 objects)
-        - Simple implementation
+        - Serves as an all-pairs reference, not a production recommendation
 
     PyBullet getClosestPoints:
         - Closest point computation via PyBullet's C++ implementation
@@ -32,12 +31,11 @@ Characteristics of Each Method:
     getContactPoints() [No Args]:
         - Called without arguments, retrieves all contact points in batch
         - Obtains all collision information managed internally by PyBullet
-        - Only 1 API call needed (potentially most efficient)
+        - Only 1 query API call, but the benchmark includes a physics step
         - O(1) API calls
 
     getContactPoints(A,B) [Pairwise]:
         - Individual getContactPoints calls for all pairs
-        - Most reliable
         - O(N^2) API calls for all-pairs checking
 
 Usage:
@@ -57,7 +55,8 @@ Notes:
       (Spatial Hashing, PyBullet getClosestPoints) work for kinematic objects.
     - Use --spacing=1.0 for a no-collision baseline to measure pure overhead.
 
-Example Output:
+Historical output example (illustrative only; compare timings only when rows
+have equivalent collision semantics and collision counts):
     ===================================================================
     Results for 100 Agents
     ===================================================================
@@ -335,12 +334,12 @@ def print_comparison_table(results_list: List[Dict], num_agents: int):
             f"{accuracy:>5.1f}%"
         )
 
-    # Winner
+    # This is the lowest observed time for the selected workload. It is not a
+    # general recommendation because compared methods can have different
+    # collision semantics.
     fastest = min(results_list, key=lambda x: x["time_mean"])
-    print(f"\nWinner: {fastest['method']}")
-    if fastest != results_list[0]:
-        speedup = baseline_time / fastest["time_mean"]
-        print(f"  {speedup:.2f}x faster than Spatial Hashing")
+    print(f"\nLowest measured time: {fastest['method']}")
+    print("  Compare this row only with methods that detected equivalent collision sets.")
 
     # Warnings for unreliable results
     all_zero = all(r["collisions_mean"] == 0 for r in results_list)

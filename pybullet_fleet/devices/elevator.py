@@ -13,7 +13,9 @@ from dataclasses import dataclass, field, fields
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, cast
 
 from pybullet_fleet.action import JointAction
-from pybullet_fleet.agent import Agent, AgentSpawnParams
+from pybullet_fleet.agent import Agent, AgentSpawnParams, IKParams
+from pybullet_fleet.controller_params import ControllerParams
+from pybullet_fleet.controller import Controller
 from pybullet_fleet.logging_utils import get_lazy_logger
 from pybullet_fleet.types import ActionStatus
 
@@ -127,7 +129,7 @@ class Elevator(Agent):
         """Floor where the elevator currently is (or departed from while moving).
 
         While the elevator is in transit this returns the **departure** floor,
-        not the destination.  Use :pyattr:`target_floor` for the destination.
+        not the destination.  Use :attr:`target_floor` for the destination.
         """
         for name, pos in self._floors.items():
             if self.are_joints_at_targets({self._joint_name: pos}):
@@ -137,7 +139,7 @@ class Elevator(Agent):
 
     @property
     def target_floor(self) -> str:
-        """Destination floor (equals :pyattr:`current_floor` when idle)."""
+        """Destination floor (equals :attr:`current_floor` when idle)."""
         return self._target_floor_name
 
     @property

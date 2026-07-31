@@ -12,7 +12,8 @@ Overview:
 Usage:
     python collision_mode_comparison.py --agents=1000 --iterations=100
 
-Example Output:
+Historical output example (illustrative only; do not use these values as a
+reference or as a mode-selection recommendation):
     ===================================================================
     Collision Mode Comparison for 1000 Agents
     ===================================================================
@@ -224,12 +225,12 @@ def print_results(results_list, num_agents):
     if collision_3d_time > collision_2d_time:
         speedup = collision_3d_time / collision_2d_time
         reduction = (1 - collision_2d_time / collision_3d_time) * 100
-        print(f"\n2D mode speedup: {speedup:.2f}x ({reduction:.1f}% reduction vs 3D)")
+        print(f"\nObserved 2D/3D ratio for this workload: {speedup:.2f}x ({reduction:.1f}% reduction)")
 
-    print("\nRecommendation:")
-    print("  - For 2D navigation: Use 2D mode for faster collision checks")
-    print("  - For 3D navigation: Use 3D mode (required for accuracy)")
-    print("  - For visualization only: Disable collision checks")
+    print("\nInterpretation:")
+    print("  - Select NORMAL_2D only when ignoring Z-axis neighbours is correct.")
+    print("  - Select NORMAL_3D when the scene requires Z-axis neighbours.")
+    print("  - Select DISABLED only when collision detection is intentionally out of scope.")
     print("=" * 70)
 
 

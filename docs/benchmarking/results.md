@@ -20,7 +20,9 @@ see [Benchmark Suite](benchmark-suite) and [Profiling Guide](profiling-guide).
 ## Simulation Throughput
 
 **Command:** `make bench-release` (runs the core throughput sweep and the mobile control-path comparison)
-**Config:** `benchmark/configs/general.yaml` — `simple_cube` robots, `collision_check_frequency=null` (every step), 50% agents moving, batch controller, fleet command interface
+**Base config:** `benchmark/configs/general.yaml` — headless `simple_cube`
+robots, `collision_check_frequency=null` (every step), `batch_omni` fleet
+controller, and the fleet command interface
 **Last measured:** 2026-07-24
 
 | Agents | Step Time (ms) | RTF   | Spawn Time | Memory Delta |
@@ -34,12 +36,24 @@ see [Benchmark Suite](benchmark-suite) and [Profiling Guide](profiling-guide).
 **Source:** `benchmark/results/benchmark_sweep_10.0s.json`
 
 The 2026-07-24 sweep was collected on a WSL2 host using the lightweight
-`simple_cube` model as the large-scale baseline. The default
+`simple_cube` model as the large-scale baseline. The worker currently gives
+goals to half of the spawned agents; this workload is defined in
+`mobile_benchmark.py`. Although `general.yaml` contains
+`moving_agents_ratio` and `max_moving_agents`, the mobile worker does not yet
+read those two settings.
+
+The default
 `collision_check_frequency=null` setting means collision checks run every
 simulation step. More detailed robot models have higher spawn and update costs
 and should be benchmarked separately. Timed simulation runs keep
 `tracemalloc` disabled because Python allocation tracing materially distorts
 step-time and RTF measurements; memory deltas are RSS-based.
+
+**Metric scope:** RTF is the simulation-loop value
+`duration / simulation_wall_s`. `simulation_wall_s` measures only the
+`run_simulation()` call. It excludes Python process startup, PyBullet setup,
+spawning, command setup, warmup, cleanup, and JSON aggregation. Therefore it
+must not be read as the elapsed time of a complete benchmark worker.
 
 ## ROS 2 Bridge Scale Check
 
@@ -63,8 +77,18 @@ the bridge-specific methodology and recommendations.
 **Script:** `benchmark/run_benchmark.py --type mobile_control_path --controller per_agent batch --command-interface per_agent fleet --sweep 100 500 1000 --steps 600 --repetitions 3`
 **Source:** `benchmark/results/mobile_control_path_sweep_600steps.json`
 
-This benchmark isolates controller update and command-ingress cost in the
-Python simulation loop.
+This is a fixed-step micro-benchmark of the controller and command-ingress
+paths, not an end-to-end simulation benchmark. It uses differential
+controllers (`--mode diff`), `collision_freq=60`, five warmup steps, and 600
+measured `step_once()` calls. Setup time begins after spawning; step time
+includes the configured simulation-step work, including collision work.
+
+The command runs the Cartesian product of the two controller implementations
+and the two command interfaces. The table below intentionally shows the two
+matched, representative paths: a fully per-agent path and a batch-controller
+path reached through `FleetCommandDispatcher`. The JSON source also contains
+the cross combinations (`per-agent` + fleet and batch + per-agent), which are
+useful when isolating one axis at a time.
 
 | Agents | Controller | Command Interface | Setup Time | Step Time | P95 Step |
 |--------|------------|-------------------|------------|-----------|----------|
