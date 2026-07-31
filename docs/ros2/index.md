@@ -11,6 +11,7 @@ or fleet-management tools. Framework extension contracts belong in the
 ```{toctree}
 :maxdepth: 2
 
+quickstart
 overview
 configuration
 rmf
@@ -28,14 +29,21 @@ The ROS packages provide interfaces and nodes. Install the separately released
 `pybullet-fleet` Python package in the Python environment that launches ROS
 nodes; the package includes the simulation core and PyBullet dependency.
 
+## Start here
+
+Follow [Run Your First ROS 2 Demo](quickstart) for a Docker TurtleBot3 demo,
+a batched fleet command, and an RMF patrol.  It is the user-facing quickstart;
+the repository READMEs remain references for Docker operations and native
+overlay maintenance.
+
 ## Which control path should I use?
 
 | Need | Recommended path |
 | --- | --- |
 | Inspect or control individual robots with standard ROS interfaces | Per-robot API |
-| Send one command or receive one state snapshot for a large fleet | Fleet API |
+| Send one command or receive one state snapshot for a large fleet | Fleet ROS API (`fleet_api`) |
 | Run an RMF demo with the lowest ROS control-path overhead | `python_fleet` |
-| Keep RMF commands and state visible on ROS fleet endpoints | `fleet_ros` |
+| Make the RMF adapter itself use Fleet ROS API endpoints | `fleet_ros` |
 | Preserve an existing per-robot ROS integration | `per_robot_ros` |
 
 See [Bridge overview](overview) for endpoint semantics, [configuration](configuration)

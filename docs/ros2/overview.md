@@ -5,6 +5,50 @@ interfaces. It can export a conventional per-robot API, a compact fleet API, or
 both. Exported endpoints are independent from how an RMF adapter controls the
 simulation.
 
+## ROS communication patterns
+
+Choose the public ROS boundary by the client that owns the command loop.  The
+per-robot and fleet paths may be enabled together for debugging, but they are
+alternative ways for a client to communicate with the same simulation core.
+
+```{mermaid}
+flowchart LR
+  subgraph clients[External ROS processes]
+    app1["Robot App 1"]
+    appn["Robot App N"]
+    fleet[Fleet application]
+  end
+  subgraph bridge[bridge_node]
+    per_robot[Per-robot handlers]
+    fleet_api[Fleet ROS API]
+  end
+  core[PyBulletFleet simulation core]
+
+  app1 <-->|ROS 2 per-robot endpoints| per_robot
+  appn <-->|ROS 2 per-robot endpoints| per_robot
+  fleet <-->|ROS 2 fleet endpoints| fleet_api
+  per_robot <-->|In-process Python| core
+  fleet_api <-->|In-process Python| core
+
+  linkStyle 0,1,2 stroke:#1976d2,stroke-width:3px
+  linkStyle 3,4 stroke:#616161,stroke-width:2px
+```
+
+Blue links are ROS 2 communication; gray links are in-process Python calls.
+The arrows are bidirectional because commands flow toward the simulator while
+state, feedback, and diagnostics flow back to the client.
+`Robot App 1` and `Robot App N` represent the per-robot pattern: one ROS
+namespace and handler set is created for every selected robot.
+
+| Boundary | ROS graph shape | Typical client | Choose it when |
+| --- | --- | --- | --- |
+| Per-robot API | One namespace and handler set per selected robot | Nav2-like Robot App, RViz, manual debugging | The client expects standard robot topics, services, or actions |
+| Fleet ROS API (`fleet_api`) | One batched state stream and named command endpoints | Fleet manager or load-test client | The client commands or observes many robots together |
+
+`per_robot_api.include_robots` and `exclude_robots` limit which Agents receive
+per-robot endpoints.  The Fleet ROS API currently has simulation-wide Agent scope;
+it is not automatically restricted by a manager or the per-robot filters.
+
 ## Per-robot API
 
 Enable this API when existing tools expect one ROS namespace per robot. A robot
@@ -13,12 +57,28 @@ can accept velocity, goal-pose, path, trajectory, and joint commands. It also
 provides navigation, path-following, trajectory, attach, and generic-action
 services/actions as appropriate for the enabled interface groups.
 
-The full endpoint and message-type table is maintained in the
-[bridge README](https://github.com/yuokamoto/PyBulletFleet/blob/main/ros2_bridge/README.md#pybullet_fleet_ros--ros-2-bridge).
+| Direction | Topic | Type | Description |
+| --- | --- | --- | --- |
+| Pub | `/{robot}/odom` | `nav_msgs/Odometry` | Odometry and `odom → base_link` TF |
+| Pub | `/{robot}/joint_states` | `sensor_msgs/JointState` | Joint positions and velocities |
+| Pub | `/{robot}/plan` | `nav_msgs/Path` | Current planned path |
+| Pub | `/{robot}/current_goal` | `geometry_msgs/PoseStamped` | Active navigation goal |
+| Pub | `/{robot}/diagnostics` | `diagnostic_msgs/DiagnosticArray` | Robot diagnostics |
+| Sub | `/{robot}/cmd_vel` | `geometry_msgs/Twist` | Velocity command |
+| Sub | `/{robot}/goal_pose` | `geometry_msgs/PoseStamped` | Fire-and-forget navigation goal |
+| Sub | `/{robot}/path` | `nav_msgs/Path` | Path to follow |
+| Sub | `/{robot}/joint_trajectory` | `trajectory_msgs/JointTrajectory` | Joint trajectory command |
+| Sub | `/{robot}/joint_commands` | `std_msgs/Float64MultiArray` | Direct joint-position command |
 
-## Fleet API
+Per-robot action servers are `navigate_to_pose`, `follow_path`,
+`follow_joint_trajectory`, and `execute_action_blocking`; the per-robot
+services are `toggle_attach` and `attach_object`.  The non-blocking generic
+action topic is `/{robot}/execute_action`.
 
-Use the fleet API when an external client works on a whole fleet. It reduces
+## Fleet ROS API
+
+Use the Fleet ROS API (`fleet_api`) when an external client works on a whole
+fleet. It reduces
 ROS graph size by replacing repeated per-robot state and command endpoints with
 batched endpoints:
 
@@ -40,7 +100,7 @@ the command-ingress result, not as proof that every robot has completed motion.
 
 An `Agent` represents any active simulated actor, not only a robot owned by the
 ROS/RMF client. This includes mock people, robots owned by another system, and
-jointed devices. Today the fleet API is global: `FleetStateProvider` publishes
+jointed devices. Today the Fleet ROS API is global: `FleetStateProvider` publishes
 every `sim.agents` entry in `/fleet/states`, and `FleetCommandDispatcher` can
 resolve every uniquely named Agent. A separate `AgentManager` does not alter
 that scope.
@@ -49,7 +109,7 @@ For per-robot endpoints, use `per_robot_api.include_robots` or
 `exclude_robots` to avoid creating ROS interfaces for mock actors. If a fleet
 state must contain only a controlled fleet, disable the fleet state endpoint or
 provide that filtered state through an integration/plugin for now. Selective
-fleet-state publication and named fleet API scopes are planned; see the
+fleet-state publication and named Fleet ROS API scopes are planned; see the
 [roadmap](../roadmap).
 
 ## Simulation services
@@ -78,9 +138,11 @@ starting the simulation.
 
 Fleet endpoints are the preferred public interface for high robot counts. The
 latest 1000-robot Docker measurement reached 9.37x real time in fleet mode;
-per-robot and hybrid modes impose substantial DDS graph overhead. The benchmark
-also records that per-robot publication latency is not equivalent to end-to-end
-motion completion. Read the [benchmark results](../benchmarking/results) and
+per-robot and hybrid modes add substantial ROS interface and bridge overhead.
+The measurement does not isolate DDS graph cost from message handling,
+serialization, callbacks, TF, or endpoint handlers. The benchmark also records
+that per-robot publication latency is not equivalent to end-to-end motion
+completion. Read the [benchmark results](../benchmarking/results) and
 the [bridge performance notes](https://github.com/yuokamoto/PyBulletFleet/blob/main/ros2_bridge/PERFORMANCE.md)
 before setting production thresholds.
 

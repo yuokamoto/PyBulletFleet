@@ -3,9 +3,10 @@
 Docker environment for the [`ros2_bridge/`](../ros2_bridge/) package (ROS 2 Jazzy).
 The Dockerfile builds `pybullet_fleet`, `pybullet_fleet_ros`, and `pybullet_fleet_rmf`
 inside a single colcon workspace.
-Use [`ros2_bridge/README.md`](../ros2_bridge/README.md) as the architecture and
-interface entry point; this page intentionally focuses on Docker-specific setup
-and commands.
+Use the [ROS 2 ReadTheDocs section](https://pybulletfleet.readthedocs.io/en/latest/ros2/index.html)
+for user-facing tutorials, endpoint semantics, and RMF usage.  This page is the
+Docker-specific reference for image setup, GUI forwarding, operations, and
+automated checks.
 
 ## Build
 
