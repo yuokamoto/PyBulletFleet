@@ -12,4 +12,3 @@
 - [ ] No user-visible change; the reason is stated below.
 
 <!-- Required when the second box is checked. -->
-
