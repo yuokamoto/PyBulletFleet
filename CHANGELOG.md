@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## v0.7.1 (2026-08-01)
+
+### Fixed
+
+- Constrain NumPy and SciPy to compatible releases so a fresh installation
+  continues to work with the PyBullet binary extension.
+
 ## v0.7.0 (2026-08-01)
 
 ### Features
