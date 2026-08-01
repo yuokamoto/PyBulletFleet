@@ -7,27 +7,55 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-### Added
+## v0.7.0 (2026-08-01)
 
-- Added transport-neutral fleet API primitives in `pybullet_fleet.fleet_api`,
-  including fleet state snapshots, navigation and joint command dataclasses,
-  `FleetStateProvider`, and `FleetCommandDispatcher`.
+### Features
+
+- Add a transport-neutral fleet API with state snapshots, fleet navigation and
+  joint, stop, attach, and generic action commands, `FleetStateProvider`, and
+  `FleetCommandDispatcher`.
+- Add stable generated names for grid-spawned robots and objects, allowing
+  fleet commands and integrations to address them deterministically.
+- Add `MultiRobotSimulationCore.last_profiling`, a read-only snapshot of the
+  most recently measured simulation step for plugins and callbacks.
+- Add fleet-level ROS 2 state and command interfaces, including 2D/3D
+  navigation, joint control, stop, attach, and generic action requests.
+- Add RMF fleet client modes for per-robot ROS endpoints, fleet-level ROS
+  endpoints, and direct in-process Python dispatch. The direct mode dispatches
+  simulator changes on the simulation step thread.
+- Add configurable, Gazebo-faithful RMF workcell results and expanded support
+  for RMF doors and lifts.
 
 ### Changed
 
-- ROS 2 bridge `per_robot_api` group switches now control which per-robot
-  interface groups `RobotHandler` creates. Disabling all per-robot groups skips
-  per-robot handler creation; disabling individual groups suppresses only those
-  publishers, subscribers, services, or actions.
+- Make per-robot bridge interface groups independently configurable. Disabling
+  all groups avoids creating per-robot handlers; disabling one group suppresses
+  only its associated publishers, subscribers, services, or actions.
+- Configure vectorized batch robot controllers through a named manager's
+  `fleet_controller` mapping; entity-level `batch_controller` and
+  `fleet_controller` settings are no longer accepted.
+- Keep objects attached to a robot link synchronized with the current pose in
+  the same simulation step.
 
 ### Breaking Changes
 
 - ROS 2 bridge internals: `RobotHandler` is now a facade over dedicated
   interface groups. Private callback overrides such as `_cmd_vel_cb`,
   `_navigate_execute`, `_execute_action_execute`, and service callbacks are not
-  treated as extension points. Custom integrations should use the public ROS
-  topics/actions/services or compose/replace the relevant interface group
-  instead.
+  supported extension points. Custom integrations should use the public ROS
+  topics/actions/services or compose/replace the relevant interface group.
+
+### Documentation
+
+- Document the ROS 2 Jazzy APT release workflow, including a reproducible
+  GitHub-hosted APT supplement repository and the required RMF demo overlay.
+- Add native ROS 2, fleet API, bridge scale, and RMF dispatch guides and
+  runnable Docker validation commands.
+
+### Testing
+
+- Add headless RMF integration coverage and end-to-end patrol and delivery
+  dispatch checks, including door, lift, and workcell flows.
 
 ## v0.6.0 (2026-06-26)
 
