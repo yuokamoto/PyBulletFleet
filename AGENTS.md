@@ -14,6 +14,19 @@ files explicitly when the task matches their scope.
 - Release work: `.copilot/skills/releasing/SKILL.md`
 - Performance work: `.copilot/skills/pybullet-performance-workflow/SKILL.md`
 
+## Pull Request Changelog
+
+Every pull request MUST assess its user-visible impact and update the
+`[Unreleased]` section of `CHANGELOG.md` in the same pull request when it
+changes public APIs, behavior, configuration, packaging, supported
+environments, performance characteristics, or user documentation.
+
+Purely internal changes (for example, test-only, CI-only, or mechanical
+refactors) may omit a changelog entry only when the PR description explicitly
+states that there is no user-visible change. Do not create a version heading in
+a feature PR; the release workflow promotes the accumulated `[Unreleased]`
+entries after the release version is selected.
+
 ## Before Pushing
 
 Run the core CI subset before pushing any branch that changes Python source,

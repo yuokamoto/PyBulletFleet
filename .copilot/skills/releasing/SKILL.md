@@ -35,6 +35,29 @@ grep 'version' pyproject.toml  # Must match intended release version
 
 These require judgment — CI can't fully automate them.
 
+**2.0 Changelog completeness audit**
+
+Before generating the release draft, compare the complete release range with
+the accumulated `[Unreleased]` entries. Commit subjects are not a substitute
+for this audit: they often omit user-visible behavior or include internal
+noise.
+
+```bash
+git log --first-parent --oneline <previous-tag>..HEAD
+git diff --stat <previous-tag>..HEAD
+git diff <previous-tag>..HEAD -- pybullet_fleet ros2_bridge pyproject.toml
+```
+
+For each user-visible API, behavior, configuration, packaging, performance, or
+documentation change missing from `[Unreleased]`, add one concise entry before
+running `pre-release.sh`. Merge related commits into one user-facing item and
+omit test-only or refactor-only details.
+
+Every feature PR must make this easier: it MUST update `[Unreleased]` when it
+has user-visible impact. A PR without such impact must state that explicitly in
+its description. Feature PRs never add a version heading; version headings are
+created only during release preparation.
+
 **2a. Performance Benchmark**
 
 ```bash
@@ -243,6 +266,7 @@ Release checks:
 - [ ] API compatibility reviewed (no unintended breaking changes)
 - [ ] Sphinx docs build clean
 - [ ] README version references current
+- [ ] Changelog completeness audited against `<previous-tag>..HEAD`
 - [ ] CHANGELOG.md up to date
 
 Execute:
