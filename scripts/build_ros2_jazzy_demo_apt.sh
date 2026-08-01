@@ -25,18 +25,31 @@ Options:
 EOF
 }
 
+require_option_value() {
+  local option="$1"
+  local value="${2:-}"
+  if [[ -z "$value" || "$value" == --* ]]; then
+    echo "error: $option requires a value" >&2
+    usage >&2
+    exit 2
+  fi
+}
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --output)
-      output_dir="${2:-}"
+      require_option_value "$1" "${2:-}"
+      output_dir="$2"
       shift 2
       ;;
     --source-ref)
-      source_ref="${2:-}"
+      require_option_value "$1" "${2:-}"
+      source_ref="$2"
       shift 2
       ;;
     --image)
-      image="${2:-}"
+      require_option_value "$1" "${2:-}"
+      image="$2"
       shift 2
       ;;
     --include-rmf)
