@@ -97,7 +97,7 @@ trap cleanup EXIT
 git -C "$repo_root" worktree add --detach "$worktree" "$source_ref" >/dev/null
 source_commit="$(git -C "$worktree" rev-parse HEAD)"
 
-docker run --rm -i \
+docker run --rm -i --platform linux/amd64 \
   -v "$worktree:/workspace" \
   -v "$output_dir:/output" \
   -w /workspace \
@@ -110,7 +110,9 @@ set -eo pipefail
 
 apt-get update -qq
 apt-get install -y -qq --no-install-recommends \
-  debhelper dh-python dpkg-dev python3-all
+  debhelper dh-python dpkg-dev python3-all python3-bloom python3-rosdep
+
+test -e /etc/ros/rosdep/sources.list.d/20-default.list || rosdep init
 
 source /opt/ros/jazzy/setup.bash
 
