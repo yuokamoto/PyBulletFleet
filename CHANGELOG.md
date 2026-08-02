@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## v0.7.3 (2026-08-02)
+
 ### Documentation
 
 - Document the optional `python3-tk` dependency for the PyBulletFleet
@@ -15,9 +17,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
-- Avoid repeated `InvalidHandle` and shutdown errors during ROS 2 bridge
-  Ctrl-C handling by stopping simulation publish callbacks before rclpy
-  destroys publishers and making context shutdown idempotent.
+- Avoid repeated `InvalidHandle` and shutdown errors during ROS 2 bridge Ctrl-C
+  handling by stopping simulation publish callbacks before rclpy destroys
+  publishers and making context shutdown idempotent.
 
 ### Performance
 
