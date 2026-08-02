@@ -2,7 +2,7 @@
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
   <name>pybullet_fleet_rmf</name>
-  <version>0.1.1</version>
+  <version>0.1.2</version>
   <description>Open-RMF integration for PyBulletFleet — fleet adapter, door/lift/workcell handlers</description>
   <maintainer email="yuokamoto1988@gmail.com">Yu Okamoto</maintainer>
   <license>Apache-2.0</license>

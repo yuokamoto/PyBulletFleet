@@ -54,6 +54,12 @@ PyBulletFleet sits in a different part of the design space: it is a **kinematics
 pip install pybullet-fleet
 ```
 
+For ROS 2 Jazzy, do not install the core only inside a virtual environment:
+`ros2 run` uses the system Python interpreter. Follow the [ROS 2 bridge
+quickstart](https://pybulletfleet.readthedocs.io/en/latest/ros2/quickstart.html)
+instead; it installs PyBulletFleet once into the system Python user site before
+adding the ROS packages.
+
 ### Or install from source (for development)
 
 ```bash
@@ -62,6 +68,18 @@ cd PyBulletFleet
 sudo apt install python3-tk  # required for the optional DataMonitor tkinter GUI
 pip install -e ".[dev]"
 ```
+
+### ROS 2 Jazzy APT preview
+
+For Ubuntu 24.04 or WSL with ROS 2 Jazzy, the bridge packages are available
+from the GitHub-hosted APT preview. The simulation core remains a separate
+Python package. Follow the [APT preview installation guide](https://yuokamoto.github.io/pybullet-fleet-apt/README.md)
+for the repository setup, system-Python installation, bundled example, and
+bridge smoke test. The preview is intended for short-lived demo environments
+until the official ROS package release is available.
+See the [ROS 2 bridge quickstart](https://pybulletfleet.readthedocs.io/en/latest/ros2/quickstart.html)
+and [RMF quickstart](https://pybulletfleet.readthedocs.io/en/latest/ros2/rmf-quickstart.html)
+for the complete native sequence.
 
 ### Run a demo
 

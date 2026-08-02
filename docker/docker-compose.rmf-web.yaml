@@ -1,0 +1,24 @@
+# RMF Web companion stack for a native PyBulletFleet + RMF demo.
+#
+# This file deliberately uses only upstream Open-RMF images. It does not build
+# or distribute a PyBulletFleet image, rmf_demos, or Gazebo Fuel assets.
+#
+# Usage:
+#   ROS_DOMAIN_ID=42 docker compose -f docker-compose.rmf-web.yaml up -d
+#   ROS_DOMAIN_ID=42 docker compose -f docker-compose.rmf-web.yaml down
+
+services:
+  rmf-web-api:
+    image: ghcr.io/open-rmf/rmf-web/api-server:jazzy-nightly
+    network_mode: host
+    environment:
+      ROS_DOMAIN_ID: ${ROS_DOMAIN_ID:-42}
+      RMW_IMPLEMENTATION: rmw_cyclonedds_cpp
+
+  rmf-web-dashboard:
+    # jazzy-nightly currently has a frontend regression; latest is the last
+    # known tag that renders the demonstration dashboard.
+    image: ghcr.io/open-rmf/rmf-web/demo-dashboard:latest
+    network_mode: host
+    depends_on:
+      - rmf-web-api

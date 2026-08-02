@@ -22,6 +22,13 @@ All dependencies are installed automatically during the package install step bel
 pip install pybullet-fleet
 ```
 
+:::{note}
+For ROS 2 Jazzy, do not also install PyBulletFleet into a virtual environment.
+ROS console scripts use the system Python interpreter, so follow the [ROS 2
+bridge quickstart](../ros2/quickstart) instead. It installs the core once into
+the system Python user site before adding the ROS packages.
+:::
+
 ### From source (for development)
 
 Clone the repository and install in editable mode with development dependencies:

@@ -10,8 +10,16 @@ automated checks.
 
 ## Build
 
+Docker Compose bind-mounts this checkout, so start from a cloned repository:
+
 ```bash
-cd docker
+git clone https://github.com/yuokamoto/PyBulletFleet.git
+cd PyBulletFleet/docker
+```
+
+Build the bridge image before running the `docker compose run` examples:
+
+```bash
 docker compose build bridge
 ```
 
@@ -52,24 +60,27 @@ Stop with **Ctrl+C** in Terminal 1.
 
 ### Fleet API Navigation Demo — Batched Goals Before RMF
 
-This is the bridge-level fleet API path without RMF. It launches a generated
-fleet config with only fleet-level ROS interfaces enabled, then sends one
-batched navigation request to `/fleet/navigate`.
+This is the bridge-level fleet API path without RMF. It uses the same
+`fleet_demo.launch.py` installed for the native Jazzy APT preview, with Docker
+providing the image and display forwarding. The launch enables only fleet-level
+ROS interfaces, then accepts one batched navigation request at `/fleet/navigate`.
 
-**Terminal 1** — generate and launch a fleet API config:
+**Terminal 1** — launch the fleet API demo:
 
 ```bash
 cd docker
 xhost +local:docker
 
 docker compose run --rm --name pbf_bridge \
-  -v "$(pwd):/docker:ro" \
-  bridge bash /docker/run_fleet_api_demo.sh \
-    --robots 100 --robot-model simple_cube --gui true --target-rtf 1.0
+  bridge ros2 launch pybullet_fleet_ros fleet_demo.launch.py \
+    robots:=100 robot_model:=simple_cube gui:=true target_rtf:=1.0
 ```
 
-Change `--robot-model simple_cube` to `mobile_robot`, `tb3_burger`, or
+Change `robot_model:=simple_cube` to `mobile_robot`, `tb3_burger`, or
 `tb3_waffle` to try the same fleet API path with another robot model.
+For a lower-overhead RViz view instead of the PyBullet GUI, use
+`gui:=false rviz:=true`; the launch renders lightweight fleet markers from the
+single `/fleet/states` stream.
 
 **Terminal 2** — inspect fleet state and send batched goals through the ROS API.
 The helper script is a thin ROS client: it reads `/fleet/states`, selects the
@@ -82,22 +93,34 @@ docker exec pbf_bridge bash -c 'source /rmf_demos_ws/install/setup.bash && \
 
 # Fleet navigation service: one request contains multiple RobotGoal2D commands
 docker exec pbf_bridge bash -c 'source /rmf_demos_ws/install/setup.bash && \
-  python3 /opt/pybullet_fleet/scripts/send_fleet_nav_goals.py \
-    --robots 50 --dx 0.5 --transport service'
+  python3 -m pybullet_fleet_ros.fleet_nav_demo \
+    --robots 10 --dx 0.5 --dy 0.5 --transport service'
 ```
 
 Use `--transport topic` to publish the same command to the `/fleet/navigate`
 topic instead of calling the service.
 
-Equivalent raw ROS command for reference:
+### Presentation: one direct 10-robot service call
+
+For a live explanation of the Fleet ROS API, the following command shows the
+full request without a helper script. It targets the first ten robots from the
+default `simple_cube` grid, shifting each by `(+0.5, +0.5)` while retaining the
+2 m spacing. Start Terminal 1 with `target_rtf:=1.0` so the movement is visible.
 
 ```bash
 docker exec pbf_bridge bash -c 'source /rmf_demos_ws/install/setup.bash && \
   ros2 service call /fleet/navigate pybullet_fleet_msgs/srv/FleetNavigate \
-    "{command_id: demo_batch_nav, source: docker_readme, goals_2d: [
-      {name: robot_0, position: [2.0, 0.0], yaw: 0.0, z: 0.05},
-      {name: robot_1, position: [2.0, 2.0], yaw: 0.0, z: 0.05},
-      {name: robot_2, position: [2.0, 4.0], yaw: 0.0, z: 0.05}
+    "{command_id: presentation_grid_shift, source: docker_readme, goals_2d: [
+      {name: robot_0, position: [0.5, 0.5], yaw: 0.0, z: 0.05},
+      {name: robot_1, position: [2.5, 0.5], yaw: 0.0, z: 0.05},
+      {name: robot_2, position: [4.5, 0.5], yaw: 0.0, z: 0.05},
+      {name: robot_3, position: [6.5, 0.5], yaw: 0.0, z: 0.05},
+      {name: robot_4, position: [0.5, 2.5], yaw: 0.0, z: 0.05},
+      {name: robot_5, position: [2.5, 2.5], yaw: 0.0, z: 0.05},
+      {name: robot_6, position: [4.5, 2.5], yaw: 0.0, z: 0.05},
+      {name: robot_7, position: [6.5, 2.5], yaw: 0.0, z: 0.05},
+      {name: robot_8, position: [0.5, 4.5], yaw: 0.0, z: 0.05},
+      {name: robot_9, position: [2.5, 4.5], yaw: 0.0, z: 0.05}
     ], goals_3d: []}"'
 ```
 

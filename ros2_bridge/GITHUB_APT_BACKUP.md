@@ -45,12 +45,12 @@ From a checkout containing the immutable ROS source tag:
 scripts/build_ros2_jazzy_demo_apt.sh --output /tmp/pybulletfleet-apt-repo
 ```
 
-The script creates a detached clean worktree from `v0.1.1-ros2`, builds in the
-existing `pybullet-fleet-rmf:jazzy` image, and writes `.deb` files, `Packages`,
-`Packages.gz`, `SHA256SUMS`, and `BUILD_INFO.txt` to the specified empty output
-directory. It does not modify the active worktree or commit Bloom-generated
-`debian/` files. Each generated `.deb` includes the Apache-2.0 license text in
-its Debian copyright documentation.
+The script creates a detached clean worktree from its selected immutable ROS
+source tag, builds in the existing `pybullet-fleet-rmf:jazzy` image, and writes
+`.deb` files, `Packages`, `Packages.gz`, `SHA256SUMS`, and `BUILD_INFO.txt` to
+the specified empty output directory. It does not modify the active worktree or
+commit Bloom-generated `debian/` files. Each generated `.deb` includes the
+Apache-2.0 license text in its Debian copyright documentation.
 
 `--include-rmf` additionally builds `ros-jazzy-pybullet-fleet-rmf`. Publish it
 only with source-overlay or Docker instructions that supply a compatible
@@ -72,7 +72,7 @@ echo 'deb [trusted=yes] https://OWNER.github.io/REPOSITORY/ ./' \
 sudo apt update
 sudo apt install -y ros-jazzy-pybullet-fleet-ros
 
-python3 -m pip install --user --break-system-packages pybullet-fleet==0.7.0
+python3 -m pip install --user --break-system-packages pybullet-fleet==0.7.1
 source /opt/ros/jazzy/setup.bash
 ros2 run pybullet_fleet_ros bridge_node --ros-args \
   -p config_yaml:="$(ros2 pkg prefix pybullet_fleet_ros)/share/pybullet_fleet_ros/config/bridge_test.yaml"

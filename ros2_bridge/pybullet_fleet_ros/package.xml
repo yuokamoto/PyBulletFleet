@@ -2,7 +2,7 @@
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
   <name>pybullet_fleet_ros</name>
-  <version>0.1.1</version>
+  <version>0.1.2</version>
   <description>ROS 2 bridge for PyBulletFleet multi-robot simulation</description>
   <maintainer email="yuokamoto1988@gmail.com">Yu Okamoto</maintainer>
   <license>Apache-2.0</license>
@@ -17,6 +17,7 @@
   <depend>tf2_ros</depend>
   <depend>tf2_geometry_msgs</depend>
   <depend>trajectory_msgs</depend>
+  <depend>visualization_msgs</depend>
   <depend>diagnostic_msgs</depend>
   <depend>rosgraph_msgs</depend>
   <depend>simulation_interfaces</depend>

@@ -1,4 +1,4 @@
-"""Launch bridge with an arm robot and RViz for arm control demo.
+"""Launch bridge with a Franka Panda and RViz for arm control demo.
 
 Usage::
 
@@ -8,7 +8,10 @@ Usage::
 """
 
 import os
+from pathlib import Path
+import re
 
+import pybullet_data
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchContext, LaunchDescription
 from launch.actions import DeclareLaunchArgument, OpaqueFunction
@@ -29,11 +32,23 @@ def _launch_setup(context: LaunchContext):
     if not os.path.exists(config_yaml):
         config_yaml = os.path.join(src_config, "bridge_arm.yaml")
 
-    # Read URDF for robot_state_publisher (RViz model visualisation)
-    urdf_path = "/opt/pybullet_fleet/robots/arm_robot.urdf"
+    # PyBullet ships Panda, but its generated URDF uses package://meshes.
+    # Expand that package-relative URI to the installed pybullet_data path for RViz.
+    urdf_path = Path(pybullet_data.getDataPath()) / "franka_panda" / "panda.urdf"
     try:
-        with open(urdf_path, "r") as f:
-            robot_description = f.read()
+        mesh_dir = urdf_path.parent / "meshes"
+        robot_description = urdf_path.read_text(encoding="utf-8").replace("package://meshes", f"file://{mesh_dir}")
+        # RViz does not need collision geometry. Removing it also avoids a
+        # PyBullet collision MTL that contains a development-machine texture path.
+        robot_description = re.sub(r"\s*<collision>.*?</collision>", "", robot_description, flags=re.DOTALL)
+        # Panda's base and wrist have no separate visual mesh and point to the
+        # same collision assets, so omit only those two RViz visual elements.
+        robot_description = re.sub(
+            r"\s*<visual>.*?meshes/collision/.*?</visual>",
+            "",
+            robot_description,
+            flags=re.DOTALL,
+        )
     except FileNotFoundError:
         robot_description = ""
 
@@ -76,19 +91,18 @@ def _launch_setup(context: LaunchContext):
                 package="robot_state_publisher",
                 executable="robot_state_publisher",
                 name="robot_state_publisher",
-                namespace="arm0",
+                namespace="panda0",
                 parameters=[
                     {
                         "robot_description": robot_description,
-                        "frame_prefix": "arm0/",
+                        "frame_prefix": "panda0/",
                     }
                 ],
-                remappings=[("joint_states", "/arm0/joint_states")],
+                remappings=[("joint_states", "/panda0/joint_states")],
                 output="screen",
                 condition=IfCondition(LaunchConfiguration("rviz")),
             )
         )
-
     return nodes
 
 

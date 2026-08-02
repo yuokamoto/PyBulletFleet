@@ -100,25 +100,10 @@ kept in the [bridge README](https://github.com/yuokamoto/PyBulletFleet/blob/main
 
 ## Run and validate
 
-Use Docker for the fully provisioned RMF demo environment, including the
-`rmf_demos` assets. Native and apt installs require the documented Jazzy setup;
-RMF demo launch files additionally require an `rmf_demos` source overlay.
-
-Start an office demo with the default `python_fleet` client mode:
-
-```bash
-cd docker
-docker compose run --rm bridge \
-  ros2 launch pybullet_fleet_rmf office_pybullet.launch.py
-```
-
-In another terminal, dispatch a patrol:
-
-```bash
-cd docker
-docker compose run --rm bridge \
-  ros2 run rmf_demos_tasks dispatch_patrol -p pantry lounge -n 3
-```
+For a native Jazzy APT installation, follow [Run Your First RMF
+Demo](rmf-quickstart). It installs the adapter package, creates the required
+`rmf_demos` source overlay, and starts an office patrol. The same page also
+provides the Docker alternative, which includes a compatible RMF demo overlay.
 
 Use `client_mode:=fleet_ros` only when the RMF adapter itself must communicate
 through the Fleet ROS API.  Keep `client_mode:=python_fleet` for the in-process
@@ -127,3 +112,7 @@ debugging.  Use `client_mode:=per_robot_ros` for per-robot compatibility.  The
 Docker guide documents the runnable demo, dispatch flow check, RMF stack check,
 and client-mode matrix; these are the recommended validation path after
 changing a bridge configuration or selecting a new client mode.
+
+Once the first office patrol is working, use the [RMF demo catalog](rmf-demos)
+to select a scenario for single-fleet, multi-fleet, door/lift, or cleaning
+behavior.

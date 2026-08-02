@@ -6,7 +6,7 @@ package_name = "pybullet_fleet_ros"
 
 setup(
     name=package_name,
-    version="0.1.1",
+    version="0.1.2",
     packages=[package_name],
     data_files=[
         ("share/ament_index/resource_index/packages", ["resource/" + package_name]),
@@ -24,6 +24,8 @@ setup(
     entry_points={
         "console_scripts": [
             "bridge_node = pybullet_fleet_ros.bridge_node:main",
+            "fleet_nav_demo = pybullet_fleet_ros.fleet_nav_demo:main",
+            "fleet_rviz = pybullet_fleet_ros.fleet_rviz:main",
         ],
     },
 )

@@ -6,6 +6,7 @@ import pybullet_data
 import pytest
 
 from pybullet_fleet import MultiRobotSimulationCore, SimulationParams
+import pybullet_fleet.sdf_loader as sdf_loader
 from pybullet_fleet.sdf_loader import (
     _extract_sdf_material_color,
     _parse_pose,
@@ -924,6 +925,37 @@ class TestModelYawOffset:
 
         # No rotation applied
         assert rpy[2] == pytest.approx(0.0, abs=0.01)
+
+
+class TestFuelIncludeResolution:
+    """Tests for Fuel-backed ``model://`` includes used by RMF maps."""
+
+    def test_fuel_path_parts_decode_model_name(self):
+        uri = "https://fuel.gazebosim.org/1.0/OpenRobotics/models/Cafe%20Table/1/files/model.sdf"
+
+        assert sdf_loader._fuel_path_parts(uri) == [
+            "OpenRobotics",
+            "models",
+            "Cafe Table",
+            "1",
+            "files",
+            "model.sdf",
+        ]
+
+    def test_missing_model_uri_falls_back_to_quoted_fuel_uri(self, monkeypatch):
+        requested_uris = []
+
+        def resolve_fuel(uri):
+            requested_uris.append(uri)
+            return "/tmp/fuel/Cafe Table/1"
+
+        monkeypatch.delenv("GZ_SIM_RESOURCE_PATH", raising=False)
+        monkeypatch.setattr(sdf_loader, "_resolve_fuel_uri", resolve_fuel)
+
+        resolved = sdf_loader._resolve_include_uri("model://Cafe Table", [])
+
+        assert resolved == "/tmp/fuel/Cafe Table/1"
+        assert requested_uris == ["https://fuel.gazebosim.org/1.0/OpenRobotics/models/Cafe%20Table"]
 
 
 class TestStaticAutoDetection:
