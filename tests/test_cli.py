@@ -141,6 +141,15 @@ def test_config_lists_yaml_templates(monkeypatch, tmp_path, capsys):
     assert "ignore.txt" not in output
 
 
+def test_config_path_prints_bundled_directory(monkeypatch, tmp_path, capsys):
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+    monkeypatch.setattr(cli, "_config_dir", lambda: str(config_dir))
+
+    assert cli.main(["config", "--path"]) == 0
+    assert capsys.readouterr().out.strip() == str(config_dir)
+
+
 def test_config_copy_copies_yaml_templates(monkeypatch, tmp_path):
     config_dir = tmp_path / "config"
     config_dir.mkdir()

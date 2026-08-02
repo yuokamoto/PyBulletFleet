@@ -84,7 +84,7 @@ if not entities:
 if args.robot:
     robot_path = resolve_model(args.robot)
     for entity in entities:
-        if entity.get("grid"):
+        if "grid" in entity:
             entity["urdf_path"] = robot_path
 
 fleet_controller = config["managers"][0].setdefault("fleet_controller", {})
