@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## v0.7.2 (2026-08-02)
+
 ### Features
 
 - Add an installed ROS 2 fleet demo launch for 100-robot, batched Fleet API
