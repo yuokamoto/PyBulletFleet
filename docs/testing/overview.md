@@ -96,9 +96,15 @@ source .ros2_native_env
 make rmf-matrix
 ```
 
-The CI bridge workflow also runs ROS package tests with colcon, the bridge API
-smoke check, and RMF stack/dispatch scenarios. See the [ROS 2 and Open-RMF
-documentation](../ros2/index.md) for setup and integration-specific commands.
+The CI bridge workflow also builds a flat Jazzy APT repository from the current
+commit. A clean RMF runtime container installs the bridge and RMF packages from
+that repository with `apt`, installs the core from the matching wheel, and runs
+the bridge API smoke check plus Office RMF readiness. This catches package
+layout, Debian dependency, system-Python, and installed-launch regressions that
+the source-overlay checks cannot detect. The workflow also runs ROS package
+tests with colcon and source-image RMF stack/dispatch scenarios. See the [ROS 2
+and Open-RMF documentation](../ros2/index.md) for setup and
+integration-specific commands.
 
 ## Manual GUI Checks
 

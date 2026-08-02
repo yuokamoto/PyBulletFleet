@@ -1,0 +1,25 @@
+# Clean Jazzy runtime used to verify the locally built APT repository.
+#
+# It deliberately contains no PyBulletFleet source or built ROS overlay. The
+# test runner installs the bridge and RMF packages from a mounted flat APT
+# repository and the Python core from a mounted wheel.
+FROM ghcr.io/open-rmf/rmf/rmf_demos:jazzy-rmf-latest
+
+ENV DEBIAN_FRONTEND=noninteractive
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends python3-pip python3-tk \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY docker/bridge_api_check.py /opt/pbf-apt-test/bridge_api_check.py
+COPY docker/bridge_test_lib.sh /opt/pbf-apt-test/bridge_test_lib.sh
+COPY docker/ros_check_utils.py /opt/pbf-apt-test/ros_check_utils.py
+COPY docker/rmf_dispatch_flow_check.py /opt/pbf-apt-test/rmf_dispatch_flow_check.py
+COPY docker/test_bridge_api.sh /opt/pbf-apt-test/test_bridge_api.sh
+COPY docker/test_rmf_dispatch.sh /opt/pbf-apt-test/test_rmf_dispatch.sh
+COPY docker/test_apt_runtime.sh /usr/local/bin/test_apt_runtime.sh
+
+RUN chmod +x /opt/pbf-apt-test/*.sh /usr/local/bin/test_apt_runtime.sh
+
+ENTRYPOINT ["/usr/local/bin/test_apt_runtime.sh"]

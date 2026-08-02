@@ -15,7 +15,11 @@ fi
 source "$LIB"
 
 source_ros_env
-bridge_repo_root
+# Source-tree Docker checks use repository-relative assets. The APT runtime
+# gate deliberately has no checkout, so it must use installed package paths.
+if [ "${PBF_APT_RUNTIME:-false}" != "true" ]; then
+    bridge_repo_root
+fi
 
 # Start bridge in background.
 # The bridge is config_yaml-driven (num_robots/robot_urdf were removed); spawn

@@ -30,8 +30,9 @@ Three packages provide a clean separation between general ROS 2 connectivity, Op
 
 The user-facing setup and runnable demos are maintained in the
 [ROS 2 documentation](https://pybulletfleet.readthedocs.io/en/latest/ros2/index.html).
-Start with [Run Your First ROS 2 Demo](https://pybulletfleet.readthedocs.io/en/latest/ros2/quickstart.html)
-for Docker, fleet API, and RMF commands.  This README keeps the package
+Start with [Run Your First ROS 2 Bridge](https://pybulletfleet.readthedocs.io/en/latest/ros2/quickstart.html)
+for the native Jazzy APT installation, TurtleBot3, and Fleet API demos, then
+continue to the RMF quickstart when needed. This README keeps the package
 boundary, a minimal installed-package smoke check, architecture reference, and
 bridge/RMF development notes.
 
@@ -201,6 +202,7 @@ generic action payloads stay aligned with their fleet-level equivalents.
 | RMF dispatch flow | `docker/test_rmf_dispatch.sh` | RMF dispatcher -> adapter -> bridge/plugin -> simulator task flow |
 | RMF client-mode matrix | `docker/test_rmf_client_modes.sh` | `per_robot_ros`, `fleet_ros`, and `python_fleet` launch coverage |
 | Fleet scale check | `docker/test_fleet_scale.sh` | Endpoint scale and fleet/per-robot command diagnostics |
+| Jazzy APT runtime gate | `docker/test_apt_runtime.sh` | Clean runtime installs locally built `.deb` packages through APT, then runs bridge and RMF readiness checks |
 
 ### Bridge Test TODO
 
@@ -229,11 +231,8 @@ generic action payloads stay aligned with their fleet-level equivalents.
 
 ### Documentation And Release TODO
 
-- Add a ReadTheDocs ROS 2 bridge section that mirrors this structure:
-  overview/interfaces here, Docker commands under a Docker page, and native
-  setup under a native ROS 2 page.
 - Keep Docker and native docs from duplicating the same conceptual text. The
-  environment pages should link back to this README for interface modes,
+  user-facing pages should link back to this README for interface modes,
   deployment patterns, and the test matrix.
 - Before apt packaging or release, validate an external install that does not
   rely on a source checkout:
