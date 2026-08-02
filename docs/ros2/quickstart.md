@@ -22,9 +22,15 @@ environment will not be visible to `ros2 run`.
 ```bash
 sudo apt update
 sudo apt install -y curl python3-pip python3-dev build-essential
-python3 -m pip install --user --break-system-packages pybullet-fleet==0.7.2
+python3 -m pip install --user --break-system-packages pybullet-fleet==0.7.3
 export PATH="$HOME/.local/bin:$PATH"
 pybullet-fleet examples --list
+```
+
+For the optional DataMonitor tkinter window, install its system dependency:
+
+```bash
+sudo apt install -y python3-tk
 ```
 
 With WSLg or another desktop display, run the bundled grid example:

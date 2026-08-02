@@ -109,14 +109,14 @@ roadmap
 
 | Agents | Real-Time Factor | Step Time |
 |--------|-----------------|-----------|
-| 100    | 143.5× | 0.7 ms  |
-| 500    | 23.5× | 4.2 ms |
-| 1000   | 10.1× | 9.9 ms |
-| 2000   | 4.3× | 23.3 ms |
+| 100    | 140.4× | 0.7 ms  |
+| 500    | 23.8× | 4.2 ms |
+| 1000   | 9.5× | 10.5 ms |
+| 2000   | 4.1× | 24.5 ms |
 
-Kinematics mode (physics OFF), headless, `simple_cube` robots, batch controller + fleet command interface. Measured on 2026-07-24. See {doc}`benchmarking/benchmark-suite` for full data, component breakdown, and methodology.
+Kinematics mode (physics OFF), headless, `simple_cube` robots, batch controller + fleet command interface. Measured on 2026-08-02. See {doc}`benchmarking/benchmark-suite` for full data, component breakdown, and methodology.
 
-ROS 2 bridge scale checks on 2026-07-25 measured 1000-robot maximum RTF of 9.37× in fleet mode, 0.64× in per-robot mode, and 0.30× in hybrid mode. Per-robot topic publication completed in 0.217 s, but motion verification reached 0/1000 within 60 s; see {doc}`benchmarking/results` for the bridge scale details.
+ROS 2 bridge scale checks on 2026-08-02 measured 1000-robot maximum RTF of 8.46× in fleet mode, 0.64× in per-robot mode, and 0.30× in hybrid mode. Per-robot topic publication completed in 0.217 s, but motion verification reached 0/1000 within 60 s; see {doc}`benchmarking/results` for the bridge scale details.
 
 See the {doc}`roadmap` for upcoming features and integrations.
 

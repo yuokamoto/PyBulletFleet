@@ -198,6 +198,11 @@ class BridgeNode(Node):
         # Robot handlers (object_id → list of RobotHandlerBase instances)
         self._handler_lock = threading.RLock()
         self._handler_callback_lock = threading.RLock()
+        # Serialize ROS publisher destruction with callbacks from the simulation
+        # thread. Without this, Ctrl-C can destroy rclpy handles while POST_STEP
+        # is publishing /clock or robot state.
+        self._shutdown_lock = threading.RLock()
+        self._shutdown_requested = False
         self._handlers: Dict[int, List["RobotHandlerBase"]] = {}
         self._pre_step_handlers: List["RobotHandlerBase"] = []
         self._post_step_handlers: List["RobotHandlerBase"] = []
@@ -431,15 +436,29 @@ class BridgeNode(Node):
 
     def _on_pre_step(self, dt, sim_time, **kwargs) -> None:
         """PRE_STEP — delegate to handler.pre_step()."""
-        stamp = sim_time_to_ros_time(sim_time)
-        with self._handler_lock:
-            handlers = list(self._pre_step_handlers)
-        with self._handler_callback_lock:
-            for h in handlers:
-                h.pre_step(dt=dt, stamp=stamp)
+        if getattr(self, "_shutdown_requested", False):
+            return
+        with self._shutdown_lock:
+            if self._shutdown_requested:
+                return
+            stamp = sim_time_to_ros_time(sim_time)
+            with self._handler_lock:
+                handlers = list(self._pre_step_handlers)
+            with self._handler_callback_lock:
+                for h in handlers:
+                    h.pre_step(dt=dt, stamp=stamp)
 
     def _on_post_step(self, dt, sim_time, **kwargs) -> None:
         """POST_STEP — publish /clock and delegate to handler.post_step()."""
+        if getattr(self, "_shutdown_requested", False):
+            return
+        with self._shutdown_lock:
+            if self._shutdown_requested:
+                return
+            self._on_post_step_active(dt, sim_time)
+
+    def _on_post_step_active(self, dt, sim_time) -> None:
+        """Publish post-step state while ROS handles are known to be live."""
         try:
             stamp = sim_time_to_ros_time(sim_time)
 
@@ -473,6 +492,14 @@ class BridgeNode(Node):
             if "Not connected" in str(e) or "physics server" in str(e):
                 return
             raise
+
+    def destroy_node(self):
+        """Stop simulation callbacks before rclpy destroys publisher handles."""
+        with self._shutdown_lock:
+            if self._shutdown_requested:
+                return False
+            self._shutdown_requested = True
+        return super().destroy_node()
 
     def reset(self) -> None:
         """Destroy all robot handlers and reset the simulation."""
@@ -517,7 +544,10 @@ def main(args=None):
         pass
     finally:
         node.destroy_node()
-        rclpy.shutdown()
+        # SIGINT may already have shut down the default context before the
+        # executor exits. Avoid turning an otherwise clean Ctrl-C into RCLError.
+        if rclpy.ok():
+            rclpy.shutdown()
 
 
 if __name__ == "__main__":

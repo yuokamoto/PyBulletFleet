@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Documentation
+
+- Document the optional `python3-tk` dependency for the PyBulletFleet
+  DataMonitor GUI in the ROS 2 and APT installation paths, and link the RMF
+  Docker steps to the official Ubuntu Docker Engine installation guide.
+
+### Fixed
+
+- Avoid repeated `InvalidHandle` and shutdown errors during ROS 2 bridge
+  Ctrl-C handling by stopping simulation publish callbacks before rclpy
+  destroys publishers and making context shutdown idempotent.
+
+### Performance
+
+- Refresh core and ROS bridge benchmark references for this release; no
+  release-blocking regression was observed.
+
 ## v0.7.2 (2026-08-02)
 
 ### Features

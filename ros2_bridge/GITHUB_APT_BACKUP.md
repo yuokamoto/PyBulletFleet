@@ -72,10 +72,16 @@ echo 'deb [trusted=yes] https://OWNER.github.io/REPOSITORY/ ./' \
 sudo apt update
 sudo apt install -y ros-jazzy-pybullet-fleet-ros
 
-python3 -m pip install --user --break-system-packages pybullet-fleet==0.7.2
+python3 -m pip install --user --break-system-packages pybullet-fleet==0.7.3
 source /opt/ros/jazzy/setup.bash
 ros2 run pybullet_fleet_ros bridge_node --ros-args \
   -p config_yaml:="$(ros2 pkg prefix pybullet_fleet_ros)/share/pybullet_fleet_ros/config/bridge_test.yaml"
+```
+
+Install `python3-tk` when using the optional PyBulletFleet DataMonitor GUI:
+
+```bash
+sudo apt install -y python3-tk
 ```
 
 `ros-jazzy-pybullet-fleet-msgs` is installed automatically by the bridge

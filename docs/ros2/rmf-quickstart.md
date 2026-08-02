@@ -47,6 +47,11 @@ source `~/rmf_demos_ws/install/setup.bash`; for the example above, source
 
 ## 3. Optional: start RMF Web without building a PyBulletFleet image
 
+This step and the full Docker alternative below require Docker Engine with the
+Compose plugin. On Ubuntu, install it using the [official Docker Engine
+installation guide](https://docs.docker.com/engine/install/ubuntu/) before
+continuing.
+
 The RMF Web API and dashboard can run in Docker while the PyBulletFleet
 simulation and RMF adapter run natively. This Compose file pulls only the
 upstream RMF Web images; it does not build or distribute a PyBulletFleet image,

@@ -23,19 +23,19 @@ see [Benchmark Suite](benchmark-suite) and [Profiling Guide](profiling-guide).
 **Base config:** `benchmark/configs/general.yaml` — headless `simple_cube`
 robots, `collision_check_frequency=null` (every step), `batch_omni` fleet
 controller, and the fleet command interface
-**Last measured:** 2026-07-24
+**Last measured:** 2026-08-02
 
 | Agents | Step Time (ms) | RTF   | Spawn Time | Memory Delta |
 |--------|----------------|-------|------------|--------------|
-| 100    | 0.70 ± 0.06    | 143.5× | 59 ms     | +2.6 MB      |
-| 250    | 1.76 ± 0.12    | 56.8×  | 140 ms    | +6.2 MB      |
-| 500    | 4.25 ± 0.30    | 23.5×  | 294 ms    | +12.5 MB     |
-| 1000   | 9.88 ± 0.08    | 10.1×  | 604 ms    | +25.0 MB     |
-| 2000   | 23.25 ± 1.07   | 4.3×   | 1241 ms   | +48.1 MB     |
+| 100    | 0.71 ± 0.02    | 140.4× | 61 ms     | +2.6 MB      |
+| 250    | 1.78 ± 0.09    | 56.2×  | 158 ms    | +6.2 MB      |
+| 500    | 4.20 ± 0.35    | 23.8×  | 332 ms    | +12.5 MB     |
+| 1000   | 10.48 ± 0.32   | 9.5×   | 676 ms    | +25.0 MB     |
+| 2000   | 24.54 ± 0.68   | 4.1×   | 1454 ms   | +48.0 MB     |
 
 **Source:** `benchmark/results/benchmark_sweep_10.0s.json`
 
-The 2026-07-24 sweep was collected on a WSL2 host using the lightweight
+The 2026-08-02 sweep was collected on a WSL2 host using the lightweight
 `simple_cube` model as the large-scale baseline. The worker currently gives
 goals to half of the spawned agents; this workload is defined in
 `mobile_benchmark.py`. Although `general.yaml` contains
@@ -57,13 +57,13 @@ must not be read as the elapsed time of a complete benchmark worker.
 
 ## ROS 2 Bridge Scale Check
 
-Measured 2026-07-25 with Docker, headless `simple_cube` robots, physics off,
+Measured 2026-08-02 with Docker, headless `simple_cube` robots, physics off,
 `timestep=0.1`, `publish_rate=5 Hz`, and `target_rtf=0`. These are diagnostic
 single-run values and are not comparable to the core simulation table above.
 
 | Mode | Robots | Command result | Max RTF |
 |------|--------|----------------|---------|
-| `fleet` | 1000 | ack 0.486 s; all moved in 0.104 s | 9.37× |
+| `fleet` | 1000 | ack 0.529 s; all moved in 0.100 s | 8.46× |
 | `per_robot` | 1000 | publish 0.217 s; 0/1000 moved in 60 s | 0.64× |
 | `per_robot` | 100 | publish 0.056 s; all moved in 15.033 s | not measured |
 | `hybrid` | 1000 | fleet ack 7.998 s; per-robot publish 0.220 s | 0.30× |
@@ -92,12 +92,12 @@ useful when isolating one axis at a time.
 
 | Agents | Controller | Command Interface | Setup Time | Step Time | P95 Step |
 |--------|------------|-------------------|------------|-----------|----------|
-| 100    | per-agent  | per-agent         | 0.0020 s   | 0.118 ms  | 0.149 ms |
-| 100    | batch      | fleet             | 0.0016 s   | 0.112 ms  | 0.124 ms |
-| 500    | per-agent  | per-agent         | 0.0283 s   | 0.666 ms  | 0.563 ms |
-| 500    | batch      | fleet             | 0.0082 s   | 0.661 ms  | 0.383 ms |
-| 1000   | per-agent  | per-agent         | 0.0245 s   | 1.526 ms  | 1.592 ms |
-| 1000   | batch      | fleet             | 0.0162 s   | 1.290 ms  | 1.397 ms |
+| 100    | per-agent  | per-agent         | 0.0021 s   | 0.124 ms  | 0.132 ms |
+| 100    | batch      | fleet             | 0.0017 s   | 0.114 ms  | 0.105 ms |
+| 500    | per-agent  | per-agent         | 0.0298 s   | 0.688 ms  | 0.717 ms |
+| 500    | batch      | fleet             | 0.0091 s   | 0.567 ms  | 0.432 ms |
+| 1000   | per-agent  | per-agent         | 0.0206 s   | 1.430 ms  | 1.470 ms |
+| 1000   | batch      | fleet             | 0.0173 s   | 1.315 ms  | 1.430 ms |
 
 **Memory note:** Memory delta is process RSS and should be treated as
 environment-dependent, especially on WSL2.

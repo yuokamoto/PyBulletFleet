@@ -2,6 +2,10 @@
 Changelog for package pybullet_fleet_ros
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+0.1.3 (2026-08-02)
+------------------
+* Stop simulation callbacks before ROS publisher handles are destroyed, avoiding repeated shutdown errors on Ctrl-C.
+
 0.1.2 (2026-08-01)
 ------------------
 * Add ``fleet_demo.launch.py`` for a configurable fleet-only ROS API demo that runs from an installed Jazzy package.

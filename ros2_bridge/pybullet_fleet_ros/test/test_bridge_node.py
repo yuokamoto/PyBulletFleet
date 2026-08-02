@@ -50,6 +50,18 @@ def test_step_once_increments_sim_time():
     assert sim.sim_time > 0
 
 
+def test_post_step_is_noop_after_shutdown_requested():
+    """A late simulation callback must not publish through destroyed rclpy handles."""
+    from pybullet_fleet_ros.bridge_node import BridgeNode
+
+    bridge = BridgeNode.__new__(BridgeNode)
+    bridge._shutdown_requested = True
+
+    # A bare instance intentionally has no publishers or locks. The early
+    # shutdown guard must return before accessing either one.
+    BridgeNode._on_post_step(bridge, dt=0.01, sim_time=1.0)
+
+
 def test_agent_spawn_params_from_dict():
     """AgentSpawnParams.from_dict is usable for config-driven spawning."""
     from pybullet_fleet.agent import AgentSpawnParams

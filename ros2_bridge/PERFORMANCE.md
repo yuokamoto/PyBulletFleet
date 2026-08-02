@@ -99,7 +99,7 @@ These are single-run diagnostic numbers, not stable CI thresholds.
 | `fleet` | 100 | none | 5 Hz | 0 | 0.048 s | 0.008 s | max RTF 110.20x |
 | `fleet` | 500 | none | 5 Hz | 0 | 0.181 s | 0.043 s | max RTF 21.03x |
 | `fleet` | 1000 | none | 5 Hz | 1.0 | 0.027 s | 0.173 s | target-rate command check |
-| `fleet` | 1000 | none | 5 Hz | 0 | 0.486 s | 0.104 s | max RTF 9.37x |
+| `fleet` | 1000 | none | 5 Hz | 0 | 0.529 s | 0.100 s | max RTF 8.46x |
 | `per_robot` | 1000 | `state_publishers,tf,command_topics` | 5 Hz | 0 | publish 0.217 s | 0/1000 in 60 s | max RTF 0.64x |
 | `per_robot` | 100 | `state_publishers,tf,command_topics` | 5 Hz | 0 | publish 0.056 s | 15.033 s | 100/100 moved |
 | `hybrid` | 1000 | `state_publishers,tf,command_topics` | 5 Hz | 0 | fleet ack 7.998 s; per-robot publish 0.220 s | not verified | max RTF 0.30x |
