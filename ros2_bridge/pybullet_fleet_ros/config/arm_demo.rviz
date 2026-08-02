@@ -39,12 +39,14 @@ Visualization Manager:
       Value: true
       Description Source: Topic
       Description Topic:
-        Value: /arm0/robot_description
+        Value: /panda0/robot_description
         Depth: 5
         Durability Policy: Transient Local
         Reliability Policy: Reliable
       Alpha: 0.8
-      TF Prefix: arm0
+      Collision Enabled: false
+      TF Prefix: panda0
+      Visual Enabled: true
 
     - Class: rviz_default_plugins/Axes
       Name: Origin
@@ -52,11 +54,11 @@ Visualization Manager:
       Value: true
       Length: 0.5
       Radius: 0.02
-      Reference Frame: odom
+      Reference Frame: panda0/panda_link0
 
   Global Options:
     Background Color: 48; 48; 48
-    Fixed Frame: odom
+    Fixed Frame: panda0/panda_link0
     Frame Rate: 30
   Name: root
   Tools:

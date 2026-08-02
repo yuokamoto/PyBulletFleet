@@ -10,18 +10,18 @@ on:
     paths:
       - 'ros2_bridge/**'
       - 'docker/**'
-      - 'pybullet_fleet/robots/**'
-      - 'pybullet_fleet/config/**'
-      - 'pybullet_fleet/mesh/**'
+      - 'pybullet_fleet/**'
+      - 'pyproject.toml'
+      - 'scripts/build_ros2_jazzy_demo_apt.sh'
       - '.github/workflows/bridge.yml'
   pull_request:
     branches: [ main ]
     paths:
       - 'ros2_bridge/**'
       - 'docker/**'
-      - 'pybullet_fleet/robots/**'
-      - 'pybullet_fleet/config/**'
-      - 'pybullet_fleet/mesh/**'
+      - 'pybullet_fleet/**'
+      - 'pyproject.toml'
+      - 'scripts/build_ros2_jazzy_demo_apt.sh'
       - '.github/workflows/bridge.yml'
 
 concurrency:
@@ -110,3 +110,39 @@ jobs:
             -v "$(pwd)/test_rmf_dispatch.sh:/test_rmf_dispatch.sh:ro" \
             -v "$(pwd)/rmf_dispatch_flow_check.py:/rmf_dispatch_flow_check.py:ro" \
             bridge bash /test_rmf_dispatch.sh --ready-only hotel_pybullet
+
+  apt-runtime:
+    name: Jazzy APT Runtime (bridge + RMF)
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Build bridge image for Bloom packaging
+        run: docker compose -f docker/docker-compose.yaml build bridge
+
+      - name: Build local Jazzy APT repository
+        run: |
+          mkdir -p "$RUNNER_TEMP/pbf-apt-repo"
+          scripts/build_ros2_jazzy_demo_apt.sh \
+            --source-ref "$GITHUB_SHA" \
+            --output "$RUNNER_TEMP/pbf-apt-repo" \
+            --include-rmf
+
+      - name: Build Python core wheel
+        run: |
+          python3 -m pip install --user build
+          python3 -m build --wheel --outdir "$RUNNER_TEMP/pbf-apt-artifacts"
+
+      - name: Build clean APT runtime image
+        run: |
+          docker build \
+            -f docker/Dockerfile.apt-runtime-test \
+            -t pbf-apt-runtime-test:jazzy .
+
+      - name: Install from APT and run bridge/RMF smoke checks
+        run: |
+          docker run --rm \
+            -v "$RUNNER_TEMP/pbf-apt-repo:/apt-repo:ro" \
+            -v "$RUNNER_TEMP/pbf-apt-artifacts:/artifacts:ro" \
+            pbf-apt-runtime-test:jazzy

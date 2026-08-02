@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Features
+
+- Add an installed ROS 2 fleet demo launch for 100-robot, batched Fleet API
+  navigation, shared by native Jazzy and Docker environments, with an optional
+  lightweight RViz view and non-overlapping multi-robot navigation client.
+- Use a Franka Panda in the ROS 2 arm trajectory demo without requiring an
+  additional model package.
+
+### Fixed
+
+- Default the Open-RMF Office demo to real-time pacing so dispatched tasks
+  progress with the simulated clock.
+- Resolve RMF map `model://` furniture includes from the Gazebo Fuel cache,
+  so prefetched Office and other RMF demo assets are rendered in PyBullet.
+
+### Documentation
+
+- Add native Jazzy bridge, Fleet API, and RMF quickstarts, with Docker moved to
+  the alternative environment path, add an RMF scenario catalog and full RMF
+  Web Docker workflow including a no-build RMF Web companion stack for native
+  demos, and document prefetching Gazebo Fuel assets for the supported RMF demos.
+
 ## v0.7.1 (2026-08-01)
 
 ### Fixed

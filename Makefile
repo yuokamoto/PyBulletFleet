@@ -30,7 +30,7 @@ test-clean-install:  ## Build wheel + install in a clean venv + smoke test (catc
 verify: lint test  ## Full verification (lint + test, CI subset)
 
 docs:  ## Build documentation (warnings as errors)
-	cd docs && sphinx-build -W -b html . _build/html
+	cd docs && sphinx-build -E -a -W -b html . _build/html
 
 bench-smoke:  ## Quick benchmark (~10 seconds)
 	python benchmark/run_benchmark.py --duration 10

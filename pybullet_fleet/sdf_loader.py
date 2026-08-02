@@ -32,6 +32,7 @@ import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
+from urllib.parse import quote, unquote, urlparse
 
 import pybullet as p
 
@@ -42,11 +43,33 @@ from pybullet_fleet.types import CollisionMode
 logger = logging.getLogger(__name__)
 
 _FUEL_CACHE = os.path.expanduser("~/.gz/fuel")
+_FUEL_HOSTS = ("fuel.gazebosim.org", "fuel.ignitionrobotics.org")
 
 #: Default color for scenery objects without material info.
 #: Matches Gazebo Sim (Harmonic) default — a neutral light grey
 #: that renders well under PyBullet's default lighting.
 DEFAULT_SCENERY_COLOR = [0.7, 0.7, 0.7, 1.0]
+
+
+def _is_fuel_uri(uri: str) -> bool:
+    """Return whether *uri* uses a supported Gazebo Fuel host."""
+    return urlparse(uri).hostname in _FUEL_HOSTS
+
+
+def _fuel_cache_hosts(uri: str) -> Tuple[str, ...]:
+    """Return preferred and compatible Fuel cache hosts for *uri*."""
+    host = urlparse(uri).hostname
+    if host not in _FUEL_HOSTS:
+        return ()
+    return (host, *(candidate for candidate in _FUEL_HOSTS if candidate != host))
+
+
+def _fuel_path_parts(uri: str) -> List[str]:
+    """Return Fuel API path parts without its optional ``1.0`` prefix."""
+    parts = [unquote(part) for part in urlparse(uri).path.split("/") if part]
+    if parts[:1] == ["1.0"]:
+        parts = parts[1:]
+    return parts
 
 
 # ---------------------------------------------------------------------------
@@ -69,27 +92,21 @@ def _resolve_model_uri(uri: str, model_dir: str, model_name: str) -> str:
     Returns:
         Absolute filesystem path.
     """
-    if uri.startswith("https://fuel.gazebosim.org/"):
-        # https://fuel.gazebosim.org/1.0/owner/models/name/ver/files/rest
-        # → ~/.gz/fuel/fuel.gazebosim.org/owner/models/name/ver/rest
-        stripped = uri.replace("https://", "")
-        # Remove the "1.0/" API version segment
-        stripped = stripped.replace("fuel.gazebosim.org/1.0/", "fuel.gazebosim.org/", 1)
-        # Convert owner to lowercase (Fuel cache uses lowercase)
-        parts = stripped.split("/")
-        if len(parts) >= 2:
-            parts[1] = parts[1].lower()  # owner
-        if len(parts) >= 4:
-            parts[3] = parts[3].lower()  # model name
-        # Remove "files" segment if present
+    if _is_fuel_uri(uri):
+        # Fuel API URI: /1.0/owner/models/name/ver/files/rest
+        # Cache URI:     ~/.gz/fuel/<host>/owner/models/name/ver/rest
+        parts = _fuel_path_parts(uri)
+        if parts:
+            parts[0] = parts[0].lower()  # owner
+        if len(parts) >= 3:
+            parts[2] = parts[2].lower()  # model name
         if "files" in parts:
             parts.remove("files")
-        local = os.path.join(_FUEL_CACHE, *parts[0:])
-        # Also check model_dir for meshes subdir as fallback
-        if os.path.isfile(local):
-            return local
-        # Try without lowercasing model name
-        return os.path.join(os.path.expanduser("~/.gz/fuel"), *stripped.split("/"))
+        for host in _fuel_cache_hosts(uri):
+            local = os.path.join(_FUEL_CACHE, host, *parts)
+            if os.path.isfile(local):
+                return local
+        return os.path.join(_FUEL_CACHE, _fuel_cache_hosts(uri)[0], *parts)
 
     if not uri.startswith("model://"):
         # Plain relative path (e.g. "meshes/suv.obj") — resolve relative to model_dir
@@ -595,32 +612,37 @@ def load_sdf_world(
 
 
 def _resolve_fuel_uri(uri: str) -> Optional[str]:
-    """Resolve a Gazebo Fuel ``https://fuel.gazebosim.org/...`` URI to a local model dir.
+    """Resolve a Gazebo Fuel URI to a local model directory.
 
     Downloads the model with ``gz fuel download`` if not already cached.
     Returns the local directory containing ``model.sdf``, or *None* on failure.
     """
-    if not uri.startswith("https://fuel.gazebosim.org/"):
+    if not _is_fuel_uri(uri):
         return None
 
-    # URL structure: https://fuel.gazebosim.org/1.0/<owner>/models/<model>
-    # Local cache:   ~/.gz/fuel/fuel.gazebosim.org/<owner>/models/<model>/<ver>/
-    parts = uri.replace("https://fuel.gazebosim.org/1.0/", "").split("/")
+    # URL structure: https://fuel.<host>/1.0/<owner>/models/<model>
+    # Local cache:   ~/.gz/fuel/<host>/<owner>/models/<model>/<ver>/
+    parts = _fuel_path_parts(uri)
     if len(parts) < 3:  # owner/models/ModelName
         return None
     owner = parts[0].lower()
     model_name = parts[2].lower()
 
-    cache_dir = os.path.join(_FUEL_CACHE, "fuel.gazebosim.org", owner, "models", model_name)
+    def cached_model_dir() -> Optional[str]:
+        for host in _fuel_cache_hosts(uri):
+            cache_dir = os.path.join(_FUEL_CACHE, host, owner, "models", model_name)
+            if os.path.isdir(cache_dir):
+                versions = sorted(os.listdir(cache_dir))
+                if versions:
+                    candidate = os.path.join(cache_dir, versions[-1])
+                    if os.path.isfile(os.path.join(candidate, "model.sdf")):
+                        _ensure_texture_symlinks(candidate)
+                        return candidate
+        return None
 
-    # Check cache first
-    if os.path.isdir(cache_dir):
-        versions = sorted(os.listdir(cache_dir))
-        if versions:
-            candidate = os.path.join(cache_dir, versions[-1])
-            if os.path.isfile(os.path.join(candidate, "model.sdf")):
-                _ensure_texture_symlinks(candidate)
-                return candidate
+    cached = cached_model_dir()
+    if cached:
+        return cached
 
     # Download via gz fuel
     if shutil.which("gz") is None:
@@ -638,14 +660,9 @@ def _resolve_fuel_uri(uri: str) -> Optional[str]:
         logger.warning("Failed to download Fuel model %s: %s", uri, e)
         return None
 
-    # Re-check cache
-    if os.path.isdir(cache_dir):
-        versions = sorted(os.listdir(cache_dir))
-        if versions:
-            candidate = os.path.join(cache_dir, versions[-1])
-            if os.path.isfile(os.path.join(candidate, "model.sdf")):
-                _ensure_texture_symlinks(candidate)
-                return candidate
+    cached = cached_model_dir()
+    if cached:
+        return cached
 
     logger.warning("Fuel model not found after download: %s", uri)
     return None
@@ -688,10 +705,10 @@ def _resolve_include_uri(
     """Resolve ``<uri>`` from a ``<include>`` element to a local model directory.
 
     Handles:
-    - ``https://fuel.gazebosim.org/...`` — Gazebo Fuel download/cache
+    - Gazebo Fuel HTTPS URIs — download/cache lookup
     - ``model://ModelName`` — search ``GZ_SIM_RESOURCE_PATH`` and *resource_paths*
     """
-    if uri.startswith("https://fuel.gazebosim.org/"):
+    if _is_fuel_uri(uri):
         return _resolve_fuel_uri(uri)
 
     if uri.startswith("model://"):
@@ -704,6 +721,12 @@ def _resolve_include_uri(
             candidate = os.path.join(base, model_name)
             if os.path.isfile(os.path.join(candidate, "model.sdf")):
                 return candidate
+        # rmf_demos Office maps use model:// for furniture that Gazebo resolves
+        # from OpenRobotics Fuel on first use. Match that fallback after local
+        # model directories have been checked.
+        resolved = _resolve_fuel_uri(f"https://fuel.gazebosim.org/1.0/OpenRobotics/models/{quote(model_name)}")
+        if resolved:
+            return resolved
         logger.warning("model://%s not found in resource paths", model_name)
         return None
 
@@ -826,7 +849,7 @@ def load_sdf_world_file(
         # (see roadmap), the is_fuel flag could be replaced with a mesh-format
         # check (e.g. "does the model contain .dae files?") to handle
         # arbitrary DAE models from any source generically.
-        is_fuel = uri.startswith("https://fuel.gazebosim.org/")
+        is_fuel = _is_fuel_uri(uri)
         model_dir = _resolve_include_uri(uri, effective_paths)
         if model_dir is None:
             logger.warning("Cannot resolve include URI: %s", uri)

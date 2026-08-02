@@ -31,7 +31,9 @@ tags separate while their versions and release schedules are independent.
    ```
 
 4. Run the bridge/RMF smoke test appropriate to the changes and run
-   `make verify`.
+   `make verify`. The CI bridge workflow also builds a local APT repository and
+   runs a clean `apt install` bridge/RMF runtime gate; it must be green before
+   publishing a preview repository or Bloom release.
 5. Create the ROS release branch and immutable `*-ros2` source tag. Do not
    include Bloom-generated `debian/` directories in this repository.
 

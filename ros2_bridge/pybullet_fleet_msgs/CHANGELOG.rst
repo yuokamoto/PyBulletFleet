@@ -2,6 +2,10 @@
 Changelog for package pybullet_fleet_msgs
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+0.1.2 (2026-08-01)
+------------------
+* Re-release message definitions with the installed fleet demo package set.
+
 0.1.1 (2026-08-01)
 ------------------
 * Re-release the message definitions with the Jazzy bridge and RMF updates.

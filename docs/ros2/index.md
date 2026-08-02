@@ -12,18 +12,21 @@ or fleet-management tools. Framework extension contracts belong in the
 :maxdepth: 2
 
 quickstart
+demos
 overview
 configuration
+rmf-quickstart
 rmf
+rmf-demos
 ```
 
 ## Choose an environment
 
 | Environment | Best for | Start here |
 | --- | --- | --- |
-| Docker | Reproducible bridge and RMF demos; no native ROS install | [Docker bridge guide](https://github.com/yuokamoto/PyBulletFleet/blob/main/docker/README.md) |
+| Jazzy APT preview | Running an installed bridge outside a source checkout | [GitHub APT preview guide](https://yuokamoto.github.io/pybullet-fleet-apt/README.md) |
 | Native Jazzy | Ubuntu 24.04 development, apt packages, and overlays | [Native Jazzy setup](https://github.com/yuokamoto/PyBulletFleet/blob/main/ros2_bridge/NATIVE_ROS2.md) |
-| Jazzy apt packages | Running an installed bridge outside a source checkout | [Bridge installation reference](https://github.com/yuokamoto/PyBulletFleet/blob/main/ros2_bridge/README.md#jazzy-apt-installation) |
+| Docker | Reproducible bridge and RMF demos; no native ROS install | [Docker bridge guide](https://github.com/yuokamoto/PyBulletFleet/blob/main/docker/README.md) |
 
 The ROS packages provide interfaces and nodes. Install the separately released
 `pybullet-fleet` Python package in the Python environment that launches ROS
@@ -31,10 +34,11 @@ nodes; the package includes the simulation core and PyBullet dependency.
 
 ## Start here
 
-Follow [Run Your First ROS 2 Demo](quickstart) for a Docker TurtleBot3 demo,
-a batched fleet command, and an RMF patrol.  It is the user-facing quickstart;
-the repository READMEs remain references for Docker operations and native
-overlay maintenance.
+Start with [Run Your First ROS 2 Bridge](quickstart), then browse the [ROS 2
+demo catalog](demos) or continue to [Run Your First RMF Demo](rmf-quickstart)
+when you need task dispatch. Docker is an alternative for a fully provisioned
+environment; the repository READMEs remain references for Docker operations
+and native overlay maintenance.
 
 ## Which control path should I use?
 

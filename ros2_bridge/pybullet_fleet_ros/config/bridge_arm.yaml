@@ -1,4 +1,4 @@
-# Bridge config: Arm robot for joint trajectory tests
+# Bridge config: Franka Panda for joint trajectory tests
 #
 # テスト 4 向け: joint_trajectory / FollowJointTrajectory アクション
 #
@@ -17,8 +17,8 @@ simulation:
   physics: false
 
 entities:
-  - name: arm0
-    urdf_path: "robots/arm_robot.urdf"
+  - name: panda0
+    urdf_path: "panda"
     pose: [0.0, 0.0, 0.0]
     yaw: 0.0
     use_fixed_base: true

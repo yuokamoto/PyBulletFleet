@@ -29,7 +29,7 @@ fleet_api:
 simulation:
   gui: true
   physics: false
-  target_rtf: 10.0  # Real-time factor (1.0 = real-time, 0 = max speed)
+  target_rtf: 1.0  # Keep RMF's simulated clock synchronized with dispatch tasks.
   enable_structure_transparency: true
   camera:
     camera_mode: manual

@@ -2,7 +2,7 @@
 # Build an amd64-only Jazzy APT supplement repository from an immutable tag.
 set -euo pipefail
 
-source_ref="v0.1.1-ros2"
+source_ref="v0.1.2-ros2"
 image="pybullet-fleet-rmf:jazzy"
 output_dir=""
 include_rmf=false
@@ -18,7 +18,7 @@ before general-purpose or long-lived use.
 
 Options:
   --output DIR       Empty directory for .deb files and APT metadata (required)
-  --source-ref REF   Immutable source ref to build (default: v0.1.1-ros2)
+  --source-ref REF   Immutable source ref to build (default: v0.1.2-ros2)
   --image IMAGE      Jazzy build image (default: pybullet-fleet-rmf:jazzy)
   --include-rmf      Also build pybullet_fleet_rmf (requires an RMF demo overlay at runtime)
   -h, --help         Show this help
