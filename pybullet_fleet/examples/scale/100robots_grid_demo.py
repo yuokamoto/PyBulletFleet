@@ -9,6 +9,7 @@ Command comparison:
 
 Examples:
   python 100robots_grid_demo.py
+  python 100robots_grid_demo.py --robot racecar
   python 100robots_grid_demo.py --movement=goal --duration=10
 """
 import argparse
@@ -35,9 +36,11 @@ from pybullet_fleet.commands import RobotGoalCommand2D
 from pybullet_fleet.config_utils import load_yaml_config, merge_configs
 from pybullet_fleet.core_simulation import MultiRobotSimulationCore
 from pybullet_fleet.fleet_api import FleetCommandDispatcher, FleetStateProvider
+from pybullet_fleet.robot_models import resolve_model
 
 
 parser = argparse.ArgumentParser(description="100 Robots Grid Demo")
+parser.add_argument("--robot", default=None, help="Override the robot model for every grid entity")
 parser.add_argument(
     "--duration",
     type=float,
@@ -78,6 +81,12 @@ entities = config.get("entities") or []
 if not entities:
     raise ValueError("100robots_grid_demo.py requires a config with entities[].grid")
 
+if args.robot:
+    robot_path = resolve_model(args.robot)
+    for entity in entities:
+        if entity.get("grid"):
+            entity["urdf_path"] = robot_path
+
 fleet_controller = config["managers"][0].setdefault("fleet_controller", {})
 if args.controller == "batch":
     fleet_controller["type"] = "batch_omni"
@@ -91,6 +100,8 @@ print("=== 100 Robots Grid Demo ===")
 print(f"Config: {args.config}")
 print(f"Total robots: {num_robots}")
 print(f"Config entities: {len(entities)} group(s)")
+if args.robot:
+    print(f"Robot override: {args.robot} -> {robot_path}")
 print(f"Controller implementation: {args.controller}")
 print(f"Command interface: {args.command_interface}")
 print(f"Movement: {args.movement}")

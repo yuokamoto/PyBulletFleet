@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- Add `pybullet-fleet config --list`, `--path`, and `--copy` for managing
+  bundled YAML configuration templates after a pip installation.
+- Add model overrides to the grid demos: `--robot` for the mobile-only grid
+  and `--mobile-robot` / `--arm-robot` for the mixed fleet.
+- Add recorded fleet-interface and RMF office-demo videos to the ROS 2
+  quickstarts.
+
 ## v0.7.3 (2026-08-02)
 
 ### Documentation

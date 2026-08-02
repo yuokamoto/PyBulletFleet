@@ -49,10 +49,14 @@ you can run a demo without cloning the repository:
 pybullet-fleet examples --list
 pybullet-fleet examples --run batch_controller_scale_demo.py -- --no-gui --duration 10
 pybullet-fleet examples --copy ./examples
+pybullet-fleet config --list
+pybullet-fleet config --copy ./config
 ```
 
 Use `--copy` before editing a demo. The source-checkout commands below remain
 useful once examples have been copied or when developing the repository.
+Use `pybullet-fleet config --copy ./config` to copy the bundled YAML templates;
+the copied `config/config.yaml` is preferred when running from that directory.
 
 ## Switching Robot Models with `--robot`
 
@@ -72,8 +76,10 @@ python examples/mobile/path_following_demo.py --robot racecar
 python examples/scale/100robots_cube_patrol_demo.py --robot mobile_robot
 python examples/scale/pick_drop_arm_100robots_demo.py --robot kuka_iiwa
 
-# The grid demo is mobile-only. Select another entities[].grid scene with --config.
+# The grid demo is mobile-only. Override its model or select another scene.
+python examples/scale/100robots_grid_demo.py --robot racecar
 python examples/scale/100robots_grid_demo.py --config config/100robots_config.yaml
+python examples/scale/100robots_mixed_demo.py --mobile-robot racecar --arm-robot kuka_iiwa
 ```
 
 | Category | Scripts | Argument | Default | Alternatives |
@@ -82,8 +88,8 @@ python examples/scale/100robots_grid_demo.py --config config/100robots_config.ya
 | Mobile demos | `examples/mobile/path_following_demo.py` | `--robot` | `husky` | `racecar`, `mobile_robot` |
 | Scale (mobile) | `100robots_cube_patrol_demo.py`, `pick_drop_mobile_100robots_demo.py` | `--robot` | `husky` | `racecar`, `mobile_robot` |
 | Scale (arm) | `pick_drop_arm_100robots_demo.py` | `--robot` | `panda` | `kuka_iiwa`, `arm_robot` |
-| Grid demo | `100robots_grid_demo.py` | `--config` | mobile-only grid | another `entities[].grid` YAML scene |
-| Mixed grid demo | `100robots_mixed_demo.py` | `--config` | Husky + Panda | another mixed `entities[].grid` YAML scene |
+| Grid demo | `100robots_grid_demo.py` | `--robot`, `--config` | `mobile_robot` | `husky`, `racecar`; another `entities[].grid` YAML scene |
+| Mixed grid demo | `100robots_mixed_demo.py` | `--mobile-robot`, `--arm-robot`, `--config` | Husky + Panda | `racecar`, `mobile_robot`; `kuka_iiwa`, `arm_robot`; another scene |
 | Model demos | `resolve_model_demo.py` | `--robot` | `panda` | any registered model |
 | Model demos | `robot_descriptions_demo.py` | `--robot` | `tiago` | any `robot_descriptions` model |
 

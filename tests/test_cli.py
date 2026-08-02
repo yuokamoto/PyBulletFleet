@@ -124,3 +124,30 @@ def test_examples_missing_dir_errors(monkeypatch, tmp_path, capsys):
     rc = cli.main(["examples", "--list"])
     assert rc == 1
     assert "not found" in capsys.readouterr().err
+
+
+def test_config_lists_yaml_templates(monkeypatch, tmp_path, capsys):
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+    (config_dir / "config.yaml").write_text("simulation: {}\n")
+    (config_dir / "nested.yaml").write_text("simulation: {}\n")
+    (config_dir / "ignore.txt").write_text("ignored\n")
+    monkeypatch.setattr(cli, "_config_dir", lambda: str(config_dir))
+
+    assert cli.main(["config", "--list"]) == 0
+    output = capsys.readouterr().out
+    assert "config.yaml" in output
+    assert "nested.yaml" in output
+    assert "ignore.txt" not in output
+
+
+def test_config_copy_copies_yaml_templates(monkeypatch, tmp_path):
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+    source = config_dir / "config.yaml"
+    source.write_text("simulation:\n  gui: false\n")
+    monkeypatch.setattr(cli, "_config_dir", lambda: str(config_dir))
+
+    destination = tmp_path / "user-config"
+    assert cli.main(["config", "--copy", str(destination)]) == 0
+    assert (destination / "config.yaml").read_text() == source.read_text()
