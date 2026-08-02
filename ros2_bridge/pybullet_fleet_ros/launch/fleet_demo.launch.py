@@ -7,6 +7,7 @@ Usage::
 """
 
 from pathlib import Path
+import os
 import sys
 import tempfile
 
@@ -33,7 +34,11 @@ def _launch_setup(context: LaunchContext):
     package_dir = Path(get_package_share_directory("pybullet_fleet_ros"))
     template_path = package_dir / "config" / "bridge_fleet_scale.yaml"
     rviz_config = package_dir / "config" / "fleet_demo.rviz"
-    config_path = Path(tempfile.gettempdir()) / f"pybullet_fleet_fleet_demo_{robots}_{robot_model}.yaml"
+    descriptor, config_name = tempfile.mkstemp(prefix="pybullet_fleet_fleet_demo_", suffix=".yaml")
+    # The bridge reads this after the launch setup has returned.
+    # Close the descriptor before writing the generated YAML by path.
+    os.close(descriptor)
+    config_path = Path(config_name)
     write_fleet_demo_config(
         template_path,
         config_path,

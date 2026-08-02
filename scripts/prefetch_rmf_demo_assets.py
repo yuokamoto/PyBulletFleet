@@ -26,7 +26,7 @@ def _package_share(package: str) -> Path:
 
 def _resource_paths(world: Path) -> list[Path]:
     paths = [world.parent / "models", _package_share("rmf_demos_assets") / "models"]
-    paths.extend(Path(path) for path in os.environ.get("GZ_SIM_RESOURCE_PATH", "").split(":"))
+    paths.extend(Path(path) for path in os.environ.get("GZ_SIM_RESOURCE_PATH", "").split(":") if path)
     return paths
 
 
@@ -59,9 +59,6 @@ def main() -> int:
     parser.add_argument("--dry-run", action="store_true", help="List assets without downloading them")
     args = parser.parse_args()
 
-    if not shutil.which("gz"):
-        raise RuntimeError("The Gazebo 'gz' CLI is not available in this shell")
-
     maps_dir = _package_share("rmf_demos_maps") / "maps"
     scenarios = args.scenario or list(SCENARIOS)
     worlds = [maps_dir / scenario / f"{scenario}.world" for scenario in scenarios]
@@ -70,6 +67,8 @@ def main() -> int:
         raise FileNotFoundError(f"RMF world file not found: {missing[0]}")
 
     fuel_uris = sorted({uri for world in worlds for uri in _fuel_uris(world)})
+    if not args.dry_run and not shutil.which("gz"):
+        raise RuntimeError("The Gazebo 'gz' CLI is not available in this shell")
     print(f"Scenarios: {', '.join(scenarios)}")
     print(f"Fuel models to fetch: {len(fuel_uris)}")
     for index, uri in enumerate(fuel_uris, start=1):

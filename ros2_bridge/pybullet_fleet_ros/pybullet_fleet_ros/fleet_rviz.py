@@ -14,16 +14,29 @@ class FleetRvizNode(Node):
         super().__init__("pybullet_fleet_fleet_rviz")
         self._marker_pub = self.create_publisher(MarkerArray, "/fleet/markers", 10)
         self._state_sub = self.create_subscription(FleetState, "/fleet/states", self._on_fleet_state, 10)
-        self._marker_ids: set[int] = set()
+        self._marker_ids_by_name: dict[str, int] = {}
+        self._next_marker_id = 0
+
+    def _marker_id(self, robot_name: str) -> int:
+        marker_id = self._marker_ids_by_name.get(robot_name)
+        if marker_id is None:
+            marker_id = self._next_marker_id
+            self._marker_ids_by_name[robot_name] = marker_id
+            self._next_marker_id += 1
+        return marker_id
 
     def _on_fleet_state(self, state: FleetState) -> None:
         markers = MarkerArray()
         active_ids: set[int] = set()
-        for marker_id, robot in enumerate(state.robots):
+        active_names = set()
+        for robot in state.robots:
+            marker_id = self._marker_id(robot.name)
             active_ids.add(marker_id)
+            active_names.add(robot.name)
             markers.markers.append(self._robot_marker(marker_id, state, robot))
 
-        for marker_id in self._marker_ids - active_ids:
+        previous_ids = set(self._marker_ids_by_name.values())
+        for marker_id in previous_ids - active_ids:
             marker = Marker()
             marker.header = state.header
             marker.ns = "pybullet_fleet"
@@ -31,7 +44,9 @@ class FleetRvizNode(Node):
             marker.action = Marker.DELETE
             markers.markers.append(marker)
 
-        self._marker_ids = active_ids
+        self._marker_ids_by_name = {
+            name: marker_id for name, marker_id in self._marker_ids_by_name.items() if name in active_names
+        }
         self._marker_pub.publish(markers)
 
     @staticmethod

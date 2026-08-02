@@ -146,11 +146,11 @@ PY
 )
     if [ "${#fuel_uris[@]}" -eq 0 ]; then
         echo "No missing Gazebo Fuel assets found." >&2
-        exit 1
+    else
+        echo "Prefetching ${#fuel_uris[@]} Gazebo Fuel assets..."
+        for fuel_uri in "${fuel_uris[@]}"; do
+            echo "Downloading: $fuel_uri"
+            gz fuel download -u "$fuel_uri"
+        done
     fi
-    echo "Prefetching ${#fuel_uris[@]} Gazebo Fuel assets..."
-    for fuel_uri in "${fuel_uris[@]}"; do
-        echo "Downloading: $fuel_uri"
-        gz fuel download -u "$fuel_uri"
-    done
 fi
