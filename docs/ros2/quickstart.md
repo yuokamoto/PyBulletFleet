@@ -31,7 +31,7 @@ environment will not be visible to `ros2 run`.
 ```bash
 sudo apt update
 sudo apt install -y curl python3-pip python3-dev build-essential
-python3 -m pip install --user --break-system-packages pybullet-fleet==0.7.3
+python3 -m pip install --user --break-system-packages pybullet-fleet==0.7.4
 export PATH="$HOME/.local/bin:$PATH"
 pybullet-fleet examples --list
 ```

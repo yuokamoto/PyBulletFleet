@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## v0.7.4 (2026-08-03)
 
 ### Added
 
@@ -15,6 +15,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   and `--mobile-robot` / `--arm-robot` for the mixed fleet.
 - Add recorded fleet-interface and RMF office-demo videos to the ROS 2
   quickstarts.
+
+## [Unreleased]
 
 ## v0.7.3 (2026-08-02)
 

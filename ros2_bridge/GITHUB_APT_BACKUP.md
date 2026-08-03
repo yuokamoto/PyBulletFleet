@@ -72,7 +72,7 @@ echo 'deb [trusted=yes] https://OWNER.github.io/REPOSITORY/ ./' \
 sudo apt update
 sudo apt install -y ros-jazzy-pybullet-fleet-ros
 
-python3 -m pip install --user --break-system-packages pybullet-fleet==0.7.3
+python3 -m pip install --user --break-system-packages pybullet-fleet==0.7.4
 source /opt/ros/jazzy/setup.bash
 ros2 run pybullet_fleet_ros bridge_node --ros-args \
   -p config_yaml:="$(ros2 pkg prefix pybullet_fleet_ros)/share/pybullet_fleet_ros/config/bridge_test.yaml"
