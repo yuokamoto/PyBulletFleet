@@ -1,9 +1,9 @@
 """Command-line interface for pybullet_fleet.
 
-Exposes ``pybullet-fleet examples`` so a pip-installed user can locate, list,
-copy, or run the bundled example scripts without cloning the repository. The
-examples ship inside the wheel (see ``[tool.setuptools.package-data]``), so they
-live next to the installed package.
+Exposes ``pybullet-fleet examples`` and ``pybullet-fleet config`` so a
+pip-installed user can locate, list, copy, or run bundled assets without
+cloning the repository. The assets ship inside the wheel (see
+``[tool.setuptools.package-data]``), so they live next to the installed package.
 """
 
 import argparse
@@ -21,11 +21,27 @@ def _examples_dir() -> str:
     return os.path.join(os.path.dirname(pybullet_fleet.__file__), "examples")
 
 
+def _config_dir() -> str:
+    """Absolute path to the bundled YAML configuration directory."""
+    import pybullet_fleet
+
+    return os.path.join(os.path.dirname(pybullet_fleet.__file__), "config")
+
+
 def _iter_examples(root: str):
     """Yield ``(relpath, fullpath)`` for every example ``.py`` under *root*."""
     for dirpath, _dirs, files in os.walk(root):
         for fn in sorted(files):
             if fn.endswith(".py"):
+                full = os.path.join(dirpath, fn)
+                yield os.path.relpath(full, root), full
+
+
+def _iter_configs(root: str):
+    """Yield ``(relpath, fullpath)`` for bundled YAML configuration files."""
+    for dirpath, _dirs, files in os.walk(root):
+        for fn in sorted(files):
+            if fn.endswith((".yaml", ".yml")):
                 full = os.path.join(dirpath, fn)
                 yield os.path.relpath(full, root), full
 
@@ -106,6 +122,34 @@ def _cmd_examples(args: argparse.Namespace, extra: List[str]) -> int:
     return 0
 
 
+def _cmd_config(args: argparse.Namespace) -> int:
+    """List, locate, or copy bundled YAML configuration templates."""
+    root = _config_dir()
+    if not os.path.isdir(root):
+        print(
+            f"config not found at {root} — is pybullet_fleet installed with its bundled data?",
+            file=sys.stderr,
+        )
+        return 1
+
+    if args.path:
+        print(root)
+        return 0
+
+    if args.copy:
+        dest = os.path.abspath(args.copy)
+        shutil.copytree(root, dest, dirs_exist_ok=True)
+        print(f"Copied config templates to {dest}")
+        return 0
+
+    print(f"Bundled config templates (installed at {root}):\n")
+    for rel, _full in _iter_configs(root):
+        print(f"  {rel}")
+    print("\n  pybullet-fleet config --copy ./config  copy templates to edit")
+    print("  pybullet-fleet config --path             print the install directory")
+    return 0
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser(prog="pybullet-fleet", description="PyBulletFleet command-line tools")
     sub = parser.add_subparsers(dest="command")
@@ -121,6 +165,12 @@ def main(argv: Optional[List[str]] = None) -> int:
         help="run an example by file name (e.g. path_following_demo.py; the .py and folder are optional)",
     )
 
+    cfg = sub.add_parser("config", help="list, locate, or copy bundled YAML configuration templates")
+    cfg_group = cfg.add_mutually_exclusive_group()
+    cfg_group.add_argument("--list", action="store_true", help="list available config templates (default action)")
+    cfg_group.add_argument("--path", action="store_true", help="print the directory where configs are installed")
+    cfg_group.add_argument("--copy", metavar="DEST", help="copy config templates into DEST so you can edit them")
+
     # parse_known_args so trailing flags after `--run NAME` (e.g. --duration 5)
     # are forwarded to the example instead of rejected by this parser.
     args, extra = parser.parse_known_args(argv)
@@ -130,6 +180,10 @@ def main(argv: Optional[List[str]] = None) -> int:
         if extra and not args.run:
             parser.error(f"unrecognized arguments: {' '.join(extra)}")
         return _cmd_examples(args, extra)
+    if args.command == "config":
+        if extra:
+            parser.error(f"unrecognized arguments: {' '.join(extra)}")
+        return _cmd_config(args)
     parser.print_help()
     return 0
 

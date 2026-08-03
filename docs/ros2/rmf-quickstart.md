@@ -4,6 +4,15 @@ This guide extends the [ROS 2 bridge quickstart](quickstart). Complete its
 core and bridge installation first, then add the RMF adapter and the
 source-built `rmf_demos` overlay required by the demo maps and tasks.
 
+<div align="center">
+<video controls preload="metadata" width="720">
+  <source src="../rmf_demo_office.mp4" type="video/mp4">
+  <a href="../rmf_demo_office.mp4">Download the RMF office demo video</a>
+</video>
+</div>
+
+This is the office patrol demonstrated in step 4 below.
+
 ## 1. Install the RMF adapter package
 
 The RMF adapter is distributed from the same Jazzy APT preview repository as

@@ -11,6 +11,7 @@ entities[].grid for both robot groups:
 
 Examples:
   python 100robots_mixed_demo.py
+  python 100robots_mixed_demo.py --mobile-robot racecar --arm-robot kuka_iiwa
   python 100robots_mixed_demo.py --duration=10
   python 100robots_mixed_demo.py --controller=per_agent --duration=10
 """
@@ -36,8 +37,11 @@ except ModuleNotFoundError:
 from pybullet_fleet.agent import Agent, Pose
 from pybullet_fleet.config_utils import load_yaml_config, merge_configs
 from pybullet_fleet.core_simulation import MultiRobotSimulationCore
+from pybullet_fleet.robot_models import resolve_model
 
 parser = argparse.ArgumentParser(description="100 Robots Mixed Demo")
+parser.add_argument("--mobile-robot", default=None, help="Override the mobile robot model")
+parser.add_argument("--arm-robot", default=None, help="Override the arm robot model")
 parser.add_argument(
     "--duration",
     type=float,
@@ -66,6 +70,15 @@ entities = config.get("entities") or []
 if not entities:
     raise ValueError("100robots_mixed_demo.py requires a config with entities[].grid")
 
+mobile_path = resolve_model(args.mobile_robot) if args.mobile_robot else None
+arm_path = resolve_model(args.arm_robot) if args.arm_robot else None
+for entity in entities:
+    robot_type = (entity.get("user_data") or {}).get("robot_type")
+    if robot_type == "mobile_robot" and mobile_path:
+        entity["urdf_path"] = mobile_path
+    elif robot_type == "arm_robot" and arm_path:
+        entity["urdf_path"] = arm_path
+
 mobile_manager = next(manager for manager in config["managers"] if manager["name"] == "mobile_fleet")
 fleet_controller = mobile_manager.setdefault("fleet_controller", {})
 if args.controller == "batch":
@@ -81,6 +94,10 @@ print(f"Config: {args.config}")
 print(f"Total robots: {num_robots}")
 print(f"Config entities: {len(entities)} group(s)")
 print(f"Controller implementation: {args.controller}")
+if mobile_path:
+    print(f"Mobile robot override: {args.mobile_robot} -> {mobile_path}")
+if arm_path:
+    print(f"Arm robot override: {args.arm_robot} -> {arm_path}")
 
 sim_core = MultiRobotSimulationCore.from_dict(config)
 agents = [obj for obj in sim_core.sim_objects if isinstance(obj, Agent)]

@@ -102,6 +102,7 @@ URDF path:
 ```bash
 pybullet-fleet examples --run path_following_demo.py --robot racecar
 pybullet-fleet examples --run pick_drop_arm_demo.py --robot kuka_iiwa
+pybullet-fleet config --copy ./config                       # copy YAML templates to edit
 # (resolve_model_demo has its own --list; copy it out and run it directly)
 ```
 
@@ -113,13 +114,16 @@ From a source checkout you can also run the files directly, e.g.
 | Arm demos | `pick_drop_arm_*.py`, `rail_arm_demo.py` | `panda` | `kuka_iiwa`, `arm_robot` |
 | Mobile demos | `path_following_demo.py` | `husky` | `racecar`, `mobile_robot` |
 | Scale demos (mobile) | `100robots_cube_patrol_demo.py`, `pick_drop_mobile_100robots_demo.py` | `husky` | `racecar`, `mobile_robot` |
-| Scale demos (mixed) | `100robots_mixed_demo.py` | `husky` + `panda` | config-driven `entities[].grid` |
+| Scale demo (grid) | `100robots_grid_demo.py` | `--robot` (`mobile_robot`) | `husky`, `racecar` |
+| Scale demo (mixed) | `100robots_mixed_demo.py` | `--mobile-robot` (`husky`), `--arm-robot` (`panda`) | `racecar`, `mobile_robot`; `kuka_iiwa`, `arm_robot` |
 | Scale demos (arm) | `pick_drop_arm_100robots_demo.py` | `panda` | `kuka_iiwa`, `arm_robot` |
 | Model demos | `resolve_model_demo.py`, `robot_descriptions_demo.py` | `panda` / `tiago` | any registered model |
 
 `100robots_grid_demo.py` defaults to a 100 mobile robot `entities[].grid` scene.
-Use `--config` to point it at another `entities[].grid` scene.
-`100robots_mixed_demo.py` is the separate Husky + Panda mixed showcase.
+Use `--robot` to override the model for every mobile entity, or `--config` to
+point it at another `entities[].grid` scene. `100robots_mixed_demo.py` is the
+separate Husky + Panda mixed showcase; use `--mobile-robot` and `--arm-robot`
+to override its two groups.
 
 See [Tutorial 6 — Robot Models](https://pybulletfleet.readthedocs.io/en/latest/examples/robot-models.html) for the full model resolution system.
 

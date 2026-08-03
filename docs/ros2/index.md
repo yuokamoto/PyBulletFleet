@@ -34,11 +34,12 @@ nodes; the package includes the simulation core and PyBullet dependency.
 
 ## Start here
 
-Start with [Run Your First ROS 2 Bridge](quickstart), then browse the [ROS 2
-demo catalog](demos) or continue to [Run Your First RMF Demo](rmf-quickstart)
-when you need task dispatch. Docker is an alternative for a fully provisioned
-environment; the repository READMEs remain references for Docker operations
-and native overlay maintenance.
+Start with [Run Your First ROS 2 Bridge](quickstart), which includes a fleet
+interface recording, then browse the [ROS 2 demo catalog](demos) or continue
+to [Run Your First RMF Demo](rmf-quickstart), which includes an office patrol
+recording, when you need task dispatch. Docker is an alternative for a fully
+provisioned environment; the repository READMEs remain references for Docker
+operations and native overlay maintenance.
 
 ## Which control path should I use?
 

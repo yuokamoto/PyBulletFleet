@@ -499,14 +499,16 @@ python examples/scale/pick_drop_mobile_100robots_demo.py --robot mobile_robot
 python examples/scale/pick_drop_arm_100robots_demo.py --robot kuka_iiwa
 
 # Grid demos select entities through a config file instead of model arguments.
+python examples/scale/100robots_grid_demo.py --robot racecar
 python examples/scale/100robots_grid_demo.py --config config/100robots_config.yaml
+python examples/scale/100robots_mixed_demo.py --mobile-robot racecar --arm-robot kuka_iiwa
 python examples/scale/100robots_mixed_demo.py --config config/100robots_mixed_config.yaml
 ```
 
 | Script | Argument | Default | Alternatives |
 |--------|----------|---------|-------------|
-| `100robots_grid_demo.py` | `--config` | mobile-only grid | another `entities[].grid` YAML scene |
-| `100robots_mixed_demo.py` | `--config` | Husky + Panda grid | another mixed `entities[].grid` YAML scene |
+| `100robots_grid_demo.py` | `--robot`, `--config` | `mobile_robot` grid | `husky`, `racecar`; another `entities[].grid` YAML scene |
+| `100robots_mixed_demo.py` | `--mobile-robot`, `--arm-robot`, `--config` | Husky + Panda grid | `racecar`, `mobile_robot`; `kuka_iiwa`, `arm_robot`; another scene |
 | `100robots_cube_patrol_demo.py` | `--robot` (mobile) | `husky` | `racecar`, `mobile_robot` |
 | `batch_controller_scale_demo.py` | `--robot` (mobile) | `simple_cube` | `husky`, `racecar`, `mobile_robot` |
 | `pick_drop_mobile_100robots_demo.py` | `--robot` (mobile) | `husky` | `racecar`, `mobile_robot` |

@@ -335,8 +335,10 @@ python examples/mobile/path_following_demo.py --robot racecar
 python examples/scale/100robots_cube_patrol_demo.py --robot mobile_robot
 python examples/scale/pick_drop_arm_100robots_demo.py --robot kuka_iiwa
 
-# Grid demos select their robot groups through the config file.
+# Grid demos support model overrides as well as custom scene files.
+python examples/scale/100robots_grid_demo.py --robot racecar
 python examples/scale/100robots_grid_demo.py --config config/100robots_config.yaml
+python examples/scale/100robots_mixed_demo.py --mobile-robot racecar --arm-robot kuka_iiwa
 python examples/scale/100robots_mixed_demo.py --config config/100robots_mixed_config.yaml
 
 # Model demos — accepts any registered model
@@ -349,8 +351,8 @@ python examples/models/robot_descriptions_demo.py --robot pr2
 | Mobile demos (`examples/mobile/`) | `--robot` | `husky` | `racecar`, `mobile_robot` |
 | Scale demos — mobile | `--robot` | `husky` | `racecar`, `mobile_robot` |
 | Scale demos — arm | `--robot` | `panda` | `kuka_iiwa`, `arm_robot` |
-| `100robots_grid_demo.py` | `--config` | mobile-only grid | another `entities[].grid` YAML scene |
-| `100robots_mixed_demo.py` | `--config` | Husky + `arm_robot` grid | another mixed `entities[].grid` YAML scene |
+| `100robots_grid_demo.py` | `--robot`, `--config` | `mobile_robot` grid | `husky`, `racecar`; another `entities[].grid` YAML scene |
+| `100robots_mixed_demo.py` | `--mobile-robot`, `--arm-robot`, `--config` | Husky + Panda grid | `racecar`, `mobile_robot`; `kuka_iiwa`, `arm_robot`; another scene |
 | `resolve_model_demo.py` | `--robot` | `panda` | any registered model |
 | `robot_descriptions_demo.py` | `--robot` | `tiago` | any `robot_descriptions` model |
 

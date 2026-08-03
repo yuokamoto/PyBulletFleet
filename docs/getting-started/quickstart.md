@@ -52,6 +52,7 @@ the repository:
 pybullet-fleet examples --list
 pybullet-fleet examples --run 100robots_grid_demo.py
 pybullet-fleet examples --copy ./examples  # optional: copy files to edit
+pybullet-fleet config --copy ./config      # optional: copy YAML templates to edit
 ```
 
 From a source checkout or after copying examples, launch the 100-robot grid

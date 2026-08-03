@@ -4,6 +4,15 @@ This guide uses the GitHub-hosted Jazzy APT preview on Ubuntu 24.04 or WSL.
 It first installs and runs the Python simulation core, then adds the ROS 2
 bridge. For Open-RMF, continue with [Run Your First RMF Demo](rmf-quickstart).
 
+<div align="center">
+<video controls preload="metadata" width="720">
+  <source src="../fleet_interface_demo.mp4" type="video/mp4">
+  <a href="../fleet_interface_demo.mp4">Download the fleet interface demo video</a>
+</video>
+</div>
+
+This is the fleet-level ROS 2 demo described in step 4 below.
+
 Before starting, install the base ROS 2 Jazzy distribution (at least
 `ros-jazzy-ros-base`) using the [official Ubuntu binary installation
 guide](https://docs.ros.org/en/jazzy/Installation/Ubuntu-Install-Debs.html).
