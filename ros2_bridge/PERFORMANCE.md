@@ -35,6 +35,44 @@ The checker sends commands and verifies that commanded robots start moving. For
 per-robot topic commands this is important: publish-loop time alone is not an
 end-to-end performance metric.
 
+Add `--measure-transport` to enable the separate `TransportTiming` probe and
+report message timing for the `/fleet/states` and `/fleet/navigate` service
+paths. The checker runs in a separate process from the bridge. For
+`/fleet/states`, the bridge publishes a timing record immediately alongside
+the real FleetState; the checker matches the record to the FleetState header
+stamp and measures callback receive time. For `/fleet/navigate`, the probe
+reports request receive and response-ready times while the checker records
+request send and response receive. Existing public FleetState, FleetNavigate,
+and CommandAck definitions are unchanged. Wall-clock values are valid for
+same-host/container measurements; cross-host measurements require synchronized
+clocks.
+
+For the `/fleet/navigate` topic, the probe reports client publish to bridge
+callback start and callback dispatch completion. It has no response leg and
+does not claim that the robots have begun moving; use the existing motion check
+when that boundary matters.
+
+For repeatable service distributions, use `--fleet-service-repeats N`. Each
+request carries one `goals_2d` entry per robot and receives a unique
+`command_id`; it therefore measures repeated full-fleet commands rather than
+single-robot requests.
+
+Example:
+
+```bash
+docker compose run --rm --no-deps \
+  -v "$(pwd):/docker:ro" \
+  bridge bash /docker/test_fleet_scale.sh --robots 1000 \
+    --interface-mode fleet --command-interface fleet \
+    --publish-rate 5 --measure-transport --measure-rtf \
+    --fleet-service-repeats 10
+```
+
+To measure repeated full-fleet topic commands without deliberately filling the
+topic queue, use `--command-interface fleet_topic --fleet-topic-repeats 10`.
+The checker waits for each callback-completion probe before publishing the next
+topic command when transport measurement is enabled.
+
 `--interface-mode` configures which ROS interfaces the bridge exposes.
 `--command-interface` is an advanced checker option that selects which command
 path is exercised during the measurement. In normal runs they should match
@@ -94,8 +132,15 @@ DDS/RCL layer.
 
 These are single-run diagnostic numbers, not stable CI thresholds.
 
-| Mode | Robots | Groups | publish_rate | target_rtf | Command ack | All moved after ack (wall) | Result |
-|------|--------|--------|--------------|------------|-------------|----------------------------|--------|
+Unless a label explicitly says otherwise, every duration and latency below is
+wall-clock time. This includes publish-loop time, command acknowledgement,
+motion verification, and all transport p50/p99 values. `target_rtf` is a
+configured simulation pacing target, while `Observed RTF` and `max RTF` are the
+ratio of `/clock` simulation time to wall-clock time. Message sizes, robot
+counts, and probe-match counts are not timings.
+
+| Mode | Robots | Groups | publish_rate | target_rtf | Command ack (wall) | All moved after ack (wall) | Result |
+|------|--------|--------|--------------|------------|--------------------|----------------------------|--------|
 | `fleet` | 100 | none | 5 Hz | 0 | 0.048 s | 0.008 s | max RTF 110.20x |
 | `fleet` | 500 | none | 5 Hz | 0 | 0.181 s | 0.043 s | max RTF 21.03x |
 | `fleet` | 1000 | none | 5 Hz | 1.0 | 0.027 s | 0.173 s | target-rate command check |
@@ -107,6 +152,89 @@ These are single-run diagnostic numbers, not stable CI thresholds.
 | `hybrid` | 1000 | `state_publishers,tf,command_topics` | 1 Hz | 1.0 | 1.878 s | 0.229 s | target-rate command check |
 | `hybrid` | 1000 | `state_publishers,tf,command_topics` | 5 Hz | 1.0 | 8.657 s | 0.323 s | target-rate command check |
 | `hybrid` | 1000 | `actions` | 5 Hz | 1.0 | not available | not measured | DDS/RCL abort observed |
+
+### Transport Probe Results
+
+The following same-host Docker measurements used `--measure-transport`,
+`publish_rate=5`, `simple_cube`, and `target_rtf=1.0`. The probe is enabled only
+for measurement and adds one small timing topic plus a serialization-size
+measurement, so these values are diagnostic rather than CI thresholds.
+
+| Robots | FleetState bytes | State p50 / p99 (wall) | Navigate request-to-bridge (wall) | Navigate round-trip (wall) |
+|--------|------------------:|-----------------------:|----------------------------------:|---------------------------:|
+| 100 | 14,422 | 2.67 / 15.88 ms | 3.60 ms | 8.43 ms |
+| 500 | 72,022 | 10.81 / 25.23 ms | 3.56 ms | 19.55 ms |
+| 1000 | 144,022 | 19.72 / 33.49 ms | 5.03 ms | 29.05 ms |
+
+The target-RTF comparison uses the controlled, repeated measurements below.
+Do not compare unpaired single command samples across pacing modes.
+
+At the paced 1x baseline, FleetState wire size and publish-to-callback latency
+grow approximately with robot count: 14,422/72,022/144,022 bytes and
+2.67/10.81/19.72 ms p50 at 100/500/1000 robots. The navigate request's
+arrival at the bridge stays small (3.60/3.56/5.03 ms), while acknowledged
+round-trip grows from 8.43 to 29.05 ms because the bridge must validate and
+apply more robot goals. This separates transport delivery from full-fleet
+command processing for capacity planning.
+
+### Simulation Pacing Impact
+
+The following 2026-08-08 diagnostic run used 1000 robots, 1000 `goals_2d`
+entries per `/fleet/navigate` request, and ten repeated requests. All values
+are wall-clock milliseconds except observed RTF.
+
+| Target RTF | Observed RTF | State p50 / p99 | Request-to-bridge p50 / p99 | Bridge processing p50 / p99 | Navigate round-trip p50 / p99 |
+|-----------:|-------------:|----------------:|-----------------------------:|-----------------------------:|-------------------------------:|
+| 0 (unpaced) | 7.68x | 19.56 / 36.49 | 76.00 / 99.00 | 326.49 / 395.63 | 413.47 / 466.17 |
+| 1 | 0.96x | 20.90 / 36.36 | 4.25 / 5.51 | 22.80 / 302.14 | 29.68 / 308.13 |
+| 4 | 3.96x | 19.89 / 35.61 | 59.81 / 135.76 | 264.06 / 393.16 | 335.38 / 494.23 |
+| 8 | 7.80x | 19.51 / 38.43 | 64.43 / 126.96 | 293.81 / 382.37 | 378.84 / 511.98 |
+
+FleetState delivery remains about 20 ms p50 across this range. In contrast,
+the 1000-goal command uses about 30 ms p50 at paced 1x and 335--413 ms p50 at
+the simulator's upper-throughput range. This is the practical timing budget
+for an external controller, not a simulation-correctness limit.
+
+The scale checker verifies that accepted commands cause robots to start moving;
+it does not evaluate path quality, collision behaviour, or physics accuracy.
+At 8x, 100 ms of wall-clock delay spans roughly 0.8 s of simulation-clock
+progress. Choose a target RTF with command-latency headroom, and repeat this
+measurement for a product timing requirement before treating these diagnostic
+values as a limit.
+
+### FleetState QoS Sweep
+
+The following 2026-08-08 native same-host run used 1000 robots,
+`target_rtf=8`, `publish_rate=5`, one state subscriber, and ten full-fleet
+topic commands. The timing probe remained reliable so probe matches report
+FleetState deliveries. This is not a network or slow-subscriber test and does
+not establish a broadly recommended default.
+
+The scale checker uses named QoS profiles in its generated temporary bridge
+configuration; they are not yet a general bridge configuration API. For
+example, select the same-host best-effort profile with
+`--state-qos-preset fleet_state_best_effort`; use
+`--state-qos-reliability`, `--state-qos-history`, `--state-qos-depth`, or
+`--state-qos-durability` only when measuring an explicit override.
+
+| State QoS | Observed RTF | State p50 / p99 (wall) | Probe matches |
+|-----------|-------------:|-----------------------:|--------------:|
+| `RELIABLE/KEEP_LAST(10)` | 8.39x | 18.07 / 46.08 ms | 335 / 335 (100%) |
+| `RELIABLE/KEEP_LAST(1)` | 8.53x | 18.03 / 43.27 ms | 341 / 341 (100%) |
+| `BEST_EFFORT/KEEP_LAST(1)` | 8.38x | 18.10 / 44.64 ms | 340 / 340 (100%) |
+
+No material difference appeared in this uncongested, local setup. Repeat with
+slow subscribers, multiple subscribers, and a network transport before making
+a reliability or depth recommendation.
+
+### Same-Host Conclusion
+
+For the current deployment target, keep the default FleetState QoS as
+`RELIABLE/KEEP_LAST(10)`. The native same-host sweep did not show a material
+RTF or delivery-latency benefit from changing either reliability or depth, and
+the reliable default preserves complete delivery semantics for ordinary local
+clients. This is a deployment decision, not a claim that the same profile is
+best across a network or with a slow subscriber.
 
 `Command ack` is the `/fleet/navigate` service response time. `All moved after
 ack` or `All moved after command publication` is a separate checker result based

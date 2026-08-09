@@ -10,6 +10,15 @@ from pathlib import Path
 
 import yaml
 
+try:
+    from pybullet_fleet_ros.interface_config import FLEET_STATE_QOS_PRESETS
+except ModuleNotFoundError:
+    _BRIDGE_SOURCE = Path(__file__).resolve().parents[1] / "ros2_bridge/pybullet_fleet_ros"
+    if not _BRIDGE_SOURCE.is_dir():
+        raise
+    sys.path.insert(0, str(_BRIDGE_SOURCE))
+    from pybullet_fleet_ros.interface_config import FLEET_STATE_QOS_PRESETS
+
 DEFAULT_TEMPLATE_CANDIDATES = [
     Path(__file__).resolve().parents[1] / "ros2_bridge/pybullet_fleet_ros/config/bridge_fleet_scale.yaml",
     Path("/rmf_demos_ws/install/pybullet_fleet_ros/share/pybullet_fleet_ros/config/bridge_fleet_scale.yaml"),
@@ -41,6 +50,15 @@ def _default_template() -> Path:
     raise FileNotFoundError(f"bridge_fleet_scale.yaml not found; checked: {candidates}")
 
 
+def _state_qos_config(args: argparse.Namespace) -> dict:
+    config = {"preset": args.state_qos_preset}
+    for key in ("reliability", "history", "depth", "durability"):
+        value = getattr(args, f"state_qos_{key}")
+        if value is not None:
+            config[key] = value
+    return config
+
+
 def generate_bridge_config(
     robot_count: int,
     output_path: Path,
@@ -51,6 +69,8 @@ def generate_bridge_config(
     interface_mode: str,
     per_robot_groups: set[str],
     robot_model: str,
+    transport_probe: bool,
+    state_qos: dict,
 ) -> None:
     side = int(math.ceil(math.sqrt(robot_count)))
     fleet_enabled = interface_mode in {"fleet", "hybrid"}
@@ -68,6 +88,8 @@ def generate_bridge_config(
         "states": fleet_enabled,
         "navigate": fleet_enabled,
         "joint_command": False,
+        "transport_probe": fleet_enabled and transport_probe,
+        "state_qos": state_qos,
     }
     config["per_robot_api"] = {
         "enabled": per_robot_enabled,
@@ -150,7 +172,35 @@ def main() -> int:
         default=_parse_groups("default"),
         help="Comma-separated per-robot groups for per_robot/hybrid configs, or default/all/none",
     )
+    parser.add_argument("--transport-probe", action="store_true", help="Enable the isolated ROS transport timing probe")
+    parser.add_argument(
+        "--state-qos-preset",
+        choices=sorted(FLEET_STATE_QOS_PRESETS),
+        default="fleet_state_reliable",
+        help="Evaluated FleetState QoS profile",
+    )
+    parser.add_argument(
+        "--state-qos-reliability",
+        choices=["reliable", "best_effort"],
+        default=None,
+        help="Override QoS reliability for /fleet/states",
+    )
+    parser.add_argument(
+        "--state-qos-history",
+        choices=["keep_last", "keep_all"],
+        default=None,
+        help="Override QoS history policy for /fleet/states",
+    )
+    parser.add_argument("--state-qos-depth", type=int, default=None, help="Override QoS depth for /fleet/states")
+    parser.add_argument(
+        "--state-qos-durability",
+        choices=["volatile", "transient_local"],
+        default=None,
+        help="Override QoS durability for /fleet/states",
+    )
     args = parser.parse_args()
+    if args.state_qos_depth is not None and args.state_qos_depth < 1:
+        parser.error("--state-qos-depth must be at least 1")
 
     template_path = args.template if args.template is not None else _default_template()
     generate_bridge_config(
@@ -162,6 +212,8 @@ def main() -> int:
         interface_mode=args.interface_mode,
         per_robot_groups=args.per_robot_groups,
         robot_model=args.robot_model,
+        transport_probe=args.transport_probe,
+        state_qos=_state_qos_config(args),
     )
     print(f"[config] wrote generated bridge config: {args.config_out} (template={template_path})")
     return 0

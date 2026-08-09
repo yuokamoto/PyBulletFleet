@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import time
 from typing import Iterable
 
 from geometry_msgs.msg import Point, Pose, Quaternion, Twist, Vector3
+from rclpy.qos import QoSProfile
+from rclpy.serialization import serialize_message
 from std_msgs.msg import Header
 
 from pybullet_fleet.commands import (
@@ -38,6 +41,7 @@ try:
         RobotJointPositionsCommand as RobotJointPositionsCommandMsg,
         RobotNamedJointPositionsCommand as RobotNamedJointPositionsCommandMsg,
         RobotState3D as RobotState3DMsg,
+        TransportTiming,
     )
     from pybullet_fleet_msgs.srv import FleetAttach as FleetAttachSrv
     from pybullet_fleet_msgs.srv import FleetExecuteAction as FleetExecuteActionSrv
@@ -59,6 +63,7 @@ except ImportError as exc:
     RobotJointPositionsCommandMsg = None
     RobotNamedJointPositionsCommandMsg = None
     RobotState3DMsg = None
+    TransportTiming = None
     FleetAttachSrv = None
     FleetExecuteActionSrv = None
     FleetJointCommandSrv = None
@@ -76,6 +81,15 @@ def _require_fleet_msgs() -> None:
         "fleet_api is enabled but pybullet_fleet_msgs Python bindings are unavailable. "
         "Build/source the ROS workspace so pybullet_fleet_msgs is generated."
     ) from _FLEET_MSGS_IMPORT_ERROR
+
+
+def _fleet_state_qos(config: FleetApiConfig) -> QoSProfile:
+    return QoSProfile(
+        history=config.state_qos.history,
+        depth=config.state_qos.depth,
+        reliability=config.state_qos.reliability,
+        durability=config.state_qos.durability,
+    )
 
 
 class FleetRosInterface:
@@ -96,6 +110,8 @@ class FleetRosInterface:
         self._execute_action_srv = None
         self._joint_sub = None
         self._joint_srv = None
+        self._transport_probe_pub = None
+        self._transport_probe_sequence = 0
 
         if not config.enabled:
             return
@@ -106,7 +122,9 @@ class FleetRosInterface:
         self._rmf_frame_offset = _node_frame_offset(node)
 
         if config.states:
-            self._state_pub = node.create_publisher(FleetState, "/fleet/states", 10)
+            self._state_pub = node.create_publisher(FleetState, "/fleet/states", _fleet_state_qos(config))
+        if config.transport_probe:
+            self._transport_probe_pub = node.create_publisher(TransportTiming, "/fleet/transport_timing", 10)
         if config.navigate:
             self._navigate_sub = node.create_subscription(FleetNavigate, "/fleet/navigate", self._on_navigate, 10)
             self._navigate_srv = node.create_service(FleetNavigateSrv, "/fleet/navigate", self._on_navigate_service)
@@ -145,13 +163,21 @@ class FleetRosInterface:
         """Publish fleet state after a simulation step."""
         if self._state_pub is None:
             return
-        self._state_pub.publish(
-            fleet_state_to_msg(
-                self.state_provider.get_states(),
-                stamp=stamp,
-                xy_offset=self._rmf_frame_offset,
-            )
+        msg = fleet_state_to_msg(
+            self.state_provider.get_states(),
+            stamp=stamp,
+            xy_offset=self._rmf_frame_offset,
         )
+        publish_ns = time.monotonic_ns()
+        self._state_pub.publish(msg)
+        if self._transport_probe_pub is not None:
+            self._publish_transport_timing(
+                channel="/fleet/states",
+                source_sim_time=stamp,
+                source_monotonic_ns=publish_ns,
+                item_count=len(msg.robots),
+                payload_bytes=len(serialize_message(msg)),
+            )
 
     def destroy(self) -> None:
         """Destroy ROS entities created by this wrapper."""
@@ -172,13 +198,75 @@ class FleetRosInterface:
             if entity is not None:
                 destroy(entity)
                 setattr(self, attr, None)
+        if self._transport_probe_pub is not None:
+            self.node.destroy_publisher(self._transport_probe_pub)
+            self._transport_probe_pub = None
 
     def _on_navigate(self, msg: FleetNavigate) -> None:
-        self._log_rejections(self._dispatch_navigate(msg))
+        receive_ns = time.monotonic_ns()
+        ack = self._dispatch_navigate(msg)
+        self._log_rejections(ack)
+        if self._transport_probe_pub is not None:
+            self._publish_transport_timing(
+                channel="/fleet/navigate_topic",
+                correlation_id=msg.command_id,
+                source_sim_time=ack.sim_time,
+                source_monotonic_ns=receive_ns,
+                end_monotonic_ns=time.monotonic_ns(),
+                item_count=len(msg.goals_2d) + len(msg.goals_3d),
+                payload_bytes=len(serialize_message(msg)),
+            )
 
     def _on_navigate_service(self, request, response):
+        receive_ns = time.monotonic_ns()
         response.ack = command_ack_to_msg(self._dispatch_navigate(request))
+        if self._transport_probe_pub is not None:
+            self._publish_transport_timing(
+                channel="/fleet/navigate",
+                correlation_id=request.command_id,
+                source_sim_time=response.ack.sim_time,
+                source_monotonic_ns=receive_ns,
+                end_monotonic_ns=time.monotonic_ns(),
+                item_count=len(request.goals_2d) + len(request.goals_3d),
+                payload_bytes=len(serialize_message(request)),
+            )
         return response
+
+    def _publish_transport_timing(
+        self,
+        *,
+        channel: str,
+        source_sim_time,
+        source_monotonic_ns: int,
+        correlation_id: str = "",
+        end_monotonic_ns: int = 0,
+        item_count: int = 0,
+        payload_bytes: int = 0,
+    ) -> None:
+        if self._transport_probe_pub is None:
+            return
+        probe = TransportTiming()
+        probe.channel = channel
+        probe.correlation_id = correlation_id
+        probe.sequence = self._transport_probe_sequence
+        self._transport_probe_sequence += 1
+        if source_sim_time is not None:
+            if hasattr(source_sim_time, "sec"):
+                probe.source_sim_time.sec = int(source_sim_time.sec)
+                probe.source_sim_time.nanosec = int(source_sim_time.nanosec)
+            else:
+                seconds = int(float(source_sim_time))
+                nanoseconds = int(round((float(source_sim_time) - seconds) * 1e9))
+                if nanoseconds >= 1_000_000_000:
+                    seconds += 1
+                    nanoseconds -= 1_000_000_000
+                probe.source_sim_time.sec = seconds
+                probe.source_sim_time.nanosec = nanoseconds
+        probe.source_monotonic_ns = int(source_monotonic_ns)
+        probe.end_monotonic_ns = int(end_monotonic_ns)
+        probe.item_count = int(item_count)
+        probe.payload_bytes = int(payload_bytes)
+        self._transport_probe_pub.publish(probe)
 
     def _dispatch_navigate(self, msg: FleetNavigate) -> PbfCommandAck:
         frame_rejections = _navigation_frame_rejections(msg)

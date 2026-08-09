@@ -1273,7 +1273,7 @@ class Agent(SimObject):
 
         # Delegate to batch controller when registered, otherwise per-agent.
         if self._batch_controller is not None:
-            self._batch_controller.set_path(
+            self._batch_controller.synchronized_set_path(
                 self,
                 final_path,
                 final_orientation_align=final_orientation_align,
@@ -1664,9 +1664,7 @@ class Agent(SimObject):
         self._clear_path_visualization()
         if self._batch_controller is not None:
             # Cancel the in-progress batch path so batch_advance() goes IDLE.
-            idx = self._batch_controller._agent_index.get(id(self))
-            if idx is not None:
-                self._batch_controller._on_cancel_path(idx)
+            self._batch_controller.synchronized_cancel_path(self)
         elif self._controllers:
             # Notify base controller to reset all internal state (velocity, pose, path)
             self._controllers[0].on_stop(self)

@@ -5,6 +5,7 @@ find_package(ament_cmake REQUIRED)
 find_package(rosidl_default_generators REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(std_msgs REQUIRED)
+find_package(builtin_interfaces REQUIRED)
 
 # Keep ROS interfaces explicitly listed instead of globbed. These files are the
 # package's public API; updating CMakeLists.txt makes additions/removals visible
@@ -26,6 +27,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/RobotJointPositionsCommand.msg"
   "msg/RobotNamedJointPositionsCommand.msg"
   "msg/RobotState3D.msg"
+  "msg/TransportTiming.msg"
   "srv/AttachObject.srv"
   "srv/FleetAttach.srv"
   "srv/FleetExecuteAction.srv"
@@ -33,7 +35,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "srv/FleetNavigate.srv"
   "srv/FleetStop.srv"
   "action/ExecuteAction.action"
-  DEPENDENCIES geometry_msgs std_msgs
+  DEPENDENCIES builtin_interfaces geometry_msgs std_msgs
 )
 
 ament_export_dependencies(rosidl_default_runtime)

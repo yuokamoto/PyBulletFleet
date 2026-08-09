@@ -1,0 +1,8 @@
+string channel
+string correlation_id
+uint64 sequence
+builtin_interfaces/Time source_sim_time
+uint64 source_monotonic_ns
+uint64 end_monotonic_ns
+uint32 item_count
+uint32 payload_bytes

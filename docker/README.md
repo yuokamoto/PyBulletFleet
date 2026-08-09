@@ -637,6 +637,24 @@ docker compose run --rm --no-deps \
   bridge bash /docker/test_fleet_scale.sh --robots 1000 --interface-mode fleet \
     --command-interface fleet --no-verify-motion
 
+# Enable the separate transport timing probe and measure same-host wall-clock
+# timing for fleet state and navigation paths during a 10-second window. Repeat
+# ten full-fleet service requests and measure observed /clock RTF in the same run.
+docker compose run --rm --no-deps \
+  -v "$(pwd):/docker:ro" \
+  bridge bash /docker/test_fleet_scale.sh --robots 1000 --interface-mode fleet \
+    --command-interface fleet --publish-rate 5 --measure-transport --measure-rtf \
+    --fleet-service-repeats 10
+
+# Measure the asynchronous topic command path. With transport measurement, the
+# checker waits for each bridge callback completion before sending the next
+# full-fleet command, so this does not intentionally fill the topic queue.
+docker compose run --rm --no-deps \
+  -v "$(pwd):/docker:ro" \
+  bridge bash /docker/test_fleet_scale.sh --robots 1000 --interface-mode fleet \
+    --command-interface fleet_topic --publish-rate 5 --measure-transport --measure-rtf \
+    --fleet-topic-repeats 10
+
 # To inspect the generated bridge config:
 docker compose run --rm --no-deps \
   -v "$(pwd):/docker:ro" \

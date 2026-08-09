@@ -28,6 +28,7 @@ sized with ``self._agents``.
 from __future__ import annotations
 
 import math
+import threading
 from abc import abstractmethod
 from typing import TYPE_CHECKING, Dict, List, Optional, Type
 
@@ -79,6 +80,9 @@ class BatchKinematicController(Controller):
             BATCH_CONTROLLER_REGISTRY[name] = cls
 
     def __init__(self) -> None:
+        # ROS bridge callbacks may replace paths while the simulation thread is
+        # evaluating vectorized trajectory arrays. Keep those mutations atomic.
+        self._state_lock = threading.RLock()
         self._sim_core: Optional["MultiRobotSimulationCore"] = None
         self._agents: List["Agent"] = []
         # id(agent) -> row index. Stable for the lifetime of an agent in this
@@ -226,6 +230,23 @@ class BatchKinematicController(Controller):
     # ------------------------------------------------------------------ #
     # Phase 1 entry point (called by core_simulation.step_once)
     # ------------------------------------------------------------------ #
+
+    def synchronized_set_path(self, agent: "Agent", path, **kwargs) -> None:
+        """Set one path without racing a concurrent simulation step."""
+        with self._state_lock:
+            getattr(self, "set_path")(agent, path, **kwargs)
+
+    def synchronized_cancel_path(self, agent: "Agent") -> None:
+        """Cancel one path without racing a concurrent simulation step."""
+        with self._state_lock:
+            idx = self._agent_index.get(id(agent))
+            if idx is not None:
+                self._on_cancel_path(idx)
+
+    def synchronized_batch_advance(self, dt: float) -> np.ndarray:
+        """Advance vectorized trajectory state without concurrent path writes."""
+        with self._state_lock:
+            return self.batch_advance(dt)
 
     @abstractmethod
     def batch_advance(self, dt: float) -> np.ndarray:

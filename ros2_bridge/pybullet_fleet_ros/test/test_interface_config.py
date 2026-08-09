@@ -1,8 +1,7 @@
-"""Tests for bridge API interface configuration helpers.
+"""Tests for bridge API interface configuration and ROS QoS resolution."""
 
-These tests intentionally avoid ROS imports.
-Default pytest coverage mirrors the core cases in ``tests/``.
-"""
+import pytest
+from rclpy.qos import DurabilityPolicy, HistoryPolicy, ReliabilityPolicy
 
 from pybullet_fleet_ros.interface_config import resolve_bridge_api_config
 
@@ -37,6 +36,41 @@ def test_explicit_fleet_api_does_not_disable_per_robot_interfaces():
     assert cfg.fleet_api.navigate is True
     assert cfg.per_robot_api.enabled is True
     assert cfg.per_robot_api.robot_enabled("robot0") is True
+
+
+def test_fleet_state_qos_resolves_preset_and_overrides():
+    cfg = resolve_bridge_api_config(
+        {
+            "fleet_api": {
+                "state_qos": {
+                    "preset": "fleet_state_best_effort",
+                    "history": "keep_all",
+                    "depth": 1,
+                    "durability": "transient_local",
+                }
+            }
+        }
+    )
+
+    assert cfg.fleet_api.state_qos.reliability == ReliabilityPolicy.BEST_EFFORT
+    assert cfg.fleet_api.state_qos.history == HistoryPolicy.KEEP_ALL
+    assert cfg.fleet_api.state_qos.depth == 1
+    assert cfg.fleet_api.state_qos.durability == DurabilityPolicy.TRANSIENT_LOCAL
+
+
+@pytest.mark.parametrize(
+    ("state_qos", "field"),
+    [
+        ({"preset": "unknown"}, "preset"),
+        ({"reliability": "invalid"}, "reliability"),
+        ({"history": "invalid"}, "history"),
+        ({"depth": 0}, "depth"),
+        ({"durability": "invalid"}, "durability"),
+    ],
+)
+def test_fleet_state_qos_rejects_invalid_profile(state_qos, field):
+    with pytest.raises(ValueError, match=rf"state_qos\.{field}"):
+        resolve_bridge_api_config({"fleet_api": {"state_qos": state_qos}})
 
 
 def test_fleet_api_and_per_robot_api_are_independent():

@@ -19,6 +19,14 @@ VERIFY_MOTION=true
 PER_ROBOT_PUBLISH_REPEATS=3
 PER_ROBOT_PUBLISH_BATCH_SIZE=0
 MEASURE_RTF=false
+MEASURE_TRANSPORT=false
+FLEET_SERVICE_REPEATS=1
+FLEET_TOPIC_REPEATS=1
+STATE_QOS_PRESET=fleet_state_reliable
+STATE_QOS_RELIABILITY=
+STATE_QOS_HISTORY=
+STATE_QOS_DEPTH=
+STATE_QOS_DURABILITY=
 RTF_WARMUP=1.0
 RTF_DURATION=10.0
 
@@ -75,6 +83,38 @@ while [ "$#" -gt 0 ]; do
         --measure-rtf)
             MEASURE_RTF=true
             shift
+            ;;
+        --measure-transport)
+            MEASURE_TRANSPORT=true
+            shift
+            ;;
+        --fleet-service-repeats)
+            FLEET_SERVICE_REPEATS="$2"
+            shift 2
+            ;;
+        --fleet-topic-repeats)
+            FLEET_TOPIC_REPEATS="$2"
+            shift 2
+            ;;
+        --state-qos-reliability)
+            STATE_QOS_RELIABILITY="$2"
+            shift 2
+            ;;
+        --state-qos-preset)
+            STATE_QOS_PRESET="$2"
+            shift 2
+            ;;
+        --state-qos-history)
+            STATE_QOS_HISTORY="$2"
+            shift 2
+            ;;
+        --state-qos-depth)
+            STATE_QOS_DEPTH="$2"
+            shift 2
+            ;;
+        --state-qos-durability)
+            STATE_QOS_DURABILITY="$2"
+            shift 2
             ;;
         --rtf-warmup)
             RTF_WARMUP="$2"
@@ -151,6 +191,7 @@ CONFIG_ARGS=(
     --target-rtf "$TARGET_RTF"
     --interface-mode "$INTERFACE_MODE"
     --per-robot-groups "$PER_ROBOT_GROUPS"
+    --state-qos-preset "$STATE_QOS_PRESET"
     --config-out "$CONFIG_PATH"
 )
 if [ "$GUI" = true ]; then
@@ -158,6 +199,21 @@ if [ "$GUI" = true ]; then
 fi
 if [ -n "$TEMPLATE" ]; then
     CONFIG_ARGS+=(--template "$TEMPLATE")
+fi
+if [ "$MEASURE_TRANSPORT" = true ]; then
+    CONFIG_ARGS+=(--transport-probe)
+fi
+if [ -n "$STATE_QOS_RELIABILITY" ]; then
+    CONFIG_ARGS+=(--state-qos-reliability "$STATE_QOS_RELIABILITY")
+fi
+if [ -n "$STATE_QOS_HISTORY" ]; then
+    CONFIG_ARGS+=(--state-qos-history "$STATE_QOS_HISTORY")
+fi
+if [ -n "$STATE_QOS_DEPTH" ]; then
+    CONFIG_ARGS+=(--state-qos-depth "$STATE_QOS_DEPTH")
+fi
+if [ -n "$STATE_QOS_DURABILITY" ]; then
+    CONFIG_ARGS+=(--state-qos-durability "$STATE_QOS_DURABILITY")
 fi
 echo "--- Phase 1/2: generate bridge config ---"
 python3 "$CONFIG_GENERATOR" "${CONFIG_ARGS[@]}"
@@ -181,14 +237,32 @@ CHECK_ARGS=(
     --timeout "$TIMEOUT"
     --interface-mode "$INTERFACE_MODE"
     --command-interface "$COMMAND_INTERFACE"
+    --fleet-service-repeats "$FLEET_SERVICE_REPEATS"
+    --fleet-topic-repeats "$FLEET_TOPIC_REPEATS"
+    --state-qos-preset "$STATE_QOS_PRESET"
     --per-robot-publish-repeats "$PER_ROBOT_PUBLISH_REPEATS"
     --per-robot-publish-batch-size "$PER_ROBOT_PUBLISH_BATCH_SIZE"
 )
+if [ -n "$STATE_QOS_RELIABILITY" ]; then
+    CHECK_ARGS+=(--state-qos-reliability "$STATE_QOS_RELIABILITY")
+fi
+if [ -n "$STATE_QOS_HISTORY" ]; then
+    CHECK_ARGS+=(--state-qos-history "$STATE_QOS_HISTORY")
+fi
+if [ -n "$STATE_QOS_DEPTH" ]; then
+    CHECK_ARGS+=(--state-qos-depth "$STATE_QOS_DEPTH")
+fi
+if [ -n "$STATE_QOS_DURABILITY" ]; then
+    CHECK_ARGS+=(--state-qos-durability "$STATE_QOS_DURABILITY")
+fi
 if [ "$VERIFY_MOTION" = false ]; then
     CHECK_ARGS+=(--no-verify-motion)
 fi
 if [ "$MEASURE_RTF" = true ]; then
     CHECK_ARGS+=(--measure-rtf --rtf-warmup "$RTF_WARMUP" --rtf-duration "$RTF_DURATION")
+fi
+if [ "$MEASURE_TRANSPORT" = true ]; then
+    CHECK_ARGS+=(--measure-transport --transport-warmup "$RTF_WARMUP" --transport-duration "$RTF_DURATION")
 fi
 
 python3 "$CHECKER" "${CHECK_ARGS[@]}"

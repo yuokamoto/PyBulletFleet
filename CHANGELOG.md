@@ -18,6 +18,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- Add an optional ROS 2 fleet scale-check transport probe for same-host
+  monotonic timing on `/fleet/states`, the `/fleet/navigate` service, and the
+  `/fleet/navigate` topic.
+- Add repeatable full-fleet navigation service timing samples to the ROS 2
+  scale checker.
+
+### Fixed
+
+- Serialize batch-controller path updates with simulation advancement to avoid
+  concurrent ROS command dispatch corrupting vectorized trajectory state.
+
 ## v0.7.3 (2026-08-02)
 
 ### Documentation

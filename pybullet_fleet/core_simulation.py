@@ -3555,7 +3555,7 @@ class MultiRobotSimulationCore:
             for mgr in self._registered_managers:
                 bc = getattr(mgr, "batch_controller", None)
                 if bc is not None:
-                    bc.batch_advance(self._params.timestep)
+                    bc.synchronized_batch_advance(self._params.timestep)
 
             for obj in self._sim_objects:
                 if obj._needs_update:
