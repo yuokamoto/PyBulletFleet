@@ -2,6 +2,10 @@
 Changelog for package pybullet_fleet_msgs
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+0.1.3 (Unreleased)
+-------------------
+* Add an isolated transport timing message for ROS benchmark instrumentation.
+
 0.1.2 (2026-08-01)
 ------------------
 * Re-release message definitions with the installed fleet demo package set.

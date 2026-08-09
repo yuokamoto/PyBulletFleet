@@ -1,7 +1,6 @@
 """Configuration helpers for fleet and per-robot ROS interfaces.
 
-This module intentionally has no ROS imports so it can be tested outside a
-ROS workspace. BridgeNode can use it to translate explicit ``fleet_api`` /
+BridgeNode uses this module to translate explicit ``fleet_api`` /
 ``per_robot_api`` sections into one normalized configuration object.
 """
 
@@ -9,9 +8,43 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from enum import Enum, auto
 from typing import Any
 
 from pybullet_fleet.config_utils import config_get_bool, config_get_str_list
+
+try:
+    from rclpy.qos import DurabilityPolicy, HistoryPolicy, ReliabilityPolicy
+except ImportError:  # pragma: no cover - exercised by core-only configuration tests
+    # Keep configuration parsing importable in the normal, non-ROS test
+    # environment. A running bridge always imports the rclpy policy enums.
+    class ReliabilityPolicy(Enum):
+        RELIABLE = auto()
+        BEST_EFFORT = auto()
+
+    class HistoryPolicy(Enum):
+        KEEP_LAST = auto()
+        KEEP_ALL = auto()
+
+    class DurabilityPolicy(Enum):
+        VOLATILE = auto()
+        TRANSIENT_LOCAL = auto()
+
+
+@dataclass(frozen=True)
+class FleetStateQosConfig:
+    """Internal QoS settings used by the FleetState scale-check profiles."""
+
+    reliability: ReliabilityPolicy = ReliabilityPolicy.RELIABLE
+    history: HistoryPolicy = HistoryPolicy.KEEP_LAST
+    depth: int = 10
+    durability: DurabilityPolicy = DurabilityPolicy.VOLATILE
+
+
+FLEET_STATE_QOS_PRESETS = {
+    "fleet_state_reliable": FleetStateQosConfig(),
+    "fleet_state_best_effort": FleetStateQosConfig(reliability=ReliabilityPolicy.BEST_EFFORT, depth=1),
+}
 
 
 @dataclass(frozen=True)
@@ -26,6 +59,10 @@ class FleetApiConfig:
     execute_action: bool = False
     attach: bool = False
     charging: bool = False
+    transport_probe: bool = False
+    # The scale checker writes this internal setting into its temporary bridge
+    # config. It is not yet a documented general bridge configuration API.
+    state_qos: FleetStateQosConfig = field(default_factory=FleetStateQosConfig)
 
 
 @dataclass(frozen=True)
@@ -74,6 +111,7 @@ class BridgeApiConfig:
 
 
 def _fleet_api_from_dict(config: Mapping[str, Any], base: FleetApiConfig) -> FleetApiConfig:
+    state_qos = _fleet_state_qos_from_dict(config.get("state_qos"), base.state_qos)
     return FleetApiConfig(
         enabled=config_get_bool(config, "enabled", base.enabled),
         states=config_get_bool(config, "states", base.states),
@@ -83,7 +121,62 @@ def _fleet_api_from_dict(config: Mapping[str, Any], base: FleetApiConfig) -> Fle
         execute_action=config_get_bool(config, "execute_action", base.execute_action),
         attach=config_get_bool(config, "attach", base.attach),
         charging=config_get_bool(config, "charging", base.charging),
+        transport_probe=config_get_bool(config, "transport_probe", base.transport_probe),
+        state_qos=state_qos,
     )
+
+
+def _fleet_state_qos_from_dict(config: Any, base: FleetStateQosConfig) -> FleetStateQosConfig:
+    if config is None:
+        return base
+    if not isinstance(config, Mapping):
+        raise ValueError("fleet_api.state_qos must be a mapping")
+    preset = str(config.get("preset", "fleet_state_reliable")).strip().lower()
+    if preset not in FLEET_STATE_QOS_PRESETS:
+        choices = ", ".join(sorted(FLEET_STATE_QOS_PRESETS))
+        raise ValueError(f"fleet_api.state_qos.preset must be one of: {choices}")
+    selected = FLEET_STATE_QOS_PRESETS[preset]
+    reliability = _qos_policy_from_dict(
+        config,
+        "reliability",
+        selected.reliability,
+        ReliabilityPolicy,
+        (ReliabilityPolicy.RELIABLE, ReliabilityPolicy.BEST_EFFORT),
+    )
+    history = _qos_policy_from_dict(
+        config,
+        "history",
+        selected.history,
+        HistoryPolicy,
+        (HistoryPolicy.KEEP_LAST, HistoryPolicy.KEEP_ALL),
+    )
+    depth = config.get("depth", selected.depth)
+    if not isinstance(depth, int) or isinstance(depth, bool) or depth < 1:
+        raise ValueError("fleet_api.state_qos.depth must be a positive integer")
+    durability = _qos_policy_from_dict(
+        config,
+        "durability",
+        selected.durability,
+        DurabilityPolicy,
+        (DurabilityPolicy.VOLATILE, DurabilityPolicy.TRANSIENT_LOCAL),
+    )
+    return FleetStateQosConfig(reliability=reliability, history=history, depth=depth, durability=durability)
+
+
+def _qos_policy_from_dict(config: Mapping[str, Any], key: str, default, policy_type, supported):
+    raw_value = config.get(key, default)
+    if isinstance(raw_value, policy_type):
+        value = raw_value
+    else:
+        try:
+            value = policy_type[str(raw_value).strip().upper()]
+        except KeyError as exc:
+            choices = " or ".join(repr(item.name.lower()) for item in supported)
+            raise ValueError(f"fleet_api.state_qos.{key} must be {choices}") from exc
+    if value not in supported:
+        choices = " or ".join(repr(item.name.lower()) for item in supported)
+        raise ValueError(f"fleet_api.state_qos.{key} must be {choices}")
+    return value
 
 
 def _per_robot_api_from_dict(config: Mapping[str, Any], base: PerRobotApiConfig) -> PerRobotApiConfig:

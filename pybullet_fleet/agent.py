@@ -1273,7 +1273,7 @@ class Agent(SimObject):
 
         # Delegate to batch controller when registered, otherwise per-agent.
         if self._batch_controller is not None:
-            self._batch_controller.set_path(
+            self._batch_controller.synchronized_set_path(
                 self,
                 final_path,
                 final_orientation_align=final_orientation_align,

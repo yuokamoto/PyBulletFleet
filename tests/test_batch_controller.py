@@ -86,6 +86,15 @@ class _NoopBatchController(BatchKinematicController):
 
 
 class TestBatchControllerLifecycle:
+    def test_synchronized_batch_advance_delegates_to_controller(self, sim):
+        bc = _NoopBatchController()
+        agent = _spawn_agent(sim, x=0.0)
+        bc.register_agent(agent)
+
+        result = bc.synchronized_batch_advance(0.1)
+
+        assert result is bc._moved_mask
+
     def test_register_sizes_buffers(self, sim):
         bc = _NoopBatchController()
         a = _spawn_agent(sim, x=0.0)
