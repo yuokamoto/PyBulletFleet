@@ -236,6 +236,13 @@ class BatchKinematicController(Controller):
         with self._state_lock:
             getattr(self, "set_path")(agent, path, **kwargs)
 
+    def synchronized_cancel_path(self, agent: "Agent") -> None:
+        """Cancel one path without racing a concurrent simulation step."""
+        with self._state_lock:
+            idx = self._agent_index.get(id(agent))
+            if idx is not None:
+                self._on_cancel_path(idx)
+
     def synchronized_batch_advance(self, dt: float) -> np.ndarray:
         """Advance vectorized trajectory state without concurrent path writes."""
         with self._state_lock:

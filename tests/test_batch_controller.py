@@ -79,10 +79,17 @@ def _make_batch_manager(sim, batch_controller="batch_omni"):
 class _NoopBatchController(BatchKinematicController):
     """Concrete-but-trivial subclass to exercise the ABC lifecycle."""
 
+    def __init__(self):
+        super().__init__()
+        self.cancelled_indices: list[int] = []
+
     def batch_advance(self, dt: float) -> np.ndarray:
         # Pretend nothing moved this step.
         self._moved_mask.fill(False)
         return self._moved_mask
+
+    def _on_cancel_path(self, idx: int) -> None:
+        self.cancelled_indices.append(idx)
 
 
 class TestBatchControllerLifecycle:
@@ -94,6 +101,24 @@ class TestBatchControllerLifecycle:
         result = bc.synchronized_batch_advance(0.1)
 
         assert result is bc._moved_mask
+
+    def test_synchronized_cancel_path_uses_registered_agent_index(self, sim):
+        bc = _NoopBatchController()
+        agent = _spawn_agent(sim, x=0.0)
+        bc.register_agent(agent)
+
+        bc.synchronized_cancel_path(agent)
+
+        assert bc.cancelled_indices == [0]
+
+    def test_agent_stop_cancels_path_through_batch_controller(self, sim):
+        bc = _NoopBatchController()
+        agent = _spawn_agent(sim, x=0.0)
+        bc.register_agent(agent)
+
+        agent.stop()
+
+        assert bc.cancelled_indices == [0]
 
     def test_register_sizes_buffers(self, sim):
         bc = _NoopBatchController()

@@ -422,6 +422,8 @@ def _measure_transport(node: FleetScaleClient, warmup: float, duration: float) -
     node.spin_for(warmup)
     node._fleet_state_wall_delays.clear()
     node._fleet_state_payloads.clear()
+    node._state_probe_by_stamp.clear()
+    node._pending_state_receives.clear()
     node._fleet_state_probe_count = 0
     node.spin_for(duration)
 
