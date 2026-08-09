@@ -702,10 +702,10 @@ def main() -> int:
 
     preset = FLEET_STATE_QOS_PRESETS[args.state_qos_preset]
     state_qos = {
-        "reliability": preset.reliability.value,
-        "history": preset.history.value,
+        "reliability": preset.reliability.name.lower(),
+        "history": preset.history.name.lower(),
         "depth": preset.depth,
-        "durability": preset.durability.value,
+        "durability": preset.durability.name.lower(),
     }
     for key in ("reliability", "history", "depth", "durability"):
         value = getattr(args, f"state_qos_{key}")

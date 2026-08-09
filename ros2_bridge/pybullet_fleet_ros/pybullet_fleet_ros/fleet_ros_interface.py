@@ -170,13 +170,14 @@ class FleetRosInterface:
         )
         publish_ns = time.monotonic_ns()
         self._state_pub.publish(msg)
-        self._publish_transport_timing(
-            channel="/fleet/states",
-            source_sim_time=stamp,
-            source_monotonic_ns=publish_ns,
-            item_count=len(msg.robots),
-            payload_bytes=len(serialize_message(msg)),
-        )
+        if self._transport_probe_pub is not None:
+            self._publish_transport_timing(
+                channel="/fleet/states",
+                source_sim_time=stamp,
+                source_monotonic_ns=publish_ns,
+                item_count=len(msg.robots),
+                payload_bytes=len(serialize_message(msg)),
+            )
 
     def destroy(self) -> None:
         """Destroy ROS entities created by this wrapper."""
@@ -205,28 +206,30 @@ class FleetRosInterface:
         receive_ns = time.monotonic_ns()
         ack = self._dispatch_navigate(msg)
         self._log_rejections(ack)
-        self._publish_transport_timing(
-            channel="/fleet/navigate_topic",
-            correlation_id=msg.command_id,
-            source_sim_time=ack.sim_time,
-            source_monotonic_ns=receive_ns,
-            end_monotonic_ns=time.monotonic_ns(),
-            item_count=len(msg.goals_2d) + len(msg.goals_3d),
-            payload_bytes=len(serialize_message(msg)),
-        )
+        if self._transport_probe_pub is not None:
+            self._publish_transport_timing(
+                channel="/fleet/navigate_topic",
+                correlation_id=msg.command_id,
+                source_sim_time=ack.sim_time,
+                source_monotonic_ns=receive_ns,
+                end_monotonic_ns=time.monotonic_ns(),
+                item_count=len(msg.goals_2d) + len(msg.goals_3d),
+                payload_bytes=len(serialize_message(msg)),
+            )
 
     def _on_navigate_service(self, request, response):
         receive_ns = time.monotonic_ns()
         response.ack = command_ack_to_msg(self._dispatch_navigate(request))
-        self._publish_transport_timing(
-            channel="/fleet/navigate",
-            correlation_id=request.command_id,
-            source_sim_time=response.ack.sim_time,
-            source_monotonic_ns=receive_ns,
-            end_monotonic_ns=time.monotonic_ns(),
-            item_count=len(request.goals_2d) + len(request.goals_3d),
-            payload_bytes=len(serialize_message(request)),
-        )
+        if self._transport_probe_pub is not None:
+            self._publish_transport_timing(
+                channel="/fleet/navigate",
+                correlation_id=request.command_id,
+                source_sim_time=response.ack.sim_time,
+                source_monotonic_ns=receive_ns,
+                end_monotonic_ns=time.monotonic_ns(),
+                item_count=len(request.goals_2d) + len(request.goals_3d),
+                payload_bytes=len(serialize_message(request)),
+            )
         return response
 
     def _publish_transport_timing(

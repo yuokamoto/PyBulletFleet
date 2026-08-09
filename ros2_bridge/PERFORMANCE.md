@@ -219,9 +219,9 @@ example, select the same-host best-effort profile with
 
 | State QoS | Observed RTF | State p50 / p99 (wall) | Probe matches |
 |-----------|-------------:|-----------------------:|--------------:|
-| `RELIABLE/KEEP_LAST(10)` | 8.28x | 18.34 / 35.38 ms | 333 / 333 (100%) |
-| `RELIABLE/KEEP_LAST(1)` | 8.59x | 18.51 / 34.34 ms | 344 / 344 (100%) |
-| `BEST_EFFORT/KEEP_LAST(1)` | 8.63x | 18.11 / 36.97 ms | 347 / 347 (100%) |
+| `RELIABLE/KEEP_LAST(10)` | 8.39x | 18.07 / 46.08 ms | 335 / 335 (100%) |
+| `RELIABLE/KEEP_LAST(1)` | 8.53x | 18.03 / 43.27 ms | 341 / 341 (100%) |
+| `BEST_EFFORT/KEEP_LAST(1)` | 8.38x | 18.10 / 44.64 ms | 340 / 340 (100%) |
 
 No material difference appeared in this uncongested, local setup. Repeat with
 slow subscribers, multiple subscribers, and a network transport before making
