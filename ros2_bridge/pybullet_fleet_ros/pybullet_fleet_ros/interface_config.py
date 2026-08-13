@@ -166,7 +166,7 @@ def _state_scope_from_dict(config: Mapping[str, Any], managers: tuple[str, ...],
     try:
         scope = StateScope(raw_scope.strip().lower())
     except ValueError as exc:
-        raise ValueError("fleet_api.state_scope must be 'all_agents' or 'managers'")
+        raise ValueError("fleet_api.state_scope must be 'all_agents' or 'managers'") from exc
     if scope is StateScope.MANAGERS and not managers:
         raise ValueError("fleet_api.state_scope 'managers' requires state_include_managers")
     if scope is StateScope.ALL_AGENTS and managers:

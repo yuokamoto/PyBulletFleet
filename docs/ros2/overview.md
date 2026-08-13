@@ -105,7 +105,7 @@ ROS/RMF client. This includes mock people, robots owned by another system, and
 jointed devices. The global `/fleet/*` endpoints retain their compatibility
 scope by default. Configure `state_scope` for a filtered global state stream,
 or use `manager_interfaces` for manager-namespaced state and command endpoints.
-See [manager-scoped Fleet API endpoints](configuration#manager-scoped-fleet-api-endpoints).
+See [manager-scoped Fleet API endpoints](configuration.md#manager-scoped-fleet-api-endpoints).
 
 For per-robot endpoints, use `per_robot_api.include_robots` or
 `exclude_robots` to avoid creating ROS interfaces for mock actors.

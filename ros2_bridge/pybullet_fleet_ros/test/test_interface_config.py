@@ -148,6 +148,12 @@ def test_manager_interfaces_resolve_scoped_endpoint_configuration():
     assert manager.stop is True
 
 
+def test_manager_interface_allows_a_numeric_namespace_segment():
+    cfg = resolve_bridge_api_config({"fleet_api": {"manager_interfaces": [{"manager": "1"}]}})
+
+    assert cfg.manager_interfaces[0].manager == "1"
+
+
 @pytest.mark.parametrize(
     ("manager_interfaces", "match"),
     [

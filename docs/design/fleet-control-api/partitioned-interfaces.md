@@ -43,10 +43,10 @@ source and the stable ROS namespace in v1.
 
 Existing message and service definitions stay unchanged: a message on
 `/fleet/delivery_fleet/states` is identified by its topic, rather than by
-adding a manager field to every robot state or command. Numeric namespaces such
-as `/fleet/1/states` are explicitly rejected: their meaning depends on YAML
-order and they are unsuitable for dashboards, access-control policy, and client
-configuration.
+adding a manager field to every robot state or command. A manager name is a
+single non-empty ROS namespace segment. Numeric segments such as
+`/fleet/1/states` are valid, although descriptive names are generally easier to
+use in dashboards, access-control policy, and client configuration.
 
 ## Configuration Shape
 
