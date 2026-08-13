@@ -38,6 +38,8 @@ import yaml
 from rclpy.duration import Duration
 from rclpy.parameter import Parameter
 
+from pybullet_fleet_ros.fleet_endpoints import FLEET_API_NAMESPACE
+
 logger = logging.getLogger(__name__)
 _RMF_RCLCPP_INITIALIZED = False
 DEFAULT_PLANNER_CACHE_RESET_SIZE = 2500
@@ -160,6 +162,7 @@ def start_adapter_runtime(
     sim_core=None,
     server_uri: str | None = None,
     rmf_frame_offset=None,
+    fleet_namespace: str = FLEET_API_NAMESPACE,
 ) -> RmfAdapterRuntime | None:
     """Start the EasyFullControl adapter on an existing ROS node.
 
@@ -255,6 +258,7 @@ def start_adapter_runtime(
             node,
             sim_core=sim_core,
             rmf_frame_offset=rmf_frame_offset,
+            fleet_namespace=fleet_namespace,
         )
     except ValueError as exc:
         node.get_logger().error(str(exc))
@@ -370,6 +374,7 @@ def main(argv=sys.argv):
         default=None,
         help="RMF client transport (default: pybullet_fleet.rmf_client_mode or per_robot_ros)",
     )
+    parser.add_argument("--fleet-namespace", default=FLEET_API_NAMESPACE, help="Fleet ROS endpoint namespace")
     args = parser.parse_args(args_without_ros[1:])
 
     # ROS 2 node for the command handle
@@ -384,6 +389,7 @@ def main(argv=sys.argv):
         nav_graph_path=args.nav_graph,
         use_sim_time=args.use_sim_time,
         client_mode=args.client_mode,
+        fleet_namespace=args.fleet_namespace,
     )
     if runtime is None:
         node.destroy_node()

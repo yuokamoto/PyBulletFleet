@@ -12,16 +12,22 @@ from pybullet_fleet_msgs.msg import FleetState, RobotGoal2D
 from pybullet_fleet_msgs.srv import FleetNavigate
 from rclpy.node import Node
 
+from .fleet_endpoints import FLEET_API_NAMESPACE, fleet_endpoint, normalize_fleet_namespace
+
 
 class FleetNavGoalClient(Node):
     """Build fleet navigation goals from the most recent state snapshot."""
 
-    def __init__(self) -> None:
+    def __init__(self, fleet_namespace: str = FLEET_API_NAMESPACE) -> None:
         super().__init__("fleet_nav_demo")
+        self._fleet_namespace = normalize_fleet_namespace(fleet_namespace)
         self.positions: dict[str, tuple[float, float, float]] = {}
-        self.create_subscription(FleetState, "/fleet/states", self._on_state, 10)
-        self.navigate = self.create_client(FleetNavigate, "/fleet/navigate")
-        self.navigate_pub = self.create_publisher(FleetNavigateMsg, "/fleet/navigate", 10)
+        self.create_subscription(FleetState, self._endpoint("states"), self._on_state, 10)
+        self.navigate = self.create_client(FleetNavigate, self._endpoint("navigate"))
+        self.navigate_pub = self.create_publisher(FleetNavigateMsg, self._endpoint("navigate"), 10)
+
+    def _endpoint(self, name: str) -> str:
+        return fleet_endpoint(self._fleet_namespace, name)
 
     def _on_state(self, msg: FleetState) -> None:
         for robot in msg.robots:
@@ -37,11 +43,11 @@ class FleetNavGoalClient(Node):
             rclpy.spin_once(self, timeout_sec=0.1)
             if len(self.positions) >= count:
                 return
-        raise TimeoutError(f"/fleet/states reported {len(self.positions)} robot(s), expected at least {count}")
+        raise TimeoutError(f"{self._endpoint('states')} reported {len(self.positions)} robot(s), expected at least {count}")
 
     def call_navigate(self, goals: list[RobotGoal2D], timeout: float) -> None:
         if not self.navigate.wait_for_service(timeout_sec=timeout):
-            raise TimeoutError("/fleet/navigate service is not available")
+            raise TimeoutError(f"{self._endpoint('navigate')} service is not available")
 
         request = FleetNavigate.Request()
         request.header.stamp = self.get_clock().now().to_msg()
@@ -53,10 +59,10 @@ class FleetNavGoalClient(Node):
         future = self.navigate.call_async(request)
         rclpy.spin_until_future_complete(self, future, timeout_sec=timeout)
         if not future.done():
-            raise TimeoutError("/fleet/navigate service call timed out")
+            raise TimeoutError(f"{self._endpoint('navigate')} service call timed out")
         response = future.result()
         if response is None:
-            raise RuntimeError("/fleet/navigate service call failed")
+            raise RuntimeError(f"{self._endpoint('navigate')} service call failed")
         self._raise_for_rejections(response.ack)
 
     def publish_navigate(self, goals: list[RobotGoal2D], timeout: float) -> None:
@@ -64,7 +70,7 @@ class FleetNavGoalClient(Node):
         while time.monotonic() < deadline and self.navigate_pub.get_subscription_count() == 0:
             rclpy.spin_once(self, timeout_sec=0.1)
         if self.navigate_pub.get_subscription_count() == 0:
-            raise TimeoutError("/fleet/navigate topic has no subscribers")
+            raise TimeoutError(f"{self._endpoint('navigate')} topic has no subscribers")
 
         msg = FleetNavigateMsg()
         msg.header.stamp = self.get_clock().now().to_msg()
@@ -79,8 +85,8 @@ class FleetNavGoalClient(Node):
         accepted = ", ".join(ack.accepted_names)
         if ack.rejected_names:
             rejected = ", ".join(f"{name}:{reason}" for name, reason in zip(ack.rejected_names, ack.reject_reasons))
-            raise RuntimeError(f"/fleet/navigate rejected command: accepted=[{accepted}], rejected=[{rejected}]")
-        self.get_logger().info(f"/fleet/navigate accepted {len(ack.accepted_names)} robot(s): {accepted}")
+            raise RuntimeError(f"{self._endpoint('navigate')} rejected command: accepted=[{accepted}], rejected=[{rejected}]")
+        self.get_logger().info(f"{self._endpoint('navigate')} accepted {len(ack.accepted_names)} robot(s): {accepted}")
 
 
 def _make_goals(
@@ -99,6 +105,7 @@ def main() -> int:
     parser.add_argument("--dy", type=float, default=0.5, help="Goal y offset from each current robot pose")
     parser.add_argument("--yaw", type=float, default=0.0, help="Goal yaw in radians")
     parser.add_argument("--timeout", type=float, default=10.0, help="ROS wait/call timeout in seconds")
+    parser.add_argument("--fleet-namespace", default=FLEET_API_NAMESPACE, help="Fleet endpoint namespace")
     parser.add_argument(
         "--transport",
         choices=["service", "topic"],
@@ -112,7 +119,7 @@ def main() -> int:
         parser.error("--dx, --dy, and --yaw must be finite")
 
     rclpy.init()
-    node = FleetNavGoalClient()
+    node = FleetNavGoalClient(args.fleet_namespace)
     try:
         node.wait_for_states(args.robots, args.timeout)
         goals = _make_goals(node.positions, count=args.robots, dx=args.dx, dy=args.dy, yaw=args.yaw)

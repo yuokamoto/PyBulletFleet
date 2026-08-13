@@ -67,6 +67,9 @@ def generate_launch_description():
             "name": f"{fleet_name}_fleet_adapter",
             "config_file": config_path,
             "nav_graph": nav_path,
+            # Explicitly selects the matching manager endpoint; this does not
+            # make the manager name an RMF identity in the bridge itself.
+            "fleet_namespace": f"/fleet/{fleet_name}",
         }
         for fleet_name, (config_path, nav_path) in fleet_configs.items()
     ]

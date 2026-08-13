@@ -6,14 +6,18 @@ from pybullet_fleet_msgs.msg import FleetState
 from rclpy.node import Node
 from visualization_msgs.msg import Marker, MarkerArray
 
+from .fleet_endpoints import FLEET_API_NAMESPACE, fleet_endpoint
+
 
 class FleetRvizNode(Node):
     """Publish one cube marker per robot from the Fleet ROS state stream."""
 
-    def __init__(self) -> None:
+    def __init__(self, fleet_namespace: str = FLEET_API_NAMESPACE) -> None:
         super().__init__("pybullet_fleet_fleet_rviz")
-        self._marker_pub = self.create_publisher(MarkerArray, "/fleet/markers", 10)
-        self._state_sub = self.create_subscription(FleetState, "/fleet/states", self._on_fleet_state, 10)
+        self._marker_pub = self.create_publisher(MarkerArray, fleet_endpoint(FLEET_API_NAMESPACE, "markers"), 10)
+        self._state_sub = self.create_subscription(
+            FleetState, fleet_endpoint(fleet_namespace, "states"), self._on_fleet_state, 10
+        )
         self._marker_ids_by_name: dict[str, int] = {}
         self._next_marker_id = 0
 
@@ -69,10 +73,14 @@ class FleetRvizNode(Node):
 
 
 def main() -> None:
+    import argparse
     import rclpy
 
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--fleet-namespace", default=FLEET_API_NAMESPACE, help="Fleet endpoint namespace")
+    args = parser.parse_args()
     rclpy.init()
-    node = FleetRvizNode()
+    node = FleetRvizNode(args.fleet_namespace)
     try:
         rclpy.spin(node)
     finally:

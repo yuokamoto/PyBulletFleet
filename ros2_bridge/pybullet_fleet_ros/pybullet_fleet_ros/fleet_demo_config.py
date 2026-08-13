@@ -8,7 +8,6 @@ from typing import Any
 
 import yaml
 
-
 SUPPORTED_ROBOT_MODELS = ("simple_cube", "mobile_robot", "tb3_burger", "tb3_waffle")
 
 
@@ -21,7 +20,7 @@ def write_fleet_demo_config(
     gui: bool,
     target_rtf: float,
 ) -> None:
-    """Write a fleet-only bridge configuration derived from *template_path*."""
+    """Write a single-fleet bridge configuration derived from *template_path*."""
     if robots < 1:
         raise ValueError("robots must be at least 1")
     if robot_model not in SUPPORTED_ROBOT_MODELS:

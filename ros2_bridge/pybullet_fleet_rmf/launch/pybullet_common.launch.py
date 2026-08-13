@@ -147,15 +147,12 @@ def _enable_fleet_api_for_rmf_client(bridge_config: dict) -> dict:
     """Return bridge config with the fleet ROS endpoints required by RMF enabled."""
     updated = dict(bridge_config)
     fleet_api = dict(updated.get("fleet_api") or {})
-    fleet_api.update(
-        {
-            "enabled": True,
-            "states": True,
-            "navigate": True,
-            "stop": True,
-            "attach": True,
-        }
-    )
+    fleet_api["enabled"] = True
+    # A manager-scoped demo explicitly owns its endpoint selection. Do not add
+    # a redundant global stream when every standalone RMF adapter selects its
+    # own manager namespace.
+    if not fleet_api.get("manager_interfaces"):
+        fleet_api.update({"states": True, "navigate": True, "stop": True, "attach": True})
     updated["fleet_api"] = fleet_api
     return updated
 
@@ -280,6 +277,9 @@ def _fleet_adapter_setup(context: LaunchContext):
         if adapter_use_sim_time:
             arguments.append("-sim")
         arguments.extend(["--client-mode", client_mode])
+        fleet_namespace = adapter.get("fleet_namespace", "")
+        if fleet_namespace:
+            arguments.extend(["--fleet-namespace", str(fleet_namespace)])
         nodes.append(
             Node(
                 package="pybullet_fleet_rmf",

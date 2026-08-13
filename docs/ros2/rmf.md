@@ -14,8 +14,10 @@ the in-process path that avoids ROS messages on the RMF command path.
 
 `python_fleet` requires the adapter to run as a bridge plugin so it shares the
 same simulation core. It is not a standalone `fleet_adapter` process mode.
-`fleet_ros` requires the matching `fleet_api` endpoints to be enabled. See
-[Bridge configuration](configuration).
+`fleet_ros` requires the matching global `fleet_api` endpoints to be enabled.
+It does not infer an RMF fleet identity from an `AgentManager` name; a future
+manager-scoped ROS client must explicitly select its `/fleet/<manager>`
+namespace. See [Bridge configuration](configuration).
 
 ## Two independent choices
 
@@ -112,6 +114,12 @@ debugging.  Use `client_mode:=per_robot_ros` for per-robot compatibility.  The
 Docker guide documents the runnable demo, dispatch flow check, RMF stack check,
 and client-mode matrix; these are the recommended validation path after
 changing a bridge configuration or selecting a new client mode.
+
+The airport-terminal multi-fleet demo explicitly maps each adapter to a
+manager endpoint (`/fleet/tinyRobot`, `/fleet/deliveryRobot`,
+`/fleet/cleanerBotA`, or `/fleet/cleanerBotE`) when launched with
+`client_mode:=fleet_ros`. This makes it a ready-to-run manager-interface
+example; the mappings are launch configuration, not inferred RMF identity.
 
 Once the first office patrol is working, use the [RMF demo catalog](rmf-demos)
 to select a scenario for single-fleet, multi-fleet, door/lift, or cleaning

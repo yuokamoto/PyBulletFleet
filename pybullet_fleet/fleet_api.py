@@ -96,9 +96,10 @@ class FleetStateProvider:
 class FleetCommandDispatcher:
     """Validate and apply fleet commands against a simulation core."""
 
-    def __init__(self, sim_core: Any) -> None:
+    def __init__(self, sim_core: Any, *, allowed_names: Iterable[str] | None = None) -> None:
         self.sim_core = sim_core
         self.command_events: list[CommandEvent] = []
+        self.allowed_names = frozenset(allowed_names) if allowed_names is not None else None
         self._name_index: dict[str, Any | None] = {}
         self.refresh_name_index()
 
@@ -267,6 +268,9 @@ class FleetCommandDispatcher:
                 continue
             if name not in self._name_index:
                 rejected[name] = "unknown robot"
+                continue
+            if self.allowed_names is not None and name not in self.allowed_names:
+                rejected[name] = "not managed by this interface"
                 continue
             agent = self._name_index[name]
             if agent is None:

@@ -71,7 +71,9 @@ except ImportError as exc:
     FleetStopSrv = None
     _FLEET_MSGS_IMPORT_ERROR = exc
 
-from .interface_config import FleetApiConfig
+from .interface_config import FleetApiConfig, ManagerInterfaceConfig
+from .fleet_endpoints import FLEET_API_NAMESPACE, fleet_endpoint, normalize_fleet_namespace
+from .conversions import ros_time_to_seconds
 
 
 def _require_fleet_msgs() -> None:
@@ -83,7 +85,7 @@ def _require_fleet_msgs() -> None:
     ) from _FLEET_MSGS_IMPORT_ERROR
 
 
-def _fleet_state_qos(config: FleetApiConfig) -> QoSProfile:
+def _fleet_state_qos(config: FleetApiConfig | ManagerInterfaceConfig) -> QoSProfile:
     return QoSProfile(
         history=config.state_qos.history,
         depth=config.state_qos.depth,
@@ -93,11 +95,45 @@ def _fleet_state_qos(config: FleetApiConfig) -> QoSProfile:
 
 
 class FleetRosInterface:
-    """Expose ``FleetStateProvider`` and ``FleetCommandDispatcher`` over ROS."""
+    """Expose one global or manager-scoped fleet endpoint set over ROS."""
 
-    def __init__(self, node, sim_core, config: FleetApiConfig) -> None:
+    def __init__(
+        self,
+        node,
+        sim_core,
+        config: FleetApiConfig | ManagerInterfaceConfig,
+        *,
+        namespace: str = FLEET_API_NAMESPACE,
+        state_names: Iterable[str] | None = None,
+        command_names: Iterable[str] | None = None,
+    ) -> None:
+        """Create one global or manager-scoped Fleet ROS endpoint set.
+
+        Args:
+            node: ROS node that owns this endpoint set.
+            sim_core: Simulation used by the state provider and command
+                dispatcher.
+            config: Global Fleet API or manager-scoped endpoint configuration.
+            namespace: Base namespace, such as ``/fleet`` or
+                ``/fleet/delivery``.
+            state_names: Agent names included in the state stream. ``None``
+                means no filter, so the provider publishes every Agent. This
+                preserves the global ``/fleet/states`` compatibility stream;
+                manager endpoints receive their resolved Agent-name set.
+            command_names: Agent names accepted by commands. ``None`` leaves
+                commands unrestricted. It is intentionally separate from
+                ``state_names``: a global endpoint may publish a filtered
+                state stream while retaining compatibility commands for every
+                Agent.
+        """
         self.node = node
         self.config = config
+        self._namespace = normalize_fleet_namespace(namespace)
+        # ``None`` deliberately means no state filter, i.e. every sim Agent.
+        # A manager endpoint receives an explicit frozen set instead.
+        self._state_names = frozenset(state_names) if state_names is not None else None
+        self._state_publish_rate = getattr(config, "state_publish_rate", None)
+        self._last_state_publish_time = float("-inf")
 
         self._state_pub = None
         self._navigate_sub = None
@@ -113,49 +149,49 @@ class FleetRosInterface:
         self._transport_probe_pub = None
         self._transport_probe_sequence = 0
 
-        if not config.enabled:
+        if not getattr(config, "enabled", True):
             return
         _require_fleet_msgs()
 
         self.state_provider = FleetStateProvider(sim_core)
-        self.command_dispatcher = FleetCommandDispatcher(sim_core)
+        self.command_dispatcher = FleetCommandDispatcher(sim_core, allowed_names=command_names)
         self._rmf_frame_offset = _node_frame_offset(node)
 
         if config.states:
-            self._state_pub = node.create_publisher(FleetState, "/fleet/states", _fleet_state_qos(config))
-        if config.transport_probe:
-            self._transport_probe_pub = node.create_publisher(TransportTiming, "/fleet/transport_timing", 10)
+            self._state_pub = node.create_publisher(FleetState, self._endpoint("states"), _fleet_state_qos(config))
+        if getattr(config, "transport_probe", False):
+            self._transport_probe_pub = node.create_publisher(TransportTiming, self._endpoint("transport_timing"), 10)
         if config.navigate:
-            self._navigate_sub = node.create_subscription(FleetNavigate, "/fleet/navigate", self._on_navigate, 10)
-            self._navigate_srv = node.create_service(FleetNavigateSrv, "/fleet/navigate", self._on_navigate_service)
+            self._navigate_sub = node.create_subscription(FleetNavigate, self._endpoint("navigate"), self._on_navigate, 10)
+            self._navigate_srv = node.create_service(FleetNavigateSrv, self._endpoint("navigate"), self._on_navigate_service)
         if config.stop:
-            self._stop_sub = node.create_subscription(FleetStop, "/fleet/stop", self._on_stop, 10)
-            self._stop_srv = node.create_service(FleetStopSrv, "/fleet/stop", self._on_stop_service)
+            self._stop_sub = node.create_subscription(FleetStop, self._endpoint("stop"), self._on_stop, 10)
+            self._stop_srv = node.create_service(FleetStopSrv, self._endpoint("stop"), self._on_stop_service)
         if config.attach:
-            self._attach_sub = node.create_subscription(FleetAttach, "/fleet/attach", self._on_attach, 10)
-            self._attach_srv = node.create_service(FleetAttachSrv, "/fleet/attach", self._on_attach_service)
+            self._attach_sub = node.create_subscription(FleetAttach, self._endpoint("attach"), self._on_attach, 10)
+            self._attach_srv = node.create_service(FleetAttachSrv, self._endpoint("attach"), self._on_attach_service)
         if config.execute_action:
             self._execute_action_sub = node.create_subscription(
                 FleetExecuteAction,
-                "/fleet/execute_action",
+                self._endpoint("execute_action"),
                 self._on_execute_action,
                 10,
             )
             self._execute_action_srv = node.create_service(
                 FleetExecuteActionSrv,
-                "/fleet/execute_action",
+                self._endpoint("execute_action"),
                 self._on_execute_action_service,
             )
         if config.joint_command:
             self._joint_sub = node.create_subscription(
                 FleetJointCommand,
-                "/fleet/joint_command",
+                self._endpoint("joint_command"),
                 self._on_joint_command,
                 10,
             )
             self._joint_srv = node.create_service(
                 FleetJointCommandSrv,
-                "/fleet/joint_command",
+                self._endpoint("joint_command"),
                 self._on_joint_command_service,
             )
 
@@ -163,21 +199,40 @@ class FleetRosInterface:
         """Publish fleet state after a simulation step."""
         if self._state_pub is None:
             return
+        sim_time = ros_time_to_seconds(stamp)
+        if (
+            self._state_publish_rate is not None
+            and sim_time is not None
+            and sim_time - self._last_state_publish_time < 1.0 / self._state_publish_rate
+        ):
+            return
+        # Query only when this endpoint is due. This avoids a ROS graph query
+        # on every bridge tick for lower-rate manager streams, and remains
+        # immediately before the expensive state collection/message creation.
+        subscription_count = self._state_pub.get_subscription_count()
+        if isinstance(subscription_count, int) and subscription_count == 0:
+            return
+        # FleetStateProvider interprets ``names=None`` as an all-Agent query.
         msg = fleet_state_to_msg(
-            self.state_provider.get_states(),
+            self.state_provider.get_states_3d(names=self._state_names),
             stamp=stamp,
             xy_offset=self._rmf_frame_offset,
         )
         publish_ns = time.monotonic_ns()
         self._state_pub.publish(msg)
+        if sim_time is not None:
+            self._last_state_publish_time = sim_time
         if self._transport_probe_pub is not None:
             self._publish_transport_timing(
-                channel="/fleet/states",
+                channel=self._endpoint("states"),
                 source_sim_time=stamp,
                 source_monotonic_ns=publish_ns,
                 item_count=len(msg.robots),
                 payload_bytes=len(serialize_message(msg)),
             )
+
+    def _endpoint(self, name: str) -> str:
+        return fleet_endpoint(self._namespace, name)
 
     def destroy(self) -> None:
         """Destroy ROS entities created by this wrapper."""
@@ -208,7 +263,7 @@ class FleetRosInterface:
         self._log_rejections(ack)
         if self._transport_probe_pub is not None:
             self._publish_transport_timing(
-                channel="/fleet/navigate_topic",
+                channel=self._endpoint("navigate_topic"),
                 correlation_id=msg.command_id,
                 source_sim_time=ack.sim_time,
                 source_monotonic_ns=receive_ns,
@@ -222,7 +277,7 @@ class FleetRosInterface:
         response.ack = command_ack_to_msg(self._dispatch_navigate(request))
         if self._transport_probe_pub is not None:
             self._publish_transport_timing(
-                channel="/fleet/navigate",
+                channel=self._endpoint("navigate"),
                 correlation_id=request.command_id,
                 source_sim_time=response.ack.sim_time,
                 source_monotonic_ns=receive_ns,

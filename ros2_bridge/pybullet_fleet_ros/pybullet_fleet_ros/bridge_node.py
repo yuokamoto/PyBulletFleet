@@ -12,7 +12,7 @@ Usage::
 import inspect
 import logging
 import threading
-from typing import Any, Dict, List, Type
+from typing import Any, Dict, Iterable, List, Type
 
 import rclpy
 from rclpy.node import Node
@@ -32,8 +32,9 @@ from pybullet_fleet.types import MotionMode
 from .bridge_plugin import BridgePlugin
 from .conversions import sim_time_to_ros_time
 from .fleet_ros_interface import FleetRosInterface
+from .fleet_endpoints import manager_fleet_namespace
 from .handler_registry import HandlerMap, load_handler_map_from_config, resolve_handler_classes
-from .interface_config import BridgeApiConfig, resolve_bridge_api_config
+from .interface_config import BridgeApiConfig, StateScope, resolve_bridge_api_config
 from .param_utils import get_bool_param, get_float_param
 from .robot_handler import RobotHandler
 from .robot_handler_base import RobotHandlerBase
@@ -92,6 +93,32 @@ def _register_step_handler(
             throttled_post_step_handlers.append(handler)
         else:
             post_step_handlers.append(handler)
+
+
+def _manager_agent_names(sim_core, managers: Iterable[str]) -> dict[str, frozenset[str]]:
+    """Resolve named AgentManagers to their current Agent names.
+
+    Manager membership is intentionally resolved after simulation construction:
+    it is the v1 source of truth for manager-scoped Fleet endpoints.
+    """
+    sim_agent_ids = {id(agent) for agent in sim_core.agents}
+    resolved = {}
+    for name in managers:
+        manager = sim_core.get_manager(name)
+        if manager is None:
+            raise ValueError(f"fleet_api manager {name!r} is unknown")
+        names = frozenset(
+            agent.name
+            for agent in getattr(manager, "objects", ())
+            if id(agent) in sim_agent_ids and isinstance(getattr(agent, "name", None), str) and agent.name
+        )
+        if not names:
+            logger.warning(
+                "fleet_api manager %r has no Agent members; its manager-scoped endpoint will be empty",
+                name,
+            )
+        resolved[name] = names
+    return resolved
 
 
 class BridgeNode(Node):
@@ -217,7 +244,41 @@ class BridgeNode(Node):
 
         # Interface selection from explicit fleet_api/per_robot_api sections.
         self._api_config: BridgeApiConfig = resolve_bridge_api_config(bridge_config)
-        self._fleet_ros = FleetRosInterface(self, self.sim, self._api_config.fleet_api)
+        # ``None`` is the unfiltered/global convention used by
+        # FleetStateProvider: it publishes every Agent for ``all_agents``.
+        global_state_names = None
+        if self._api_config.fleet_api.state_scope is StateScope.MANAGERS:
+            included = _manager_agent_names(self.sim, self._api_config.fleet_api.state_include_managers)
+            global_state_names = frozenset().union(*included.values())
+        agents_by_manager = _manager_agent_names(
+            self.sim,
+            (entry.manager for entry in self._api_config.manager_interfaces),
+        )
+        claimed_names = set()
+        for manager, names in agents_by_manager.items():
+            overlap = claimed_names.intersection(names)
+            if overlap:
+                formatted = ", ".join(sorted(overlap))
+                raise ValueError(f"Agent(s) {formatted} belong to more than one exposed manager interface")
+            claimed_names.update(names)
+        self._fleet_ros = FleetRosInterface(
+            self,
+            self.sim,
+            self._api_config.fleet_api,
+            # Preserve ``None`` for the all-Agent global compatibility stream.
+            state_names=global_state_names,
+        )
+        self._manager_fleet_ros = [
+            FleetRosInterface(
+                self,
+                self.sim,
+                entry,
+                namespace=manager_fleet_namespace(entry.manager),
+                state_names=agents_by_manager[entry.manager],
+                command_names=agents_by_manager[entry.manager],
+            )
+            for entry in self._api_config.manager_interfaces
+        ]
         if not self._api_config.per_robot_api.enabled:
             self.get_logger().warning("per_robot_api disabled: no per-robot ROS handlers will be created")
         elif not self._api_config.per_robot_api.any_group_enabled:
@@ -473,6 +534,8 @@ class BridgeNode(Node):
             # Per-robot update (odom, TF, joint_states, diagnostics)
             if should_run_throttled_post_step:
                 self._fleet_ros.post_step(stamp=stamp)
+                for interface in self._manager_fleet_ros:
+                    interface.post_step(stamp=stamp)
                 with self._handler_lock:
                     throttled_handlers = list(self._throttled_post_step_handlers)
                 with self._handler_callback_lock:

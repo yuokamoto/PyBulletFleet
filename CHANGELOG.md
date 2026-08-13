@@ -20,6 +20,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Add manager-scoped Fleet ROS endpoint sets, selective global FleetState
+  inclusion, per-manager state rate/QoS, and manager-owned command validation.
 - Add an optional ROS 2 fleet scale-check transport probe for same-host
   monotonic timing on `/fleet/states`, the `/fleet/navigate` service, and the
   `/fleet/navigate` topic.

@@ -4,7 +4,7 @@ These tests require ROS 2.  Run inside Docker or with a sourced ROS workspace.
 """
 
 from types import SimpleNamespace
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import tempfile
 import threading
@@ -88,6 +88,42 @@ def test_load_yaml_config_with_robots():
 
     result = load_yaml_config(config_path)
     assert len(result["entities"]) == 2
+
+
+def _manager_lookup_sim():
+    agent = SimpleNamespace(name="delivery_0")
+    managers = {
+        "delivery": SimpleNamespace(objects=[agent]),
+        "empty": SimpleNamespace(objects=[]),
+    }
+    return SimpleNamespace(agents=[agent], get_manager=managers.get)
+
+
+def test_manager_agent_names_resolves_active_agent_members():
+    from pybullet_fleet_ros.bridge_node import _manager_agent_names
+
+    assert _manager_agent_names(_manager_lookup_sim(), ["delivery"]) == {"delivery": frozenset({"delivery_0"})}
+
+
+def test_manager_agent_names_warns_for_empty_manager():
+    """An empty known manager creates an empty scope without failing startup."""
+    from pybullet_fleet_ros.bridge_node import _manager_agent_names
+
+    with patch("pybullet_fleet_ros.bridge_node.logger.warning") as warning:
+        resolved = _manager_agent_names(_manager_lookup_sim(), ["empty"])
+
+    assert resolved == {"empty": frozenset()}
+    warning.assert_called_once_with(
+        "fleet_api manager %r has no Agent members; its manager-scoped endpoint will be empty",
+        "empty",
+    )
+
+
+def test_manager_agent_names_rejects_unknown_manager():
+    from pybullet_fleet_ros.bridge_node import _manager_agent_names
+
+    with pytest.raises(ValueError, match="manager 'missing' is unknown"):
+        _manager_agent_names(_manager_lookup_sim(), ["missing"])
 
 
 def test_register_robot_handler_passes_interface_config_to_robot_handler_subclass():

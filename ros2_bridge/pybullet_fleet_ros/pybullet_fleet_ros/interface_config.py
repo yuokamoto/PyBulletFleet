@@ -47,6 +47,13 @@ FLEET_STATE_QOS_PRESETS = {
 }
 
 
+class StateScope(str, Enum):
+    """Membership policy for the global ``/fleet/states`` stream."""
+
+    ALL_AGENTS = "all_agents"
+    MANAGERS = "managers"
+
+
 @dataclass(frozen=True)
 class FleetApiConfig:
     """Fleet-level API group switches."""
@@ -60,9 +67,26 @@ class FleetApiConfig:
     attach: bool = False
     charging: bool = False
     transport_probe: bool = False
+    state_scope: StateScope = StateScope.ALL_AGENTS
+    state_include_managers: tuple[str, ...] = field(default_factory=tuple)
     # The scale checker writes this internal setting into its temporary bridge
     # config. It is not yet a documented general bridge configuration API.
     state_qos: FleetStateQosConfig = field(default_factory=FleetStateQosConfig)
+
+
+@dataclass(frozen=True)
+class ManagerInterfaceConfig:
+    """One named manager's fleet-level ROS endpoint set."""
+
+    manager: str
+    states: bool = True
+    state_publish_rate: float | None = None
+    state_qos: FleetStateQosConfig = field(default_factory=FleetStateQosConfig)
+    navigate: bool = False
+    joint_command: bool = False
+    stop: bool = False
+    execute_action: bool = False
+    attach: bool = False
 
 
 @dataclass(frozen=True)
@@ -108,10 +132,13 @@ class BridgeApiConfig:
 
     fleet_api: FleetApiConfig = field(default_factory=FleetApiConfig)
     per_robot_api: PerRobotApiConfig = field(default_factory=PerRobotApiConfig)
+    manager_interfaces: tuple[ManagerInterfaceConfig, ...] = field(default_factory=tuple)
 
 
 def _fleet_api_from_dict(config: Mapping[str, Any], base: FleetApiConfig) -> FleetApiConfig:
     state_qos = _fleet_state_qos_from_dict(config.get("state_qos"), base.state_qos)
+    state_include_managers = tuple(config_get_str_list(config, "state_include_managers", list(base.state_include_managers)))
+    state_scope = _state_scope_from_dict(config, state_include_managers, base.state_scope)
     return FleetApiConfig(
         enabled=config_get_bool(config, "enabled", base.enabled),
         states=config_get_bool(config, "states", base.states),
@@ -122,8 +149,29 @@ def _fleet_api_from_dict(config: Mapping[str, Any], base: FleetApiConfig) -> Fle
         attach=config_get_bool(config, "attach", base.attach),
         charging=config_get_bool(config, "charging", base.charging),
         transport_probe=config_get_bool(config, "transport_probe", base.transport_probe),
+        state_scope=state_scope,
+        state_include_managers=state_include_managers,
         state_qos=state_qos,
     )
+
+
+def _state_scope_from_dict(config: Mapping[str, Any], managers: tuple[str, ...], default: StateScope) -> StateScope:
+    raw_scope = config.get("state_scope")
+    if raw_scope is None:
+        # Retain the pre-state_scope manager-filter behavior for configurations
+        # that already supplied an inclusion list.
+        return StateScope.MANAGERS if managers else default
+    if not isinstance(raw_scope, str):
+        raise ValueError("fleet_api.state_scope must be 'all_agents' or 'managers'")
+    try:
+        scope = StateScope(raw_scope.strip().lower())
+    except ValueError as exc:
+        raise ValueError("fleet_api.state_scope must be 'all_agents' or 'managers'") from exc
+    if scope is StateScope.MANAGERS and not managers:
+        raise ValueError("fleet_api.state_scope 'managers' requires state_include_managers")
+    if scope is StateScope.ALL_AGENTS and managers:
+        raise ValueError("fleet_api.state_scope 'all_agents' cannot use state_include_managers")
+    return scope
 
 
 def _fleet_state_qos_from_dict(config: Any, base: FleetStateQosConfig) -> FleetStateQosConfig:
@@ -192,6 +240,45 @@ def _per_robot_api_from_dict(config: Mapping[str, Any], base: PerRobotApiConfig)
     )
 
 
+def _manager_interfaces_from_dict(config: Mapping[str, Any]) -> tuple[ManagerInterfaceConfig, ...]:
+    raw_entries = config.get("manager_interfaces", [])
+    if not isinstance(raw_entries, list):
+        raise ValueError("fleet_api.manager_interfaces must be a list")
+    entries = []
+    seen = set()
+    for index, raw_entry in enumerate(raw_entries):
+        if not isinstance(raw_entry, Mapping):
+            raise ValueError(f"fleet_api.manager_interfaces[{index}] must be a mapping")
+        manager = raw_entry.get("manager")
+        if not isinstance(manager, str) or not manager.strip():
+            raise ValueError(f"fleet_api.manager_interfaces[{index}].manager must be a non-empty string")
+        manager = manager.strip()
+        if "/" in manager:
+            raise ValueError(f"fleet_api.manager_interfaces[{index}].manager must be one ROS namespace segment")
+        if manager in seen:
+            raise ValueError(f"fleet_api.manager_interfaces contains duplicate manager {manager!r}")
+        seen.add(manager)
+        rate = raw_entry.get("state_publish_rate")
+        if rate is not None:
+            if isinstance(rate, bool) or not isinstance(rate, (int, float)) or rate <= 0:
+                raise ValueError(f"fleet_api.manager_interfaces[{index}].state_publish_rate must be positive")
+            rate = float(rate)
+        entries.append(
+            ManagerInterfaceConfig(
+                manager=manager,
+                states=config_get_bool(raw_entry, "states", True),
+                state_publish_rate=rate,
+                state_qos=_fleet_state_qos_from_dict(raw_entry.get("state_qos"), FleetStateQosConfig()),
+                navigate=config_get_bool(raw_entry, "navigate", False),
+                joint_command=config_get_bool(raw_entry, "joint_command", False),
+                stop=config_get_bool(raw_entry, "stop", False),
+                execute_action=config_get_bool(raw_entry, "execute_action", False),
+                attach=config_get_bool(raw_entry, "attach", False),
+            )
+        )
+    return tuple(entries)
+
+
 def _optional_mapping_section(config: Mapping[str, Any], key: str) -> Mapping[str, Any] | None:
     if key not in config:
         return None
@@ -214,4 +301,9 @@ def resolve_bridge_api_config(bridge_config: Mapping[str, Any]) -> BridgeApiConf
     if explicit_per_robot is not None:
         per_robot_api = _per_robot_api_from_dict(explicit_per_robot, per_robot_api)
 
-    return BridgeApiConfig(fleet_api=fleet_api, per_robot_api=per_robot_api)
+    manager_interfaces = _manager_interfaces_from_dict(explicit_fleet) if explicit_fleet is not None else ()
+    return BridgeApiConfig(
+        fleet_api=fleet_api,
+        per_robot_api=per_robot_api,
+        manager_interfaces=manager_interfaces,
+    )
