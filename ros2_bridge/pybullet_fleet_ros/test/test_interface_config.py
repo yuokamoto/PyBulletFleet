@@ -3,7 +3,7 @@
 import pytest
 from rclpy.qos import DurabilityPolicy, HistoryPolicy, ReliabilityPolicy
 
-from pybullet_fleet_ros.interface_config import resolve_bridge_api_config
+from pybullet_fleet_ros.interface_config import StateScope, resolve_bridge_api_config
 
 
 def test_default_config_preserves_per_robot_interfaces():
@@ -36,6 +36,20 @@ def test_explicit_fleet_api_does_not_disable_per_robot_interfaces():
     assert cfg.fleet_api.navigate is True
     assert cfg.per_robot_api.enabled is True
     assert cfg.per_robot_api.robot_enabled("robot0") is True
+
+
+def test_fleet_api_without_manager_interfaces_defaults_to_an_empty_list():
+    cfg = resolve_bridge_api_config({"fleet_api": {"enabled": True, "states": True}})
+
+    assert cfg.manager_interfaces == ()
+    assert cfg.fleet_api.state_scope is StateScope.ALL_AGENTS
+
+
+def test_legacy_state_include_managers_implies_manager_state_scope():
+    cfg = resolve_bridge_api_config({"fleet_api": {"state_include_managers": ["delivery"]}})
+
+    assert cfg.fleet_api.state_scope is StateScope.MANAGERS
+    assert cfg.fleet_api.state_include_managers == ("delivery",)
 
 
 def test_fleet_state_qos_resolves_preset_and_overrides():
@@ -101,6 +115,66 @@ def test_fleet_api_and_per_robot_api_are_independent():
     assert cfg.per_robot_api.command_topics is True
     assert cfg.per_robot_api.services is False
     assert cfg.per_robot_api.actions is False
+
+
+def test_manager_interfaces_resolve_scoped_endpoint_configuration():
+    cfg = resolve_bridge_api_config(
+        {
+            "fleet_api": {
+                "state_scope": "managers",
+                "state_include_managers": ["delivery", "inspection"],
+                "manager_interfaces": [
+                    {
+                        "manager": "delivery",
+                        "states": True,
+                        "state_publish_rate": 2.5,
+                        "state_qos": {"reliability": "best_effort", "history": "keep_last", "depth": 1},
+                        "navigate": True,
+                        "stop": True,
+                    }
+                ],
+            }
+        }
+    )
+
+    assert cfg.fleet_api.state_include_managers == ("delivery", "inspection")
+    assert cfg.fleet_api.state_scope is StateScope.MANAGERS
+    assert len(cfg.manager_interfaces) == 1
+    manager = cfg.manager_interfaces[0]
+    assert manager.manager == "delivery"
+    assert manager.state_publish_rate == 2.5
+    assert manager.state_qos.reliability == ReliabilityPolicy.BEST_EFFORT
+    assert manager.navigate is True
+    assert manager.stop is True
+
+
+@pytest.mark.parametrize(
+    ("manager_interfaces", "match"),
+    [
+        ({}, "must be a list"),
+        ([True], "must be a mapping"),
+        ([{}], "must be a non-empty string"),
+        ([{"manager": "one/two"}], "one ROS namespace segment"),
+        ([{"manager": "one"}, {"manager": "one"}], "duplicate manager"),
+        ([{"manager": "one", "state_publish_rate": 0}], "state_publish_rate must be positive"),
+    ],
+)
+def test_manager_interfaces_reject_invalid_entries(manager_interfaces, match):
+    with pytest.raises(ValueError, match=match):
+        resolve_bridge_api_config({"fleet_api": {"manager_interfaces": manager_interfaces}})
+
+
+@pytest.mark.parametrize(
+    ("fleet_api", "match"),
+    [
+        ({"state_scope": "invalid"}, "state_scope"),
+        ({"state_scope": "managers"}, "requires state_include_managers"),
+        ({"state_scope": "all_agents", "state_include_managers": ["delivery"]}, "cannot use"),
+    ],
+)
+def test_state_scope_rejects_ambiguous_or_invalid_filters(fleet_api, match):
+    with pytest.raises(ValueError, match=match):
+        resolve_bridge_api_config({"fleet_api": fleet_api})
 
 
 def test_invalid_api_sections_raise_clear_errors():

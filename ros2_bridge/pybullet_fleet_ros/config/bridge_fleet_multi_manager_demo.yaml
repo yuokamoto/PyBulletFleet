@@ -1,0 +1,102 @@
+# Copyable Fleet ROS manager-interface example.
+#
+# Exposes two independently controlled fleets while retaining a filtered
+# compatibility /fleet/states snapshot. The npc manager is intentionally
+# unexposed: inspect it on demand through simulation_interfaces services.
+#
+# Run directly:
+#   ros2 run pybullet_fleet_ros bridge_node --ros-args \
+#     -p config_yaml:=/path/to/bridge_fleet_multi_manager_demo.yaml
+#
+# Then test one manager:
+#   ros2 topic echo /fleet/delivery_fleet/states --once
+#   ros2 run pybullet_fleet_ros fleet_nav_demo -- \
+#     --fleet-namespace /fleet/delivery_fleet --robots 5
+#
+# Prerequisite for the TurtleBot3 inspection fleet:
+#   sudo apt install ros-${ROS_DISTRO}-turtlebot3-description
+
+simulation:
+  gui: false
+  physics: false
+  target_rtf: 1.0
+
+fleet_api:
+  enabled: true
+  # Compatibility snapshot for clients that need both external fleets. NPCs
+  # are not collected, converted, or included in this message.
+  # For a manager-only deployment, set this to false and remove
+  # state_include_managers; the manager_interfaces streams remain available.
+  states: true
+  navigate: false
+  state_scope: managers
+  state_include_managers: [delivery_fleet, inspection_fleet]
+  # These streams are independent of the global compatibility snapshot.
+  manager_interfaces:
+    - manager: delivery_fleet
+      states: true
+      state_publish_rate: 5.0
+      navigate: true
+      stop: true
+    - manager: inspection_fleet
+      states: true
+      state_publish_rate: 1.0
+      navigate: true
+      stop: true
+
+per_robot_api:
+  enabled: false
+
+managers:
+  - name: delivery_fleet
+    fleet_controller:
+      type: batch_omni
+      max_linear_vel: 2.0
+      max_angular_vel: 3.0
+  - name: inspection_fleet
+    fleet_controller:
+      type: batch_omni
+      max_linear_vel: 2.0
+      max_angular_vel: 3.0
+  - name: npc
+    fleet_controller:
+      type: batch_omni
+      max_linear_vel: 2.0
+      max_angular_vel: 3.0
+
+entities:
+  - name: delivery_robot
+    manager: delivery_fleet
+    urdf_path: robots/simple_cube.urdf
+    controller:
+      type: omni
+    grid:
+      count: 5
+      columns: 3
+      spacing: [2.0, 2.0, 0.0]
+      offset: [0.0, 0.0, 0.05]
+
+  - name: inspection_robot
+    manager: inspection_fleet
+    # Model name resolves through the installed turtlebot3_description package.
+    urdf_path: turtlebot3_burger
+    controller:
+      type: omni
+    grid:
+      count: 5
+      columns: 3
+      spacing: [2.0, 2.0, 0.0]
+      # Keep the fleet nearby for one-screen comparison without overlapping
+      # the delivery grid (which spans x=0..4 m).
+      offset: [12.0, 0.0, 0.05]
+
+  - name: npc_robot
+    manager: npc
+    urdf_path: robots/mobile_robot.urdf
+    controller:
+      type: omni
+    grid:
+      count: 5
+      columns: 3
+      spacing: [2.0, 2.0, 0.0]
+      offset: [0.0, 12.0, 0.05]

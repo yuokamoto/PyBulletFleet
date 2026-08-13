@@ -46,8 +46,8 @@ namespace and handler set is created for every selected robot.
 | Fleet ROS API (`fleet_api`) | One batched state stream and named command endpoints | Fleet manager or load-test client | The client commands or observes many robots together |
 
 `per_robot_api.include_robots` and `exclude_robots` limit which Agents receive
-per-robot endpoints.  The Fleet ROS API currently has simulation-wide Agent scope;
-it is not automatically restricted by a manager or the per-robot filters.
+per-robot endpoints. Fleet endpoints can instead be partitioned explicitly by
+named managers; see [Bridge Configuration](configuration).
 
 ## Per-robot API
 
@@ -80,37 +80,35 @@ action topic is `/{robot}/execute_action`.
 Use the Fleet ROS API (`fleet_api`) when an external client works on a whole
 fleet. It reduces
 ROS graph size by replacing repeated per-robot state and command endpoints with
-batched endpoints:
+batched endpoints. In the table, `/fleet[/<manager>]` means either the global
+compatibility endpoint (`/fleet`) or an endpoint for one configured manager
+(`/fleet/<manager>`):
 
 | Endpoint | Purpose |
 | --- | --- |
-| `/fleet/states` | One `FleetState` message containing all current Agent states |
-| `/fleet/navigate` | Batched navigation command, as topic or service |
-| `/fleet/stop` | Batched stop command, as topic or service |
-| `/fleet/attach` | Batched attach/detach command, as topic or service |
-| `/fleet/execute_action` | Batched generic action command, as topic or service |
-| `/fleet/joint_command` | Batched joint-position command, as topic or service |
+| `/fleet[/<manager>]/states` | One `FleetState` message for the global scope or that manager's Agents |
+| `/fleet[/<manager>]/navigate` | Batched navigation command, as topic or service |
+| `/fleet[/<manager>]/stop` | Batched stop command, as topic or service |
+| `/fleet[/<manager>]/attach` | Batched attach/detach command, as topic or service |
+| `/fleet[/<manager>]/execute_action` | Batched generic action command, as topic or service |
+| `/fleet[/<manager>]/joint_command` | Batched joint-position command, as topic or service |
 
 Pose-bearing fleet commands include a ROS header. `header.frame_id` identifies
 the command frame (normally `odom`); `header.stamp` records the command issue
 time. Clients should treat service responses and command acknowledgements as
 the command-ingress result, not as proof that every robot has completed motion.
 
-### Actor visibility and current scope
+### Agent scope
 
 An `Agent` represents any active simulated actor, not only a robot owned by the
 ROS/RMF client. This includes mock people, robots owned by another system, and
-jointed devices. Today the Fleet ROS API is global: `FleetStateProvider` publishes
-every `sim.agents` entry in `/fleet/states`, and `FleetCommandDispatcher` can
-resolve every uniquely named Agent. A separate `AgentManager` does not alter
-that scope.
+jointed devices. The global `/fleet/*` endpoints retain their compatibility
+scope by default. Configure `state_scope` for a filtered global state stream,
+or use `manager_interfaces` for manager-namespaced state and command endpoints.
+See [manager-scoped Fleet API endpoints](configuration#manager-scoped-fleet-api-endpoints).
 
 For per-robot endpoints, use `per_robot_api.include_robots` or
-`exclude_robots` to avoid creating ROS interfaces for mock actors. If a fleet
-state must contain only a controlled fleet, disable the fleet state endpoint or
-provide that filtered state through an integration/plugin for now. Selective
-fleet-state publication and named Fleet ROS API scopes are planned; see the
-[roadmap](../roadmap).
+`exclude_robots` to avoid creating ROS interfaces for mock actors.
 
 ## Simulation services
 
@@ -118,6 +116,27 @@ The bridge can also expose `simulation_interfaces` services for spawning,
 deleting, querying, moving, stepping, pausing, and resetting entities. These
 are useful for test harnesses and scenario tools, but are separate from the
 fleet command API.
+
+### Choose the control boundary
+
+Use the interface that reflects what is being controlled, rather than treating
+the Fleet API as a general-purpose simulation API:
+
+| Target and intent | Recommended boundary |
+| --- | --- |
+| An `Agent` moving as part of a fleet | Fleet ROS API (`/fleet/*` or `/fleet/<manager>/*`) |
+| An `Agent` used with Nav2-like, robot-by-robot tooling | Per-robot API |
+| A general `SimObject` queried, moved, spawned, or deleted from another ROS node | `simulation_interfaces` services such as `/sim/get_entity_state`, `/sim/set_entity_state`, and `/sim/delete_entity` |
+| Doors, lifts, or workcells | Their dedicated ROS interfaces |
+| Scenario logic, physics tuning, or continuous custom object behavior | In-process Python API |
+
+`SimObject` is intentionally not a Fleet API target: fleet commands model
+robot/actor operations such as navigation, stop, attachment, and joint
+commands. `simulation_interfaces` is the appropriate ROS boundary when an
+external node must manipulate a non-Agent entity. A client can perform
+periodic `/sim/set_entity_state` calls for simple continuous control, but
+complex behavior and physics-oriented logic are generally clearer and more
+efficient in Python.
 
 ### Dynamic spawning
 

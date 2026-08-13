@@ -117,14 +117,15 @@ def test_client_factory_creates_fleet_ros_client():
     attach_client = MagicMock()
     node = _node_with_clients(nav_client, stop_client, attach_client)
 
-    factory = create_rmf_client_factory("fleet_ros", node)
+    factory = create_rmf_client_factory("fleet_ros", node, fleet_namespace="/fleet/tinyRobot")
 
     assert isinstance(factory, RosRmfFleetClient)
     node.create_subscription.assert_called_once()
+    assert node.create_subscription.call_args.args[1] == "/fleet/tinyRobot/states"
     assert node.create_client.call_count == 3
-    assert node.create_client.call_args_list[0].args[1] == "/fleet/navigate"
-    assert node.create_client.call_args_list[1].args[1] == "/fleet/stop"
-    assert node.create_client.call_args_list[2].args[1] == "/fleet/attach"
+    assert node.create_client.call_args_list[0].args[1] == "/fleet/tinyRobot/navigate"
+    assert node.create_client.call_args_list[1].args[1] == "/fleet/tinyRobot/stop"
+    assert node.create_client.call_args_list[2].args[1] == "/fleet/tinyRobot/attach"
 
 
 def test_client_factory_creates_python_fleet_client(mock_node):

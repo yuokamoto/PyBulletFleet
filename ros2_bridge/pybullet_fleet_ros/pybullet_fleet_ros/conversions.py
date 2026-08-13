@@ -186,6 +186,17 @@ def sim_time_to_ros_time(sim_time: float) -> TimeMsg:
     return TimeMsg(sec=sec, nanosec=nanosec)
 
 
+def ros_time_to_seconds(stamp: TimeMsg | None) -> float | None:
+    """Convert a ROS time message to seconds without a clock lookup.
+
+    ``None`` is returned for an absent or time-like-invalid value, which is
+    useful for optional message headers.
+    """
+    if stamp is None or not hasattr(stamp, "sec") or not hasattr(stamp, "nanosec"):
+        return None
+    return float(stamp.sec) + float(stamp.nanosec) / 1e9
+
+
 # ---------------------------------------------------------------------------
 # Nav / Arm / Diagnostic conversion helpers
 # ---------------------------------------------------------------------------

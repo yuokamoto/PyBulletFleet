@@ -23,6 +23,7 @@ from pybullet_fleet.commands import DEFAULT_ATTACH_SEARCH_RADIUS
 from pybullet_fleet.commands import RobotAttachCommand as PbfRobotAttachCommand
 from pybullet_fleet.commands import RobotGoalCommand2D
 from pybullet_fleet.fleet_api import FleetCommandDispatcher, FleetStateProvider
+from pybullet_fleet_ros.fleet_endpoints import FLEET_API_NAMESPACE, fleet_endpoint, normalize_fleet_namespace
 from pybullet_fleet.geometry import Pose as PbfPose
 from pybullet_fleet_rmf.client_interface import RobotUpdateData
 from pybullet_fleet_rmf.per_robot_ros_client import PerRobotRosClient
@@ -124,8 +125,8 @@ class _RmfRobotClientBase:
 class RosRmfFleetClient:
     """Shared ROS fleet-endpoint client for RMF.
 
-    The client consumes ``/fleet/states`` once and sends navigation commands
-    through the ``/fleet/navigate`` service. Per-robot service clients are still
+    The client consumes one fleet state endpoint and sends navigation commands
+    through that namespace's ``navigate`` service. Per-robot service clients are still
     used for delivery/charging compatibility until fleet-level equivalents are
     added.
     """
@@ -136,17 +137,22 @@ class RosRmfFleetClient:
         map_name: str = "L1",
         *,
         completion_radius: float = 0.25,
+        fleet_namespace: str = FLEET_API_NAMESPACE,
     ) -> None:
         self._node = node
         self._default_map_name = map_name
         self._completion_radius = float(completion_radius)
+        self._fleet_namespace = normalize_fleet_namespace(fleet_namespace)
         self._lock = threading.Lock()
         self._states: dict[str, RobotUpdateData] = {}
         self._map_names: dict[str, str] = {}
-        self._state_sub = node.create_subscription(FleetState, "/fleet/states", self._on_fleet_state, 10)
-        self._navigate_client = node.create_client(FleetNavigateSrv, "/fleet/navigate")
-        self._stop_client = node.create_client(FleetStopSrv, "/fleet/stop")
-        self._attach_client = node.create_client(FleetAttachSrv, "/fleet/attach")
+        self._state_sub = node.create_subscription(FleetState, self._endpoint("states"), self._on_fleet_state, 10)
+        self._navigate_client = node.create_client(FleetNavigateSrv, self._endpoint("navigate"))
+        self._stop_client = node.create_client(FleetStopSrv, self._endpoint("stop"))
+        self._attach_client = node.create_client(FleetAttachSrv, self._endpoint("attach"))
+
+    def _endpoint(self, name: str) -> str:
+        return fleet_endpoint(self._fleet_namespace, name)
 
     def robot(self, robot_name: str) -> "RosRmfFleetRobotClient":
         """Return a per-robot facade over the shared fleet endpoints."""
@@ -730,13 +736,14 @@ def create_rmf_client_factory(
     provider: FleetStateProvider | None = None,
     dispatcher: FleetCommandDispatcher | None = None,
     rmf_frame_offset=None,
+    fleet_namespace: str = FLEET_API_NAMESPACE,
 ):
     """Create an RMF client factory for ``mode``."""
     normalized = (mode or "per_robot_ros").strip().lower()
     if normalized == "per_robot_ros":
         return PerRobotRosClientFactory(node, map_name=map_name)
     if normalized == "fleet_ros":
-        return RosRmfFleetClient(node, map_name=map_name)
+        return RosRmfFleetClient(node, map_name=map_name, fleet_namespace=fleet_namespace)
     if normalized == "python_fleet":
         if provider is None or dispatcher is None:
             if sim_core is None:

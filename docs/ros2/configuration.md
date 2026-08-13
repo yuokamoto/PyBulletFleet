@@ -53,11 +53,74 @@ per_robot_api:
 filters prevent handler, publisher, subscriber, service, and action-server
 creation for excluded actors.
 
-They do **not** filter the fleet API: its state provider currently includes all
-Agents, and its dispatcher resolves all uniquely named Agents. A manager is an
-execution group, not an API visibility group. Until the planned fleet API scope
-feature is available, disable unwanted fleet endpoints or expose a filtered
-view from an integration/plugin.
+### Manager-scoped Fleet API endpoints
+
+Use named `AgentManager` instances to expose a selective state stream and a
+manager-owned command boundary. A manager name is an execution grouping and a
+stable ROS namespace; it is not an RMF fleet name.
+
+```yaml
+fleet_api:
+  enabled: true
+  states: true
+  # Keep the compatibility stream, while avoiding work for internal NPCs.
+  state_scope: managers
+  state_include_managers: [delivery]
+  manager_interfaces:
+    - manager: delivery
+      states: true
+      state_publish_rate: 5.0
+      state_qos:
+        reliability: reliable
+        history: keep_last
+        depth: 10
+        durability: volatile
+      navigate: true
+      stop: true
+      joint_command: true
+
+managers:
+  - name: delivery
+  - name: npc
+```
+
+This creates `/fleet/delivery/states`, `/fleet/delivery/navigate`,
+`/fleet/delivery/stop`, and `/fleet/delivery/joint_command` (each command has
+both its existing topic and service form). `attach` and `execute_action` may be
+enabled in the same way. Manager commands reject targets outside their resolved
+Agent membership. The global `/fleet/*` commands remain unrestricted for
+compatibility.
+
+`state_scope` makes the global `/fleet/states` membership explicit:
+
+- `all_agents` includes every Agent, including Agents with no manager. This is
+  the default when the field is omitted for compatibility.
+- `managers` requires `state_include_managers` and includes only those named
+  managers' Agents.
+
+`state_include_managers` affects only the global compatibility snapshot, not
+the manager streams. The global filtered stream and every manager stream use
+the same complete `state_qos` structure. A state stream with no matched
+subscribers skips state collection and ROS-message conversion. Manager state
+rate can only reduce the bridge's configured `publish_rate`, which is the
+shared scheduling ceiling.
+
+For a manager-only deployment, use `fleet_api.states: false` and retain only
+the `manager_interfaces[].states` streams; neither `state_scope` nor
+`state_include_managers` is then needed.
+
+Each listed manager must exist. A manager with no Agents logs a warning rather
+than preventing the bridge from starting; its manager-scoped state stream is
+empty and its commands have no valid targets. Membership is resolved at bridge
+startup, so add Agents before starting the bridge (or restart it after changing
+membership). An Agent cannot belong to more than one exposed
+`manager_interfaces` entry. Put rarely inspected NPCs in an unexposed `npc`
+manager and use the on-demand `/sim/get_entity_state` or
+`/sim/get_entities_states` services instead.
+
+For a copyable complete configuration with `delivery_fleet`,
+`inspection_fleet`, and an unexposed `npc` manager, start with
+[`bridge_fleet_multi_manager_demo.yaml`](https://github.com/yuokamoto/PyBulletFleet/blob/main/ros2_bridge/pybullet_fleet_ros/config/bridge_fleet_multi_manager_demo.yaml).
 
 ## Common deployment choices
 

@@ -11,7 +11,8 @@ headless form shown where available.
 | Navigation | Mobile robot navigation topics and actions | None | `nav_demo.launch.py` |
 | Panda arm | Seven-joint trajectory control | None | `arm_demo.launch.py` |
 | Attach | Attach/detach a nearby box through ROS services | `ros-jazzy-turtlebot3-description` | `attach_demo.launch.py` |
-| Fleet ROS GUI | 100 robots with batched Fleet ROS commands | None | `fleet_demo.launch.py` |
+| Configurable Fleet ROS | One configurable fleet with batched Fleet ROS commands | TurtleBot3 description only for `tb3_*` models | `fleet_demo.launch.py` |
+| Multi-manager Fleet ROS | Two manager-scoped fleets plus unexposed NPCs | `ros-jazzy-turtlebot3-description` | `multi_manager_fleet_demo.launch.py` |
 | RMF office | RMF patrol and delivery integration | `ros-jazzy-pybullet-fleet-rmf` plus `rmf_demos` overlay | [RMF quickstart](rmf-quickstart) |
 
 ## TurtleBot3
@@ -85,35 +86,69 @@ After the robot reaches the goal, detach the box:
 ros2 service call /tb3_0/toggle_attach std_srvs/srv/SetBool "{data: false}"
 ```
 
-## Fleet ROS GUI demo
+## Configurable Fleet ROS demo
 
-This native demo creates a fleet scene with the Fleet ROS API enabled, then
-accepts one navigation request for every robot. It is the representative GUI
-demo for the fleet ROS path:
+This launch generates a simple single-fleet YAML from its arguments and exposes
+the global `/fleet/*` endpoints. It is the quickest way to test a different
+fleet size or robot model:
 
 ```bash
 ros2 launch pybullet_fleet_ros fleet_demo.launch.py \
-  robots:=10 robot_model:=simple_cube gui:=true target_rtf:=1.0
+  robots:=10 robot_model:=simple_cube gui:=true
 ```
 
-For a lower-overhead WSLg view, install `ros-jazzy-rviz2` and launch with
-`gui:=false rviz:=true`. It renders lightweight cubes from the single
-`/fleet/states` stream rather than opening the PyBullet GUI.
-
-From another terminal, inspect the batched state and move all ten robots while
-preserving their grid spacing:
+From another terminal, verify the state stream and move five robots:
 
 ```bash
 ros2 topic echo /fleet/states --once
-python3 -m pybullet_fleet_ros.fleet_nav_demo \
-  --robots 10 --dx 0.5 --dy 0.5 --transport service
+ros2 run pybullet_fleet_ros fleet_nav_demo -- \
+  --robots 5 --dx 0.5 --dy 0.5 --transport service
 ```
 
-The [bridge quickstart](quickstart) also includes a literal 10-robot
-`ros2 service call` suited to a live API demonstration. Set
-`robot_model:=tb3_burger` or `tb3_waffle` after installing
-`ros-jazzy-turtlebot3-description`. The same launch works in Docker; see the
+Supported `robot_model` values are `simple_cube`, `mobile_robot`,
+`tb3_burger`, and `tb3_waffle`. Install
+`ros-jazzy-turtlebot3-description` before using either TurtleBot3 value.
+
+## Multi-manager Fleet ROS demo
+
+This fixed, directly editable scene exposes `/fleet/delivery_fleet/*` and
+`/fleet/inspection_fleet/*`; its `npc` manager is not published continuously.
+It is the basic reference for manager-scoped endpoints.
+
+```bash
+sudo apt install -y ros-jazzy-turtlebot3-description
+ros2 launch pybullet_fleet_ros multi_manager_fleet_demo.launch.py gui:=true
+```
+
+From another terminal, inspect and command the delivery manager:
+
+```bash
+ros2 topic echo /fleet/delivery_fleet/states --once
+ros2 run pybullet_fleet_ros fleet_nav_demo -- \
+  --fleet-namespace /fleet/delivery_fleet \
+  --robots 5 --dx 0.5 --dy 0.5 --transport service
+```
+
+To inspect the complete ROS request without the helper client, call the same
+service directly. This makes each target name and goal visible in the terminal:
+
+```bash
+ros2 service call /fleet/delivery_fleet/navigate pybullet_fleet_msgs/srv/FleetNavigate \
+  "{command_id: demo_grid_shift, source: demos, goals_2d: [
+    {name: delivery_robot_0, position: [0.5, 0.5], yaw: 0.0, z: 0.05},
+    {name: delivery_robot_1, position: [2.5, 0.5], yaw: 0.0, z: 0.05},
+    {name: delivery_robot_2, position: [4.5, 0.5], yaw: 0.0, z: 0.05},
+    {name: delivery_robot_3, position: [6.5, 0.5], yaw: 0.0, z: 0.05},
+    {name: delivery_robot_4, position: [8.5, 0.5], yaw: 0.0, z: 0.05}
+  ], goals_3d: []}"
+```
+
+The same launch works in Docker; see the
 [Docker bridge guide](https://github.com/yuokamoto/PyBulletFleet/blob/main/docker/README.md).
+
+For a fixed, directly editable version of this multi-manager scene, copy
+[`bridge_fleet_multi_manager_demo.yaml`](https://github.com/yuokamoto/PyBulletFleet/blob/main/ros2_bridge/pybullet_fleet_ros/config/bridge_fleet_multi_manager_demo.yaml)
+and pass it to `bridge_node` through `config_yaml`.
 
 ## Docker-only model catalog
 

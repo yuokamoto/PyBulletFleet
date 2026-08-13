@@ -5,7 +5,7 @@ those tests skip when the bindings are unavailable.
 """
 
 from dataclasses import dataclass, field
-from unittest.mock import MagicMock
+from unittest.mock import ANY, MagicMock
 
 import pytest
 
@@ -24,7 +24,7 @@ except ImportError as exc:
     _GEOMETRY_MSGS_IMPORT_ERROR = exc
 
 from pybullet_fleet.geometry import Pose
-from pybullet_fleet_ros.interface_config import FleetApiConfig
+from pybullet_fleet_ros.interface_config import FleetApiConfig, ManagerInterfaceConfig
 
 
 def _require_geometry_msgs():
@@ -161,6 +161,68 @@ def test_fleet_state_publisher_uses_provider():
     assert published.robots[0].twist.linear.x == pytest.approx(0.4)
 
 
+def test_manager_state_publisher_filters_members_and_uses_namespace():
+    _fleet_msg_types()
+    node = _node()
+    node.create_publisher.return_value.get_subscription_count.return_value = 1
+    delivery = FakeAgent("delivery_0", 1)
+    npc = FakeAgent("npc_0", 2)
+    interface = FleetRosInterface(
+        node,
+        FakeSim([delivery, npc]),
+        ManagerInterfaceConfig(manager="delivery", states=True),
+        namespace="/fleet/delivery",
+        state_names=["delivery_0"],
+        command_names=["delivery_0"],
+    )
+
+    interface.post_step()
+
+    node.create_publisher.assert_called_once()
+    assert node.create_publisher.call_args.args[1] == "/fleet/delivery/states"
+    published = node.create_publisher.return_value.publish.call_args.args[0]
+    assert [robot.name for robot in published.robots] == ["delivery_0"]
+
+
+def test_state_publisher_skips_collection_without_subscribers(monkeypatch):
+    _fleet_msg_types()
+    node = _node()
+    node.create_publisher.return_value.get_subscription_count.return_value = 0
+    provider = MagicMock()
+    monkeypatch.setattr(fleet_ros_interface_module, "FleetStateProvider", provider)
+    interface = FleetRosInterface(node, FakeSim([FakeAgent("robot0", 1)]), FleetApiConfig(enabled=True, states=True))
+
+    interface.post_step()
+
+    provider.return_value.get_states_3d.assert_not_called()
+    node.create_publisher.return_value.publish.assert_not_called()
+
+
+def test_manager_state_rate_limit_skips_subscription_query_until_due():
+    _fleet_msg_types()
+    from pybullet_fleet_ros.conversions import sim_time_to_ros_time
+
+    node = _node()
+    node.create_publisher.return_value.get_subscription_count.return_value = 1
+    interface = FleetRosInterface(
+        node,
+        FakeSim([FakeAgent("delivery_0", 1)]),
+        ManagerInterfaceConfig(manager="delivery", states=True, state_publish_rate=1.0),
+        state_names=["delivery_0"],
+    )
+
+    interface.post_step(stamp=sim_time_to_ros_time(0.0))
+    node.create_publisher.return_value.get_subscription_count.assert_called_once_with()
+    node.create_publisher.return_value.publish.assert_called_once_with(ANY)
+    node.create_publisher.return_value.get_subscription_count.reset_mock()
+    node.create_publisher.return_value.publish.reset_mock()
+
+    interface.post_step(stamp=sim_time_to_ros_time(0.5))
+
+    node.create_publisher.return_value.get_subscription_count.assert_not_called()
+    node.create_publisher.return_value.publish.assert_not_called()
+
+
 def test_fleet_state_publisher_applies_frame_offset():
     _fleet_msg_types()
     node = _node()
@@ -192,6 +254,29 @@ def test_fleet_navigate_service_dispatches_2d_goal():
     assert result.ack.accepted_names == ["robot0"]
     assert agent.goal_calls[0].x == pytest.approx(1.0)
     assert agent.goal_calls[0].yaw == pytest.approx(0.5)
+
+
+def test_manager_navigate_service_rejects_out_of_scope_target():
+    msgs, srvs = _fleet_msg_types()
+    node = _node()
+    delivery = FakeAgent("delivery_0", 1)
+    npc = FakeAgent("npc_0", 2)
+    interface = FleetRosInterface(
+        node,
+        FakeSim([delivery, npc]),
+        ManagerInterfaceConfig(manager="delivery", navigate=True),
+        namespace="/fleet/delivery",
+        command_names=["delivery_0"],
+    )
+    request = srvs.FleetNavigate.Request()
+    request.goals_2d = [msgs.RobotGoal2D(name="npc_0", position=[1.0, 2.0], yaw=0.0, z=0.0)]
+
+    result = interface._on_navigate_service(request, srvs.FleetNavigate.Response())
+
+    assert result.ack.accepted_names == []
+    assert result.ack.rejected_names == ["npc_0"]
+    assert result.ack.reject_reasons == ["not managed by this interface"]
+    assert npc.goal_calls == []
 
 
 def test_fleet_navigate_service_applies_frame_offset():

@@ -102,6 +102,12 @@ Fleet-level command callbacks should enqueue commands into the dispatcher and
 return acknowledgements. They should not run long blocking robot actions inside
 the ROS callback thread.
 
+For deployments that need selective state subscriptions or command ownership
+boundaries, use the implemented [Manager-Scoped Fleet ROS
+Interfaces](partitioned-interfaces.md). It preserves the global Fleet API for
+compatibility and deliberately does not equate a manager name with an RMF fleet
+name.
+
 Fleet ROS command messages and service requests carry `std_msgs/Header`:
 
 - `header.stamp` is the command issue time from the caller's ROS clock. A zero

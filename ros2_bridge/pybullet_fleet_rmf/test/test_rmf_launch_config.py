@@ -45,6 +45,34 @@ def test_bridge_config_for_fleet_ros_enables_required_fleet_api(tmp_path):
     }
 
 
+def test_bridge_config_for_manager_fleet_ros_preserves_global_endpoint_switches(tmp_path):
+    module = _load_pybullet_common_launch()
+    config_path = tmp_path / "bridge.yaml"
+    config_path.write_text(
+        yaml.safe_dump(
+            {
+                "simulation": {},
+                "fleet_api": {
+                    "enabled": True,
+                    "states": False,
+                    "navigate": False,
+                    "manager_interfaces": [{"manager": "delivery", "states": True, "navigate": True}],
+                },
+            }
+        )
+    )
+
+    result = module._bridge_config_for_client_mode(
+        config_yaml=str(config_path),
+        rmf_adapters=yaml.safe_dump([{"config_file": "/tmp/fleet.yaml", "fleet_namespace": "/fleet/delivery"}]),
+        client_mode="fleet_ros",
+    )
+
+    fleet_api = yaml.safe_load(Path(result).read_text())["fleet_api"]
+    assert fleet_api["states"] is False
+    assert fleet_api["navigate"] is False
+
+
 def test_bridge_config_registers_temp_file_cleanup(tmp_path, monkeypatch):
     module = _load_pybullet_common_launch()
     config_path = tmp_path / "bridge.yaml"

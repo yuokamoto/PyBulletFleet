@@ -259,6 +259,19 @@ def test_dispatcher_joint_command_and_stop():
     assert robot0.stop_calls == 1
 
 
+def test_dispatcher_allowlist_rejects_out_of_scope_targets():
+    robot0 = FakeAgent("robot0", 1)
+    robot1 = FakeAgent("robot1", 2)
+    dispatcher = FleetCommandDispatcher(FakeSim([robot0, robot1]), allowed_names=["robot0"])
+
+    ack = dispatcher.stop(["robot0", "robot1"], command_id="manager-stop")
+
+    assert ack.accepted_names == ("robot0",)
+    assert ack.rejected == {"robot1": "not managed by this interface"}
+    assert robot0.stop_calls == 1
+    assert robot1.stop_calls == 0
+
+
 def test_dispatcher_attach_by_name_and_detach_attached_object():
     robot0 = FakeAgent("robot0", 1)
     box = FakeObject("box")

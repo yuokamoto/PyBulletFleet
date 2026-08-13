@@ -134,3 +134,12 @@ def test_sim_time_to_ros_time():
     stamp = sim_time_to_ros_time(1.5)
     assert stamp.sec == 1
     assert stamp.nanosec == 500000000
+
+
+def test_ros_time_to_seconds():
+    """ROS Time messages convert back to floating-point seconds."""
+    from builtin_interfaces.msg import Time
+    from pybullet_fleet_ros.conversions import ros_time_to_seconds
+
+    assert ros_time_to_seconds(Time(sec=1, nanosec=500000000)) == 1.5
+    assert ros_time_to_seconds(None) is None
