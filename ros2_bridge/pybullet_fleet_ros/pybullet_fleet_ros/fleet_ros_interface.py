@@ -5,7 +5,6 @@ from __future__ import annotations
 import time
 from typing import Iterable
 
-from geometry_msgs.msg import Point, Pose, Quaternion, Twist, Vector3
 from rclpy.qos import QoSProfile
 from rclpy.serialization import serialize_message
 from std_msgs.msg import Header
@@ -457,31 +456,25 @@ def robot_state3d_to_msg(state: RobotState3D, xy_offset: tuple[float, float] = (
     msg = RobotState3DMsg()
     msg.name = state.name
     msg.object_id = int(state.object_id)
-    msg.pose = Pose(
-        position=Point(
-            x=state.position[0] + xy_offset[0],
-            y=state.position[1] + xy_offset[1],
-            z=state.position[2],
-        ),
-        orientation=Quaternion(
-            x=state.orientation[0],
-            y=state.orientation[1],
-            z=state.orientation[2],
-            w=state.orientation[3],
-        ),
-    )
-    msg.twist = Twist(
-        linear=Vector3(
-            x=state.linear_velocity[0],
-            y=state.linear_velocity[1],
-            z=state.linear_velocity[2],
-        ),
-        angular=Vector3(
-            x=state.angular_velocity[0],
-            y=state.angular_velocity[1],
-            z=state.angular_velocity[2],
-        ),
-    )
+    # Generated ROS Python messages eagerly allocate their nested defaults.
+    # Populate those objects instead of constructing a second Pose/Twist tree.
+    position = msg.pose.position
+    position.x = state.position[0] + xy_offset[0]
+    position.y = state.position[1] + xy_offset[1]
+    position.z = state.position[2]
+    orientation = msg.pose.orientation
+    orientation.x = state.orientation[0]
+    orientation.y = state.orientation[1]
+    orientation.z = state.orientation[2]
+    orientation.w = state.orientation[3]
+    linear = msg.twist.linear
+    linear.x = state.linear_velocity[0]
+    linear.y = state.linear_velocity[1]
+    linear.z = state.linear_velocity[2]
+    angular = msg.twist.angular
+    angular.x = state.angular_velocity[0]
+    angular.y = state.angular_velocity[1]
+    angular.z = state.angular_velocity[2]
     msg.is_moving = bool(state.is_moving)
     msg.has_battery_soc = state.battery_soc is not None
     msg.battery_soc = float(state.battery_soc or 0.0)

@@ -31,6 +31,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   distributed subscriber modes, to the ROS 2 scale checker.
 - Add FleetState collection, ROS-message conversion, and local publish-call
   timing fields to the standard per-step profiler for ROS 2 bridge diagnosis.
+- Reduce ROS 2 FleetState conversion cost by populating generated nested
+  messages in place instead of allocating replacement message trees.
 
 ### Fixed
 
