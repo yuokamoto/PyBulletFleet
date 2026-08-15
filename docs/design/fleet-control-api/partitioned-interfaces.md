@@ -225,7 +225,9 @@ The user-facing documentation covers the implemented surface:
 
 ## Validation Plan
 
-Extend the scale checker to compare, at 100, 500, and 1000 robots:
+The scale checker now compares the following cases at 100, 500, and 1000
+robots. The first same-host results are recorded in
+`ros2_bridge/PERFORMANCE.md`.
 
 | Case | State subscribers | What it establishes |
 |---|---|---|
@@ -234,11 +236,18 @@ Extend the scale checker to compare, at 100, 500, and 1000 robots:
 | Manager complete | one subscriber to every manager stream | total-work overhead |
 | Manager distributed | one subscriber per manager stream | executor/DDS fan-out behavior |
 
-For every case record achieved RTF, CPU, publish-to-callback p50/p99,
-per-manager serialized size, missed samples, and full-snapshot completion
-latency. Start with the current same-host profile. Network and slow-subscriber
-tests are separate follow-up work before recommending `BEST_EFFORT` or
-`KEEP_LAST(1)` defaults.
+The completed same-host matrix confirms the intended distinction: a selective
+manager subscription avoids conversion for unsubscribed managers, while
+subscribing every manager stream adds message overhead and does not parallelize
+the one bridge process. Therefore v1 does not add automatic partitions inside a
+manager. A future state-only partition feature requires a stable, documented
+assignment policy and a deployment-specific stream-size or latency requirement.
+Manager command endpoints remain manager-scoped rather than partition-scoped.
+
+Future measurements should record CPU, full-snapshot completion latency,
+slow-subscriber behavior, and network behavior. Network and slow-subscriber
+tests are also required before recommending `BEST_EFFORT` or `KEEP_LAST(1)`
+defaults.
 
 ## Non-Goals
 

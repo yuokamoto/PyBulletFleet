@@ -227,6 +227,39 @@ No material difference appeared in this uncongested, local setup. Repeat with
 slow subscribers, multiple subscribers, and a network transport before making
 a reliability or depth recommendation.
 
+### Manager-Scoped State Matrix
+
+The following 2026-08-13 same-host Docker measurements use ten equally sized
+manager scopes, `publish_rate=5`, `target_rtf=0`, `simple_cube`, and the
+transport probe. They are single-run diagnostics. `Selective` subscribes only
+to `manager_00`; `Complete` has one checker subscribe to all ten manager
+streams; `Distributed` has one checker process per manager stream. The global
+case has one `/fleet/states` subscriber.
+
+| Robots | Case | Subscribed robots / stream | State bytes / stream | Observed RTF | State p50 / p99 (wall) |
+|-------:|------|---------------------------:|---------------------:|-------------:|-----------------------:|
+| 100 | Global | 100 | 14,422 | 83.24x | 1.90 / 23.60 ms |
+| 100 | Manager selective | 10 | 1,550 | 305.76x | 0.37 / 1.25 ms |
+| 100 | Manager complete | 10 x 10 | 1,550 | 47.78x | 0.45--0.49 / 1.82--2.37 ms |
+| 500 | Global | 500 | 72,022 | 18.21x | 9.57 / 33.23 ms |
+| 500 | Manager selective | 50 | 7,630 | 114.83x | 1.02 / 2.65 ms |
+| 500 | Manager complete | 50 x 10 | 7,630 | 16.22x | 1.07--1.15 / 2.56--3.17 ms |
+| 1000 | Global | 1000 | 144,022 | 8.36x | 19.14 / 45.64 ms |
+| 1000 | Manager selective | 100 | 15,230 | 60.63x | 2.07 / 20.70 ms |
+| 1000 | Manager complete | 100 x 10 | 15,230 | 5.06x | 3.11--3.40 / 16.67--42.03 ms |
+| 1000 | Manager distributed | 100 x 10 | 15,230 | 7.64x | 2.27--2.43 / 4.16--5.21 ms |
+
+Probe matches were 99.5--100%. Per-stream p99 is not full-snapshot completion
+latency: manager streams are published sequentially by one bridge process, so a
+client that needs every manager must also wait for the final stream.
+
+Manager interfaces are useful for ownership boundaries and selective
+observation. One active manager subscriber lets the bridge skip the other nine
+state conversions. Subscribing every manager stream creates ten messages but
+does not parallelize the bridge, so total state work is higher than one global
+snapshot. Separate subscriber processes reduce client-side fan-out contention,
+not bridge serialization work.
+
 ### Same-Host Conclusion
 
 For the current deployment target, keep the default FleetState QoS as
@@ -289,11 +322,17 @@ not evidence that publish completion implies motion completion.
 - Keep `publish_rate` low when per-robot state publishers or TF are enabled.
 - Treat per-robot command topics as a debug interface unless an acknowledgement
   or verification layer is added.
+- Use manager-scoped state endpoints for independent operating fleets or
+  selective clients. Do not subscribe every manager endpoint merely to replace
+  `/fleet/states`; that increases total publish work in the current single-node
+  bridge.
 
 ## Follow-Up
 
 - Add ReadTheDocs pages under a dedicated ROS 2 Bridge section.
 - Convert these notes into `docs/ros2-bridge/performance.md`.
 - Add startup time, memory, DDS graph size, and RMF adapter latency measurements.
+- Measure full-snapshot completion, slow-subscriber behavior, and networked
+  manager subscriptions before defining a per-manager partition size limit.
 - Keep Docker scale checks optional; they are diagnostic benchmarks, not stable
   unit-test gates.

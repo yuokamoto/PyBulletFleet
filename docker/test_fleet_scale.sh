@@ -27,6 +27,8 @@ STATE_QOS_RELIABILITY=
 STATE_QOS_HISTORY=
 STATE_QOS_DEPTH=
 STATE_QOS_DURABILITY=
+MANAGER_COUNT=0
+MANAGER_SUBSCRIPTION_MODE=complete
 RTF_WARMUP=1.0
 RTF_DURATION=10.0
 
@@ -116,6 +118,14 @@ while [ "$#" -gt 0 ]; do
             STATE_QOS_DURABILITY="$2"
             shift 2
             ;;
+        --manager-count)
+            MANAGER_COUNT="$2"
+            shift 2
+            ;;
+        --manager-subscription-mode)
+            MANAGER_SUBSCRIPTION_MODE="$2"
+            shift 2
+            ;;
         --rtf-warmup)
             RTF_WARMUP="$2"
             shift 2
@@ -192,6 +202,7 @@ CONFIG_ARGS=(
     --interface-mode "$INTERFACE_MODE"
     --per-robot-groups "$PER_ROBOT_GROUPS"
     --state-qos-preset "$STATE_QOS_PRESET"
+    --manager-count "$MANAGER_COUNT"
     --config-out "$CONFIG_PATH"
 )
 if [ "$GUI" = true ]; then
@@ -232,6 +243,13 @@ fi
 start_bridge_node "$CONFIG_PATH" "$GUI" "$PUBLISH_RATE"
 
 echo "--- Phase 2/2: run ROS scale checks ---"
+if [ "$MANAGER_COUNT" -gt 0 ]; then
+    if [ "$COMMAND_INTERFACE" != "fleet" ]; then
+        echo "--manager-count requires the default --command-interface fleet; manager scale checks are state-only" >&2
+        exit 2
+    fi
+    COMMAND_INTERFACE=none
+fi
 CHECK_ARGS=(
     --robots "$ROBOTS"
     --timeout "$TIMEOUT"
@@ -240,6 +258,8 @@ CHECK_ARGS=(
     --fleet-service-repeats "$FLEET_SERVICE_REPEATS"
     --fleet-topic-repeats "$FLEET_TOPIC_REPEATS"
     --state-qos-preset "$STATE_QOS_PRESET"
+    --manager-count "$MANAGER_COUNT"
+    --manager-subscription-mode "$MANAGER_SUBSCRIPTION_MODE"
     --per-robot-publish-repeats "$PER_ROBOT_PUBLISH_REPEATS"
     --per-robot-publish-batch-size "$PER_ROBOT_PUBLISH_BATCH_SIZE"
 )
@@ -265,7 +285,60 @@ if [ "$MEASURE_TRANSPORT" = true ]; then
     CHECK_ARGS+=(--measure-transport --transport-warmup "$RTF_WARMUP" --transport-duration "$RTF_DURATION")
 fi
 
-python3 "$CHECKER" "${CHECK_ARGS[@]}"
+if [ "$MANAGER_SUBSCRIPTION_MODE" = distributed ]; then
+    if [ "$MANAGER_COUNT" -le 0 ]; then
+        echo "--manager-subscription-mode distributed requires --manager-count" >&2
+        exit 2
+    fi
+    base_manager_robots=$(( ROBOTS / MANAGER_COUNT ))
+    manager_remainder=$(( ROBOTS % MANAGER_COUNT ))
+    DISTRIBUTED_ARGS=(--state-qos-preset "$STATE_QOS_PRESET")
+    if [ -n "$STATE_QOS_RELIABILITY" ]; then
+        DISTRIBUTED_ARGS+=(--state-qos-reliability "$STATE_QOS_RELIABILITY")
+    fi
+    if [ -n "$STATE_QOS_HISTORY" ]; then
+        DISTRIBUTED_ARGS+=(--state-qos-history "$STATE_QOS_HISTORY")
+    fi
+    if [ -n "$STATE_QOS_DEPTH" ]; then
+        DISTRIBUTED_ARGS+=(--state-qos-depth "$STATE_QOS_DEPTH")
+    fi
+    if [ -n "$STATE_QOS_DURABILITY" ]; then
+        DISTRIBUTED_ARGS+=(--state-qos-durability "$STATE_QOS_DURABILITY")
+    fi
+    if [ "$MEASURE_RTF" = true ]; then
+        DISTRIBUTED_ARGS+=(--measure-rtf --rtf-warmup "$RTF_WARMUP" --rtf-duration "$RTF_DURATION")
+    fi
+    if [ "$MEASURE_TRANSPORT" = true ]; then
+        DISTRIBUTED_ARGS+=(--measure-transport --transport-warmup "$RTF_WARMUP" --transport-duration "$RTF_DURATION")
+    fi
+    pids=()
+    logs=()
+    for ((index = 0; index < MANAGER_COUNT; index++)); do
+        endpoint=$(printf '/fleet/manager_%02d/states' "$index")
+        manager_robots=$base_manager_robots
+        if [ "$index" -lt "$manager_remainder" ]; then
+            manager_robots=$((manager_robots + 1))
+        fi
+        log="$TMPDIR/check_manager_${index}.log"
+        logs+=("$log")
+        python3 "$CHECKER" \
+            --robots "$ROBOTS" --timeout "$TIMEOUT" --interface-mode "$INTERFACE_MODE" \
+            --command-interface none --state-endpoints "$endpoint" \
+            --expected-state-robots "$manager_robots" "${DISTRIBUTED_ARGS[@]}" \
+            >"$log" 2>&1 &
+        pids+=("$!")
+    done
+    rc=0
+    for pid in "${pids[@]}"; do
+        wait "$pid" || rc=1
+    done
+    cat "${logs[@]}"
+    if [ "$rc" -ne 0 ]; then
+        exit "$rc"
+    fi
+else
+    python3 "$CHECKER" "${CHECK_ARGS[@]}"
+fi
 
 trap - EXIT
 cleanup

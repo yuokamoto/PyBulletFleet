@@ -655,6 +655,23 @@ docker compose run --rm --no-deps \
     --command-interface fleet_topic --publish-rate 5 --measure-transport --measure-rtf \
     --fleet-topic-repeats 10
 
+# Compare manager-scoped state streams. "selective" subscribes to one manager;
+# "complete" subscribes to all of them. These are state-only checks, so the
+# helper suppresses its normal navigation command automatically.
+docker compose run --rm --no-deps \
+  -v "$(pwd):/docker:ro" \
+  bridge bash /docker/test_fleet_scale.sh --robots 1000 --interface-mode fleet \
+    --manager-count 10 --manager-subscription-mode selective --publish-rate 5 \
+    --target-rtf 0 --measure-transport --measure-rtf --no-verify-motion
+
+# Use one checker process per manager to separate client-side fan-out from the
+# bridge's single-process publication cost.
+docker compose run --rm --no-deps \
+  -v "$(pwd):/docker:ro" \
+  bridge bash /docker/test_fleet_scale.sh --robots 1000 --interface-mode fleet \
+    --manager-count 10 --manager-subscription-mode distributed --publish-rate 5 \
+    --target-rtf 0 --measure-transport --measure-rtf --no-verify-motion
+
 # To inspect the generated bridge config:
 docker compose run --rm --no-deps \
   -v "$(pwd):/docker:ro" \
