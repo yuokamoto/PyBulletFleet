@@ -73,6 +73,8 @@ def generate_bridge_config(
     transport_probe: bool,
     state_qos: dict,
     manager_count: int,
+    enable_time_profiling: bool,
+    profiling_interval: int,
 ) -> None:
     side = int(math.ceil(math.sqrt(robot_count)))
     fleet_enabled = interface_mode in {"fleet", "hybrid"}
@@ -84,6 +86,12 @@ def generate_bridge_config(
     config.setdefault("simulation", {})
     config["simulation"]["gui"] = gui
     config["simulation"]["target_rtf"] = target_rtf
+    config["simulation"]["enable_time_profiling"] = enable_time_profiling
+    config["simulation"]["profiling_interval"] = profiling_interval
+    if enable_time_profiling:
+        # Core profiling reports at INFO level; scale templates otherwise use
+        # the quiet production-like default (warn).
+        config["simulation"]["log_level"] = "info"
 
     config["fleet_api"] = {
         "enabled": fleet_enabled,
@@ -239,6 +247,17 @@ def main() -> int:
     )
     parser.add_argument("--transport-probe", action="store_true", help="Enable the isolated ROS transport timing probe")
     parser.add_argument(
+        "--enable-time-profiling",
+        action="store_true",
+        help="Enable core per-step profiling in the generated bridge configuration",
+    )
+    parser.add_argument(
+        "--profiling-interval",
+        type=int,
+        default=1000,
+        help="Steps per core profiling report when --enable-time-profiling is set",
+    )
+    parser.add_argument(
         "--state-qos-preset",
         choices=sorted(FLEET_STATE_QOS_PRESETS),
         default="fleet_state_reliable",
@@ -270,6 +289,8 @@ def main() -> int:
         parser.error("--manager-count must be between 0 and --robots")
     if args.manager_count and args.interface_mode == "per_robot":
         parser.error("--manager-count requires --interface-mode fleet or hybrid")
+    if args.profiling_interval < 1:
+        parser.error("--profiling-interval must be at least 1")
 
     template_path = args.template if args.template is not None else _default_template()
     generate_bridge_config(
@@ -284,6 +305,8 @@ def main() -> int:
         transport_probe=args.transport_probe,
         state_qos=_state_qos_config(args),
         manager_count=args.manager_count,
+        enable_time_profiling=args.enable_time_profiling,
+        profiling_interval=args.profiling_interval,
     )
     print(f"[config] wrote generated bridge config: {args.config_out} (template={template_path})")
     return 0

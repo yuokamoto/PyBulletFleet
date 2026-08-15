@@ -29,6 +29,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   scale checker.
 - Add manager-scoped state transport checks, including selective, complete, and
   distributed subscriber modes, to the ROS 2 scale checker.
+- Add FleetState collection, ROS-message conversion, and local publish-call
+  timing fields to the standard per-step profiler for ROS 2 bridge diagnosis.
 
 ### Fixed
 

@@ -127,6 +127,7 @@ class FleetRosInterface:
                 Agent.
         """
         self.node = node
+        self._sim_core = sim_core
         self.config = config
         self._namespace = normalize_fleet_namespace(namespace)
         # ``None`` deliberately means no state filter, i.e. every sim Agent.
@@ -212,14 +213,28 @@ class FleetRosInterface:
         subscription_count = self._state_pub.get_subscription_count()
         if isinstance(subscription_count, int) and subscription_count == 0:
             return
+
+        # Bridge state publication runs inside the simulation POST_STEP event.
+        # Once core profiling has produced its first step snapshot, record the
+        # endpoint work in its current per-step accumulator.  Keep the fields
+        # fleet-wide: manager endpoints are deliberately summed rather than
+        # creating an unbounded profiling field for each manager name.
+        profile_enabled = self._sim_core.last_profiling is not None
+        if profile_enabled:
+            collect_started_ns = time.perf_counter_ns()
         # FleetStateProvider interprets ``names=None`` as an all-Agent query.
-        msg = fleet_state_to_msg(
-            self.state_provider.get_states_3d(names=self._state_names),
-            stamp=stamp,
-            xy_offset=self._rmf_frame_offset,
-        )
+        states = self.state_provider.get_states_3d(names=self._state_names)
+        if profile_enabled:
+            self._record_profile("fleet_state_collect", collect_started_ns)
+            message_started_ns = time.perf_counter_ns()
+        msg = fleet_state_to_msg(states, stamp=stamp, xy_offset=self._rmf_frame_offset)
+        if profile_enabled:
+            self._record_profile("fleet_state_message", message_started_ns)
+            publish_started_ns = time.perf_counter_ns()
         publish_ns = time.monotonic_ns()
         self._state_pub.publish(msg)
+        if profile_enabled:
+            self._record_profile("fleet_state_publish", publish_started_ns)
         if sim_time is not None:
             self._last_state_publish_time = sim_time
         if self._transport_probe_pub is not None:
@@ -230,6 +245,10 @@ class FleetRosInterface:
                 item_count=len(msg.robots),
                 payload_bytes=len(serialize_message(msg)),
             )
+
+    def _record_profile(self, name: str, started_ns: int) -> None:
+        """Add a bridge sub-phase to the active core profiling step."""
+        self._sim_core.record_profiling(name, (time.perf_counter_ns() - started_ns) / 1_000_000)
 
     def _endpoint(self, name: str) -> str:
         return fleet_endpoint(self._namespace, name)

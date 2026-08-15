@@ -103,8 +103,13 @@ class FakeSim:
         self.agents = agents
         self.sim_time = 12.5
         self.sim_objects = []
+        self.last_profiling = None
+        self.profile_records = []
         for agent in self.agents:
             agent.sim_core = self
+
+    def record_profiling(self, name, value_ms):
+        self.profile_records.append((name, value_ms))
 
 
 def _node():
@@ -159,6 +164,26 @@ def test_fleet_state_publisher_uses_provider():
     assert published.robots[0].object_id == 7
     assert published.robots[0].pose.position.x == pytest.approx(1.0)
     assert published.robots[0].twist.linear.x == pytest.approx(0.4)
+
+
+def test_fleet_state_publisher_records_core_profile_subphases():
+    _fleet_msg_types()
+    node = _node()
+    sim = FakeSim([FakeAgent("robot0", 7)])
+    # ``last_profiling`` is populated after the first profiled core step. The
+    # bridge records into the current step only while that standard profiler is
+    # active.
+    sim.last_profiling = {}
+    interface = FleetRosInterface(node, sim, FleetApiConfig(enabled=True, states=True))
+
+    interface.post_step()
+
+    assert [name for name, _ in sim.profile_records] == [
+        "fleet_state_collect",
+        "fleet_state_message",
+        "fleet_state_publish",
+    ]
+    assert all(value_ms >= 0.0 for _, value_ms in sim.profile_records)
 
 
 def test_manager_state_publisher_filters_members_and_uses_namespace():

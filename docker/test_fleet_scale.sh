@@ -20,6 +20,8 @@ PER_ROBOT_PUBLISH_REPEATS=3
 PER_ROBOT_PUBLISH_BATCH_SIZE=0
 MEASURE_RTF=false
 MEASURE_TRANSPORT=false
+PROFILE=false
+PROFILING_INTERVAL=1000
 FLEET_SERVICE_REPEATS=1
 FLEET_TOPIC_REPEATS=1
 STATE_QOS_PRESET=fleet_state_reliable
@@ -89,6 +91,14 @@ while [ "$#" -gt 0 ]; do
         --measure-transport)
             MEASURE_TRANSPORT=true
             shift
+            ;;
+        --profile)
+            PROFILE=true
+            shift
+            ;;
+        --profiling-interval)
+            PROFILING_INTERVAL="$2"
+            shift 2
             ;;
         --fleet-service-repeats)
             FLEET_SERVICE_REPEATS="$2"
@@ -213,6 +223,9 @@ if [ -n "$TEMPLATE" ]; then
 fi
 if [ "$MEASURE_TRANSPORT" = true ]; then
     CONFIG_ARGS+=(--transport-probe)
+fi
+if [ "$PROFILE" = true ]; then
+    CONFIG_ARGS+=(--enable-time-profiling --profiling-interval "$PROFILING_INTERVAL")
 fi
 if [ -n "$STATE_QOS_RELIABILITY" ]; then
     CONFIG_ARGS+=(--state-qos-reliability "$STATE_QOS_RELIABILITY")
