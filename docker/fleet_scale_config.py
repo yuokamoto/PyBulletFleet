@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import math
 import sys
 from pathlib import Path
@@ -71,6 +72,7 @@ def generate_bridge_config(
     robot_model: str,
     transport_probe: bool,
     state_qos: dict,
+    manager_count: int,
 ) -> None:
     side = int(math.ceil(math.sqrt(robot_count)))
     fleet_enabled = interface_mode in {"fleet", "hybrid"}
@@ -85,10 +87,10 @@ def generate_bridge_config(
 
     config["fleet_api"] = {
         "enabled": fleet_enabled,
-        "states": fleet_enabled,
-        "navigate": fleet_enabled,
+        "states": fleet_enabled and manager_count == 0,
+        "navigate": fleet_enabled and manager_count == 0,
         "joint_command": False,
-        "transport_probe": fleet_enabled and transport_probe,
+        "transport_probe": fleet_enabled and manager_count == 0 and transport_probe,
         "state_qos": state_qos,
     }
     config["per_robot_api"] = {
@@ -101,12 +103,69 @@ def generate_bridge_config(
     }
 
     entity = config["entities"][0]
-    fleet_controller = config["managers"][0]["fleet_controller"]
-    _apply_robot_model(entity, fleet_controller, robot_model)
-    entity.setdefault("grid", {})
-    entity["grid"]["count"] = robot_count
-    entity["grid"]["columns"] = side
+    manager = config["managers"][0]
+    _apply_robot_model(entity, manager["fleet_controller"], robot_model)
+    if manager_count == 0:
+        entity.setdefault("grid", {})
+        entity["grid"]["count"] = robot_count
+        entity["grid"]["columns"] = side
+    else:
+        _configure_manager_scale_scenario(
+            config,
+            entity=entity,
+            manager=manager,
+            robot_count=robot_count,
+            manager_count=manager_count,
+            transport_probe=transport_probe,
+            state_qos=state_qos,
+        )
     output_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
+
+
+def _configure_manager_scale_scenario(
+    config: dict,
+    *,
+    entity: dict,
+    manager: dict,
+    robot_count: int,
+    manager_count: int,
+    transport_probe: bool,
+    state_qos: dict,
+) -> None:
+    """Generate equally sized manager scopes for transport-scale checks."""
+    base_count, extra = divmod(robot_count, manager_count)
+    manager_side = int(math.ceil(math.sqrt(base_count + bool(extra))))
+    manager_grid = int(math.ceil(math.sqrt(manager_count)))
+    manager_spacing = manager_side * 2.0 + 10.0
+    config["managers"] = []
+    config["entities"] = []
+    config["fleet_api"]["manager_interfaces"] = []
+    for index in range(manager_count):
+        name = f"manager_{index:02d}"
+        count = base_count + (1 if index < extra else 0)
+        manager_entry = copy.deepcopy(manager)
+        manager_entry["name"] = name
+        config["managers"].append(manager_entry)
+
+        entity_entry = copy.deepcopy(entity)
+        entity_entry["name"] = f"robot_manager_{index:02d}"
+        entity_entry["manager"] = name
+        entity_entry["grid"]["count"] = count
+        entity_entry["grid"]["columns"] = int(math.ceil(math.sqrt(count)))
+        entity_entry["grid"]["offset"] = [
+            float(index % manager_grid) * manager_spacing,
+            float(index // manager_grid) * manager_spacing,
+            entity_entry["grid"]["offset"][2],
+        ]
+        config["entities"].append(entity_entry)
+        config["fleet_api"]["manager_interfaces"].append(
+            {
+                "manager": name,
+                "states": True,
+                "transport_probe": transport_probe,
+                "state_qos": copy.deepcopy(state_qos),
+            }
+        )
 
 
 def _apply_robot_model(entity: dict, fleet_controller: dict, robot_model: str) -> None:
@@ -150,6 +209,12 @@ def _apply_robot_model(entity: dict, fleet_controller: dict, robot_model: str) -
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--robots", type=int, default=100, help="Number of robots to spawn")
+    parser.add_argument(
+        "--manager-count",
+        type=int,
+        default=0,
+        help="Create this many manager-scoped state streams; 0 keeps one global stream",
+    )
     parser.add_argument(
         "--robot-model",
         choices=["simple_cube", "mobile_robot", "tb3_burger", "tb3_waffle"],
@@ -201,6 +266,8 @@ def main() -> int:
     args = parser.parse_args()
     if args.state_qos_depth is not None and args.state_qos_depth < 1:
         parser.error("--state-qos-depth must be at least 1")
+    if args.manager_count < 0 or args.manager_count > args.robots:
+        parser.error("--manager-count must be between 0 and --robots")
 
     template_path = args.template if args.template is not None else _default_template()
     generate_bridge_config(
@@ -214,6 +281,7 @@ def main() -> int:
         robot_model=args.robot_model,
         transport_probe=args.transport_probe,
         state_qos=_state_qos_config(args),
+        manager_count=args.manager_count,
     )
     print(f"[config] wrote generated bridge config: {args.config_out} (template={template_path})")
     return 0

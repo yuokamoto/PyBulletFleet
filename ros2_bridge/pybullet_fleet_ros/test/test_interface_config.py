@@ -129,6 +129,7 @@ def test_manager_interfaces_resolve_scoped_endpoint_configuration():
                         "states": True,
                         "state_publish_rate": 2.5,
                         "state_qos": {"reliability": "best_effort", "history": "keep_last", "depth": 1},
+                        "transport_probe": True,
                         "navigate": True,
                         "stop": True,
                     }
@@ -144,6 +145,7 @@ def test_manager_interfaces_resolve_scoped_endpoint_configuration():
     assert manager.manager == "delivery"
     assert manager.state_publish_rate == 2.5
     assert manager.state_qos.reliability == ReliabilityPolicy.BEST_EFFORT
+    assert manager.transport_probe is True
     assert manager.navigate is True
     assert manager.stop is True
 

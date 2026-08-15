@@ -141,14 +141,11 @@ See [Tutorial 6 — Robot Models](https://pybulletfleet.readthedocs.io/en/latest
 
 Kinematics mode (physics OFF), headless, `simple_cube` robots, batch controller + fleet command interface. Measured on 2026-08-02. See [Benchmark Results](benchmark/README.md#benchmark-results) for full data, component breakdown, and methodology.
 
-ROS 2 bridge scale checks on 2026-08-02 measured 1000-robot maximum RTF of 8.46× in fleet mode, 0.64× in per-robot mode, and 0.30× in hybrid mode. Per-robot topic publication completed in 0.217 s, but motion verification reached 0/1000 within 60 s; see [`ros2_bridge/PERFORMANCE.md`](ros2_bridge/PERFORMANCE.md).
-
-A separate 2026-08-08 probe-enabled fleet measurement sent ten 1000-goal
-service requests across target RTF 0, 1, 4, and 8. FleetState delivery remained
-near 20 ms p50; full-fleet navigation round-trip was lowest at target RTF 1 and
-increased near the simulator's throughput limit. See
-[`ros2_bridge/PERFORMANCE.md`](ros2_bridge/PERFORMANCE.md) for conditions and
-percentiles.
+For ROS 2, use the fleet-level interface as the scalable default. Manager-scoped
+endpoints support operational ownership and selective state subscriptions; they
+do not increase total throughput when clients subscribe to every manager stream.
+See [`ros2_bridge/PERFORMANCE.md`](ros2_bridge/PERFORMANCE.md) for measurement
+conditions, current results, and deployment guidance.
 
 ## Robot Models
 

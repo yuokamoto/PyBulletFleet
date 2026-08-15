@@ -27,6 +27,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   `/fleet/navigate` topic.
 - Add repeatable full-fleet navigation service timing samples to the ROS 2
   scale checker.
+- Add manager-scoped state transport checks, including selective, complete, and
+  distributed subscriber modes, to the ROS 2 scale checker.
 
 ### Fixed
 

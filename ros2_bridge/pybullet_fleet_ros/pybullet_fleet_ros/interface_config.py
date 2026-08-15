@@ -82,6 +82,9 @@ class ManagerInterfaceConfig:
     states: bool = True
     state_publish_rate: float | None = None
     state_qos: FleetStateQosConfig = field(default_factory=FleetStateQosConfig)
+    # Measurement-only setting used by the scale checker. It is intentionally
+    # not a documented application-facing endpoint option.
+    transport_probe: bool = False
     navigate: bool = False
     joint_command: bool = False
     stop: bool = False
@@ -269,6 +272,7 @@ def _manager_interfaces_from_dict(config: Mapping[str, Any]) -> tuple[ManagerInt
                 states=config_get_bool(raw_entry, "states", True),
                 state_publish_rate=rate,
                 state_qos=_fleet_state_qos_from_dict(raw_entry.get("state_qos"), FleetStateQosConfig()),
+                transport_probe=config_get_bool(raw_entry, "transport_probe", False),
                 navigate=config_get_bool(raw_entry, "navigate", False),
                 joint_command=config_get_bool(raw_entry, "joint_command", False),
                 stop=config_get_bool(raw_entry, "stop", False),

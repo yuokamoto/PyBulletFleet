@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 import argparse
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import math
 import sys
 import time
@@ -45,6 +45,18 @@ class MotionReport:
     final_positions: dict[str, tuple[float, float]]
 
 
+@dataclass
+class StateEndpointMetrics:
+    """Probe bookkeeping for one FleetState endpoint."""
+
+    names: set[str] = field(default_factory=set)
+    probes_by_stamp: dict[tuple[int, int], TransportTiming] = field(default_factory=dict)
+    receives_by_stamp: dict[tuple[int, int], int] = field(default_factory=dict)
+    wall_delays: list[float] = field(default_factory=list)
+    payloads: list[tuple[int, int]] = field(default_factory=list)
+    probe_count: int = 0
+
+
 def _fleet_state_qos(config: dict) -> QoSProfile:
     reliability = ReliabilityPolicy.RELIABLE if config["reliability"] == "reliable" else ReliabilityPolicy.BEST_EFFORT
     history = HistoryPolicy.KEEP_LAST if config["history"] == "keep_last" else HistoryPolicy.KEEP_ALL
@@ -53,17 +65,14 @@ def _fleet_state_qos(config: dict) -> QoSProfile:
 
 
 class FleetScaleClient(RosCheckNode):
-    def __init__(self, *, state_qos: dict) -> None:
+    def __init__(self, *, state_qos: dict, state_endpoints: tuple[str, ...] = ("/fleet/states",)) -> None:
         super().__init__("pybullet_fleet_scale_check")
         self.names: set[str] = set()
         self.positions: dict[str, tuple[float, float]] = {}
         self._clock_samples: list[tuple[float, float]] = []
         self._latest_sim_time: float | None = None
-        self._state_probe_by_stamp: dict[tuple[int, int], TransportTiming] = {}
-        self._pending_state_receives: dict[tuple[int, int], int] = {}
-        self._fleet_state_wall_delays: list[float] = []
-        self._fleet_state_payloads: list[tuple[int, int]] = []
-        self._fleet_state_probe_count = 0
+        self._state_endpoints = tuple(state_endpoints)
+        self._state_metrics = {endpoint: StateEndpointMetrics() for endpoint in self._state_endpoints}
         self._navigate_probe_by_id: dict[str, TransportTiming] = {}
         self._navigate_sent_ns: dict[str, int] = {}
         self._navigate_received_ns: dict[str, int] = {}
@@ -81,33 +90,48 @@ class FleetScaleClient(RosCheckNode):
             "publish_to_bridge": [],
             "bridge_processing": [],
         }
-        self.create_subscription(
-            FleetState,
-            "/fleet/states",
-            self._on_fleet_state,
-            _fleet_state_qos(state_qos),
-        )
-        self.create_subscription(TransportTiming, "/fleet/transport_timing", self._on_transport_timing, 10)
+        for endpoint in self._state_endpoints:
+            self.create_subscription(
+                FleetState,
+                endpoint,
+                lambda msg, endpoint=endpoint: self._on_fleet_state(endpoint, msg),
+                _fleet_state_qos(state_qos),
+            )
+            self.create_subscription(
+                TransportTiming,
+                _transport_endpoint(endpoint),
+                self._on_transport_timing,
+                10,
+            )
         self.create_subscription(Clock, "/clock", self._on_clock, 10)
         self.navigate = self.create_client(FleetNavigateSrv, "/fleet/navigate")
         self.navigate_pub = self.create_publisher(FleetNavigateMsg, "/fleet/navigate", 10)
         self.get_entities_states = self.create_client(GetEntitiesStates, "/sim/get_entities_states")
 
-    def _on_fleet_state(self, msg: FleetState) -> None:
+    def _on_fleet_state(self, endpoint: str, msg: FleetState) -> None:
         receive_wall_ns = time.monotonic_ns()
-        self.names.update(robot.name for robot in msg.robots)
-        for robot in msg.robots:
-            self.positions[robot.name] = (robot.pose.position.x, robot.pose.position.y)
+        names = {robot.name for robot in msg.robots}
+        self._state_metrics[endpoint].names.update(names)
+        self.names.update(names)
+        # Motion verification predates manager-scoped state checks and uses one
+        # complete FleetState stream. Manager scale checks are state-only, so
+        # keep pose caching scoped to the primary endpoint rather than adding
+        # every manager stream's client-side bookkeeping to the measurement.
+        if endpoint == self._state_endpoints[0]:
+            for robot in msg.robots:
+                self.positions[robot.name] = (robot.pose.position.x, robot.pose.position.y)
         stamp_key = _time_msg_key(msg.header.stamp)
-        self._pending_state_receives[stamp_key] = receive_wall_ns
-        self._match_state_probe(stamp_key)
+        metrics = self._state_metrics[endpoint]
+        metrics.receives_by_stamp[stamp_key] = receive_wall_ns
+        self._match_state_probe(endpoint, stamp_key)
 
     def _on_transport_timing(self, msg: TransportTiming) -> None:
-        if msg.channel == "/fleet/states":
-            self._fleet_state_probe_count += 1
+        if msg.channel in self._state_metrics:
+            metrics = self._state_metrics[msg.channel]
+            metrics.probe_count += 1
             stamp_key = _time_msg_key(msg.source_sim_time)
-            self._state_probe_by_stamp[stamp_key] = msg
-            self._match_state_probe(stamp_key)
+            metrics.probes_by_stamp[stamp_key] = msg
+            self._match_state_probe(msg.channel, stamp_key)
         elif msg.channel == "/fleet/navigate":
             self._navigate_probe_by_id[msg.correlation_id] = msg
             self._match_navigate_probe(msg.correlation_id)
@@ -115,16 +139,17 @@ class FleetScaleClient(RosCheckNode):
             self._navigate_topic_probe_by_id[msg.correlation_id] = msg
             self._match_navigate_topic_probe(msg.correlation_id)
 
-    def _match_state_probe(self, stamp_key: tuple[int, int]) -> None:
-        probe = self._state_probe_by_stamp.get(stamp_key)
-        receive_ns = self._pending_state_receives.get(stamp_key)
+    def _match_state_probe(self, endpoint: str, stamp_key: tuple[int, int]) -> None:
+        metrics = self._state_metrics[endpoint]
+        probe = metrics.probes_by_stamp.get(stamp_key)
+        receive_ns = metrics.receives_by_stamp.get(stamp_key)
         if probe is None or receive_ns is None:
             return
         if receive_ns >= probe.source_monotonic_ns:
-            self._fleet_state_wall_delays.append((receive_ns - probe.source_monotonic_ns) / 1e9)
-            self._fleet_state_payloads.append((int(probe.item_count), int(probe.payload_bytes)))
-        self._state_probe_by_stamp.pop(stamp_key, None)
-        self._pending_state_receives.pop(stamp_key, None)
+            metrics.wall_delays.append((receive_ns - probe.source_monotonic_ns) / 1e9)
+            metrics.payloads.append((int(probe.item_count), int(probe.payload_bytes)))
+        metrics.probes_by_stamp.pop(stamp_key, None)
+        metrics.receives_by_stamp.pop(stamp_key, None)
 
     def _match_navigate_probe(self, command_id: str) -> None:
         probe = self._navigate_probe_by_id.get(command_id)
@@ -378,6 +403,12 @@ def _time_msg_key(stamp) -> tuple[int, int]:
     return int(stamp.sec), int(stamp.nanosec)
 
 
+def _transport_endpoint(state_endpoint: str) -> str:
+    if not state_endpoint.endswith("/states"):
+        raise ValueError(f"state endpoint must end with '/states': {state_endpoint}")
+    return f"{state_endpoint[:-len('/states')]}/transport_timing"
+
+
 def _print_transport_report(node: FleetScaleClient) -> None:
     """Report probe-based same-host ROS transport timing."""
 
@@ -396,17 +427,18 @@ def _print_transport_report(node: FleetScaleClient) -> None:
             f"p99={percentile(0.99):.6f}s, max={ordered[-1]:.6f}s"
         )
 
-    print(f"WALL /fleet/states publish-to-receive: {summary(node._fleet_state_wall_delays)}")
-    if node._fleet_state_payloads:
-        counts = sorted({count for count, _ in node._fleet_state_payloads})
-        sizes = [size for _, size in node._fleet_state_payloads]
-        print(f"FleetState payload: robots={counts}, bytes={min(sizes)}..{max(sizes)}")
-    if node._fleet_state_probe_count:
-        delivered = len(node._fleet_state_wall_delays)
-        print(
-            f"FleetState probe matches: {delivered}/{node._fleet_state_probe_count} "
-            f"({delivered / node._fleet_state_probe_count:.1%})"
-        )
+    for endpoint, metrics in node._state_metrics.items():
+        print(f"WALL {endpoint} publish-to-receive: {summary(metrics.wall_delays)}")
+        if metrics.payloads:
+            counts = sorted({count for count, _ in metrics.payloads})
+            sizes = [size for _, size in metrics.payloads]
+            print(f"FleetState payload {endpoint}: robots={counts}, bytes={min(sizes)}..{max(sizes)}")
+        if metrics.probe_count:
+            delivered = len(metrics.wall_delays)
+            print(
+                f"FleetState probe matches {endpoint}: {delivered}/{metrics.probe_count} "
+                f"({delivered / metrics.probe_count:.1%})"
+            )
     for label, values in node._navigate_wall_delays.items():
         print(f"WALL /fleet/navigate {label.replace('_', '-')}: {summary(values)}")
     for label, values in node._navigate_topic_wall_delays.items():
@@ -420,11 +452,12 @@ def _print_transport_report(node: FleetScaleClient) -> None:
 def _measure_transport(node: FleetScaleClient, warmup: float, duration: float) -> None:
     print(f"Measuring probe-based transport timing for {duration:.1f}s after {warmup:.1f}s warmup...")
     node.spin_for(warmup)
-    node._fleet_state_wall_delays.clear()
-    node._fleet_state_payloads.clear()
-    node._state_probe_by_stamp.clear()
-    node._pending_state_receives.clear()
-    node._fleet_state_probe_count = 0
+    for metrics in node._state_metrics.values():
+        metrics.wall_delays.clear()
+        metrics.payloads.clear()
+        metrics.probes_by_stamp.clear()
+        metrics.receives_by_stamp.clear()
+        metrics.probe_count = 0
     node.spin_for(duration)
 
 
@@ -598,6 +631,20 @@ def _measure_rtf(node: FleetScaleClient, warmup: float, duration: float, timeout
     return 0
 
 
+def _manager_state_endpoints(manager_count: int, subscription_mode: str) -> tuple[str, ...]:
+    count = 1 if subscription_mode == "selective" else manager_count
+    return tuple(f"/fleet/manager_{index:02d}/states" for index in range(count))
+
+
+def _wait_for_state_count(node: FleetScaleClient, expected_count: int, timeout: float) -> bool:
+    endpoints = ", ".join(node._state_endpoints)
+    print(f"Waiting for {expected_count} robots across {endpoints}...")
+    if node.spin_until(lambda: len(node.names) >= expected_count, timeout):
+        return True
+    print(f"FAIL: observed only {len(node.names)}/{expected_count} robots on configured state endpoints")
+    return False
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--robots", type=int, default=100, help="Number of robots expected in the running bridge")
@@ -610,7 +657,7 @@ def main() -> int:
     )
     parser.add_argument(
         "--command-interface",
-        choices=["fleet", "fleet_topic", "per_robot", "all"],
+        choices=["fleet", "fleet_topic", "per_robot", "all", "none"],
         default="fleet",
         help=(
             "Advanced measurement option: command path exercised by the checker. "
@@ -618,6 +665,29 @@ def main() -> int:
         ),
     )
     parser.add_argument("--no-verify-motion", action="store_true", help="Skip waiting for commanded robots to move")
+    parser.add_argument(
+        "--manager-count",
+        type=int,
+        default=0,
+        help="Expected generated manager endpoint count; 0 uses /fleet/states",
+    )
+    parser.add_argument(
+        "--manager-subscription-mode",
+        choices=["selective", "complete"],
+        default="complete",
+        help="Subscribe to the first manager only or every generated manager stream",
+    )
+    parser.add_argument(
+        "--state-endpoints",
+        default=None,
+        help="Comma-separated explicit state endpoints; overrides --manager-count endpoint selection",
+    )
+    parser.add_argument(
+        "--expected-state-robots",
+        type=int,
+        default=None,
+        help="Expected unique robot count across --state-endpoints for state-only checks",
+    )
     parser.add_argument(
         "--per-robot-publish-repeats",
         type=int,
@@ -695,6 +765,10 @@ def main() -> int:
         parser.error("--command-interface per_robot requires --interface-mode per_robot or hybrid")
     if args.command_interface == "all" and args.interface_mode != "hybrid":
         parser.error("--command-interface all requires --interface-mode hybrid")
+    if args.manager_count < 0 or args.manager_count > args.robots:
+        parser.error("--manager-count must be between 0 and --robots")
+    if args.manager_count and args.command_interface != "none":
+        parser.error("manager scale scenarios currently measure state streams only; use --command-interface none")
     if args.fleet_service_repeats < 1:
         parser.error("--fleet-service-repeats must be at least 1")
     if args.fleet_topic_repeats < 1:
@@ -714,13 +788,32 @@ def main() -> int:
         if value is not None:
             state_qos[key] = value
 
+    if args.state_endpoints:
+        state_endpoints = tuple(endpoint.strip() for endpoint in args.state_endpoints.split(",") if endpoint.strip())
+        if not state_endpoints:
+            parser.error("--state-endpoints must contain at least one endpoint")
+    else:
+        state_endpoints = (
+            _manager_state_endpoints(args.manager_count, args.manager_subscription_mode)
+            if args.manager_count
+            else ("/fleet/states",)
+        )
+    expected_state_robots = args.expected_state_robots if args.expected_state_robots is not None else args.robots
+    if args.manager_count and args.manager_subscription_mode == "selective" and args.expected_state_robots is None:
+        expected_state_robots = math.ceil(args.robots / args.manager_count)
+    if expected_state_robots < 1:
+        parser.error("--expected-state-robots must be positive")
+
     rclpy.init()
-    node = FleetScaleClient(state_qos=state_qos)
+    node = FleetScaleClient(state_qos=state_qos, state_endpoints=state_endpoints)
     try:
         print(
             "[runtime] checking ROS fleet scale endpoints: "
-            f"robots={args.robots}, interface_mode={args.interface_mode}, command_interface={args.command_interface}"
+            f"robots={args.robots}, interface_mode={args.interface_mode}, command_interface={args.command_interface}, "
+            f"state_endpoints={list(state_endpoints)}"
         )
+        if args.command_interface == "none" and not _wait_for_state_count(node, expected_state_robots, args.timeout):
+            return 1
         if args.command_interface in {"fleet", "all"}:
             rc = _check_fleet_navigate_service(
                 node,

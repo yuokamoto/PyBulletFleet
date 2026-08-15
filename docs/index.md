@@ -116,7 +116,11 @@ roadmap
 
 Kinematics mode (physics OFF), headless, `simple_cube` robots, batch controller + fleet command interface. Measured on 2026-08-02. See {doc}`benchmarking/benchmark-suite` for full data, component breakdown, and methodology.
 
-ROS 2 bridge scale checks on 2026-08-02 measured 1000-robot maximum RTF of 8.46× in fleet mode, 0.64× in per-robot mode, and 0.30× in hybrid mode. Per-robot topic publication completed in 0.217 s, but motion verification reached 0/1000 within 60 s; see {doc}`benchmarking/results` for the bridge scale details.
+For ROS 2, use the fleet-level interface as the scalable default. Manager-scoped
+endpoints support operational ownership and selective state subscriptions; they
+do not increase total throughput when clients subscribe to every manager stream.
+See {doc}`benchmarking/results` for benchmark summaries and
+`ros2_bridge/PERFORMANCE.md` in the source repository for measurement details.
 
 See the {doc}`roadmap` for upcoming features and integrations.
 

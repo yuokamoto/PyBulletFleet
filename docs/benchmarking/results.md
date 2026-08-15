@@ -72,6 +72,31 @@ The 1000-robot per-robot result shows why topic publication latency must not be
 treated as end-to-end command latency. See `ros2_bridge/PERFORMANCE.md` for
 the bridge-specific methodology and recommendations.
 
+### Manager-Scoped State Check
+
+Measured 2026-08-13 on the same Docker host with ten equally sized manager
+scopes, `publish_rate=5 Hz`, `target_rtf=0`, and transport timing enabled.
+This is a state-only diagnostic, not a command benchmark.
+
+| Robots | Subscription case | Observed RTF | State p50 / p99 |
+|-------:|-------------------|-------------:|----------------:|
+| 100 | global / one stream | 83.24x | 1.90 / 23.60 ms |
+| 100 | one 10-robot manager | 305.76x | 0.37 / 1.25 ms |
+| 100 | all ten manager streams | 47.78x | 0.45--0.49 / 1.82--2.37 ms |
+| 500 | global / one stream | 18.21x | 9.57 / 33.23 ms |
+| 500 | one 50-robot manager | 114.83x | 1.02 / 2.65 ms |
+| 500 | all ten manager streams | 16.22x | 1.07--1.15 / 2.56--3.17 ms |
+| 1000 | global / one stream | 8.36x | 19.14 / 45.64 ms |
+| 1000 | one 100-robot manager | 60.63x | 2.07 / 20.70 ms |
+| 1000 | all ten manager streams | 5.06x | 3.11--3.40 / 16.67--42.03 ms |
+
+Manager scopes allow the bridge to skip state conversion for unsubscribed
+managers. They are therefore appropriate for separate operating fleets and
+selective consumers. Replacing a global snapshot with subscriptions to every
+manager stream adds message overhead and is slower in this single-process
+bridge. Full measurements and the partitioning decision are in
+`ros2_bridge/PERFORMANCE.md`.
+
 ## Mobile Control Path Comparison
 
 **Script:** `benchmark/run_benchmark.py --type mobile_control_path --controller per_agent batch --command-interface per_agent fleet --sweep 100 500 1000 --steps 600 --repetitions 3`
