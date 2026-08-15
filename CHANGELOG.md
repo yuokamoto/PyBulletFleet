@@ -34,6 +34,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Reduce ROS 2 FleetState conversion cost by populating generated nested
   messages in place instead of allocating replacement message trees.
 
+### Documentation
+
+- Document the shared lazy state-capture direction for snapshot/replay,
+  co-simulation, and ROS FleetState publication.
+
 ### Fixed
 
 - Serialize batch-controller path updates with simulation advancement to avoid
