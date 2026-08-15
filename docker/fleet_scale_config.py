@@ -132,7 +132,7 @@ def _configure_manager_scale_scenario(
     transport_probe: bool,
     state_qos: dict,
 ) -> None:
-    """Generate equally sized manager scopes for transport-scale checks."""
+    """Generate near-even manager scopes for transport-scale checks."""
     base_count, extra = divmod(robot_count, manager_count)
     manager_side = int(math.ceil(math.sqrt(base_count + bool(extra))))
     manager_grid = int(math.ceil(math.sqrt(manager_count)))
@@ -268,6 +268,8 @@ def main() -> int:
         parser.error("--state-qos-depth must be at least 1")
     if args.manager_count < 0 or args.manager_count > args.robots:
         parser.error("--manager-count must be between 0 and --robots")
+    if args.manager_count and args.interface_mode == "per_robot":
+        parser.error("--manager-count requires --interface-mode fleet or hybrid")
 
     template_path = args.template if args.template is not None else _default_template()
     generate_bridge_config(

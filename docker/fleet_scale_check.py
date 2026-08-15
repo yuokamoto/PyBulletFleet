@@ -792,6 +792,9 @@ def main() -> int:
         state_endpoints = tuple(endpoint.strip() for endpoint in args.state_endpoints.split(",") if endpoint.strip())
         if not state_endpoints:
             parser.error("--state-endpoints must contain at least one endpoint")
+        invalid_endpoints = [endpoint for endpoint in state_endpoints if not endpoint.endswith("/states")]
+        if invalid_endpoints:
+            parser.error("--state-endpoints values must end with '/states'")
     else:
         state_endpoints = (
             _manager_state_endpoints(args.manager_count, args.manager_subscription_mode)
