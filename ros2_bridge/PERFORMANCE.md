@@ -260,6 +260,34 @@ does not parallelize the bridge, so total state work is higher than one global
 snapshot. Separate subscriber processes reduce client-side fan-out contention,
 not bridge serialization work.
 
+### FleetState Publication Profile
+
+The following representative same-host Docker diagnostic uses 1,000
+`simple_cube` robots, one global `/fleet/states` subscriber, `publish_rate=5`,
+and `target_rtf=0`. Values are averaged per simulation step; state publication
+occurs every second step at the configured 0.1 s timestep.
+
+| Profile field | Average per step | Meaning |
+|---------------|-----------------:|---------|
+| `total` | 8.38 ms | Complete simulation step |
+| `events_post_step` | 7.55 ms | Complete bridge callback work |
+| `fleet_state_collect` | 3.08 ms | Build transport-neutral state snapshots |
+| `fleet_state_message` | 2.77 ms | Construct the ROS `FleetState` message |
+| `fleet_state_publish` | 1.48 ms | Local `rclpy.publish()` call, including hand-off toward serialization |
+
+The three FleetState fields total 7.33 ms per step, about 87% of the measured
+step time. Same-host DDS delivery is measured separately with the transport
+probe; it is not included in `fleet_state_publish`.
+
+The generated-message allocation reduction changed the representative
+1,000-robot message-conversion measurement from 4.34 to 2.59 ms per step and
+observed RTF from 10.38x to 12.08x in matched diagnostic runs. Collection
+remains the largest FleetState subphase; it is an O(N) immutable state capture
+shared conceptually with the planned snapshot/replay and co-simulation work.
+Use `docker/fleet_state_message_profile.py` and
+`benchmark/profiling/fleet_state_collection.py` to refresh these measurements
+when changing either path.
+
 ### Same-Host Conclusion
 
 For the current deployment target, keep the default FleetState QoS as

@@ -37,7 +37,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ### Documentation
 
 - Document the shared lazy state-capture direction for snapshot/replay,
-  co-simulation, and ROS FleetState publication.
+  co-simulation, and ROS FleetState publication, including the final ROS
+  bridge publication profile.
 
 ### Fixed
 
