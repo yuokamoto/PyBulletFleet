@@ -40,8 +40,7 @@ def main() -> int:
     sim_elapsed, steps = _run_for_wall_time(sim, args.duration)
     wall_elapsed = time.monotonic() - start_wall
     print(
-        "CORE_ONLY_RTF "
-        f"sim={sim_elapsed:.3f}s wall={wall_elapsed:.3f}s steps={steps} rtf={sim_elapsed / wall_elapsed:.2f}x"
+        "CORE_ONLY_RTF " f"sim={sim_elapsed:.3f}s wall={wall_elapsed:.3f}s steps={steps} rtf={sim_elapsed / wall_elapsed:.2f}x"
     )
     return 0
 

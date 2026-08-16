@@ -139,10 +139,17 @@ def main() -> int:
         parser.error("--robots and --iterations must be positive; --warmup must be non-negative")
 
     states = _states(args.robots)
-    to_robot_messages = lambda: [robot_state3d_to_msg(state) for state in states]
-    to_fleet_message = lambda: fleet_state_to_msg(states)
-    to_candidate_fleet_message = lambda: _fleet_state_to_msg_in_place(states)
-    serialize_fleet_message = lambda: serialize_message(fleet_state_to_msg(states))
+    def to_robot_messages() -> list[RobotState3DMsg]:
+        return [robot_state3d_to_msg(state) for state in states]
+
+    def to_fleet_message() -> FleetState:
+        return fleet_state_to_msg(states)
+
+    def to_candidate_fleet_message() -> FleetState:
+        return _fleet_state_to_msg_in_place(states)
+
+    def serialize_fleet_message() -> bytes:
+        return serialize_message(fleet_state_to_msg(states))
 
     for _ in range(args.warmup):
         serialize_fleet_message()

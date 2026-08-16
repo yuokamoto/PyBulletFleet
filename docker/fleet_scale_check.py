@@ -777,6 +777,10 @@ def main() -> int:
         parser.error("--command-interface per_robot requires --interface-mode per_robot or hybrid")
     if args.command_interface == "all" and args.interface_mode != "hybrid":
         parser.error("--command-interface all requires --interface-mode hybrid")
+    if args.no_state_subscription and args.command_interface != "none":
+        parser.error("--no-state-subscription requires --command-interface none")
+    if args.no_state_subscription and args.measure_transport:
+        parser.error("--no-state-subscription cannot be combined with --measure-transport")
     if args.manager_count < 0 or args.manager_count > args.robots:
         parser.error("--manager-count must be between 0 and --robots")
     if args.manager_count and args.command_interface != "none":
