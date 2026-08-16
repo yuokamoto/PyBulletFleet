@@ -20,6 +20,7 @@ PER_ROBOT_PUBLISH_REPEATS=3
 PER_ROBOT_PUBLISH_BATCH_SIZE=0
 MEASURE_RTF=false
 MEASURE_TRANSPORT=false
+NO_STATE_SUBSCRIPTION=false
 PROFILE=false
 PROFILING_INTERVAL=1000
 FLEET_SERVICE_REPEATS=1
@@ -90,6 +91,10 @@ while [ "$#" -gt 0 ]; do
             ;;
         --measure-transport)
             MEASURE_TRANSPORT=true
+            shift
+            ;;
+        --no-state-subscription)
+            NO_STATE_SUBSCRIPTION=true
             shift
             ;;
         --profile)
@@ -296,6 +301,9 @@ if [ "$MEASURE_RTF" = true ]; then
 fi
 if [ "$MEASURE_TRANSPORT" = true ]; then
     CHECK_ARGS+=(--measure-transport --transport-warmup "$RTF_WARMUP" --transport-duration "$RTF_DURATION")
+fi
+if [ "$NO_STATE_SUBSCRIPTION" = true ]; then
+    CHECK_ARGS+=(--no-state-subscription)
 fi
 
 if [ "$MANAGER_SUBSCRIPTION_MODE" = distributed ]; then

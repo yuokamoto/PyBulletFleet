@@ -141,10 +141,10 @@ counts, and probe-match counts are not timings.
 
 | Mode | Robots | Groups | publish_rate | target_rtf | Command ack (wall) | All moved after ack (wall) | Result |
 |------|--------|--------|--------------|------------|--------------------|----------------------------|--------|
-| `fleet` | 100 | none | 5 Hz | 0 | 0.048 s | 0.008 s | max RTF 110.20x |
-| `fleet` | 500 | none | 5 Hz | 0 | 0.181 s | 0.043 s | max RTF 21.03x |
+| `fleet` | 100 | none | 5 Hz | 0 | 0.089 s | 0.007 s | max RTF 111.41x |
+| `fleet` | 500 | none | 5 Hz | 0 | 0.264 s | 0.035 s | max RTF 22.32x |
 | `fleet` | 1000 | none | 5 Hz | 1.0 | 0.027 s | 0.173 s | target-rate command check |
-| `fleet` | 1000 | none | 5 Hz | 0 | 0.529 s | 0.100 s | max RTF 8.46x |
+| `fleet` | 1000 | none | 5 Hz | 0 | 0.537 s | 0.071 s | max RTF 10.60x |
 | `per_robot` | 1000 | `state_publishers,tf,command_topics` | 5 Hz | 0 | publish 0.217 s | 0/1000 in 60 s | max RTF 0.64x |
 | `per_robot` | 100 | `state_publishers,tf,command_topics` | 5 Hz | 0 | publish 0.056 s | 15.033 s | 100/100 moved |
 | `hybrid` | 1000 | `state_publishers,tf,command_topics` | 5 Hz | 0 | fleet ack 7.998 s; per-robot publish 0.220 s | not verified | max RTF 0.30x |
@@ -244,14 +244,19 @@ case has one `/fleet/states` subscriber.
 | 500 | Global | 500 | 72,022 | 18.21x | 9.57 / 33.23 ms |
 | 500 | Manager selective | 50 | 7,630 | 114.83x | 1.02 / 2.65 ms |
 | 500 | Manager complete | 50 x 10 | 7,630 | 16.22x | 1.07--1.15 / 2.56--3.17 ms |
-| 1000 | Global | 1000 | 144,022 | 8.36x | 19.14 / 45.64 ms |
-| 1000 | Manager selective | 100 | 15,230 | 60.63x | 2.07 / 20.70 ms |
-| 1000 | Manager complete | 100 x 10 | 15,230 | 5.06x | 3.11--3.40 / 16.67--42.03 ms |
+| 1000 | Global | 1000 | 144,022 | 10.60x | 19.11 / 45.75 ms |
+| 1000 | Manager selective | 100 | 15,230 | 70.58x | 1.91 / 20.68 ms |
+| 1000 | Manager complete | 100 x 10 | 15,230 | 10.17x | 1.89--2.04 / 17.18--32.96 ms |
 | 1000 | Manager distributed | 100 x 10 | 15,230 | 7.64x | 2.27--2.43 / 4.16--5.21 ms |
 
 Probe matches were 99.5--100%. Per-stream p99 is not full-snapshot completion
 latency: manager streams are published sequentially by one bridge process, so a
 client that needs every manager must also wait for the final stream.
+
+The 1000-robot global, selective, and complete rows were refreshed on
+2026-08-16 after the FleetState message-conversion optimization. Payload sizes
+and same-host delivery medians remain nearly unchanged because the optimization
+removes bridge-side Python allocations, not DDS wire work.
 
 Manager interfaces are useful for ownership boundaries and selective
 observation. One active manager subscriber lets the bridge skip the other nine
@@ -287,6 +292,32 @@ shared conceptually with the planned snapshot/replay and co-simulation work.
 Use `docker/fleet_state_message_profile.py` and
 `benchmark/profiling/fleet_state_collection.py` to refresh these measurements
 when changing either path.
+
+### Matched Core and Bridge Comparison
+
+The following 2026-08-16 comparison uses the same generated 1,000
+`simple_cube` YAML, `physics=false`, `timestep=0.1`, `target_rtf=0`, and a
+static workload. Each case warms up for one wall-clock second and measures for
+six seconds. The bridge cases have a `/clock` subscriber so observed RTF uses
+the same boundary as the scale checker; no command is sent.
+
+| Case | Observed RTF | Approx. step time | Increment over core-only |
+|------|-------------:|------------------:|-------------------------:|
+| Core only | 274.14x | 0.365 ms | baseline |
+| Fleet bridge, no FleetState subscriber | 239.08x | 0.418 ms | 0.053 ms |
+| Fleet bridge, one `/fleet/states` subscriber | 10.94x | 9.141 ms | 8.776 ms |
+
+Creating the ROS node, Fleet endpoints, executor, and `/clock` path costs
+about 0.053 ms per step in this scenario. The dominant cost is therefore not
+ROS bridge residency but the requested FleetState snapshot conversion and
+publication. The subscribed case includes bridge-side state collection,
+message construction, and `rclpy.publish()` work; same-host DDS callback
+delivery remains a separate transport-probe measurement.
+
+Reproduce the core-only row with `docker/core_scale_rtf.py` and the generated
+scale YAML. For the bridge-only row, run `test_fleet_scale.sh` with
+`--command-interface none --no-state-subscription --measure-rtf`; omit
+`--no-state-subscription` for the subscribed row.
 
 ### Same-Host Conclusion
 

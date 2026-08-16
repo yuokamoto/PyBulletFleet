@@ -65,7 +65,13 @@ def _fleet_state_qos(config: dict) -> QoSProfile:
 
 
 class FleetScaleClient(RosCheckNode):
-    def __init__(self, *, state_qos: dict, state_endpoints: tuple[str, ...] = ("/fleet/states",)) -> None:
+    def __init__(
+        self,
+        *,
+        state_qos: dict,
+        state_endpoints: tuple[str, ...] = ("/fleet/states",),
+        subscribe_states: bool = True,
+    ) -> None:
         super().__init__("pybullet_fleet_scale_check")
         self.names: set[str] = set()
         self.positions: dict[str, tuple[float, float]] = {}
@@ -90,19 +96,20 @@ class FleetScaleClient(RosCheckNode):
             "publish_to_bridge": [],
             "bridge_processing": [],
         }
-        for endpoint in self._state_endpoints:
-            self.create_subscription(
-                FleetState,
-                endpoint,
-                lambda msg, endpoint=endpoint: self._on_fleet_state(endpoint, msg),
-                _fleet_state_qos(state_qos),
-            )
-            self.create_subscription(
-                TransportTiming,
-                _transport_endpoint(endpoint),
-                self._on_transport_timing,
-                10,
-            )
+        if subscribe_states:
+            for endpoint in self._state_endpoints:
+                self.create_subscription(
+                    FleetState,
+                    endpoint,
+                    lambda msg, endpoint=endpoint: self._on_fleet_state(endpoint, msg),
+                    _fleet_state_qos(state_qos),
+                )
+                self.create_subscription(
+                    TransportTiming,
+                    _transport_endpoint(endpoint),
+                    self._on_transport_timing,
+                    10,
+                )
         self.create_subscription(Clock, "/clock", self._on_clock, 10)
         self.navigate = self.create_client(FleetNavigateSrv, "/fleet/navigate")
         self.navigate_pub = self.create_publisher(FleetNavigateMsg, "/fleet/navigate", 10)
@@ -702,6 +709,11 @@ def main() -> int:
     )
     parser.add_argument("--measure-rtf", action="store_true", help="Measure observed /clock RTF after command checks")
     parser.add_argument(
+        "--no-state-subscription",
+        action="store_true",
+        help="Do not subscribe to FleetState; useful for measuring bridge overhead without state publication",
+    )
+    parser.add_argument(
         "--fleet-service-repeats",
         type=int,
         default=1,
@@ -804,18 +816,26 @@ def main() -> int:
     expected_state_robots = args.expected_state_robots if args.expected_state_robots is not None else args.robots
     if args.manager_count and args.manager_subscription_mode == "selective" and args.expected_state_robots is None:
         expected_state_robots = math.ceil(args.robots / args.manager_count)
-    if expected_state_robots < 1:
+    if not args.no_state_subscription and expected_state_robots < 1:
         parser.error("--expected-state-robots must be positive")
 
     rclpy.init()
-    node = FleetScaleClient(state_qos=state_qos, state_endpoints=state_endpoints)
+    node = FleetScaleClient(
+        state_qos=state_qos,
+        state_endpoints=state_endpoints,
+        subscribe_states=not args.no_state_subscription,
+    )
     try:
         print(
             "[runtime] checking ROS fleet scale endpoints: "
             f"robots={args.robots}, interface_mode={args.interface_mode}, command_interface={args.command_interface}, "
             f"state_endpoints={list(state_endpoints)}"
         )
-        if args.command_interface == "none" and not _wait_for_state_count(node, expected_state_robots, args.timeout):
+        if (
+            not args.no_state_subscription
+            and args.command_interface == "none"
+            and not _wait_for_state_count(node, expected_state_robots, args.timeout)
+        ):
             return 1
         if args.command_interface in {"fleet", "all"}:
             rc = _check_fleet_navigate_service(
