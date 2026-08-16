@@ -5,7 +5,6 @@ from __future__ import annotations
 import time
 from typing import Iterable
 
-from geometry_msgs.msg import Point, Pose, Quaternion, Twist, Vector3
 from rclpy.qos import QoSProfile
 from rclpy.serialization import serialize_message
 from std_msgs.msg import Header
@@ -127,6 +126,7 @@ class FleetRosInterface:
                 Agent.
         """
         self.node = node
+        self._sim_core = sim_core
         self.config = config
         self._namespace = normalize_fleet_namespace(namespace)
         # ``None`` deliberately means no state filter, i.e. every sim Agent.
@@ -212,14 +212,28 @@ class FleetRosInterface:
         subscription_count = self._state_pub.get_subscription_count()
         if isinstance(subscription_count, int) and subscription_count == 0:
             return
+
+        # Bridge state publication runs inside the simulation POST_STEP event.
+        # Once core profiling has produced its first step snapshot, record the
+        # endpoint work in its current per-step accumulator.  Keep the fields
+        # fleet-wide: manager endpoints are deliberately summed rather than
+        # creating an unbounded profiling field for each manager name.
+        profile_enabled = self._sim_core.last_profiling is not None
+        if profile_enabled:
+            collect_started_ns = time.perf_counter_ns()
         # FleetStateProvider interprets ``names=None`` as an all-Agent query.
-        msg = fleet_state_to_msg(
-            self.state_provider.get_states_3d(names=self._state_names),
-            stamp=stamp,
-            xy_offset=self._rmf_frame_offset,
-        )
+        states = self.state_provider.get_states_3d(names=self._state_names)
+        if profile_enabled:
+            self._record_profile("fleet_state_collect", collect_started_ns)
+            message_started_ns = time.perf_counter_ns()
+        msg = fleet_state_to_msg(states, stamp=stamp, xy_offset=self._rmf_frame_offset)
+        if profile_enabled:
+            self._record_profile("fleet_state_message", message_started_ns)
+            publish_started_ns = time.perf_counter_ns()
         publish_ns = time.monotonic_ns()
         self._state_pub.publish(msg)
+        if profile_enabled:
+            self._record_profile("fleet_state_publish", publish_started_ns)
         if sim_time is not None:
             self._last_state_publish_time = sim_time
         if self._transport_probe_pub is not None:
@@ -230,6 +244,10 @@ class FleetRosInterface:
                 item_count=len(msg.robots),
                 payload_bytes=len(serialize_message(msg)),
             )
+
+    def _record_profile(self, name: str, started_ns: int) -> None:
+        """Add a bridge sub-phase to the active core profiling step."""
+        self._sim_core.record_profiling(name, (time.perf_counter_ns() - started_ns) / 1_000_000)
 
     def _endpoint(self, name: str) -> str:
         return fleet_endpoint(self._namespace, name)
@@ -438,31 +456,25 @@ def robot_state3d_to_msg(state: RobotState3D, xy_offset: tuple[float, float] = (
     msg = RobotState3DMsg()
     msg.name = state.name
     msg.object_id = int(state.object_id)
-    msg.pose = Pose(
-        position=Point(
-            x=state.position[0] + xy_offset[0],
-            y=state.position[1] + xy_offset[1],
-            z=state.position[2],
-        ),
-        orientation=Quaternion(
-            x=state.orientation[0],
-            y=state.orientation[1],
-            z=state.orientation[2],
-            w=state.orientation[3],
-        ),
-    )
-    msg.twist = Twist(
-        linear=Vector3(
-            x=state.linear_velocity[0],
-            y=state.linear_velocity[1],
-            z=state.linear_velocity[2],
-        ),
-        angular=Vector3(
-            x=state.angular_velocity[0],
-            y=state.angular_velocity[1],
-            z=state.angular_velocity[2],
-        ),
-    )
+    # Generated ROS Python messages eagerly allocate their nested defaults.
+    # Populate those objects instead of constructing a second Pose/Twist tree.
+    position = msg.pose.position
+    position.x = state.position[0] + xy_offset[0]
+    position.y = state.position[1] + xy_offset[1]
+    position.z = state.position[2]
+    orientation = msg.pose.orientation
+    orientation.x = state.orientation[0]
+    orientation.y = state.orientation[1]
+    orientation.z = state.orientation[2]
+    orientation.w = state.orientation[3]
+    linear = msg.twist.linear
+    linear.x = state.linear_velocity[0]
+    linear.y = state.linear_velocity[1]
+    linear.z = state.linear_velocity[2]
+    angular = msg.twist.angular
+    angular.x = state.angular_velocity[0]
+    angular.y = state.angular_velocity[1]
+    angular.z = state.angular_velocity[2]
     msg.is_moving = bool(state.is_moving)
     msg.has_battery_soc = state.battery_soc is not None
     msg.battery_soc = float(state.battery_soc or 0.0)

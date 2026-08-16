@@ -37,6 +37,16 @@ New robot and infrastructure models:
   schemas, separate files), but share common header keys (`sim_time`, `step`,
   `wall_time`, `run_id`) so they can be merged on the time axis.
 
+  **Shared live capture:** define a transport-neutral, step-versioned agent
+  state snapshot as the common capture layer for replay, co-simulation, and
+  fleet state publication. Build it lazily when the first sink needs the
+  current step and cache it only for that step, so a 5 Hz ROS state publisher
+  or 1 Hz replay logger does not force full per-agent snapshot construction on
+  every simulation step. Co-simulation may explicitly request an every-step
+  dense array snapshot. ROS message conversion/DDS publication, replay
+  full-or-delta serialization, and event logging remain separate sinks; the
+  shared layer only owns the consistent raw state capture and agent selection.
+
   **Why trace alone cannot replay:** trace is sampled, coarse-grained (Action-level spans), drops non-deterministic inputs (RNG seed, callback returns), and has attribute-size limits unsuitable for `Path` waypoints / IK results. Replay needs Event log (input) + Snapshot (checkpoint).
 
   **Output layout:**

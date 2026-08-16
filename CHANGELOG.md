@@ -29,6 +29,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   scale checker.
 - Add manager-scoped state transport checks, including selective, complete, and
   distributed subscriber modes, to the ROS 2 scale checker.
+- Add FleetState collection, ROS-message conversion, and local publish-call
+  timing fields to the standard per-step profiler for ROS 2 bridge diagnosis.
+- Add a core-only scale RTF runner and a checker option for measuring bridge
+  overhead when no FleetState subscriber is present.
+- Reduce ROS 2 FleetState conversion cost by populating generated nested
+  messages in place instead of allocating replacement message trees.
+
+### Documentation
+
+- Document the shared lazy state-capture direction for snapshot/replay,
+  co-simulation, and ROS FleetState publication, including the final ROS
+  bridge publication profile.
+- Refresh the ROS FleetState scale notes after the message-conversion
+  optimization, distinguishing affected fleet-state paths from unchanged
+  per-robot measurements.
 
 ### Fixed
 

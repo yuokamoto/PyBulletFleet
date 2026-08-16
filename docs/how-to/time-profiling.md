@@ -16,6 +16,23 @@ It helps identify performance bottlenecks by breaking down where time is spent e
 
 **Overhead**: < 0.1% CPU — safe to leave enabled during development.
 
+### ROS 2 Bridge state publication
+
+When a bridge configuration enables the Fleet API state publisher, the same
+profile also includes these fields for every endpoint that actually publishes
+in that step:
+
+| Component | What it measures |
+|-----------|-----------------|
+| `fleet_state_collect` | Build transport-neutral `RobotState3D` values from the selected agents. |
+| `fleet_state_message` | Convert those values into the ROS `FleetState` message. |
+| `fleet_state_publish` | The local `rclpy` `Publisher.publish()` call. This is not DDS delivery time. |
+
+The three values are summed across the global and all active manager-scoped
+endpoints. `events_post_step` remains the complete bridge callback cost,
+including `/clock`, other ROS interfaces, and plugins. Use the optional
+transport probe separately when measuring same-host DDS delivery time.
+
 ---
 
 ## Quick Start

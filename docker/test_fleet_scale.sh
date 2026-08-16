@@ -20,6 +20,9 @@ PER_ROBOT_PUBLISH_REPEATS=3
 PER_ROBOT_PUBLISH_BATCH_SIZE=0
 MEASURE_RTF=false
 MEASURE_TRANSPORT=false
+NO_STATE_SUBSCRIPTION=false
+PROFILE=false
+PROFILING_INTERVAL=1000
 FLEET_SERVICE_REPEATS=1
 FLEET_TOPIC_REPEATS=1
 STATE_QOS_PRESET=fleet_state_reliable
@@ -89,6 +92,18 @@ while [ "$#" -gt 0 ]; do
         --measure-transport)
             MEASURE_TRANSPORT=true
             shift
+            ;;
+        --no-state-subscription)
+            NO_STATE_SUBSCRIPTION=true
+            shift
+            ;;
+        --profile)
+            PROFILE=true
+            shift
+            ;;
+        --profiling-interval)
+            PROFILING_INTERVAL="$2"
+            shift 2
             ;;
         --fleet-service-repeats)
             FLEET_SERVICE_REPEATS="$2"
@@ -214,6 +229,9 @@ fi
 if [ "$MEASURE_TRANSPORT" = true ]; then
     CONFIG_ARGS+=(--transport-probe)
 fi
+if [ "$PROFILE" = true ]; then
+    CONFIG_ARGS+=(--enable-time-profiling --profiling-interval "$PROFILING_INTERVAL")
+fi
 if [ -n "$STATE_QOS_RELIABILITY" ]; then
     CONFIG_ARGS+=(--state-qos-reliability "$STATE_QOS_RELIABILITY")
 fi
@@ -283,6 +301,9 @@ if [ "$MEASURE_RTF" = true ]; then
 fi
 if [ "$MEASURE_TRANSPORT" = true ]; then
     CHECK_ARGS+=(--measure-transport --transport-warmup "$RTF_WARMUP" --transport-duration "$RTF_DURATION")
+fi
+if [ "$NO_STATE_SUBSCRIPTION" = true ]; then
+    CHECK_ARGS+=(--no-state-subscription)
 fi
 
 if [ "$MANAGER_SUBSCRIPTION_MODE" = distributed ]; then
