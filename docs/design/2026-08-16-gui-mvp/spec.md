@@ -160,9 +160,8 @@ perform serialization merely because no handler is registered.
   after selection has been resolved.
 - Viewport debug item IDs are owned by `GuiController` and removed/replaced safely on
   shutdown, reset, selection change, and PyBullet disconnect.
-- The command queue is bounded and coalesces state-setting requests such as
-  selection and follow.  A closed or slow monitor window must not block the
-  simulation thread.
+- The command queue is bounded. A closed or slow monitor window must not block
+  the simulation thread; requests may be rejected when the queue is full.
 - GUI exceptions and a closed GUI connection are logged and disable further
   GUI updates; they must not terminate a headless or running simulation.
 
@@ -191,7 +190,7 @@ the compatibility commitments of this MVP.
   viewport; it clears velocity and does not cancel or alter queued actions.
 - Action queue cancellation/editing and an action timeline.
 - Floor visibility controls and multi-floor navigation.
-- Mouse click picking, a scene tree, search/filter, and persistent layouts.
+- Multi-object/marquee picking, a scene tree, and persistent layouts.
 - A tkinter/web/Rerun panel, ROS remote control, or GUI state persistence.
 - A PyBullet debug-parameter control panel; DataMonitor is the control surface.
 - Snapshot/Replay, event serialization, or the `MultiRobotSimulationCore`

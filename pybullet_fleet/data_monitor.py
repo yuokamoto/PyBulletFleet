@@ -246,9 +246,9 @@ class DataMonitor:
                 self.labels["Collisions"].config(text=f"Collis.  : {data.get('active_collisions', 0)}")
                 self.labels["Tot Collis."].config(text=f"Tot Col. : {data.get('collisions', 0)}")
                 self.labels["Steps"].config(text=f"Steps    : {data.get('steps', 0)}")
-                if not self.target_rtf_entry.focus_get():
+                if self.window.focus_get() is not self.target_rtf_entry:
                     self.target_rtf_var.set(f"{data.get('target_rtf', 0):g}")
-                if not self.timestep_entry.focus_get():
+                if self.window.focus_get() is not self.timestep_entry:
                     self.timestep_var.set(f"{data.get('time_step', 0):g}")
 
                 state = "PAUSED" if data.get("paused") else "PLAYING"
@@ -291,10 +291,14 @@ class DataMonitor:
         """Set the thread-safe callable that accepts monitor commands."""
         self.command_sink = sink
 
-    def _submit_command(self, command: GuiCommandType, **kwargs: Any) -> None:
+    def _submit_command(self, command: GuiCommandType, **kwargs: Any) -> bool:
         """Send a UI request without accessing simulation state from tkinter."""
-        if self.command_sink is not None:
-            self.command_sink(GuiCommand(command=command, **kwargs))
+        if self.command_sink is None:
+            return False
+        accepted = self.command_sink(GuiCommand(command=command, **kwargs))
+        if not accepted and self.status_label is not None:
+            self.status_label.config(text="Status: Command queue is full; request was not applied")
+        return accepted
 
     def _on_entity_selected(self, _event: Any) -> None:
         selection = self.entity_list.curselection()

@@ -71,6 +71,13 @@ def test_data_monitor_submits_typed_commands_without_core_access():
     assert received == [GuiCommand(command=GuiCommandType.PAUSE)]
 
 
+def test_data_monitor_reports_rejected_command_without_core_access():
+    monitor = DataMonitor(enable_gui=False)
+    monitor.set_command_sink(lambda command: False)
+
+    assert not monitor._submit_command(GuiCommandType.PAUSE)
+
+
 def test_data_monitor_can_clear_selection_without_core_access():
     received = []
     monitor = DataMonitor(enable_gui=False)
@@ -136,8 +143,8 @@ def test_paused_pose_edit_is_applied_at_step_boundary():
     try:
         from pybullet_fleet.sim_object import SimObject
 
-        obj = SimObject.from_mesh(sim_core=sim, name="movable")
         sim.initialize_simulation()
+        obj = SimObject.from_mesh(sim_core=sim, name="movable")
         sim.pause()
         sim.enqueue_gui_command(
             GuiCommand(
@@ -164,8 +171,8 @@ def test_running_pose_edit_is_rejected():
     try:
         from pybullet_fleet.sim_object import SimObject
 
-        obj = SimObject.from_mesh(sim_core=sim, name="movable")
         sim.initialize_simulation()
+        obj = SimObject.from_mesh(sim_core=sim, name="movable")
         initial_position = obj.get_pose().position[:]
         sim.enqueue_gui_command(GuiCommand(GuiCommandType.SET_ENTITY_POSE, entity_id=obj.object_id, position=(2.0, 3.0, 0.4)))
         sim.step_once()
@@ -181,6 +188,7 @@ def test_viewport_drag_moves_the_selected_paused_entity(monkeypatch):
         from pybullet_fleet.geometry import Pose
         from pybullet_fleet.sim_object import SimObject
 
+        sim.initialize_simulation()
         obj = SimObject.from_mesh(sim_core=sim, name="movable")
         obj.set_pose(Pose.from_xyz(1.0, 1.0, 0.4))
         sim.pause()
@@ -204,6 +212,7 @@ def test_selected_entity_uses_one_world_coordinate_nameplate(monkeypatch):
         from pybullet_fleet.geometry import Pose
         from pybullet_fleet.sim_object import SimObject
 
+        sim.initialize_simulation()
         obj = SimObject.from_mesh(sim_core=sim, name="selected")
         obj.set_pose(Pose.from_xyz(2.0, 3.0, 0.2))
         added = []
@@ -253,6 +262,7 @@ def test_viewport_click_selects_without_an_existing_selection(monkeypatch):
     try:
         from pybullet_fleet.sim_object import SimObject
 
+        sim.initialize_simulation()
         obj = SimObject.from_mesh(sim_core=sim, name="selected")
         monkeypatch.setattr(sim, "_pick_entity_at", lambda mouse_x, mouse_y: obj.object_id)
 
@@ -273,6 +283,7 @@ def test_viewport_click_on_empty_space_clears_selection(monkeypatch):
     try:
         from pybullet_fleet.sim_object import SimObject
 
+        sim.initialize_simulation()
         obj = SimObject.from_mesh(sim_core=sim, name="selected")
         sim._set_selected_entity(obj.object_id, source="test")
         monkeypatch.setattr(sim, "_pick_entity_at", lambda mouse_x, mouse_y: None)
