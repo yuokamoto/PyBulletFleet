@@ -45,6 +45,15 @@ from pybullet_fleet.fleet_api import (
 )
 from pybullet_fleet.states import RobotState2D, RobotState3D
 
+# Toolkit-neutral monitor UI boundary
+from pybullet_fleet.gui_commands import (
+    GuiCommand,
+    GuiCommandType,
+    MonitorEntity,
+    MonitorFrame,
+    SelectedEntityMonitorState,
+)
+
 # Robot/Agent management
 from pybullet_fleet.agent import Agent, AgentSpawnParams, IKParams
 from pybullet_fleet.plugins.battery_plugin import BatteryPlugin

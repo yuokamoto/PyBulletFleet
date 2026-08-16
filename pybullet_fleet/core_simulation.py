@@ -15,6 +15,7 @@ import tracemalloc  # Memory profiling (imported once at module level)
 from collections import deque
 from contextlib import contextmanager
 from dataclasses import dataclass, field
+from queue import Empty, Full, Queue
 from types import MappingProxyType
 from typing import (
     TYPE_CHECKING,
@@ -46,6 +47,13 @@ from pybullet_fleet.collision_visualizer import CollisionVisualizer  # deprecate
 from pybullet_fleet.config_utils import load_yaml_config
 from pybullet_fleet.data_monitor import DataMonitor
 from pybullet_fleet.events import EventBus, SimEvents
+from pybullet_fleet.gui_commands import (
+    GuiCommand,
+    GuiCommandType,
+    MonitorEntity,
+    MonitorFrame,
+    SelectedEntityMonitorState,
+)
 from pybullet_fleet.logging_utils import get_lazy_logger
 from pybullet_fleet.sim_object import SimObject
 from pybullet_fleet.agent import Agent
@@ -74,6 +82,14 @@ logger = get_lazy_logger(__name__)
 # Wall-vs-monotonic divergence (seconds) worth flagging as a clock jump. WARNING
 # log only; does not affect pacing.
 _CLOCK_JUMP_LOG_THRESHOLD_S = 0.5
+
+# PyBullet does not expose these mouse constants in every wheel build.  Keep
+# them aligned with CameraController's documented event tuple values.
+_MOUSE_BUTTON_EVENT = 2
+_MOUSE_BUTTON_LEFT = 0
+_MOUSE_MOVE_EVENT = 1
+_SELECTED_NAMEPLATE_UPDATE_INTERVAL_S = 0.25
+_VIEWPORT_CLICK_MAX_DISTANCE_PX = 8
 
 
 @dataclass
@@ -331,6 +347,7 @@ class MultiRobotSimulationCore:
         self._collision_count: int = 0
         self._step_count: int = 0
         self.sim_time: float = 0.0  # Simulation time (kept public for hot-path access)
+        self._elapsed_sim_time: float = 0.0  # Canonical accumulated simulation time
         self._enable_time_profiling: bool = params.enable_time_profiling
 
         # --- Fully private (no external access) ---
@@ -341,6 +358,16 @@ class MultiRobotSimulationCore:
         self._last_monitor_update: float = 0
         self._callbacks: List[Dict[str, Any]] = []  # List of callback functions
         self._data_monitor: Optional[DataMonitor] = None
+        self._gui_commands: Queue[GuiCommand] = Queue(maxsize=32)
+        self._single_step_requested: bool = False
+        self._last_monitor_frame: Optional[MonitorFrame] = None
+        self._selected_entity_id: Optional[int] = None
+        self._gui_follow_enabled: bool = False
+        self._pacing_rebase_requested: bool = False
+        self._selected_nameplate_id: Optional[int] = None
+        self._last_selected_nameplate_update: float = 0.0
+        self._viewport_left_click_start: Optional[Tuple[int, int]] = None
+        self._viewport_drag_entity_id: Optional[int] = None
         self._collision_check_frequency: Optional[float] = params.collision_check_frequency  # If None, check every step
         self._last_collision_check: float = 0.0
         self._log_level: str = params.log_level
@@ -472,7 +499,10 @@ class MultiRobotSimulationCore:
                 height=self._params.monitor_height,
                 x=self._params.monitor_x,
                 y=self._params.monitor_y,
+                initial_target_rtf=self._params.target_rtf,
+                initial_timestep=self._params.timestep,
             )
+            self._data_monitor.set_command_sink(self.enqueue_gui_command)
             self._data_monitor.start()
         else:
             self._data_monitor = None
@@ -488,6 +518,308 @@ class MultiRobotSimulationCore:
     def sim_objects(self) -> List[SimObject]:
         """List of all simulation objects (Agent, SimObject, etc.)."""
         return self._sim_objects
+
+    @property
+    def last_monitor_frame(self) -> Optional[MonitorFrame]:
+        """Return the most recently published toolkit-neutral monitor frame."""
+        return self._last_monitor_frame
+
+    @property
+    def selected_entity_id(self) -> Optional[int]:
+        """Return the entity selected by the monitor, if any."""
+        return self._selected_entity_id
+
+    @property
+    def gui_follow_enabled(self) -> bool:
+        """Return whether the viewport follows the selected entity."""
+        return self._gui_follow_enabled
+
+    def enqueue_gui_command(self, command: GuiCommand) -> bool:
+        """Queue a monitor request for the next simulation-step boundary.
+
+        This method is safe to call from a tkinter callback.  It deliberately
+        does not mutate simulation state or make PyBullet calls on the caller's
+        thread.  Returns ``False`` only when the bounded queue is full.
+        """
+        if not isinstance(command, GuiCommand):
+            raise TypeError("command must be a GuiCommand")
+        try:
+            self._gui_commands.put_nowait(command)
+        except Full:
+            logger.warning("Dropping GUI command because the monitor command queue is full")
+            return False
+        return True
+
+    def request_single_step(self, source: str = "api") -> bool:
+        """Request one step while paused, without re-entering :meth:`step_once`.
+
+        The request is consumed by the outer ``step_once`` invocation.  A
+        request made while running is ignored because normal stepping already
+        advances the simulation.
+        """
+        if not self.is_paused:
+            return False
+        self._single_step_requested = True
+        self.events.emit("gui.single_step_requested", source=source)
+        return True
+
+    def _consume_gui_commands(self) -> None:
+        """Apply queued monitor requests on the simulation thread."""
+        while True:
+            try:
+                command = self._gui_commands.get_nowait()
+            except Empty:
+                return
+            if command.command is GuiCommandType.PAUSE:
+                if not self.is_paused:
+                    self.pause()
+            elif command.command is GuiCommandType.RESUME:
+                if self.is_paused:
+                    self.resume()
+            elif command.command is GuiCommandType.SINGLE_STEP:
+                self.request_single_step(source=command.source)
+            elif command.command is GuiCommandType.SELECT_ENTITY:
+                self._set_selected_entity(command.entity_id, source=command.source)
+            elif command.command is GuiCommandType.SET_FOLLOW:
+                self._set_gui_follow(bool(command.enabled))
+            elif command.command is GuiCommandType.SET_SIMULATION_PACING:
+                self._set_simulation_pacing(command.target_rtf, command.timestep, source=command.source)
+            elif command.command is GuiCommandType.SET_ENTITY_POSE:
+                self._set_entity_pose(
+                    command.entity_id,
+                    command.position,
+                    command.yaw_radians,
+                    command.rpy_radians,
+                    source=command.source,
+                )
+
+    def _set_simulation_pacing(self, target_rtf: Optional[float], timestep: Optional[float], source: str) -> None:
+        """Apply live pacing settings at a simulation-step boundary.
+
+        A currently running simulation is paused internally while the physics
+        timestep and scheduler settings are changed, then immediately resumed.
+        The outer run loop observes ``_pacing_rebase_requested`` and discards
+        its old wall-clock baseline before its next pacing decision.
+        """
+        if target_rtf is None and timestep is None:
+            return
+        invalid_values = []
+        if target_rtf is not None and target_rtf < 0:
+            invalid_values.append(f"target_rtf={target_rtf} (must be >= 0)")
+        if timestep is not None and timestep <= 0:
+            invalid_values.append(f"timestep={timestep} (must be > 0)")
+        if invalid_values:
+            logger.warning("Ignoring invalid GUI pacing change: %s", "; ".join(invalid_values))
+            return
+
+        was_running = not self.is_paused
+        if was_running:
+            self.pause()
+        if target_rtf is not None:
+            self._params.target_rtf = target_rtf
+        if timestep is not None:
+            self._params.timestep = timestep
+            p.setTimeStep(timestep, physicsClientId=self._client)
+        self._pacing_rebase_requested = True
+        self.events.emit(
+            "gui.simulation_pacing_changed",
+            target_rtf=self._params.target_rtf,
+            timestep=self._params.timestep,
+            source=source,
+        )
+        if was_running:
+            self.resume()
+
+    def _set_entity_pose(
+        self,
+        entity_id: Optional[int],
+        position: Optional[Tuple[float, float, float]],
+        yaw_radians: Optional[float],
+        rpy_radians: Optional[Tuple[float, float, float]],
+        source: str,
+    ) -> bool:
+        """Teleport one entity while paused, preserving roll and pitch.
+
+        GUI pose editing deliberately has paused-only semantics: it cannot race
+        an agent controller or physics integration.  Dynamic bodies also have
+        their velocity cleared so a pre-edit velocity cannot move them away
+        immediately after resume.
+        """
+        if not self.is_paused:
+            logger.warning("Ignoring GUI pose edit while simulation is running")
+            return False
+        if entity_id is None or entity_id not in self._sim_objects_dict:
+            logger.warning("Ignoring GUI pose edit for missing entity %s", entity_id)
+            return False
+        if position is None or len(position) != 3 or not all(math.isfinite(value) for value in position):
+            logger.warning("Ignoring invalid GUI position %s", position)
+            return False
+        if yaw_radians is not None and not math.isfinite(yaw_radians):
+            logger.warning("Ignoring invalid GUI yaw %s", yaw_radians)
+            return False
+        if rpy_radians is not None and (len(rpy_radians) != 3 or not all(math.isfinite(value) for value in rpy_radians)):
+            logger.warning("Ignoring invalid GUI roll/pitch/yaw %s", rpy_radians)
+            return False
+
+        entity = self._sim_objects_dict[entity_id]
+        orientation = list(entity.get_pose().orientation)
+        if rpy_radians is not None:
+            orientation = list(p.getQuaternionFromEuler(rpy_radians))
+        elif yaw_radians is not None:
+            roll, pitch, _ = p.getEulerFromQuaternion(orientation)
+            orientation = list(p.getQuaternionFromEuler([roll, pitch, yaw_radians]))
+        moved = entity.set_pose_raw(list(position), orientation, preserve_velocity=False)
+        if moved:
+            self.events.emit("gui.entity_pose_changed", entity_id=entity_id, source=source)
+        return moved
+
+    def _set_selected_entity(self, entity_id: Optional[int], source: str) -> None:
+        if entity_id is not None and entity_id not in self._sim_objects_dict:
+            logger.warning("Ignoring GUI selection for missing entity %s", entity_id)
+            return
+        if self._selected_entity_id == entity_id:
+            return
+        self._selected_entity_id = entity_id
+        if entity_id is None:
+            self._gui_follow_enabled = False
+        self._update_selected_nameplate(force=True)
+        self.events.emit("gui.selection_changed", entity_id=entity_id, source=source)
+
+    def _set_gui_follow(self, enabled: bool) -> None:
+        enabled = enabled and self._selected_entity_id is not None
+        if self._gui_follow_enabled == enabled:
+            return
+        self._gui_follow_enabled = enabled
+        self.events.emit("gui.follow_changed", entity_id=self._selected_entity_id, enabled=enabled)
+
+    def _clear_selected_nameplate(self) -> None:
+        """Remove the one viewport label owned by the current selection."""
+        if self._selected_nameplate_id is None:
+            return
+        try:
+            p.removeUserDebugItem(self._selected_nameplate_id, physicsClientId=self._client)
+        except p.error:
+            pass
+        self._selected_nameplate_id = None
+        self._last_selected_nameplate_update = 0.0
+
+    def _update_selected_nameplate(self, force: bool = False) -> None:
+        """Place one nameplate above the selected entity, when a GUI is active.
+
+        Debug-text parenting to a base link is not consistent across PyBullet
+        builds, so the label uses the entity's world pose.  Only the selected
+        label is refreshed, at most four times per real-time second.  It
+        remains visualizer state rather than a SimObject attribute, and
+        therefore does not affect simulation state or snapshots.
+        """
+        if not self._params.gui or self._selected_entity_id is None:
+            self._clear_selected_nameplate()
+            return
+        selected = self._sim_objects_dict.get(self._selected_entity_id)
+        if selected is None or selected.body_id is None:
+            self._clear_selected_nameplate()
+            return
+        now = time.monotonic()
+        if not force and now - self._last_selected_nameplate_update < _SELECTED_NAMEPLATE_UPDATE_INTERVAL_S:
+            return
+        position = list(selected.get_pose().position)
+        position[2] += 0.3
+        try:
+            self._selected_nameplate_id = p.addUserDebugText(
+                selected.name or f"entity-{selected.object_id}",
+                position,
+                textColorRGB=[1, 1, 0],
+                textSize=1.2,
+                replaceItemUniqueId=self._selected_nameplate_id if self._selected_nameplate_id is not None else -1,
+                physicsClientId=self._client,
+            )
+            self._last_selected_nameplate_update = now
+        except p.error:
+            self._selected_nameplate_id = None
+
+    def _viewport_ray_at(self, mouse_x: int, mouse_y: int) -> Optional[Tuple[np.ndarray, np.ndarray]]:
+        """Return world-space near/far points for a viewport coordinate."""
+        camera = p.getDebugVisualizerCamera(physicsClientId=self._client)
+        width, height = camera[0], camera[1]
+        if width <= 0 or height <= 0:
+            return None
+        view = np.asarray(camera[2], dtype=float).reshape((4, 4), order="F")
+        projection = np.asarray(camera[3], dtype=float).reshape((4, 4), order="F")
+        inverse = np.linalg.inv(projection @ view)
+        x = 2.0 * mouse_x / width - 1.0
+        y = 1.0 - 2.0 * mouse_y / height
+        near = inverse @ np.array([x, y, -1.0, 1.0])
+        far = inverse @ np.array([x, y, 1.0, 1.0])
+        near /= near[3]
+        far /= far[3]
+        return near[:3], far[:3]
+
+    def _pick_entity_at(self, mouse_x: int, mouse_y: int) -> Optional[int]:
+        """Return the entity under a viewport coordinate, if PyBullet reports one."""
+        ray = self._viewport_ray_at(mouse_x, mouse_y)
+        if ray is None:
+            return None
+        near, far = ray
+        hit = p.rayTest(near[:3], far[:3], physicsClientId=self._client)[0]
+        body_id = hit[0]
+        for obj in self._sim_objects:
+            if obj.body_id == body_id:
+                return obj.object_id
+        return None
+
+    def _drag_selected_entity_to(self, mouse_x: int, mouse_y: int) -> None:
+        """Move the selected paused entity to the mouse ray at its current Z."""
+        if self._selected_entity_id is None:
+            return
+        entity = self._sim_objects_dict.get(self._selected_entity_id)
+        if entity is None:
+            return
+        ray = self._viewport_ray_at(mouse_x, mouse_y)
+        if ray is None:
+            return
+        near, far = ray
+        direction = far - near
+        if abs(direction[2]) < 1e-9:
+            return
+        current_pose = entity.get_pose()
+        scale = (current_pose.position[2] - near[2]) / direction[2]
+        if scale < 0:
+            return
+        point = near + scale * direction
+        self._set_entity_pose(
+            entity.object_id,
+            (float(point[0]), float(point[1]), current_pose.position[2]),
+            None,
+            None,
+            source="viewport_drag",
+        )
+
+    def _select_viewport_entity(self, mouse_events: List[Tuple[int, int, int, int, int]]) -> None:
+        """Select an entity on a left click, while leaving left-drag for camera control."""
+        for event_type, mouse_x, mouse_y, button, state in mouse_events:
+            if event_type == _MOUSE_MOVE_EVENT and self._viewport_drag_entity_id is not None:
+                self._drag_selected_entity_to(mouse_x, mouse_y)
+                continue
+            if event_type != _MOUSE_BUTTON_EVENT or button != _MOUSE_BUTTON_LEFT:
+                continue
+            if state != p.KEY_WAS_RELEASED:
+                self._viewport_left_click_start = (mouse_x, mouse_y)
+                continue
+
+            if self._viewport_drag_entity_id is not None:
+                self._viewport_drag_entity_id = None
+                self._viewport_left_click_start = None
+                continue
+
+            start = self._viewport_left_click_start
+            self._viewport_left_click_start = None
+            if start is not None and max(abs(mouse_x - start[0]), abs(mouse_y - start[1])) > _VIEWPORT_CLICK_MAX_DISTANCE_PX:
+                continue
+            try:
+                selected_id = self._pick_entity_at(mouse_x, mouse_y)
+            except p.error:
+                return
+            self._set_selected_entity(selected_id, source="viewport")
 
     @property
     def agents(self) -> List[Agent]:
@@ -1852,6 +2184,8 @@ class MultiRobotSimulationCore:
             return
 
         self._sim_objects_dict.pop(obj_id, None)
+        if self._selected_entity_id == obj_id:
+            self._set_selected_entity(None, source="system")
 
         # Remove from agents list if this is an Agent instance
         if isinstance(obj, Agent):
@@ -2029,6 +2363,11 @@ class MultiRobotSimulationCore:
                 self.pause()
             print(f"\n[PAUSE] Simulation: {'PAUSED' if self.is_paused else 'PLAYING'}")
 
+        # '.' advances exactly one outer simulation step while paused.  It
+        # records a request only; it never calls step_once() recursively.
+        if ord(".") in keys and keys[ord(".")] & p.KEY_WAS_TRIGGERED:
+            self.request_single_step(source="keyboard")
+
         # Camera controller (interactive mode)
         if self._camera_controller is not None:
             try:
@@ -2036,7 +2375,18 @@ class MultiRobotSimulationCore:
             except p.error:
                 mouse_events = []
             self._camera_controller.update(keys, mouse_events=mouse_events)
-
+            if self._gui_follow_enabled and self._selected_entity_id is not None:
+                selected = self._sim_objects_dict.get(self._selected_entity_id)
+                if selected is not None:
+                    self._camera_controller.follow_target(tuple(selected.get_pose().position))
+            control_state = keys.get(p.B3G_CONTROL, 0)
+            control_down = bool(control_state & (p.KEY_IS_DOWN | p.KEY_WAS_TRIGGERED))
+            if control_down and self.is_paused and self._selected_entity_id is not None:
+                for event_type, _mouse_x, _mouse_y, button, state in mouse_events:
+                    if event_type == _MOUSE_BUTTON_EVENT and button == _MOUSE_BUTTON_LEFT and state != p.KEY_WAS_RELEASED:
+                        self._viewport_drag_entity_id = self._selected_entity_id
+                        break
+            self._select_viewport_entity(mouse_events)
         # 't' key (ASCII 116) - toggle structure transparency
         if ord("t") in keys and keys[ord("t")] & p.KEY_WAS_TRIGGERED:
             num_structures = len(self._static_collision_objects)
@@ -2703,7 +3053,7 @@ class MultiRobotSimulationCore:
         logs monitor data via logger, and writes to DataMonitor if enabled.
         """
         now = time.monotonic()  # monotonic: RTF/elapsed stay correct across wall-clock jumps
-        sim_time = self._step_count * self._params.timestep
+        sim_time = self._elapsed_sim_time
         # --- Speed history buffer ---
         self._speed_history.append((now, sim_time))
         # Keep only history within 10 seconds (O(1) popleft with deque)
@@ -2724,20 +3074,48 @@ class MultiRobotSimulationCore:
         num_agents = len(self._agents)
         num_objects = len(self._sim_objects) - num_agents
 
-        monitor_data = {
-            "sim_time": sim_time,
-            "real_time": elapsed_time,
-            "target_rtf": self._params.target_rtf,
-            "actual_rtf": actual_rtf,
-            "time_step": self._params.timestep,
-            "frequency": 1 / self._params.timestep,
-            "physics": "enabled" if self._params.physics else "disabled",
-            "agents": num_agents,
-            "objects": num_objects,
-            "active_collisions": len(self._active_collision_pairs),
-            "collisions": self._collision_count,
-            "steps": self._step_count,
-        }
+        entities = tuple(
+            MonitorEntity(object_id=obj.object_id, name=obj.name or f"entity-{obj.object_id}", kind=type(obj).__name__)
+            for obj in sorted(self._sim_objects, key=lambda item: item.object_id)
+        )
+        selected_state = None
+        selected = self._sim_objects_dict.get(self._selected_entity_id) if self._selected_entity_id is not None else None
+        if selected is not None:
+            pose = selected.get_pose()
+            action = selected.get_current_action() if isinstance(selected, Agent) else None
+            selected_state = SelectedEntityMonitorState(
+                entity=MonitorEntity(
+                    selected.object_id, selected.name or f"entity-{selected.object_id}", type(selected).__name__
+                ),
+                position=tuple(pose.position),
+                orientation=tuple(pose.orientation),
+                action_type=type(action).__name__ if action is not None else None,
+                action_status=action.status.value if action is not None else None,
+                queued_actions=selected.get_action_queue_size() if isinstance(selected, Agent) else 0,
+                attached_objects=len(selected.attached_objects),
+                active_collisions=sum(selected.object_id in pair for pair in self._active_collision_pairs),
+            )
+        elif self._selected_entity_id is not None:
+            self._set_selected_entity(None, source="system")
+
+        frame = MonitorFrame(
+            sim_time=sim_time,
+            real_time=elapsed_time,
+            target_rtf=self._params.target_rtf,
+            actual_rtf=actual_rtf,
+            timestep=self._params.timestep,
+            physics_enabled=self._params.physics,
+            agents=num_agents,
+            objects=num_objects,
+            active_collisions=len(self._active_collision_pairs),
+            collisions=self._collision_count,
+            steps=self._step_count,
+            paused=self.is_paused,
+            entities=entities,
+            selected_entity=selected_state,
+            follow_enabled=self._gui_follow_enabled,
+        )
+        self._last_monitor_frame = frame
         logger.debug(
             "[MONITOR] sim_time=%.2f, real_time=%.2f, rtf=%.2f, agents=%d, objects=%d, "
             "active_collisions=%d, total_collisions=%d, steps=%d",
@@ -2756,7 +3134,7 @@ class MultiRobotSimulationCore:
             self._last_logged_collision_count = self._collision_count
         # Also output to DataMonitor window
         if self._data_monitor:
-            self._data_monitor.write_data(monitor_data)
+            self._data_monitor.write_frame(frame)
 
     def initialize_simulation(self) -> None:
         """
@@ -2786,9 +3164,16 @@ class MultiRobotSimulationCore:
         self._step_count = 0
         self._collision_count = 0
         self.sim_time = 0.0
+        self._elapsed_sim_time = 0.0
         self._last_collision_check = 0.0
         self._last_monitor_update = 0.0
         self._last_logged_collision_count = 0
+        self._last_monitor_frame = None
+        self._single_step_requested = False
+        self._pacing_rebase_requested = False
+        self._clear_selected_nameplate()
+        self._selected_entity_id = None
+        self._gui_follow_enabled = False
 
         # Reset pause state (#1: prevents stuck-paused on re-run)
         self.resume()
@@ -3255,10 +3640,13 @@ class MultiRobotSimulationCore:
             diag_prev_mono = start_time
 
             while True:
-                current_sim_time = self._step_count * self._params.timestep
+                current_sim_time = self._elapsed_sim_time
 
                 # Check duration based on simulation time (not real time)
-                if duration > 0 and current_sim_time >= duration:
+                if duration > 0 and (
+                    current_sim_time >= duration
+                    or math.isclose(current_sim_time, duration, rel_tol=0.0, abs_tol=self._params.timestep * 1e-9)
+                ):
                     break
 
                 # Check if PyBullet connection is still active (e.g., GUI window not closed)
@@ -3267,6 +3655,14 @@ class MultiRobotSimulationCore:
                 except p.error:
                     logger.info("PyBullet connection lost (GUI window closed)")
                     break
+
+                if self._pacing_rebase_requested:
+                    if self._params.target_rtf > 0:
+                        pacing_now = time.monotonic()
+                        start_time = pacing_now - current_sim_time / self._params.target_rtf
+                        diag_prev_mono = pacing_now
+                    last_step_process_time = 0.0
+                    self._pacing_rebase_requested = False
 
                 # target_rtf=0: Run as fast as possible (no synchronization, no sleep)
                 if self._params.target_rtf <= 0:
@@ -3503,13 +3899,19 @@ class MultiRobotSimulationCore:
             # PyBullet disconnected, skip this step
             return
 
+        # Monitor controls are submitted from tkinter and consumed only by this
+        # simulation thread.  Do this before GUI input so both sources share
+        # the same step boundary.
+        self._consume_gui_commands()
+
         # Handle keyboard events for visual/collision shape toggling and pause
         if self._keyboard_events_registered:
             self._handle_keyboard_events()
 
         # Skip physics simulation and callbacks if paused
-        if self.is_paused:
+        if self.is_paused and not self._single_step_requested:
             return
+        self._single_step_requested = False
 
         # Initialize profiling accumulators for this step (append 0.0 slot for ALL fields)
         # Placed after pause/disconnect checks so paused steps don't accumulate stale entries
@@ -3530,7 +3932,7 @@ class MultiRobotSimulationCore:
             # across multiple steps when collision_check_frequency < step_frequency
             self._moved_this_step.update(self._physics_objects)
 
-            self.sim_time = self._step_count * self._params.timestep
+            self.sim_time = self._elapsed_sim_time
 
             # --- pre_step event ---
             if measure_timing:
@@ -3685,6 +4087,8 @@ class MultiRobotSimulationCore:
             if measure_timing:
                 self._profiling_stats["events_post_step"][-1] = (time.perf_counter() - t_ev1) * 1000
 
+            self._update_selected_nameplate()
+            self._elapsed_sim_time += self._params.timestep
             self._step_count += 1
             # Monitor: every step if GUI enabled, otherwise every second
             if measure_timing:

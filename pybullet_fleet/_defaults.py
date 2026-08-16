@@ -54,8 +54,8 @@ _DEFAULTS: Dict[str, Dict[str, Any]] = {
         "window_width": 1024,
         "window_height": 768,
         # Monitor window
-        "monitor_width": 200,
-        "monitor_height": 290,
+        "monitor_width": 680,
+        "monitor_height": 480,
         # monitor_x / monitor_y: -1 means "let the window manager decide"
         # (tkinter geometry string omits +x+y). Set to >= 0 for absolute
         # virtual-screen coordinates.

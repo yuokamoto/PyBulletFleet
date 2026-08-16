@@ -29,7 +29,7 @@ disabled behaviour.
 | `timestep` | `0.1` | Simulation seconds per step. |
 | `duration` | `0` | Default `run_simulation()` duration; `0` runs until interrupted or the GUI closes. |
 | `gui` / `physics` | `true` / `false` | Open a GUI / call `p.stepSimulation()` and update physics bodies each step. |
-| `monitor` / `enable_monitor_gui` | `true` / `true` | Enable DataMonitor and its optional tkinter window. |
+| `monitor` / `enable_monitor_gui` | `true` / `true` | Enable DataMonitor and its optional tkinter window. The window provides playback controls plus entity selection and camera follow; requests are applied on the simulation step thread. |
 | `log_level` | `warn` | Python logging level applied to the process root logger. |
 | `max_steps_per_frame` | `10` | Catch-up-step limit used by the pacing loop. |
 | `max_sleep_frames` | `4.0` | Maximum one pacing sleep in normal frame intervals. |
@@ -37,7 +37,7 @@ disabled behaviour.
 | `enable_floor` | `true` | Load the default plane. `world:` disables it unless explicitly set. |
 | `model_paths` | `None` | Additional model-search directories. |
 | `window_width` / `window_height` | `1024` / `768` | PyBullet GUI window size. |
-| `monitor_width` / `monitor_height` | `200` / `290` | DataMonitor window size. |
+| `monitor_width` / `monitor_height` | `680` / `480` | DataMonitor window size. The default leaves room for its side-by-side statistics and entity inspector panes. |
 | `monitor_x` / `monitor_y` | `-1` / `-1` | DataMonitor location; `-1` leaves placement to the window manager. |
 
 ### Profiling
