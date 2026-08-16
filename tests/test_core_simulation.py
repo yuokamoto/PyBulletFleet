@@ -21,7 +21,6 @@ from pybullet_fleet.types import (
     SpatialHashCellSizeMode,
 )
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
@@ -575,10 +574,10 @@ class TestSimulationParams:
         assert params.window_height == 768
 
     def test_monitor_size_defaults(self):
-        """Monitor size/position defaults: size 200x290, position -1,-1 (WM-managed)."""
+        """Monitor size/position defaults: size 680x480, position -1,-1 (WM-managed)."""
         params = SimulationParams(gui=False, monitor=False)
-        assert params.monitor_width == 200
-        assert params.monitor_height == 290
+        assert params.monitor_width == 680
+        assert params.monitor_height == 480
         assert params.monitor_x == -1
         assert params.monitor_y == -1
 
@@ -616,8 +615,8 @@ class TestSimulationParams:
         params = SimulationParams.from_dict(cfg)
         assert params.window_width == 1024
         assert params.window_height == 768
-        assert params.monitor_width == 200
-        assert params.monitor_height == 290
+        assert params.monitor_width == 680
+        assert params.monitor_height == 480
         assert params.monitor_x == -1
         assert params.monitor_y == -1
 
@@ -630,7 +629,7 @@ class TestDataMonitorParams:
         from pybullet_fleet.data_monitor import DataMonitor
 
         monitor = DataMonitor("Test")
-        assert monitor.geometry_string == "200x290"
+        assert monitor.geometry_string == "680x480"
 
     def test_custom_geometry(self):
         """Custom size/position should produce correct geometry string."""

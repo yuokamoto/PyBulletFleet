@@ -5,12 +5,15 @@ Shows simulation statistics in a separate tkinter window
 """
 
 import json
+import math
 import os
 import threading
 import time
-from typing import Any, Dict, Optional
+from dataclasses import asdict
+from typing import Any, Callable, Dict, Optional
 
 from pybullet_fleet._defaults import SIMULATION as _SIM_D
+from pybullet_fleet.gui_commands import GuiCommand, GuiCommandType, MonitorFrame
 from pybullet_fleet.logging_utils import get_lazy_logger
 
 logger = get_lazy_logger(__name__)
@@ -39,6 +42,8 @@ class DataMonitor:
         height: int = _SIM_D["monitor_height"],
         x: int = _SIM_D["monitor_x"],
         y: int = _SIM_D["monitor_y"],
+        initial_target_rtf: Optional[float] = None,
+        initial_timestep: Optional[float] = None,
     ) -> None:
         self.title: str = title
         self.enable_gui: bool = enable_gui
@@ -49,6 +54,13 @@ class DataMonitor:
         self.update_interval: float = 0.5  # Update every 500ms
         self.status_label: Optional[Any] = None
         self.monitor_thread: Optional[threading.Thread] = None
+        self.command_sink: Optional[Callable[[GuiCommand], bool]] = None
+        self._entity_rows: list[int] = []
+        self._all_entities: list[Dict[str, Any]] = []
+        self._follow_enabled: bool = False
+        self._current_selected_entity_id: Optional[int] = None
+        self.initial_target_rtf: Optional[float] = initial_target_rtf
+        self.initial_timestep: Optional[float] = initial_timestep
         if tk is None and self.enable_gui:
             logger.warning(
                 "DataMonitor GUI was requested but tkinter is unavailable; "
@@ -95,6 +107,8 @@ class DataMonitor:
         self.window.title(self.title)
         self.window.geometry(self.geometry_string)
         self.window.configure(bg="black")
+        self.window.columnconfigure(0, weight=1)
+        self.window.rowconfigure(0, weight=1)
 
         # Create main frame  (padding: top right bottom left)
         main_frame = ttk.Frame(self.window, padding="4 5 4 2")
@@ -103,6 +117,13 @@ class DataMonitor:
         # Configure style for better visibility
         style = ttk.Style()
         style.configure("Monitor.TLabel", foreground="lime", background="black", font=("Courier", 9))
+
+        # Keep compact run statistics beside a vertically expandable entity
+        # inspector.  Large fleets need the latter to use the window height.
+        metrics = ttk.Frame(main_frame)
+        metrics.grid(row=0, column=0, sticky=(tk.N, tk.W), padx=(0, 8))
+        main_frame.columnconfigure(1, weight=1)
+        main_frame.rowconfigure(0, weight=1)
 
         # Create labels for different data fields
         self.labels = {}
@@ -121,13 +142,75 @@ class DataMonitor:
         ]
 
         for i, field in enumerate(fields):
-            label = ttk.Label(main_frame, text=f"{field}: --", style="Monitor.TLabel")
+            label = ttk.Label(metrics, text=f"{field}: --", style="Monitor.TLabel")
             label.grid(row=i, column=0, sticky=tk.W, pady=2)
             self.labels[field] = label
 
+        # Playback controls submit a request to the simulation thread.  They
+        # never call core/PyBullet methods directly from tkinter's thread.
+        controls = ttk.Frame(metrics)
+        controls.grid(row=len(fields), column=0, sticky=tk.W, pady=(8, 2))
+        ttk.Button(controls, text="Pause", command=lambda: self._submit_command(GuiCommandType.PAUSE)).grid(
+            row=0, column=0, padx=(0, 3)
+        )
+        ttk.Button(controls, text="Resume", command=lambda: self._submit_command(GuiCommandType.RESUME)).grid(
+            row=0, column=1, padx=3
+        )
+        ttk.Button(controls, text="Step", command=lambda: self._submit_command(GuiCommandType.SINGLE_STEP)).grid(
+            row=0, column=2, padx=(3, 0)
+        )
+
+        pacing = ttk.LabelFrame(metrics, text="Pacing", padding="3 2 3 2")
+        pacing.grid(row=len(fields) + 1, column=0, sticky=tk.W, pady=(6, 0))
+        ttk.Label(pacing, text="RTF").grid(row=0, column=0, sticky=tk.W)
+        self.target_rtf_var = tk.StringVar(value=f"{self.initial_target_rtf:g}" if self.initial_target_rtf is not None else "")
+        self.target_rtf_entry = ttk.Entry(pacing, textvariable=self.target_rtf_var, width=7)
+        self.target_rtf_entry.grid(row=0, column=1, padx=(3, 6))
+        ttk.Label(pacing, text="dt").grid(row=0, column=2, sticky=tk.W)
+        self.timestep_var = tk.StringVar(value=f"{self.initial_timestep:g}" if self.initial_timestep is not None else "")
+        self.timestep_entry = ttk.Entry(pacing, textvariable=self.timestep_var, width=7)
+        self.timestep_entry.grid(row=0, column=3, padx=(3, 6))
+        ttk.Button(pacing, text="Apply", command=self._apply_pacing).grid(row=0, column=4)
+
+        inspector = ttk.LabelFrame(main_frame, text="Entities", padding="3 3 3 3")
+        inspector.grid(row=0, column=1, sticky=(tk.N, tk.S, tk.W, tk.E))
+        inspector.columnconfigure(0, weight=1)
+        inspector.rowconfigure(2, weight=1)
+        ttk.Label(inspector, text="Search name / ID / type").grid(row=0, column=0, sticky=tk.W)
+        self.search_var = tk.StringVar()
+        self.search_var.trace_add("write", self._apply_entity_filter)
+        ttk.Entry(inspector, textvariable=self.search_var, width=28).grid(row=1, column=0, sticky=tk.W, pady=(0, 3))
+        self.entity_list = tk.Listbox(inspector, height=6, exportselection=False)
+        self.entity_list.grid(row=2, column=0, sticky=(tk.N, tk.S, tk.W, tk.E))
+        self.entity_list.bind("<<ListboxSelect>>", self._on_entity_selected)
+        scrollbar = ttk.Scrollbar(inspector, orient=tk.VERTICAL, command=self.entity_list.yview)
+        scrollbar.grid(row=2, column=1, sticky=(tk.N, tk.S))
+        self.entity_list.configure(yscrollcommand=scrollbar.set)
+        selection_controls = ttk.Frame(inspector)
+        selection_controls.grid(row=3, column=0, sticky=tk.W, pady=(3, 0))
+        self.follow_button = ttk.Button(selection_controls, text="Follow selected", command=self._toggle_follow)
+        self.follow_button.grid(row=0, column=0, padx=(0, 3))
+        ttk.Button(selection_controls, text="Clear selection", command=self._clear_selection).grid(row=0, column=1)
+        self.inspector_label = ttk.Label(inspector, text="No entity selected", style="Monitor.TLabel", justify=tk.LEFT)
+        self.inspector_label.grid(row=4, column=0, sticky=tk.W)
+
+        pose_editor = ttk.LabelFrame(inspector, text="Move selected (paused)", padding="3 2 3 2")
+        pose_editor.grid(row=5, column=0, sticky=(tk.W, tk.E), pady=(4, 0))
+        self.pose_vars = {axis: tk.StringVar() for axis in ("x", "y", "z", "roll", "pitch", "yaw")}
+        self.pose_entries: Dict[str, Any] = {}
+        for row, axes in enumerate((("x", "y", "z"), ("roll", "pitch", "yaw"))):
+            for column, axis in enumerate(axes):
+                ttk.Label(pose_editor, text=f"{axis}{'°' if row else ''}").grid(row=row, column=column * 2)
+                entry = ttk.Entry(pose_editor, textvariable=self.pose_vars[axis], width=7)
+                entry.grid(row=row, column=column * 2 + 1, padx=(2, 4))
+                self.pose_entries[axis] = entry
+        ttk.Button(pose_editor, text="Move", command=self._apply_selected_pose).grid(
+            row=2, column=0, columnspan=6, pady=(3, 0)
+        )
+
         # Add status label
-        self.status_label = ttk.Label(main_frame, text="Status: Waiting for data...", style="Monitor.TLabel")
-        self.status_label.grid(row=len(fields), column=0, sticky=tk.W, pady=10)
+        self.status_label = ttk.Label(metrics, text="Status: Waiting for data...", style="Monitor.TLabel")
+        self.status_label.grid(row=len(fields) + 2, column=0, sticky=tk.W, pady=10)
 
         # Start periodic update
         self.window.after(int(self.update_interval * 1000), self._update_display)
@@ -163,8 +246,14 @@ class DataMonitor:
                 self.labels["Collisions"].config(text=f"Collis.  : {data.get('active_collisions', 0)}")
                 self.labels["Tot Collis."].config(text=f"Tot Col. : {data.get('collisions', 0)}")
                 self.labels["Steps"].config(text=f"Steps    : {data.get('steps', 0)}")
+                if not self.target_rtf_entry.focus_get():
+                    self.target_rtf_var.set(f"{data.get('target_rtf', 0):g}")
+                if not self.timestep_entry.focus_get():
+                    self.timestep_var.set(f"{data.get('time_step', 0):g}")
 
-                self.status_label.config(text=f"Status: Connected (Updated: {time.strftime('%H:%M:%S')})")
+                state = "PAUSED" if data.get("paused") else "PLAYING"
+                self.status_label.config(text=f"Status: {state} (Updated: {time.strftime('%H:%M:%S')})")
+                self._update_inspector(data)
             else:
                 self.status_label.config(text="Status: No data file found")
 
@@ -188,6 +277,151 @@ class DataMonitor:
             os.replace(tmp_path, self.data_file)  # atomic on POSIX
         except Exception:
             pass  # Ignore errors in data writing
+
+    def write_frame(self, frame: MonitorFrame) -> None:
+        """Write a :class:`MonitorFrame` through the legacy JSON monitor path."""
+        data = asdict(frame)
+        # Keep the established JSON keys stable for external file readers.
+        data["time_step"] = data.pop("timestep")
+        data["physics"] = "enabled" if data.pop("physics_enabled") else "disabled"
+        data["frequency"] = 1 / frame.timestep
+        self.write_data(data)
+
+    def set_command_sink(self, sink: Callable[[GuiCommand], bool]) -> None:
+        """Set the thread-safe callable that accepts monitor commands."""
+        self.command_sink = sink
+
+    def _submit_command(self, command: GuiCommandType, **kwargs: Any) -> None:
+        """Send a UI request without accessing simulation state from tkinter."""
+        if self.command_sink is not None:
+            self.command_sink(GuiCommand(command=command, **kwargs))
+
+    def _on_entity_selected(self, _event: Any) -> None:
+        selection = self.entity_list.curselection()
+        if selection:
+            self._submit_command(GuiCommandType.SELECT_ENTITY, entity_id=self._entity_rows[selection[0]])
+
+    def _toggle_follow(self) -> None:
+        self._submit_command(GuiCommandType.SET_FOLLOW, enabled=not self._follow_enabled)
+
+    def _clear_selection(self) -> None:
+        self._submit_command(GuiCommandType.SELECT_ENTITY, entity_id=None)
+
+    def _apply_pacing(self) -> None:
+        """Validate monitor inputs and request an atomic pacing change."""
+        try:
+            target_rtf = float(self.target_rtf_var.get())
+            timestep = float(self.timestep_var.get())
+        except ValueError:
+            self.status_label.config(text="Status: RTF and dt must be numbers")
+            return
+        if target_rtf < 0 or timestep <= 0:
+            self.status_label.config(text="Status: RTF must be >= 0 and dt must be > 0")
+            return
+        self._submit_command(GuiCommandType.SET_SIMULATION_PACING, target_rtf=target_rtf, timestep=timestep)
+
+    def _apply_selected_pose(self) -> None:
+        """Request a paused-only teleport using XYZ and yaw in degrees."""
+        try:
+            position = tuple(float(self.pose_vars[axis].get()) for axis in ("x", "y", "z"))
+            rpy_radians = tuple(math.radians(float(self.pose_vars[axis].get())) for axis in ("roll", "pitch", "yaw"))
+        except ValueError:
+            self.status_label.config(text="Status: X, Y, Z, roll, pitch, and yaw must be numbers")
+            return
+        selected = self._selected_entity_id()
+        if selected is None:
+            self.status_label.config(text="Status: Select an entity before moving it")
+            return
+        self._submit_command(
+            GuiCommandType.SET_ENTITY_POSE,
+            entity_id=selected,
+            position=position,
+            rpy_radians=rpy_radians,
+        )
+
+    def _selected_entity_id(self) -> Optional[int]:
+        return self._current_selected_entity_id
+
+    def _update_inspector(self, data: Dict[str, Any]) -> None:
+        entities = data.get("entities", [])
+        if entities != self._all_entities:
+            self._all_entities = entities
+            self._apply_entity_filter()
+        selected = data.get("selected_entity")
+        self._follow_enabled = bool(data.get("follow_enabled"))
+        self.follow_button.config(text="Stop following" if self._follow_enabled else "Follow selected")
+        if selected:
+            self._current_selected_entity_id = selected["entity"]["object_id"]
+            position = ", ".join(f"{value:.2f}" for value in selected["position"])
+            orientation = ", ".join(f"{value:.2f}" for value in selected["orientation"])
+            action = selected["action_type"] or "idle"
+            if selected["action_status"]:
+                action = f"{action} ({selected['action_status']})"
+            collision = "yes" if selected["active_collisions"] else "no"
+            self.inspector_label.config(
+                text=(
+                    f"ID: {selected['entity']['object_id']}  {selected['entity']['name']}\n"
+                    f"Type: {selected['entity']['kind']}\n"
+                    f"Position: ({position})\nOrientation: ({orientation})\n"
+                    f"Action: {action}; queued: {selected['queued_actions']}\n"
+                    f"Attached: {selected['attached_objects']}; active collision: {collision}"
+                )
+            )
+            if not any(entry.focus_get() is entry for entry in self.pose_entries.values()):
+                roll = math.degrees(
+                    math.atan2(
+                        2
+                        * (
+                            selected["orientation"][3] * selected["orientation"][0]
+                            + selected["orientation"][1] * selected["orientation"][2]
+                        ),
+                        1 - 2 * (selected["orientation"][0] ** 2 + selected["orientation"][1] ** 2),
+                    )
+                )
+                pitch = math.degrees(
+                    math.asin(
+                        max(
+                            -1.0,
+                            min(
+                                1.0,
+                                2
+                                * (
+                                    selected["orientation"][3] * selected["orientation"][1]
+                                    - selected["orientation"][2] * selected["orientation"][0]
+                                ),
+                            ),
+                        )
+                    )
+                )
+                yaw = math.degrees(
+                    math.atan2(
+                        2
+                        * (
+                            selected["orientation"][3] * selected["orientation"][2]
+                            + selected["orientation"][0] * selected["orientation"][1]
+                        ),
+                        1 - 2 * (selected["orientation"][1] ** 2 + selected["orientation"][2] ** 2),
+                    )
+                )
+                for axis, value in zip(("x", "y", "z"), selected["position"]):
+                    self.pose_vars[axis].set(f"{value:g}")
+                for axis, value in zip(("roll", "pitch", "yaw"), (roll, pitch, yaw)):
+                    self.pose_vars[axis].set(f"{value:g}")
+        else:
+            self._current_selected_entity_id = None
+            self.inspector_label.config(text="No entity selected")
+
+    def _apply_entity_filter(self, *_args: Any) -> None:
+        """Apply the case-insensitive inspector filter without touching sim state."""
+        query = self.search_var.get().casefold().strip()
+        self.entity_list.delete(0, tk.END)
+        self._entity_rows = []
+        for entry in self._all_entities:
+            label = f"{entry['object_id']}: {entry['name']} ({entry['kind']})"
+            if query and query not in label.casefold():
+                continue
+            self._entity_rows.append(entry["object_id"])
+            self.entity_list.insert(tk.END, label)
 
 
 # Standalone monitor launcher

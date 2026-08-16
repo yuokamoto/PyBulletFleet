@@ -20,6 +20,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Add tkinter DataMonitor pause, resume, single-step, entity selection, and
+  camera-follow controls that submit requests safely to the simulation-step
+  thread, with a vertically expandable side-by-side entity inspector, viewport
+  click selection with empty-space or monitor-button deselection, and a
+  nameplate for the selected entity. Add safe live RTF and timestep controls,
+  plus paused-only numeric and viewport-drag pose editing.
 - Add manager-scoped Fleet ROS endpoint sets, selective global FleetState
   inclusion, per-manager state rate/QoS, and manager-owned command validation.
 - Add an optional ROS 2 fleet scale-check transport probe for same-host

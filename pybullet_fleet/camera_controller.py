@@ -119,6 +119,11 @@ class CameraController:
         if camera_changed:
             p.resetDebugVisualizerCamera(dist, yaw, pitch, target, physicsClientId=self._cid)
 
+    def follow_target(self, target: Tuple[float, float, float]) -> None:
+        """Move only the camera target, preserving the user's view angles."""
+        cam = p.getDebugVisualizerCamera(physicsClientId=self._cid)
+        p.resetDebugVisualizerCamera(cam[_CAM_DIST], cam[_CAM_YAW], cam[_CAM_PITCH], target, physicsClientId=self._cid)
+
     def _process_mouse(
         self,
         mouse_events: List[MouseEvent],
