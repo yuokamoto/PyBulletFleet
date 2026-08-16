@@ -139,6 +139,7 @@ def main() -> int:
         parser.error("--robots and --iterations must be positive; --warmup must be non-negative")
 
     states = _states(args.robots)
+
     def to_robot_messages() -> list[RobotState3DMsg]:
         return [robot_state3d_to_msg(state) for state in states]
 
