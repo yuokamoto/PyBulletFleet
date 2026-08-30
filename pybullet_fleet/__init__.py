@@ -73,6 +73,23 @@ from pybullet_fleet.sdf_loader import load_mesh_directory, load_rmf_world  # noq
 from pybullet_fleet.sdf_loader import load_sdf_world, load_sdf_world_file  # noqa: F401
 from pybullet_fleet.sdf_loader import resolve_sdf_to_urdf  # noqa: F401
 
+# Optional OpenUSD static-world import. The module lazy-imports ``pxr`` so this
+# public import remains safe without installing the ``usd`` extra.
+from pybullet_fleet.usd_loader import UsdImportDiagnostic, UsdImportOptions, UsdImportReport, load_usd_world  # noqa: F401
+
+from pybullet_fleet.behavior_tree import (  # noqa: F401
+    AgentActionId,
+    AgentBehaviorTree,
+    BehaviorTree,
+    BehaviorTreeNodeType,
+    NavigationAdapter,
+    NavigationStatus,
+    PyBulletFleetNavigationAdapter,
+    TickResult,
+    WorkerBehaviorTree,
+    WorkerActionId,
+)
+
 # Robot model resolution  (resolve_urdf kept as backward-compatible alias)
 from pybullet_fleet.robot_models import resolve_model  # noqa: F401
 
@@ -188,6 +205,21 @@ __all__ = [
     "SpatialHashCellSizeMode",
     "SimulationRecorder",
     "SimObject",
+    # OpenUSD static-world import
+    "UsdImportDiagnostic",
+    "UsdImportOptions",
+    "UsdImportReport",
+    "load_usd_world",
+    "WorkerBehaviorTree",
+    "WorkerActionId",
+    "AgentBehaviorTree",
+    "AgentActionId",
+    "BehaviorTree",
+    "BehaviorTreeNodeType",
+    "NavigationAdapter",
+    "NavigationStatus",
+    "PyBulletFleetNavigationAdapter",
+    "TickResult",
     # Events
     "EventBus",
     "SimEvents",

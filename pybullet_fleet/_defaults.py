@@ -73,6 +73,8 @@ _DEFAULTS: Dict[str, Dict[str, Any]] = {
         "spatial_hash_cell_size": None,
         # Default: interactive camera (Shift+drag pan, +/- zoom, o top-down)
         "camera_config": None,
+        # Optional PyBullet GUI main-light and shadow-map settings.
+        "lighting_config": None,
         # None = no additional model search paths
         "model_paths": None,
     },

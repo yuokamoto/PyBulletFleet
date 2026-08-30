@@ -67,3 +67,5 @@ _roscon_jp_2026/
 
 # Stray benchmark outputs at repo root (canonical results live in benchmark/results/)
 /benchmark_results_*.json
+
+log/

@@ -1,0 +1,20 @@
+#usda 1.0
+(
+    defaultPrim = "Scene"
+    metersPerUnit = 0.01
+    upAxis = "Y"
+)
+
+def Xform "Scene"
+{
+    double3 xformOp:translate = (100, 200, 300)
+    uniform token[] xformOpOrder = ["xformOp:translate"]
+
+    def Mesh "Triangle"
+    {
+        point3f[] points = [(0, 0, 0), (100, 0, 0), (0, 0, 100)]
+        int[] faceVertexCounts = [3]
+        int[] faceVertexIndices = [0, 1, 2]
+        color3f[] primvars:displayColor = [(0.2, 0.7, 0.9)]
+    }
+}

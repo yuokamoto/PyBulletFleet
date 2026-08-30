@@ -1,0 +1,11 @@
+<root BTCPP_format="4" main_tree_to_execute="WorkerWander">
+  <BehaviorTree ID="WorkerWander">
+    <Repeat num_cycles="-1">
+      <Sequence>
+        <Action ID="SelectGoalFromWaypointSet" waypoint_set="{worker_waypoint_set}" output_goal="{goal}" />
+        <Action ID="NavigateTo" goal="{goal}" />
+        <Action ID="WaitRandom" min_seconds="1.0" max_seconds="2.0" />
+      </Sequence>
+    </Repeat>
+  </BehaviorTree>
+</root>

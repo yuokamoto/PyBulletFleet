@@ -22,6 +22,7 @@ arm-pick-drop
 arm-ee-control
 robot-models
 sdf-mesh-loading
+usd-worlds
 event-bus
 plugins
 ```
@@ -39,6 +40,7 @@ plugins
 | 7 | [SDF and Mesh Assets](sdf-mesh-loading) | `models/sdf_demo.py` | Multi-model SDF and bulk mesh loading |
 | 8 | [Event Bus](event-bus) | `basics/event_bus_demo.py` | EventBus, lifecycle and custom events |
 | 9 | [Plugins](plugins) | `basics/plugin_demo.py` | SimPlugin lifecycle and AgentPlugin configuration |
+| 10 | [OpenUSD Static Worlds](usd-worlds) | `models/usd_warehouse_demo.py` | Local USD/USDZ static environments |
 
 ## Run bundled examples
 

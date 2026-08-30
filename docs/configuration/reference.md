@@ -88,6 +88,27 @@ Manual camera settings can specify `camera_distance`, `camera_yaw`,
 `camera_pitch`, and `camera_target`. Recording camera selection is documented
 in [Capturing Demo Videos](../how-to/capturing-demos).
 
+### GUI lighting
+
+`lighting` is accepted as an alias for `lighting_config`. It configures
+PyBullet GUI's single main light and its shadow map; it does not import or
+reproduce USD light prims.
+
+```yaml
+simulation:
+  enable_shadows: true
+  lighting:
+    light_position: [8, -8, 15]
+    shadow_map_world_size: 20
+    shadow_map_resolution: 2048
+    enable_controls: true
+```
+
+When `enable_controls` is true, PyBulletFleet displays the native Parameters
+panel with sliders for these values. The simulation thread applies changes, so
+the controls are safe for normal `run_simulation()` execution. The panel is
+not available in headless mode.
+
 ## World
 
 `world:` loads environment geometry before `entities:`. The loader selects one

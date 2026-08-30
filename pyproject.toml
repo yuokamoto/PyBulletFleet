@@ -43,6 +43,11 @@ sdf = [
     "trimesh>=4.0",
     "pycollada>=0.8",
 ]
+# OpenUSD static-world import. Kept optional because the OpenUSD Python
+# distribution is large and not needed by normal URDF/SDF users.
+usd = [
+    "usd-core>=25.0,<26.0",
+]
 dev = [
     "black>=23.0.0",
     "isort>=5.12.0",
