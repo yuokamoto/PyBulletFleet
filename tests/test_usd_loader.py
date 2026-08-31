@@ -17,6 +17,7 @@ from pybullet_fleet.usd_loader import (
     _shader_appearance,
     load_usd_world,
 )
+import pybullet_fleet.usd_loader as usd_loader
 
 
 def test_mesh_cache_digest_is_deterministic_and_includes_optional_attributes():
@@ -28,6 +29,30 @@ def test_mesh_cache_digest_is_deterministic_and_includes_optional_attributes():
     assert digest == _mesh_cache_digest(list(vertices), list(triangles), None, None)
     assert digest != _mesh_cache_digest(vertices, triangles, [(0.0, 0.0)] * 3, None)
     assert digest != _mesh_cache_digest(vertices, [(0, 2, 1)], None, None)
+
+
+def test_apply_texture_reloads_a_stale_cached_id_after_client_reconnect(monkeypatch):
+    texture_path = "/tmp/texture.png"
+    cache_key = (7, texture_path, 1.0)
+    usd_loader._TEXTURE_CACHE[cache_key] = 13
+    changes = []
+
+    def change_visual_shape(*_args, **kwargs):
+        changes.append(kwargs["textureUniqueId"])
+        if len(changes) == 1:
+            raise p.error("stale texture ID")
+
+    try:
+        monkeypatch.setattr("pybullet.loadTexture", lambda *_args, **_kwargs: 29)
+        monkeypatch.setattr("pybullet.changeVisualShape", change_visual_shape)
+        monkeypatch.setattr(usd_loader, "_brightened_texture_path", lambda path, _brightness: path)
+
+        usd_loader._apply_texture(3, texture_path, physics_client_id=7, brightness=1.0)
+
+        assert changes == [13, 29]
+        assert usd_loader._TEXTURE_CACHE[cache_key] == 29
+    finally:
+        usd_loader._TEXTURE_CACHE.pop(cache_key, None)
 
 
 @pytest.fixture

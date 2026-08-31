@@ -37,8 +37,8 @@ class ElevatorRequestResult(str, Enum):
 class ElevatorStateMachine:
     """Coordinate floor requests independently of a physics backend.
 
-    ``ARRIVED`` lasts until the next update, making the completed transition
-    observable without delaying a subsequent floor request.
+    ``ARRIVED`` is observable after a completed transition until the next
+    update or a newly accepted floor request.
     """
 
     def __init__(

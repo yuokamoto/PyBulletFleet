@@ -64,6 +64,19 @@ def test_elevator_state_machine_rejects_unknown_and_current_floor_requests():
     assert adapter.target_height is None
 
 
+def test_elevator_state_machine_accepts_a_new_request_while_arrived():
+    adapter = _Adapter()
+    machine = ElevatorStateMachine({"L1": 0.0, "L2": 4.0, "L3": 8.0}, "L1", adapter)
+
+    assert machine.request_floor("L2") is ElevatorRequestResult.ACCEPTED
+    adapter.moving = False
+    assert machine.update()
+    assert machine.state is ElevatorState.ARRIVED
+
+    assert machine.request_floor("L3") is ElevatorRequestResult.ACCEPTED
+    assert machine.state is ElevatorState.MOVING
+
+
 def test_elevator_state_machine_queues_requests_after_the_current_trip():
     adapter = _Adapter()
     machine = ElevatorStateMachine(

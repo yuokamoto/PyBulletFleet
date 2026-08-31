@@ -754,7 +754,7 @@ def _mesh_local_normals(mesh: Any) -> list[tuple[float, float, float]] | None:
 
 
 def _apply_texture(body_id: int, texture_path: str, physics_client_id: int, brightness: float) -> None:
-    """Apply a cached texture to a body after its PyBullet visual shape exists."""
+    """Apply a cached texture, reloading if a reused client ID made it stale."""
     import pybullet as p
 
     cache_key = (physics_client_id, texture_path, brightness)
@@ -762,8 +762,18 @@ def _apply_texture(body_id: int, texture_path: str, physics_client_id: int, brig
     if texture_id is None:
         texture_id = p.loadTexture(_brightened_texture_path(texture_path, brightness), physicsClientId=physics_client_id)
         _TEXTURE_CACHE[cache_key] = texture_id
-    if texture_id >= 0:
+    if texture_id < 0:
+        return
+    try:
         p.changeVisualShape(body_id, -1, textureUniqueId=texture_id, physicsClientId=physics_client_id)
+    except p.error:
+        # PyBullet may reuse a client ID after disconnecting.  Texture IDs
+        # belong to the old connection in that case, so reload once.
+        _TEXTURE_CACHE.pop(cache_key, None)
+        texture_id = p.loadTexture(_brightened_texture_path(texture_path, brightness), physicsClientId=physics_client_id)
+        _TEXTURE_CACHE[cache_key] = texture_id
+        if texture_id >= 0:
+            p.changeVisualShape(body_id, -1, textureUniqueId=texture_id, physicsClientId=physics_client_id)
 
 
 def _brightened_texture_path(texture_path: str, brightness: float) -> str:
