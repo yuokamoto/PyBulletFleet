@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
+from typing import Any  # noqa: F401 - Sphinx resolves inherited annotations in this module.
 from typing import Protocol, cast
 from xml.etree import ElementTree
 

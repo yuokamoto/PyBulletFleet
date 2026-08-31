@@ -12,6 +12,7 @@ from contextlib import nullcontext
 from dataclasses import dataclass, field
 from hashlib import sha256
 from pathlib import Path
+from struct import pack
 from tempfile import gettempdir
 from typing import Any
 
@@ -794,7 +795,7 @@ def _write_obj(
     texture_coordinates: list[tuple[float, float]] | None = None,
     normals: list[tuple[float, float, float]] | None = None,
 ) -> Path:
-    digest = sha256(repr((vertices, triangles, texture_coordinates, normals)).encode("utf-8")).hexdigest()
+    digest = _mesh_cache_digest(vertices, triangles, texture_coordinates, normals)
     cache_dir = Path(gettempdir()) / "pybullet_fleet_usd_meshes"
     cache_dir.mkdir(parents=True, exist_ok=True)
     path = cache_dir / f"{digest}.obj"
@@ -816,3 +817,29 @@ def _write_obj(
         lines.extend(f"f {a + 1} {b + 1} {c + 1}" for a, b, c in triangles)
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return path
+
+
+def _mesh_cache_digest(
+    vertices: list[tuple[float, float, float]],
+    triangles: list[tuple[int, int, int]],
+    texture_coordinates: list[tuple[float, float]] | None,
+    normals: list[tuple[float, float, float]] | None,
+) -> str:
+    """Hash mesh content incrementally without materializing one large repr."""
+    digest = sha256()
+
+    def update_rows(tag: bytes, rows: list[tuple[Any, ...]] | None, row_format: str) -> None:
+        digest.update(tag)
+        if rows is None:
+            digest.update(b"\0")
+            return
+        digest.update(b"\1")
+        digest.update(pack("<Q", len(rows)))
+        for row in rows:
+            digest.update(pack(row_format, *row))
+
+    update_rows(b"vertices", vertices, "<3d")
+    update_rows(b"triangles", triangles, "<3q")
+    update_rows(b"texture_coordinates", texture_coordinates, "<2d")
+    update_rows(b"normals", normals, "<3d")
+    return digest.hexdigest()

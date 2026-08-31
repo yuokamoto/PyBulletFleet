@@ -4,10 +4,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
+from typing import Any  # noqa: F401 - Sphinx resolves inherited annotations in this module.
 from xml.etree import ElementTree
 
-from pybullet_fleet.agent_behavior_tree import AgentBehaviorTree
-from pybullet_fleet.behavior_tree_core import ActionHandler, TickResult
+from pybullet_fleet.agent_behavior_tree import AgentBehaviorTree, GoalPoseAgent  # noqa: F401
+from pybullet_fleet.behavior_tree_core import ActionHandler, NavigationAdapter, TickResult  # noqa: F401
 
 
 class WorkerActionId(str, Enum):

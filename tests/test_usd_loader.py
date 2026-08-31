@@ -12,10 +12,22 @@ from pybullet_fleet import MultiRobotSimulationCore, SimulationParams
 from pybullet_fleet.usd_loader import (
     UsdImportOptions,
     _expand_face_varying_uvs,
+    _mesh_cache_digest,
     _mesh_texture_coordinates,
     _shader_appearance,
     load_usd_world,
 )
+
+
+def test_mesh_cache_digest_is_deterministic_and_includes_optional_attributes():
+    vertices = [(0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.0, 1.0, 0.0)]
+    triangles = [(0, 1, 2)]
+
+    digest = _mesh_cache_digest(vertices, triangles, None, None)
+
+    assert digest == _mesh_cache_digest(list(vertices), list(triangles), None, None)
+    assert digest != _mesh_cache_digest(vertices, triangles, [(0.0, 0.0)] * 3, None)
+    assert digest != _mesh_cache_digest(vertices, [(0, 2, 1)], None, None)
 
 
 @pytest.fixture

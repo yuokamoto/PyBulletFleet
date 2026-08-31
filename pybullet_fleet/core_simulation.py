@@ -2386,32 +2386,54 @@ class MultiRobotSimulationCore:
             return
         config = self._params.lighting_config if lighting_config is None else lighting_config
         kwargs: Dict[str, Any] = {"physicsClientId": self._client}
-        position = config.get("light_position")
+        position, world_size, resolution = self._validated_gui_lighting_values(config)
+        if position is not None:
+            kwargs["lightPosition"] = position
+        if world_size is not None:
+            kwargs["shadowMapWorldSize"] = world_size
+        if resolution is not None:
+            kwargs["shadowMapResolution"] = resolution
+        if len(kwargs) > 1:
+            p.configureDebugVisualizer(**kwargs)
+
+    @staticmethod
+    def _validated_gui_lighting_values(
+        config: Dict[str, Any], *, defaults: bool = False
+    ) -> tuple[list[float] | None, int | None, int | None]:
+        """Return validated GUI-lighting values shared by setup and sliders."""
+        position = config.get("light_position", [4.0, -4.0, 8.0] if defaults else None)
+        if position is None and defaults:
+            position = [4.0, -4.0, 8.0]
         if position is not None:
             if not isinstance(position, (list, tuple)) or len(position) != 3:
                 raise ValueError("lighting.light_position must be a three-element list")
-            kwargs["lightPosition"] = [float(value) for value in position]
-        world_size = config.get("shadow_map_world_size")
-        if world_size is not None:
-            if int(world_size) <= 0:
-                raise ValueError("lighting.shadow_map_world_size must be positive")
-            kwargs["shadowMapWorldSize"] = int(world_size)
-        resolution = config.get("shadow_map_resolution")
-        if resolution is not None:
-            if int(resolution) <= 0:
-                raise ValueError("lighting.shadow_map_resolution must be positive")
-            kwargs["shadowMapResolution"] = int(resolution)
-        if len(kwargs) > 1:
-            p.configureDebugVisualizer(**kwargs)
+            position = [float(value) for value in position]
+
+        def positive_integer(key: str, default: int | None) -> int | None:
+            value = config.get(key, default)
+            if value is None:
+                return None
+            try:
+                value = int(value)
+            except (TypeError, ValueError) as error:
+                raise ValueError(f"lighting.{key} must be a positive integer") from error
+            if value <= 0:
+                raise ValueError(f"lighting.{key} must be positive")
+            return value
+
+        return (
+            position,
+            positive_integer("shadow_map_world_size", 12 if defaults else None),
+            positive_integer("shadow_map_resolution", 2048 if defaults else None),
+        )
 
     def _install_gui_lighting_controls(self) -> None:
         """Create the optional built-in-panel sliders once per PyBullet world."""
         if self._lighting_control_ids is not None:
             return
         config = self._params.lighting_config
-        position = config.get("light_position", [4.0, -4.0, 8.0])
-        world_size = int(config.get("shadow_map_world_size", 12))
-        resolution = int(config.get("shadow_map_resolution", 2048))
+        position, world_size, resolution = self._validated_gui_lighting_values(config, defaults=True)
+        assert position is not None and world_size is not None and resolution is not None
         self._lighting_control_ids = {
             "x": p.addUserDebugParameter("Light X", -30.0, 30.0, float(position[0]), physicsClientId=self._client),
             "y": p.addUserDebugParameter("Light Y", -30.0, 30.0, float(position[1]), physicsClientId=self._client),

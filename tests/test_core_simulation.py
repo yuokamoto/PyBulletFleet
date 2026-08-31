@@ -564,6 +564,15 @@ class TestSimulationParams:
             physicsClientId=sim_core.client,
         )
 
+    def test_gui_lighting_controls_validate_position_before_creating_sliders(self, sim_core):
+        sim_core._params.lighting_config = {
+            "light_position": [8, -8],
+            "enable_controls": True,
+        }
+
+        with pytest.raises(ValueError, match="light_position must be a three-element list"):
+            sim_core._install_gui_lighting_controls()
+
     def test_from_yaml(self, tmp_path):
         import yaml
 
