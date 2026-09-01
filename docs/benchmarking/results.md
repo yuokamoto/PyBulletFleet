@@ -23,19 +23,19 @@ see [Benchmark Suite](benchmark-suite) and [Profiling Guide](profiling-guide).
 **Base config:** `benchmark/configs/general.yaml` — headless `simple_cube`
 robots, `collision_check_frequency=null` (every step), `batch_omni` fleet
 controller, and the fleet command interface
-**Last measured:** 2026-08-02
+**Last measured:** 2026-09-01
 
 | Agents | Step Time (ms) | RTF   | Spawn Time | Memory Delta |
 |--------|----------------|-------|------------|--------------|
-| 100    | 0.71 ± 0.02    | 140.4× | 61 ms     | +2.6 MB      |
-| 250    | 1.78 ± 0.09    | 56.2×  | 158 ms    | +6.2 MB      |
-| 500    | 4.20 ± 0.35    | 23.8×  | 332 ms    | +12.5 MB     |
-| 1000   | 10.48 ± 0.32   | 9.5×   | 676 ms    | +25.0 MB     |
-| 2000   | 24.54 ± 0.68   | 4.1×   | 1454 ms   | +48.0 MB     |
+| 100    | 0.74 ± 0.02    | 135.4× | 62 ms     | +2.6 MB      |
+| 250    | 1.82 ± 0.03    | 54.8×  | 160 ms    | +6.2 MB      |
+| 500    | 4.26 ± 0.16    | 23.5×  | 346 ms    | +12.4 MB     |
+| 1000   | 9.73 ± 0.03    | 10.3×  | 644 ms    | +24.9 MB     |
+| 2000   | 24.70 ± 1.30   | 4.0×   | 1468 ms   | +47.9 MB     |
 
 **Source:** `benchmark/results/benchmark_sweep_10.0s.json`
 
-The 2026-08-02 sweep was collected on a WSL2 host using the lightweight
+The 2026-09-01 sweep was collected on a WSL2 host using the lightweight
 `simple_cube` model as the large-scale baseline. The worker currently gives
 goals to half of the spawned agents; this workload is defined in
 `mobile_benchmark.py`. Although `general.yaml` contains
@@ -58,15 +58,17 @@ must not be read as the elapsed time of a complete benchmark worker.
 ## ROS 2 Bridge Scale Check
 
 Measured 2026-08-02 with Docker, headless `simple_cube` robots, physics off,
-`timestep=0.1`, `publish_rate=5 Hz`, and `target_rtf=0`. These are diagnostic
-single-run values and are not comparable to the core simulation table above.
+`timestep=0.1`, `publish_rate=5 Hz`, and `target_rtf=0`; the `fleet` 1000-row
+was refreshed on 2026-09-01. These are diagnostic single-run values and are
+not comparable to the core simulation table above.
 
 | Mode | Robots | Command result | Max RTF |
 |------|--------|----------------|---------|
-| `fleet` | 1000 | ack 0.529 s; all moved in 0.100 s | 8.46× |
+| `fleet` | 1000 | ack 0.550 s; all moved in 0.083 s | 10.98× |
 | `per_robot` | 1000 | publish 0.217 s; 0/1000 moved in 60 s | 0.64× |
 | `per_robot` | 100 | publish 0.056 s; all moved in 15.033 s | not measured |
 | `hybrid` | 1000 | fleet ack 7.998 s; per-robot publish 0.220 s | 0.30× |
+| `hybrid` | 1000 | fleet ack 1.862 s; all moved in 0.412 s (1 Hz, target RTF 1.0) | target-rate check |
 
 The 1000-robot per-robot result shows why topic publication latency must not be
 treated as end-to-end command latency. See `ros2_bridge/PERFORMANCE.md` for
@@ -126,12 +128,12 @@ useful when isolating one axis at a time.
 
 | Agents | Controller | Command Interface | Setup Time | Step Time | P95 Step |
 |--------|------------|-------------------|------------|-----------|----------|
-| 100    | per-agent  | per-agent         | 0.0021 s   | 0.124 ms  | 0.132 ms |
-| 100    | batch      | fleet             | 0.0017 s   | 0.114 ms  | 0.105 ms |
-| 500    | per-agent  | per-agent         | 0.0298 s   | 0.688 ms  | 0.717 ms |
-| 500    | batch      | fleet             | 0.0091 s   | 0.567 ms  | 0.432 ms |
-| 1000   | per-agent  | per-agent         | 0.0206 s   | 1.430 ms  | 1.470 ms |
-| 1000   | batch      | fleet             | 0.0173 s   | 1.315 ms  | 1.430 ms |
+| 100    | per-agent  | per-agent         | 0.0022 s   | 0.114 ms  | 0.122 ms |
+| 100    | batch      | fleet             | 0.0017 s   | 0.109 ms  | 0.118 ms |
+| 500    | per-agent  | per-agent         | 0.0100 s   | 0.680 ms  | 0.397 ms |
+| 500    | batch      | fleet             | 0.0085 s   | 0.519 ms  | 0.288 ms |
+| 1000   | per-agent  | per-agent         | 0.0224 s   | 1.355 ms  | 1.084 ms |
+| 1000   | batch      | fleet             | 0.0162 s   | 1.156 ms  | 0.723 ms |
 
 **Memory note:** Memory delta is process RSS and should be treated as
 environment-dependent, especially on WSL2.

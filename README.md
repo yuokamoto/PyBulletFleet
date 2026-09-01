@@ -134,12 +134,12 @@ See [Tutorial 6 — Robot Models](https://pybulletfleet.readthedocs.io/en/latest
 
 | Agents | Real-Time Factor | Step Time |
 |--------|-----------------|-----------|
-| 100    | 140.4× | 0.7 ms  |
-| 500    | 23.8× | 4.2 ms |
-| 1000   | 9.5× | 10.5 ms |
-| 2000   | 4.1× | 24.5 ms |
+| 100    | 135.4× | 0.7 ms  |
+| 500    | 23.5× | 4.3 ms |
+| 1000   | 10.3× | 9.7 ms |
+| 2000   | 4.0× | 24.7 ms |
 
-Kinematics mode (physics OFF), headless, `simple_cube` robots, batch controller + fleet command interface. Measured on 2026-08-02. See [Benchmark Results](benchmark/README.md#benchmark-results) for full data, component breakdown, and methodology.
+Kinematics mode (physics OFF), headless, `simple_cube` robots, batch controller + fleet command interface. Measured on 2026-09-01. See [Benchmark Results](benchmark/README.md#benchmark-results) for full data, component breakdown, and methodology.
 
 For ROS 2, use the fleet-level interface as the scalable default. Manager-scoped
 endpoints support operational ownership and selective state subscriptions; they
