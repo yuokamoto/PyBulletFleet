@@ -7,12 +7,28 @@ Runnable demos for PyBulletFleet, grouped by area:
 | `basics/` | Spawning, the action system, the event bus |
 | `mobile/` | Path following and mobile-robot navigation |
 | `arm/` | Arm pick/drop, end-effector (IK) control, mobile manipulators |
-| `models/` | Bundled model names, `robot_descriptions`, SDF worlds |
+| `models/` | Bundled model names, `robot_descriptions`, SDF and OpenUSD worlds |
 | `scale/` | 100–1000 robot fleets |
 
 Most demos open a PyBullet GUI window and run until you close it — they are meant
 to be watched, not run in CI. Some `models/` demos need extras:
-`pip install 'pybullet-fleet[sdf,models]'`.
+`pip install 'pybullet-fleet[sdf,models,usd]'`.
+
+The OpenUSD warehouse demo uses a bundled self-contained `.usda` scene:
+
+```bash
+python pybullet_fleet/examples/models/usd_warehouse_demo.py
+python pybullet_fleet/examples/models/usd_warehouse_demo.py --headless
+python pybullet_fleet/examples/models/usd_warehouse_demo.py --usd /path/to/local_warehouse.usdz
+python pybullet_fleet/examples/models/usd_warehouse_demo.py --lighting-controls
+```
+
+The generic worker behavior-tree demo does not require OpenUSD:
+
+```bash
+python pybullet_fleet/examples/basics/behavior_tree_demo.py
+python pybullet_fleet/examples/basics/behavior_tree_demo.py --headless --duration 5
+```
 
 ## Scale Demo Roles
 

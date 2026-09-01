@@ -7,6 +7,7 @@ using a real PyBullet environment (DIRECT mode).
 
 import math
 import time
+from unittest.mock import Mock
 
 import pytest
 import pybullet as p
@@ -533,6 +534,44 @@ class TestSimulationParams:
         assert params.physics is True
         assert params.timestep == 0.01
         assert params.collision_margin == 0.05
+
+    def test_lighting_config_alias_from_dict(self):
+        params = SimulationParams.from_dict(
+            {
+                "gui": False,
+                "monitor": False,
+                "lighting": {"light_position": [8, -8, 15], "enable_controls": True},
+            }
+        )
+        assert params.lighting_config == {"light_position": [8, -8, 15], "enable_controls": True}
+
+    def test_configure_gui_lighting_applies_initial_values(self, sim_core, monkeypatch):
+        sim_core._params.gui = True
+        sim_core._params.lighting_config = {
+            "light_position": [8, -8, 15],
+            "shadow_map_world_size": 20,
+            "shadow_map_resolution": 2048,
+        }
+        configure = Mock()
+        monkeypatch.setattr("pybullet_fleet.core_simulation.p.configureDebugVisualizer", configure)
+
+        sim_core.configure_gui_lighting()
+
+        configure.assert_called_once_with(
+            lightPosition=[8.0, -8.0, 15.0],
+            shadowMapWorldSize=20,
+            shadowMapResolution=2048,
+            physicsClientId=sim_core.client,
+        )
+
+    def test_gui_lighting_controls_validate_position_before_creating_sliders(self, sim_core):
+        sim_core._params.lighting_config = {
+            "light_position": [8, -8],
+            "enable_controls": True,
+        }
+
+        with pytest.raises(ValueError, match="light_position must be a three-element list"):
+            sim_core._install_gui_lighting_controls()
 
     def test_from_yaml(self, tmp_path):
         import yaml

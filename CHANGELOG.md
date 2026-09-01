@@ -20,6 +20,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Add an optional OpenUSD static-world importer for local `.usd`, `.usda`,
+  `.usdc`, and `.usdz` stages, including PointInstancer expansion and a
+  runnable warehouse GUI example.
+  Support `UsdPreviewSurface` diffuse color, common Isaac MDL albedo
+  color/texture aliases, vertex and indexed face-varying `st`/`st_0` UV
+  primvars, USD vertex normals, and default/render-purpose geometry filtering,
+  a configurable texture-brightness adjustment, normalized per-prim poses for
+  rigid/uniform transforms, and document a measured light-to-heavy Isaac
+  Assets Pack trial order.
+- Add a portable BehaviorTree.CPP XML runner hierarchy (`BehaviorTree`,
+  `AgentBehaviorTree`, and worker-specific trees) and worker demo. Split its
+  backend-neutral XML runner from PyBulletFleet Agent and worker actions, and
+  type the simulation registration API with the common `BehaviorTree` base.
+  The base no longer requires an Agent execution target, and the supported XML
+  node vocabulary and tick outcomes are exposed as `BehaviorTreeNodeType` and
+  `TickResult` enums. Add the portable `NavigationAdapter` contract and
+  `NavigationStatus` enum for Agent behavior trees, plus typed Agent and
+  worker Action IDs. Rename the worker's candidate-list Action and settings to
+  `SelectGoalFromWaypointSet` / `waypoint_sets` so they do not imply geometric
+  zone sampling.
+- Add a backend-neutral elevator state-machine and motion-adapter contract,
+  while retaining the existing PyBullet elevator API and passenger behavior.
+- Add configurable elevator moving-request policies (`REJECT`, FIFO `QUEUE`,
+  and `REPLACE_NEXT`) and typed request outcomes for device clients.
+- Add reusable SimulationCore GUI-lighting configuration and optional native
+  runtime controls, including YAML initial light and shadow-map settings; use
+  them from the OpenUSD warehouse demo.
 - Add tkinter DataMonitor pause, resume, single-step, entity selection, and
   camera-follow controls that submit requests safely to the simulation-step
   thread, with a vertically expandable side-by-side entity inspector, viewport
@@ -44,6 +71,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Documentation
 
+- Document the post-MVP USD entity-override and Agent-promotion plan, including
+  candidate discovery, versioned PyBulletFleet sidecars, collision proxies, and
+  the USO portability boundary.
+- Clarify the implemented Behavior Tree XML profile and document the remaining
+  portable `Condition`, `SubTree`, control-node, lifecycle, and adapter work.
+- Document the USO direction for portable composite Pick, Drop, and Charge
+  action trees with simulator-specific physical leaf adapters.
+- Add the RMF-compatible elevator cabin/shaft-door coordination plan to the
+  device roadmap.
+- Connect planned conveyor/mobile-rack devices with portable behavior-tree
+  leaf Actions and coordinated device state-machine flows.
 - Document the shared lazy state-capture direction for snapshot/replay,
   co-simulation, and ROS FleetState publication, including the final ROS
   bridge publication profile.

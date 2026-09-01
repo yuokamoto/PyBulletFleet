@@ -12,9 +12,51 @@ New robot and infrastructure models:
 
 - **Physics Mobile Robot** — Wheeled robot driven by PyBullet physics (motor torques, friction, contact forces)
 - **Physics Mobile Manipulator** — Physics-mode mobile manipulator with motor-driven base and arm
-- **Conveyor / Mobile Rack** — Warehouse infrastructure entities for material
-  handling scenarios.  Door and Elevator devices, and the WorkcellPlugin used
-  for RMF dispenser/ingestor flows, are available today.
+- **Conveyor / Mobile Rack** — Add warehouse infrastructure entities for
+  material-handling scenarios. Define a portable conveyor state machine and
+  backend motion/sensor adapter, including start/stop, jam, item-arrival, and
+  recovery states. Develop its device-request BT leaves (`StartConveyor`,
+  `StopConveyor`, and `WaitForItemAtSensor`) with the same portable action
+  registry as Pick/Drop and lift requests; retain backend physics and sensor
+  mechanics in adapters. Door and Elevator devices, and the WorkcellPlugin
+  used for RMF dispenser/ingestor flows, are available today.
+- **Portable device execution contracts** — Keep infrastructure state machines
+  and request/event schemas independent of the physics backend; add adapter
+  conformance tests and backend implementations for doors, conveyors, and
+  elevators as additional simulators are supported.  The current PyBullet
+  elevator is the first extraction; shared packaging and USO node ownership
+  remain future work. Validate the portable elevator request contract and its
+  policy/configuration conformance across backends, including `REJECT`, FIFO
+  `QUEUE`, and `REPLACE_NEXT`; treat an in-motion physical redirect as a
+  separate, safety-reviewed capability.
+- **RMF-compatible elevator doors** — Extend the simplified cabin-motion
+  elevator into a coordinated lift state machine with cabin-door and
+  destination-floor shaft-door pairs. Model closed/opening/open/closing and
+  cabin motion separately; close and verify the relevant doors before moving,
+  then open the paired doors on arrival. Add backend door adapters, URDF/SDF
+  door-pair configuration, passenger safety/occupancy checks, and RMF
+  `LiftState` / `LiftRequest` door-state, mode, and session semantics. Keep
+  standalone building `Door` devices separate from lift-owned doors.
+- **Portable mobile-manipulation actions** — Define backend-neutral `Pick` and
+  `Drop` Agent contracts, XML ports, capability reporting, and conformance
+  tests before adding them to `AgentBehaviorTree`. Forklift and picker trees
+  will extend that shared profile with their equipment-specific actions.
+- **Portable behavior-tree core** — Move the dependency-free XML runner,
+  control-node semantics, blackboard, and documented portable leaf contracts
+  into a shared library after a second simulator validates the adapter
+  boundary. Keep PyBulletFleet's Agent/worker action adapters in this package;
+  preserve `pybullet_fleet.behavior_tree` as a compatibility import path.
+- **Portable composite action trees (USO)** — Express reusable warehouse-task
+  choreography as portable trees: for example `Pick` as navigate-to-pregrasp,
+  reach, grasp, and verify-holding; `Drop` as navigate, release, and verify;
+  and `Charge` as find, dock, start, and wait. Define backend-neutral leaf
+  Action contracts and lifecycle results; PyBullet, MuJoCo, and other
+  simulators then implement only physical leaf adapters such as navigation,
+  IK, grasp/release, contact verification, and charging observation. Retain
+  existing PyBulletFleet `PickAction`/`DropAction` and related public APIs as
+  compatibility facades while progressively implementing their orchestration
+  through the portable trees. Keep simple physical movement as a leaf Action;
+  represent recovery, replanning, congestion, and device use as tree policy.
 
 ## Simulation Capabilities
 
@@ -76,7 +118,30 @@ New robot and infrastructure models:
   4. Add an OTel exporter subscriber (independent of replay; see
      [Observability](#observability)).
 
-- **Behavior tree integration** — Create agent behavior from behavior trees
+- **Behavior tree integration** — The current portable profile supports
+  `Sequence`, `Fallback`, `Repeat`, and registered `Action` nodes. It is not a
+  full BehaviorTree.CPP runtime. Remaining work, in dependency order:
+
+  1. Define portable `Condition` handler contracts and capability/query
+     adapters, with deterministic tests.
+  2. Add `SubTree` resolution, explicit input/output port remapping, scoped
+     blackboards, recursion/cycle validation, and XML source locations in
+     diagnostics.
+  3. Add only the control/decorator nodes justified by scenarios (for example
+     `Parallel`, reactive control nodes, cancellation/halting, timeout, and
+     retry); document unsupported nodes rather than implying full compatibility.
+  4. Specify typed port conversion and validation, tree/node lifecycle events,
+     and snapshot-safe execution-state serialization.
+  5. Define portable Agent `Pick`/`Drop` and device-request leaf contracts,
+     including lift calls/status, door requests/status, and conveyor
+     start/stop/sensor operations. Implement forklift, picker, conveyor, and
+     device-tree profiles through adapters and verify their coordinated
+     state-machine/BT flows.
+  6. Move the validated XML core and portable contracts to the shared library
+     only after a second simulator exercises the same profile.
+  7. Define portable geometric navigation-zone schemas and sampling rules;
+     retain explicitly named waypoint sets for deterministic MVP wandering.
+
 ### Crowd Simulation (lightweight)
 
 Lightweight crowd simulation for NPC pedestrians in RMF demo environments. Provides more realistic pedestrian behavior than the current `RandomWalkController` (random point within radius) while staying far simpler than Gazebo's full Menge/ORCA `crowd_simulator` plugin.
@@ -360,6 +425,11 @@ Simulation environment assets (warehouse floors, factory layouts, etc.):
   - pybullet_data bundled environments (kiva_shelf, samurai, stadium) wrappers
   - Original license clearly noted per environment
 - **`resolve_environment()` API** — Name resolution similar to `resolve_model()` for loading environments. Shows install hints when not installed.
+- **USD entity overrides and Agent promotion** — Keep imported USD geometry
+  static by default; use a versioned PyBulletFleet sidecar to promote explicit
+  semantic candidates (for example an Isaac forklift root) into movable
+  entities with controller and collision-proxy settings. See
+  `docs/design/usd-behavior-tree/spec.md`.
 
 ## CI / DevOps
 

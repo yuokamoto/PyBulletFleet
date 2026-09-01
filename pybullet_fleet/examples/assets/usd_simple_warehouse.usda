@@ -1,0 +1,40 @@
+#usda 1.0
+(
+    defaultPrim = "Warehouse"
+    metersPerUnit = 0.01
+    upAxis = "Y"
+)
+
+def Xform "Warehouse"
+{
+    def Mesh "Floor"
+    {
+        point3f[] points = [(-700, 0, -500), (700, 0, -500), (700, 0, 500), (-700, 0, 500)]
+        int[] faceVertexCounts = [4]
+        int[] faceVertexIndices = [0, 1, 2, 3]
+        color3f[] primvars:displayColor = [(0.18, 0.21, 0.26)]
+    }
+
+    def Mesh "BackWall"
+    {
+        point3f[] points = [(-700, 0, 500), (700, 0, 500), (700, 300, 500), (-700, 300, 500)]
+        int[] faceVertexCounts = [4]
+        int[] faceVertexIndices = [0, 1, 2, 3]
+        color3f[] primvars:displayColor = [(0.35, 0.40, 0.48)]
+    }
+
+    def Mesh "ShelfPrototype"
+    {
+        point3f[] points = [(-125, 0, -200), (125, 0, -200), (125, 0, 200), (-125, 0, 200), (-125, 220, -200), (125, 220, -200), (125, 220, 200), (-125, 220, 200)]
+        int[] faceVertexCounts = [4, 4, 4, 4, 4, 4]
+        int[] faceVertexIndices = [0, 1, 2, 3, 4, 7, 6, 5, 0, 4, 5, 1, 1, 5, 6, 2, 2, 6, 7, 3, 4, 0, 3, 7]
+        color3f[] primvars:displayColor = [(0.92, 0.58, 0.16)]
+    }
+
+    def PointInstancer "Shelves"
+    {
+        int[] protoIndices = [0, 0]
+        point3f[] positions = [(-375, 0, -100), (375, 0, 100)]
+        rel prototypes = </Warehouse/ShelfPrototype>
+    }
+}

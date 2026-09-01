@@ -183,6 +183,14 @@ simulation:
   enable_shadows: false                # Enable shadows
   enable_gui_panel: false              # Show GUI control panel
 
+  # Optional PyBullet GUI main-light and shadow-map settings. These do not
+  # reproduce USD light prims. Set enable_controls to show native sliders.
+  lighting:
+    light_position: [8, -8, 15]
+    shadow_map_world_size: 20
+    shadow_map_resolution: 2048
+    enable_controls: false
+
   # --- Feature Option ---
   # If true, robot color will change on collision (default: false)
   enable_collision_color_change: false

@@ -58,6 +58,7 @@ from pybullet_fleet.logging_utils import get_lazy_logger
 from pybullet_fleet.sim_object import SimObject
 from pybullet_fleet.agent import Agent
 from pybullet_fleet.agent_manager import SimObjectManager
+from pybullet_fleet.behavior_tree_core import BehaviorTree
 from pybullet_fleet.types import SpatialHashCellSizeMode, CollisionDetectionMethod, CollisionMode
 from pybullet_fleet._defaults import SIMULATION as _SIM_D
 
@@ -133,6 +134,7 @@ class SimulationParams:
     multi_cell_threshold: float = _SIM_D["multi_cell_threshold"]
     enable_floor: bool = _SIM_D["enable_floor"]
     camera_config: Optional[Dict[str, Any]] = None  # Camera configuration from config file
+    lighting_config: Optional[Dict[str, Any]] = None  # PyBullet GUI main-light configuration from config file
     model_paths: Optional[List[str]] = None  # Additional directories to scan for URDF/mesh models
     # Window size parameters
     window_width: int = _SIM_D["window_width"]
@@ -168,6 +170,9 @@ class SimulationParams:
         # Ensure camera_config is always a dict (avoid mutable default)
         if self.camera_config is None:
             self.camera_config = {}
+        # Ensure lighting_config is always a dict (avoid mutable default)
+        if self.lighting_config is None:
+            self.lighting_config = {}
         # Ensure model_paths is always a list (avoid mutable default)
         if self.model_paths is None:
             self.model_paths = []
@@ -196,7 +201,7 @@ class SimulationParams:
         return dataclass_from_dict(
             cls,
             config,
-            aliases={"camera_config": "camera"},
+            aliases={"camera_config": "camera", "lighting_config": "lighting"},
         )
 
 
@@ -357,6 +362,7 @@ class MultiRobotSimulationCore:
         self._monitor_enabled: bool = params.monitor
         self._last_monitor_update: float = 0
         self._callbacks: List[Dict[str, Any]] = []  # List of callback functions
+        self._behavior_tree_callbacks: List[Tuple[BehaviorTree, Callable]] = []
         self._data_monitor: Optional[DataMonitor] = None
         self._gui_commands: Queue[GuiCommand] = Queue(maxsize=32)
         self._single_step_requested: bool = False
@@ -380,6 +386,8 @@ class MultiRobotSimulationCore:
         self._keyboard_events_registered: bool = False  # Track if keyboard events are registered
         self._camera_controller: Optional[CameraController] = None  # Interactive camera control
         self._camera_configured: bool = False  # True after explicit setup_camera() — prevents configure_visualizer overwrite
+        self._lighting_control_ids: Optional[Dict[str, int]] = None
+        self._lighting_control_values: Optional[Tuple[float, ...]] = None
         self._original_visual_colors: Dict[Tuple[int, int], List[float]] = (
             {}
         )  # Store original colors: (body_id, link_index) -> rgba
@@ -971,6 +979,37 @@ class MultiRobotSimulationCore:
         """
         self._callbacks.append({"func": callback, "frequency": frequency, "last_exec": 0.0})
 
+    def register_behavior_tree(self, tree: BehaviorTree) -> BehaviorTree:
+        """Register a behavior tree to tick once per simulation step.
+
+        ``tree`` must provide ``tick(sim_core, dt)``. Registration is
+        idempotent by object identity, and the returned tree makes inline use
+        convenient. The tree's ``tick`` method remains public for deterministic
+        unit tests and custom stepping loops.
+        """
+        callback = getattr(tree, "tick", None)
+        if not callable(callback):
+            raise TypeError("Behavior tree must provide a callable tick(sim_core, dt) method")
+        if any(registered_tree is tree for registered_tree, _ in self._behavior_tree_callbacks):
+            return tree
+        self.register_callback(callback)
+        self._behavior_tree_callbacks.append((tree, callback))
+        return tree
+
+    def unregister_behavior_tree(self, tree: BehaviorTree) -> bool:
+        """Stop automatically ticking a tree previously registered with this simulation."""
+        for index, (registered_tree, callback) in enumerate(self._behavior_tree_callbacks):
+            if registered_tree is tree:
+                self._behavior_tree_callbacks.pop(index)
+                self.unregister_callback(callback)
+                return True
+        return False
+
+    @property
+    def behavior_trees(self) -> Tuple[BehaviorTree, ...]:
+        """Behavior trees automatically ticked by this simulation."""
+        return tuple(tree for tree, _ in self._behavior_tree_callbacks)
+
     def register_manager(self, manager: "SimObjectManager") -> None:
         """Register a :class:`SimObjectManager` (or subclass) with this simulation.
 
@@ -1285,9 +1324,10 @@ class MultiRobotSimulationCore:
         """Enable rendering before starting simulation."""
         if self._params.gui and not self._rendering_enabled:
             p.configureDebugVisualizer(p.COV_ENABLE_RENDERING, 1, physicsClientId=self._client)
-            # Re-assert GUI panel hidden — toggling COV_ENABLE_RENDERING
-            # can reset the panel state on some PyBullet builds.
-            p.configureDebugVisualizer(p.COV_ENABLE_GUI, 0, physicsClientId=self._client)
+            # Toggling rendering can reset this panel on some PyBullet builds.
+            # Lighting controls intentionally use the native Parameters panel.
+            show_panel = self._params.enable_gui_panel or self._lighting_controls_enabled
+            p.configureDebugVisualizer(p.COV_ENABLE_GUI, 1 if show_panel else 0, physicsClientId=self._client)
             self._rendering_enabled = True
             logger.info("Rendering enabled for simulation")
 
@@ -2193,6 +2233,9 @@ class MultiRobotSimulationCore:
                 self._agents.remove(obj)
             except ValueError:
                 pass  # Already removed or not in list
+            for tree, _ in list(self._behavior_tree_callbacks):
+                if getattr(tree, "agent", None) is obj:
+                    self.unregister_behavior_tree(tree)
 
         # Remove from movement tracking sets
         self._moved_this_step.discard(obj_id)
@@ -2280,6 +2323,9 @@ class MultiRobotSimulationCore:
 
         # Configure shadows
         p.configureDebugVisualizer(p.COV_ENABLE_SHADOWS, 1 if enable_shadows else 0, physicsClientId=self._client)
+        self.configure_gui_lighting()
+        if self._lighting_controls_enabled:
+            self._install_gui_lighting_controls()
 
         # Apply initial collision shape visibility from config
         if self._params.enable_collision_shapes:
@@ -2323,6 +2369,104 @@ class MultiRobotSimulationCore:
         print("    w           toggle wireframe / collision shapes")
         print("    g           toggle grid")
         print("    j           toggle joint axes")
+
+    @property
+    def _lighting_controls_enabled(self) -> bool:
+        """Whether native PyBullet sliders are enabled for GUI lighting."""
+        return bool(self._params.lighting_config.get("enable_controls", False))
+
+    def configure_gui_lighting(self, lighting_config: Optional[Dict[str, Any]] = None) -> None:
+        """Apply optional PyBullet GUI main-light and shadow-map settings.
+
+        ``lighting_config`` accepts ``light_position`` (three coordinates),
+        ``shadow_map_world_size`` and ``shadow_map_resolution``. The normal
+        PyBullet GUI has one main light; this does not model USD light prims.
+        """
+        if not self._params.gui:
+            return
+        config = self._params.lighting_config if lighting_config is None else lighting_config
+        kwargs: Dict[str, Any] = {"physicsClientId": self._client}
+        position, world_size, resolution = self._validated_gui_lighting_values(config)
+        if position is not None:
+            kwargs["lightPosition"] = position
+        if world_size is not None:
+            kwargs["shadowMapWorldSize"] = world_size
+        if resolution is not None:
+            kwargs["shadowMapResolution"] = resolution
+        if len(kwargs) > 1:
+            p.configureDebugVisualizer(**kwargs)
+
+    @staticmethod
+    def _validated_gui_lighting_values(
+        config: Dict[str, Any], *, defaults: bool = False
+    ) -> tuple[list[float] | None, int | None, int | None]:
+        """Return validated GUI-lighting values shared by setup and sliders."""
+        position = config.get("light_position", [4.0, -4.0, 8.0] if defaults else None)
+        if position is None and defaults:
+            position = [4.0, -4.0, 8.0]
+        if position is not None:
+            if not isinstance(position, (list, tuple)) or len(position) != 3:
+                raise ValueError("lighting.light_position must be a three-element list")
+            position = [float(value) for value in position]
+
+        def positive_integer(key: str, default: int | None) -> int | None:
+            value = config.get(key, default)
+            if value is None:
+                return None
+            try:
+                value = int(value)
+            except (TypeError, ValueError) as error:
+                raise ValueError(f"lighting.{key} must be a positive integer") from error
+            if value <= 0:
+                raise ValueError(f"lighting.{key} must be positive")
+            return value
+
+        return (
+            position,
+            positive_integer("shadow_map_world_size", 12 if defaults else None),
+            positive_integer("shadow_map_resolution", 2048 if defaults else None),
+        )
+
+    def _install_gui_lighting_controls(self) -> None:
+        """Create the optional built-in-panel sliders once per PyBullet world."""
+        if self._lighting_control_ids is not None:
+            return
+        config = self._params.lighting_config
+        position, world_size, resolution = self._validated_gui_lighting_values(config, defaults=True)
+        assert position is not None and world_size is not None and resolution is not None
+        self._lighting_control_ids = {
+            "x": p.addUserDebugParameter("Light X", -30.0, 30.0, float(position[0]), physicsClientId=self._client),
+            "y": p.addUserDebugParameter("Light Y", -30.0, 30.0, float(position[1]), physicsClientId=self._client),
+            "z": p.addUserDebugParameter("Light Z", 0.5, 30.0, float(position[2]), physicsClientId=self._client),
+            "shadow_size": p.addUserDebugParameter(
+                "Shadow map world size", 2.0, 60.0, float(world_size), physicsClientId=self._client
+            ),
+            "shadow_resolution": p.addUserDebugParameter(
+                "Shadow map resolution", 256.0, 4096.0, float(resolution), physicsClientId=self._client
+            ),
+        }
+        self._lighting_control_values = None
+
+    def _update_gui_lighting_controls(self) -> None:
+        """Apply changed native lighting sliders on the simulation thread."""
+        if not self._params.gui or not self._lighting_controls_enabled:
+            return
+        self._install_gui_lighting_controls()
+        assert self._lighting_control_ids is not None
+        values = tuple(
+            p.readUserDebugParameter(control_id, physicsClientId=self._client)
+            for control_id in self._lighting_control_ids.values()
+        )
+        if values == self._lighting_control_values:
+            return
+        self._lighting_control_values = values
+        self.configure_gui_lighting(
+            {
+                "light_position": values[:3],
+                "shadow_map_world_size": int(values[3]),
+                "shadow_map_resolution": int(values[4]),
+            }
+        )
 
     def _save_original_visual_colors(self) -> None:
         """
@@ -3246,7 +3390,11 @@ class MultiRobotSimulationCore:
             agent = Agent.from_params(params, sim)
             sim.step_once()
         """
-        # 1. Clear all Python-side object tracking
+        # 1. Clear automatic behavior trees before their owning agents vanish.
+        for tree, _ in list(self._behavior_tree_callbacks):
+            self.unregister_behavior_tree(tree)
+
+        # 2. Clear all Python-side object tracking
         self._sim_objects.clear()
         self._sim_objects_dict.clear()
         self._agents.clear()
@@ -3288,6 +3436,8 @@ class MultiRobotSimulationCore:
 
         # 2. Reset PyBullet world (removes all bodies including ground plane)
         p.resetSimulation(physicsClientId=self._client)
+        self._lighting_control_ids = None
+        self._lighting_control_values = None
 
         # 3. Re-configure PyBullet (gravity, timestep, physics params, ground plane)
         p.setAdditionalSearchPath(pybullet_data.getDataPath())
@@ -3903,6 +4053,7 @@ class MultiRobotSimulationCore:
         # simulation thread.  Do this before GUI input so both sources share
         # the same step boundary.
         self._consume_gui_commands()
+        self._update_gui_lighting_controls()
 
         # Handle keyboard events for visual/collision shape toggling and pause
         if self._keyboard_events_registered:

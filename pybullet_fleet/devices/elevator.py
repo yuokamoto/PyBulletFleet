@@ -16,6 +16,12 @@ from pybullet_fleet.action import JointAction
 from pybullet_fleet.agent import Agent, AgentSpawnParams, IKParams  # noqa: F401 - resolves inherited API type hints
 from pybullet_fleet.controller import Controller  # noqa: F401 - resolves inherited API type hints
 from pybullet_fleet.controller_params import ControllerParams  # noqa: F401 - resolves inherited API type hints
+from pybullet_fleet.devices.elevator_state_machine import (
+    ElevatorRequestPolicy,
+    ElevatorRequestResult,
+    ElevatorState,
+    ElevatorStateMachine,
+)
 from pybullet_fleet.logging_utils import get_lazy_logger
 from pybullet_fleet.types import ActionStatus
 
@@ -37,12 +43,14 @@ class ElevatorParams(AgentSpawnParams):
         initial_floor: Name of the floor the elevator starts at.
         joint_name: Name of the prismatic joint that moves the platform.
         platform_link: Name of the link with the platform collision box.
+        request_policy: Handling for floor requests received while moving.
     """
 
     floors: Optional[Dict[str, float]] = None
     initial_floor: str = ""
     joint_name: str = "lift"
     platform_link: str = "platform"
+    request_policy: ElevatorRequestPolicy | str = ElevatorRequestPolicy.REJECT
 
     def __post_init__(self):
         super().__post_init__()
@@ -67,6 +75,7 @@ class ElevatorParams(AgentSpawnParams):
             initial_floor=config.get("initial_floor", ""),
             joint_name=config.get("joint_name", "lift"),
             platform_link=config.get("platform_link", "platform"),
+            request_policy=config.get("request_policy", ElevatorRequestPolicy.REJECT),
         )
 
 
@@ -86,6 +95,7 @@ class Elevator(Agent):
         initial_floor: L1
         joint_name: lift
         platform_link: platform
+        request_policy: queue  # reject (default), replace_next, or queue
     """
 
     _spawn_params_cls = ElevatorParams
@@ -95,10 +105,8 @@ class Elevator(Agent):
     _floors: Dict[str, float]
     _joint_name: str
     _platform_link: str
-    _current_floor_name: str
-    _target_floor_name: str
     _passengers: List["SimObject"]
-    _moving: bool
+    _state_machine: ElevatorStateMachine
 
     @classmethod
     def from_params(cls, spawn_params: "ElevatorParams", sim_core=None) -> "Elevator":
@@ -114,10 +122,13 @@ class Elevator(Agent):
         agent._floors = spawn_params.floors  # type: ignore[assignment]
         agent._joint_name = spawn_params.joint_name
         agent._platform_link = spawn_params.platform_link
-        agent._current_floor_name = spawn_params.initial_floor
-        agent._target_floor_name = spawn_params.initial_floor
         agent._passengers = []  # Currently attached passengers
-        agent._moving = False
+        agent._state_machine = ElevatorStateMachine(
+            agent._floors,
+            spawn_params.initial_floor,
+            agent,
+            request_policy=spawn_params.request_policy,
+        )
         return agent
 
     # ------------------------------------------------------------------
@@ -131,16 +142,12 @@ class Elevator(Agent):
         While the elevator is in transit this returns the **departure** floor,
         not the destination.  Use :attr:`target_floor` for the destination.
         """
-        for name, pos in self._floors.items():
-            if self.are_joints_at_targets({self._joint_name: pos}):
-                self._current_floor_name = name
-                return name
-        return self._current_floor_name
+        return self._state_machine.current_floor
 
     @property
     def target_floor(self) -> str:
         """Destination floor (equals :attr:`current_floor` when idle)."""
-        return self._target_floor_name
+        return self._state_machine.target_floor
 
     @property
     def available_floors(self) -> List[str]:
@@ -150,7 +157,22 @@ class Elevator(Agent):
     @property
     def is_moving(self) -> bool:
         """True while elevator is transitioning between floors."""
-        return self._moving
+        return self._state_machine.is_moving
+
+    @property
+    def state(self) -> ElevatorState:
+        """Current backend-neutral elevator lifecycle state."""
+        return self._state_machine.state
+
+    @property
+    def request_policy(self) -> ElevatorRequestPolicy:
+        """Policy applied to requests received while the cabin is moving."""
+        return self._state_machine.request_policy
+
+    @property
+    def pending_floors(self) -> tuple[str, ...]:
+        """Requested floors to visit after the current transition."""
+        return self._state_machine.pending_floors
 
     @property
     def passengers(self) -> List["SimObject"]:
@@ -161,31 +183,26 @@ class Elevator(Agent):
     # Floor request
     # ------------------------------------------------------------------
 
-    def request_floor(self, floor_name: str) -> None:
+    def request_floor(self, floor_name: str) -> ElevatorRequestResult:
         """Request the elevator to move to the given floor.
 
         Attaches all objects on the platform, then starts the joint action.
 
         Args:
             floor_name: Name of the target floor (must exist in ``floors``).
+
+        Returns:
+            Whether the request was accepted immediately, queued, replaced, or
+            rejected according to :attr:`request_policy`.
         """
-        if floor_name not in self._floors:
-            logger.warning("Unknown floor: %s (available: %s)", floor_name, list(self._floors.keys()))
-            return
-        if floor_name == self.current_floor:
-            return
-        if self._moving and floor_name == self._target_floor_name:
-            return
-
-        self._target_floor_name = floor_name
-        target_pos = self._floors[floor_name]
-
-        # Attach all objects currently on the platform
-        self._attach_platform_objects()
-
-        self._moving = True
-        self.clear_actions()
-        self.add_action(JointAction(target_joint_positions={self._joint_name: target_pos}))
+        result = self._state_machine.request_floor(floor_name)
+        if result is ElevatorRequestResult.REJECTED:
+            if floor_name not in self._floors:
+                logger.warning("Unknown floor: %s (available: %s)", floor_name, list(self._floors.keys()))
+            return result
+        if result is not ElevatorRequestResult.ACCEPTED:
+            logger.info("Elevator '%s': %s request for '%s'", self.name, result.value, floor_name)
+            return result
         logger.info(
             "Elevator '%s': moving '%s' -> '%s' (%d passengers)",
             self.name,
@@ -193,6 +210,7 @@ class Elevator(Agent):
             floor_name,
             len(self._passengers),
         )
+        return result
 
     # ------------------------------------------------------------------
     # Update — detach on arrival
@@ -202,19 +220,39 @@ class Elevator(Agent):
         """Per-step update.  Detaches passengers when movement completes."""
         super().update(dt)
 
-        if self._moving:
-            action = self.get_current_action()
-            still_moving = action is not None and isinstance(action, JointAction) and action.status == ActionStatus.IN_PROGRESS
-            if not still_moving:
-                self._moving = False
-                n = len(self._passengers)
-                self._detach_all_passengers()
-                logger.info(
-                    "Elevator '%s': arrived at '%s', %d passengers released",
-                    self.name,
-                    self.current_floor,
-                    n,
-                )
+        passenger_count = len(self._passengers)
+        if self._state_machine.update():
+            logger.info(
+                "Elevator '%s': arrived at '%s', %d passengers released",
+                self.name,
+                self.current_floor,
+                passenger_count,
+            )
+
+    # ------------------------------------------------------------------
+    # ElevatorMotionAdapter implementation (PyBullet-specific mechanics)
+    # ------------------------------------------------------------------
+
+    def begin_motion(self, target_height: float) -> None:
+        """Command the PyBullet lift joint to move to ``target_height``."""
+        self.clear_actions()
+        self.add_action(JointAction(target_joint_positions={self._joint_name: target_height}))
+
+    def motion_in_progress(self) -> bool:
+        """Observe whether the active PyBullet joint action is still running."""
+        action = self.get_current_action()
+        return action is not None and isinstance(action, JointAction) and action.status == ActionStatus.IN_PROGRESS
+
+    def attach_platform_passengers(self) -> int:
+        """Attach platform occupants using PyBullet constraints."""
+        self._attach_platform_objects()
+        return len(self._passengers)
+
+    def detach_passengers(self) -> int:
+        """Release constrained passengers after a completed lift motion."""
+        count = len(self._passengers)
+        self._detach_all_passengers()
+        return count
 
     # ------------------------------------------------------------------
     # Platform object detection & attach/detach
