@@ -5,6 +5,39 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+## v0.8.0 (2026-09-01)
+
+### Added
+
+- Add OpenUSD static-world import, including PointInstancer expansion,
+  PreviewSurface/Isaac material support, collision controls, and a warehouse
+  example.
+- Add portable BehaviorTree.CPP XML runners for generic, Agent, and Worker
+  trees, with typed action/navigation contracts and a worker demo.
+- Add backend-neutral elevator state-machine and motion-adapter contracts,
+  including reject, queue, and replace-next request policies.
+- Add configurable GUI lighting and native runtime lighting controls.
+- Add interactive DataMonitor controls for simulation execution, selection,
+  camera following, live timing, and paused pose editing.
+- Add manager-scoped Fleet ROS interfaces, transport probes, and scale checks.
+
+### Changed
+
+- Reduce FleetState conversion overhead by populating generated ROS messages
+  in place, and add profiler fields for collection, conversion, and publish.
+
+### Fixed
+
+- Serialize batch-controller path updates with simulation advancement to avoid
+  concurrent ROS command dispatch corrupting vectorized trajectory state.
+
+### Documentation
+
+- Document the USD/USO portability roadmap, supported behavior-tree profile,
+  planned device coordination, and refreshed core and ROS scale results.
+
 ## v0.7.4 (2026-08-03)
 
 ### Added
@@ -15,84 +48,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   and `--mobile-robot` / `--arm-robot` for the mixed fleet.
 - Add recorded fleet-interface and RMF office-demo videos to the ROS 2
   quickstarts.
-
-## [Unreleased]
-
-### Added
-
-- Add an optional OpenUSD static-world importer for local `.usd`, `.usda`,
-  `.usdc`, and `.usdz` stages, including PointInstancer expansion and a
-  runnable warehouse GUI example.
-  Support `UsdPreviewSurface` diffuse color, common Isaac MDL albedo
-  color/texture aliases, vertex and indexed face-varying `st`/`st_0` UV
-  primvars, USD vertex normals, and default/render-purpose geometry filtering,
-  a configurable texture-brightness adjustment, normalized per-prim poses for
-  rigid/uniform transforms, and document a measured light-to-heavy Isaac
-  Assets Pack trial order.
-- Add a portable BehaviorTree.CPP XML runner hierarchy (`BehaviorTree`,
-  `AgentBehaviorTree`, and worker-specific trees) and worker demo. Split its
-  backend-neutral XML runner from PyBulletFleet Agent and worker actions, and
-  type the simulation registration API with the common `BehaviorTree` base.
-  The base no longer requires an Agent execution target, and the supported XML
-  node vocabulary and tick outcomes are exposed as `BehaviorTreeNodeType` and
-  `TickResult` enums. Add the portable `NavigationAdapter` contract and
-  `NavigationStatus` enum for Agent behavior trees, plus typed Agent and
-  worker Action IDs. Rename the worker's candidate-list Action and settings to
-  `SelectGoalFromWaypointSet` / `waypoint_sets` so they do not imply geometric
-  zone sampling.
-- Add a backend-neutral elevator state-machine and motion-adapter contract,
-  while retaining the existing PyBullet elevator API and passenger behavior.
-- Add configurable elevator moving-request policies (`REJECT`, FIFO `QUEUE`,
-  and `REPLACE_NEXT`) and typed request outcomes for device clients.
-- Add reusable SimulationCore GUI-lighting configuration and optional native
-  runtime controls, including YAML initial light and shadow-map settings; use
-  them from the OpenUSD warehouse demo.
-- Add tkinter DataMonitor pause, resume, single-step, entity selection, and
-  camera-follow controls that submit requests safely to the simulation-step
-  thread, with a vertically expandable side-by-side entity inspector, viewport
-  click selection with empty-space or monitor-button deselection, and a
-  nameplate for the selected entity. Add safe live RTF and timestep controls,
-  plus paused-only numeric and viewport-drag pose editing.
-- Add manager-scoped Fleet ROS endpoint sets, selective global FleetState
-  inclusion, per-manager state rate/QoS, and manager-owned command validation.
-- Add an optional ROS 2 fleet scale-check transport probe for same-host
-  monotonic timing on `/fleet/states`, the `/fleet/navigate` service, and the
-  `/fleet/navigate` topic.
-- Add repeatable full-fleet navigation service timing samples to the ROS 2
-  scale checker.
-- Add manager-scoped state transport checks, including selective, complete, and
-  distributed subscriber modes, to the ROS 2 scale checker.
-- Add FleetState collection, ROS-message conversion, and local publish-call
-  timing fields to the standard per-step profiler for ROS 2 bridge diagnosis.
-- Add a core-only scale RTF runner and a checker option for measuring bridge
-  overhead when no FleetState subscriber is present.
-- Reduce ROS 2 FleetState conversion cost by populating generated nested
-  messages in place instead of allocating replacement message trees.
-
-### Documentation
-
-- Document the post-MVP USD entity-override and Agent-promotion plan, including
-  candidate discovery, versioned PyBulletFleet sidecars, collision proxies, and
-  the USO portability boundary.
-- Clarify the implemented Behavior Tree XML profile and document the remaining
-  portable `Condition`, `SubTree`, control-node, lifecycle, and adapter work.
-- Document the USO direction for portable composite Pick, Drop, and Charge
-  action trees with simulator-specific physical leaf adapters.
-- Add the RMF-compatible elevator cabin/shaft-door coordination plan to the
-  device roadmap.
-- Connect planned conveyor/mobile-rack devices with portable behavior-tree
-  leaf Actions and coordinated device state-machine flows.
-- Document the shared lazy state-capture direction for snapshot/replay,
-  co-simulation, and ROS FleetState publication, including the final ROS
-  bridge publication profile.
-- Refresh the ROS FleetState scale notes after the message-conversion
-  optimization, distinguishing affected fleet-state paths from unchanged
-  per-robot measurements.
-
-### Fixed
-
-- Serialize batch-controller path updates with simulation advancement to avoid
-  concurrent ROS command dispatch corrupting vectorized trajectory state.
 
 ## v0.7.3 (2026-08-02)
 
