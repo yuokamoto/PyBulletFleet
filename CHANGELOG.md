@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Isolate the macOS Tkinter monitor in its own process to avoid native GUI
+  conflicts with PyBullet, while preserving monitor controls while paused.
+  Keep the existing threaded startup and shutdown behavior on Windows and Linux.
+
 ## v0.8.0 (2026-09-01)
 
 ### Added
