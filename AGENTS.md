@@ -4,6 +4,9 @@ This repository is used by automated coding agents and human maintainers. Keep
 changes small, verify the same checks that CI will run, and do not push unless
 the user explicitly asks for it.
 
+For the development process and human decision points, see
+`docs/AI_DEVELOPMENT_WORKFLOW.md`.
+
 ## Repo-Local Skills
 
 Repo-local skills live under `.copilot/skills/`. Claude uses the same files via
