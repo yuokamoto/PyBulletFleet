@@ -1,5 +1,8 @@
 # PyBulletFleet — Copilot Instructions
 
+For the development process and human decision points, see
+`docs/AI_DEVELOPMENT_WORKFLOW.md`. This file covers project-specific code guidance.
+
 Kinematics-first PyBullet simulation framework for large-scale multi-robot fleets.
 Targets 100+ robots at real-time or faster. Python ≥ 3.10, PyBullet backend.
 

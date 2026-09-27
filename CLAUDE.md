@@ -1,7 +1,9 @@
 # PyBulletFleet
 
-Project, code, testing, and agent-workflow instructions are maintained in a
-single shared file so GitHub Copilot and Claude Code use the same source of
-truth. Copilot loads it automatically; Claude imports it here:
+Claude imports the shared project and code instructions below. Repository-wide
+agent instructions are in `AGENTS.md`; the development process and human
+decision points are in `docs/AI_DEVELOPMENT_WORKFLOW.md`.
+
+Copilot loads its instructions automatically; Claude imports them here:
 
 @.github/copilot-instructions.md
