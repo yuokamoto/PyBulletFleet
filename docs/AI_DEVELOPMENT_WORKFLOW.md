@@ -546,6 +546,8 @@ The rule "automate after repetition" requires a lightweight memory of previous d
 
 Maintain a lightweight `AI_WORKFLOW_LEARNINGS.md` (or equivalent) that records only reusable AI-development observations and promotion candidates.
 
+Create the record when the first reusable observation is identified. An empty file is not needed before then.
+
 This is not an activity log or a transcript of agent usage. Do not record every agent session, prompt, pull request, or retrospective.
 
 Record an observation when a retrospective identifies something likely to matter again, for example:
@@ -582,7 +584,7 @@ The exact format should remain lightweight.
 During a retrospective:
 
 1. Identify reusable observations from the completed task.
-2. Compare them with existing entries in `AI_WORKFLOW_LEARNINGS.md`.
+2. If a learning record exists, compare the observations with its existing entries.
 3. Add a new pattern only when the observation is plausibly reusable.
 4. Increment or update an existing pattern when it occurs again.
 5. When a pattern has repeated enough to justify standardization—typically two or three meaningful occurrences—ask whether it should be promoted.
@@ -683,7 +685,7 @@ Adopt this workflow incrementally.
 1. Use this document as the initial process definition.
 2. Have a local coding agent inspect the existing repository, including existing instructions, Skills, templates, CI, and documentation.
 3. Ask the agent to propose the minimum changes required to support this workflow before implementing them.
-4. Human-review that proposal for duplication and overengineering.
+4. Have a human review that proposal for duplication and overengineering.
 5. Implement only the approved minimum.
 6. Select one real PyBulletFleet feature and run the workflow end to end.
 7. Retrospect on both the feature and the workflow.
