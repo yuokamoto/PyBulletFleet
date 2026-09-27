@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- Add a macOS launcher for viewing Linux GUI examples in a browser via Colima
+  and noVNC.
+
 ### Fixed
 
 - Isolate the macOS Tkinter monitor in its own process to avoid native GUI
