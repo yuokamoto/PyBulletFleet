@@ -612,6 +612,9 @@ class Agent(SimObject):
         Raises:
             ValueError: If *plugin* is not bound to this agent.
         """
+        replay_session = getattr(self.sim_core, "_replay_session", None)
+        if replay_session is not None:
+            replay_session.check_mutation("plugin")
         if plugin.agent is not self:
             raise ValueError(f"Plugin {plugin!r} is bound to a different agent")
         self._plugins.append(plugin)
@@ -1019,6 +1022,9 @@ class Agent(SimObject):
             direction: Movement direction override, or ``None`` to use
                 the controller's ``default_direction``.
         """
+        replay_session = getattr(self.sim_core, "_replay_session", None)
+        if replay_session is not None:
+            replay_session.check_mutation("navigate")
         # Single goal is just a path with one waypoint
         self.set_path([goal], direction=direction)
 
@@ -1309,6 +1315,9 @@ class Agent(SimObject):
             agent.add_action(MoveAction(path=my_path))
             agent.add_action(WaitAction(duration=5.0))
         """
+        replay_session = getattr(self.sim_core, "_replay_session", None)
+        if replay_session is not None:
+            replay_session.check_mutation("action")
         self._action_queue.append(action)
         self._log.info(f"Added {action.__class__.__name__} to queue (queue size: {len(self._action_queue)})")
 
@@ -1657,6 +1666,9 @@ class Agent(SimObject):
 
     def stop(self):
         """Stop robot movement and clear goal and path."""
+        replay_session = getattr(self.sim_core, "_replay_session", None)
+        if replay_session is not None:
+            replay_session.check_mutation("stop")
         self._is_moving = False
         self._current_velocity[:] = 0.0
         self._current_angular_velocity = 0.0
@@ -1819,6 +1831,9 @@ class Agent(SimObject):
 
             robot.set_all_joints_targets([0.0, 1.57, -1.57, 0.0])
         """
+        replay_session = getattr(self.sim_core, "_replay_session", None)
+        if replay_session is not None:
+            replay_session.check_mutation("joints")
         if not self.is_urdf_robot():
             self._log.warning("set_all_joints_targets() only works for URDF robots")
             return
@@ -1834,6 +1849,9 @@ class Agent(SimObject):
         """
         Set multiple joint targets by dict {joint_name: target_position} (partial update allowed).
         """
+        replay_session = getattr(self.sim_core, "_replay_session", None)
+        if replay_session is not None:
+            replay_session.check_mutation("joints")
         for joint_name, target in joint_targets.items():
             joint_index = resolve_joint_index(self.body_id, joint_name)
             if joint_index == -1:
@@ -1857,6 +1875,9 @@ class Agent(SimObject):
             # Using dict
             robot.set_joints_targets({"joint1": 1.57, "joint2": -1.57})
         """
+        replay_session = getattr(self.sim_core, "_replay_session", None)
+        if replay_session is not None:
+            replay_session.check_mutation("joints")
         if isinstance(targets, dict):
             self.set_joints_targets_by_name(targets, max_force)
         else:

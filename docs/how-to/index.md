@@ -30,6 +30,7 @@ collision-config
 controller-config
 custom-profiling
 capturing-demos
+replay
 ```
 
 ```{toctree}

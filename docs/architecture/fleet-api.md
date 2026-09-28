@@ -60,3 +60,18 @@ but they are neither required by nor coupled to `FleetCommandDispatcher`.
 
 For endpoint names and user configuration, see [Bridge Interfaces](../ros2/overview).
 For the Python symbols, see the generated [API reference](../api/generated/pybullet_fleet).
+
+## Opt-in replay execution boundary
+
+The restricted navigation replay session owns a fresh core and applies ordered
+effective inputs before PRE_STEP. The ordinary dispatcher remains synchronous;
+`CommandAck` is still acceptance/application, not navigation completion.
+`retain_command_events=False` can disable the in-memory diagnostic history for
+a session whose durable journal already records commands; the default is unchanged.
+
+Replay inputs preserve payload, source, command ID, allowed target names, and
+(step, phase, order). Capture records the actual returned ack independently of
+the existing pre-mutation `CommandEvent`; that event alone lacks replay payload.
+Python, ROS, RMF and other producers can supply the same effective input after
+translation. Existing ROS endpoints are not automatically moved to this boundary.
+See [Navigation replay](../how-to/replay) for the supported profile and API.

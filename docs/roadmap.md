@@ -60,63 +60,32 @@ New robot and infrastructure models:
 
 ## Simulation Capabilities
 
-- **Snapshot, Event log & Replay** *(event emission complete; recording and
-  replay pending)* — Three-layer architecture sharing a single EventBus as a
-  source. Enables replay, external synchronization ([USO](https://github.com/yuokamoto/Unified-Simulation-Orchestrator)
-  integration), and downstream observability (see [Observability](#observability) below).
+- **Snapshot, Event log & Replay** — Restricted kinematic navigation
+  re-execution is implemented: a session-owned fresh instance, effective
+  Fleet API navigate/stop inputs at a defined step/order, full observations,
+  supported outcomes, and comparison. The versioned artifact is PBF-owned;
+  it is evidence for evolving USO concepts, not a canonical/USO-compatible
+  schema or a shared runtime dependency. See [Navigation replay](how-to/replay)
+  and the [design record](https://github.com/yuokamoto/PyBulletFleet/blob/main/docs/design/snapshot-replay/spec.md).
 
-  **Layer overview:**
+  The implemented artifact separates initial state, input journal, observations
+  and completeness/provenance. Full observations are complete only for the
+  declared observation profile; they are not execution checkpoints.
 
-  | Layer | Purpose | Granularity | Lossless? | Replayable? |
-  |---|---|---|---|---|
-  | **Snapshot** | State checkpoint for seek / restore | Low frequency (e.g. 1 Hz) | Yes | Yes (state restore) |
-  | **Event log** | Causal record of state transitions (input replay, audit) | Per state-change | Yes (must) | Yes (input replay) |
-  | **Trace** | Operational observability (Grafana/Tempo) | Action-level spans | Sampling allowed | No (view only) |
+  Remaining candidates, requiring concrete use cases and separate scope:
 
-  **Design principle: same source, separate sinks.** All three are derived from
-  the EventBus ([eventbus/spec.md](https://github.com/yuokamoto/PyBulletFleet/blob/main/docs/design/eventbus/spec.md))
-  — emit once, fan out to multiple subscribers. Snapshot ≠ Event (different
-  schemas, separate files), but share common header keys (`sim_time`, `step`,
-  `wall_time`, `run_id`) so they can be merged on the time axis.
-
-  **Shared live capture:** define a transport-neutral, step-versioned agent
-  state snapshot as the common capture layer for replay, co-simulation, and
-  fleet state publication. Build it lazily when the first sink needs the
-  current step and cache it only for that step, so a 5 Hz ROS state publisher
-  or 1 Hz replay logger does not force full per-agent snapshot construction on
-  every simulation step. Co-simulation may explicitly request an every-step
-  dense array snapshot. ROS message conversion/DDS publication, replay
-  full-or-delta serialization, and event logging remain separate sinks; the
-  shared layer only owns the consistent raw state capture and agent selection.
-
-  **Why trace alone cannot replay:** trace is sampled, coarse-grained (Action-level spans), drops non-deterministic inputs (RNG seed, callback returns), and has attribute-size limits unsuitable for `Path` waypoints / IK results. Replay needs Event log (input) + Snapshot (checkpoint).
-
-  **Output layout:**
-
-  ```
-  run_<timestamp>/
-    snapshots.jsonl   # low-frequency full+delta state
-    events.jsonl      # lossless state-change events
-    # OTel spans → Tempo (separate, optional, sampled)
-  ```
-
-  **Implementation order:**
-
-  **Current state:** the EventBus and lifecycle, action, collision, pause, and
-  per-agent update events are available.  Handlers receive the current
-  event-name/keyword-argument API; there is no persisted, structured
-  `SimEvent` record yet.
-
-  **Remaining order:**
-
-  1. Define a versioned event-record schema and JSONL writer subscriber
-     (lossless input log).
-  2. Add `SimulationSnapshot` plus
-     `MultiRobotSimulationCore.snapshot()` / `restore()` (see
-     [snapshot-replay/spec.md](https://github.com/yuokamoto/PyBulletFleet/blob/main/docs/design/snapshot-replay/spec.md)).
-  3. Add `replay.py` for snapshot + event-log re-execution.
-  4. Add an OTel exporter subscriber (independent of replay; see
-     [Observability](#observability)).
+  - Result playback/seek and delta encoding.
+  - Additional command/controller/device/BT profiles.
+  - ROS ingress adapters and rosbag correlation; DDS/executor replay is not
+    covered by core input re-execution.
+  - Checkpoint/restore with an explicitly sufficient execution-state contract.
+  - Shared lazy state capture for ROS/co-simulation/replay after validating
+    capture consistency and cost.
+  - USO mapping/conformance, then cross-backend validation before extracting
+    common libraries.
+  - Independent observability sinks. Sampled traces cannot replace a complete
+    input journal. The general EventBus remains an in-process name/kwargs API;
+    only supported replay records have a persisted schema today.
 
 - **Behavior tree integration** — The current portable profile supports
   `Sequence`, `Fallback`, `Repeat`, and registered `Action` nodes. It is not a
@@ -238,7 +207,7 @@ External communication layers:
   (see `ros2_bridge/README.md` and
   [ros2-bridge/spec.md](https://github.com/yuokamoto/PyBulletFleet/blob/main/docs/design/ros2-bridge/spec.md))
 - **gRPC** — Language-agnostic RPC interface for orchestrators, WMS, and fleet managers
-- **Distributed co-simulation (Robot Proxy layer)** — Per-robot proxy processes that translate between simulated robots and real Robot Apps (Nav2, task assigners, BTs). Enables running 100+ unmodified single-robot software stacks against a centralized batched simulator. Sim Central stays single-process and batched; only a thin fixed-schema boundary (`StateSnapshot` + `CommandBuffer` + Events) crosses the IPC. **Shares schema with Snapshot/Replay** — same `StateSnapshot` dataclass feeds live IPC, replay log, and observability sinks (define schema once, fan out to multiple consumers). See [co-simulation/spec.md](https://github.com/yuokamoto/PyBulletFleet/blob/main/docs/design/co-simulation/spec.md) for layer separation, transport options (shared memory / gRPC / DDS), lockstep vs async sync modes, and the implementation phases.
+- **Distributed co-simulation (Robot Proxy layer)** — Per-robot proxy processes that translate between simulated robots and real Robot Apps (Nav2, task assigners, BTs). Enables running 100+ unmodified single-robot software stacks against a centralized batched simulator. Sim Central stays single-process and batched; only a thin fixed-schema boundary (`StateSnapshot` + `CommandBuffer` + Events) crosses the IPC. Its earlier proposal to share one `StateSnapshot` dataclass with replay is a future design candidate, not a contract of the v1 navigation replay artifact. See [co-simulation/spec.md](https://github.com/yuokamoto/PyBulletFleet/blob/main/docs/design/co-simulation/spec.md) for layer separation, transport options (shared memory / gRPC / DDS), lockstep vs async sync modes, and the implementation phases.
 
 ## Refactoring
 

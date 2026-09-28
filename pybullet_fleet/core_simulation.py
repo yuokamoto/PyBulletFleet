@@ -351,6 +351,8 @@ class MultiRobotSimulationCore:
         self._robot_original_colors: Dict[int, List[float]] = {}  # body_id: rgbaColor
         self._collision_count: int = 0
         self._step_count: int = 0
+        # Optional owned replay execution; ordinary runs never construct snapshots.
+        self._replay_session: Any = None
         self.sim_time: float = 0.0  # Simulation time (kept public for hot-path access)
         self._elapsed_sim_time: float = 0.0  # Canonical accumulated simulation time
         self._enable_time_profiling: bool = params.enable_time_profiling
@@ -894,6 +896,9 @@ class MultiRobotSimulationCore:
         Raises:
             TypeError: If *plugin_or_cls* is not a SimPlugin.
         """
+        replay_session = self._replay_session
+        if replay_session is not None:
+            replay_session.check_mutation("plugin")
         from pybullet_fleet.sim_plugin import SimPlugin
 
         if isinstance(plugin_or_cls, SimPlugin):
@@ -977,6 +982,9 @@ class MultiRobotSimulationCore:
 
             sim_core.register_callback(my_callback, frequency=10.0)  # 10 Hz
         """
+        replay_session = self._replay_session
+        if replay_session is not None:
+            replay_session.check_mutation("callback")
         self._callbacks.append({"func": callback, "frequency": frequency, "last_exec": 0.0})
 
     def register_behavior_tree(self, tree: BehaviorTree) -> BehaviorTree:
@@ -987,6 +995,9 @@ class MultiRobotSimulationCore:
         convenient. The tree's ``tick`` method remains public for deterministic
         unit tests and custom stepping loops.
         """
+        replay_session = self._replay_session
+        if replay_session is not None:
+            replay_session.check_mutation("behavior_tree")
         callback = getattr(tree, "tick", None)
         if not callable(callback):
             raise TypeError("Behavior tree must provide a callable tick(sim_core, dt) method")
@@ -1464,6 +1475,9 @@ class MultiRobotSimulationCore:
                 ``N = len(object_ids)``.
             KeyError: if any ``object_id`` is not registered in this sim.
         """
+        replay_session = self._replay_session
+        if replay_session is not None:
+            replay_session.check_mutation("pose")
         n = len(object_ids)
         if n == 0:
             return
@@ -2149,6 +2163,9 @@ class MultiRobotSimulationCore:
             # Automatic addition (recommended)
             obj = SimObject(body_id=body_id, sim_core=sim_core)  # Calls add_object() internally
         """
+        replay_session = self._replay_session
+        if replay_session is not None:
+            replay_session.check_mutation("add_object")
         # Add to sim_objects list and dict
         if obj in self._sim_objects:
             logger.warning(f"Object {obj.object_id} already added to simulation")
@@ -2214,6 +2231,9 @@ class MultiRobotSimulationCore:
             # ... later ...
             sim_core.remove_object(obj)
         """
+        replay_session = self._replay_session
+        if replay_session is not None:
+            replay_session.check_mutation("remove_object")
         obj_id = obj.object_id
 
         # Remove from sim_objects list and dict
@@ -3303,6 +3323,9 @@ class MultiRobotSimulationCore:
             while custom_condition:
                 sim.step_once()
         """
+        replay_session = self._replay_session
+        if replay_session is not None:
+            replay_session.check_mutation("initialize")
         # Reset simulation state
         self._start_time = time.monotonic()  # monotonic: elapsed/RTF immune to wall-clock jumps
         self._step_count = 0
@@ -3390,6 +3413,9 @@ class MultiRobotSimulationCore:
             agent = Agent.from_params(params, sim)
             sim.step_once()
         """
+        replay_session = self._replay_session
+        if replay_session is not None:
+            replay_session.check_mutation("reset")
         # 1. Clear automatic behavior trees before their owning agents vanish.
         for tree, _ in list(self._behavior_tree_callbacks):
             self.unregister_behavior_tree(tree)
@@ -3980,11 +4006,17 @@ class MultiRobotSimulationCore:
 
     def pause(self) -> None:
         """Pause the simulation. step_once will be skipped while paused."""
+        replay_session = self._replay_session
+        if replay_session is not None:
+            replay_session.check_mutation("pause")
         self._simulation_paused = True
         self.events.emit(SimEvents.PAUSED)
 
     def resume(self) -> None:
         """Resume the simulation after a pause."""
+        replay_session = self._replay_session
+        if replay_session is not None:
+            replay_session.check_mutation("resume")
         self._simulation_paused = False
         self.events.emit(SimEvents.RESUMED)
 
@@ -4034,6 +4066,9 @@ class MultiRobotSimulationCore:
         Performance note: time.perf_counter() calls have negligible overhead (<0.1% for 10k objects).
         The profiling measurements themselves do not significantly impact simulation performance.
         """
+        if self._replay_session is not None:
+            self._replay_session._before_step()
+
         # Profiling: step start time (measure even if return_profiling=True)
         measure_timing = self._enable_time_profiling or return_profiling
         if not measure_timing:
@@ -4084,6 +4119,9 @@ class MultiRobotSimulationCore:
             self._moved_this_step.update(self._physics_objects)
 
             self.sim_time = self._elapsed_sim_time
+
+            if self._replay_session is not None:
+                self._replay_session._apply_inputs()
 
             # --- pre_step event ---
             if measure_timing:
@@ -4241,6 +4279,8 @@ class MultiRobotSimulationCore:
             self._update_selected_nameplate()
             self._elapsed_sim_time += self._params.timestep
             self._step_count += 1
+            if self._replay_session is not None:
+                self._replay_session._after_step()
             # Monitor: every step if GUI enabled, otherwise every second
             if measure_timing:
                 t_mon0 = time.perf_counter()

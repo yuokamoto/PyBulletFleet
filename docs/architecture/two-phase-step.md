@@ -127,3 +127,18 @@ exposes the phase split:
 
 - {doc}`overview` — overall architecture
 - {doc}`../how-to/custom-profiling` — adding your own profiling metrics
+
+## Owned navigation replay sessions
+
+Only when an owned `ReplaySession` is active, core hooks validate the session,
+apply its ordered input batch after assigning the step-start time and before
+PRE_STEP, and capture observations after POST_STEP and counter advancement.
+The hooks are direct calls: required recording failures do not pass through the
+EventBus exception-isolation path. Ordinary simulations keep their existing
+step and event behavior and do not construct replay snapshots.
+
+The replay transition is `S_k -> inputs(k, order) -> update -> S_(k+1)`.
+Input/event records identify transition `k`; observations identify completed
+state `k+1`. Replay uses `k * dt` as its canonical step-start timestamp; it does
+not change legacy timestamps for ordinary runs or ROS publication. Custom
+state-mutating event handlers are unsupported in the v1 replay session.
