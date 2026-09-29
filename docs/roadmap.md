@@ -81,7 +81,15 @@ New robot and infrastructure models:
     randomness, time, external inputs, scheduling, assets and relevant runtime
     state. Preserve ordinary API compatibility during any migration.
   - Result playback/seek and delta encoding.
-  - Additional command/controller/device/BT profiles.
+  - Additional profiles, starting from concrete failure cases: differential
+    navigation, attach/detach and the controller/attachment state needed to
+    explain their outcomes; then joint/action/device/BT and dynamic worlds as
+    justified. Specify initial re-execution state separately from any
+    intermediate checkpoint state.
+  - A CLI to inspect, re-execute and compare supported artifacts, plus an
+    opt-in record mode for examples that explicitly use a supported input
+    boundary. Generic `record: true` for arbitrary examples requires broader
+    command/state coverage and is not a config-only change.
   - ROS ingress adapters and rosbag correlation; DDS/executor replay is not
     covered by core input re-execution.
   - Checkpoint/restore with an explicitly sufficient execution-state contract.

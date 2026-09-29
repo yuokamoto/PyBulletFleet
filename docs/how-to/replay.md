@@ -75,17 +75,36 @@ The `pbf` configuration accepts:
 | `position_tolerance` | `0.001` m for the arrival outcome |
 | `angle_tolerance` | `0.001` rad for the arrival outcome |
 
+This table is the allowlist of **execution-affecting initial `pbf` settings**
+that v1 can reconstruct. It is not a limit on descriptive metadata:
+`ReplaySession.create(..., provenance={...})` stores finite JSON data in the
+artifact manifest, and inputs retain their source/command IDs. Provenance is
+recorded for correlation but is not interpreted as executable configuration.
+Other simulation parameters cannot be passed through the v1 initial definition;
+silently saving an unsupported parameter would not make its behavior replayable.
+
 V1 fixes navigation to XY (preserving initial Z), closest-points collision,
 NORMAL_2D robots, STATIC boxes, automatic initial spatial-grid sizing, no implicit
 floor, no physics, no GUI/monitor, and no plugin/callback/BT execution. Other
 simulation defaults remain tied to the recorded PBF source fingerprint; the
 profile version and fingerprint must match for strict reproduction. Unknown
 configuration fields are rejected instead of silently discarded.
+Headless execution is a restriction of this tested profile, not a claim that
+displaying a replay inherently changes simulation results. A GUI or interactive
+example may add unrecorded user input and scheduling effects, so it needs a
+separately defined capture/display boundary before being supported.
 
 ## Effective inputs and step semantics
 
 `session.step(inputs)` accepts an ordered iterable of `ReplayInput` values.
 Use `navigate()` / `stop()` helpers, or a batch payload:
+
+With `output` set, v1 writes these complete inputs to `journal.jsonl`.
+`reexecute(recording, new_output)` reads the saved input intents, creates a
+fresh supported simulation and applies them at their original steps/orders;
+`compare(recording, new_output)` checks the computed results. This is already
+input re-execution. A timeline player that displays saved observations without
+running the simulation is a separate, unimplemented result-playback feature.
 
 ```python
 request = ReplayInput(
@@ -113,6 +132,8 @@ Input/event `sim_time` is `k * dt`; observation `sim_time` is `state_step * dt`.
 Ordering is by integer step/phase/order, never floating timestamps alone. Paused
 steps and arbitrary reinitialization are unsupported in this owned session.
 Recording correctness does not depend on EventBus subscriber ordering.
+The v1 timestep is fixed in `initial_state.json`: a mid-run `dt` change is
+rejected and there is no per-step `dt` journal or variable-timestep replay.
 
 Producer-specific translation (including ROS frame conversion) happens **before**
 this boundary. A ROS-origin effective input can therefore replay without ROS.
@@ -206,3 +227,13 @@ the first **observed** difference, not an invented exact divergence step.
 
 See `docs/design/snapshot-replay/evidence.md` in the repository for verification,
 performance measurements, limitations and findings to feed back into USO.
+
+## Example and command-line tooling
+
+The bundled replay example above uses the supported session API explicitly.
+There is no `pybullet-fleet replay <file>` command or generic `record: true`
+switch for existing examples in v1. A command-line wrapper around
+`reexecute()`/`compare()` for a supported artifact would be relatively small.
+Recording an arbitrary existing example requires its initial world and every
+result-affecting command to cross a supported input boundary; a config switch
+alone cannot capture direct agent, controller, callback or GUI mutations.
