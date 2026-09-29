@@ -1250,6 +1250,9 @@ class MultiRobotSimulationCore:
 
         Note: Higher frequency increases computational cost but improves collision detection accuracy.
         """
+        replay_session = self._replay_session
+        if replay_session is not None:
+            replay_session.check_mutation("collision_frequency")
         self._collision_check_frequency = frequency
 
         # Log the setting for clarity

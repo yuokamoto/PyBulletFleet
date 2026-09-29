@@ -5,8 +5,9 @@ Final Review are still required. No commit, push or merge is part of this change
 
 ## Verification and performance
 
-Replay tests: 41 passed, including three independent fresh-process re-executions.
-`make verify` passed: 1753 passed, 12 skipped, 1 xfailed, 81.40% coverage
+Replay tests: 49 passed, including three independent fresh-process re-executions
+and regression cases for all three Copilot mutation-path findings.
+`make verify` passed: 1761 passed, 12 skipped, 1 xfailed, 81.43% coverage
 (75% required). The new Python files were also passed explicitly to pre-commit,
 since they are not tracked yet. The representative example completed with a
 matched repeated run and an observed velocity difference for the variant.
@@ -19,21 +20,23 @@ of each process's mean step time; RTF uses measured loop time. `disabled` is the
 current core with no session. `session` owns a simulation but writes nothing.
 `record_1hz` writes observations every 10 steps; `record_every_step` writes all.
 Run with `python benchmark/replay_benchmark.py --baseline-root
-/tmp/pbf-replay-before-d7c290b --output /tmp/pbf-replay-results-final.json`.
+/tmp/pbf-replay-before-d7c290b --output /tmp/pbf-replay-results-review.json`.
+These results were refreshed after the Copilot mutation-path fixes; do not
+combine their absolute times with the earlier measurement session.
 
 | Agents | Controller | Baseline ms | Disabled ms | Session ms | 1 Hz record ms | Every step ms | 1 Hz RTF | Every step RTF |
 | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| 100 | omni | 2.95 | 2.98 | 3.43 | 3.42 | 4.03 | 29.20 | 24.76 |
-| 100 | batch_omni | 3.18 | 3.18 | 3.43 | 3.58 | 4.23 | 27.92 | 23.61 |
-| 1000 | omni | 32.51 | 33.78 | 44.36 | 40.84 | 48.29 | 2.45 | 2.07 |
-| 1000 | batch_omni | 33.62 | 34.03 | 39.95 | 40.70 | 49.05 | 2.46 | 2.04 |
+| 100 | omni | 4.78 | 4.45 | 5.31 | 5.37 | 6.34 | 18.60 | 15.76 |
+| 100 | batch_omni | 4.78 | 4.79 | 5.17 | 5.42 | 6.38 | 18.44 | 15.66 |
+| 1000 | omni | 47.44 | 47.68 | 56.25 | 58.36 | 68.36 | 1.71 | 1.46 |
+| 1000 | batch_omni | 50.21 | 49.21 | 55.55 | 57.15 | 70.34 | 1.75 | 1.42 |
 
 At 1000 agents, 1 Hz artifact sizes were 2.83 MiB (omni) and 3.00 MiB
 (batch_omni) for the 13 simulated seconds, versus 21.23 and 22.51 MiB for
-every-step observations. Sampled peak RSS rose from 87.1 to 91.0 MiB for
-omni and 91.1 to 94.6 MiB for batch_omni between disabled and 1 Hz recording.
-Setup medians for 1000 agents were 0.61/0.72 s disabled and 0.77/0.80 s at
-1 Hz; finalization was approximately 0.02 s at 1 Hz and 0.07 s every step.
+every-step observations. Sampled peak RSS rose from 87.2 to 90.9 MiB for
+omni and 91.3 to 95.2 MiB for batch_omni between disabled and 1 Hz recording.
+Setup medians for 1000 agents were 0.92/1.07 s disabled and 1.00/1.15 s at
+1 Hz; finalization was approximately 0.03 s at 1 Hz and 0.09/0.10 s every step.
 The isolated process runs vary, so these figures characterize this workload,
 machine and storage only. Neither 5% nor 20% overhead is an approval gate.
 The added cost is material at 1000 agents and should inform later optimization.

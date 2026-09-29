@@ -1166,6 +1166,9 @@ class Agent(SimObject):
         Returns:
             True if mode was changed successfully, False if robot is moving
         """
+        replay_session = getattr(self.sim_core, "_replay_session", None)
+        if replay_session is not None:
+            replay_session.check_mutation("controller")
         if self._is_moving:
             self._log.warning("Cannot change motion mode while robot is moving. Call stop() first.")
             return False
@@ -1236,6 +1239,9 @@ class Agent(SimObject):
                       Only used in differential drive mode (MotionMode.DIFFERENTIAL).
                       In omnidirectional mode, this parameter is ignored.
         """
+        replay_session = getattr(self.sim_core, "_replay_session", None)
+        if replay_session is not None:
+            replay_session.check_mutation("navigate")
         if self.use_fixed_base:
             self._log.warning("Cannot set path for fixed-base robot")
             return
@@ -1588,6 +1594,9 @@ class Agent(SimObject):
             controller: A :class:`~pybullet_fleet.controller.Controller`
                 instance, or ``None`` to disable movement.
         """
+        replay_session = getattr(self.sim_core, "_replay_session", None)
+        if replay_session is not None:
+            replay_session.check_mutation("controller")
         if controller is None:
             self._controllers.clear()
         elif self._controllers:
@@ -1604,6 +1613,9 @@ class Agent(SimObject):
         Args:
             controller: A :class:`~pybullet_fleet.controller.Controller` instance.
         """
+        replay_session = getattr(self.sim_core, "_replay_session", None)
+        if replay_session is not None:
+            replay_session.check_mutation("controller")
         self._controllers.append(controller)
 
     def remove_controller(self, controller_or_cls) -> None:
@@ -1619,6 +1631,9 @@ class Agent(SimObject):
         Args:
             controller_or_cls: A Controller instance or subclass.
         """
+        replay_session = getattr(self.sim_core, "_replay_session", None)
+        if replay_session is not None:
+            replay_session.check_mutation("controller")
         if isinstance(controller_or_cls, type):
             for i, c in enumerate(self._controllers[1:], start=1):
                 if isinstance(c, controller_or_cls):

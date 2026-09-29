@@ -136,6 +136,7 @@ class ReplaySession:
             self._sim.initialize_simulation()
             self._dispatcher = FleetCommandDispatcher(self._sim, retain_command_events=False)
             self._params_signature = asdict(self._sim.params)
+            self._collision_frequency = self._sim._collision_check_frequency
             self._entity_signature = self._signature()
             self._manager = manager
             self._manager_controller = manager.batch_controller
@@ -181,7 +182,7 @@ class ReplaySession:
                 obj.name,
                 obj.collision_mode,
                 tuple(obj.callbacks),
-                id(obj.controller) if isinstance(obj, Agent) else None,
+                tuple(id(controller) for controller in obj._controllers) if isinstance(obj, Agent) else None,
                 # V1 admits scalar limits only. Snapshot those immutable values
                 # without a recursive dataclass deepcopy on every agent/step.
                 tuple(vars(obj.controller_params).items()) if isinstance(obj, Agent) else None,
@@ -193,6 +194,7 @@ class ReplaySession:
         if (
             self._sim.step_count != self._expected_step
             or asdict(self._sim.params) != self._params_signature
+            or self._sim._collision_check_frequency != self._collision_frequency
             or self._signature() != self._entity_signature
             or self._sim._callbacks
             or self._sim.plugins

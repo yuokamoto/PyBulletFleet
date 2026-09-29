@@ -170,7 +170,26 @@ def test_fresh_process_three_reexecutions(tmp_path):
         assert compare(original, destination).status == "matched"
 
 
-@pytest.mark.parametrize("mutation", ["command", "pose", "action", "callback", "remove", "reset", "phase", "params", "events"])
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "command",
+        "pose",
+        "path",
+        "set_controller",
+        "add_controller",
+        "remove_controller",
+        "motion_mode",
+        "collision_frequency",
+        "action",
+        "callback",
+        "remove",
+        "reset",
+        "phase",
+        "params",
+        "events",
+    ],
+)
 def test_unsupported_mutation_invalidates_session(tmp_path, mutation):
     from pybullet_fleet.action import WaitAction
     from pybullet_fleet.fleet_api import FleetCommandDispatcher
@@ -185,6 +204,18 @@ def test_unsupported_mutation_invalidates_session(tmp_path, mutation):
                 FleetCommandDispatcher(session._sim).stop(["robot"])
             elif mutation == "pose":
                 agent.set_pose(Pose.from_xyz(4, 0, 0))
+            elif mutation == "path":
+                agent.set_path([Pose.from_xyz(4, 0, 0.1)])
+            elif mutation == "set_controller":
+                agent.set_controller(None)
+            elif mutation == "add_controller":
+                agent.add_controller(object())
+            elif mutation == "remove_controller":
+                agent.remove_controller(object())
+            elif mutation == "motion_mode":
+                agent.set_motion_mode("differential")
+            elif mutation == "collision_frequency":
+                session._sim.set_collision_check_frequency(0)
             elif mutation == "action":
                 agent.add_action(WaitAction(duration=1))
             elif mutation == "callback":
@@ -329,6 +360,20 @@ def test_controller_parameter_mutation_is_detected(tmp_path):
         session.step()
     session.close()
     assert compare(tmp_path / "run", tmp_path / "run").status == "incomplete"
+
+
+@pytest.mark.parametrize("mutation", ["controller_chain", "collision_frequency"])
+def test_unmanaged_runtime_mutation_is_detected_before_step(tmp_path, mutation):
+    path = tmp_path / "run"
+    session = ReplaySession.create(definition(), output=path)
+    if mutation == "controller_chain":
+        session._agents["r1"]._controllers.append(object())
+    else:
+        session._sim._collision_check_frequency = 0
+    with pytest.raises(ReplayError, match="runtime"):
+        session.step()
+    session.close()
+    assert compare(path, path).status == "incomplete"
 
 
 def test_ack_write_failure_leaves_applied_intent_incomplete(tmp_path, monkeypatch):
