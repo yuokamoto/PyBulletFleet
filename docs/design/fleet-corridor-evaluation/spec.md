@@ -1,7 +1,6 @@
 # Fleet corridor failure scenario — scope draft
 
-**Status:** First-slice scope approved; Implementation Plan under Human review.
-Architecture approval and implementation remain pending.
+**Status:** First-slice scope and architecture approved; implementation in progress.
 
 ## Problem and intended outcome
 
@@ -22,12 +21,11 @@ of the first slice.
 
 ## Responsibility and capability boundaries
 
-PBF supplies simulation state, collision facts, command acknowledgements,
-available outcome events, and the public data/metric access needed by the
-scenario. The scenario defines tasks, corridor occupancy and entry policy. An
-external evaluator uses PBF-exposed metrics to compare outcomes; PBF does not
-declare a policy successful. A command acknowledgement is not movement or task
-completion.
+PBF supplies simulation state, collision facts, command acknowledgements and
+available outcome events. The external scenario defines tasks, corridor
+occupancy and entry policy; its evaluator computes congestion and fleet-level
+metrics and compares outcomes. PBF does not declare a policy successful. A
+command acknowledgement is not movement or task completion.
 
 The five desired uses are separate capabilities:
 
@@ -37,7 +35,7 @@ The five desired uses are separate capabilities:
 | B. Recorded-result playback | Full observations can be recorded in the v1 profile. | No timeline player or seek/display contract exists. Sparse sampling may miss the onset of a failure. |
 | C. Checkpoint/restore/resume | No intermediate execution checkpoint exists. | Controller state and any pending policy/task state must be captured before a changed-policy continuation can be claimed. |
 | Trace | Supported request, ack, outcome and collision transitions are recorded in the v1 journal. | Corridor-entry decisions, waiting reasons and task causality are not generally traced across arbitrary policy code or ROS/RMF. |
-| Metrics | Step/RTF benchmarks and state/event access exist. | No reusable movement-command completion/rate contract exists. Waiting before a Fleet API call belongs to the external policy. |
+| Metrics | Step/RTF benchmarks and state/event access exist. | The external evaluator must derive movement completion and rate from PBF facts; waiting before a Fleet API call belongs entirely to the external policy. |
 
 For future checkpoint work, simulator/controller code may expose the state and
 save/load operations needed for a supported profile. External orchestration
@@ -81,11 +79,11 @@ proximity/contact according to configured mode and margin; it does not itself
 prevent collisions or explain policy decisions. A low-frequency collision pass
 can miss short contacts, so the detection cadence is part of the conditions.
 
-Individual PBF metric records retain run, robot and command IDs plus simulation
-step/time, allowing later correlation with an operation trace. The external app
-retains its task ID and maps it to the issued command ID. Metric collection and
-aggregate counts must remain complete even if a future trace exporter samples
-or drops spans; end-to-end trace propagation is a separate follow-up.
+The evaluator's individual records retain run, robot, task and command IDs plus
+simulation step/time, allowing later correlation with an operation trace.
+Metric collection and aggregate counts must remain complete even if a future
+trace exporter samples or drops spans; end-to-end trace propagation is a
+separate follow-up.
 
 ## Acceptance criteria draft for the first slice
 
@@ -123,8 +121,8 @@ USO refinement → another backend sequence before extracting a shared schema.
 
 The Human approved this synthetic scenario, 20 robots, endpoint arrival as
 movement-task completion, and separate follow-ups for playback, checkpoint,
-broader replay and tracing. The Implementation Plan must settle the minimal
-public PBF metric surface, collision categories and configurable sampling,
-the fixed simulated-time cutoff, and the scenario report's future extension
-boundary before implementation. A collision-stop/reset-and-teleport mode is an
-interesting follow-up; it is not required to count collisions in this slice.
+broader replay and tracing. The architecture approval keeps all task,
+congestion, policy-comparison and fleet-level metric semantics in the external
+evaluator. PBF exposes only the narrow facts it owns. A
+collision-stop/reset-and-teleport mode is a follow-up; it is not required to
+count collisions in this slice.

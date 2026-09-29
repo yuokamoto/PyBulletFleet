@@ -1,8 +1,7 @@
 # Fleet corridor evaluation — implementation plan
 
-**Status:** Plan for Human Architecture Approval. Scope approved for a synthetic
-20-robot corridor scenario and an external evaluator/measurement contract;
-implementation has not begun. See [scope draft](spec.md).
+**Status:** Scope and architecture approved for a synthetic 20-robot corridor
+scenario and external evaluator; implementation in progress. See [spec](spec.md).
 
 ## Repository findings and constraints
 
@@ -14,8 +13,10 @@ implementation has not begun. See [scope draft](spec.md).
   distance=collision_margin)`. The core maintains one set of active pairs and
   emits `COLLISION_STARTED`/`COLLISION_ENDED` when that threshold is crossed.
   It does not retain separate near-miss and geometric-overlap event streams.
-  Its public cumulative `collision_count` counts new threshold-crossing pairs,
-  including positive-distance margin intrusions; it is not an overlap count.
+  Its public cumulative `collision_count` counts detected threshold-crossing
+  pairs; it is not an overlap count. The AABB broadphase does not expand boxes
+  by `collision_margin`, so positive-gap near misses can be absent from the
+  active-pair stream and counter.
   `CONTACT_POINTS` reads a physics contact cache and is unsuitable as the
   primary kinematic measurement without a collision-detection pass.
 - The `getClosestPoints` result exposes a signed contact distance. A focused
@@ -29,9 +30,9 @@ implementation has not begun. See [scope draft](spec.md).
   pose/motion state, core collision pairs and lifecycle events are available.
   Existing `MoveAction` timing is not automatically the proposed Fleet API
   movement-task timing. `MultiRobotSimulationCore` already exposes `sim_time`,
-  `step_count`, `collision_count` and `get_active_collision_pairs()`, but it
-  does not expose movement-command completion-time or completion-rate metrics
-  as a reusable public contract.
+  `step_count`, `collision_count` and `get_active_collision_pairs()`. The
+  approved external evaluator derives task completion and rates from these
+  facts; a new public metric API is not part of this slice.
 - PR #50's `ReplaySession` owns a restricted world and replays saved effective
   navigate/stop commands. It cannot record arbitrary state-dependent policy
   decisions in an existing simulation, and replaying Policy A's commands under
@@ -42,9 +43,7 @@ implementation has not begun. See [scope draft](spec.md).
 ## Architecture and data flow
 
 Keep the first slice in an example/scenario package and tests, with no replay
-hooks or task-evaluation logic added to `MultiRobotSimulationCore`. Add a
-small opt-in, public PBF evaluation component for movement-task metric inputs
-and summaries where existing PBF access is insufficient:
+hooks, task-evaluation logic, or generalized metric API added to PBF core:
 
 ```text
 fixed scene + immutable workload + policy parameters
@@ -53,7 +52,7 @@ fixed scene + immutable workload + policy parameters
        |        |          |
  Fleet API    step_once   post-step state/collision query
        |        |          |
-       +---- PBF metric records/summary, driven by external collector
+       +---- external task/event/metric collector
                     |
           per-run records + comparison report
 ```
@@ -62,45 +61,20 @@ The scenario owns stable robot/task IDs, deterministic request order, fixed
 spawn/route geometry, and policy state. It is an example of an external fleet
 management application: it may live in the PBF repository for verification,
 but uses PBF as a library rather than becoming part of the simulation core.
-The external collector observes Fleet API commands and their outcomes and feeds
-a PBF-provided movement-metric surface. That surface should expose raw
-per-command records and aggregate values
-to callers, rather than only printing them or hiding them inside an example
-file. PBF computes command-to-arrival durations and completion rates from
-PBF-visible facts. The external app owns any time before its API call; PBF
-does not report that as waiting time. Keep this a small, opt-in Python API,
-not a general task engine or a claim that PBF judges algorithm quality. Use
-existing public core/Fleet APIs for state and collision facts; add a narrow
-read-only accessor only if feasibility shows a concrete missing observation.
-Start with direct Python Fleet API calls, no ROS/DDS.
+The external collector observes Fleet API commands, states and collision facts,
+then computes task lifecycle and fleet-level metrics. PBF does not infer a
+pre-command wait or a congestion verdict. Use existing public core/Fleet APIs
+for facts; add a narrow read-only accessor only if a concrete missing fact is
+found. Start with direct Python Fleet API calls, no ROS/DDS.
 
-The proposed public surface is a small `pybullet_fleet.evaluation` module:
-immutable movement-command lifecycle records and a pure summarizer accepting
-accepted/rejected commands, terminal outcomes, observed collision
-episodes and simulated cutoff. It returns typed per-command results plus a run
-summary. Scenario code is responsible for identifying endpoint arrival and
-supplying that fact. It reports admission delay separately in its own
-comparison report, without passing pre-command release time to PBF metrics.
-This keeps the metric formulas reusable and testable without putting task state
-or policy decisions into the simulation core. Exact class/function names can
-be settled during detailed
-design; adding broad evaluator registration or plugin machinery is outside
-scope.
+Each evaluator record should retain run, robot, task and command IDs plus
+simulation step/time for later trace correlation. The metric source and
+aggregates remain complete if a future trace exporter samples or fails. No
+new global operation ID or general trace API is introduced here.
 
-Each individual PBF metric record should retain `run_id`, stable robot ID,
-`command_id`, and simulation step/time for acceptance and terminal outcome.
-The external app retains `task_id` and links it to the command ID. These are
-correlation fields for a future operation trace, not a new trace API or a
-requirement that all metric records become spans. The metric source and
-aggregates must remain complete if a later trace exporter samples or fails.
-Do not add a new global `operation_id` contract in this slice; a later tracing
-design can map the existing IDs and define cross-process propagation.
-
-**Common behavior for both policies:** define a local stop/hold rule for an
-occupied path or safety zone, if needed to turn bidirectional conflict into
-observable waiting. Without such a rule, the kinematic robots can simply
-overlap and proceed; collision counts alone would not demonstrate congestion.
-Keep this local rule identical in both runs. Policy A has no corridor admission
+**Common behavior for both policies:** kinematic robots pass through overlap;
+the evaluator records crowding and overlap, without treating this as physical
+blocking. A stop/hold rule would require a separate scenario change. Policy A has no corridor admission
 control; Policy B grants entry in one direction at a time, with a documented
 fairness/timeout rule. Record each policy's admission, hold and release
 decisions in a scenario-owned event stream. These records explain this
@@ -149,12 +123,13 @@ per policy or extend stalled runs until they look successful.
 Set kinematic `CLOSEST_POINTS`, `NORMAL_2D` robots, an explicit positive
 `collision_margin`, and `collision_check_frequency=None`. Observe after every
 completed step at the configured timestep (default `dt=0.1 s`). For each step,
-map active object-ID pairs to stable
-scenario robot IDs, query signed closest-point distance for those pairs and
+map object IDs to stable scenario robot IDs, query signed closest-point distance
+for each robot/robot and robot/wall pair (the core's active-pair broadphase
+misses some positive-gap near misses), and
 emit categorized episodes. Keep the core's threshold transitions as evidence
 of **margin intrusion**; an external collector can additionally classify
-`distance <= 0` as **geometric touch/overlap** if the focused geometry test
-confirms this query path. Preserve the numeric distance and threshold used.
+`distance <= 0` as **geometric touch/overlap**, as verified by the focused
+geometry test. Preserve the numeric distance and threshold used.
 Also sample the endpoints of episodes, so a short event seen for one step does
 not disappear from a lower-rate summary.
 
@@ -192,9 +167,8 @@ release-to-arrival task time, clearly labeled as external-policy metrics.
 PBF waiting time before an API call is zero/not applicable, never inferred
 from pose. No single composite score or built-in “better policy” verdict.
 
-Expose these measurements through the public PBF evaluation component so
-another Python caller can obtain the same task records and summaries without
-running this example. Existing core collision counters remain available, but
+Expose these measurements in the external example's machine-readable report.
+Existing core collision counters remain available, but
 the per-run report should retain categorized pair/step evidence because a
 single cumulative count does not distinguish margin intrusion from overlap.
 The report must include a final collision count after task completion or the
@@ -220,13 +194,12 @@ extend PR #50's replay schema or freeze a universal artifact contract here.
    audience is evaluation), with immutable workload and two policy strategies.
    Keep policy decisions outside the simulation core. Decide the exact home
    before coding; do not create a public general policy API.
-3. **Public metric surface and external collector:** add the smallest opt-in
-   PBF Python metric records/summary needed for movement-command completion,
-   rate and observed collision categories. Let the scenario-local collector
-   supply task and policy context and format the result.
+3. **External collector:** use existing PBF facts to record movement-command
+   completion, rate and observed collision categories. The scenario-local
+   collector owns task and policy context and formats the result.
    Produce a machine-readable per-run result containing conditions, task
    lifecycle records, decision records, observed collision episodes and
-   aggregate metrics through the public PBF metric surface. A small command-line
+   aggregate metrics. A small command-line
    entry point runs either policy and writes its own result; a comparison
    command/run mode reads both reports.
 4. **Verification:** add focused tests for task lifecycle and censoring,
@@ -260,36 +233,25 @@ If a safe implementation requires one, return for scope/architecture review.
   their own decision records. A diagnostic check should demonstrate that
   merely re-executing A's recorded commands cannot count as a B run.
 - Collision classification fixture with separated, within-margin and
-  penetrating geometric cases; verify `COLLISION_STARTED`/`ENDED` timing at
-  every-step cadence for at least two configured timesteps and state the
-  missed-between-steps limit.
+  penetrating geometric cases at two configured timesteps. Verify observed
+  episode transitions; separately state the core broadphase and
+  missed-between-steps limits.
 - Result arithmetic: every task accounted for, throughput denominator fixed,
   incomplete tasks censored, no ack mistaken for arrival.
-- A public API test obtains per-command and aggregate metrics without importing
-  the example; the scenario report includes the final collision count even
-  when all movement tasks have finished.
+- The scenario report includes the final collision count even when all
+  movement tasks have finished; no new public PBF metric API is required.
 - Per-command records preserve run/robot/command IDs and simulation step/time;
   aggregate counts remain correct with no trace exporter attached.
 - Repeatability and 20-robot runtime cost recorded with hardware/configuration
   and no unsupported deterministic or performance guarantee.
 
-## Architecture decisions for Human review
+## Approved architecture and implementation guardrails
 
-1. **Collision semantics and cadence:** `closest_points` is approved. Confirm
-   the names “safety-margin intrusion” and “geometric touch/overlap” if the
-   latter is validated; neither means physics impact. Approve configurable
-   timestep, every-step checking and its explicit between-step blind spot.
-2. **Policy/metric ownership:** independent external policy runs are approved.
-   The remaining clarification is the minimal public PBF metric API: it can
-   calculate and expose durations/rates from PBF-visible command and outcome
-   times; pre-command admission delay belongs only to the external app.
-   Scenario policy and value judgments remain outside the core.
-3. **Traffic rule:** a shared local hold rule is approved if feasibility shows
-   otherwise the kinematic agents pass through each other. This rule must be
-   identical in A and B; only corridor admission differs.
-4. **Workload/cutoff:** two movements per robot (40 tasks) and the
-   provisional 300 s simulated-time cutoff, subject to the feasibility
-   calibration and a documented return to Human review if it must change.
-5. **Artifact scope:** the separate scenario report is approved with its
-   versioned, self-describing structure so later use cases can reuse or map
-   common fields, without declaring a general PBF/USO/replay schema now.
+The Human approved independent external policy runs under equivalent scenario
+conditions, an external evaluator for task/congestion/fleet metrics, configurable
+timestep with explicit collision cadence, a finite 20-robot workload, and a
+versioned scenario report. Pass-through kinematic collisions may be observed
+without adding a stop/reset mode. If a material core responsibility change or
+generic task/metric framework becomes necessary, return for Human Architecture
+Review. Replay, playback, checkpoint, tracing, item transport and 100-robot
+scale remain follow-ups.

@@ -31,6 +31,7 @@ controller-config
 custom-profiling
 capturing-demos
 replay
+fleet-corridor-evaluation
 ```
 
 ```{toctree}
