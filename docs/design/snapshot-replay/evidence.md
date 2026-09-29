@@ -5,9 +5,9 @@ addressed in draft PR #50. Human Final Review and merge remain pending.
 
 ## Verification and performance
 
-Replay tests: 49 passed, including three independent fresh-process re-executions
-and regression cases for all three Copilot mutation-path findings.
-`make verify` passed: 1761 passed, 12 skipped, 1 xfailed, 81.43% coverage
+Replay tests: 35 passed, including three independent fresh-process re-executions
+and a case showing that a direct core command is not captured as session input.
+`make verify` passed: 1747 passed, 12 skipped, 1 xfailed, 81.38% coverage
 (75% required). The new Python files were also passed explicitly to pre-commit
 before their first commit. The representative example completed with a
 matched repeated run and an observed velocity difference for the variant.
@@ -20,23 +20,23 @@ of each process's mean step time; RTF uses measured loop time. `disabled` is the
 current core with no session. `session` owns a simulation but writes nothing.
 `record_1hz` writes observations every 10 steps; `record_every_step` writes all.
 Run with `python benchmark/replay_benchmark.py --baseline-root
-/tmp/pbf-replay-before-d7c290b --output /tmp/pbf-replay-results-review.json`.
-These results were refreshed after the Copilot mutation-path fixes; do not
-combine their absolute times with the earlier measurement session.
+/tmp/pbf-replay-before-d7c290b --output /tmp/pbf-replay-results-external-session.json`.
+These results were refreshed after replay control moved outside the core;
+do not combine their absolute times with the earlier measurement session.
 
 | Agents | Controller | Baseline ms | Disabled ms | Session ms | 1 Hz record ms | Every step ms | 1 Hz RTF | Every step RTF |
 | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| 100 | omni | 4.78 | 4.45 | 5.31 | 5.37 | 6.34 | 18.60 | 15.76 |
-| 100 | batch_omni | 4.78 | 4.79 | 5.17 | 5.42 | 6.38 | 18.44 | 15.66 |
-| 1000 | omni | 47.44 | 47.68 | 56.25 | 58.36 | 68.36 | 1.71 | 1.46 |
-| 1000 | batch_omni | 50.21 | 49.21 | 55.55 | 57.15 | 70.34 | 1.75 | 1.42 |
+| 100 | omni | 2.77 | 2.78 | 2.99 | 3.06 | 3.64 | 32.69 | 27.42 |
+| 100 | batch_omni | 2.94 | 2.89 | 3.25 | 3.30 | 3.95 | 30.30 | 25.32 |
+| 1000 | omni | 31.24 | 31.74 | 36.63 | 37.24 | 44.97 | 2.69 | 2.22 |
+| 1000 | batch_omni | 31.73 | 31.28 | 36.27 | 37.03 | 44.88 | 2.70 | 2.23 |
 
-At 1000 agents, 1 Hz artifact sizes were 2.83 MiB (omni) and 3.00 MiB
-(batch_omni) for the 13 simulated seconds, versus 21.23 and 22.51 MiB for
-every-step observations. Sampled peak RSS rose from 87.2 to 90.9 MiB for
-omni and 91.3 to 95.2 MiB for batch_omni between disabled and 1 Hz recording.
-Setup medians for 1000 agents were 0.92/1.07 s disabled and 1.00/1.15 s at
-1 Hz; finalization was approximately 0.03 s at 1 Hz and 0.09/0.10 s every step.
+At 1000 agents, 1 Hz artifact sizes were 2.86 MiB (omni) and 3.03 MiB
+(batch_omni) for the 13 simulated seconds, versus 21.64 and 22.87 MiB for
+every-step observations. Sampled peak RSS rose from 87.3 to 91.0 MiB for
+omni and 91.0 to 94.8 MiB for batch_omni between disabled and 1 Hz recording.
+Setup medians for 1000 agents were 0.60/0.67 s disabled and 0.65/0.71 s at
+1 Hz; finalization was approximately 0.02 s at 1 Hz and 0.06 s every step.
 The isolated process runs vary, so these figures characterize this workload,
 machine and storage only. Power and thermal state were not captured, so the
 absolute times should not be attributed to a specific machine condition.
@@ -56,7 +56,7 @@ The added cost is material at 1000 agents and should inform later optimization.
 | Explicit changed-condition comparison | `test_variant_config_reports_conditions_and_first_observed_difference` |
 | Input → ack → outcome traceability | Outcome input_step/input_order/command_id; representative example |
 | Unsupported/invalid/incomplete distinct | Version, identity, asset/environment, integrity and semantic validation tests |
-| No silent required record loss | Writer failure, unsupported-input and unfinished-command tests |
+| No silent loss of session-managed records | Writer failure, unsupported-input and unfinished-command tests; direct core calls are outside the contract |
 | No unnecessary disabled capture | `test_no_observation_construction_without_writer`; core hooks inactive in ordinary runs |
 | Representative navigation/stop value | `examples/replay/navigation_reexecution.py`; explicitly synthetic |
 | Existing behavior / CI checks | Repository verification results below |
@@ -64,14 +64,17 @@ The added cost is material at 1000 agents and should inform later optimization.
 ## Self-review findings
 
 - The ordinary dispatcher keeps synchronous ack semantics and existing
-  CommandEvent emission. Durable records use complete inputs and returned acks.
+  CommandEvent emission. Durable records use complete session inputs and
+  returned acks; direct commands through the private core are not captured.
 - Required I/O failures use direct session calls, not EventBus subscribers.
 - Runtime IDs never become artifact identities; record comparison uses stable IDs.
 - Full observations cannot claim to restore controller/plugin/engine state.
 - Recorder memory is bounded by current state/input batch and normal file buffers;
   session dispatchers disable the old unbounded diagnostic command-event list.
-- Core/user mutation guards are scoped to active owned sessions. They are not an
-  arbitrary-Python sandbox; private/raw engine mutation remains outside contract.
+- Replay execution control now lives in `ReplaySession.step()`, outside the
+  ordinary core/API paths. The session checks some persistent runtime changes,
+  but direct core commands are unrecorded and need not be rejected. They remain
+  outside the replay contract, not within an arbitrary-Python sandbox.
 - Per-agent angular motion can report speed rather than signed yaw rate. The
   artifact and guide preserve this distinction instead of asserting a universal
   engine velocity meaning.

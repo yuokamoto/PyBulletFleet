@@ -27,8 +27,8 @@ class ReplaySession:
     """Coordinate a supported initial state, ordered effective inputs and observations.
 
     Use :meth:`create` and the context manager. The owned core is deliberately
-    private: raw PyBullet, private-state writes and direct controller calls are
-    outside the replay contract, not an arbitrary-mutation sandbox.
+    private: calls outside the session input boundary are not captured or
+    guaranteed to replay.
     """
 
     @classmethod
@@ -54,8 +54,6 @@ class ReplaySession:
         self._closed = False
         self._failed = False
         self._stepping = False
-        self._phase = "idle"
-        self._inputs: list[dict] = []
         self._acks: list[CommandAck] = []
         self._interval = interval
         self._last_observed = -1
@@ -140,7 +138,6 @@ class ReplaySession:
             self._entity_signature = self._signature()
             self._manager = manager
             self._manager_controller = manager.batch_controller
-            self._sim._replay_session = self
             if output is not None:
                 manifest = {
                     "schema_version": SCHEMA_VERSION,
@@ -212,25 +209,11 @@ class ReplaySession:
         self._failed = True
         raise ReplayError("unsupported", message)
 
-    def check_mutation(self, operation: str) -> None:
-        """Guard managed mutation paths; internal supported updates remain legal."""
-        if operation in ("navigate", "stop") and self._phase == "input":
-            return
-        if operation in ("pose",) and self._phase == "update":
-            return
-        self._reject(f"{operation} outside the supported replay input/update boundary")
-
-    def _before_step(self) -> None:
-        if not self._stepping or self._closed or self._failed:
-            self._reject("advance through ReplaySession.step only")
-        self._check_runtime()
-
-    def _apply_inputs(self) -> None:
-        self._phase = "input"
+    def _apply_inputs(self, inputs: list[dict]) -> None:
         # Existing sim_time labels step starts. Canonical v1 time avoids accumulated
         # rounding drift without changing time semantics for ordinary simulations.
         self._sim.sim_time = self._expected_step * self._initial["pbf"]["timestep"]
-        for order, command in enumerate(self._inputs):
+        for order, command in enumerate(inputs):
             self._journal("command_intent", order=order, input=command)
             self._dispatcher.allowed_names = None if command["allowed_names"] is None else frozenset(command["allowed_names"])
             kwargs = {"source": command["source"], "command_id": command["command_id"]}
@@ -259,7 +242,6 @@ class ReplaySession:
                     "type": command["command_type"],
                     "goal": goals.get(target),
                 }
-        self._phase = "update"
 
     def _journal(self, kind: str, **payload) -> None:
         if self._writer:
@@ -276,7 +258,6 @@ class ReplaySession:
             )
 
     def _after_step(self) -> None:
-        self._phase = "observation"
         pairs = {
             tuple(sorted((self._id_by_object[a], self._id_by_object[b]))) for a, b in self._sim.get_active_collision_pairs()
         }
@@ -314,7 +295,6 @@ class ReplaySession:
         self._expected_step += 1
         if self._writer and self._expected_step % self._interval == 0:
             self._observe()
-        self._phase = "idle"
 
     def _observe(self) -> None:
         if self._writer is None or self._last_observed == self._expected_step:
@@ -345,13 +325,16 @@ class ReplaySession:
         if self._closed or self._failed or self._stepping:
             raise ReplayError("incomplete", "session is closed, failed or already stepping")
         try:
-            self._inputs = [item.to_record() for item in inputs]
+            recorded_inputs = [item.to_record() for item in inputs]
             self._acks = []
             self._stepping = True
             before = self._expected_step
+            self._check_runtime()
+            self._apply_inputs(recorded_inputs)
             self._sim.step_once()
-            if self._expected_step != before + 1:
+            if self._sim.step_count != before + 1:
                 raise ReplayError("incomplete", "simulation did not complete a step")
+            self._after_step()
             return tuple(self._acks)
         except BaseException as exc:
             self._failed = True
@@ -360,8 +343,6 @@ class ReplaySession:
             raise
         finally:
             self._stepping = False
-            self._phase = "idle"
-            self._inputs = []
 
     def close(self) -> None:
         if self._closed:
@@ -379,7 +360,6 @@ class ReplaySession:
             self._closed = True
             if self._writer:
                 self._writer.abort()
-            self._sim._replay_session = None
             if p.isConnected(self._sim.client):
                 p.disconnect(self._sim.client)
 

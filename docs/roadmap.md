@@ -61,18 +61,46 @@ New robot and infrastructure models:
 ## Simulation Capabilities
 
 - **Snapshot, Event log & Replay** — Restricted kinematic navigation
-  re-execution is implemented: a session-owned fresh instance, effective
-  Fleet API navigate/stop inputs at a defined step/order, full observations,
-  supported outcomes, and comparison. The versioned artifact is PBF-owned;
+  re-execution from a recorded initial state is implemented: a session-owned
+  fresh instance, effective Fleet API navigate/stop inputs at a defined
+  step/order, full observations, supported outcomes, and comparison. The
+  versioned artifact is PBF-owned;
   it is evidence for evolving USO concepts, not a canonical/USO-compatible
   schema or a shared runtime dependency. See [Navigation replay](how-to/replay)
   and the [design record](https://github.com/yuokamoto/PyBulletFleet/blob/main/docs/design/snapshot-replay/spec.md).
 
   The implemented artifact separates initial state, input journal, observations
   and completeness/provenance. Full observations are complete only for the
-  declared observation profile; they are not execution checkpoints.
+  declared observation profile; they are not execution checkpoints. A changed
+  code environment or explicit PBF configuration override produces a variant
+  from the same initial state, not a continuation from an intermediate state.
 
-  Preserve three distinct debugging records as coverage grows:
+  The final user goals are:
+
+  1. Play recorded simulation data like `rosbag play`, without recomputing it.
+  2. Restore a snapshot from an arbitrary recorded point and resume normal
+     simulation.
+  3. After restore, change an algorithm and reproduce a failure or compare
+     variants in an A/B test. A controlled comparison also needs the relevant
+     later external inputs and conditions.
+
+  The current initial-state input re-execution is a limited first step toward
+  these goals. It can compare changed code/configuration from the beginning of
+  a supported run, but cannot display a recorded timeline or resume from an
+  intermediate point. Schema, journal, execution boundary, identity, USO
+  mapping and tracing serve these goals or other future uses; none is a goal
+  by itself.
+
+  After the current replay PR review, the proposed next checkpoint proof is a
+  single per-agent omni robot stopped at a completed step mid-navigation: save
+  `S_k`, terminate the
+  original simulation, restore in a fresh process, and compare the continued
+  trajectory with an uninterrupted run. See
+  `docs/design/snapshot-replay/checkpoint-candidate.md` for the evidence-based
+  minimum state and proposed acceptance criteria. This is a candidate for
+  Human Scope / Architecture Approval, not an approved feature.
+
+  Distinguish three records where the user goals require them:
 
   | Record | Primary question | Current status |
   | --- | --- | --- |
@@ -93,15 +121,18 @@ New robot and infrastructure models:
 
   For the next scope review, a **provisional v2 candidate** is tooling around
   the supported artifact: inspect/re-execute/compare CLI, opt-in recording in
-  compatible examples, and possibly limited result playback. Playback reads
+  compatible examples, and limited result playback. Playback reads
   saved observations; it does not require variable `dt` or controller-state
   serialization, but needs explicit sampling, timing and display semantics. A
   **provisional v3 candidate** is broader execution profiles based on concrete
   failures, starting with differential navigation and attach/detach plus their
-  required inputs/state. Generic recording of arbitrary examples and
-  checkpoint/restore remain separate scope decisions. These version labels are
-  discussion aids, not approved milestones; playback, input re-execution and
-  checkpoint/restore can advance independently.
+  required inputs/state. Capturing controller, attachment and other relevant
+  internal execution state would support a later checkpoint contract; expanding
+  recorded observations and example capture would support useful playback.
+  Neither expansion alone establishes a complete restore boundary. Generic
+  recording of arbitrary examples and checkpoint/restore remain separate scope
+  decisions. These version labels are discussion aids, not approved milestones;
+  playback, input re-execution and checkpoint/restore can advance independently.
 
   Remaining candidates, requiring concrete use cases and separate scope:
 
@@ -118,13 +149,29 @@ New robot and infrastructure models:
     explain their outcomes; then joint/action/device/BT and dynamic worlds as
     justified. Specify initial re-execution state separately from any
     intermediate checkpoint state.
+  - Reconstruct supported `Agent` and `SimObject` instances from their effective
+    spawn information, instead of extending the replay-only `simple_cube` /
+    `static_box` vocabulary as a general PBF entity model. Record enough spawn
+    parameters and asset references to create the same initial objects. For
+    user-provided URDFs, assume the referenced files remain available and
+    unchanged; maintaining those files is the user's responsibility. Do not
+    require bundling or hashing arbitrary user assets by default. State changed
+    after spawn still needs its own capture and input boundary.
   - A CLI to inspect, re-execute and compare supported artifacts, plus an
     opt-in record mode for examples that explicitly use a supported input
     boundary. Generic `record: true` for arbitrary examples requires broader
-    command/state coverage and is not a config-only change.
+    command/state coverage and is not a config-only change. A recorder attached
+    to an existing simulation must capture its actual effective configuration,
+    not fill omitted fields with ReplaySession creation defaults.
   - ROS ingress adapters and rosbag correlation; DDS/executor replay is not
     covered by core input re-execution.
-  - Checkpoint/restore with an explicitly sufficient execution-state contract.
+  - Checkpoint/restore with an explicitly sufficient execution-state contract:
+    capture and load the required controller, action, attachment/device and
+    other mutable state for the approved profile, then continue normal
+    simulation. Record and reapply post-checkpoint inputs separately when an
+    identical continuation is required. Evaluate whether a PyBullet-native
+    state format can preserve the relevant engine state; if usable, define how
+    it combines with PBF-owned execution state and user-managed asset files.
   - Shared lazy state capture for ROS/co-simulation/replay after validating
     capture consistency and cost.
   - USO mapping/conformance, then cross-backend validation before extracting
@@ -460,8 +507,8 @@ Simulation environment assets (warehouse floors, factory layouts, etc.):
 
 Operational visibility for long benchmark runs and production deployments.
 Optional traces and metrics may consume EventBus emissions, while the v1 replay
-session records required inputs/results through direct hooks so I/O failures
-remain visible. The sinks should share correlation IDs where available, not
+session records its supported inputs/results directly so I/O failures remain
+visible. The sinks should share correlation IDs where available, not
 depend on one universal emission point.
 See [observability/spec.md](https://github.com/yuokamoto/PyBulletFleet/blob/main/docs/design/observability/spec.md)
 for the design.

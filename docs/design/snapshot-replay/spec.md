@@ -3,8 +3,18 @@
 **Status:** Implemented; Copilot review findings addressed, Human Final Review pending.
 
 The first conceptual change is re-execution and result comparison of effective
-Fleet API commands from a known initial state, for a fixed kinematic navigation
-profile. Scope and architecture were explicitly approved under workflow v0.1.
+Fleet API commands from a recorded initial state, for a fixed kinematic navigation
+profile. Explicit configuration overrides or changed code produce a variant from
+that same initial state, not a resume from an intermediate checkpoint. Scope and
+architecture were explicitly approved under workflow v0.1.
+
+The final Snapshot/Replay goals are (1) playback of recorded simulation data
+like `rosbag play`, (2) restore/resume from an arbitrary recorded snapshot, and
+(3) algorithm changes after restore for failure reproduction and A/B tests.
+The v1 initial-state re-execution profile is a limited step toward these goals,
+not their completion. Schema, journal, execution boundary, identity, USO and
+trace decisions are means to these workflows or possible secondary uses, not
+independent goals.
 
 ## Contract
 

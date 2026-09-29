@@ -417,9 +417,6 @@ class SimObject:
         Args:
             name: New human-readable name (None to clear)
         """
-        replay_session = getattr(self.sim_core, "_replay_session", None)
-        if replay_session is not None:
-            replay_session.check_mutation("rename")
         if self.name != name:
             self.name = name
             self._update_log_prefix()
@@ -1059,9 +1056,6 @@ class SimObject:
         Returns:
             True if the object moved, False otherwise
         """
-        replay_session = getattr(self.sim_core, "_replay_session", None)
-        if replay_session is not None:
-            replay_session.check_mutation("pose")
         # Static objects should never move - warn and return early
         if self.collision_mode == CollisionMode.STATIC:
             self._log.warning(
@@ -1230,9 +1224,6 @@ class SimObject:
             # Attach to specific link by name
             agent.attach_object(box, parent_link_index="end_effector")
         """
-        replay_session = getattr(self.sim_core, "_replay_session", None)
-        if replay_session is not None:
-            replay_session.check_mutation("attachment")
         # Resolve link name to index
         parent_link_index = resolve_link_index(self.body_id, parent_link_index)
 
@@ -1372,9 +1363,6 @@ class SimObject:
             # Detach and offset from current position (e.g. lower by 0.5m)
             agent.detach_object(pallet, drop_relative_pose=Pose.from_xyz(0, 0, -0.5))
         """
-        replay_session = getattr(self.sim_core, "_replay_session", None)
-        if replay_session is not None:
-            replay_session.check_mutation("attachment")
         if drop_pose is not None and drop_relative_pose is not None:
             raise ValueError("drop_pose and drop_relative_pose cannot both be specified")
 

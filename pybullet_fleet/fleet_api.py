@@ -124,9 +124,6 @@ class FleetCommandDispatcher:
         command_id: str | None = None,
     ) -> CommandAck:
         """Apply one or more navigation goals by robot name."""
-        replay_session = getattr(self.sim_core, "_replay_session", None)
-        if replay_session is not None:
-            replay_session.check_mutation("navigate")
         commands = tuple(goals)
         resolved_id = _resolve_command_id(command_id, commands)
         accepted, rejected = self._resolve_targets(command.name for command in commands)
@@ -144,9 +141,6 @@ class FleetCommandDispatcher:
         command_id: str | None = None,
     ) -> CommandAck:
         """Apply one or more joint target commands by robot name."""
-        replay_session = getattr(self.sim_core, "_replay_session", None)
-        if replay_session is not None:
-            replay_session.check_mutation("joint_command")
         command_tuple = tuple(commands)
         resolved_id = _resolve_command_id(command_id, command_tuple)
         accepted, rejected = self._resolve_targets(command.name for command in command_tuple)
@@ -176,9 +170,6 @@ class FleetCommandDispatcher:
         command_id: str | None = None,
     ) -> CommandAck:
         """Stop one or more robots by name."""
-        replay_session = getattr(self.sim_core, "_replay_session", None)
-        if replay_session is not None:
-            replay_session.check_mutation("stop")
         target_names = tuple(names)
         resolved_id = command_id or _new_command_id()
         accepted, rejected = self._resolve_targets(target_names)
@@ -195,9 +186,6 @@ class FleetCommandDispatcher:
         command_id: str | None = None,
     ) -> CommandAck:
         """Attach or detach objects for one or more robots by name."""
-        replay_session = getattr(self.sim_core, "_replay_session", None)
-        if replay_session is not None:
-            replay_session.check_mutation("attach")
         command_tuple = tuple(commands)
         resolved_id = _resolve_command_id(command_id, command_tuple)
         accepted, rejected = self._resolve_targets(command.name for command in command_tuple)
@@ -244,9 +232,6 @@ class FleetCommandDispatcher:
         command_id: str | None = None,
     ) -> CommandAck:
         """Queue generic PyBulletFleet actions for one or more robots."""
-        replay_session = getattr(self.sim_core, "_replay_session", None)
-        if replay_session is not None:
-            replay_session.check_mutation("execute_action")
         command_tuple = tuple(commands)
         resolved_id = _resolve_command_id(command_id, command_tuple)
         accepted, rejected = self._resolve_targets(command.name for command in command_tuple)

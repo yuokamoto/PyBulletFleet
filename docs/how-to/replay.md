@@ -1,12 +1,21 @@
 # Record and re-execute fleet navigation
 
 `pybullet_fleet.replay` records effective Fleet API inputs and re-executes them
-from a supported initial state in a **fresh PyBulletFleet instance**. It compares
-computed results, rather than applying saved poses to force agreement.
+from the **recorded initial state** in a fresh PyBulletFleet instance. It applies
+the saved inputs at their original steps and compares computed results. Explicit
+`pbf_overrides` or a changed code environment allow a variant run from that same
+initial state; they do not resume an intermediate state.
 
 This is an opt-in PBF-owned v1 profile. It is not complete simulation-state
 restoration, result playback, or an execution checkpoint. It has no ROS or USO
 runtime dependency and makes no USO compatibility or canonical-schema claim.
+The longer-term goals are to play recorded simulation data like `rosbag play`,
+restore a sufficiently complete snapshot from an arbitrary recorded point and
+resume simulation, then change an algorithm after restore to reproduce a
+failure or compare A/B results. V1 delivers none of those end-to-end workflows:
+it compares runs restarted from the initial state. Reproducing the same
+continuation after restore would also require the later external inputs and
+relevant conditions.
 
 ## Quick start
 
@@ -42,6 +51,28 @@ python -m pybullet_fleet.examples.replay.navigation_reexecution /tmp/replay-demo
 
 It is a synthetic representative scenario, not a claimed historical failure.
 
+## V1 limitations at a glance
+
+The following restrictions apply to **recording and re-execution**, not to
+PyBulletFleet as a whole. V1 does not record an arbitrary running simulation.
+
+| Area | V1 boundary |
+| --- | --- |
+| Starting point | `ReplaySession.create()` creates a fresh, session-owned simulation from a supplied S_0 definition. It cannot attach to an existing simulation or start from an intermediate snapshot. |
+| Robots and models | Only bundled `simple_cube.urdf` robots; no user URDF, joints, arbitrary `Agent` spawn parameters or other robot types. |
+| Other objects | Only fixed box obstacles through the replay-only `static_box` shorthand. This creates a normal PBF `SimObject` with a box shape and `CollisionMode.STATIC`; `static_box` is not a general PBF entity type. No arbitrary shapes, floors, devices or runtime spawning. |
+| Controllers and motion | `omni` or `batch_omni` planar navigation; no differential controller, physics-driven motion, other actions or behavior trees. Initial controllers are idle, with zero velocity. |
+| Inputs | Only effective Fleet API `navigate` **and `stop`** requests passed through `session.step(inputs)` are recorded and dispatched. Direct agent/controller/PyBullet mutations and existing ROS/RMF input paths are not captured. |
+| Timing and execution | Fixed timestep, fixed entities, headless and physics off; no mid-run configuration changes, pause/resume, GUI input, plugins or callbacks. Steps must advance through `ReplaySession.step()`. |
+| Saved state | Sampled poses, reported velocities and `is_moving`, plus supported command results/events. No complete controller/action/device/physics state, so observations are not restorable checkpoints. |
+| User workflows | Re-execution and comparison from S_0 only. No result player, arbitrary-time restore/resume, post-restore A/B test, generic example recorder or replay CLI. |
+
+The session checks some persistent runtime configuration/entity changes at its
+step boundary and rejects a run when it detects them. Direct commands or state
+changes made outside `session.step(inputs)` are neither captured nor guaranteed
+to be detected. The roadmap tracks broader capture, playback and
+checkpoint/restore as separate future work.
+
 ## Supported profile
 
 `pbf.kinematic_navigation` version 1 supports `omni` and `batch_omni`, physics off,
@@ -60,9 +91,13 @@ generated once and saved. Names remain Fleet API addresses; durable references
 and comparison use entity IDs. `object_id` and PyBullet `body_id` are not saved as
 persistent identities. This does not change ordinary SimObject naming semantics.
 
-The `pbf` configuration accepts:
+The `pbf` section of the initial definition passed to `ReplaySession.create()`
+accepts the following fields. The listed defaults apply **only when that
+definition omits a field**. V1 does not attach to an already running simulation
+or read its configuration. It resolves the definition before constructing its
+owned simulation and saves every resolved value in `initial_state.json`.
 
-| Field | Default / meaning |
+| Field | Value if omitted / meaning |
 | --- | --- |
 | `controller` | `omni`; alternatively `batch_omni` |
 | `timestep` | `0.1` seconds, positive and fixed |
@@ -82,6 +117,9 @@ artifact manifest, and inputs retain their source/command IDs. Provenance is
 recorded for correlation but is not interpreted as executable configuration.
 Other simulation parameters cannot be passed through the v1 initial definition;
 silently saving an unsupported parameter would not make its behavior replayable.
+For a future record mode that attaches to an existing simulation, the recorder
+would need to capture and validate its *effective runtime configuration* rather
+than substitute these creation defaults.
 
 V1 fixes navigation to XY (preserving initial Z), closest-points collision,
 NORMAL_2D robots, STATIC boxes, automatic initial spatial-grid sizing, no implicit
@@ -185,18 +223,22 @@ Do not edit an artifact while it is being validated or replayed. Hashes detect
 accidental corruption, not malicious rewriting by an actor who can also rewrite
 the completion metadata.
 
-Sessions fail fast when required data cannot be recorded. Unsupported commands,
-managed mutation outside the input/update boundary, writer failure and interrupted
-execution cannot produce a successful footer. A command intent without its result
-is incomplete; it is not assumed to have executed or to have been rolled back.
+Sessions fail fast when required session-managed data cannot be recorded.
+Unsupported `ReplayInput` commands, detected persistent runtime configuration
+changes, writer failure and interrupted session execution cannot produce a
+successful footer. A command intent without its result is incomplete; it is not
+assumed to have executed or to have been rolled back.
 
-The owned simulation is private. Public mutation guards and step-time validation
-cover managed commands/poses, runtime configuration/entities, actions, callbacks,
-plugins and event subscriptions. Raw PyBullet calls, private attribute mutation,
-and direct controller manipulation through the private core are outside the
-contract and are **not completely detectable**. Do not use private session/core
-objects as an integration API. The session is a single-owner stepping API, not a
-concurrent producer queue.
+`ReplaySession.step()` applies supported inputs before the ordinary core step,
+then reads outcomes and observations afterward. The core, Agent, SimObject and
+Fleet API do not switch behavior when a replay session exists. The owned core is
+private: direct calls to it can run normally, but they bypass input recording.
+The session's step-time checks catch some lasting configuration/entity/callback
+changes, not transient or arbitrary private/raw PyBullet mutations. A completed
+artifact therefore attests to the session-managed input stream and recorded
+results, **not** to every possible change in the underlying simulation. Do not
+use private session/core objects as an integration API. The session is a
+single-owner stepping API, not a concurrent producer queue.
 
 `ReplayError.status` / comparison status distinguish:
 

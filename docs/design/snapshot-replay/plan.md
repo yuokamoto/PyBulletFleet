@@ -21,14 +21,18 @@ Scope and architecture approved by the Human under
 
 1. `replay/schema.py`: restricted initial/input profile, defaults and validation.
 2. `replay/session.py`: initialization, stable-ID mapping, supported entities.
-3. Core direct hooks plus Fleet API/managed mutation guards: step/phase/order.
+3. `ReplaySession.step()` applies effective inputs before an ordinary core step
+   and records outcomes afterward; no replay-specific core/API mutation guards.
 4. `replay/artifact.py`: synchronous JSON/JSONL writer, completion and reader.
 5. `replay/runner.py`: fresh re-execution and streaming result comparison.
 6. `tests/test_replay.py`, representative example, replay benchmark and docs.
 
-The core hooks are not EventBus subscribers. Normal dispatch remains synchronous;
-recording a command before its mutation does not equate acceptance with completion.
-Required I/O failure cannot disappear in EventBus exception isolation.
+Session recording is not an EventBus subscriber. Normal dispatch remains
+synchronous; recording a command before its mutation does not equate acceptance
+with completion. Required I/O failure cannot disappear in EventBus exception
+isolation. Following Human review, the implementation moved replay execution
+control outside core simulation; direct core calls are outside the recording
+contract and cannot be exhaustively detected.
 
 ## Verification
 
@@ -36,7 +40,7 @@ Required I/O failure cannot disappear in EventBus exception isolation.
 - Fresh independent-process re-execution, both controller profiles, outcomes and
   collision-step equality; numeric observations within stated tolerance.
 - Explicit variant comparison with first observed difference.
-- Unsupported input/runtime mutation, corruption, unknown versions, missing
+- Unsupported input/detected persistent runtime mutation, corruption, unknown versions, missing
   assets, incomplete intent/results, write/finalization failure.
 - No observation construction without a writer; normal core regression tests.
 - Repository `make verify`, documentation build and representative example.
