@@ -130,12 +130,12 @@ exposes the phase split:
 
 ## Owned navigation replay sessions
 
-Only when an owned `ReplaySession` is active, core hooks validate the session,
-apply its ordered input batch after assigning the step-start time and before
-PRE_STEP, and capture observations after POST_STEP and counter advancement.
-The hooks are direct calls: required recording failures do not pass through the
-EventBus exception-isolation path. Ordinary simulations keep their existing
-step and event behavior and do not construct replay snapshots.
+`ReplaySession.step()` applies its ordered input batch at the step-start time,
+then calls the ordinary `MultiRobotSimulationCore.step_once()` and records
+results after the core advances its counter. Replay control and required
+recording calls stay in the session, outside EventBus exception isolation.
+The core has no replay-specific step hooks or mutation guards; ordinary
+simulations keep their existing step and event behavior.
 
 The replay transition is `S_k -> inputs(k, order) -> update -> S_(k+1)`.
 Input/event records identify transition `k`; observations identify completed

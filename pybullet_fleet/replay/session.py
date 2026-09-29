@@ -209,11 +209,11 @@ class ReplaySession:
         self._failed = True
         raise ReplayError("unsupported", message)
 
-    def _apply_inputs(self, inputs: list[dict]) -> None:
+    def _apply_inputs(self, step_inputs: list[dict]) -> None:
         # Existing sim_time labels step starts. Canonical v1 time avoids accumulated
         # rounding drift without changing time semantics for ordinary simulations.
         self._sim.sim_time = self._expected_step * self._initial["pbf"]["timestep"]
-        for order, command in enumerate(inputs):
+        for order, command in enumerate(step_inputs):
             self._journal("command_intent", order=order, input=command)
             self._dispatcher.allowed_names = None if command["allowed_names"] is None else frozenset(command["allowed_names"])
             kwargs = {"source": command["source"], "command_id": command["command_id"]}
@@ -325,12 +325,12 @@ class ReplaySession:
         if self._closed or self._failed or self._stepping:
             raise ReplayError("incomplete", "session is closed, failed or already stepping")
         try:
-            recorded_inputs = [item.to_record() for item in inputs]
+            step_inputs = [item.to_record() for item in inputs]
             self._acks = []
             self._stepping = True
             before = self._expected_step
             self._check_runtime()
-            self._apply_inputs(recorded_inputs)
+            self._apply_inputs(step_inputs)
             self._sim.step_once()
             if self._sim.step_count != before + 1:
                 raise ReplayError("incomplete", "simulation did not complete a step")

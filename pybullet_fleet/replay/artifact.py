@@ -340,7 +340,7 @@ class ReplayArtifact:
             if step != expected_step or number(observation["sim_time"], "observation.sim_time") != step * dt:
                 raise ReplayError("invalid", "observation step/time mismatch")
             values = observation["entities"]
-            if set(values) != entity_ids:
+            if not isinstance(values, dict) or set(values) != entity_ids:
                 raise ReplayError("invalid", "full observation entity set mismatch")
             for value in values.values():
                 keys(value, {"position", "orientation", "linear_velocity", "angular_velocity", "is_moving"}, "entity state")

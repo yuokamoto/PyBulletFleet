@@ -5,9 +5,10 @@ addressed in draft PR #50. Human Final Review and merge remain pending.
 
 ## Verification and performance
 
-Replay tests: 35 passed, including three independent fresh-process re-executions
-and a case showing that a direct core command is not captured as session input.
-`make verify` passed: 1747 passed, 12 skipped, 1 xfailed, 81.38% coverage
+Replay tests: 36 passed, including three independent fresh-process re-executions,
+a case showing that a direct core command is not captured as session input,
+and malformed observation container validation.
+`make verify` passed: 1748 passed, 12 skipped, 1 xfailed, 81.38% coverage
 (75% required). The new Python files were also passed explicitly to pre-commit
 before their first commit. The representative example completed with a
 matched repeated run and an observed velocity difference for the variant.
@@ -57,7 +58,7 @@ The added cost is material at 1000 agents and should inform later optimization.
 | Input → ack → outcome traceability | Outcome input_step/input_order/command_id; representative example |
 | Unsupported/invalid/incomplete distinct | Version, identity, asset/environment, integrity and semantic validation tests |
 | No silent loss of session-managed records | Writer failure, unsupported-input and unfinished-command tests; direct core calls are outside the contract |
-| No unnecessary disabled capture | `test_no_observation_construction_without_writer`; core hooks inactive in ordinary runs |
+| No unnecessary disabled capture | `test_no_observation_construction_without_writer`; ordinary core has no replay hooks |
 | Representative navigation/stop value | `examples/replay/navigation_reexecution.py`; explicitly synthetic |
 | Existing behavior / CI checks | Repository verification results below |
 

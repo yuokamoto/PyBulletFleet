@@ -194,7 +194,9 @@ These fields are not a physics-solver state or a cross-controller velocity contr
 state (without duplicating it). Each observation contains every profile entity's
 observation fields; static definitions are referenced from the initial state.
 “Full” does not mean the observation alone can recreate the runtime or assets.
-There are no deltas or general dirty tracking.
+There are no deltas or general dirty tracking. Future checkpoint state may
+share these observable fields, but the current observations are a
+display/comparison view, not a saved execution state.
 
 Collision start/end events use sorted stable-ID pairs. Events are recorded at
 collision-check opportunities, not interpolated contact times. For each robot,

@@ -366,7 +366,9 @@ def test_exception_in_context_is_not_a_successful_empty_run(tmp_path):
     assert compare(tmp_path / "run", tmp_path / "run").status == "incomplete"
 
 
-@pytest.mark.parametrize("malformation", ["duplicate_key", "nan", "boolean_step", "missing_entity", "bad_quaternion"])
+@pytest.mark.parametrize(
+    "malformation", ["duplicate_key", "nan", "boolean_step", "missing_entity", "entities_list", "bad_quaternion"]
+)
 def test_observation_semantics_are_validated(tmp_path, malformation):
     path = tmp_path / "run"
     with ReplaySession.create(definition(), output=path):
@@ -377,6 +379,8 @@ def test_observation_semantics_are_validated(tmp_path, malformation):
             rows[0]["state_step"] = False
         elif malformation == "missing_entity":
             rows[0]["entities"] = {}
+        elif malformation == "entities_list":
+            rows[0]["entities"] = ["r1"]
         elif malformation == "bad_quaternion":
             rows[0]["entities"]["r1"]["orientation"] = [0, 0, 0, 0]
         elif malformation == "nan":
@@ -392,6 +396,9 @@ def test_observation_semantics_are_validated(tmp_path, malformation):
         completion = json.loads((path / "completion.json").read_text())
         completion["sha256"]["observations.jsonl"] = hashlib.sha256(target.read_bytes()).hexdigest()
         (path / "completion.json").write_text(json.dumps(completion))
+    with pytest.raises(ReplayError) as error:
+        ReplayArtifact.open(path)
+    assert error.value.status == "invalid"
     assert compare(path, path).status == "invalid"
 
 

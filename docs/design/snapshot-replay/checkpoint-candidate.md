@@ -61,6 +61,21 @@ an external coordinator owns checkpoint files, input replay, stepping and
 comparison. Confirm the smallest useful save/load surface during design rather
 than putting replay orchestration into `MultiRobotSimulationCore`.
 
+Keep event ownership equally narrow. Collision transitions are simulation
+facts: a future core event/query boundary could expose them to an external
+recorder without making the core own a durable event log. V1 instead derives
+transitions in `ReplaySession` by comparing the core's active collision pairs
+across steps. `arrived` and `stopped` are different: they are replay-profile
+outcomes tied to a recorded request, its ID and saved tolerances, so they belong
+in the external coordinator rather than a generic core event log.
+
+Observation and execution checkpoint data will overlap, especially for pose.
+For a supported profile, an observation could eventually be projected from a
+complete checkpoint state. A checkpoint additionally needs the execution state
+required to resume; an observation selects fields for playback and comparison.
+Do not assume the current observation schema is already a literal subset of a
+future checkpoint format or redesign it before the minimal restore proof.
+
 PyBullet provides in-memory `saveState()` and file-based `saveBullet()` /
 `restoreState(fileName=...)` in its
 [official example](https://github.com/bulletphysics/bullet3/blob/master/examples/pybullet/examples/saveRestoreState.py).
