@@ -1,6 +1,6 @@
 # Snapshot / Replay — Approved v1 Scope
 
-**Status:** Implemented; independent review and Human Final Review pending.
+**Status:** Implemented; Copilot review findings addressed, Human Final Review pending.
 
 The first conceptual change is re-execution and result comparison of effective
 Fleet API commands from a known initial state, for a fixed kinematic navigation
@@ -42,9 +42,22 @@ and leaves joint/version/extension details open. No persisted old format was
 identified, so there is no legacy-reader migration. Git history retains the old
 draft. Existing movie recording and ordinary Fleet API behavior remain separate.
 
+The [2026-04-05 PBF draft](https://github.com/yuokamoto/PyBulletFleet/blob/59e4375/docs/design/snapshot-replay/spec.md)
+remains available for its DataMonitor separation and proposed PBF-to-USO mapping.
+It was not moved into the USO repository and is not an implementation contract
+for v1.
+
 ## USO evolution
 
 This PBF artifact validates concrete concepts for future USO refinement. It does
 not permanently choose a competing schema. Findings will feed into USO, then be
 validated in another backend before any shared abstraction is extracted. The USO
 repository is not modified by this change.
+
+For the USO-side design and its unsettled questions, see the
+[snapshot specification](https://github.com/yuokamoto/Unified-Simulation-Orchestrator/blob/main/03_Snapshot_Specification_EN.md),
+[logging/replay specification](https://github.com/yuokamoto/Unified-Simulation-Orchestrator/blob/main/06_Logging_Replay_EN.md),
+[open questions](https://github.com/yuokamoto/Unified-Simulation-Orchestrator/blob/main/17_Open_Questions_EN.md),
+and [bottom-up rollout approach](https://github.com/yuokamoto/Unified-Simulation-Orchestrator/blob/main/16_Current_Status_and_Rollout_Approach_EN.md).
+These documents describe future integration inputs, not a PBF v1 compatibility
+claim. See [implementation evidence](evidence.md) for findings to take back to USO.
