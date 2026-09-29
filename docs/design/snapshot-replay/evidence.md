@@ -1,7 +1,7 @@
 # Navigation replay: implementation evidence and review handoff
 
 **Status:** Implementation verification complete; Copilot review findings
-addressed in draft PR #50. Human Final Review and merge remain pending.
+addressed and PR #50 merged on 2026-09-29.
 
 ## Verification and performance
 

@@ -1,6 +1,6 @@
 # Snapshot / Replay — Approved v1 Scope
 
-**Status:** Implemented; Copilot review findings addressed, Human Final Review pending.
+**Status:** Implemented and merged in PR #50 on 2026-09-29.
 
 The first conceptual change is re-execution and result comparison of effective
 Fleet API commands from a recorded initial state, for a fixed kinematic navigation
