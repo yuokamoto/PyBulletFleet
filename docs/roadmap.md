@@ -72,6 +72,18 @@ New robot and infrastructure models:
   and completeness/provenance. Full observations are complete only for the
   declared observation profile; they are not execution checkpoints.
 
+  For the next scope review, a **provisional v2 candidate** is tooling around
+  the supported artifact: inspect/re-execute/compare CLI, opt-in recording in
+  compatible examples, and possibly limited result playback. Playback reads
+  saved observations; it does not require variable `dt` or controller-state
+  serialization, but needs explicit sampling, timing and display semantics. A
+  **provisional v3 candidate** is broader execution profiles based on concrete
+  failures, starting with differential navigation and attach/detach plus their
+  required inputs/state. Generic recording of arbitrary examples and
+  checkpoint/restore remain separate scope decisions. These version labels are
+  discussion aids, not approved milestones; playback, input re-execution and
+  checkpoint/restore can advance independently.
+
   Remaining candidates, requiring concrete use cases and separate scope:
 
   - Extend the opt-in execution boundary incrementally to other simulation
@@ -80,7 +92,8 @@ New robot and infrastructure models:
     profile: explicit input order alone is insufficient without controlled
     randomness, time, external inputs, scheduling, assets and relevant runtime
     state. Preserve ordinary API compatibility during any migration.
-  - Result playback/seek and delta encoding.
+  - Result playback/seek for supported observations; delta encoding is a
+    separate storage optimization, not a playback prerequisite.
   - Additional profiles, starting from concrete failure cases: differential
     navigation, attach/detach and the controller/attachment state needed to
     explain their outcomes; then joint/action/device/BT and dynamic worlds as
