@@ -1,15 +1,15 @@
 # Navigation replay: implementation evidence and review handoff
 
-**Status:** Implementation verification complete; independent review and Human
-Final Review are still required. No commit, push or merge is part of this change.
+**Status:** Implementation verification complete; Copilot review findings
+addressed in draft PR #50. Human Final Review and merge remain pending.
 
 ## Verification and performance
 
 Replay tests: 49 passed, including three independent fresh-process re-executions
 and regression cases for all three Copilot mutation-path findings.
 `make verify` passed: 1761 passed, 12 skipped, 1 xfailed, 81.43% coverage
-(75% required). The new Python files were also passed explicitly to pre-commit,
-since they are not tracked yet. The representative example completed with a
+(75% required). The new Python files were also passed explicitly to pre-commit
+before their first commit. The representative example completed with a
 matched repeated run and an observed velocity difference for the variant.
 
 The matched benchmark used macOS 14.6.1/x86_64, Python 3.12.5, local temporary
@@ -38,7 +38,9 @@ omni and 91.3 to 95.2 MiB for batch_omni between disabled and 1 Hz recording.
 Setup medians for 1000 agents were 0.92/1.07 s disabled and 1.00/1.15 s at
 1 Hz; finalization was approximately 0.03 s at 1 Hz and 0.09/0.10 s every step.
 The isolated process runs vary, so these figures characterize this workload,
-machine and storage only. Neither 5% nor 20% overhead is an approval gate.
+machine and storage only. Power and thermal state were not captured, so the
+absolute times should not be attributed to a specific machine condition.
+Neither 5% nor 20% overhead is an approval gate.
 The added cost is material at 1000 agents and should inform later optimization.
 
 `make docs` passed with the repository virtual environment and `LC_ALL=C`.
