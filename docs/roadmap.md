@@ -74,6 +74,12 @@ New robot and infrastructure models:
 
   Remaining candidates, requiring concrete use cases and separate scope:
 
+  - Extend the opt-in execution boundary incrementally to other simulation
+    commands and state-changing subsystems, then evaluate whether it should
+    become the default architecture. Define the reproducibility guarantee per
+    profile: explicit input order alone is insufficient without controlled
+    randomness, time, external inputs, scheduling, assets and relevant runtime
+    state. Preserve ordinary API compatibility during any migration.
   - Result playback/seek and delta encoding.
   - Additional command/controller/device/BT profiles.
   - ROS ingress adapters and rosbag correlation; DDS/executor replay is not
