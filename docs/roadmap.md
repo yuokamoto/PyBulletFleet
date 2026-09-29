@@ -72,6 +72,25 @@ New robot and infrastructure models:
   and completeness/provenance. Full observations are complete only for the
   declared observation profile; they are not execution checkpoints.
 
+  Preserve three distinct debugging records as coverage grows:
+
+  | Record | Primary question | Current status |
+  | --- | --- | --- |
+  | State observation / future checkpoint | What was the world state? Can execution resume? | V1 has sampled, profile-full observations; resumable checkpoints are separate future work. |
+  | Input and event journal | Which effective input was applied, when, and what ack/outcome followed? | V1 durably records supported navigation inputs, acks and events; broader typed events remain future work. |
+  | Operation trace | Why did a task take this path across RMF, ROS, agents and devices? | Future sampled action/operation spans; not a replay input source. |
+
+  Snapshots alone cannot yield the causal operation trace: sampled poses omit
+  requests, decisions, retries, rejection reasons and cross-process timing.
+  The input/event journal can anchor a trace timeline, but end-to-end spans
+  require context propagated at each integration boundary. Correlate sinks with
+  stable run/step/command/operation IDs and explicit simulation versus wall time;
+  v1 persists run, step/phase/order, source and command IDs, but not end-to-end
+  operation/trace IDs or wall-time spans. Keep
+  durable replay writes on a failure-visible path; optional EventBus/OTel sinks
+  may share emissions but must not be the sole source of required replay data.
+  See [Observability](#observability) for the future trace exporter.
+
   For the next scope review, a **provisional v2 candidate** is tooling around
   the supported artifact: inspect/re-execute/compare CLI, opt-in recording in
   compatible examples, and possibly limited result playback. Playback reads
@@ -113,6 +132,10 @@ New robot and infrastructure models:
   - Independent observability sinks. Sampled traces cannot replace a complete
     input journal. The general EventBus remains an in-process name/kwargs API;
     only supported replay records have a persisted schema today.
+  - If broader audit/debugging cases require it, define a versioned generic
+    event-record schema and correlation fields before adding an independent
+    durable event sink. Do not assume every EventBus emission is a complete
+    state-change record or a safe required-I/O boundary.
 
 - **Behavior tree integration** — The current portable profile supports
   `Sequence`, `Fallback`, `Repeat`, and registered `Action` nodes. It is not a
@@ -436,7 +459,10 @@ Simulation environment assets (warehouse floors, factory layouts, etc.):
 ## Observability
 
 Operational visibility for long benchmark runs and production deployments.
-**Shares the EventBus with Snapshot/Replay** — same emission point, different sinks.
+Optional traces and metrics may consume EventBus emissions, while the v1 replay
+session records required inputs/results through direct hooks so I/O failures
+remain visible. The sinks should share correlation IDs where available, not
+depend on one universal emission point.
 See [observability/spec.md](https://github.com/yuokamoto/PyBulletFleet/blob/main/docs/design/observability/spec.md)
 for the design.
 
