@@ -77,15 +77,24 @@ Start with direct Python Fleet API calls, no ROS/DDS.
 The proposed public surface is a small `pybullet_fleet.evaluation` module:
 immutable movement-command lifecycle records and a pure summarizer accepting
 accepted/rejected commands, terminal outcomes, observed collision
-episodes and simulated cutoff. It returns typed per-task results plus a run
+episodes and simulated cutoff. It returns typed per-command results plus a run
 summary. Scenario code is responsible for identifying endpoint arrival and
 supplying that fact. It reports admission delay separately in its own
 comparison report, without passing pre-command release time to PBF metrics.
-This keeps the metric formulas
-reusable and testable without putting task state or policy decisions into the
-simulation core. Exact class/function names can be settled during detailed
+This keeps the metric formulas reusable and testable without putting task state
+or policy decisions into the simulation core. Exact class/function names can
+be settled during detailed
 design; adding broad evaluator registration or plugin machinery is outside
 scope.
+
+Each individual PBF metric record should retain `run_id`, stable robot ID,
+`command_id`, and simulation step/time for acceptance and terminal outcome.
+The external app retains `task_id` and links it to the command ID. These are
+correlation fields for a future operation trace, not a new trace API or a
+requirement that all metric records become spans. The metric source and
+aggregates must remain complete if a later trace exporter samples or fails.
+Do not add a new global `operation_id` contract in this slice; a later tracing
+design can map the existing IDs and define cross-process propagation.
 
 **Common behavior for both policies:** define a local stop/hold rule for an
 occupied path or safety zone, if needed to turn bidirectional conflict into
@@ -256,9 +265,11 @@ If a safe implementation requires one, return for scope/architecture review.
   missed-between-steps limit.
 - Result arithmetic: every task accounted for, throughput denominator fixed,
   incomplete tasks censored, no ack mistaken for arrival.
-- A public API test obtains per-task and aggregate metrics without importing
+- A public API test obtains per-command and aggregate metrics without importing
   the example; the scenario report includes the final collision count even
   when all movement tasks have finished.
+- Per-command records preserve run/robot/command IDs and simulation step/time;
+  aggregate counts remain correct with no trace exporter attached.
 - Repeatability and 20-robot runtime cost recorded with hardware/configuration
   and no unsupported deterministic or performance guarantee.
 

@@ -81,6 +81,12 @@ proximity/contact according to configured mode and margin; it does not itself
 prevent collisions or explain policy decisions. A low-frequency collision pass
 can miss short contacts, so the detection cadence is part of the conditions.
 
+Individual PBF metric records retain run, robot and command IDs plus simulation
+step/time, allowing later correlation with an operation trace. The external app
+retains its task ID and maps it to the issued command ID. Metric collection and
+aggregate counts must remain complete even if a future trace exporter samples
+or drops spans; end-to-end trace propagation is a separate follow-up.
+
 ## Acceptance criteria draft for the first slice
 
 1. The scene, workload, policies, cutoff and random inputs (if any) are fixed
