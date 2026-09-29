@@ -127,3 +127,18 @@ exposes the phase split:
 
 - {doc}`overview` — overall architecture
 - {doc}`../how-to/custom-profiling` — adding your own profiling metrics
+
+## Owned navigation replay sessions
+
+`ReplaySession.step()` applies its ordered input batch at the step-start time,
+then calls the ordinary `MultiRobotSimulationCore.step_once()` and records
+results after the core advances its counter. Replay control and required
+recording calls stay in the session, outside EventBus exception isolation.
+The core has no replay-specific step hooks or mutation guards; ordinary
+simulations keep their existing step and event behavior.
+
+The replay transition is `S_k -> inputs(k, order) -> update -> S_(k+1)`.
+Input/event records identify transition `k`; observations identify completed
+state `k+1`. Replay uses `k * dt` as its canonical step-start timestamp; it does
+not change legacy timestamps for ordinary runs or ROS publication. Custom
+state-mutating event handlers are unsupported in the v1 replay session.

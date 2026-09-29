@@ -1,5 +1,11 @@
 # USO Specification Summary
 
+> **Status:** This is a historical condensed design reference for a possible
+> future integration, not the approved v1 PyBulletFleet replay contract.
+> Recheck the current USO repository before treating interfaces or schema fields
+> below as authoritative; see `docs/design/snapshot-replay/spec.md` for the
+> current PBF boundary and open compatibility decision.
+
 Condensed reference for the Unified Simulation Orchestrator (USO) specification.
 Source: https://github.com/yuokamoto/Unified-Simulation-Orchestrator
 

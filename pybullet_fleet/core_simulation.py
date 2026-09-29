@@ -4034,6 +4034,7 @@ class MultiRobotSimulationCore:
         Performance note: time.perf_counter() calls have negligible overhead (<0.1% for 10k objects).
         The profiling measurements themselves do not significantly impact simulation performance.
         """
+
         # Profiling: step start time (measure even if return_profiling=True)
         measure_timing = self._enable_time_profiling or return_profiling
         if not measure_timing:

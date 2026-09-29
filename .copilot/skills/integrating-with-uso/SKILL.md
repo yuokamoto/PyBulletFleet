@@ -5,6 +5,17 @@ description: "Use when implementing USO (Unified Simulation Orchestrator) integr
 
 # Integrating with USO
 
+> **Scope note (2026-09):** The adapter, full/delta snapshot, playback and
+> transport steps below are future integration design sketches, not the
+> implemented PyBulletFleet replay contract or an approved implementation plan.
+> The first replay stage implements restricted initial-state re-execution only;
+> see `docs/how-to/replay.md` and `docs/design/snapshot-replay/spec.md`.
+> USO integration remains a possible later stage. Before implementing it,
+> verify the current USO specification and PyBulletFleet APIs, then decide
+> schema ownership and compatibility with Human review. In particular, do not
+> assume `_moved_this_step` is a complete delta tracker, `name` is a durable
+> identity, or a full observation is an execution checkpoint.
+
 Guide for integrating PyBulletFleet as a USO (Unified Simulation Orchestrator) simulation node — covering the SimulationNode adapter, snapshot serialization, and replay capability.
 
 **USO Repository:** https://github.com/yuokamoto/Unified-Simulation-Orchestrator
