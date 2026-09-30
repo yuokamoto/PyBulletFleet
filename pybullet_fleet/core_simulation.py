@@ -42,6 +42,7 @@ import pybullet_data
 
 import yaml
 
+from pybullet_fleet._platform import IS_MACOS
 from pybullet_fleet.camera_controller import CameraController
 from pybullet_fleet.collision_visualizer import CollisionVisualizer  # deprecated, unused
 from pybullet_fleet.config_utils import load_yaml_config
@@ -3932,6 +3933,9 @@ class MultiRobotSimulationCore:
         # Shutdown plugins before disconnecting
         self._shutdown_plugins()
 
+        if IS_MACOS and self._data_monitor:
+            self._data_monitor.stop()
+
         # Disconnect from PyBullet if still connected
         try:
             p.getConnectionInfo(physicsClientId=self.client)
@@ -4053,6 +4057,8 @@ class MultiRobotSimulationCore:
         # Monitor controls are submitted from tkinter and consumed only by this
         # simulation thread.  Do this before GUI input so both sources share
         # the same step boundary.
+        if IS_MACOS and self._data_monitor:
+            self._data_monitor.process_events()
         self._consume_gui_commands()
         self._update_gui_lighting_controls()
 

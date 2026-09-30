@@ -11,11 +11,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 - Add a synthetic 20-robot corridor evaluation example with independent entry
   policies, task/collision evidence, and simulated-time fleet metrics.
+- Add a macOS launcher for viewing Linux GUI examples in a browser via Colima
+  and noVNC.
 - Opt-in, versioned kinematic navigation replay: record effective Fleet API navigate/stop inputs, reconstruct a fresh supported initial world, and compare acknowledgements, events and full observations. Supports omni/batch_omni, stable artifact entity IDs, integrity validation and explicit changed-configuration comparisons; does not provide checkpoint/resume or ROS/DDS replay.
 
 ### Changed
 
 - Keep replay input application and result capture in `ReplaySession`, without replay-specific mutation guards in ordinary simulation and Fleet APIs. Direct core calls are outside the recorded-input contract.
+
+### Fixed
+
+- Isolate the macOS Tkinter monitor in its own process to avoid native GUI
+  conflicts with PyBullet, while preserving monitor controls while paused.
+  Keep the existing threaded startup and shutdown behavior on Windows and Linux.
 
 ## v0.8.0 (2026-09-01)
 

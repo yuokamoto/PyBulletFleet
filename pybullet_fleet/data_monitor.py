@@ -4,14 +4,20 @@ Real-time data monitor window for PyBullet simulation
 Shows simulation statistics in a separate tkinter window
 """
 
+import atexit
 import json
 import math
 import os
+import sys
+import subprocess
 import threading
 import time
 from dataclasses import asdict
+from multiprocessing import Pipe
+from multiprocessing.connection import Connection
 from typing import Any, Callable, Dict, Optional
 
+from pybullet_fleet._platform import IS_MACOS
 from pybullet_fleet._defaults import SIMULATION as _SIM_D
 from pybullet_fleet.gui_commands import GuiCommand, GuiCommandType, MonitorFrame
 from pybullet_fleet.logging_utils import get_lazy_logger
@@ -54,6 +60,9 @@ class DataMonitor:
         self.update_interval: float = 0.5  # Update every 500ms
         self.status_label: Optional[Any] = None
         self.monitor_thread: Optional[threading.Thread] = None
+        self._monitor_process: Optional[subprocess.Popen] = None
+        self._command_pipe: Optional[Connection] = None
+        self._parent_poll: Optional[Callable[[], None]] = None
         self.command_sink: Optional[Callable[[GuiCommand], bool]] = None
         self._entity_rows: list[int] = []
         self._all_entities: list[Dict[str, Any]] = []
@@ -76,7 +85,7 @@ class DataMonitor:
             self.geometry_string: str = f"{width}x{height}"
 
     def start(self) -> None:
-        """Start the monitor window in a separate thread"""
+        """Start Tk in a separate process on macOS, or a thread elsewhere."""
         if self.running:
             return
 
@@ -84,18 +93,83 @@ class DataMonitor:
 
         # Only start GUI thread if GUI is enabled
         if self.enable_gui:
-            self.monitor_thread = threading.Thread(target=self._run_monitor, daemon=True)
-            self.monitor_thread.start()
+            if IS_MACOS:
+                self._start_process()
+            else:
+                self.monitor_thread = threading.Thread(target=self._run_monitor, daemon=True)
+                self.monitor_thread.start()
+
+    def _start_process(self) -> None:
+        # PyBullet and Tk both own NSApplication on macOS. Even main-thread Tk
+        # cannot share PyBullet's process. Use a fresh interpreter, not fork or
+        # multiprocessing spawn (which would re-execute unguarded demo scripts).
+        parent, child = Pipe()
+        settings = json.dumps(
+            {
+                "title": self.title,
+                "geometry": self.geometry_string,
+                "data_file": self.data_file,
+                "initial_target_rtf": self.initial_target_rtf,
+                "initial_timestep": self.initial_timestep,
+            }
+        )
+        try:
+            self._monitor_process = subprocess.Popen(
+                [
+                    sys.executable,
+                    "-c",
+                    "from pybullet_fleet.data_monitor import _process_main; _process_main()",
+                    str(child.fileno()),
+                    settings,
+                ],
+                pass_fds=(child.fileno(),),
+            )
+        except Exception:
+            parent.close()
+            self.running = False
+            raise
+        finally:
+            child.close()
+        self._command_pipe = parent
+        atexit.register(self.stop)
+
+    def process_events(self) -> None:
+        """Forward subprocess commands at the simulation boundary, even paused."""
+        pipe = self._command_pipe
+        if pipe is None:
+            return
+        try:
+            for _ in range(100):
+                if not pipe.poll():
+                    break
+                command = GuiCommand(**pipe.recv())
+                if self.command_sink is not None and not self.command_sink(command):
+                    logger.warning("Monitor command queue is full; request was not applied")
+        except (EOFError, OSError):
+            self.stop()
 
     def stop(self) -> None:
         """Stop the monitor window"""
         self.running = False
+        if IS_MACOS and self._command_pipe is not None:
+            self._command_pipe.close()
+            self._command_pipe = None
+        if IS_MACOS and self._monitor_process is not None:
+            try:
+                self._monitor_process.wait(timeout=3)
+            except subprocess.TimeoutExpired:
+                self._monitor_process.terminate()
+                self._monitor_process.wait(timeout=3)
+            self._monitor_process = None
+            atexit.unregister(self.stop)
         if self.window:
             try:
                 self.window.quit()
                 self.window.destroy()
             except Exception:
                 pass
+            if IS_MACOS:
+                self.window = None
 
     def _run_monitor(self) -> None:
         """Run the tkinter monitor window"""
@@ -107,6 +181,8 @@ class DataMonitor:
         self.window.title(self.title)
         self.window.geometry(self.geometry_string)
         self.window.configure(bg="black")
+        if IS_MACOS:
+            self.window.protocol("WM_DELETE_WINDOW", self.stop)
         self.window.columnconfigure(0, weight=1)
         self.window.rowconfigure(0, weight=1)
 
@@ -214,6 +290,8 @@ class DataMonitor:
 
         # Start periodic update
         self.window.after(int(self.update_interval * 1000), self._update_display)
+        if self._parent_poll is not None:
+            self.window.after(100, self._parent_poll)
 
         # Start the tkinter main loop
         try:
@@ -428,6 +506,44 @@ class DataMonitor:
             self.entity_list.insert(tk.END, label)
 
 
+def _process_main() -> None:
+    """macOS child entry point: Tk owns this process's main thread."""
+    pipe = Connection(int(sys.argv[1]))
+    settings = json.loads(sys.argv[2])
+    monitor = DataMonitor(
+        settings["title"],
+        initial_target_rtf=settings["initial_target_rtf"],
+        initial_timestep=settings["initial_timestep"],
+    )
+    monitor.geometry_string = settings["geometry"]
+    monitor.data_file = settings["data_file"]
+
+    def send_command(command: GuiCommand) -> bool:
+        try:
+            pipe.send(asdict(command))
+            return True
+        except (BrokenPipeError, EOFError, OSError):
+            return False
+
+    def check_parent() -> None:
+        try:
+            if pipe.poll():
+                pipe.recv()  # EOF when the parent exits or stops the monitor.
+        except (EOFError, OSError):
+            monitor.stop()
+            return
+        if monitor.running and monitor.window is not None:
+            monitor.window.after(100, check_parent)
+
+    monitor.set_command_sink(send_command)
+    monitor._parent_poll = check_parent
+    monitor.running = True
+    try:
+        monitor._run_monitor()
+    finally:
+        pipe.close()
+
+
 # Standalone monitor launcher
 def main():
     """Run standalone data monitor"""
@@ -436,10 +552,13 @@ def main():
     print("Press Ctrl+C to exit")
 
     try:
-        monitor.start()
-        # Keep main thread alive
-        while monitor.running:
-            time.sleep(1)
+        if IS_MACOS:
+            monitor.running = True
+            monitor._run_monitor()
+        else:
+            monitor.start()
+            while monitor.running:
+                time.sleep(1)
     except KeyboardInterrupt:
         print("\nStopping monitor...")
         monitor.stop()
