@@ -1,7 +1,8 @@
 # Fleet corridor evaluation — implementation plan
 
 **Status:** Scope and architecture approved for a synthetic 20-robot corridor
-scenario and external evaluator; implementation in progress. See [spec](spec.md).
+scenario and external evaluator; implementation complete on the draft PR branch,
+awaiting independent and Human Final Review. See [spec](spec.md).
 
 ## Repository findings and constraints
 

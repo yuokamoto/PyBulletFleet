@@ -1,6 +1,7 @@
 # Fleet corridor failure scenario — scope draft
 
-**Status:** First-slice scope and architecture approved; implementation in progress.
+**Status:** First-slice scope and architecture approved; implementation complete
+on the draft PR branch, awaiting independent and Human Final Review.
 
 ## Problem and intended outcome
 

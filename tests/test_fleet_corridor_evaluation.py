@@ -109,26 +109,25 @@ def test_comparison_rejects_different_conditions():
         compare_reports(report, {**report, "policy": "direction_gate", "tasks": changed_tasks})
     with pytest.raises(ValueError, match="different policies"):
         compare_reports(report, report)
+    with pytest.raises(ValueError, match="headless"):
+        compare_reports(report, {**report, "policy": "direction_gate", "execution": {"gui": True}})
 
 
 def test_gui_observation_uses_same_scenario_without_desktop(monkeypatch):
     original_make_sim = corridor._make_sim
+    observed_connected = []
 
     def direct_client(config, *, gui=False):
         assert gui
-        sim, entities = original_make_sim(config, gui=False)
-
-        def run_exact_steps(duration: float | None = None) -> None:
-            assert duration == config.cutoff
-            assert sim.params.target_rtf == 3
-            for _ in range(config.steps):
-                sim.step_once()
-
-        sim.run_simulation = run_exact_steps
-        return sim, entities
+        return original_make_sim(config, gui=False)
 
     monkeypatch.setattr(corridor, "_make_sim", direct_client)
-    report = run_policy("uncontrolled", CorridorConfig(cutoff=1), gui=True, view_rtf=3)
+    monkeypatch.setattr(corridor, "_hold_final_gui", lambda sim: observed_connected.append(bool(p.isConnected(sim.client))))
+    # Use the real run_simulation lifecycle but avoid wall-clock pacing in this
+    # desktop-free test; the GUI hold itself is checked before core disconnects.
+    monkeypatch.setattr(corridor.time, "sleep", lambda _: None)
+    report = run_policy("uncontrolled", CorridorConfig(cutoff=1), gui=True, view_rtf=3, hold_gui=True)
+    assert observed_connected == [True]
     assert report["execution"] == {"gui": True, "target_view_rtf": 3}
     assert report["metrics"]["simulated_seconds"] == 1
     assert len(report["tasks"]) == 40
@@ -147,6 +146,17 @@ def test_single_policy_cli_writes_only_one_report(monkeypatch, tmp_path):
     monkeypatch.setattr(sys, "argv", ["corridor", str(output), "--policy", "uncontrolled", "--cutoff", "1"])
     corridor.main()
     assert sorted(path.name for path in output.iterdir()) == ["uncontrolled.json"]
+
+
+def test_default_dual_policy_cli_writes_comparison(monkeypatch, tmp_path):
+    output = tmp_path / "both-policies"
+    monkeypatch.setattr(sys, "argv", ["corridor", str(output), "--cutoff", "1"])
+    corridor.main()
+    assert sorted(path.name for path in output.iterdir()) == [
+        "comparison.json",
+        "direction_gate.json",
+        "uncontrolled.json",
+    ]
 
 
 def test_observer_failure_cannot_publish_incomplete_report(monkeypatch):

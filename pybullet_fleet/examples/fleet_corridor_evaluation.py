@@ -282,6 +282,16 @@ def _select(policy: str, ready: list[dict], active: dict[str, dict], turn: str) 
     return [task for task in ready if task["direction"] == direction][: max(0, slots)], turn
 
 
+def _hold_final_gui(sim: MultiRobotSimulationCore) -> None:
+    """Keep the final frame visible before run_simulation disconnects its client."""
+    print("Simulation finished. Close the GUI window or press Ctrl+C to save the report and exit.")
+    try:
+        while p.isConnected(sim.client):
+            time.sleep(0.1)
+    except KeyboardInterrupt:
+        pass
+
+
 def run_policy(
     policy: str,
     config: CorridorConfig = CorridorConfig(),
@@ -430,6 +440,9 @@ def run_policy(
                     task["completed_time"] = observed_step * config.timestep
                     completed.add(task["task_id"])
                     del active[name]
+            if hold_gui and observed_step == config.steps:
+                sim.pause()
+                _hold_final_gui(sim)
         except Exception as exc:
             callback_failure.append(exc)
             sim.params.target_rtf = 0
@@ -542,13 +555,6 @@ def run_policy(
                 "Manual GUI pause or single-step interaction can change the policy command schedule and reported outcome.",
             ],
         }
-        if hold_gui:
-            print("Simulation finished. Close the GUI window or press Ctrl+C to save the report and exit.")
-            try:
-                while p.isConnected(sim.client):
-                    time.sleep(0.1)
-            except KeyboardInterrupt:
-                pass
         return report
     finally:
         sim.events.off(SimEvents.PRE_STEP, before_step)
@@ -559,6 +565,8 @@ def run_policy(
 
 def compare_reports(left: dict, right: dict) -> dict:
     """Return parallel measurements without declaring a winning policy."""
+    if left["execution"].get("gui") or right["execution"].get("gui"):
+        raise ValueError("policy comparison requires headless runs")
     if left["scenario_id"] != right["scenario_id"] or left["conditions"] != right["conditions"]:
         raise ValueError("policy reports require equivalent scenario conditions")
     workload_fields = ("task_id", "robot_id", "leg", "direction", "start", "destination")
