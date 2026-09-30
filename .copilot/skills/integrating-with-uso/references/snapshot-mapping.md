@@ -1,5 +1,11 @@
 # Snapshot Field Mapping
 
+> **Status:** This is a future USO integration mapping sketch, not a mapping
+> implemented by the v1 PyBulletFleet navigation replay artifact. Consult
+> `docs/how-to/replay.md` for the current contract. Validate every field and
+> private API against current PBF and USO before using this sketch; in
+> particular, identity, velocity, attachment and delta semantics are unresolved.
+
 Detailed field-by-field mapping between USO snapshot format and PyBulletFleet data sources.
 
 ## Table of Contents

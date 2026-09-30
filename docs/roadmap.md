@@ -60,63 +60,129 @@ New robot and infrastructure models:
 
 ## Simulation Capabilities
 
-- **Snapshot, Event log & Replay** *(event emission complete; recording and
-  replay pending)* — Three-layer architecture sharing a single EventBus as a
-  source. Enables replay, external synchronization ([USO](https://github.com/yuokamoto/Unified-Simulation-Orchestrator)
-  integration), and downstream observability (see [Observability](#observability) below).
+- **Snapshot, Event log & Replay** — Restricted kinematic navigation
+  re-execution from a recorded initial state is implemented: a session-owned
+  fresh instance, effective Fleet API navigate/stop inputs at a defined
+  step/order, full observations, supported outcomes, and comparison. The
+  versioned artifact is PBF-owned;
+  it is evidence for evolving USO concepts, not a canonical/USO-compatible
+  schema or a shared runtime dependency. See [Navigation replay](how-to/replay)
+  and the [design record](https://github.com/yuokamoto/PyBulletFleet/blob/main/docs/design/snapshot-replay/spec.md).
 
-  **Layer overview:**
+  The implemented artifact separates initial state, input journal, observations
+  and completeness/provenance. Full observations are complete only for the
+  declared observation profile; they are not execution checkpoints. A changed
+  code environment or explicit PBF configuration override produces a variant
+  from the same initial state, not a continuation from an intermediate state.
 
-  | Layer | Purpose | Granularity | Lossless? | Replayable? |
-  |---|---|---|---|---|
-  | **Snapshot** | State checkpoint for seek / restore | Low frequency (e.g. 1 Hz) | Yes | Yes (state restore) |
-  | **Event log** | Causal record of state transitions (input replay, audit) | Per state-change | Yes (must) | Yes (input replay) |
-  | **Trace** | Operational observability (Grafana/Tempo) | Action-level spans | Sampling allowed | No (view only) |
+  The final user goals are:
 
-  **Design principle: same source, separate sinks.** All three are derived from
-  the EventBus ([eventbus/spec.md](https://github.com/yuokamoto/PyBulletFleet/blob/main/docs/design/eventbus/spec.md))
-  — emit once, fan out to multiple subscribers. Snapshot ≠ Event (different
-  schemas, separate files), but share common header keys (`sim_time`, `step`,
-  `wall_time`, `run_id`) so they can be merged on the time axis.
+  1. Play recorded simulation data like `rosbag play`, without recomputing it.
+  2. Restore a snapshot from an arbitrary recorded point and resume normal
+     simulation.
+  3. After restore, change an algorithm and reproduce a failure or compare
+     variants in an A/B test. A controlled comparison also needs the relevant
+     later external inputs and conditions.
 
-  **Shared live capture:** define a transport-neutral, step-versioned agent
-  state snapshot as the common capture layer for replay, co-simulation, and
-  fleet state publication. Build it lazily when the first sink needs the
-  current step and cache it only for that step, so a 5 Hz ROS state publisher
-  or 1 Hz replay logger does not force full per-agent snapshot construction on
-  every simulation step. Co-simulation may explicitly request an every-step
-  dense array snapshot. ROS message conversion/DDS publication, replay
-  full-or-delta serialization, and event logging remain separate sinks; the
-  shared layer only owns the consistent raw state capture and agent selection.
+  The current initial-state input re-execution is a limited first step toward
+  these goals. It can compare changed code/configuration from the beginning of
+  a supported run, but cannot display a recorded timeline or resume from an
+  intermediate point. Schema, journal, execution boundary, identity, USO
+  mapping and tracing serve these goals or other future uses; none is a goal
+  by itself.
 
-  **Why trace alone cannot replay:** trace is sampled, coarse-grained (Action-level spans), drops non-deterministic inputs (RNG seed, callback returns), and has attribute-size limits unsuitable for `Path` waypoints / IK results. Replay needs Event log (input) + Snapshot (checkpoint).
+  After the current replay PR review, the proposed next checkpoint proof is a
+  single per-agent omni robot stopped at a completed step mid-navigation: save
+  `S_k`, terminate the
+  original simulation, restore in a fresh process, and compare the continued
+  trajectory with an uninterrupted run. See
+  `docs/design/snapshot-replay/checkpoint-candidate.md` for the evidence-based
+  minimum state and proposed acceptance criteria. This is a candidate for
+  Human Scope / Architecture Approval, not an approved feature.
 
-  **Output layout:**
+  Distinguish three records where the user goals require them:
 
-  ```
-  run_<timestamp>/
-    snapshots.jsonl   # low-frequency full+delta state
-    events.jsonl      # lossless state-change events
-    # OTel spans → Tempo (separate, optional, sampled)
-  ```
+  | Record | Primary question | Current status |
+  | --- | --- | --- |
+  | State observation / future checkpoint | What was the world state? Can execution resume? | V1 has sampled, profile-full observations; resumable checkpoints are separate future work. |
+  | Input and event journal | Which effective input was applied, when, and what ack/outcome followed? | V1 durably records supported navigation inputs, acks and events; broader typed events remain future work. |
+  | Operation trace | Why did a task take this path across RMF, ROS, agents and devices? | Future sampled action/operation spans; not a replay input source. |
 
-  **Implementation order:**
+  Snapshots alone cannot yield the causal operation trace: sampled poses omit
+  requests, decisions, retries, rejection reasons and cross-process timing.
+  The input/event journal can anchor a trace timeline, but end-to-end spans
+  require context propagated at each integration boundary. Correlate sinks with
+  stable run/step/command/operation IDs and explicit simulation versus wall time;
+  v1 persists run, step/phase/order, source and command IDs, but not end-to-end
+  operation/trace IDs or wall-time spans. Keep
+  durable replay writes on a failure-visible path; optional EventBus/OTel sinks
+  may share emissions but must not be the sole source of required replay data.
+  See [Observability](#observability) for the future trace exporter.
 
-  **Current state:** the EventBus and lifecycle, action, collision, pause, and
-  per-agent update events are available.  Handlers receive the current
-  event-name/keyword-argument API; there is no persisted, structured
-  `SimEvent` record yet.
+  For the next scope review, a **provisional v2 candidate** is tooling around
+  the supported artifact: inspect/re-execute/compare CLI, opt-in recording in
+  compatible examples, and limited result playback. Playback reads
+  saved observations; it does not require variable `dt` or controller-state
+  serialization, but needs explicit sampling, timing and display semantics. A
+  **provisional v3 candidate** is broader execution profiles based on concrete
+  failures, starting with differential navigation and attach/detach plus their
+  required inputs/state. Capturing controller, attachment and other relevant
+  internal execution state would support a later checkpoint contract; expanding
+  recorded observations and example capture would support useful playback.
+  Neither expansion alone establishes a complete restore boundary. Generic
+  recording of arbitrary examples and checkpoint/restore remain separate scope
+  decisions. These version labels are discussion aids, not approved milestones;
+  playback, input re-execution and checkpoint/restore can advance independently.
 
-  **Remaining order:**
+  Remaining candidates, requiring concrete use cases and separate scope:
 
-  1. Define a versioned event-record schema and JSONL writer subscriber
-     (lossless input log).
-  2. Add `SimulationSnapshot` plus
-     `MultiRobotSimulationCore.snapshot()` / `restore()` (see
-     [snapshot-replay/spec.md](https://github.com/yuokamoto/PyBulletFleet/blob/main/docs/design/snapshot-replay/spec.md)).
-  3. Add `replay.py` for snapshot + event-log re-execution.
-  4. Add an OTel exporter subscriber (independent of replay; see
-     [Observability](#observability)).
+  - Extend the opt-in execution boundary incrementally to other simulation
+    commands and state-changing subsystems, then evaluate whether it should
+    become the default architecture. Define the reproducibility guarantee per
+    profile: explicit input order alone is insufficient without controlled
+    randomness, time, external inputs, scheduling, assets and relevant runtime
+    state. Preserve ordinary API compatibility during any migration.
+  - Result playback/seek for supported observations; delta encoding is a
+    separate storage optimization, not a playback prerequisite.
+  - Additional profiles, starting from concrete failure cases: differential
+    navigation, attach/detach and the controller/attachment state needed to
+    explain their outcomes; then joint/action/device/BT and dynamic worlds as
+    justified. Specify initial re-execution state separately from any
+    intermediate checkpoint state.
+  - Reconstruct supported `Agent` and `SimObject` instances from their effective
+    spawn information, instead of extending the replay-only `simple_cube` /
+    `static_box` vocabulary as a general PBF entity model. Record enough spawn
+    parameters and asset references to create the same initial objects. For
+    user-provided URDFs, assume the referenced files remain available and
+    unchanged; maintaining those files is the user's responsibility. Do not
+    require bundling or hashing arbitrary user assets by default. State changed
+    after spawn still needs its own capture and input boundary.
+  - A CLI to inspect, re-execute and compare supported artifacts, plus an
+    opt-in record mode for examples that explicitly use a supported input
+    boundary. Generic `record: true` for arbitrary examples requires broader
+    command/state coverage and is not a config-only change. A recorder attached
+    to an existing simulation must capture its actual effective configuration,
+    not fill omitted fields with ReplaySession creation defaults.
+  - ROS ingress adapters and rosbag correlation; DDS/executor replay is not
+    covered by core input re-execution.
+  - Checkpoint/restore with an explicitly sufficient execution-state contract:
+    capture and load the required controller, action, attachment/device and
+    other mutable state for the approved profile, then continue normal
+    simulation. Record and reapply post-checkpoint inputs separately when an
+    identical continuation is required. Evaluate whether a PyBullet-native
+    state format can preserve the relevant engine state; if usable, define how
+    it combines with PBF-owned execution state and user-managed asset files.
+  - Shared lazy state capture for ROS/co-simulation/replay after validating
+    capture consistency and cost.
+  - USO mapping/conformance, then cross-backend validation before extracting
+    common libraries.
+  - Independent observability sinks. Sampled traces cannot replace a complete
+    input journal. The general EventBus remains an in-process name/kwargs API;
+    only supported replay records have a persisted schema today.
+  - If broader audit/debugging cases require it, define a versioned generic
+    event-record schema and correlation fields before adding an independent
+    durable event sink. Do not assume every EventBus emission is a complete
+    state-change record or a safe required-I/O boundary.
 
 - **Behavior tree integration** — The current portable profile supports
   `Sequence`, `Fallback`, `Repeat`, and registered `Action` nodes. It is not a
@@ -238,7 +304,7 @@ External communication layers:
   (see `ros2_bridge/README.md` and
   [ros2-bridge/spec.md](https://github.com/yuokamoto/PyBulletFleet/blob/main/docs/design/ros2-bridge/spec.md))
 - **gRPC** — Language-agnostic RPC interface for orchestrators, WMS, and fleet managers
-- **Distributed co-simulation (Robot Proxy layer)** — Per-robot proxy processes that translate between simulated robots and real Robot Apps (Nav2, task assigners, BTs). Enables running 100+ unmodified single-robot software stacks against a centralized batched simulator. Sim Central stays single-process and batched; only a thin fixed-schema boundary (`StateSnapshot` + `CommandBuffer` + Events) crosses the IPC. **Shares schema with Snapshot/Replay** — same `StateSnapshot` dataclass feeds live IPC, replay log, and observability sinks (define schema once, fan out to multiple consumers). See [co-simulation/spec.md](https://github.com/yuokamoto/PyBulletFleet/blob/main/docs/design/co-simulation/spec.md) for layer separation, transport options (shared memory / gRPC / DDS), lockstep vs async sync modes, and the implementation phases.
+- **Distributed co-simulation (Robot Proxy layer)** — Per-robot proxy processes that translate between simulated robots and real Robot Apps (Nav2, task assigners, BTs). Enables running 100+ unmodified single-robot software stacks against a centralized batched simulator. Sim Central stays single-process and batched; only a thin fixed-schema boundary (`StateSnapshot` + `CommandBuffer` + Events) crosses the IPC. Its earlier proposal to share one `StateSnapshot` dataclass with replay is a future design candidate, not a contract of the v1 navigation replay artifact. See [co-simulation/spec.md](https://github.com/yuokamoto/PyBulletFleet/blob/main/docs/design/co-simulation/spec.md) for layer separation, transport options (shared memory / gRPC / DDS), lockstep vs async sync modes, and the implementation phases.
 
 ## Refactoring
 
@@ -440,7 +506,10 @@ Simulation environment assets (warehouse floors, factory layouts, etc.):
 ## Observability
 
 Operational visibility for long benchmark runs and production deployments.
-**Shares the EventBus with Snapshot/Replay** — same emission point, different sinks.
+Optional traces and metrics may consume EventBus emissions, while the v1 replay
+session records its supported inputs/results directly so I/O failures remain
+visible. The sinks should share correlation IDs where available, not
+depend on one universal emission point.
 See [observability/spec.md](https://github.com/yuokamoto/PyBulletFleet/blob/main/docs/design/observability/spec.md)
 for the design.
 

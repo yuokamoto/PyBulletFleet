@@ -96,9 +96,12 @@ class FleetStateProvider:
 class FleetCommandDispatcher:
     """Validate and apply fleet commands against a simulation core."""
 
-    def __init__(self, sim_core: Any, *, allowed_names: Iterable[str] | None = None) -> None:
+    def __init__(
+        self, sim_core: Any, *, allowed_names: Iterable[str] | None = None, retain_command_events: bool = True
+    ) -> None:
         self.sim_core = sim_core
         self.command_events: list[CommandEvent] = []
+        self._retain_command_events = retain_command_events
         self.allowed_names = frozenset(allowed_names) if allowed_names is not None else None
         self._name_index: dict[str, Any | None] = {}
         self.refresh_name_index()
@@ -311,7 +314,8 @@ class FleetCommandDispatcher:
             accepted_names=accepted_names,
             rejected=dict(rejected),
         )
-        self.command_events.append(event)
+        if self._retain_command_events:
+            self.command_events.append(event)
         events = getattr(self.sim_core, "events", None)
         if events is not None and hasattr(events, "emit"):
             events.emit(FLEET_COMMAND_EVENT, command_event=event)
