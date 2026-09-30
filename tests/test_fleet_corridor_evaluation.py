@@ -1,8 +1,11 @@
 """Scenario-level evidence for the external corridor evaluator."""
 
+import sys
+
 import pybullet as p
 import pytest
 
+import pybullet_fleet.examples.fleet_corridor_evaluation as corridor
 from pybullet_fleet.examples.fleet_corridor_evaluation import (
     CorridorConfig,
     _make_sim,
@@ -92,3 +95,33 @@ def test_comparison_rejects_different_conditions():
         compare_reports(report, {**report, "policy": "direction_gate", "tasks": changed_tasks})
     with pytest.raises(ValueError, match="different policies"):
         compare_reports(report, report)
+
+
+def test_gui_observation_uses_same_scenario_without_desktop(monkeypatch):
+    original_make_sim = corridor._make_sim
+
+    def direct_client(config, *, gui=False):
+        assert gui
+        return original_make_sim(config, gui=False)
+
+    monkeypatch.setattr(corridor, "_make_sim", direct_client)
+    monkeypatch.setattr(corridor.time, "sleep", lambda _: None)
+    report = run_policy("uncontrolled", CorridorConfig(cutoff=1), gui=True, view_rtf=3)
+    assert report["execution"] == {"gui": True, "target_view_rtf": 3}
+    assert report["metrics"]["simulated_seconds"] == 1
+    assert len(report["tasks"]) == 40
+
+
+def test_gui_requires_one_policy_and_positive_view_rate(monkeypatch, tmp_path):
+    monkeypatch.setattr(sys, "argv", ["corridor", str(tmp_path / "unused"), "--gui"])
+    with pytest.raises(SystemExit, match="2"):
+        corridor.main()
+    with pytest.raises(ValueError, match="view_rtf"):
+        run_policy("uncontrolled", gui=True, view_rtf=0)
+
+
+def test_single_policy_cli_writes_only_one_report(monkeypatch, tmp_path):
+    output = tmp_path / "one-policy"
+    monkeypatch.setattr(sys, "argv", ["corridor", str(output), "--policy", "uncontrolled", "--cutoff", "1"])
+    corridor.main()
+    assert sorted(path.name for path in output.iterdir()) == ["uncontrolled.json"]

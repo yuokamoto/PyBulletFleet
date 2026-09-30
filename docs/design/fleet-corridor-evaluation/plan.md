@@ -255,3 +255,14 @@ without adding a stop/reset mode. If a material core responsibility change or
 generic task/metric framework becomes necessary, return for Human Architecture
 Review. Replay, playback, checkpoint, tracing, item transport and 100-robot
 scale remain follow-ups.
+
+## GUI observation extension
+
+Human requested a way to watch the scenario after the first implementation.
+The example offers a single-policy GUI mode with external wall-clock pacing and
+a fixed top-down camera; the default two-policy measurement remains headless.
+`step_once()` itself does not pace to `target_rtf`, so the example sleeps after
+each completed step at the requested viewing rate. The GUI stays open at the
+cutoff until closed or interrupted. Manual pause/single-step input may alter
+command timing and is labeled as observational, not a repeatability check.
+This adds no simulation-core responsibility or replay mechanism.

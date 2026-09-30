@@ -16,6 +16,41 @@ integer number of steps. The command writes `uncontrolled.json`,
 simulation with the same initial poses, 40 two-leg movement tasks, geometry,
 motion limits and cutoff. The comparison does not use recorded-command replay.
 
+## Watch a policy in the GUI
+
+Select one policy at a time. The GUI defaults to 1× simulated time and keeps
+the final view open until you close the window or press Ctrl+C. The JSON report
+is written when the window closes. Blue robots start in area A; orange robots
+start in area B.
+
+```bash
+python -m pybullet_fleet.examples.fleet_corridor_evaluation /tmp/pbf-corridor-watch-a \
+  --gui --policy uncontrolled --cutoff 30
+python -m pybullet_fleet.examples.fleet_corridor_evaluation /tmp/pbf-corridor-watch-b \
+  --gui --policy direction_gate --rtf 3
+```
+
+The 30-second run is for a quick look and censors unfinished tasks. For the
+defined 300-second comparison, omit `--cutoff`; direction gate reaches its
+last endpoint at about 245 simulated seconds in the tested configuration.
+`--rtf` changes live GUI viewing speed, not the simulation timestep. This is a
+live simulation run, not recorded-result playback. Manual pause
+or single-step interaction may change command timing, so use the default
+headless two-policy command for repeatable measurement. GUI mode writes only
+the selected policy's report, not `comparison.json`.
+
+On macOS, native PyBullet GUI can be used from Terminal. If the native window
+does not work well, the launcher added by [PR #48](https://github.com/yuokamoto/PyBulletFleet/pull/48)
+can show the Linux GUI in a browser (requires Colima and Docker CLI):
+
+```bash
+scripts/run_linux_gui_macos.sh fleet_corridor_evaluation.py \
+  /tmp/pbf-corridor-browser --gui --policy uncontrolled --cutoff 30
+```
+
+That launcher runs in a temporary container; use the native Python command
+above when you need to retain the JSON report on the Mac.
+
 The JSON includes versioned conditions, measurement definitions, task release,
 command acknowledgement, first movement and arrival times, external policy
 decisions, observed proximity/overlap episodes, and aggregate metrics. A task
@@ -38,7 +73,8 @@ The report retains each observed crowding interval with start/end step and
 peak occupancy, as well as the aggregate count of over-capacity steps.
 Kinematic robots pass through one another. The direction gate grants up to two
 active movement tasks in one direction and alternates direction after a batch
-finishes. It can create substantial admission delay while reducing observed
+finishes. A gate slot is held until endpoint arrival, including travel outside
+the corridor. It can create substantial admission delay while reducing observed
 overlap in the corridor; overlap elsewhere may remain.
 
 Collision episodes are sampled after every completed step. `margin_only`

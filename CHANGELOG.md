@@ -10,7 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ### Added
 
 - Add a synthetic 20-robot corridor evaluation example with independent entry
-  policies, task/collision evidence, and simulated-time fleet metrics.
+  policies, optional single-policy GUI observation, task/collision evidence,
+  and simulated-time fleet metrics.
 - Add a macOS launcher for viewing Linux GUI examples in a browser via Colima
   and noVNC.
 - Opt-in, versioned kinematic navigation replay: record effective Fleet API navigate/stop inputs, reconstruct a fresh supported initial world, and compare acknowledgements, events and full observations. Supports omni/batch_omni, stable artifact entity IDs, integrity validation and explicit changed-configuration comparisons; does not provide checkpoint/resume or ROS/DDS replay.

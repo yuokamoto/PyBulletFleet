@@ -30,6 +30,16 @@ python pybullet_fleet/examples/basics/behavior_tree_demo.py
 python pybullet_fleet/examples/basics/behavior_tree_demo.py --headless --duration 5
 ```
 
+The synthetic corridor evaluation runs 20 robots under two external entry
+policies. Select one policy with `--gui` to watch a live simulation; the
+default command runs both policies headlessly and writes comparable reports.
+See the [corridor evaluation guide](../../docs/how-to/fleet-corridor-evaluation.md).
+
+```bash
+python -m pybullet_fleet.examples.fleet_corridor_evaluation /tmp/pbf-corridor \
+  --gui --policy uncontrolled --cutoff 30
+```
+
 ## Scale Demo Roles
 
 | Demo | Role |

@@ -18,6 +18,17 @@ batches. The uncontrolled policy dispatches all ready tasks.
 
 ## Observed outcomes
 
+**Uncontrolled** and **Direction gate** are names of the two external
+fleet-management policies being compared, not PBF simulation modes.
+Uncontrolled sends every ready movement request, including opposing traffic,
+to the Fleet API immediately. Direction gate admits at most two active
+movement requests in one direction; it holds other requests before the API
+call and alternates direction when a batch finishes. A request occupies a gate
+slot until endpoint arrival, including travel outside the corridor; this is a
+deliberately conservative example policy and contributes to its long delay.
+Each policy runs in a fresh simulation with the same initial scene and
+workload. The table compares their measured outcomes under those conditions.
+
 Local macOS 14.6.1 x86_64, Python 3.12.5, PyBullet build 2026-09-26.
 Two independent runs per policy produced the same simulated-time metrics.
 These figures describe this synthetic configuration, not a policy ranking:
@@ -55,6 +66,14 @@ The all-pair collector has visible cost: approximate 300 s runs took 3.2–3.6 s
 wall time with episode collection, versus 0.8–1.0 s without it; core step time
 remained about 0.3–0.4 s. RTF was about 85–93 with collection and 315–370
 without. These are local observations, not a release performance guarantee.
+These timing figures are from headless runs; GUI viewing adds deliberate
+pacing and is not a comparable performance measurement.
+A native macOS GUI smoke run completed and the one-policy CLI saved its JSON
+after Ctrl+C at the final view. At a 30 s cutoff, a native GUI run at 30×
+viewing speed matched the headless uncontrolled run on completed tasks,
+corridor peak/over-capacity steps, observed corridor overlap episodes and the
+core collision count. This verifies the default viewing path without manual
+pause/step interaction; it does not validate the browser launcher visually.
 
 ## Follow-up signals
 
@@ -78,9 +97,9 @@ without. These are local observations, not a release performance guarantee.
 
 Focused scenario tests cover two cadences, collision categories and clearing,
 equivalent independent policy workloads, accounting and cutoff censoring.
-`make verify` passed: 1754 passed, 12 skipped, one expected failure and 81.39%
-coverage. After the final crowding-interval and comparison checks were added,
-the focused tests (5 passed) and all changed-file pre-commit hooks passed.
+`make verify` passed after the GUI extension and main-branch merge: 1768
+passed, 12 skipped, one expected failure and 81.24% coverage. Focused
+corridor tests (8 passed) and all pre-commit hooks passed.
 `make docs` passed with `LC_ALL=C LANG=C` because the local shell locale was
 not available to Sphinx. The CLI produced all three JSON reports in a smoke
 run.

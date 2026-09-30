@@ -44,7 +44,9 @@ Do not put that workflow into the simulation core without a demonstrated need.
 
 ## Proposed first slice: scenario and measurement contract
 
-Define one small, headless, physics-off corridor scene and a finite workload.
+Define one small, physics-off corridor scene and a finite workload. The
+measurement default is headless; optional GUI observation runs one policy at
+a time and does not replace the independent headless comparison.
 Use a fixed timestep, explicit initial poses, robot dimensions, corridor width,
 route waypoints, movement limits, input schedule and run cutoff. Start with 20
 robots and two entry policies; 100 robots is a later scale check. The scenario

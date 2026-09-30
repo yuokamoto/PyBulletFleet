@@ -89,10 +89,12 @@ def _workload() -> list[dict]:
     return tasks
 
 
-def _make_sim(config: CorridorConfig) -> tuple[MultiRobotSimulationCore, dict[int, tuple[str, SimObject]]]:
+def _make_sim(
+    config: CorridorConfig, *, gui: bool = False
+) -> tuple[MultiRobotSimulationCore, dict[int, tuple[str, SimObject]]]:
     sim = MultiRobotSimulationCore(
         SimulationParams(
-            gui=False,
+            gui=gui,
             monitor=False,
             enable_monitor_gui=False,
             enable_floor=False,
@@ -134,6 +136,9 @@ def _make_sim(config: CorridorConfig) -> tuple[MultiRobotSimulationCore, dict[in
                     sim,
                 )
                 entities[robot.object_id] = (name, robot)
+                if gui:
+                    color = [0.15, 0.45, 0.95, 1.0] if side == "a" else [0.95, 0.45, 0.12, 1.0]
+                    p.changeVisualShape(robot.body_id, -1, rgbaColor=color, physicsClientId=sim.client)
         for side, y in (("north", 0.22), ("south", -0.22)):
             shape = ShapeParams(shape_type="box", half_extents=[3.0, 0.05, 0.25])
             wall = SimObject.from_params(
@@ -149,6 +154,16 @@ def _make_sim(config: CorridorConfig) -> tuple[MultiRobotSimulationCore, dict[in
                 sim,
             )
             entities[wall.object_id] = (f"wall-{side}", wall)
+    if gui:
+        sim.setup_camera(
+            camera_config={
+                "camera_mode": "manual",
+                "camera_distance": 18.0,
+                "camera_yaw": 0,
+                "camera_pitch": -89,
+                "camera_target": [0, 0, 0.1],
+            }
+        )
     return sim, entities
 
 
@@ -243,11 +258,23 @@ def _select(policy: str, ready: list[dict], active: dict[str, dict], turn: str) 
     return [task for task in ready if task["direction"] == direction][: max(0, slots)], turn
 
 
-def run_policy(policy: str, config: CorridorConfig = CorridorConfig(), *, collect_collision_episodes: bool = True) -> dict:
+def run_policy(
+    policy: str,
+    config: CorridorConfig = CorridorConfig(),
+    *,
+    collect_collision_episodes: bool = True,
+    gui: bool = False,
+    view_rtf: float = 1.0,
+    hold_gui: bool = False,
+) -> dict:
     """Run one policy from a fresh, equivalent scenario; never use replay commands."""
     if policy not in ("uncontrolled", "direction_gate"):
         raise ValueError("policy must be uncontrolled or direction_gate")
-    sim, entities = _make_sim(config)
+    if gui and (not math.isfinite(view_rtf) or view_rtf <= 0):
+        raise ValueError("view_rtf must be finite and positive in GUI mode")
+    if hold_gui and not gui:
+        raise ValueError("hold_gui requires gui=True")
+    sim, entities = _make_sim(config, gui=gui)
     dispatcher = FleetCommandDispatcher(sim, retain_command_events=False)
     provider = FleetStateProvider(sim)
     tasks = _workload()
@@ -266,9 +293,11 @@ def run_policy(policy: str, config: CorridorConfig = CorridorConfig(), *, collec
     crowding_intervals: list[dict] = []
     active_crowding: dict | None = None
     try:
-        for _ in range(config.steps):
+        while sim.step_count < config.steps:
+            if gui and not p.isConnected(sim.client):
+                raise RuntimeError("GUI closed before the fixed simulated-time cutoff; no report was saved")
             step = sim.step_count
-            ready = _ready(tasks, active, completed)
+            ready = _ready(tasks, active, completed) if not sim.is_paused else []
             for task in ready:
                 task.setdefault("released_step", step)
             selected, turn = _select(policy, ready, active, turn)
@@ -323,6 +352,10 @@ def run_policy(policy: str, config: CorridorConfig = CorridorConfig(), *, collec
             before = time.perf_counter()
             sim.step_once()
             step_wall += time.perf_counter() - before
+            if sim.step_count == step:
+                if gui:
+                    time.sleep(0.02)
+                continue
             if collect_collision_episodes:
                 _observe_collisions(sim, entities, active_episodes, episodes, config.margin, active)
             states = {state.name: state for state in provider.get_states_2d()}
@@ -358,6 +391,8 @@ def run_policy(policy: str, config: CorridorConfig = CorridorConfig(), *, collec
                     task["completed_time"] = sim.step_count * config.timestep
                     completed.add(task["task_id"])
                     del active[name]
+            if gui:
+                time.sleep(max(0.0, config.timestep / view_rtf - (time.perf_counter() - before)))
         for episode in active_episodes.values():
             episode["end_step"] = sim.step_count
             episode["end_time"] = sim.step_count * config.timestep
@@ -382,11 +417,12 @@ def run_policy(policy: str, config: CorridorConfig = CorridorConfig(), *, collec
         command_durations = [(task["completed_step"] - task["issued_step"]) * config.timestep for task in finished]
         admission_delays = [(task["issued_step"] - task["released_step"]) * config.timestep for task in issued]
         release_to_arrival = [(task["completed_step"] - task["released_step"]) * config.timestep for task in finished]
-        return {
+        report = {
             "schema_version": 1,
             "scenario_id": "pbf.synthetic_corridor.v1",
             "run_id": run_id,
             "policy": policy,
+            "execution": {"gui": gui, "target_view_rtf": view_rtf if gui else None},
             "conditions": {
                 **asdict(config),
                 "robots": 20,
@@ -449,8 +485,17 @@ def run_policy(policy: str, config: CorridorConfig = CorridorConfig(), *, collec
                 "Geometric overlap is not a physics impact.",
                 "Admission delay is an external policy measurement, not PBF robot waiting time.",
                 "Uncontrolled traffic passes through overlaps; crowding is not a physical queue or warehouse throughput.",
+                "Manual GUI pause or single-step interaction can change the policy command schedule and reported outcome.",
             ],
         }
+        if hold_gui:
+            print("Simulation finished. Close the GUI window or press Ctrl+C to save the report and exit.")
+            try:
+                while p.isConnected(sim.client):
+                    time.sleep(0.1)
+            except KeyboardInterrupt:
+                pass
+        return report
     finally:
         if sim.client is not None and p.isConnected(sim.client):
             p.disconnect(sim.client)
@@ -486,16 +531,24 @@ def main() -> None:
     parser.add_argument("output", type=Path, help="Directory for independent policy reports")
     parser.add_argument("--dt", type=float, default=0.1, help="Simulation timestep in seconds")
     parser.add_argument("--cutoff", type=float, default=300.0, help="Fixed simulated-time cutoff")
+    parser.add_argument("--policy", choices=("both", "uncontrolled", "direction_gate"), default="both")
+    parser.add_argument("--gui", action="store_true", help="Observe one policy in the PyBullet GUI")
+    parser.add_argument("--rtf", type=float, default=1.0, help="GUI target real-time factor (default: 1)")
     args = parser.parse_args()
+    if args.gui and args.policy == "both":
+        parser.error("--gui requires --policy uncontrolled or --policy direction_gate")
+    if args.gui and (not math.isfinite(args.rtf) or args.rtf <= 0):
+        parser.error("--rtf must be finite and positive with --gui")
     config = CorridorConfig(timestep=args.dt, cutoff=args.cutoff)
     args.output.mkdir(parents=True, exist_ok=False)
-    left = run_policy("uncontrolled", config)
-    right = run_policy("direction_gate", config)
-    for report in (left, right):
+    policies = ("uncontrolled", "direction_gate") if args.policy == "both" else (args.policy,)
+    reports = [run_policy(policy, config, gui=args.gui, view_rtf=args.rtf, hold_gui=args.gui) for policy in policies]
+    for report in reports:
         path = args.output / f"{report['policy']}.json"
         path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
         print(report["policy"], report["metrics"])
-    (args.output / "comparison.json").write_text(json.dumps(compare_reports(left, right), indent=2, sort_keys=True) + "\n")
+    if len(reports) == 2:
+        (args.output / "comparison.json").write_text(json.dumps(compare_reports(*reports), indent=2, sort_keys=True) + "\n")
 
 
 if __name__ == "__main__":
