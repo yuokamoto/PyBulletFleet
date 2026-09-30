@@ -56,7 +56,7 @@ if ! colima status --profile "$profile" >/dev/null 2>&1; then
 fi
 
 echo "Building Linux GUI image (cached after the first run)..."
-docker --context "$docker_context" build -f "$repo_root/docker/Dockerfile.mac-gui" -t "$image" "$repo_root"
+docker --context "$docker_context" build --platform linux/amd64 -f "$repo_root/docker/Dockerfile.mac-gui" -t "$image" "$repo_root"
 
 container=$(docker --context "$docker_context" run --detach \
   --publish 127.0.0.1::6080 "$image" "$@")
