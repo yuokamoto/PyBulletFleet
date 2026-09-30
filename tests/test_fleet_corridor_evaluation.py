@@ -10,11 +10,24 @@ from pybullet_fleet.examples.fleet_corridor_evaluation import (
     CorridorConfig,
     _make_sim,
     _observe_collisions,
+    _workload,
     compare_reports,
     run_policy,
 )
 from pybullet_fleet.geometry import Pose
 from pybullet_fleet.fleet_api import FleetStateProvider
+
+
+def test_workload_starts_match_spawned_robots():
+    sim, entities = _make_sim(CorridorConfig(cutoff=1))
+    robots = {name: obj for name, obj in entities.values() if not name.startswith("wall-")}
+    try:
+        for task in _workload():
+            if task["leg"] == 0:
+                pose = robots[task["robot_id"]].get_pose()
+                assert (pose.x, pose.y) == pytest.approx(task["start"])
+    finally:
+        p.disconnect(sim.client)
 
 
 @pytest.mark.parametrize("dt", [0.1, 0.05])
@@ -103,10 +116,18 @@ def test_gui_observation_uses_same_scenario_without_desktop(monkeypatch):
 
     def direct_client(config, *, gui=False):
         assert gui
-        return original_make_sim(config, gui=False)
+        sim, entities = original_make_sim(config, gui=False)
+
+        def run_exact_steps(duration: float | None = None) -> None:
+            assert duration == config.cutoff
+            assert sim.params.target_rtf == 3
+            for _ in range(config.steps):
+                sim.step_once()
+
+        sim.run_simulation = run_exact_steps
+        return sim, entities
 
     monkeypatch.setattr(corridor, "_make_sim", direct_client)
-    monkeypatch.setattr(corridor.time, "sleep", lambda _: None)
     report = run_policy("uncontrolled", CorridorConfig(cutoff=1), gui=True, view_rtf=3)
     assert report["execution"] == {"gui": True, "target_view_rtf": 3}
     assert report["metrics"]["simulated_seconds"] == 1

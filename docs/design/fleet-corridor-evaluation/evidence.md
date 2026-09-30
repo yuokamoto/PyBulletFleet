@@ -83,12 +83,25 @@ pause/step interaction; it does not validate the browser launcher visually.
 
 ## Follow-up signals
 
+- **Collision geometry API:** The scenario can issue commands and read motion
+  state through ordinary PBF APIs, but `_observe_collisions()` directly uses
+  PyBullet body IDs and `sim.client` to obtain signed closest-point distances.
+  The public collision count/active pairs do not preserve the distinction
+  between positive-gap margin intrusion and geometric overlap, and the core's
+  AABB broadphase can omit positive-gap pairs. Consider a narrow read-only PBF
+  proximity query for specified objects, with explicit margin, detection
+  method and sampling cost. Keep corridor classification and episode/metric
+  aggregation in the external evaluator. This API is a follow-up candidate,
+  not part of the approved slice.
 - **Playback:** The per-step scenario observations are not stored as a
   continuous result timeline. Episode start positions and task/decision records
   permit limited inspection, but not rosbag-like playback or seeking.
 - **Checkpoint/restore:** A changed-policy continuation just before overlap
-  would be useful. The simulator would need profile-specific state save/load;
-  external orchestration should own capture, substitution and resume.
+  would be useful. The simulator would need profile-specific state save/load,
+  including state required to resume movement consistently; external
+  orchestration should own capture, policy substitution and resume. This is
+  separate from both recorded-result playback and PR #50's initial-state plus
+  recorded-command re-execution.
 - **Replay/input capture:** The policies choose actions dynamically. PR #50
   recorded-command re-execution would reproduce the original policy's commands,
   not let a changed policy decide. A broader live input boundary is separate.

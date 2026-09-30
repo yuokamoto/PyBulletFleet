@@ -29,6 +29,21 @@ from pybullet_fleet.sim_object import ShapeParams, SimObject, SimObjectSpawnPara
 from pybullet_fleet.types import CollisionDetectionMethod, CollisionMode
 
 
+# Fixed geometry for this synthetic scenario. Keep workload, spawn positions,
+# observation predicates and the report on the same definition.
+_ROBOTS_PER_SIDE = 10
+_ROBOT_SPACING_X = 0.24
+_LANE_Y = (-0.075, 0.075)
+_START_X = 5.0
+_ENDPOINT_X = 4.0
+_ROBOT_Z = 0.1
+_CORRIDOR_HALF_LENGTH = 3.0
+_CORRIDOR_INNER_HALF_WIDTH = 0.17
+_CORRIDOR_CAPACITY = 3
+_WALL_HALF_THICKNESS = 0.05
+_WALL_HALF_HEIGHT = 0.25
+
+
 @dataclass(frozen=True)
 class CorridorConfig:
     timestep: float = 0.1
@@ -67,15 +82,19 @@ def _quantiles(values: list[float]) -> dict:
     }
 
 
+def _robot_route(side: str, index: int) -> tuple[float, float, float]:
+    offset = _ROBOT_SPACING_X * index
+    start_x = (-_START_X - offset) if side == "a" else (_START_X + offset)
+    endpoint_x = (_ENDPOINT_X + offset) if side == "a" else (-_ENDPOINT_X - offset)
+    return start_x, endpoint_x, _LANE_Y[index % len(_LANE_Y)]
+
+
 def _workload() -> list[dict]:
     tasks = []
     for side in ("a", "b"):
-        for index in range(10):
+        for index in range(_ROBOTS_PER_SIDE):
             name = f"{side}{index:02d}"
-            lane_y = -0.075 if index % 2 == 0 else 0.075
-            offset = 0.24 * index
-            start_x = (-5.0 - offset) if side == "a" else (5.0 + offset)
-            goal_x = (4.0 + offset) if side == "a" else (-4.0 - offset)
+            start_x, goal_x, lane_y = _robot_route(side, index)
             for leg in (0, 1):
                 tasks.append(
                     {
@@ -113,15 +132,14 @@ def _make_sim(
     model = Path(__file__).resolve().parents[1] / "robots" / "simple_cube.urdf"
     with sim.batch_spawn():
         for side in ("a", "b"):
-            for index in range(10):
+            for index in range(_ROBOTS_PER_SIDE):
                 name = f"{side}{index:02d}"
-                x = (-5.0 - 0.24 * index) if side == "a" else (5.0 + 0.24 * index)
-                y = -0.075 if index % 2 == 0 else 0.075
+                x, _, y = _robot_route(side, index)
                 robot = Agent.from_params(
                     AgentSpawnParams(
                         name=name,
                         urdf_path=str(model),
-                        initial_pose=Pose.from_xyz(x, y, 0.1),
+                        initial_pose=Pose.from_xyz(x, y, _ROBOT_Z),
                         mass=0.0,
                         pickable=False,
                         collision_mode=CollisionMode.NORMAL_2D,
@@ -140,12 +158,15 @@ def _make_sim(
                 if gui:
                     color = [0.15, 0.45, 0.95, 1.0] if side == "a" else [0.95, 0.45, 0.12, 1.0]
                     p.changeVisualShape(robot.body_id, -1, rgbaColor=color, physicsClientId=sim.client)
-        for side, y in (("north", 0.22), ("south", -0.22)):
-            shape = ShapeParams(shape_type="box", half_extents=[3.0, 0.05, 0.25])
+        wall_y = _CORRIDOR_INNER_HALF_WIDTH + _WALL_HALF_THICKNESS
+        for side, y in (("north", wall_y), ("south", -wall_y)):
+            shape = ShapeParams(
+                shape_type="box", half_extents=[_CORRIDOR_HALF_LENGTH, _WALL_HALF_THICKNESS, _WALL_HALF_HEIGHT]
+            )
             wall = SimObject.from_params(
                 SimObjectSpawnParams(
                     name=f"wall-{side}",
-                    initial_pose=Pose.from_xyz(0, y, 0.1),
+                    initial_pose=Pose.from_xyz(0, y, _ROBOT_Z),
                     mass=0.0,
                     pickable=False,
                     visual_shape=shape,
@@ -162,7 +183,7 @@ def _make_sim(
                 "camera_distance": 18.0,
                 "camera_yaw": 0,
                 "camera_pitch": -89,
-                "camera_target": [0, 0, 0.1],
+                "camera_target": [0, 0, _ROBOT_Z],
             }
         )
     return sim, entities
@@ -202,7 +223,7 @@ def _observe_collisions(
             observed[tuple(sorted((name_a, name_b)))] = (
                 category,
                 distance,
-                -3.0 <= x_mid <= 3.0,
+                -_CORRIDOR_HALF_LENGTH <= x_mid <= _CORRIDOR_HALF_LENGTH,
                 {name_a: [obj_a.get_pose().x, obj_a.get_pose().y], name_b: [obj_b.get_pose().x, obj_b.get_pose().y]},
             )
 
@@ -333,7 +354,7 @@ def run_policy(
                         RobotGoalCommand2D(
                             name=name,
                             position=tuple(task["destination"]),
-                            z=0.1,
+                            z=_ROBOT_Z,
                             command_id=command_id,
                         )
                     ],
@@ -376,12 +397,14 @@ def run_policy(
                 )
             states = {state.name: state for state in provider.get_states_2d()}
             corridor_robots = sum(
-                -3.0 <= state.position[0] <= 3.0 and -0.17 <= state.position[1] <= 0.17 for state in states.values()
+                -_CORRIDOR_HALF_LENGTH <= state.position[0] <= _CORRIDOR_HALF_LENGTH
+                and -_CORRIDOR_INNER_HALF_WIDTH <= state.position[1] <= _CORRIDOR_INNER_HALF_WIDTH
+                for state in states.values()
             )
             corridor_peak_robots = max(corridor_peak_robots, corridor_robots)
-            corridor_over_capacity_steps += int(corridor_robots > 3)
+            corridor_over_capacity_steps += int(corridor_robots > _CORRIDOR_CAPACITY)
             corridor_robot_steps += corridor_robots
-            if corridor_robots > 3:
+            if corridor_robots > _CORRIDOR_CAPACITY:
                 if active_crowding is None:
                     active_crowding = {
                         "start_step": observed_step,
@@ -451,10 +474,10 @@ def run_policy(
             "execution": {"gui": gui, "target_view_rtf": view_rtf if gui else None},
             "conditions": {
                 **asdict(config),
-                "robots": 20,
-                "tasks": 40,
-                "corridor_x": [-3.0, 3.0],
-                "corridor_inner_y": [-0.17, 0.17],
+                "robots": 2 * _ROBOTS_PER_SIDE,
+                "tasks": len(tasks),
+                "corridor_x": [-_CORRIDOR_HALF_LENGTH, _CORRIDOR_HALF_LENGTH],
+                "corridor_inner_y": [-_CORRIDOR_INNER_HALF_WIDTH, _CORRIDOR_INNER_HALF_WIDTH],
                 "robot_collision_mode": "normal_2d",
                 "collision_detection_method": "closest_points",
                 "collision_check_frequency": "every_step",
@@ -467,7 +490,11 @@ def run_policy(
                 "collision_rule": (
                     "post-step signed closest-point distance: margin_only (0,d<=margin), geometric_overlap (d<=0)"
                 ),
-                "corridor_rule": "robot reference point in x=[-3,3], y=[-0.17,0.17]; over capacity means >3 robots",
+                "corridor_rule": (
+                    f"robot reference point in x=[{-_CORRIDOR_HALF_LENGTH},{_CORRIDOR_HALF_LENGTH}], "
+                    f"y=[{-_CORRIDOR_INNER_HALF_WIDTH},{_CORRIDOR_INNER_HALF_WIDTH}]; "
+                    f"over capacity means >{_CORRIDOR_CAPACITY} robots"
+                ),
                 "admission_rule": "external task release to navigate issuance, never PBF internal waiting",
                 "rate_rule": "completed tasks divided by fixed simulated-time cutoff",
                 "step_wall_rule": "sum from PRE_STEP entry to POST_STEP entry; excludes collection and pacing",
