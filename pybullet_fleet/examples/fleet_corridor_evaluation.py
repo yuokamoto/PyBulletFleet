@@ -22,6 +22,7 @@ import pybullet as p
 from pybullet_fleet.agent import Agent, AgentSpawnParams
 from pybullet_fleet.commands import RobotGoalCommand2D
 from pybullet_fleet.core_simulation import MultiRobotSimulationCore, SimulationParams
+from pybullet_fleet.events import SimEvents
 from pybullet_fleet.fleet_api import FleetCommandDispatcher, FleetStateProvider
 from pybullet_fleet.geometry import Pose
 from pybullet_fleet.sim_object import ShapeParams, SimObject, SimObjectSpawnParams
@@ -182,7 +183,9 @@ def _observe_collisions(
     episodes: list[dict],
     margin: float,
     active_tasks: dict[str, dict] | None = None,
+    observation_step: int | None = None,
 ) -> None:
+    sample_step = sim.step_count if observation_step is None else observation_step
     observed: dict[tuple[str, str], tuple[str, float, bool, dict]] = {}
     # The core's AABB broadphase does not expand by collision_margin. Query all
     # pairs here so a positive-gap margin intrusion is not silently omitted.
@@ -205,8 +208,8 @@ def _observe_collisions(
 
     for pair, episode in tuple(active.items()):
         if pair not in observed or observed[pair][0] != episode["category"]:
-            episode["end_step"] = sim.step_count
-            episode["end_time"] = sim.step_count * sim.params.timestep
+            episode["end_step"] = sample_step
+            episode["end_time"] = sample_step * sim.params.timestep
             episodes.append(episode)
             del active[pair]
     for pair, (category, distance, in_corridor, positions) in sorted(observed.items()):
@@ -214,8 +217,8 @@ def _observe_collisions(
             active[pair] = {
                 "entities": list(pair),
                 "category": category,
-                "start_step": sim.step_count,
-                "start_time": sim.step_count * sim.params.timestep,
+                "start_step": sample_step,
+                "start_time": sample_step * sim.params.timestep,
                 "min_distance": distance,
                 "start_positions_xy": positions,
                 "active_task_ids_at_start": [
@@ -292,12 +295,18 @@ def run_policy(
     corridor_robot_steps = 0
     crowding_intervals: list[dict] = []
     active_crowding: dict | None = None
-    try:
-        while sim.step_count < config.steps:
-            if gui and not p.isConnected(sim.client):
-                raise RuntimeError("GUI closed before the fixed simulated-time cutoff; no report was saved")
+    callback_failure: list[Exception] = []
+    step_started_wall = wall_start
+    sim.params.target_rtf = view_rtf if gui else 0
+
+    def before_step(**_: object) -> None:
+        nonlocal turn, step_started_wall
+        if callback_failure:
+            return
+        step_started_wall = time.perf_counter()
+        try:
             step = sim.step_count
-            ready = _ready(tasks, active, completed) if not sim.is_paused else []
+            ready = _ready(tasks, active, completed)
             for task in ready:
                 task.setdefault("released_step", step)
             selected, turn = _select(policy, ready, active, turn)
@@ -349,15 +358,22 @@ def run_policy(
                 )
                 if name in ack.accepted_names:
                     active[name] = task
-            before = time.perf_counter()
-            sim.step_once()
-            step_wall += time.perf_counter() - before
-            if sim.step_count == step:
-                if gui:
-                    time.sleep(0.02)
-                continue
+        except Exception as exc:
+            callback_failure.append(exc)
+            sim.params.target_rtf = 0
+
+    def after_step(**_: object) -> None:
+        nonlocal step_wall, corridor_peak_robots, corridor_over_capacity_steps, corridor_robot_steps, active_crowding
+        if callback_failure:
+            return
+        step_wall += time.perf_counter() - step_started_wall
+        try:
+            # POST_STEP is emitted before the core increments step_count.
+            observed_step = sim.step_count + 1
             if collect_collision_episodes:
-                _observe_collisions(sim, entities, active_episodes, episodes, config.margin, active)
+                _observe_collisions(
+                    sim, entities, active_episodes, episodes, config.margin, active, observation_step=observed_step
+                )
             states = {state.name: state for state in provider.get_states_2d()}
             corridor_robots = sum(
                 -3.0 <= state.position[0] <= 3.0 and -0.17 <= state.position[1] <= 0.17 for state in states.values()
@@ -368,31 +384,41 @@ def run_policy(
             if corridor_robots > 3:
                 if active_crowding is None:
                     active_crowding = {
-                        "start_step": sim.step_count,
-                        "start_time": sim.step_count * config.timestep,
+                        "start_step": observed_step,
+                        "start_time": observed_step * config.timestep,
                         "peak_robots": corridor_robots,
                         "observed_steps": 0,
                     }
                 active_crowding["peak_robots"] = max(active_crowding["peak_robots"], corridor_robots)
                 active_crowding["observed_steps"] += 1
             elif active_crowding is not None:
-                active_crowding["end_step"] = sim.step_count
-                active_crowding["end_time"] = sim.step_count * config.timestep
+                active_crowding["end_step"] = observed_step
+                active_crowding["end_time"] = observed_step * config.timestep
                 crowding_intervals.append(active_crowding)
                 active_crowding = None
             for name, task in tuple(active.items()):
                 state = states[name]
                 if state.is_moving and "first_movement_step" not in task:
-                    task["first_movement_step"] = sim.step_count
-                    task["first_movement_time"] = sim.step_count * config.timestep
+                    task["first_movement_step"] = observed_step
+                    task["first_movement_time"] = observed_step * config.timestep
                 goal = task["destination"]
                 if math.dist(state.position, goal) <= config.position_tolerance and not state.is_moving:
-                    task["completed_step"] = sim.step_count
-                    task["completed_time"] = sim.step_count * config.timestep
+                    task["completed_step"] = observed_step
+                    task["completed_time"] = observed_step * config.timestep
                     completed.add(task["task_id"])
                     del active[name]
-            if gui:
-                time.sleep(max(0.0, config.timestep / view_rtf - (time.perf_counter() - before)))
+        except Exception as exc:
+            callback_failure.append(exc)
+            sim.params.target_rtf = 0
+
+    sim.events.on(SimEvents.PRE_STEP, before_step)
+    sim.events.on(SimEvents.POST_STEP, after_step)
+    try:
+        sim.run_simulation(duration=config.cutoff)
+        if callback_failure:
+            raise RuntimeError("corridor scenario callback failed") from callback_failure[0]
+        if sim.step_count != config.steps:
+            raise RuntimeError("simulation ended before the fixed simulated-time cutoff; no report was saved")
         for episode in active_episodes.values():
             episode["end_step"] = sim.step_count
             episode["end_time"] = sim.step_count * config.timestep
@@ -444,6 +470,7 @@ def run_policy(
                 "corridor_rule": "robot reference point in x=[-3,3], y=[-0.17,0.17]; over capacity means >3 robots",
                 "admission_rule": "external task release to navigate issuance, never PBF internal waiting",
                 "rate_rule": "completed tasks divided by fixed simulated-time cutoff",
+                "step_wall_rule": "sum from PRE_STEP entry to POST_STEP entry; excludes collection and pacing",
                 "units": {"distance": "m", "time": "s", "rate": "tasks/s"},
             },
             "tasks": tasks,
@@ -497,6 +524,8 @@ def run_policy(
                 pass
         return report
     finally:
+        sim.events.off(SimEvents.PRE_STEP, before_step)
+        sim.events.off(SimEvents.POST_STEP, after_step)
         if sim.client is not None and p.isConnected(sim.client):
             p.disconnect(sim.client)
 

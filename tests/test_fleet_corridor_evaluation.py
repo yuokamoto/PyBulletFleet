@@ -14,6 +14,7 @@ from pybullet_fleet.examples.fleet_corridor_evaluation import (
     run_policy,
 )
 from pybullet_fleet.geometry import Pose
+from pybullet_fleet.fleet_api import FleetStateProvider
 
 
 @pytest.mark.parametrize("dt", [0.1, 0.05])
@@ -125,3 +126,13 @@ def test_single_policy_cli_writes_only_one_report(monkeypatch, tmp_path):
     monkeypatch.setattr(sys, "argv", ["corridor", str(output), "--policy", "uncontrolled", "--cutoff", "1"])
     corridor.main()
     assert sorted(path.name for path in output.iterdir()) == ["uncontrolled.json"]
+
+
+def test_observer_failure_cannot_publish_incomplete_report(monkeypatch):
+    def fail_states(_self):
+        raise ValueError("state collection failed")
+
+    monkeypatch.setattr(FleetStateProvider, "get_states_2d", fail_states)
+    with pytest.raises(RuntimeError, match="callback failed") as error:
+        run_policy("uncontrolled", CorridorConfig(cutoff=1))
+    assert isinstance(error.value.__cause__, ValueError)

@@ -50,11 +50,13 @@ fixed scene + immutable workload + policy parameters
                  |
        external scenario driver
        |        |          |
- Fleet API    step_once   post-step state/collision query
+ Fleet API  PRE_STEP    POST_STEP state/collision query
        |        |          |
        +---- external task/event/metric collector
                     |
           per-run records + comparison report
+
+ PBF run_simulation() owns stepping and wall-clock pacing.
 ```
 
 The scenario owns stable robot/task IDs, deterministic request order, fixed
@@ -259,10 +261,11 @@ scale remain follow-ups.
 ## GUI observation extension
 
 Human requested a way to watch the scenario after the first implementation.
-The example offers a single-policy GUI mode with external wall-clock pacing and
-a fixed top-down camera; the default two-policy measurement remains headless.
-`step_once()` itself does not pace to `target_rtf`, so the example sleeps after
-each completed step at the requested viewing rate. The GUI stays open at the
+The example offers a single-policy GUI mode with a fixed top-down camera; the
+default two-policy measurement remains headless. The external policy subscribes
+to `PRE_STEP`, and the external evaluator samples after collision checks via
+`POST_STEP`. PBF's `run_simulation()` owns the loop and its built-in
+`target_rtf` GUI pacing. The GUI stays open at the
 cutoff until closed or interrupted. Manual pause/single-step input may alter
 command timing and is labeled as observational, not a repeatability check.
 This adds no simulation-core responsibility or replay mechanism.

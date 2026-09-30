@@ -15,6 +15,9 @@ integer number of steps. The command writes `uncontrolled.json`,
 `direction_gate.json`, and `comparison.json`. Each policy starts in a fresh
 simulation with the same initial poses, 40 two-leg movement tasks, geometry,
 motion limits and cutoff. The comparison does not use recorded-command replay.
+The example lets PBF's normal `run_simulation()` loop advance the world;
+external policy decisions run at `PRE_STEP`, and the evaluator observes at
+`POST_STEP` after collision checks.
 
 ## Watch a policy in the GUI
 

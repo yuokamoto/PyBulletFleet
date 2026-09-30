@@ -6,7 +6,9 @@
 
 `pybullet_fleet/examples/fleet_corridor_evaluation.py` is an external fleet
 management example. It creates a fresh PBF simulation for each of two policies,
-issues ordinary Fleet API commands, samples state and geometry, and writes a
+connects external policy decisions and measurements to `PRE_STEP` and
+`POST_STEP`, then lets PBF's `run_simulation()` own the stepping and GUI pacing.
+It issues ordinary Fleet API commands, samples state and geometry, and writes a
 scenario-owned report. It adds no simulator task, congestion, policy or replay
 orchestration API. The user guide is [here](../../how-to/fleet-corridor-evaluation.md).
 
@@ -62,10 +64,14 @@ robot/robot and robot/wall pair directly for complete *sampled* near-miss
 classification. It cannot see contact between samples. Geometric overlap in
 kinematic mode does not mean a physical impact.
 
-The all-pair collector has visible cost: approximate 300 s runs took 3.2–3.6 s
-wall time with episode collection, versus 0.8–1.0 s without it; core step time
-remained about 0.3–0.4 s. RTF was about 85–93 with collection and 315–370
-without. These are local observations, not a release performance guarantee.
+The all-pair collector has visible cost: after adopting the standard
+`run_simulation()` loop, approximate 300 s runs took 5.5–5.8 s wall time with
+episode collection, versus 1.35–1.53 s without it. The measured interval from
+`PRE_STEP` policy entry to `POST_STEP` observation entry summed to about
+0.41–0.65 s, excluding collection and pacing. RTF was about 52–55 with
+collection and 196–222 without. These are local observations, not a release
+performance guarantee; they should not be compared directly with earlier
+manual-loop timings because the execution loop changed.
 These timing figures are from headless runs; GUI viewing adds deliberate
 pacing and is not a comparable performance measurement.
 A native macOS GUI smoke run completed and the one-policy CLI saved its JSON
@@ -97,9 +103,9 @@ pause/step interaction; it does not validate the browser launcher visually.
 
 Focused scenario tests cover two cadences, collision categories and clearing,
 equivalent independent policy workloads, accounting and cutoff censoring.
-`make verify` passed after the GUI extension and main-branch merge: 1768
-passed, 12 skipped, one expected failure and 81.24% coverage. Focused
-corridor tests (8 passed) and all pre-commit hooks passed.
+`make verify` passed after the standard-loop refactor: 1769 passed,
+12 skipped, one expected failure and 81.24% coverage. Focused corridor tests
+(9 passed) and all pre-commit hooks passed.
 `make docs` passed with `LC_ALL=C LANG=C` because the local shell locale was
 not available to Sphinx. The CLI produced all three JSON reports in a smoke
 run.
