@@ -99,6 +99,8 @@ jobs:
         pip install -e ".[dev,docs]"
 
     - name: Build docs with warnings as errors
+      env:
+        PBF_DOCS_OFFLINE: "1"
       run: |
         cd docs && sphinx-build -W -b html . _build/html
 
