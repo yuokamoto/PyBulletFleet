@@ -162,6 +162,10 @@ Set `collision_margin: 0.0` to exclude positive-clearance near misses; touching
 and penetrating geometry is still reported. Choose a non-zero margin from the
 clearance requirements of the robot and its task.
 
+Use `sim.set_collision_margin(value)` to change the clearance during a run.
+It refreshes the spatial grid and rechecks stationary pairs at the next
+collision check. The value must be finite and non-negative.
+
 ---
 
 (spatial-hash-cell-size)=

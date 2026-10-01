@@ -169,7 +169,7 @@ def method_spatial_hashing(sim_core) -> Tuple[List, float]:
 
 
 def method_brute_force(sim_core, distance_threshold: float = 0.01) -> Tuple[List, float]:
-    """Method 2: Brute Force AABB (all pairs with AABB overlap + getClosestPoints)
+    """Method 2: Brute Force AABB (all pairs within margin + getClosestPoints)
 
     Uses getClosestPoints for the final check (not getContactPoints) so that
     kinematic-kinematic (mass=0) collisions are correctly detected.
@@ -185,14 +185,14 @@ def method_brute_force(sim_core, distance_threshold: float = 0.01) -> Tuple[List
             aabb_a = p.getAABB(objects[i].body_id, physicsClientId=sim_core._client)
             aabb_b = p.getAABB(objects[j].body_id, physicsClientId=sim_core._client)
 
-            # Check AABB overlap
+            # Match the closest-point clearance used by the final check.
             if (
-                aabb_a[0][0] <= aabb_b[1][0]
-                and aabb_a[1][0] >= aabb_b[0][0]
-                and aabb_a[0][1] <= aabb_b[1][1]
-                and aabb_a[1][1] >= aabb_b[0][1]
-                and aabb_a[0][2] <= aabb_b[1][2]
-                and aabb_a[1][2] >= aabb_b[0][2]
+                aabb_a[0][0] <= aabb_b[1][0] + distance_threshold
+                and aabb_a[1][0] + distance_threshold >= aabb_b[0][0]
+                and aabb_a[0][1] <= aabb_b[1][1] + distance_threshold
+                and aabb_a[1][1] + distance_threshold >= aabb_b[0][1]
+                and aabb_a[0][2] <= aabb_b[1][2] + distance_threshold
+                and aabb_a[1][2] + distance_threshold >= aabb_b[0][2]
             ):
                 # Use getClosestPoints (works for kinematic objects, unlike getContactPoints)
                 closest_points = p.getClosestPoints(
@@ -201,7 +201,7 @@ def method_brute_force(sim_core, distance_threshold: float = 0.01) -> Tuple[List
                     distance=distance_threshold,
                     physicsClientId=sim_core._client,
                 )
-                if closest_points and closest_points[0][8] < distance_threshold:
+                if closest_points:
                     collision_pairs.append((i, j))
 
     elapsed = (time.perf_counter() - t0) * 1000

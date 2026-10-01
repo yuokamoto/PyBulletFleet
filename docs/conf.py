@@ -60,7 +60,12 @@ html_theme_options = {
 html_extra_path = ["media"]
 
 # -- Intersphinx -------------------------------------------------------------
-intersphinx_mapping = {
-    "python": ("https://docs.python.org/3", None),
-    "numpy": ("https://numpy.org/doc/stable/", None),
-}
+# CI verifies local documentation without depending on third-party inventory
+# availability. Published builds retain external Python and NumPy references.
+if os.environ.get("PBF_DOCS_OFFLINE") == "1":
+    intersphinx_mapping = {}
+else:
+    intersphinx_mapping = {
+        "python": ("https://docs.python.org/3", None),
+        "numpy": ("https://numpy.org/doc/stable/", None),
+    }

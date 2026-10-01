@@ -84,7 +84,8 @@ Collision episodes are sampled after every completed step. `margin_only`
 means signed closest-point distance is positive and at most the configured
 0.02 m margin. `geometric_overlap` means distance is zero or negative; it is
 not a physics impact. The example queries robot/robot and robot/wall pairs
-directly because the core's AABB broadphase can omit positive-gap near misses.
+directly to retain signed distances for each sampled episode; the core reports
+collision entries without exposing those distances.
 The separate `core_margin_entry_count` is the core's detected threshold-entry
 count and is not an overlap count or a complete near-miss count. Each episode
 records pair IDs, step/time, start positions, active task IDs, minimum sampled

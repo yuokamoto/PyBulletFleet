@@ -472,6 +472,7 @@ class MultiRobotSimulationCore:
 
         # Incremental collision tracking
         self._active_collision_pairs: Set[Tuple[int, int]] = set()  # Currently colliding object_id pairs (sorted: i < j)
+        self._collision_margin_changed = False
 
         # --- Recording ---
         self._recorder: Optional[Any] = None  # Optional[SimulationRecorder] (lazy import to avoid circular)
@@ -1747,15 +1748,39 @@ class MultiRobotSimulationCore:
         """
         return int(math.floor(coord / cast(float, self._cached_cell_size)))
 
-    def _get_overlapping_cells(self, object_id: int) -> List[Tuple[int, int, int]]:
+    def _collision_broadphase_margin(self) -> float:
+        """Match the clearance used by the configured narrow phase."""
+        if self._params.collision_detection_method in (
+            CollisionDetectionMethod.CLOSEST_POINTS,
+            CollisionDetectionMethod.HYBRID,
+        ):
+            return max(0.0, self._params.collision_margin)
+        return 0.0
+
+    def set_collision_margin(self, margin: float) -> None:
+        """Change the clearance and recheck stationary pairs on the next collision check."""
+        if not math.isfinite(margin) or margin < 0:
+            raise ValueError("collision margin must be finite and non-negative")
+        if margin == self._params.collision_margin:
+            return
+        old_effective_margin = self._collision_broadphase_margin()
+        self._params.collision_margin = margin
+        if self._collision_broadphase_margin() == old_effective_margin:
+            return
+        self._rebuild_spatial_grid()
+        self._moved_this_step.update(self._sim_objects_dict)
+        self._collision_margin_changed = True
+
+    def _get_overlapping_cells(self, object_id: int, margin: float = 0.0) -> List[Tuple[int, int, int]]:
         """
-        Get all grid cells that overlap with object's AABB.
+        Get all grid cells that overlap with an object's AABB plus margin.
 
         Used for large objects that span multiple cells to ensure
         collision detection with objects in all neighboring cells.
 
         Args:
             object_id: The object_id to get overlapping cells for
+            margin: Per-object AABB enlargement in meters
 
         Returns:
             List of cell tuples (x, y, z) that overlap with the object's AABB
@@ -1777,9 +1802,9 @@ class MultiRobotSimulationCore:
         aabb_min, aabb_max = aabb[0], aabb[1]
 
         # Calculate cell range for each dimension
-        x_range = range(self._coord_to_cell(aabb_min[0]), self._coord_to_cell(aabb_max[0]) + 1)
-        y_range = range(self._coord_to_cell(aabb_min[1]), self._coord_to_cell(aabb_max[1]) + 1)
-        z_range = range(self._coord_to_cell(aabb_min[2]), self._coord_to_cell(aabb_max[2]) + 1)
+        x_range = range(self._coord_to_cell(aabb_min[0] - margin), self._coord_to_cell(aabb_max[0] + margin) + 1)
+        y_range = range(self._coord_to_cell(aabb_min[1] - margin), self._coord_to_cell(aabb_max[1] + margin) + 1)
+        z_range = range(self._coord_to_cell(aabb_min[2] - margin), self._coord_to_cell(aabb_max[2] + margin) + 1)
 
         # Generate all cell combinations
         return [(x, y, z) for x in x_range for y in y_range for z in z_range]
@@ -1837,9 +1862,12 @@ class MultiRobotSimulationCore:
             return
 
         # Compute new cells
-        use_multi_cell = self._should_use_multi_cell_registration(object_id)
-
-        if use_multi_cell:
+        margin = self._collision_broadphase_margin()
+        if margin > 0:
+            # Each object contributes half the pair clearance. This may still
+            # be a single cell when the enlarged AABB fits inside it.
+            cells = self._get_overlapping_cells(object_id, margin / 2)
+        elif self._should_use_multi_cell_registration(object_id):
             cells = self._get_overlapping_cells(object_id)
         else:
             aabb = self._cached_aabbs_dict[object_id]
@@ -1862,11 +1890,11 @@ class MultiRobotSimulationCore:
 
         # Log
         if old_cells is None:
-            logger.debug(f"Added object {object_id} to {len(cells)} spatial grid cell(s) (multi-cell: {use_multi_cell})")
+            logger.debug(f"Added object {object_id} to {len(cells)} spatial grid cell(s) (multi-cell: {len(cells) > 1})")
         else:
             logger.debug(
                 f"Updated object {object_id} spatial grid: {len(old_cells)} -> {len(cells)} cell(s) "
-                f"(multi-cell: {use_multi_cell})"
+                f"(multi-cell: {len(cells) > 1})"
             )
 
     def _register_object_movement_type(self, obj: SimObject) -> None:
@@ -2771,6 +2799,7 @@ class MultiRobotSimulationCore:
 
         if ignore_static is None:
             ignore_static = self._ignore_static_collision
+        broadphase_margin = self._collision_broadphase_margin()
 
         # 1. Handle mode changes
         # Check if ignore_static mode has changed (skip if this is the first call)
@@ -2895,7 +2924,6 @@ class MultiRobotSimulationCore:
                         # Skip already tested pairs
                         if pair_key in tested_pairs:
                             continue
-                        tested_pairs.add(pair_key)
 
                         # Safeguard against stale spatial grid entries
                         if obj_id_j not in self._sim_objects_dict:
@@ -2906,24 +2934,26 @@ class MultiRobotSimulationCore:
                         # Skip this pair if object j uses 2D mode and offset has Z component
                         if mode_j == CollisionMode.NORMAL_2D and offset[2] != 0:
                             continue
+                        tested_pairs.add(pair_key)
 
                         # AABB overlap test
                         aabb_j = self._cached_aabbs_dict.get(obj_id_j)
                         if aabb_j is None:
                             continue
 
-                        # Check if AABBs overlap in all 3 axes (continue if NO overlap)
-                        # Note: NORMAL_2D's optimisation is in neighbour *search* (9 vs 27 cells),
-                        # NOT in skipping the Z-axis AABB check.  Full XYZ overlap is always required
-                        # so that objects at different heights within the same Z-cell are correctly
-                        # rejected when their AABBs don't actually overlap.
-                        if (
-                            aabb_i[1][0] < aabb_j[0][0]
-                            or aabb_i[0][0] > aabb_j[1][0]
-                            or aabb_i[1][1] < aabb_j[0][1]
-                            or aabb_i[0][1] > aabb_j[1][1]
-                            or aabb_i[1][2] < aabb_j[0][2]
-                            or aabb_i[0][2] > aabb_j[1][2]
+                        # Reject pairs separated beyond the margin on any axis.
+                        # NORMAL_2D still requires actual Z overlap, even when
+                        # both objects occupy the same spatial-grid Z cell.
+                        margin = broadphase_margin
+                        if self._params.collision_detection_method == CollisionDetectionMethod.HYBRID and (
+                            obj_id_i in self._physics_objects or obj_id_j in self._physics_objects
+                        ):
+                            margin = 0.0
+                        z_margin = 0.0 if CollisionMode.NORMAL_2D in (mode_i, mode_j) else margin
+                        margins = (margin, margin, z_margin)
+                        if any(
+                            aabb_i[1][d] + margins[d] < aabb_j[0][d] or aabb_i[0][d] - margins[d] > aabb_j[1][d]
+                            for d in range(3)
                         ):
                             continue  # No overlap, skip this pair
 
@@ -3013,7 +3043,11 @@ class MultiRobotSimulationCore:
             # Skip static-static pairs (they never change after initial check)
             for obj_id_i, obj_id_j in list(self._active_collision_pairs):
                 # Skip if both objects are static (no need to re-check)
-                if obj_id_i in self._static_collision_objects and obj_id_j in self._static_collision_objects:
+                if (
+                    not self._collision_margin_changed
+                    and obj_id_i in self._static_collision_objects
+                    and obj_id_j in self._static_collision_objects
+                ):
                     continue
 
                 # Re-check if at least one object moved
@@ -3162,6 +3196,8 @@ class MultiRobotSimulationCore:
         except p.error:
             # PyBullet disconnected, skip collision checking
             pass
+
+        self._collision_margin_changed = False
 
         if return_profiling:
             timings["total"] = (time.perf_counter() - t0) * 1000  # ms
@@ -3331,6 +3367,7 @@ class MultiRobotSimulationCore:
 
         # Reset filter_aabb_pairs mode-change detection (#6: fresh start)
         self._last_ignore_static = None
+        self._collision_margin_changed = False
 
         # Clear speed history (#2: prevents stale data in update_monitor)
         self._speed_history.clear()
