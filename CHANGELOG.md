@@ -22,6 +22,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- Include positive-gap pairs within `collision_margin` in closest-point
+  collision checks, including pairs whose AABBs do not overlap.
 - Isolate the macOS Tkinter monitor in its own process to avoid native GUI
   conflicts with PyBullet, while preserving monitor controls while paused.
   Keep the existing threaded startup and shutdown behavior on Windows and Linux.

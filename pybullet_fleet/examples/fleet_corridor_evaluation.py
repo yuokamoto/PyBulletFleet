@@ -208,8 +208,8 @@ def _observe_collisions(
 ) -> None:
     sample_step = sim.step_count if observation_step is None else observation_step
     observed: dict[tuple[str, str], tuple[str, float, bool, dict]] = {}
-    # The core's AABB broadphase does not expand by collision_margin. Query all
-    # pairs here so a positive-gap margin intrusion is not silently omitted.
+    # Query pairs directly to retain signed distances for episode categories;
+    # the core reports collision entries but does not expose those distances.
     for (_, (name_a, obj_a)), (_, (name_b, obj_b)) in combinations(entities.items(), 2):
         if name_a.startswith("wall-") and name_b.startswith("wall-"):
             continue
@@ -548,7 +548,7 @@ def run_policy(
             },
             "limits": [
                 "Collision states are sampled after completed steps; shorter contacts can be missed.",
-                "Core margin entries can omit positive-gap near misses because its AABB broadphase is not margin-expanded.",
+                "Core margin entries count threshold transitions, not signed-distance episodes.",
                 "Geometric overlap is not a physics impact.",
                 "Admission delay is an external policy measurement, not PBF robot waiting time.",
                 "Uncontrolled traffic passes through overlaps; crowding is not a physical queue or warehouse throughput.",

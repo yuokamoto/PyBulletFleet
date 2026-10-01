@@ -335,16 +335,6 @@ class TestBasicCollisionDetection:
 class TestCollisionDetectionMethod:
     """Test different collision detection methods"""
 
-    @pytest.mark.xfail(
-        reason=(
-            "AABB broadphase limitation: filter_aabb_pairs() requires strict AABB overlap "
-            "but does not expand AABBs by collision_margin. For axis-aligned boxes with a "
-            "positive surface gap (0.01m), AABBs never overlap even though getClosestPoints "
-            "would detect the near-miss within margin (0.02m). "
-            "Fix requires AABB expansion by margin in the broadphase filter."
-        ),
-        strict=True,
-    )
     def test_closest_points_detects_near_miss(self, sim_core_kinematics):
         """TC101: CLOSEST_POINTS detects near-miss within margin"""
         margin = sim_core_kinematics.params.collision_margin  # 0.02m
@@ -379,6 +369,98 @@ class TestCollisionDetectionMethod:
         assert expected in pairs, f"CONTACT_POINTS should detect overlapping objects. pairs={pairs}"
 
 
+@pytest.mark.parametrize("axis", [0, 1, 2])
+@pytest.mark.parametrize("mode", [CollisionMode.NORMAL_2D, CollisionMode.NORMAL_3D])
+@pytest.mark.parametrize("method", [CollisionDetectionMethod.CLOSEST_POINTS, CollisionDetectionMethod.HYBRID])
+def test_margin_pair_across_nonadjacent_cells(axis, mode, method):
+    """Enlarged AABBs must share a cell even when object centers are far apart."""
+    sim = MultiRobotSimulationCore(
+        SimulationParams(
+            gui=False,
+            physics=False,
+            monitor=False,
+            collision_detection_method=method,
+            collision_margin=0.25,
+            spatial_hash_cell_size_mode=SpatialHashCellSizeMode.CONSTANT,
+            spatial_hash_cell_size=0.05,
+            ignore_static_collision=False,
+        )
+    )
+    try:
+        first = create_test_box(sim, [0, 0, 0], size=0.05, collision_mode=mode)
+        position = [0.0, 0.0, 0.0]
+        position[axis] = 0.30  # Surface gap 0.20 m, inside the 0.25 m margin.
+        second = create_test_box(sim, position, size=0.05, collision_mode=mode)
+        sim._moved_this_step = {first.object_id, second.object_id}
+        pair = (first.object_id, second.object_id)
+        candidates, _ = sim.filter_aabb_pairs()
+        assert candidates.count(pair) == 1
+        sim.check_collisions()
+        assert sim.get_active_collision_pairs() == [pair]
+    finally:
+        p.disconnect(sim.client)
+
+
+def test_contact_points_candidates_ignore_positive_margin(sim_core_physics):
+    first = create_test_box(sim_core_physics, [0, 0, 0], size=0.05)
+    second = create_test_box(sim_core_physics, [0.30, 0, 0], size=0.05)
+    sim_core_physics._moved_this_step = {first.object_id, second.object_id}
+    candidates, _ = sim_core_physics.filter_aabb_pairs()
+    assert candidates == []
+
+
+def test_set_collision_margin_rechecks_stationary_pair():
+    sim = MultiRobotSimulationCore(
+        SimulationParams(
+            gui=False,
+            physics=False,
+            monitor=False,
+            collision_detection_method=CollisionDetectionMethod.CLOSEST_POINTS,
+            collision_margin=0.0,
+            spatial_hash_cell_size_mode=SpatialHashCellSizeMode.CONSTANT,
+            spatial_hash_cell_size=0.05,
+            ignore_static_collision=False,
+        )
+    )
+    try:
+        first = create_test_box(sim, [0, 0, 0], size=0.05, collision_mode=CollisionMode.STATIC)
+        second = create_test_box(sim, [0.30, 0, 0], size=0.05, collision_mode=CollisionMode.STATIC)
+        sim._moved_this_step = {first.object_id, second.object_id}
+        sim.check_collisions()
+        assert not sim.get_active_collision_pairs()
+
+        sim.set_collision_margin(0.25)
+        sim.check_collisions()
+        assert sim.get_active_collision_pairs() == [(first.object_id, second.object_id)]
+
+        sim.set_collision_margin(0.0)
+        sim.check_collisions()
+        assert not sim.get_active_collision_pairs()
+    finally:
+        p.disconnect(sim.client)
+
+
+def test_margin_registration_can_still_use_one_cell():
+    sim = MultiRobotSimulationCore(
+        SimulationParams(
+            gui=False,
+            physics=False,
+            monitor=False,
+            collision_margin=0.02,
+            spatial_hash_cell_size_mode=SpatialHashCellSizeMode.CONSTANT,
+            spatial_hash_cell_size=1.0,
+        )
+    )
+    try:
+        sim.set_collision_spatial_hash_cell_size_mode()
+        inside = create_test_box(sim, [0.5, 0.5, 0.5], size=0.05)
+        edge = create_test_box(sim, [1.0, 0.5, 0.5], size=0.05)
+        assert len(sim._cached_object_to_cell[inside.object_id]) == 1
+        assert len(sim._cached_object_to_cell[edge.object_id]) == 2
+    finally:
+        p.disconnect(sim.client)
+
+
 # ============================================================================
 # Category 6: Multi-cell Registration
 # ============================================================================
@@ -389,13 +471,13 @@ class TestMultiCellRegistration:
 
     @pytest.fixture
     def sim_core_multicell(self):
-        """Simulation with small cell size to trigger multi-cell registration."""
+        """Exercise the legacy size threshold without margin expansion."""
         params = SimulationParams(
             gui=False,
             physics=False,
             monitor=False,
             collision_detection_method=CollisionDetectionMethod.CLOSEST_POINTS,
-            collision_margin=0.02,
+            collision_margin=0.0,
             spatial_hash_cell_size_mode=SpatialHashCellSizeMode.CONSTANT,
             spatial_hash_cell_size=2.0,
             multi_cell_threshold=1.5,
