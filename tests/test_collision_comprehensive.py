@@ -394,11 +394,30 @@ def test_margin_pair_across_nonadjacent_cells(axis, mode, method):
         sim._moved_this_step = {first.object_id, second.object_id}
         pair = (first.object_id, second.object_id)
         candidates, _ = sim.filter_aabb_pairs()
-        assert candidates.count(pair) == 1
+        expected = axis != 2 or mode == CollisionMode.NORMAL_3D
+        assert candidates.count(pair) == int(expected)
         sim.check_collisions()
-        assert sim.get_active_collision_pairs() == [pair]
+        assert sim.get_active_collision_pairs() == ([pair] if expected else [])
     finally:
         p.disconnect(sim.client)
+
+
+def test_normal_2d_pair_requires_actual_z_overlap(sim_core_kinematics):
+    first = create_test_box(sim_core_kinematics, [0, 0, 0], size=0.05, collision_mode=CollisionMode.NORMAL_2D)
+    second = create_test_box(sim_core_kinematics, [0, 0, 0.11], size=0.05, collision_mode=CollisionMode.NORMAL_3D)
+    sim_core_kinematics._moved_this_step = {first.object_id, second.object_id}
+    candidates, _ = sim_core_kinematics.filter_aabb_pairs()
+    assert candidates == []
+
+
+def test_contact_points_margin_update_does_not_rebuild(sim_core_physics, monkeypatch):
+    def unexpected_rebuild():
+        pytest.fail("CONTACT_POINTS does not use collision_margin")
+
+    monkeypatch.setattr(sim_core_physics, "_rebuild_spatial_grid", unexpected_rebuild)
+    sim_core_physics.set_collision_margin(0.25)
+    assert sim_core_physics.params.collision_margin == 0.25
+    assert not sim_core_physics._collision_margin_changed
 
 
 def test_contact_points_candidates_ignore_positive_margin(sim_core_physics):

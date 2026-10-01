@@ -1763,7 +1763,10 @@ class MultiRobotSimulationCore:
             raise ValueError("collision margin must be finite and non-negative")
         if margin == self._params.collision_margin:
             return
+        old_effective_margin = self._collision_broadphase_margin()
         self._params.collision_margin = margin
+        if self._collision_broadphase_margin() == old_effective_margin:
+            return
         self._rebuild_spatial_grid()
         self._moved_this_step.update(self._sim_objects_dict)
         self._collision_margin_changed = True
@@ -2938,17 +2941,20 @@ class MultiRobotSimulationCore:
                         if aabb_j is None:
                             continue
 
-                        # Check if AABBs overlap in all 3 axes (continue if NO overlap)
-                        # Note: NORMAL_2D's optimisation is in neighbour *search* (9 vs 27 cells),
-                        # NOT in skipping the Z-axis AABB check.  Full XYZ overlap is always required
-                        # so that objects at different heights within the same Z-cell are correctly
-                        # rejected when their AABBs don't actually overlap.
+                        # Reject pairs separated beyond the margin on any axis.
+                        # NORMAL_2D still requires actual Z overlap, even when
+                        # both objects occupy the same spatial-grid Z cell.
                         margin = broadphase_margin
                         if self._params.collision_detection_method == CollisionDetectionMethod.HYBRID and (
                             obj_id_i in self._physics_objects or obj_id_j in self._physics_objects
                         ):
                             margin = 0.0
-                        if any(aabb_i[1][d] + margin < aabb_j[0][d] or aabb_i[0][d] - margin > aabb_j[1][d] for d in range(3)):
+                        z_margin = 0.0 if CollisionMode.NORMAL_2D in (mode_i, mode_j) else margin
+                        margins = (margin, margin, z_margin)
+                        if any(
+                            aabb_i[1][d] + margins[d] < aabb_j[0][d] or aabb_i[0][d] - margins[d] > aabb_j[1][d]
+                            for d in range(3)
+                        ):
                             continue  # No overlap, skip this pair
 
                         # AABBs overlap - add to candidate pairs
