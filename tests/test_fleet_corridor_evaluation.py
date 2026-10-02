@@ -16,6 +16,7 @@ from pybullet_fleet.examples.fleet_corridor_evaluation import (
 )
 from pybullet_fleet.geometry import Pose
 from pybullet_fleet.fleet_api import FleetStateProvider
+from pybullet_fleet.types import CollisionMode
 
 
 def test_workload_starts_match_spawned_robots():
@@ -58,6 +59,53 @@ def test_geometric_margin_overlap_and_step_cadence(dt):
         assert pair not in active
         assert any(episode["category"] == "geometric_overlap" for episode in episodes)
         assert sim.collision_count >= 1
+    finally:
+        p.disconnect(sim.client)
+
+
+def test_active_pair_without_new_sample_keeps_episode_open():
+    config = CorridorConfig(cutoff=1)
+    sim, entities = _make_sim(config)
+    robots = {name: obj for name, obj in entities.values() if name.startswith("a")}
+    active = {}
+    episodes = []
+    try:
+        robots["a00"].set_pose(Pose.from_xyz(0, 0, 0.1))
+        robots["a01"].set_pose(Pose.from_xyz(0.11, 0, 0.1))
+        sim.step_once()
+        _observe_collisions(sim, entities, active, episodes, config.margin)
+        pair = ("a00", "a01")
+        first_steps = active[pair]["observed_steps"]
+
+        sim.step_once()
+        _observe_collisions(sim, entities, active, episodes, config.margin)
+        assert pair in active
+        assert active[pair]["observed_steps"] == first_steps
+        assert not any(item["entities"] == list(pair) for item in episodes)
+    finally:
+        p.disconnect(sim.client)
+
+
+def test_disabled_pair_closes_episode_when_observation_is_invalidated():
+    config = CorridorConfig(cutoff=1)
+    sim, entities = _make_sim(config)
+    robots = {name: obj for name, obj in entities.values() if name.startswith("a")}
+    active = {}
+    episodes = []
+    try:
+        robots["a00"].set_pose(Pose.from_xyz(0, 0, 0.1))
+        robots["a01"].set_pose(Pose.from_xyz(0.11, 0, 0.1))
+        sim.step_once()
+        _observe_collisions(sim, entities, active, episodes, config.margin)
+        pair = ("a00", "a01")
+        assert pair in active
+
+        robots["a01"].set_collision_mode(CollisionMode.DISABLED)
+        assert sim.get_collision_observation() is None
+        _observe_collisions(sim, entities, active, episodes, config.margin)
+        assert pair not in active
+        assert episodes[-1]["entities"] == list(pair)
+        assert episodes[-1]["end_step"] == sim.step_count
     finally:
         p.disconnect(sim.client)
 

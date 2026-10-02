@@ -80,12 +80,16 @@ finishes. A gate slot is held until endpoint arrival, including travel outside
 the corridor. It can create substantial admission delay while reducing observed
 overlap in the corridor; overlap elsewhere may remain.
 
-Collision episodes are sampled after every completed step. `margin_only`
+Collision episodes use PBF's latest collision-check observation after every
+completed step. The evaluator still owns episode and corridor classification;
+it reads only pairs qualified by PBF's configured collision pipeline.
+`margin_only`
 means signed closest-point distance is positive and at most the configured
 0.02 m margin. `geometric_overlap` means distance is zero or negative; it is
-not a physics impact. The example queries robot/robot and robot/wall pairs
-directly to retain signed distances for each sampled episode; the core reports
-collision entries without exposing those distances.
+not a physics impact. The example reads signed distances from the core's
+latest qualifying-pair observation. If an active pair was not rechecked on a
+step, its episode remains active but that step is not counted as a new distance
+sample.
 The separate `core_margin_entry_count` is the core's detected threshold-entry
 count and is not an overlap count or a complete near-miss count. Each episode
 records pair IDs, step/time, start positions, active task IDs, minimum sampled

@@ -13,7 +13,6 @@ import math
 import statistics
 import time
 from dataclasses import asdict, dataclass
-from itertools import combinations
 from pathlib import Path
 from uuid import uuid4
 
@@ -21,7 +20,7 @@ import pybullet as p
 
 from pybullet_fleet.agent import Agent, AgentSpawnParams
 from pybullet_fleet.commands import RobotGoalCommand2D
-from pybullet_fleet.core_simulation import MultiRobotSimulationCore, SimulationParams
+from pybullet_fleet.core_simulation import CollisionPairObservation, MultiRobotSimulationCore, SimulationParams
 from pybullet_fleet.events import SimEvents
 from pybullet_fleet.fleet_api import FleetCommandDispatcher, FleetStateProvider
 from pybullet_fleet.geometry import Pose
@@ -189,7 +188,9 @@ def _make_sim(
     return sim, entities
 
 
-def _category(distance: float, margin: float) -> str | None:
+def _category(distance: float | None, margin: float) -> str | None:
+    if distance is None:
+        return None
     if distance <= 0:
         return "geometric_overlap"
     if distance <= margin:
@@ -207,33 +208,54 @@ def _observe_collisions(
     observation_step: int | None = None,
 ) -> None:
     sample_step = sim.step_count if observation_step is None else observation_step
-    observed: dict[tuple[str, str], tuple[str, float, bool, dict]] = {}
-    # Query pairs directly to retain signed distances for episode categories;
-    # the core reports collision entries but does not expose those distances.
-    for (_, (name_a, obj_a)), (_, (name_b, obj_b)) in combinations(entities.items(), 2):
+    pairs: dict[tuple[str, str], CollisionPairObservation] = {}
+    check = sim.get_collision_observation()
+    if check is None:
+        # A lifecycle change can invalidate the last check without emitting
+        # COLLISION_ENDED. Reconcile only then, preserving unaffected pairs.
+        current_pairs = {
+            tuple(sorted((entities[a][0], entities[b][0])))
+            for a, b in sim.get_active_collision_pairs()
+            if a in entities and b in entities
+        }
+        for pair, episode in tuple(active.items()):
+            if pair not in current_pairs:
+                episode["end_step"] = sample_step
+                episode["end_time"] = sample_step * sim.params.timestep
+                episodes.append(episode)
+                del active[pair]
+        return
+    if check.step != sample_step:
+        return
+    for record in check.pairs:
+        name_a = entities[record.object_ids[0]][0]
+        name_b = entities[record.object_ids[1]][0]
         if name_a.startswith("wall-") and name_b.startswith("wall-"):
             continue
-        points = p.getClosestPoints(obj_a.body_id, obj_b.body_id, distance=margin, physicsClientId=sim.client)
-        if not points:
-            continue
-        distance = min(float(point[8]) for point in points)
-        category = _category(distance, margin)
-        if category is not None:
-            x_mid = (obj_a.get_pose().x + obj_b.get_pose().x) / 2
-            observed[tuple(sorted((name_a, name_b)))] = (
-                category,
-                distance,
-                -_CORRIDOR_HALF_LENGTH <= x_mid <= _CORRIDOR_HALF_LENGTH,
-                {name_a: [obj_a.get_pose().x, obj_a.get_pose().y], name_b: [obj_b.get_pose().x, obj_b.get_pose().y]},
-            )
+        pair = tuple(sorted((name_a, name_b)))
+        pairs[pair] = record
 
     for pair, episode in tuple(active.items()):
-        if pair not in observed or observed[pair][0] != episode["category"]:
+        record = pairs.get(pair)
+        category = _category(record.signed_distance, margin) if record is not None else None
+        if record is None or (record.sample_step == sample_step and category is not None and category != episode["category"]):
             episode["end_step"] = sample_step
             episode["end_time"] = sample_step * sim.params.timestep
             episodes.append(episode)
             del active[pair]
-    for pair, (category, distance, in_corridor, positions) in sorted(observed.items()):
+    for pair, record in sorted(pairs.items()):
+        if record.sample_step != sample_step:
+            continue
+        distance = record.signed_distance
+        if distance is None:
+            continue
+        category = _category(distance, margin)
+        if category is None:
+            continue
+        name_a, obj_a = entities[record.object_ids[0]]
+        name_b, obj_b = entities[record.object_ids[1]]
+        pose_a, pose_b = obj_a.get_pose(), obj_b.get_pose()
+        x_mid = (pose_a.x + pose_b.x) / 2
         if pair not in active:
             active[pair] = {
                 "entities": list(pair),
@@ -241,7 +263,7 @@ def _observe_collisions(
                 "start_step": sample_step,
                 "start_time": sample_step * sim.params.timestep,
                 "min_distance": distance,
-                "start_positions_xy": positions,
+                "start_positions_xy": {name_a: [pose_a.x, pose_a.y], name_b: [pose_b.x, pose_b.y]},
                 "active_task_ids_at_start": [
                     active_tasks[name]["task_id"] for name in pair if active_tasks and name in active_tasks
                 ],
@@ -249,7 +271,7 @@ def _observe_collisions(
                 "corridor_observed_steps": 0,
             }
         active[pair]["observed_steps"] += 1
-        active[pair]["corridor_observed_steps"] += int(in_corridor)
+        active[pair]["corridor_observed_steps"] += int(-_CORRIDOR_HALF_LENGTH <= x_mid <= _CORRIDOR_HALF_LENGTH)
         active[pair]["min_distance"] = min(active[pair]["min_distance"], distance)
 
 

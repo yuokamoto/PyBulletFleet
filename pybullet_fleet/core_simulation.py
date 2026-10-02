@@ -94,6 +94,28 @@ _SELECTED_NAMEPLATE_UPDATE_INTERVAL_S = 0.25
 _VIEWPORT_CLICK_MAX_DISTANCE_PX = 8
 
 
+@dataclass(frozen=True)
+class CollisionPairObservation:
+    """Last narrow-phase measurement for an active object pair."""
+
+    object_ids: Tuple[int, int]
+    detection_method: CollisionDetectionMethod
+    signed_distance: Optional[float]
+    sample_step: int
+    sample_time: float
+
+
+@dataclass(frozen=True)
+class CollisionObservation:
+    """Active pairs as of a completed collision check, not an event history."""
+
+    step: int
+    sim_time: float
+    configured_method: CollisionDetectionMethod
+    margin: float
+    pairs: Tuple[CollisionPairObservation, ...]
+
+
 @dataclass
 class SimulationParams:
     """Simulation configuration parameters.
@@ -472,6 +494,9 @@ class MultiRobotSimulationCore:
 
         # Incremental collision tracking
         self._active_collision_pairs: Set[Tuple[int, int]] = set()  # Currently colliding object_id pairs (sorted: i < j)
+        self._active_pairs_by_object: Dict[int, Set[Tuple[int, int]]] = {}
+        self._collision_pair_observations: Dict[Tuple[int, int], CollisionPairObservation] = {}
+        self._last_collision_check_metadata: Optional[Tuple[int, float, CollisionDetectionMethod, float]] = None
         self._collision_margin_changed = False
 
         # --- Recording ---
@@ -486,6 +511,7 @@ class MultiRobotSimulationCore:
         # _pending_pose_ids holds object_ids whose _pending_pose buffer is non-empty.
         # See docs/design/two-phase-step/spec.md.
         self._in_step: bool = False
+        self._in_post_step: bool = False  # Counters advance after POST_STEP callbacks.
         self._pending_pose_ids: Set[int] = set()
         # Parent object ids that have link-level kinematic attachments.
         # Used to avoid scanning every flushed object in the hot path when no
@@ -2064,8 +2090,32 @@ class MultiRobotSimulationCore:
         self._remove_object_aabb(object_id)
         self._moved_this_step.discard(object_id)
 
-        # Remove all active collision pairs referencing this object
-        self._active_collision_pairs = {(i, j) for i, j in self._active_collision_pairs if i != object_id and j != object_id}
+        # The reverse index limits removal to this object's active neighbors.
+        for pair in tuple(self._active_pairs_by_object.get(object_id, ())):
+            self._discard_active_collision_pair(pair)
+        self._last_collision_check_metadata = None
+
+    def _add_active_collision_pair(self, pair: Tuple[int, int]) -> None:
+        self._active_collision_pairs.add(pair)
+        for object_id in pair:
+            self._active_pairs_by_object.setdefault(object_id, set()).add(pair)
+
+    def _discard_active_collision_pair(self, pair: Tuple[int, int]) -> None:
+        self._active_collision_pairs.discard(pair)
+        self._collision_pair_observations.pop(pair, None)
+        for object_id in pair:
+            pairs = self._active_pairs_by_object.get(object_id)
+            if pairs is not None:
+                pairs.discard(pair)
+                if not pairs:
+                    del self._active_pairs_by_object[object_id]
+
+    def _clear_active_collision_state(self) -> None:
+        """Clear active pairs, their indexes, and the last check result together."""
+        self._active_collision_pairs.clear()
+        self._active_pairs_by_object.clear()
+        self._collision_pair_observations.clear()
+        self._last_collision_check_metadata = None
 
     def set_collision_spatial_hash_cell_size_mode(
         self, mode: Optional[SpatialHashCellSizeMode] = None, cell_size: Optional[float] = None
@@ -2809,7 +2859,7 @@ class MultiRobotSimulationCore:
             # (setting self._moved_this_step alone would only affect the *next* call)
             moved_objects = set(self._sim_objects_dict.keys())
             # Clear existing collision pairs (will be recalculated with new filter rules)
-            self._active_collision_pairs.clear()
+            self._clear_active_collision_state()
             logger.debug(f"ignore_static mode changed to {ignore_static}, resetting collision state and marking all as moved")
 
         # Update last mode (do this after the check)
@@ -2998,6 +3048,10 @@ class MultiRobotSimulationCore:
             active_pairs, timings = sim.check_collisions(return_profiling=True)
             print(f"Collision check took {timings['total']:.2f}ms")
         """
+        detection_method = self._params.collision_detection_method
+        if detection_method is None:
+            raise ValueError("collision_detection_method must be set before checking collisions")
+
         t0 = time.perf_counter()
 
         # Profiling timings (always create dict for consistent return type)
@@ -3058,18 +3112,22 @@ class MultiRobotSimulationCore:
             new_collisions = set()
             resolved_collisions = set()
 
-            detection_method = self._params.collision_detection_method
+            completing_step = self._in_step or self._in_post_step
+            sample_step = self._step_count + int(completing_step)
+            sample_time = self._elapsed_sim_time + (self._params.timestep if completing_step else 0.0)
 
             for obj_id_i, obj_id_j in pairs_to_check:
                 obj_i = self._sim_objects_dict.get(obj_id_i)
                 obj_j = self._sim_objects_dict.get(obj_id_j)
                 if obj_i is None or obj_j is None:
                     # Object was removed — clean up stale pair
-                    self._active_collision_pairs.discard((obj_id_i, obj_id_j))
+                    self._discard_active_collision_pair((obj_id_i, obj_id_j))
                     continue
 
                 # Select collision detection method based on configuration
                 has_collision = False
+                signed_distance: Optional[float] = None
+                pair_method = detection_method
 
                 if detection_method == CollisionDetectionMethod.CONTACT_POINTS:
                     # Method 1: getContactPoints (physics mode, actual contact manifold)
@@ -3089,6 +3147,10 @@ class MultiRobotSimulationCore:
                         physicsClientId=self._client,
                     )
                     has_collision = len(closest_points) > 0
+                    if closest_points:
+                        signed_distance = min(
+                            (float(point[8]) for point in closest_points if math.isfinite(float(point[8]))), default=None
+                        )
 
                 elif detection_method == CollisionDetectionMethod.HYBRID:
                     # Method 3: Hybrid (physics uses getContactPoints, kinematic uses getClosestPoints)
@@ -3097,24 +3159,33 @@ class MultiRobotSimulationCore:
                     is_physics_j = obj_id_j in self._physics_objects
 
                     if is_physics_i or is_physics_j:
+                        pair_method = CollisionDetectionMethod.CONTACT_POINTS
                         # At least one is physics object - use getContactPoints
                         contact_points = p.getContactPoints(obj_i.body_id, obj_j.body_id, physicsClientId=self._client)
                         has_collision = len(contact_points) > 0
                     else:
+                        pair_method = CollisionDetectionMethod.CLOSEST_POINTS
                         # Both are kinematic - use getClosestPoints with safety margin
                         closest_points = p.getClosestPoints(
                             obj_i.body_id, obj_j.body_id, distance=self._params.collision_margin, physicsClientId=self._client
                         )
                         has_collision = len(closest_points) > 0
+                        if closest_points:
+                            signed_distance = min(
+                                (float(point[8]) for point in closest_points if math.isfinite(float(point[8]))), default=None
+                            )
 
                 pair = (obj_id_i, obj_id_j)
 
                 if has_collision:
+                    self._collision_pair_observations[pair] = CollisionPairObservation(
+                        pair, pair_method, signed_distance, sample_step, sample_time
+                    )
                     # Collision detected
                     if pair not in self._active_collision_pairs:
                         # New collision
                         new_collisions.add(pair)
-                        self._active_collision_pairs.add(pair)
+                        self._add_active_collision_pair(pair)
                         logger.info(
                             f"NEW COLLISION: object {obj_id_i} (body {obj_i.body_id}) "
                             f"<-> object {obj_id_j} (body {obj_j.body_id})"
@@ -3124,11 +3195,13 @@ class MultiRobotSimulationCore:
                     if pair in self._active_collision_pairs:
                         # Collision resolved
                         resolved_collisions.add(pair)
-                        self._active_collision_pairs.discard(pair)
+                        self._discard_active_collision_pair(pair)
                         logger.info(
                             f"COLLISION RESOLVED: object {obj_id_i} (body {obj_i.body_id}) "
                             f"<-> object {obj_id_j} (body {obj_j.body_id})"
                         )
+
+            self._last_collision_check_metadata = (sample_step, sample_time, detection_method, self._params.collision_margin)
 
             if return_profiling:
                 timings["contact_points"] = (time.perf_counter() - t_contact0) * 1000  # ms
@@ -3226,6 +3299,24 @@ class MultiRobotSimulationCore:
                 print(f"Collision: {obj_i} <-> {obj_j}")
         """
         return list(self._active_collision_pairs)
+
+    def get_collision_observation(self) -> Optional[CollisionObservation]:
+        """Return the latest completed collision check, or ``None`` before one runs.
+
+        A skipped step does not update the check timestamp. Each pair also has
+        its own sample timestamp because incremental checks may leave an active
+        pair unmeasured during a later completed check.
+        """
+        if self._last_collision_check_metadata is None:
+            return None
+        step, sim_time, configured_method, margin = self._last_collision_check_metadata
+        return CollisionObservation(
+            step,
+            sim_time,
+            configured_method,
+            margin,
+            tuple(self._collision_pair_observations[pair] for pair in sorted(self._active_collision_pairs)),
+        )
 
     def update_monitor(self) -> None:
         """Update simulation monitor with current statistics.
@@ -3363,7 +3454,7 @@ class MultiRobotSimulationCore:
         self._moved_this_step.clear()
 
         # Clear active collision pairs (fresh start)
-        self._active_collision_pairs.clear()
+        self._clear_active_collision_state()
 
         # Reset filter_aabb_pairs mode-change detection (#6: fresh start)
         self._last_ignore_static = None
@@ -3450,7 +3541,7 @@ class MultiRobotSimulationCore:
         self._cached_object_to_cell.clear()
         self._cached_cell_size = None
         self._aabb_cache_valid = False
-        self._active_collision_pairs.clear()
+        self._clear_active_collision_state()
         self._robot_original_colors.clear()
         self._original_visual_colors.clear()
 
@@ -4274,6 +4365,7 @@ class MultiRobotSimulationCore:
             # POST_STEP subscribers are written directly to PyBullet in this step
             # rather than being buffered for the next step.
             self._in_step = False
+            self._in_post_step = True
 
             # --- post_step event ---
             if measure_timing:
@@ -4285,6 +4377,7 @@ class MultiRobotSimulationCore:
             self._update_selected_nameplate()
             self._elapsed_sim_time += self._params.timestep
             self._step_count += 1
+            self._in_post_step = False
             # Monitor: every step if GUI enabled, otherwise every second
             if measure_timing:
                 t_mon0 = time.perf_counter()
@@ -4352,6 +4445,7 @@ class MultiRobotSimulationCore:
                     self._print_memory_profiling_summary()
         finally:
             self._in_step = False
+            self._in_post_step = False
 
     def _print_profiling_summary(self) -> None:
         """Print profiling statistics summary (average over last N steps).

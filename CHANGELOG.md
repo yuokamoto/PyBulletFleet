@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Expose the latest collision-check observation, including active pair IDs,
+  detection branch, signed closest-point distance and sample time, without a
+  second all-pairs query.
 - Add a synthetic 20-robot corridor evaluation example with independent entry
   policies, optional single-policy GUI observation, task/collision evidence,
   and simulated-time fleet metrics.

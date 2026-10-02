@@ -28,6 +28,7 @@ import pybullet as p
 import pytest
 
 from pybullet_fleet.core_simulation import MultiRobotSimulationCore, SimulationParams
+from pybullet_fleet.events import SimEvents
 from pybullet_fleet.sim_object import SimObject, ShapeParams
 from pybullet_fleet.geometry import Pose
 from pybullet_fleet.types import CollisionMode, CollisionDetectionMethod, SpatialHashCellSizeMode
@@ -408,6 +409,158 @@ def test_normal_2d_pair_requires_actual_z_overlap(sim_core_kinematics):
     sim_core_kinematics._moved_this_step = {first.object_id, second.object_id}
     candidates, _ = sim_core_kinematics.filter_aabb_pairs()
     assert candidates == []
+
+
+def test_collision_observation_tracks_signed_distance_and_lifecycle(sim_core_kinematics):
+    sim = sim_core_kinematics
+    assert sim.get_collision_observation() is None
+    first = create_test_box(sim, [0, 0, 0], size=0.05)
+    second = create_test_box(sim, [0.11, 0, 0], size=0.05)
+    sim.check_collisions()
+    observation = sim.get_collision_observation()
+    assert observation is not None
+    assert observation.step == 0
+    assert observation.margin == 0.02
+    assert len(observation.pairs) == 1
+    pair = observation.pairs[0]
+    assert pair.object_ids == (first.object_id, second.object_id)
+    assert pair.detection_method == CollisionDetectionMethod.CLOSEST_POINTS
+    assert pair.signed_distance == pytest.approx(0.01, abs=1e-4)
+    assert pair.sample_step == 0
+
+    second.set_pose(Pose.from_xyz(0.09, 0, 0))
+    sim.check_collisions()
+    overlap = sim.get_collision_observation()
+    assert overlap is not None
+    assert overlap.pairs[0].signed_distance <= 0
+
+    sim.set_collision_margin(0)
+    second.set_pose(Pose.from_xyz(0.11, 0, 0))
+    sim.check_collisions()
+    zero_margin = sim.get_collision_observation()
+    assert zero_margin is not None and zero_margin.margin == 0
+    assert zero_margin.pairs == ()
+
+    second.set_pose(Pose.from_xyz(0.30, 0, 0))
+    sim.check_collisions()
+    cleared = sim.get_collision_observation()
+    assert cleared is not None and cleared.pairs == ()
+    assert sim.get_active_collision_pairs() == []
+    assert sim._active_pairs_by_object == {}
+
+
+def test_missing_detection_method_rejected_before_collision_state_changes(sim_core_kinematics):
+    sim = sim_core_kinematics
+    sim._moved_this_step.add(42)
+    sim.params.collision_detection_method = None
+    with pytest.raises(ValueError, match="collision_detection_method must be set"):
+        sim.check_collisions()
+    assert sim._moved_this_step == {42}
+    assert sim.get_collision_observation() is None
+
+
+def test_collision_observation_keeps_check_and_pair_sample_times(sim_core_kinematics):
+    sim = sim_core_kinematics
+    create_test_box(sim, [0, 0, 0], size=0.05)
+    create_test_box(sim, [0.09, 0, 0], size=0.05)
+    seen_in_post_step = []
+    sim.events.on(SimEvents.POST_STEP, lambda **_: seen_in_post_step.append(sim.get_collision_observation()))
+    sim.step_once()
+    initial = sim.get_collision_observation()
+    assert initial is not None and initial.step == sim.step_count == 1
+    assert initial.sim_time == pytest.approx(sim.params.timestep)
+    assert seen_in_post_step[0] == initial
+
+    sim.set_collision_check_frequency(0)
+    sim.step_once()
+    assert sim.get_collision_observation() == initial
+    sim.check_collisions()
+    manual = sim.get_collision_observation()
+    assert manual is not None and manual.step == 2
+    assert manual.sim_time == pytest.approx(2 * sim.params.timestep)
+    assert manual.pairs[0].sample_step == 1
+
+    sim.set_collision_check_frequency(None)
+    sim.step_once()
+    later = sim.get_collision_observation()
+    assert later is not None and later.step == 3
+    assert later.pairs[0].sample_step == 1  # Stationary pair was not rechecked.
+
+
+def test_manual_collision_check_in_post_step_uses_completed_step_time(sim_core_kinematics):
+    sim = sim_core_kinematics
+    create_test_box(sim, [0, 0, 0], size=0.05)
+    create_test_box(sim, [0.09, 0, 0], size=0.05)
+    observations = []
+
+    def check_in_post_step(**_):
+        sim.check_collisions()
+        observations.append(sim.get_collision_observation())
+
+    sim.events.on(SimEvents.POST_STEP, check_in_post_step)
+    sim.step_once()
+
+    assert observations[0] is not None
+    assert observations[0].step == sim.step_count == 1
+    assert observations[0].sim_time == pytest.approx(sim.params.timestep)
+
+
+@pytest.mark.parametrize("method", [CollisionDetectionMethod.CLOSEST_POINTS, CollisionDetectionMethod.HYBRID])
+def test_collision_observation_hybrid_kinematic_branch(method):
+    sim = MultiRobotSimulationCore(
+        SimulationParams(gui=False, physics=False, monitor=False, collision_detection_method=method, collision_margin=0.02)
+    )
+    try:
+        create_test_box(sim, [0, 0, 0], size=0.05)
+        create_test_box(sim, [0.11, 0, 0], size=0.05)
+        sim.check_collisions()
+        observation = sim.get_collision_observation()
+        assert observation is not None and len(observation.pairs) == 1
+        assert observation.pairs[0].detection_method == CollisionDetectionMethod.CLOSEST_POINTS
+        assert observation.pairs[0].signed_distance is not None
+    finally:
+        p.disconnect(sim.client)
+
+
+def test_collision_observation_contact_mode_has_no_claimed_distance(sim_core_physics):
+    sim = sim_core_physics
+    create_test_box(sim, [0, 0, 0], size=0.05, mass=1.0)
+    create_test_box(sim, [0.09, 0, 0], size=0.05, mass=1.0)
+    for _ in range(3):
+        sim.step_once()
+    observation = sim.get_collision_observation()
+    assert observation is not None
+    assert observation.configured_method == CollisionDetectionMethod.CONTACT_POINTS
+    assert observation.pairs
+    assert all(
+        pair.detection_method == CollisionDetectionMethod.CONTACT_POINTS and pair.signed_distance is None
+        for pair in observation.pairs
+    )
+
+
+def test_collision_observation_invalidated_when_object_is_disabled(sim_core_kinematics):
+    sim = sim_core_kinematics
+    create_test_box(sim, [0, 0, 0], size=0.05)
+    second = create_test_box(sim, [0.09, 0, 0], size=0.05)
+    sim.check_collisions()
+    observation = sim.get_collision_observation()
+    assert observation is not None and observation.pairs
+    second.set_collision_mode(CollisionMode.DISABLED)
+    assert sim.get_collision_observation() is None
+
+
+def test_reset_clears_active_pairs_and_collision_observation(sim_core_kinematics):
+    sim = sim_core_kinematics
+    create_test_box(sim, [0, 0, 0], size=0.05)
+    create_test_box(sim, [0.09, 0, 0], size=0.05)
+    sim.check_collisions()
+    observation = sim.get_collision_observation()
+    assert observation is not None and observation.pairs
+
+    sim.reset()
+
+    assert sim.get_active_collision_pairs() == []
+    assert sim.get_collision_observation() is None
 
 
 def test_contact_points_margin_update_does_not_rebuild(sim_core_physics, monkeypatch):
@@ -922,8 +1075,9 @@ class TestRuntimeModeChanges:
         obj = create_test_box(sim_core_kinematics, [0, 0, 0], collision_mode=CollisionMode.NORMAL_3D)
         oid = obj.object_id
 
-        # Inject pairs referencing our object
-        sim_core_kinematics._active_collision_pairs = {(oid, 99), (50, oid), (50, 99)}
+        # Seed both the active set and its reverse index.
+        for pair in ((oid, 99), (50, oid), (50, 99)):
+            sim_core_kinematics._add_active_collision_pair(pair)
 
         sim_core_kinematics._remove_object_from_collision_system(oid)
 
@@ -932,12 +1086,14 @@ class TestRuntimeModeChanges:
         assert (50, oid) not in sim_core_kinematics._active_collision_pairs
         # Unrelated pair survives
         assert (50, 99) in sim_core_kinematics._active_collision_pairs
+        assert oid not in sim_core_kinematics._active_pairs_by_object
+        assert sim_core_kinematics._active_pairs_by_object[50] == {(50, 99)}
 
     def test_remove_from_collision_system_no_op_pairs(self, sim_core_kinematics):
         """_remove_object_from_collision_system is no-op for pairs when id absent."""
         obj = create_test_box(sim_core_kinematics, [0, 0, 0], collision_mode=CollisionMode.NORMAL_3D)
         oid = obj.object_id
-        sim_core_kinematics._active_collision_pairs = {(50, 99)}
+        sim_core_kinematics._add_active_collision_pair((50, 99))
 
         sim_core_kinematics._remove_object_from_collision_system(oid)
 
