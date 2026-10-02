@@ -487,6 +487,24 @@ def test_collision_observation_keeps_check_and_pair_sample_times(sim_core_kinema
     assert later.pairs[0].sample_step == 1  # Stationary pair was not rechecked.
 
 
+def test_manual_collision_check_in_post_step_uses_completed_step_time(sim_core_kinematics):
+    sim = sim_core_kinematics
+    create_test_box(sim, [0, 0, 0], size=0.05)
+    create_test_box(sim, [0.09, 0, 0], size=0.05)
+    observations = []
+
+    def check_in_post_step(**_):
+        sim.check_collisions()
+        observations.append(sim.get_collision_observation())
+
+    sim.events.on(SimEvents.POST_STEP, check_in_post_step)
+    sim.step_once()
+
+    assert observations[0] is not None
+    assert observations[0].step == sim.step_count == 1
+    assert observations[0].sim_time == pytest.approx(sim.params.timestep)
+
+
 @pytest.mark.parametrize("method", [CollisionDetectionMethod.CLOSEST_POINTS, CollisionDetectionMethod.HYBRID])
 def test_collision_observation_hybrid_kinematic_branch(method):
     sim = MultiRobotSimulationCore(

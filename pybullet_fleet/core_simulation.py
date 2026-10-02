@@ -511,6 +511,7 @@ class MultiRobotSimulationCore:
         # _pending_pose_ids holds object_ids whose _pending_pose buffer is non-empty.
         # See docs/design/two-phase-step/spec.md.
         self._in_step: bool = False
+        self._in_post_step: bool = False  # Counters advance after POST_STEP callbacks.
         self._pending_pose_ids: Set[int] = set()
         # Parent object ids that have link-level kinematic attachments.
         # Used to avoid scanning every flushed object in the hot path when no
@@ -3111,8 +3112,9 @@ class MultiRobotSimulationCore:
             new_collisions = set()
             resolved_collisions = set()
 
-            sample_step = self._step_count + int(self._in_step)
-            sample_time = self._elapsed_sim_time + (self._params.timestep if self._in_step else 0.0)
+            completing_step = self._in_step or self._in_post_step
+            sample_step = self._step_count + int(completing_step)
+            sample_time = self._elapsed_sim_time + (self._params.timestep if completing_step else 0.0)
 
             for obj_id_i, obj_id_j in pairs_to_check:
                 obj_i = self._sim_objects_dict.get(obj_id_i)
@@ -4363,6 +4365,7 @@ class MultiRobotSimulationCore:
             # POST_STEP subscribers are written directly to PyBullet in this step
             # rather than being buffered for the next step.
             self._in_step = False
+            self._in_post_step = True
 
             # --- post_step event ---
             if measure_timing:
@@ -4374,6 +4377,7 @@ class MultiRobotSimulationCore:
             self._update_selected_nameplate()
             self._elapsed_sim_time += self._params.timestep
             self._step_count += 1
+            self._in_post_step = False
             # Monitor: every step if GUI enabled, otherwise every second
             if measure_timing:
                 t_mon0 = time.perf_counter()
@@ -4441,6 +4445,7 @@ class MultiRobotSimulationCore:
                     self._print_memory_profiling_summary()
         finally:
             self._in_step = False
+            self._in_post_step = False
 
     def _print_profiling_summary(self) -> None:
         """Print profiling statistics summary (average over last N steps).

@@ -79,11 +79,12 @@ pair names.
 
 `step_once()` advances state and checks collisions before it increments
 `step_count` and elapsed simulation time. `POST_STEP` therefore sees the new
-state with the old core counters; collision observation currently labels that
-state as `step_count + 1` and `elapsed_sim_time + dt`. A manual collision check
-inside `PRE_STEP` can also receive the next-step label because `_in_step` is
-already true. This is a simulator-wide timing contract question, not a reason
-to change step order within the collision-observation slice.
+state with the old core counters; collision observation labels that state as
+`step_count + 1` and `elapsed_sim_time + dt`, including a manual collision
+check from a `POST_STEP` callback. A manual collision check inside `PRE_STEP`
+can still receive the next-step label because `_in_step` is already true.
+This is a simulator-wide timing contract question, not a reason to change
+step order within the collision-observation slice.
 
 For next-work prioritization, compare this boundary with playback, checkpoint,
 trace and other simulator gaps. If selected, investigate all `PRE_STEP` and

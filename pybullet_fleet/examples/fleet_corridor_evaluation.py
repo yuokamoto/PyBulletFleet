@@ -210,7 +210,22 @@ def _observe_collisions(
     sample_step = sim.step_count if observation_step is None else observation_step
     pairs: dict[tuple[str, str], CollisionPairObservation] = {}
     check = sim.get_collision_observation()
-    if check is None or check.step != sample_step:
+    if check is None:
+        # A lifecycle change can invalidate the last check without emitting
+        # COLLISION_ENDED. Reconcile only then, preserving unaffected pairs.
+        current_pairs = {
+            tuple(sorted((entities[a][0], entities[b][0])))
+            for a, b in sim.get_active_collision_pairs()
+            if a in entities and b in entities
+        }
+        for pair, episode in tuple(active.items()):
+            if pair not in current_pairs:
+                episode["end_step"] = sample_step
+                episode["end_time"] = sample_step * sim.params.timestep
+                episodes.append(episode)
+                del active[pair]
+        return
+    if check.step != sample_step:
         return
     for record in check.pairs:
         name_a = entities[record.object_ids[0]][0]
