@@ -1,6 +1,6 @@
 """Interactive camera control for PyBullet GUI.
 
-Provides right-drag camera panning, keyboard zooming, and view presets.
+Provides right-drag and arrow-key camera panning, keyboard zooming, and view presets.
 Integrated via ``_handle_keyboard_events()`` in :class:`MultiRobotSimulationCore`.
 """
 
@@ -43,6 +43,7 @@ class CameraController:
 
     Controls:
     - **Right-drag** — pan camera target (no conflict with native left-drag rotation)
+    - **Arrow keys** — pan the camera target in the horizontal camera-local plane
     - ``=`` / ``-`` — zoom in / out
     - ``o`` — top-down view
     """
@@ -82,6 +83,22 @@ class CameraController:
         if mouse_events is not None:
             if self._process_mouse(mouse_events, target, dist, yaw, pitch):
                 camera_changed = True
+
+        # Arrow keys pan on the ground plane relative to the current yaw.
+        # A tap and a held key both move the target. Scaling with distance
+        # keeps nearby views controllable without making wide views too slow.
+        horizontal = int(_pressed(keys, p.B3G_RIGHT_ARROW) or _triggered(keys, p.B3G_RIGHT_ARROW)) - int(
+            _pressed(keys, p.B3G_LEFT_ARROW) or _triggered(keys, p.B3G_LEFT_ARROW)
+        )
+        vertical = int(_pressed(keys, p.B3G_UP_ARROW) or _triggered(keys, p.B3G_UP_ARROW)) - int(
+            _pressed(keys, p.B3G_DOWN_ARROW) or _triggered(keys, p.B3G_DOWN_ARROW)
+        )
+        if horizontal or vertical:
+            yaw_r = math.radians(yaw)
+            step = max(0.1, dist * 0.02)
+            target[0] += step * (horizontal * math.cos(yaw_r) - vertical * math.sin(yaw_r))
+            target[1] += step * (horizontal * math.sin(yaw_r) + vertical * math.cos(yaw_r))
+            camera_changed = True
 
         # +/- → zoom (proportional: 10% per press, min step 0.5)
         # When distance is already small, move the *target* forward so the

@@ -2376,6 +2376,7 @@ class MultiRobotSimulationCore:
 
         Camera controls (always active in GUI mode):
         - Right-drag to pan camera
+        - Press arrow keys to pan camera horizontally
         - Press '=' to zoom in, '-' to zoom out
         - Press 'o' for top-down view
 
@@ -2430,7 +2431,7 @@ class MultiRobotSimulationCore:
             enable_structure_transparency,
             enable_shadows,
         )
-        logger.info("Keyboard controls registered: SPACE=pause, t=transparency, +/-=zoom, o=top-down, right-drag=pan")
+        logger.info("Keyboard controls registered: SPACE=pause, t=transparency, arrows/right-drag=pan, +/-=zoom, o=top-down")
         print("\n[KEYBOARD CONTROLS]")
         print("  Custom:")
         print("    SPACE       pause / resume simulation")
@@ -2442,6 +2443,7 @@ class MultiRobotSimulationCore:
             )
         print("  Camera:")
         print("    right-drag  pan camera")
+        print("    arrows      pan camera horizontally")
         print("    = / -       zoom in / out")
         print("    o           top-down view")
         print("  PyBullet built-in:")
@@ -2720,7 +2722,7 @@ class MultiRobotSimulationCore:
         - ``"manual"`` — Uses explicit ``camera_distance``, ``camera_yaw``,
           ``camera_pitch``, and ``camera_target`` from the config.
 
-        Interactive controls (right-drag pan, +/- zoom, o=top-down) are
+        Interactive controls (right-drag/arrow-key pan, +/- zoom, o=top-down) are
         always enabled in GUI mode regardless of camera_mode.
 
         Args:
@@ -2811,7 +2813,7 @@ class MultiRobotSimulationCore:
         # Always enable interactive camera controller in GUI mode
         if self._params.gui and self._camera_controller is None:
             self._camera_controller = CameraController(client_id=self._client)
-            logger.info("Interactive camera controls enabled: right-drag=pan, +/-=zoom, o=top-down")
+            logger.info("Interactive camera controls enabled: right-drag/arrows=pan, +/-=zoom, o=top-down")
 
     def get_aabbs(self) -> List[Tuple[Tuple[float, float, float], Tuple[float, float, float]]]:
         """Get AABBs for all simulation objects."""

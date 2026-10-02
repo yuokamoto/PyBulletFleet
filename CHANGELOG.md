@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Add a one-sided corridor traffic experiment that compares ordinary kinematic
+  passage through an entrance-side merge with an external collision-triggered
+  stop/restart rule, optional
+  single-policy GUI observation, auto-named result directories, and reports
+  of all-robot passage time and blocking evidence.
 - Expose the latest collision-check observation, including active pair IDs,
   detection branch, signed closest-point distance and sample time, without a
   second all-pairs query.
@@ -21,6 +26,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- Move the traffic-experiment GUI camera closer and allow arrow-key panning in
+  PBF's interactive camera controller.
 - Keep replay input application and result capture in `ReplaySession`, without replay-specific mutation guards in ordinary simulation and Fleet APIs. Direct core calls are outside the recorded-input contract.
 
 ### Fixed
