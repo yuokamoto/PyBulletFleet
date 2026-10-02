@@ -62,6 +62,29 @@ def test_geometric_margin_overlap_and_step_cadence(dt):
         p.disconnect(sim.client)
 
 
+def test_active_pair_without_new_sample_keeps_episode_open():
+    config = CorridorConfig(cutoff=1)
+    sim, entities = _make_sim(config)
+    robots = {name: obj for name, obj in entities.values() if name.startswith("a")}
+    active = {}
+    episodes = []
+    try:
+        robots["a00"].set_pose(Pose.from_xyz(0, 0, 0.1))
+        robots["a01"].set_pose(Pose.from_xyz(0.11, 0, 0.1))
+        sim.step_once()
+        _observe_collisions(sim, entities, active, episodes, config.margin)
+        pair = ("a00", "a01")
+        first_steps = active[pair]["observed_steps"]
+
+        sim.step_once()
+        _observe_collisions(sim, entities, active, episodes, config.margin)
+        assert pair in active
+        assert active[pair]["observed_steps"] == first_steps
+        assert not any(item["entities"] == list(pair) for item in episodes)
+    finally:
+        p.disconnect(sim.client)
+
+
 def test_independent_policy_runs_and_fixed_workload():
     config = CorridorConfig(cutoff=30)
     uncontrolled = run_policy("uncontrolled", config)

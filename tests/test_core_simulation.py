@@ -1353,13 +1353,14 @@ class TestReset:
         """All collision-related caches are emptied."""
         sim_core._cached_collision_modes[42] = CollisionMode.NORMAL_3D
         sim_core._cached_aabbs_dict[42] = ((0, 0, 0), (1, 1, 1))
-        sim_core._active_collision_pairs.add((1, 2))
+        sim_core._add_active_collision_pair((1, 2))
 
         sim_core.reset()
 
         assert len(sim_core._cached_collision_modes) == 0
         assert len(sim_core._cached_aabbs_dict) == 0
         assert len(sim_core._active_collision_pairs) == 0
+        assert len(sim_core._active_pairs_by_object) == 0
 
     def test_clears_movement_caches(self, sim_core):
         """Movement tracking sets are emptied."""

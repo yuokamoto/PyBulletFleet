@@ -38,3 +38,20 @@ out-of-session mutations mean for the recording contract.
 
 **Candidate destination:** Snapshot/replay architecture guidance, if another
 slice needs the same correction. **Status:** watch; no promotion yet.
+
+## Preserve existing mode semantics during a localized correctness fix
+
+**Occurrences:** 1 (#52, collision-margin broadphase)
+
+**Evidence:** The margin fix went through several broader implementations before
+review narrowed it to the candidate AABB envelope. Independent review then
+found that the initial fix changed the 2D mode's Z-overlap behavior. A focused
+regression restored that existing mode contract.
+
+**Reusable check:** State the invariant being repaired and the behavior of each
+existing mode before changing shared candidate extraction. Keep the fix at the
+smallest layer that enforces the invariant, and test a counterexample plus mode
+boundaries.
+
+**Candidate destination:** Collision/performance development guidance if this
+recurs. **Status:** watch; no promotion yet.

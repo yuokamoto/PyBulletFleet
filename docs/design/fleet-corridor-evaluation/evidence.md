@@ -57,12 +57,20 @@ measurements, not a realistic traffic-jam dynamics model.
 
 Collision episodes are sampled once per completed step. A focused fixture at
 0.1 s and 0.05 s distinguishes positive-gap margin proximity, geometric
-overlap and separation. The core's AABB broadphase omits some positive-gap
-near misses, as already documented by an xfail in
-`tests/test_collision_comprehensive.py`. The scenario queries every
+overlap and separation. At the time of this experiment, the core's AABB
+broadphase omitted some positive-gap near misses; PR #52 subsequently fixed
+that defect and converted its xfail regression. The scenario queries every
 robot/robot and robot/wall pair directly for complete *sampled* near-miss
 classification. It cannot see contact between samples. Geometric overlap in
 kinematic mode does not mean a physical impact.
+
+The subsequent collision-observation implementation reads PBF's qualifying
+pair records instead of querying all pairs in the evaluator. In a 300 s
+headless rerun, both policies retained the original margin-only, geometric-
+overlap and corridor-overlap episode counts (44/180/100 uncontrolled and
+46/116/0 direction gate). A pair that was not rechecked on a step remains
+active but is not counted as a new geometric sample. The original timing
+figures below describe the all-pair collector, not this later API.
 
 The all-pair collector has visible cost: after adopting the standard
 `run_simulation()` loop, approximate 300 s runs took 5.5–5.8 s wall time with
@@ -87,8 +95,9 @@ pause/step interaction; it does not validate the browser launcher visually.
   state through ordinary PBF APIs, but `_observe_collisions()` directly uses
   PyBullet body IDs and `sim.client` to obtain signed closest-point distances.
   The public collision count/active pairs do not preserve the distinction
-  between positive-gap margin intrusion and geometric overlap, and the core's
-  AABB broadphase can omit positive-gap pairs. Consider a narrow read-only PBF
+  between positive-gap margin intrusion and geometric overlap. PR #52 fixed
+  the core broadphase omission of positive-gap pairs within the margin.
+  Consider a narrow read-only PBF
   proximity query for specified objects, with explicit margin, detection
   method and sampling cost. Keep corridor classification and episode/metric
   aggregation in the external evaluator. This API is a follow-up candidate,

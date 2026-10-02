@@ -27,6 +27,22 @@ modes, safety margin, spatial hash cell size, and multi-cell threshold.
 ```
 
 (collision-features-demo)=
+## Read collision observations
+
+The Python simulation core exposes `get_collision_observation()`. It
+returns `None` before the first collision check or after collision state is
+invalidated by object removal/disable; otherwise it reports the
+latest check step/time, configured margin, and active qualifying pairs. Each
+pair has PBF object IDs, the actual `detection_method` used and its own sample
+step/time. `signed_distance` is available for closest-point checks: positive
+values are within the configured margin, while zero or negative values mean
+geometric touch/overlap. Contact-point checks report `None` for distance.
+When collision checks are skipped, the previous observation remains available
+with its original timestamp. This is not a history or an all-pairs distance
+query.
+The check-level `configured_method` records the simulation setting; in hybrid
+mode, each pair's `detection_method` identifies the branch actually used.
+
 ## Try the visual collision demo
 
 Run `pybullet_fleet/examples/basics/collision_features_demo.py` to observe
