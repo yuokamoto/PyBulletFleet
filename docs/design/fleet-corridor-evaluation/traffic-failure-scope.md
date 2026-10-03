@@ -1,8 +1,9 @@
 # Corridor traffic failure — scope investigation
 
 **Status:** Human selected a revised external response rule after the initial
-4-robot pilot. The route now merges at the corridor entrance; the revised
-4- and 20-robot runs completed. See
+4-robot pilot, then extended its stop/restart scope through endpoint arrival.
+The route merges at the corridor entrance; the revised 4- and 20-robot runs
+completed. See
 `traffic-failure-pilot-evidence.md` for both results.
 
 ## Two evaluation meanings
@@ -84,11 +85,12 @@ pass through them unless the external rule also stops it.
    because waiting for strict clearance deadlocked the initial pilot. A
    released robot may collide again; record any repeated stop/restart. Do not
    use teleport as silent recovery.
-4. Make **time until every robot passes the corridor** the primary outcome.
+4. Make **time until every robot passes the corridor** the corridor outcome.
    Record each robot's first entry into the corridor and first exit through
    the B-side boundary, using the same reference-point geometry as the
    existing evaluator. Compare the last exit time between the pass-through
-   and collision-response runs. Also report blocked robots over simulated
+   and collision-response runs. Separately compare the last endpoint-arrival
+   time to capture stopping after the exit. Also report blocked robots over simulated
    time, blocked-time distribution, spatial queue near the corridor, endpoint
    task completion, and stop/reissue decisions. Keep wall time/RTF separate.
    A queue claim requires both waiting robots and a stated spatial predicate.
@@ -109,9 +111,11 @@ nonpenetration; resumed robots may still pass through each other.
 The first exit-priority route still merged in the corridor because each robot
 navigated directly from a narrow two-lane start to a central goal. The current
 route has four feeder lanes and explicit entrance/exit waypoints. Collision
-observations remain global, but this scenario's stop rule excludes robots that
-have already crossed the B-side corridor exit. Post-exit overlaps are measured
-separately and are not used to claim traffic blocking at the entrance.
+observations remain global. Following Human review, the stop rule applies to
+robots after the B-side corridor exit until endpoint arrival. Completed robots
+are excluded from the response, while their overlaps remain measured. A
+post-exit stop can affect endpoint-arrival time without changing that robot's
+already recorded corridor-exit time; do not count it as entrance blocking.
 
 ## Missing capabilities and Human decisions
 

@@ -26,6 +26,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- Align the one-sided traffic example's `run_policy()` and report `policy` name
+  with the bidirectional evaluation example. In its version 2 report, name route
+  phases `entrance`, `exit` and `destination` instead of using numeric indices.
+- Extend the one-sided traffic example's external collision response through
+  endpoint arrival, and report all-robot endpoint time separately from corridor
+  passage time.
 - Shorten both corridor examples to a 1.5 m passage; start the bidirectional
   evaluation GUI closer to the action, auto-name its output directory when
   no path is supplied, and allow both examples to show the live DataMonitor

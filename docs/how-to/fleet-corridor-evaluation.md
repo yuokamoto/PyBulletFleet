@@ -1,5 +1,12 @@
 # Run the synthetic fleet corridor evaluation
 
+This is an **evaluation example**, not a fleet-management algorithm supplied
+by PBF. It shows how an external application can run its own algorithms under
+equivalent simulation conditions and use PBF's commands, state and collision
+observations to compare their outcomes. The two policies below are deliberately
+simple examples; designing or judging a production algorithm is outside this
+repository's scope.
+
 This example runs two independent 20-robot simulations through a narrow
 corridor. It compares unrestricted bidirectional commands with an external
 direction gate. It is a synthetic movement workload, not a warehouse delivery

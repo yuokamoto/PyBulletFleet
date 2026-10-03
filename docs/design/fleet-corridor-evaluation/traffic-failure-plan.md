@@ -30,7 +30,7 @@ so no material Architecture Gate is required.
    cutoff. Record first corridor entry and B-side exit of each robot, primary
    all-pass time (absent if unfinished), operational `deadlock_at_cutoff`,
    blocked-time distribution, blocked-robot count/queue geometry, endpoint
-   completion, overlap entries by pre-entrance/corridor/post-exit zone and
+   completion and all-arrived time, overlap entries by pre-entrance/corridor/post-exit zone and
    wall/RTF execution cost. Run 20 robots
    only after the small pilot demonstrates the intended chain or report why
    it cannot.
@@ -45,3 +45,8 @@ selected as winners yet never resume. Human proposed exit-priority release;
 the revised pilot passed at 4 and 20 robots without core changes. If another
 geometry reveals a nonrecoverable group, return to Human Scope Review rather
 than adding core collision physics or a generic traffic policy.
+
+Human later extended the response through endpoint arrival. Apply the same
+external stop/restart rule to unfinished robots after the corridor exit;
+exclude completed robots from response decisions while retaining their overlap
+observations. Keep all-pass time and all-arrived time as separate outcomes.

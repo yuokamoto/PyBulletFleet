@@ -131,6 +131,7 @@ The same 20-robot, 60 s check produced:
 | --- | ---: | ---: |
 | Robots past the B-side exit | 20/20 | 20/20 |
 | Time when all passed | 8.6 s | 38.3 s |
+| Time when all reached endpoints | 16.1 s | 45.8 s |
 | Overlap entries before entrance | 136 | 156 |
 | Overlap entries in corridor/boundary | 0 | 0 |
 | Overlap entries after exit | 118 | 0 |
@@ -141,6 +142,15 @@ The same 20-robot, 60 s check produced:
 The entrance-side blocking and all-pass delay remain observable. Zone counts
 and stop counts changed with the shorter path, so prior tables remain historical
 measurements for their stated geometries.
+Following Human review, the response was extended from corridor exit through
+endpoint arrival. A 20-robot rerun at the 300 s cutoff retained the passage
+and overlap counts above; all endpoints were reached at 16.1 s for pass-through
+and 45.8 s for collision-stop. This particular workload produced no post-exit
+stop under the extended rule. A focused injected-observation test confirms
+that a fresh overlap between unfinished, post-exit robots can trigger a stop,
+while a completed endpoint task is excluded. Thus the endpoint outcome is
+reported separately; the measured 20-robot delay here remains attributable
+to the entrance-side conflicts rather than a claimed post-exit jam.
 
 Pre-entry admission would avoid some overlap, but it changes the experiment
 from collision-induced failure toward traffic prevention and is not proposed

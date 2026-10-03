@@ -1,5 +1,11 @@
 # Run the one-sided corridor traffic experiment
 
+This is an **evaluation example**, not a traffic-control algorithm supplied
+by PBF. It shows how an external application can use PBF's collision
+observations and command APIs to measure the consequences of its own response
+rule. The stop/restart rule below is deliberately illustrative; designing or
+judging a production algorithm is outside this repository's scope.
+
 This synthetic example starts robots in area A and sends them through a narrow
 corridor toward B. It compares ordinary kinematic pass-through with a
 scenario-owned collision response. It does not simulate physical blocking or
@@ -58,6 +64,10 @@ simulations. Robots start in four A-side feeder lanes, converge on an entrance
 waypoint at x=-1.2, cross to an exit waypoint at x=1.2, then disperse to
 separate B-side endpoints. The app issues each waypoint through the ordinary
 Fleet API; it does not add route planning or traffic response to PBF core.
+In report schema version 2, each navigation decision names its `route_phase`
+as `entrance`, `exit` or `destination` rather than using a numeric index.
+The report identifies the selected external algorithm with `policy`, matching
+the `--policy` option and the bidirectional evaluation example.
 The response application reads PBF's collision observation
 after each completed step. A fresh robot–robot signed distance of zero or
 less forms a conflict; robot–wall observations are counted but do not trigger
@@ -67,15 +77,19 @@ Among all stopped robots, at most one per step is eligible to resume after at
 least one simulated second: the one nearest the exit. The app then reissues
 its original `navigate` endpoint. It may still overlap another robot and be
 stopped again. PBF core itself does not stop robots on collision. The response
-does not stop a robot after it has passed the B-side corridor exit. Robot
-overlaps beyond the exit are still measured; they are not a traffic-stop
-trigger in this example.
+can also stop a robot after it has passed the B-side corridor exit, until it
+arrives at its destination. Completed robots are excluded from further
+stop/restart decisions. All robot overlaps remain measured, including pairs
+involving completed robots; those completed pairs do not trigger a response.
 
-The primary outcome is the time when every robot has passed the B-side
-corridor boundary. If any robot remains at the 300 s cutoff, the report gives
-no all-pass time and marks `deadlock_at_cutoff`. This is a deadline label, not
-proof of permanent deadlock. The report also contains per-robot entry, exit
-and endpoint-arrival steps, stop/restart decisions, blocked intervals and
+The primary corridor outcome is the time when every robot has passed the B-side
+boundary. `all_arrived_at_seconds` separately measures when every robot reaches
+its destination, including any delay after the exit. If a robot has not passed
+by the 300 s cutoff, the report gives no all-pass time and marks
+`deadlock_at_cutoff`; this is a deadline label, not proof of permanent deadlock.
+If any destination remains unfinished, `all_arrived_at_seconds` is null and
+`endpoint_unfinished_count` reports how many. The report also contains
+per-robot entry, exit and endpoint-arrival steps, stop/restart decisions, blocked intervals and
 overlap entry counts by location. `before_entrance` means both reference points
 are before x=-0.75; `near_destinations` means both are at x>=4. The remaining
 zones cover the corridor/boundary and the immediate exit area. These are
@@ -83,11 +97,14 @@ scenario geometry labels, not PBF collision types. Simulated-time outcomes
 are separate from wall time.
 An accepted command is not arrival or passage.
 
-With the shortened x=[-0.75,0.75] corridor, the fixed 20-robot run finished
-at 8.6 simulated seconds for pass-through and 38.3 seconds for collision-stop.
+With the shortened x=[-0.75,0.75] corridor, all 20 robots passed the exit at
+8.6 simulated seconds for pass-through and 38.3 seconds for collision-stop;
+all reached their destinations at 16.1 and 45.8 seconds, respectively.
 In the response run, 156 robot-overlap entries were observed before x=-0.75,
 and the peak of 19 blocked robots was also before the entrance; no blocked
-robots were observed inside the corridor. Because kinematic
+robots were observed inside the corridor. No post-exit stop happened in this
+fixed run, though the response rule now permits one before endpoint arrival.
+Because kinematic
 robots can pass through each other, the example does not establish impact
 severity or collision avoidance. The repository's
 `docs/design/fleet-corridor-evaluation/traffic-failure-pilot-evidence.md`

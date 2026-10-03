@@ -2,7 +2,7 @@
 
 Run ``python -m pybullet_fleet.examples.fleet_corridor_traffic_failure``.
 Omit OUTPUT_DIR to create a unique result directory under the system temporary directory.
-This is a scenario-specific policy, not a PBF collision-response mode.
+The policies are scenario-specific, not PBF collision-response modes.
 """
 
 from __future__ import annotations
@@ -13,6 +13,7 @@ import math
 import tempfile
 import time
 from dataclasses import asdict, dataclass
+from enum import Enum
 from pathlib import Path
 
 import pybullet as p
@@ -35,6 +36,18 @@ _ROBOT_Z = 0.1
 _FEEDER_Y = (-1.2, -0.6, 0.6, 1.2)
 _ENTRANCE_WAYPOINT = (-_CORRIDOR_HALF_LENGTH - 0.45, 0.0)
 _EXIT_WAYPOINT = (_CORRIDOR_HALF_LENGTH + 0.45, 0.0)
+
+
+class RoutePhase(str, Enum):
+    ENTRANCE = "entrance"
+    EXIT = "exit"
+    DESTINATION = "destination"
+
+
+_NEXT_ROUTE_PHASE = {
+    RoutePhase.ENTRANCE: RoutePhase.EXIT,
+    RoutePhase.EXIT: RoutePhase.DESTINATION,
+}
 
 
 @dataclass(frozen=True)
@@ -206,8 +219,8 @@ def _hold_final_gui(sim: MultiRobotSimulationCore) -> None:
         pass
 
 
-def run_variant(
-    mode: str,
+def run_policy(
+    policy: str,
     config: TrafficConfig = TrafficConfig(),
     *,
     gui: bool = False,
@@ -215,9 +228,9 @@ def run_variant(
     view_rtf: float = 1.0,
     hold_gui: bool = False,
 ) -> dict:
-    """Run one fresh world; ``mode`` is an external app policy."""
-    if mode not in ("pass_through", "collision_stop"):
-        raise ValueError("mode must be pass_through or collision_stop")
+    """Run one fresh world with the selected external app policy."""
+    if policy not in ("pass_through", "collision_stop"):
+        raise ValueError("policy must be pass_through or collision_stop")
     if gui and (not math.isfinite(view_rtf) or view_rtf <= 0):
         raise ValueError("view_rtf must be finite and positive in GUI mode")
     if hold_gui and not gui:
@@ -227,9 +240,14 @@ def run_variant(
     tasks = _workload(config)
     goals = {task["robot_id"]: tuple(task["destination"]) for task in tasks}
     route_targets = {
-        task["robot_id"]: (tuple(task["entrance"]), tuple(task["exit"]), tuple(task["destination"])) for task in tasks
+        task["robot_id"]: {
+            RoutePhase.ENTRANCE: tuple(task["entrance"]),
+            RoutePhase.EXIT: tuple(task["exit"]),
+            RoutePhase.DESTINATION: tuple(task["destination"]),
+        }
+        for task in tasks
     }
-    route_phase = {name: 0 for name in goals}
+    route_phase = {name: RoutePhase.ENTRANCE for name in goals}
     sim, names = _make_sim(config, tasks, gui=gui, monitor_gui=monitor_gui)
     sim.params.target_rtf = view_rtf if gui else 0
     dispatcher = FleetCommandDispatcher(sim, retain_command_events=False)
@@ -266,14 +284,21 @@ def run_variant(
         if name not in ack.accepted_names:
             raise RuntimeError(f"{action} rejected for {name}: {dict(ack.rejected)}")
         decisions.append(
-            {"step": step, "robot_id": name, "action": action, "route_phase": route_phase[name], "command_id": ack.command_id}
+            {
+                "step": step,
+                "robot_id": name,
+                "action": action,
+                "route_phase": route_phase[name].value,
+                "command_id": ack.command_id,
+            }
         )
 
     def advance_route(name: str, state: RobotState2D, step: int, action: str = "next_waypoint") -> bool:
         phase = route_phase[name]
-        if phase == 2 or state.is_moving or math.dist(state.position, route_targets[name][phase]) > 0.02:
+        next_phase = _NEXT_ROUTE_PHASE.get(phase)
+        if next_phase is None or state.is_moving or math.dist(state.position, route_targets[name][phase]) > 0.02:
             return False
-        route_phase[name] += 1
+        route_phase[name] = next_phase
         issue_goal(name, step, action)
         return True
 
@@ -290,7 +315,7 @@ def run_variant(
             for name in sorted(goals):
                 if name not in blocked:
                     advance_route(name, states[name], step)
-            if mode != "collision_stop" or not blocked:
+            if policy != "collision_stop" or not blocked:
                 return
             check = sim.get_collision_observation()
             if check is None or check.step != step:
@@ -324,7 +349,13 @@ def run_variant(
                     and abs(y) <= _CORRIDOR_INNER_HALF_WIDTH
                 ):
                     exited[name] = step
-                if name not in arrived and math.dist(state.position, goals[name]) <= 0.02 and not state.is_moving:
+                if (
+                    name not in arrived
+                    and name not in blocked
+                    and route_phase[name] == RoutePhase.DESTINATION
+                    and math.dist(state.position, goals[name]) <= 0.02
+                    and not state.is_moving
+                ):
                     arrived[name] = step
 
             check = sim.get_collision_observation()
@@ -349,11 +380,14 @@ def run_variant(
                 else:
                     overlap_entries_by_zone["corridor_or_boundary"] += 1
             last_overlap_pairs = overlaps
-            if mode == "collision_stop":
-                for group in _components(overlaps):
+            if policy == "collision_stop":
+                # Keep measuring every overlap, but a completed endpoint task
+                # cannot be stopped or restarted by this response policy.
+                response_pairs = {pair for pair in overlaps if pair[0] not in arrived and pair[1] not in arrived}
+                for group in _components(response_pairs):
                     winner = min(group, key=lambda name: _exit_priority(name, states))
                     for name in sorted(group - {winner}):
-                        if name in blocked or name in exited:
+                        if name in blocked:
                             continue
                         ack = dispatcher.stop([name], source="corridor-traffic-example", command_id=f"{name}-stop-{step}")
                         if name not in ack.accepted_names:
@@ -396,10 +430,11 @@ def run_variant(
                 {"robot_id": name, "start_step": block_started[name], "end_step": sim.step_count, "censored_at_cutoff": True}
             )
         all_passed = len(exited) == len(goals)
+        all_arrived = len(arrived) == len(goals)
         return {
-            "schema_version": 1,
+            "schema_version": 2,
             "scenario_id": "pbf.one_sided_corridor_traffic.v1",
-            "mode": mode,
+            "policy": policy,
             "execution": {"gui": gui, "monitor_gui": monitor_gui, "target_view_rtf": view_rtf if gui else None},
             "conditions": {
                 **asdict(config),
@@ -418,7 +453,9 @@ def run_variant(
                     f"after_exit: both x > {_CORRIDOR_HALF_LENGTH:g} but not near_destinations; "
                     "corridor_or_boundary: all other pairs"
                 ),
-                "response_scope": "stops apply only to robots that have not passed the B-side corridor exit",
+                "response_scope": (
+                    "stops apply until endpoint arrival, including after the corridor exit; " "completed tasks are excluded"
+                ),
             },
             "tasks": tasks,
             "first_corridor_entry_step": entered,
@@ -432,6 +469,8 @@ def run_variant(
                 "unpassed_count": len(goals) - len(exited),
                 "deadlock_at_cutoff": not all_passed,
                 "endpoint_completed_count": len(arrived),
+                "endpoint_unfinished_count": len(goals) - len(arrived),
+                "all_arrived_at_seconds": max(arrived.values()) * config.timestep if all_arrived else None,
                 "robot_overlap_entries": overlap_entries,
                 "robot_overlap_entries_by_zone": overlap_entries_by_zone,
                 "wall_overlap_samples": wall_overlap_samples,
@@ -481,15 +520,15 @@ def main() -> None:
     )
     policies = ("pass_through", "collision_stop") if args.policy == "both" else (args.policy,)
     reports = [
-        run_variant(policy, config, gui=args.gui, monitor_gui=args.monitor, view_rtf=args.rtf, hold_gui=args.gui)
+        run_policy(policy, config, gui=args.gui, monitor_gui=args.monitor, view_rtf=args.rtf, hold_gui=args.gui)
         for policy in policies
     ]
     if args.output_dir is not None:
         output_dir.mkdir(parents=True, exist_ok=False)
     for report in reports:
-        (output_dir / f"{report['mode']}.json").write_text(json.dumps(report, indent=2) + "\n")
+        (output_dir / f"{report['policy']}.json").write_text(json.dumps(report, indent=2) + "\n")
     print(f"Saved reports in {output_dir}")
-    print(json.dumps({report["mode"]: report["metrics"] for report in reports}, indent=2))
+    print(json.dumps({report["policy"]: report["metrics"] for report in reports}, indent=2))
 
 
 if __name__ == "__main__":

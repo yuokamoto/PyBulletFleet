@@ -6,15 +6,17 @@ import pybullet as p
 import pytest
 
 import pybullet_fleet.examples.fleet_corridor_traffic_failure as traffic
-from pybullet_fleet.examples.fleet_corridor_traffic_failure import TrafficConfig, _workload, run_variant
+from pybullet_fleet.examples.fleet_corridor_traffic_failure import TrafficConfig, _workload, run_policy
 
 
 def test_four_robot_collision_response_recovers_after_minimum_stop():
     config = TrafficConfig(robots=4, cutoff=60)
-    baseline = run_variant("pass_through", config)
-    response = run_variant("collision_stop", config)
+    baseline = run_policy("pass_through", config)
+    response = run_policy("collision_stop", config)
 
     assert baseline["tasks"] == response["tasks"] == _workload(config)
+    assert (baseline["policy"], response["policy"]) == ("pass_through", "collision_stop")
+    assert baseline["schema_version"] == response["schema_version"] == 2
     assert baseline["metrics"]["passed_count"] == response["metrics"]["passed_count"] == 4
     assert response["metrics"]["all_passed_at_seconds"] > baseline["metrics"]["all_passed_at_seconds"]
     assert response["metrics"]["stop_count"] == response["metrics"]["resume_count"] > 0
@@ -30,7 +32,7 @@ def test_four_robot_collision_response_recovers_after_minimum_stop():
                 for decision in report["decisions"]
                 if decision["robot_id"] == task["robot_id"] and "route_phase" in decision
             }
-            == {0, 1, 2}
+            == {"entrance", "exit", "destination"}
             for task in report["tasks"]
         )
     assert all(
@@ -41,8 +43,8 @@ def test_four_robot_collision_response_recovers_after_minimum_stop():
 
 def test_twenty_robot_response_changes_all_pass_time_without_core_collision_response():
     config = TrafficConfig(robots=20, cutoff=60)
-    baseline = run_variant("pass_through", config)
-    response = run_variant("collision_stop", config)
+    baseline = run_policy("pass_through", config)
+    response = run_policy("collision_stop", config)
 
     assert baseline["conditions"] == response["conditions"]
     assert baseline["metrics"]["passed_count"] == response["metrics"]["passed_count"] == 20
@@ -61,12 +63,58 @@ def test_twenty_robot_response_changes_all_pass_time_without_core_collision_resp
     assert response["metrics"]["wall_overlap_samples"] == 0
 
 
+def test_collision_after_corridor_exit_can_stop_robot_before_endpoint(monkeypatch):
+    original_overlaps = traffic._robot_overlaps
+
+    def with_post_exit_overlap(check, step, names, goals):
+        overlaps = original_overlaps(check, step, names, goals)
+        if step == 90:
+            overlaps.add(("r00", "r01"))
+        return overlaps
+
+    monkeypatch.setattr(traffic, "_robot_overlaps", with_post_exit_overlap)
+    report = run_policy("collision_stop", TrafficConfig(robots=4, cutoff=30))
+    exited = report["first_corridor_exit_step"]
+    arrived = report["endpoint_arrival_step"]
+    assert any(
+        decision["action"] == "stop" and exited[decision["robot_id"]] < decision["step"] < arrived[decision["robot_id"]]
+        for decision in report["decisions"]
+    )
+    assert report["metrics"]["endpoint_unfinished_count"] == 0
+
+
+def test_completed_endpoint_is_not_restarted_by_later_overlap(monkeypatch):
+    original_overlaps = traffic._robot_overlaps
+
+    def with_completed_robot_overlap(check, step, names, goals):
+        overlaps = original_overlaps(check, step, names, goals)
+        if step == 125:
+            overlaps.add(("r00", "r01"))
+        return overlaps
+
+    monkeypatch.setattr(traffic, "_robot_overlaps", with_completed_robot_overlap)
+    report = run_policy("collision_stop", TrafficConfig(robots=4, cutoff=30))
+    assert report["endpoint_arrival_step"]["r01"] < 125
+    assert report["endpoint_arrival_step"]["r00"] > 125
+    assert not any(decision["action"] == "stop" and decision["step"] == 125 for decision in report["decisions"])
+
+
 def test_unfinished_robots_are_not_reported_as_completed_at_cutoff():
-    report = run_variant("collision_stop", TrafficConfig(robots=4, cutoff=1))
+    report = run_policy("collision_stop", TrafficConfig(robots=4, cutoff=1))
     assert report["metrics"]["passed_count"] == 0
     assert report["metrics"]["unpassed_count"] == 4
     assert report["metrics"]["all_passed_at_seconds"] is None
     assert report["metrics"]["deadlock_at_cutoff"]
+    assert report["metrics"]["all_arrived_at_seconds"] is None
+    assert report["metrics"]["endpoint_unfinished_count"] == 4
+
+
+def test_corridor_passage_and_endpoint_arrival_have_separate_cutoff_results():
+    report = run_policy("pass_through", TrafficConfig(robots=20, cutoff=9))
+    assert report["metrics"]["passed_count"] == 20
+    assert report["metrics"]["all_passed_at_seconds"] is not None
+    assert report["metrics"]["endpoint_unfinished_count"] > 0
+    assert report["metrics"]["all_arrived_at_seconds"] is None
 
 
 @pytest.mark.parametrize("robots", [0, 1, 3])
@@ -87,7 +135,7 @@ def test_gui_observation_uses_same_workload_without_desktop(monkeypatch):
     monkeypatch.setattr(traffic, "_make_sim", direct_client)
     monkeypatch.setattr(traffic, "_hold_final_gui", lambda sim: observed_connected.append(bool(p.isConnected(sim.client))))
     monkeypatch.setattr(traffic.time, "sleep", lambda _: None)
-    report = run_variant("collision_stop", TrafficConfig(robots=4, cutoff=1), gui=True, view_rtf=3, hold_gui=True)
+    report = run_policy("collision_stop", TrafficConfig(robots=4, cutoff=1), gui=True, view_rtf=3, hold_gui=True)
     assert observed_connected == [True]
     assert report["execution"] == {"gui": True, "monitor_gui": False, "target_view_rtf": 3}
     assert report["tasks"] == _workload(TrafficConfig(robots=4, cutoff=1))
@@ -98,7 +146,7 @@ def test_gui_requires_one_policy_and_positive_view_rate(monkeypatch, tmp_path):
     with pytest.raises(SystemExit, match="2"):
         traffic.main()
     with pytest.raises(ValueError, match="view_rtf"):
-        run_variant("collision_stop", gui=True, view_rtf=0)
+        run_policy("collision_stop", gui=True, view_rtf=0)
     monkeypatch.setattr(sys, "argv", ["traffic", "--monitor"])
     with pytest.raises(SystemExit, match="2"):
         traffic.main()
