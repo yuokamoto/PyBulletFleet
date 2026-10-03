@@ -1,6 +1,6 @@
 """Synthetic corridor experiment driven by an external fleet-management app.
 
-Run ``python -m pybullet_fleet.examples.fleet_corridor_evaluation OUTPUT_DIR``.
+Run ``python -m pybullet_fleet.examples.fleet_corridor_evaluation``.
 The policies, task ledger and verdict-free metrics live here, not in PBF core.
 This is not a replay, historical incident, or warehouse delivery workload.
 """
@@ -11,6 +11,7 @@ import argparse
 import json
 import math
 import statistics
+import tempfile
 import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -36,7 +37,7 @@ _LANE_Y = (-0.075, 0.075)
 _START_X = 5.0
 _ENDPOINT_X = 4.0
 _ROBOT_Z = 0.1
-_CORRIDOR_HALF_LENGTH = 3.0
+_CORRIDOR_HALF_LENGTH = 0.75
 _CORRIDOR_INNER_HALF_WIDTH = 0.17
 _CORRIDOR_CAPACITY = 3
 _WALL_HALF_THICKNESS = 0.05
@@ -109,13 +110,13 @@ def _workload() -> list[dict]:
 
 
 def _make_sim(
-    config: CorridorConfig, *, gui: bool = False
+    config: CorridorConfig, *, gui: bool = False, monitor_gui: bool = False
 ) -> tuple[MultiRobotSimulationCore, dict[int, tuple[str, SimObject]]]:
     sim = MultiRobotSimulationCore(
         SimulationParams(
             gui=gui,
-            monitor=False,
-            enable_monitor_gui=False,
+            monitor=monitor_gui,
+            enable_monitor_gui=monitor_gui,
             enable_floor=False,
             physics=False,
             target_rtf=0,
@@ -179,7 +180,7 @@ def _make_sim(
         sim.setup_camera(
             camera_config={
                 "camera_mode": "manual",
-                "camera_distance": 18.0,
+                "camera_distance": 8.0,
                 "camera_yaw": 0,
                 "camera_pitch": -89,
                 "camera_target": [0, 0, _ROBOT_Z],
@@ -320,6 +321,7 @@ def run_policy(
     *,
     collect_collision_episodes: bool = True,
     gui: bool = False,
+    monitor_gui: bool = False,
     view_rtf: float = 1.0,
     hold_gui: bool = False,
 ) -> dict:
@@ -330,7 +332,9 @@ def run_policy(
         raise ValueError("view_rtf must be finite and positive in GUI mode")
     if hold_gui and not gui:
         raise ValueError("hold_gui requires gui=True")
-    sim, entities = _make_sim(config, gui=gui)
+    if monitor_gui and not gui:
+        raise ValueError("monitor_gui requires gui=True")
+    sim, entities = _make_sim(config, gui=gui, monitor_gui=monitor_gui)
     dispatcher = FleetCommandDispatcher(sim, retain_command_events=False)
     provider = FleetStateProvider(sim)
     tasks = _workload()
@@ -506,7 +510,7 @@ def run_policy(
             "scenario_id": "pbf.synthetic_corridor.v1",
             "run_id": run_id,
             "policy": policy,
-            "execution": {"gui": gui, "target_view_rtf": view_rtf if gui else None},
+            "execution": {"gui": gui, "monitor_gui": monitor_gui, "target_view_rtf": view_rtf if gui else None},
             "conditions": {
                 **asdict(config),
                 "robots": 2 * _ROBOTS_PER_SIDE,
@@ -614,27 +618,38 @@ def compare_reports(left: dict, right: dict) -> dict:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("output", type=Path, help="Directory for independent policy reports")
+    parser.add_argument("output", type=Path, nargs="?", help="Result directory; omitted creates a unique temporary one")
     parser.add_argument("--dt", type=float, default=0.1, help="Simulation timestep in seconds")
     parser.add_argument("--cutoff", type=float, default=300.0, help="Fixed simulated-time cutoff")
     parser.add_argument("--policy", choices=("both", "uncontrolled", "direction_gate"), default="both")
     parser.add_argument("--gui", action="store_true", help="Observe one policy in the PyBullet GUI")
+    parser.add_argument("--monitor", action="store_true", help="Show the live DataMonitor alongside --gui")
     parser.add_argument("--rtf", type=float, default=1.0, help="GUI target real-time factor (default: 1)")
     args = parser.parse_args()
     if args.gui and args.policy == "both":
         parser.error("--gui requires --policy uncontrolled or --policy direction_gate")
+    if args.monitor and not args.gui:
+        parser.error("--monitor requires --gui")
     if args.gui and (not math.isfinite(args.rtf) or args.rtf <= 0):
         parser.error("--rtf must be finite and positive with --gui")
     config = CorridorConfig(timestep=args.dt, cutoff=args.cutoff)
-    args.output.mkdir(parents=True, exist_ok=False)
+    if args.output is not None and args.output.exists():
+        parser.error("output directory already exists")
+    output_dir = Path(tempfile.mkdtemp(prefix="pbf-corridor-")) if args.output is None else args.output
     policies = ("uncontrolled", "direction_gate") if args.policy == "both" else (args.policy,)
-    reports = [run_policy(policy, config, gui=args.gui, view_rtf=args.rtf, hold_gui=args.gui) for policy in policies]
+    reports = [
+        run_policy(policy, config, gui=args.gui, monitor_gui=args.monitor, view_rtf=args.rtf, hold_gui=args.gui)
+        for policy in policies
+    ]
+    if args.output is not None:
+        output_dir.mkdir(parents=True, exist_ok=False)
     for report in reports:
-        path = args.output / f"{report['policy']}.json"
+        path = output_dir / f"{report['policy']}.json"
         path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
         print(report["policy"], report["metrics"])
     if len(reports) == 2:
-        (args.output / "comparison.json").write_text(json.dumps(compare_reports(*reports), indent=2, sort_keys=True) + "\n")
+        (output_dir / "comparison.json").write_text(json.dumps(compare_reports(*reports), indent=2, sort_keys=True) + "\n")
+    print(f"Saved reports in {output_dir}")
 
 
 if __name__ == "__main__":

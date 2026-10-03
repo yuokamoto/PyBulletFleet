@@ -28,13 +28,13 @@ from pybullet_fleet.states import RobotState2D
 from pybullet_fleet.types import CollisionDetectionMethod, CollisionMode
 
 
-_CORRIDOR_HALF_LENGTH = 3.0
+_CORRIDOR_HALF_LENGTH = 0.75
 _CORRIDOR_INNER_HALF_WIDTH = 0.17
 _WALL_HALF_THICKNESS = 0.05
 _ROBOT_Z = 0.1
 _FEEDER_Y = (-1.2, -0.6, 0.6, 1.2)
-_ENTRANCE_WAYPOINT = (-3.45, 0.0)
-_EXIT_WAYPOINT = (3.45, 0.0)
+_ENTRANCE_WAYPOINT = (-_CORRIDOR_HALF_LENGTH - 0.45, 0.0)
+_EXIT_WAYPOINT = (_CORRIDOR_HALF_LENGTH + 0.45, 0.0)
 
 
 @dataclass(frozen=True)
@@ -83,13 +83,13 @@ def _workload(config: TrafficConfig) -> list[dict]:
 
 
 def _make_sim(
-    config: TrafficConfig, tasks: list[dict], *, gui: bool = False
+    config: TrafficConfig, tasks: list[dict], *, gui: bool = False, monitor_gui: bool = False
 ) -> tuple[MultiRobotSimulationCore, dict[int, str]]:
     sim = MultiRobotSimulationCore(
         SimulationParams(
             gui=gui,
-            monitor=False,
-            enable_monitor_gui=False,
+            monitor=monitor_gui,
+            enable_monitor_gui=monitor_gui,
             enable_floor=False,
             physics=False,
             target_rtf=0,
@@ -148,7 +148,7 @@ def _make_sim(
                 "camera_distance": 8.0,
                 "camera_yaw": 0,
                 "camera_pitch": -89,
-                "camera_target": [-2.5, 0, _ROBOT_Z],
+                "camera_target": [-1.5, 0, _ROBOT_Z],
             }
         )
     return sim, names
@@ -211,6 +211,7 @@ def run_variant(
     config: TrafficConfig = TrafficConfig(),
     *,
     gui: bool = False,
+    monitor_gui: bool = False,
     view_rtf: float = 1.0,
     hold_gui: bool = False,
 ) -> dict:
@@ -221,13 +222,15 @@ def run_variant(
         raise ValueError("view_rtf must be finite and positive in GUI mode")
     if hold_gui and not gui:
         raise ValueError("hold_gui requires gui=True")
+    if monitor_gui and not gui:
+        raise ValueError("monitor_gui requires gui=True")
     tasks = _workload(config)
     goals = {task["robot_id"]: tuple(task["destination"]) for task in tasks}
     route_targets = {
         task["robot_id"]: (tuple(task["entrance"]), tuple(task["exit"]), tuple(task["destination"])) for task in tasks
     }
     route_phase = {name: 0 for name in goals}
-    sim, names = _make_sim(config, tasks, gui=gui)
+    sim, names = _make_sim(config, tasks, gui=gui, monitor_gui=monitor_gui)
     sim.params.target_rtf = view_rtf if gui else 0
     dispatcher = FleetCommandDispatcher(sim, retain_command_events=False)
     provider = FleetStateProvider(sim)
@@ -397,15 +400,22 @@ def run_variant(
             "schema_version": 1,
             "scenario_id": "pbf.one_sided_corridor_traffic.v1",
             "mode": mode,
-            "execution": {"gui": gui, "target_view_rtf": view_rtf if gui else None},
-            "conditions": {**asdict(config), "corridor_x": [-3.0, 3.0], "corridor_inner_y": [-0.17, 0.17]},
+            "execution": {"gui": gui, "monitor_gui": monitor_gui, "target_view_rtf": view_rtf if gui else None},
+            "conditions": {
+                **asdict(config),
+                "corridor_x": [-_CORRIDOR_HALF_LENGTH, _CORRIDOR_HALF_LENGTH],
+                "corridor_inner_y": [-_CORRIDOR_INNER_HALF_WIDTH, _CORRIDOR_INNER_HALF_WIDTH],
+            },
             "measurement_contract": {
                 "timebase": "simulation steps; seconds = step * timestep",
-                "passage": "robot reference point crossed x=3 within corridor y bounds after first entry",
+                "passage": (
+                    f"robot reference point crossed x={_CORRIDOR_HALF_LENGTH:g} within corridor y bounds " "after first entry"
+                ),
                 "overlap": "fresh robot-robot signed closest-point distance <= 0",
                 "overlap_zones": (
-                    "before_entrance: both x < -3; near_destinations: both x >= 4; "
-                    "after_exit: both x > 3 but not near_destinations; "
+                    f"before_entrance: both x < {-_CORRIDOR_HALF_LENGTH:g}; "
+                    "near_destinations: both x >= 4; "
+                    f"after_exit: both x > {_CORRIDOR_HALF_LENGTH:g} but not near_destinations; "
                     "corridor_or_boundary: all other pairs"
                 ),
                 "response_scope": "stops apply only to robots that have not passed the B-side corridor exit",
@@ -452,10 +462,13 @@ def main() -> None:
     parser.add_argument("--cutoff", type=float, default=300.0)
     parser.add_argument("--policy", choices=("both", "pass_through", "collision_stop"), default="both")
     parser.add_argument("--gui", action="store_true", help="Observe one policy in the PyBullet GUI")
+    parser.add_argument("--monitor", action="store_true", help="Show the live DataMonitor alongside --gui")
     parser.add_argument("--rtf", type=float, default=1.0, help="GUI target real-time factor (default: 1)")
     args = parser.parse_args()
     if args.gui and args.policy == "both":
         parser.error("--gui requires --policy pass_through or --policy collision_stop")
+    if args.monitor and not args.gui:
+        parser.error("--monitor requires --gui")
     if args.gui and (not math.isfinite(args.rtf) or args.rtf <= 0):
         parser.error("--rtf must be finite and positive with --gui")
     config = TrafficConfig(robots=args.robots, timestep=args.dt, cutoff=args.cutoff)
@@ -467,7 +480,10 @@ def main() -> None:
         else args.output_dir
     )
     policies = ("pass_through", "collision_stop") if args.policy == "both" else (args.policy,)
-    reports = [run_variant(policy, config, gui=args.gui, view_rtf=args.rtf, hold_gui=args.gui) for policy in policies]
+    reports = [
+        run_variant(policy, config, gui=args.gui, monitor_gui=args.monitor, view_rtf=args.rtf, hold_gui=args.gui)
+        for policy in policies
+    ]
     if args.output_dir is not None:
         output_dir.mkdir(parents=True, exist_ok=False)
     for report in reports:

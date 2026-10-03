@@ -25,13 +25,18 @@ PyBullet GUI:
 
 ```bash
 python -m pybullet_fleet.examples.fleet_corridor_traffic_failure \
-  --gui --policy collision_stop --cutoff 60
+  --gui --monitor --policy collision_stop --cutoff 60
 ```
 
 Use `--policy pass_through` to watch the baseline; it gets a different
 automatically named output directory. The initial view is closer to the corridor. While the simulation
 runs, use the arrow keys or right-drag to pan, `=` / `-` or the mouse wheel to
 zoom, and left-drag to rotate. `--rtf 3` requests 3× real-time viewing speed.
+`--monitor` opens the DataMonitor beside the PyBullet GUI. Its `Collisions`
+field shows active PBF-qualified pairs and `Tot Collis.` counts new pair
+entries across the entire scene, including margin-only and wall pairs; neither
+is the example's robot-overlap entry count. The display refreshes about every
+0.5 wall-clock seconds.
 The final frame stays open until you close the GUI or press Ctrl+C; the JSON report is saved
 afterward. GUI pause or single-step interaction may change command timing, so
 use the default headless command for repeatable measurement. This shows a
@@ -50,14 +55,14 @@ above when the JSON report must remain on the Mac.
 
 Both variants use the same initial poses, route and motion limits in fresh
 simulations. Robots start in four A-side feeder lanes, converge on an entrance
-waypoint at x=-3.45, cross to an exit waypoint at x=3.45, then disperse to
+waypoint at x=-1.2, cross to an exit waypoint at x=1.2, then disperse to
 separate B-side endpoints. The app issues each waypoint through the ordinary
 Fleet API; it does not add route planning or traffic response to PBF core.
 The response application reads PBF's collision observation
 after each completed step. A fresh robot–robot signed distance of zero or
 less forms a conflict; robot–wall observations are counted but do not trigger
 stops. Within a connected conflict group, the robot nearest the B-side exit
-plane at x=3 continues and other moving members receive `stop` commands.
+plane at x=0.75 continues and other moving members receive `stop` commands.
 Among all stopped robots, at most one per step is eligible to resume after at
 least one simulated second: the one nearest the exit. The app then reissues
 its original `navigate` endpoint. It may still overlap another robot and be
@@ -72,18 +77,17 @@ no all-pass time and marks `deadlock_at_cutoff`. This is a deadline label, not
 proof of permanent deadlock. The report also contains per-robot entry, exit
 and endpoint-arrival steps, stop/restart decisions, blocked intervals and
 overlap entry counts by location. `before_entrance` means both reference points
-are before x=-3; `near_destinations` means both are at x>=4. The remaining
+are before x=-0.75; `near_destinations` means both are at x>=4. The remaining
 zones cover the corridor/boundary and the immediate exit area. These are
 scenario geometry labels, not PBF collision types. Simulated-time outcomes
 are separate from wall time.
 An accepted command is not arrival or passage.
 
-In the fixed 20-robot run, ordinary pass-through finished at 10.9 simulated
-seconds and collision-stop finished at 37.3 seconds. In the response run, all
-154 pre-entrance robot-overlap entries were observed before x=-3, and the peak
-of 19 blocked robots was also before the entrance; no blocked robots were
-observed inside the corridor. One overlap entry remained near the dispersed
-destinations and was measured without triggering a stop. Because kinematic
+With the shortened x=[-0.75,0.75] corridor, the fixed 20-robot run finished
+at 8.6 simulated seconds for pass-through and 38.3 seconds for collision-stop.
+In the response run, 156 robot-overlap entries were observed before x=-0.75,
+and the peak of 19 blocked robots was also before the entrance; no blocked
+robots were observed inside the corridor. Because kinematic
 robots can pass through each other, the example does not establish impact
 severity or collision avoidance. The repository's
 `docs/design/fleet-corridor-evaluation/traffic-failure-pilot-evidence.md`

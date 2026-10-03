@@ -26,6 +26,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- Shorten both corridor examples to a 1.5 m passage; start the bidirectional
+  evaluation GUI closer to the action, auto-name its output directory when
+  no path is supplied, and allow both examples to show the live DataMonitor
+  with `--gui --monitor`.
 - Move the traffic-experiment GUI camera closer and allow arrow-key panning in
   PBF's interactive camera controller.
 - Keep replay input application and result capture in `ReplaySession`, without replay-specific mutation guards in ordinary simulation and Fleet APIs. Direct core calls are outside the recorded-input contract.

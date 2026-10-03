@@ -51,7 +51,7 @@ def test_twenty_robot_response_changes_all_pass_time_without_core_collision_resp
     assert response["metrics"]["peak_blocked_before_entrance"] > 0
     assert response["metrics"]["peak_blocked_in_corridor"] == 0
     assert response["metrics"]["robot_overlap_entries_by_zone"]["before_entrance"] > 0
-    assert response["metrics"]["robot_overlap_entries_by_zone"]["near_destinations"] > 0
+    assert sum(response["metrics"]["robot_overlap_entries_by_zone"].values()) == response["metrics"]["robot_overlap_entries"]
     assert all(
         decision["step"] <= response["first_corridor_exit_step"][decision["robot_id"]]
         for decision in response["decisions"]
@@ -79,8 +79,9 @@ def test_gui_observation_uses_same_workload_without_desktop(monkeypatch):
     original_make_sim = traffic._make_sim
     observed_connected = []
 
-    def direct_client(config, tasks, *, gui=False):
+    def direct_client(config, tasks, *, gui=False, monitor_gui=False):
         assert gui
+        assert not monitor_gui
         return original_make_sim(config, tasks, gui=False)
 
     monkeypatch.setattr(traffic, "_make_sim", direct_client)
@@ -88,7 +89,7 @@ def test_gui_observation_uses_same_workload_without_desktop(monkeypatch):
     monkeypatch.setattr(traffic.time, "sleep", lambda _: None)
     report = run_variant("collision_stop", TrafficConfig(robots=4, cutoff=1), gui=True, view_rtf=3, hold_gui=True)
     assert observed_connected == [True]
-    assert report["execution"] == {"gui": True, "target_view_rtf": 3}
+    assert report["execution"] == {"gui": True, "monitor_gui": False, "target_view_rtf": 3}
     assert report["tasks"] == _workload(TrafficConfig(robots=4, cutoff=1))
 
 
@@ -98,6 +99,9 @@ def test_gui_requires_one_policy_and_positive_view_rate(monkeypatch, tmp_path):
         traffic.main()
     with pytest.raises(ValueError, match="view_rtf"):
         run_variant("collision_stop", gui=True, view_rtf=0)
+    monkeypatch.setattr(sys, "argv", ["traffic", "--monitor"])
+    with pytest.raises(SystemExit, match="2"):
+        traffic.main()
 
 
 def test_single_policy_cli_writes_only_one_report(monkeypatch, tmp_path):

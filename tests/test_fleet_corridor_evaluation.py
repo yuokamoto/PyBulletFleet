@@ -31,6 +31,28 @@ def test_workload_starts_match_spawned_robots():
         p.disconnect(sim.client)
 
 
+def test_monitor_option_configures_core_without_opening_window(monkeypatch):
+    import pybullet_fleet.core_simulation as core
+
+    class StubMonitor:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def set_command_sink(self, sink):
+            pass
+
+        def start(self):
+            pass
+
+    monkeypatch.setattr(core, "DataMonitor", StubMonitor)
+    sim, _ = _make_sim(CorridorConfig(cutoff=1), monitor_gui=True)
+    try:
+        assert sim.params.monitor
+        assert sim.params.enable_monitor_gui
+    finally:
+        p.disconnect(sim.client)
+
+
 @pytest.mark.parametrize("dt", [0.1, 0.05])
 def test_geometric_margin_overlap_and_step_cadence(dt):
     config = CorridorConfig(timestep=dt, cutoff=1)
@@ -165,8 +187,9 @@ def test_gui_observation_uses_same_scenario_without_desktop(monkeypatch):
     original_make_sim = corridor._make_sim
     observed_connected = []
 
-    def direct_client(config, *, gui=False):
+    def direct_client(config, *, gui=False, monitor_gui=False):
         assert gui
+        assert not monitor_gui
         return original_make_sim(config, gui=False)
 
     monkeypatch.setattr(corridor, "_make_sim", direct_client)
@@ -176,7 +199,7 @@ def test_gui_observation_uses_same_scenario_without_desktop(monkeypatch):
     monkeypatch.setattr(corridor.time, "sleep", lambda _: None)
     report = run_policy("uncontrolled", CorridorConfig(cutoff=1), gui=True, view_rtf=3, hold_gui=True)
     assert observed_connected == [True]
-    assert report["execution"] == {"gui": True, "target_view_rtf": 3}
+    assert report["execution"] == {"gui": True, "monitor_gui": False, "target_view_rtf": 3}
     assert report["metrics"]["simulated_seconds"] == 1
     assert len(report["tasks"]) == 40
 
@@ -187,6 +210,9 @@ def test_gui_requires_one_policy_and_positive_view_rate(monkeypatch, tmp_path):
         corridor.main()
     with pytest.raises(ValueError, match="view_rtf"):
         run_policy("uncontrolled", gui=True, view_rtf=0)
+    monkeypatch.setattr(sys, "argv", ["corridor", "--monitor"])
+    with pytest.raises(SystemExit, match="2"):
+        corridor.main()
 
 
 def test_single_policy_cli_writes_only_one_report(monkeypatch, tmp_path):
@@ -194,6 +220,18 @@ def test_single_policy_cli_writes_only_one_report(monkeypatch, tmp_path):
     monkeypatch.setattr(sys, "argv", ["corridor", str(output), "--policy", "uncontrolled", "--cutoff", "1"])
     corridor.main()
     assert sorted(path.name for path in output.iterdir()) == ["uncontrolled.json"]
+
+
+def test_omitted_output_creates_unique_directories(monkeypatch, tmp_path, capsys):
+    monkeypatch.setattr(corridor.tempfile, "gettempdir", lambda: str(tmp_path))
+    monkeypatch.setattr(sys, "argv", ["corridor", "--policy", "uncontrolled", "--cutoff", "1"])
+    corridor.main()
+    corridor.main()
+    runs = sorted(path for path in tmp_path.iterdir() if path.is_dir())
+    assert len(runs) == 2
+    assert all((path / "uncontrolled.json").exists() for path in runs)
+    output = capsys.readouterr().out
+    assert all(f"Saved reports in {path}" in output for path in runs)
 
 
 def test_default_dual_policy_cli_writes_comparison(monkeypatch, tmp_path):

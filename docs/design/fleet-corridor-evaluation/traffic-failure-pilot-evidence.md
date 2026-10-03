@@ -71,7 +71,7 @@ commands caused the two feeder lanes to converge around the middle of the
 corridor. The stopped robots were inside it. This did not demonstrate the
 intended entrance-side traffic failure.
 
-## Current entrance-merge route
+## Original entrance-merge route (6 m corridor)
 
 Four A-side feeder lanes converge on a waypoint at x=-3.45, before the
 corridor boundary x=-3. Each robot then navigates to x=3.45 on the centerline
@@ -99,6 +99,48 @@ Those pairs are included in the overlap metrics but, because both robots had
 already passed the B-side exit, they do not trigger `stop`. Post-exit safety
 response would be a separate policy question. The result is specific to this
 synthetic geometry and workload.
+
+## First shortened entrance-merge route (3 m corridor)
+
+The wall now spans x=[-1.5,1.5]. The route uses waypoints x=-1.95 and
+x=1.95; the four feeders, destination layout and external response rule are
+unchanged. A 20-robot run with a 60 s cutoff produced:
+
+| Outcome | Pass-through | Collision-stop |
+| --- | ---: | ---: |
+| Robots past the B-side exit | 20/20 | 20/20 |
+| Time when all passed | 9.4 s | 36.2 s |
+| Overlap entries before entrance | 134 | 177 |
+| Overlap entries in corridor/boundary | 0 | 0 |
+| Overlap entries after exit | 124 | 1 |
+| Stop / resume commands | 0 / 0 | 52 / 52 |
+| Peak blocked before entrance | 0 | 18 |
+| Peak blocked inside corridor | 0 | 0 |
+
+The shortened route still produces an entrance-side queue and delayed passage.
+It changes the location and number of post-exit overlap observations, so the
+original 6 m counts above remain historical evidence rather than current
+expected results.
+
+## Current entrance-merge route (1.5 m corridor)
+
+The wall spans x=[-0.75,0.75], with route waypoints x=-1.2 and x=1.2.
+The same 20-robot, 60 s check produced:
+
+| Outcome | Pass-through | Collision-stop |
+| --- | ---: | ---: |
+| Robots past the B-side exit | 20/20 | 20/20 |
+| Time when all passed | 8.6 s | 38.3 s |
+| Overlap entries before entrance | 136 | 156 |
+| Overlap entries in corridor/boundary | 0 | 0 |
+| Overlap entries after exit | 118 | 0 |
+| Stop / resume commands | 0 / 0 | 66 / 66 |
+| Peak blocked before entrance | 0 | 19 |
+| Peak blocked inside corridor | 0 | 0 |
+
+The entrance-side blocking and all-pass delay remain observable. Zone counts
+and stop counts changed with the shorter path, so prior tables remain historical
+measurements for their stated geometries.
 
 Pre-entry admission would avoid some overlap, but it changes the experiment
 from collision-induced failure toward traffic prevention and is not proposed
