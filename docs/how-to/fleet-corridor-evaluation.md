@@ -13,7 +13,7 @@ direction gate. It is a synthetic movement workload, not a warehouse delivery
 benchmark or a reproduction of a field incident.
 
 ```bash
-python -m pybullet_fleet.examples.fleet_corridor_evaluation
+python -m pybullet_fleet.examples.evaluation.fleet_corridor_evaluation
 ```
 
 With no output argument, each run creates a unique `pbf-corridor-*` directory
@@ -37,9 +37,9 @@ is written when the window closes. Blue robots start in area A; orange robots
 start in area B.
 
 ```bash
-python -m pybullet_fleet.examples.fleet_corridor_evaluation \
+python -m pybullet_fleet.examples.evaluation.fleet_corridor_evaluation \
   --gui --monitor --policy uncontrolled --cutoff 30
-python -m pybullet_fleet.examples.fleet_corridor_evaluation \
+python -m pybullet_fleet.examples.evaluation.fleet_corridor_evaluation \
   --gui --monitor --policy direction_gate --rtf 3
 ```
 

@@ -4,7 +4,7 @@
 
 ## Delivered boundary
 
-`pybullet_fleet/examples/fleet_corridor_evaluation.py` is an external fleet
+`pybullet_fleet/examples/evaluation/fleet_corridor_evaluation.py` is an external fleet
 management example. It creates a fresh PBF simulation for each of two policies,
 connects external policy decisions and measurements to `PRE_STEP` and
 `POST_STEP`, then lets PBF's `run_simulation()` own the stepping and GUI pacing.

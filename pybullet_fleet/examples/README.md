@@ -9,6 +9,13 @@ Runnable demos for PyBulletFleet, grouped by area:
 | `arm/` | Arm pick/drop, end-effector (IK) control, mobile manipulators |
 | `models/` | Bundled model names, `robot_descriptions`, SDF and OpenUSD worlds |
 | `scale/` | 100–1000 robot fleets |
+| `evaluation/` | Synthetic fleet scenarios and external policy/evaluator comparisons |
+| `validation/` | State-discovery and checkpoint proofs used to establish supported boundaries |
+
+The `validation/` programs are focused verification drivers. They do not
+represent the eventual workflow of enabling recording and restart in an
+ordinary demo. The `evaluation/` programs remain runnable examples of how an
+external application can compare fleet behavior using PBF observations.
 
 Most demos open a PyBullet GUI window and run until you close it — they are meant
 to be watched, not run in CI. Some `models/` demos need extras:
@@ -36,7 +43,7 @@ default command runs both policies headlessly and writes comparable reports.
 See the [corridor evaluation guide](../../docs/how-to/fleet-corridor-evaluation.md).
 
 ```bash
-python -m pybullet_fleet.examples.fleet_corridor_evaluation /tmp/pbf-corridor \
+python -m pybullet_fleet.examples.evaluation.fleet_corridor_evaluation /tmp/pbf-corridor \
   --gui --policy uncontrolled --cutoff 30
 ```
 

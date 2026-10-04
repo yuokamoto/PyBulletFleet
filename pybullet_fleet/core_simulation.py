@@ -512,6 +512,7 @@ class MultiRobotSimulationCore:
         # See docs/design/two-phase-step/spec.md.
         self._in_step: bool = False
         self._in_post_step: bool = False  # Counters advance after POST_STEP callbacks.
+        self._resume_ready: bool = False  # Set only by a validated completed-step restore.
         self._pending_pose_ids: Set[int] = set()
         # Parent object ids that have link-level kinematic attachments.
         # Used to avoid scanning every flushed object in the hot path when no
@@ -871,6 +872,28 @@ class MultiRobotSimulationCore:
     def step_count(self) -> int:
         """Current simulation step count."""
         return self._step_count
+
+    def get_completed_step_boundary(self) -> tuple[int, float]:
+        """Return the completed step and canonical elapsed time outside a step."""
+        if self._in_step or self._in_post_step:
+            raise RuntimeError("A completed-step boundary is unavailable during step_once()")
+        return self._step_count, self._elapsed_sim_time
+
+    def restore_completed_step_boundary(self, step: int, elapsed_time: float) -> None:
+        """Restore the clock of a fresh, initialized fixed-step simulation."""
+        if self._in_step or self._in_post_step or self._step_count != 0 or self._elapsed_sim_time != 0.0:
+            raise RuntimeError("Completed-step restore requires a fresh initialized simulation")
+        if type(step) is not int or step < 1 or not math.isfinite(elapsed_time):
+            raise ValueError("Invalid completed-step clock")
+        expected = step * self._params.timestep
+        if not math.isclose(elapsed_time, expected, rel_tol=0.0, abs_tol=self._params.timestep * 1e-9):
+            raise ValueError("Completed-step time does not match the fixed timestep")
+        self._step_count = step
+        self._elapsed_sim_time = elapsed_time
+        # Match the post-step field value; step_once() sets it to elapsed_time
+        # before evaluating the next step.
+        self.sim_time = (step - 1) * self._params.timestep
+        self._resume_ready = True
 
     @property
     def collision_count(self) -> int:
@@ -3439,6 +3462,7 @@ class MultiRobotSimulationCore:
         self._collision_count = 0
         self.sim_time = 0.0
         self._elapsed_sim_time = 0.0
+        self._resume_ready = False
         self._last_collision_check = 0.0
         self._last_monitor_update = 0.0
         self._last_logged_collision_count = 0
@@ -3868,13 +3892,15 @@ class MultiRobotSimulationCore:
         logger.info("Spawned %d entities from config", len(spawned))
         return spawned
 
-    def run_simulation(self, duration: Optional[float] = None) -> None:
+    def run_simulation(self, duration: Optional[float] = None, *, resume: bool = False) -> None:
         """
         Run the simulation for a specified duration.
 
         Args:
-            duration: Simulation duration in seconds (simulation time, not real time).
+            duration: Absolute simulation-time cutoff in seconds (not wall time).
                      If None, uses self._params.duration. If duration <= 0, runs indefinitely.
+            resume: Continue an explicitly restored completed-step state without
+                    resetting its clock. Ordinary runs initialize as before.
 
         Example::
 
@@ -3906,19 +3932,31 @@ class MultiRobotSimulationCore:
 
         # Initialize simulation state (counters, visualizer, rendering)
         # Note: initialize_simulation() already starts tracemalloc if needed
-        self.initialize_simulation()
+        if resume:
+            if not self._resume_ready:
+                raise RuntimeError("resume=True requires a restored completed-step state")
+            self._resume_ready = False
+        else:
+            self.initialize_simulation()
 
         try:
             # Pace against the MONOTONIC clock: it never jumps backwards and is
             # immune to NTP / host-suspend / WSL2 wall-clock corrections, which
             # previously desynced this loop into multi-second freezes.
-            start_time = time.monotonic()
+            pacing_now = time.monotonic()
+            if resume:
+                # Monitor Real Time measures this process's resumed run, while
+                # Sim Time continues from the restored completed-step clock.
+                self._start_time = pacing_now
+            start_time = pacing_now
+            if resume and self._params.target_rtf > 0:
+                start_time -= self._elapsed_sim_time / self._params.target_rtf
             last_step_process_time = 0.0  # Track processing time excluding sleep
             last_pause_state = False  # Track pause state to detect resume
             # Diagnostics: previous wall/monotonic readings to spot clock jumps.
-            # Reuse start_time as the monotonic baseline (no extra read; same origin).
+            # Resume rebases pacing, but clock-jump diagnostics start now.
             diag_prev_wall = time.time()
-            diag_prev_mono = start_time
+            diag_prev_mono = pacing_now
 
             while True:
                 current_sim_time = self._elapsed_sim_time

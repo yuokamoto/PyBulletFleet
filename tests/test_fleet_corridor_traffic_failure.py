@@ -5,8 +5,8 @@ import sys
 import pybullet as p
 import pytest
 
-import pybullet_fleet.examples.fleet_corridor_traffic_failure as traffic
-from pybullet_fleet.examples.fleet_corridor_traffic_failure import TrafficConfig, _workload, run_policy
+import pybullet_fleet.examples.evaluation.fleet_corridor_traffic_failure as traffic
+from pybullet_fleet.examples.evaluation.fleet_corridor_traffic_failure import TrafficConfig, _workload, run_policy
 
 
 def test_four_robot_collision_response_recovers_after_minimum_stop():

@@ -34,6 +34,7 @@ replay
 fleet-corridor-evaluation
 fleet-corridor-traffic-failure
 manipulation-state-scenario
+omni-checkpoint-proof
 ```
 
 ```{toctree}

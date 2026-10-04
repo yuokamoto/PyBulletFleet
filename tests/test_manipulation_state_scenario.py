@@ -6,7 +6,7 @@ import sys
 import pytest
 import pybullet as p
 
-import pybullet_fleet.examples.manipulation_state_scenario as scenario
+import pybullet_fleet.examples.validation.manipulation_state_scenario as scenario
 
 
 def test_manipulation_state_and_entity_lifecycle():

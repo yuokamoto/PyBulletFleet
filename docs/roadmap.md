@@ -69,6 +69,10 @@ New robot and infrastructure models:
   schema or a shared runtime dependency. See [Navigation replay](how-to/replay)
   and the [design record](https://github.com/yuokamoto/PyBulletFleet/blob/main/docs/design/snapshot-replay/spec.md).
 
+  Before scoping new work in this area, read the product goals in
+  `docs/design/snapshot-replay/product-goals.md` and state which user workflow
+  the change advances and which state remains unsupported.
+
   The implemented artifact separates initial state, input journal, observations
   and completeness/provenance. Full observations are complete only for the
   declared observation profile; they are not execution checkpoints. A changed
@@ -84,6 +88,15 @@ New robot and infrastructure models:
      variants in an A/B test. A controlled comparison also needs the relevant
      later external inputs and conditions.
 
+  The intended user entry points are opt-in recording during ordinary
+  simulation, a time-selectable restart followed by normal execution, RTF-
+  controlled playback of recorded results, and a time-aligned trace of events
+  and effective parameters. Names such as `save=on`, `pbf-restart --time` and
+  `pbf-playback --rtf` are provisional. Time selection should begin from the
+  nearest usable checkpoint **not later than** the requested time; exact
+  advance-to-time semantics remain to be designed. These are goals, not current
+  capabilities; the product-goals document defines their boundaries.
+
   The current initial-state input re-execution is a limited first step toward
   these goals. It can compare changed code/configuration from the beginning of
   a supported run, but cannot display a recorded timeline or resume from an
@@ -91,25 +104,24 @@ New robot and infrastructure models:
   mapping and tracing serve these goals or other future uses; none is a goal
   by itself.
 
-  After the current replay PR review, the proposed next checkpoint proof is a
-  single per-agent omni robot stopped at a completed step mid-navigation: save
-  `S_k`, terminate the
-  original simulation, restore in a fresh process, and compare the continued
-  trajectory with an uninterrupted run. See
-  `docs/design/snapshot-replay/checkpoint-candidate.md` for the evidence-based
-  minimum state and proposed acceptance criteria. This is a candidate for
-  Human Scope / Architecture Approval, not an approved feature.
-  The manipulation scenario's
+  A first execution-checkpoint proof now supports one physics-off per-agent
+  omni robot on a single straight path: capture at completed `S_k`, terminate
+  the source process, restore in a fresh process and continue with
+  `run_simulation(resume=True)`. Its suffix is compared against an uninterrupted
+  run. See `docs/design/snapshot-replay/checkpoint-evidence.md` for the exact
+  profile and limits; this does not make arbitrary simulations restorable.
+  The checkpoint state capability checklist in
+  `docs/design/snapshot-replay/product-goals.md` distinguishes the proven
+  single-omni subset from later save/load work. The manipulation scenario's
   `docs/design/snapshot-replay/manipulation-state-scenario-evidence.md`
-  contains a state capability checklist that distinguishes values observable
-  today from the later save/load work needed for continuation. No manipulation
-  checkpoint is implemented yet.
+  records the observation and ownership findings behind part of that list.
+  No manipulation checkpoint is implemented yet.
 
   Distinguish three records where the user goals require them:
 
   | Record | Primary question | Current status |
   | --- | --- | --- |
-  | State observation / future checkpoint | What was the world state? Can execution resume? | V1 has sampled, profile-full observations; resumable checkpoints are separate future work. |
+  | State observation / future checkpoint | What was the world state? Can execution resume? | V1 has sampled, profile-full observations; a separate single-omni straight-navigation checkpoint proof can resume in a fresh process. Broader restore remains future work. |
   | Input and event journal | Which effective input was applied, when, and what ack/outcome followed? | V1 durably records supported navigation inputs, acks and events; broader typed events remain future work. |
   | Operation trace | Why did a task take this path across RMF, ROS, agents and devices? | Future sampled action/operation spans; not a replay input source. |
 
@@ -153,7 +165,11 @@ New robot and infrastructure models:
     navigation, attach/detach and the controller/attachment state needed to
     explain their outcomes; then joint/action/device/BT and dynamic worlds as
     justified. Specify initial re-execution state separately from any
-    intermediate checkpoint state.
+    intermediate checkpoint state. The checkpoint follow-up profile inventory
+    in `docs/design/snapshot-replay/checkpoint-candidate.md` records what the
+    single-omni restore proof still omits; differential
+    navigation is a plausible next narrow checkpoint profile, pending its own
+    Scope Review and fresh-process continuation test.
   - **Action-based manipulation checkpoint discovery:** after the explicit
     Fleet API manipulation-state scenario has established the base, joint,
     attachment and entity-lifecycle boundaries, have an external driver queue

@@ -7,8 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- Group corridor policy evaluation programs under `examples/evaluation/` and
+  checkpoint/state-discovery programs under `examples/validation/`. Their
+  Python module paths and documented run commands now use those folders.
+
 ### Added
 
+- Add a profile-limited, fresh-process checkpoint/restore proof for one
+  physics-off omni robot in straight navigation, with explicit
+  `run_simulation(resume=True)` continuation and a three-process example.
+  All three proof modes support optional GUI viewing and auto-named result
+  paths when `--output` is omitted.
 - Add an optional-GUI mobile-manipulator state-discovery example that exercises
   runtime object spawn/delete, base and joint motion, link attachment and
   detachment, and completed-step observations without adding checkpoint APIs.

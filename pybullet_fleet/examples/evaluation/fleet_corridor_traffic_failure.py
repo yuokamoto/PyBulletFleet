@@ -1,6 +1,6 @@
 """One-sided corridor traffic experiment with an external collision response.
 
-Run ``python -m pybullet_fleet.examples.fleet_corridor_traffic_failure``.
+Run ``python -m pybullet_fleet.examples.evaluation.fleet_corridor_traffic_failure``.
 Omit OUTPUT_DIR to create a unique result directory under the system temporary directory.
 The policies are scenario-specific, not PBF collision-response modes.
 """
@@ -115,7 +115,7 @@ def _make_sim(
         )
     )
     names: dict[int, str] = {}
-    model = Path(__file__).resolve().parents[1] / "robots" / "simple_cube.urdf"
+    model = Path(__file__).resolve().parents[2] / "robots" / "simple_cube.urdf"
     with sim.batch_spawn():
         for task in tasks:
             agent = Agent.from_params(

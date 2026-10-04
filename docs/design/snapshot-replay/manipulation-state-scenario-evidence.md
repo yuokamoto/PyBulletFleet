@@ -1,6 +1,6 @@
 # Manipulation/entity-lifecycle scenario — implementation evidence
 
-**Status:** Implemented locally for Human Review. No checkpoint/restore,
+**Status:** Scenario merged in PR #55. No checkpoint/restore,
 recording/playback or schema implementation is claimed.
 
 ## Headless run
@@ -64,34 +64,16 @@ effective construction data. A spawn and deletion between two samples would
 otherwise be invisible. Entity identity must remain stable independently of
 PyBullet `body_id` and PBF's run-local `object_id`.
 
-## State capability checklist for future work
-
-"Observed" means this scenario can read or supply a value during one run; it
-does **not** mean that value can be persisted, loaded, or resumed. Checkpoint
-support remains unimplemented for every row below. This is a requirements
-inventory, not an approved implementation sequence.
-
-| State or operation | Available now | Remaining work for continuation |
-| --- | --- | --- |
-| Completed step/time and base pose | Publicly observable; CP1–CP4 are labelled by the driver | Define and restore a completed-step boundary and motion state in the supported checkpoint profile. |
-| Active base goal/trajectory | Goal can be issued, but progress lives in controller internals | Expose sufficient controller state for save/load; prove resumed motion matches an uninterrupted suffix. This belongs to the proposed first omni-navigation proof. |
-| Joint position and active target/interpolation | Position is public; the scenario knows the target it issued. Reported kinematic velocity remains `0.0` during movement | Define joint execution-state read/restore for a later manipulation profile; address velocity semantics separately rather than treating `0.0` as measured rest. |
-| Attachment parent link and relative transform | Attachment presence is public; this driver knows its requested link and offset | Define a complete supported attachment-state read/restore contract. Do not infer arbitrary existing attachments from driver knowledge. |
-| Live entity roster and construction data | Live objects and poses are observable; this driver owns the box's spawn parameters | Capture enough effective construction data to recreate live entities at restore, then prove detach/delete behavior after continuation. |
-| Durable entity identity and ordered spawn/delete | This driver uses `box-001` and observes lifecycle events; PBF IDs are run-local | Persist a stable mapping and, where exact re-execution is required, ordered effective lifecycle inputs. A roster alone cannot reveal changes between samples. |
-| External-driver stage and later inputs | Stage and command triggers are held by this scenario | Save/restore driver state only for a continuation that must resume the driver; record and apply later inputs for identical re-execution. This is outside the first omni proof. |
-| Action queue and in-progress Action | The current scenario does not use Actions; other PBF examples can queue them | Investigate queue/order, phase, sub-action progress, targets, timers and outcomes in a separate Action-based scenario before designing mid-Action restore. |
-
-Progress should be marked against a concrete supported profile and a passing
-fresh-process restore test, rather than marking a row complete merely because
-its current value can be observed. Recorded-result playback is a separate
-capability and is not tracked by this checklist.
+For current cross-profile checkpoint status, see the
+[checkpoint state capability checklist](product-goals.md#checkpoint-state-capability-checklist).
+The table above records only what this manipulation scenario observed and who
+owns it.
 
 ## Implications for checkpoint scope
 
-The earlier [single-robot checkpoint candidate](checkpoint-candidate.md)
-remains the smallest proposed **restore proof**: one omni robot during a
-straight navigation, no dynamic objects or callbacks. This new scenario shows
+The [single-robot checkpoint proof](checkpoint-evidence.md) now resumes one
+omni robot during straight navigation, with no dynamic objects or callbacks.
+It does not restore this manipulation run. This scenario shows
 what a later manipulation profile would additionally require: articulated
 joint targets/interpolation state, a live object roster with construction
 information, link-level attachment relation and relative transform, safe
@@ -113,9 +95,8 @@ external driver owns; the action example would show what PBF's action system
 must expose for a supported mid-action continuation. A future CLI does not
 remove the need to define and capture that state.
 
-The smallest supported checkpoint profile recommended **next** is therefore
-the existing single-robot, physics-off omni navigation proof, not a claim to
-restore this entire manipulation scenario. The present scenario should be
+The completed single-robot, physics-off omni navigation proof is not a claim
+to restore this entire manipulation scenario. The present scenario should be
 used as a later conformance case when joint, attachment and entity-lifecycle
 state boundaries are deliberately added. Simulator/controller code may expose
 supported state operations; external orchestration should own checkpoint

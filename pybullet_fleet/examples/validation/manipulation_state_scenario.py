@@ -73,7 +73,7 @@ def _run_scenario_with_core(sim: MultiRobotSimulationCore, *, dt: float, gui: bo
     robot = Agent.from_params(
         AgentSpawnParams(
             name=_ROBOT_NAME,
-            urdf_path=str(Path(__file__).resolve().parents[1] / "robots" / "mobile_manipulator.urdf"),
+            urdf_path=str(Path(__file__).resolve().parents[2] / "robots" / "mobile_manipulator.urdf"),
             initial_pose=Pose.from_xyz(0, 0, 0.3),
             mass=0.0,
             use_fixed_base=False,

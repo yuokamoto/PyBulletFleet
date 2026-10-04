@@ -8,7 +8,7 @@ Supports both Mesh and URDF loading.
 import logging
 import math
 from dataclasses import dataclass, fields
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple, Type, TypeVar, Union
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Sequence, Tuple, Type, TypeVar, Union
 
 import numpy as np
 import pybullet as p
@@ -1565,6 +1565,20 @@ class Agent(SimObject):
             Velocity [vx, vy, vz] in m/s
         """
         return self._current_velocity.copy()
+
+    def restore_motion_state(
+        self, pose: Pose, linear_velocity: Sequence[float], angular_velocity: float, *, moving: bool
+    ) -> None:
+        """Restore Agent-owned motion fields; restore controller execution separately."""
+        velocity = np.asarray(linear_velocity, dtype=float)
+        if velocity.shape != (3,) or not np.all(np.isfinite(velocity)) or not math.isfinite(angular_velocity):
+            raise ValueError("Motion restore requires finite linear and angular velocity")
+        if type(moving) is not bool:
+            raise ValueError("Motion restore requires a boolean moving flag")
+        self.set_pose(pose, preserve_velocity=False)
+        self._current_velocity[:] = velocity
+        self._current_angular_velocity = angular_velocity
+        self._is_moving = moving
 
     def set_controller(self, controller: Optional[Any] = None) -> None:
         """Set or replace the base (index-0) movement controller.
