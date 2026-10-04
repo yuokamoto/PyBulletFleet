@@ -734,6 +734,64 @@ class OmniController(KinematicController):
     def __init__(self, params: Optional[ControllerParams] = None) -> None:
         super().__init__(params)
 
+    def capture_straight_navigation(self) -> dict:
+        """Capture the supported one-waypoint forward trajectory, not generic controller state."""
+        tpi = self._tpi_forward
+        if (
+            self._mode is not ControllerMode.POSE
+            or self._pose_phase is not PosePhase.FORWARD
+            or len(self._path) != 1
+            or self._current_waypoint_index != 0
+            or self._goal_pose is None
+            or self._align_final_orientation
+            or self._is_final_orientation_aligning
+            or self._forward_start_pos is None
+            or tpi is None
+        ):
+            raise ValueError("Unsupported omni navigation state for the straight checkpoint profile")
+        return {
+            "goal_position": list(self._goal_pose.position),
+            "goal_orientation": list(self._goal_pose.orientation),
+            "origin": self._forward_start_pos.tolist(),
+            "t0": float(tpi.t0),
+            "vmax": float(tpi.vmax),
+            "accel": float(tpi.amax_accel),
+        }
+
+    def restore_straight_navigation(self, state: dict, orientation: list[float]) -> None:
+        """Rebuild the one-waypoint TPI from validated scalar trajectory data."""
+        if self._mode is not ControllerMode.IDLE:
+            raise ValueError("Straight navigation restore requires an idle controller")
+        goal = Pose(position=list(state["goal_position"]), orientation=list(state["goal_orientation"]))
+        origin = np.asarray(state["origin"], dtype=float)
+        displacement = np.asarray(goal.position, dtype=float) - origin
+        if self.params.navigation_2d and abs(displacement[2]) > 1e-9:
+            raise ValueError("Planar checkpoint goal must have the trajectory origin height")
+        distance = float(np.linalg.norm(displacement))
+        if distance <= 0:
+            raise ValueError("Straight navigation checkpoint requires a nonzero distance")
+        self._path = [goal]
+        self._current_waypoint_index = 0
+        self._goal_pose = goal
+        self._mode = ControllerMode.POSE
+        self._pose_phase = PosePhase.FORWARD
+        self._align_final_orientation = False
+        self._final_target_orientation = None
+        self._is_final_orientation_aligning = False
+        self._forward_start_pos = origin
+        self._forward_direction_3d = displacement
+        self._forward_total_distance_3d = distance
+        self._forward_direction_unit = displacement / distance
+        qx, qy, qz, qw = orientation
+        self._forward_direction_unit_body = np.asarray(rotate_vector(tuple(self._forward_direction_unit), (-qx, -qy, -qz, qw)))
+        self._tpi_forward = build_tpi(
+            p0=0.0,
+            pe=distance,
+            vmax=state["vmax"],
+            accel=state["accel"],
+            t0=state["t0"],
+        )
+
     # -- Velocity kinematics -------------------------------------------
 
     def set_velocity(

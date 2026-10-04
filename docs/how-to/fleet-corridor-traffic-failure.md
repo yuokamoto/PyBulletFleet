@@ -12,7 +12,7 @@ scenario-owned collision response. It does not simulate physical blocking or
 reproduce a particular field incident.
 
 ```bash
-python -m pybullet_fleet.examples.fleet_corridor_traffic_failure
+python -m pybullet_fleet.examples.evaluation.fleet_corridor_traffic_failure
 ```
 
 With no output argument, each run creates a unique `pbf-traffic-*` directory
@@ -30,7 +30,7 @@ To watch the collision-stop variant at normal speed, run one policy in the
 PyBullet GUI:
 
 ```bash
-python -m pybullet_fleet.examples.fleet_corridor_traffic_failure \
+python -m pybullet_fleet.examples.evaluation.fleet_corridor_traffic_failure \
   --gui --monitor --policy collision_stop --cutoff 60
 ```
 

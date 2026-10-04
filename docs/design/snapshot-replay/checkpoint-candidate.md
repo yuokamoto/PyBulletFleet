@@ -1,7 +1,33 @@
 # Checkpoint / restore / resume: next-slice candidate
 
-**Status:** Investigation and proposed direction for review after the current
-navigation replay PR. This is not an approved implementation scope or plan.
+For the overall recording, restart, playback and debugging destination, read
+the [product goals](product-goals.md) before choosing another checkpoint slice.
+
+**Status:** The single-omni proof was implemented after Scope and Architecture
+Approval. See the [implementation plan](checkpoint-plan.md) and
+[evidence](checkpoint-evidence.md). Broader checkpoint support is future work.
+
+## Follow-up profile inventory (not yet approved)
+
+The completed proof covers only one straight-moving, per-agent omni robot.
+`Agent.restore_motion_state()` now restores Agent-owned fields without assuming
+a controller type; it does **not** restore a controller's goal or execution
+state. Each additional controller/profile needs its own state inventory and a
+fresh-process comparison against an uninterrupted run before claiming resume.
+The [checkpoint state capability checklist](product-goals.md#checkpoint-state-capability-checklist)
+tracks the supported omni subset and the remaining state categories together.
+
+| Candidate | Status | State or behavior to investigate |
+| --- | --- | --- |
+| Per-agent straight omni navigation | **Done: fixed single-robot profile only** | Completed-step clock, Agent motion and one active straight trajectory were restored and compared in a fresh process. |
+| Per-agent differential navigation | TODO; plausible next narrow profile, subject to scope review | Heading/turn phase, angular trajectory and velocity, active goal/path, completion flags, and their timing across a completed-step restore. Include a mid-turn checkpoint and compare subsequent pose, orientation and arrival. |
+| Broader omni and batch controllers | TODO, separate profiles | Multi-waypoint/final-orientation phases and batch-owned execution state; the straight-path proof does not cover them. |
+| Manipulation, attachment and entity lifecycle | TODO, separate profiles | Joint interpolation, parent link/relative transform, spawn/delete identity and reconstruction, and external driver progress; see the manipulation-state scenario evidence. |
+| Actions/BT, devices/plugins, physics and external inputs | TODO, only with concrete use cases | Queues, timers, device or engine state, and post-checkpoint input order may be required. Do not infer coverage from pose restoration. |
+
+This inventory tracks omissions; it is not a commitment to implement every row
+or to introduce a generic controller serializer. The external coordinator
+continues to own checkpoint workflow and artifact persistence.
 
 ## Product goal and current boundary
 
@@ -96,9 +122,9 @@ prerequisite for this slice.
 - The checkpoint is identified separately from initial definitions,
   observations and the input journal.
 
-Human Scope / Architecture Approval is needed before implementation: confirm the
-single per-agent omni translation case as the first slice and a separate,
-profile-specific checkpoint contract. Algorithm replacement after restore,
+Human Scope and Architecture Approval selected the single per-agent omni
+translation case as the first slice, which is now implemented for review.
+Algorithm replacement after restore,
 recorded-data playback and post-checkpoint input replay remain later decisions.
 
 Out of scope for this proof: arbitrary Python/plugin serialization, batch or

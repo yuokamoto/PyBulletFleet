@@ -658,6 +658,17 @@ class TestAgentGoalSetting:
 class TestAgentMotionModes:
     """Test different motion modes"""
 
+    def test_restore_agent_motion_fields_does_not_require_omni_controller(self, pybullet_env):
+        agent = create_mesh_agent(pose=Pose.from_xyz(0, 0, 0.5), motion_mode=MotionMode.DIFFERENTIAL)
+        restored_pose = Pose.from_xyz(1, 2, 0.5)
+
+        agent.restore_motion_state(restored_pose, [0.2, 0.0, 0.0], 0.1, moving=True)
+
+        assert agent.get_pose().position == pytest.approx(restored_pose.position)
+        assert agent.get_velocity() == pytest.approx([0.2, 0.0, 0.0])
+        assert agent.angular_velocity == pytest.approx(0.1)
+        assert agent.is_moving is True
+
     def test_omnidirectional_mode(self, pybullet_env):
         """Test omnidirectional motion mode"""
         agent = create_mesh_agent(

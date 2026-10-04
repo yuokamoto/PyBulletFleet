@@ -1,6 +1,6 @@
 """Synthetic corridor experiment driven by an external fleet-management app.
 
-Run ``python -m pybullet_fleet.examples.fleet_corridor_evaluation``.
+Run ``python -m pybullet_fleet.examples.evaluation.fleet_corridor_evaluation``.
 The policies, task ledger and verdict-free metrics live here, not in PBF core.
 This is not a replay, historical incident, or warehouse delivery workload.
 """
@@ -129,7 +129,7 @@ def _make_sim(
         )
     )
     entities: dict[int, tuple[str, SimObject]] = {}
-    model = Path(__file__).resolve().parents[1] / "robots" / "simple_cube.urdf"
+    model = Path(__file__).resolve().parents[2] / "robots" / "simple_cube.urdf"
     with sim.batch_spawn():
         for side in ("a", "b"):
             for index in range(_ROBOTS_PER_SIDE):

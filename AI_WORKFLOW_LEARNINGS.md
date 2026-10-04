@@ -5,21 +5,23 @@ future workflow improvement, not new requirements or an activity log.
 
 ## Distinguish the final capability from the incremental slice
 
-**Occurrences:** 1 (#50, snapshot/replay v1)
+**Occurrences:** 2 (#50, snapshot/replay v1; #55, manipulation state discovery)
 
 **Evidence:** The approved v1 implemented initial-state input re-execution, but
 review discussions had to repeatedly distinguish it from recorded-result
 playback and intermediate checkpoint restore/resume. The final user goals and
 the limited role of v1 were then made explicit in the specification, user guide,
-and roadmap.
+and roadmap. In #55, the scenario only observed state, but post-implementation
+review again needed an explicit explanation and checklist separating observable
+values from save/load and fresh-process continuation.
 
 **Reusable check:** For an incremental v1, describe both the final intended
 capability and the capability delivered by this slice as user actions and
 observable results. In replay scopes, name playback, re-execution, and
 restore/resume separately before deriving required state and inputs.
 
-**Candidate destination:** Snapshot/replay design template or repo-local Skill,
-if the distinction causes confusion again. **Status:** watch; no promotion yet.
+**Candidate destination:** Snapshot/replay design template or repo-local Skill.
+**Status:** repeated; Human decision required before any promotion.
 
 ## Separate simulator capabilities from replay orchestration
 

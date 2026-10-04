@@ -4,11 +4,11 @@
 entrance-merge route recorded. This is a synthetic scenario result, not a
 field-failure claim. Earlier tables document superseded route/rule variants.
 
-The external example is `pybullet_fleet/examples/fleet_corridor_traffic_failure.py`.
+The external example is `pybullet_fleet/examples/evaluation/fleet_corridor_traffic_failure.py`.
 Run the approved 20-robot workload with:
 
 ```bash
-python -m pybullet_fleet.examples.fleet_corridor_traffic_failure --robots 20 --cutoff 300
+python -m pybullet_fleet.examples.evaluation.fleet_corridor_traffic_failure --robots 20 --cutoff 300
 ```
 
 The current variants use the same A-side starts, B-side endpoints, 0.1 s timestep,

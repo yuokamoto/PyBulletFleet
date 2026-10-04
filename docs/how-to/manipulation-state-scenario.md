@@ -17,13 +17,13 @@ example.
 Run the deterministic headless scenario:
 
 ```bash
-python -m pybullet_fleet.examples.manipulation_state_scenario
+python -m pybullet_fleet.examples.validation.manipulation_state_scenario
 ```
 
 To watch it in PyBullet GUI at normal simulated speed:
 
 ```bash
-python -m pybullet_fleet.examples.manipulation_state_scenario --gui --hold-gui
+python -m pybullet_fleet.examples.validation.manipulation_state_scenario --gui --hold-gui
 ```
 
 `--rtf 2` requests 2× viewing speed. `--hold-gui` keeps the final frame open

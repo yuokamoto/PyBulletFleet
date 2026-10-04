@@ -2,6 +2,10 @@
 
 **Status:** Implemented and merged in PR #50 on 2026-09-29.
 
+This document fixes the approved **v1** boundary. Read the
+[overall product goals](product-goals.md) before scoping later work; v1 does
+not itself deliver the full recording/restart/playback/debug workflow.
+
 The first conceptual change is re-execution and result comparison of effective
 Fleet API commands from a recorded initial state, for a fixed kinematic navigation
 profile. Explicit configuration overrides or changed code produce a variant from

@@ -5,8 +5,8 @@ import sys
 import pybullet as p
 import pytest
 
-import pybullet_fleet.examples.fleet_corridor_evaluation as corridor
-from pybullet_fleet.examples.fleet_corridor_evaluation import (
+import pybullet_fleet.examples.evaluation.fleet_corridor_evaluation as corridor
+from pybullet_fleet.examples.evaluation.fleet_corridor_evaluation import (
     CorridorConfig,
     _make_sim,
     _observe_collisions,
