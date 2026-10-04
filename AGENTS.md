@@ -1,8 +1,8 @@
 # Agent Instructions
 
 This repository is used by automated coding agents and human maintainers. Keep
-changes small, verify the same checks that CI will run, and do not push unless
-the user explicitly asks for it.
+changes reviewable and oriented toward a useful user operation, verify according
+to change risk, and do not push unless the user explicitly asks for it.
 
 For the development process and human decision points, see
 `docs/AI_DEVELOPMENT_WORKFLOW.md`.
@@ -30,20 +30,26 @@ states that there is no user-visible change. Do not create a version heading in
 a feature PR; the release workflow promotes the accumulated `[Unreleased]`
 entries after the release version is selected.
 
-## Before Pushing
+## Change-Based Verification
 
-Run the core CI subset before pushing any branch that changes Python source,
-tests, examples, packaging, or documentation:
+Activate `.venv` before running local checks. Match verification to the change;
+CI continues to run repository-wide lint, tests and documentation builds on PRs.
 
-```bash
-source .venv/bin/activate
-make verify
-```
+| Change | Before pushing | Before requesting final review |
+| --- | --- | --- |
+| Documentation/instructions only | Run pre-commit on changed files; run `PBF_DOCS_OFFLINE=1 make docs` when Sphinx content or links change. No Python test suite is required. | Confirm the relevant checks and review rendered docs where useful. |
+| Python source, tests or examples | Run pre-commit on changed files and focused tests plus the relevant suite. | Run `make verify` once on the final source diff; rerun only checks affected by later changes. |
+| Core behavior, public API, packaging or other high-risk change | Run `make verify` before the first push and relevant integration/packaging checks. | Repeat affected checks after fixes; do not rerun an unchanged full suite mechanically. |
+| ROS 2 / RMF integration | Apply the applicable row above and the bridge/RMF checks below. | Confirm the relevant integration evidence. |
 
-`make verify` runs:
-
-- `make lint`: pre-commit hooks, including black, pyright, and flake8.
-- `make test`: `pytest tests/` with coverage and the CI coverage threshold.
+For mixed changes, use the highest applicable row. `make verify` runs
+`make lint` (all-file pre-commit, including black, pyright and flake8) and
+`make test` (full pytest with the CI coverage threshold). For a changed-file
+check, use `pre-commit run --files <changed paths> --show-diff-on-failure`.
+Record commands and any omitted checks in the PR; a passing focused check is
+not a claim that the full suite passed. If a targeted check cannot establish
+the changed behavior, broaden it before pushing. Do not claim a source PR is
+ready for final review until `make verify` and relevant integration checks pass.
 
 If the agent sandbox cannot write to `~/.cache/pre-commit`, run lint with a
 temporary cache:
@@ -65,7 +71,8 @@ Core pytest does not exercise the ROS 2 bridge. For changes under
 the relevant Docker or native ROS 2 checks. At minimum, run the bridge/RMF smoke
 test that matches the changed surface before pushing.
 
-If GitHub Actions fail after push, first reproduce locally with:
+If GitHub Actions fail after push, reproduce the affected check locally. For a
+core lint or pytest failure, use:
 
 ```bash
 PRE_COMMIT_HOME=/tmp/pbf-pre-commit pre-commit run --all-files --show-diff-on-failure

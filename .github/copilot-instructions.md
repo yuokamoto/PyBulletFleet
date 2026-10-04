@@ -63,20 +63,14 @@ MultiRobotSimulationCore  (core_simulation.py)
 
 - Work on a feature branch, never `main`. Commit and push **only when asked**.
 - Backward compatibility is not a concern for this repo.
-- **Before pushing, always run the same core checks as CI:**
-  ```bash
-  make verify
-  ```
-  This runs `pre-commit run --all-files --show-diff-on-failure` and
-  `pytest tests/ -v --tb=short --cov=pybullet_fleet --cov-report=term-missing --cov-fail-under=75`.
-- If an agent sandbox cannot write to `~/.cache/pre-commit`, use a temporary
-  cache: `PRE_COMMIT_HOME=/tmp/pbf-pre-commit make lint`.
-- The same pytest command is also available as a manual pre-commit hook:
-  `pre-commit run --hook-stage manual ci-pytest --all-files`.
+- Follow the change-based verification matrix in `AGENTS.md`. It distinguishes
+  local iteration, pre-push checks and final-review evidence; CI still runs
+  full repository checks. Do not apply `make verify` to documentation-only
+  pushes solely because they are pushes.
 - `ros2_bridge/` is excluded from the default pre-commit hooks and the core
   pytest suite, so bridge changes also need ROS 2 checks. **Before pushing bridge
   or RMF changes:**
-  1. **Core (always):** `make verify`.
+  1. Apply the relevant `AGENTS.md` verification row.
   2. **Bridge integration smoke test** (when anything under `ros2_bridge/`,
      `docker/`, launch/config files, or RMF integration code changed):
      ```bash
@@ -86,7 +80,7 @@ MultiRobotSimulationCore  (core_simulation.py)
        bridge bash /docker/test_bridge_api.sh
      # expect: "=== All integration tests PASSED ===" (exit 0)
      ```
-  Do not push if either step fails.
+  Do not push if an applicable check fails.
 - CI installs `pip install -e ".[dev]"`. Optional extras such as `.[models]` can
   change local behavior, especially around `robot_descriptions`; call out that
   environment difference when interpreting local-only failures.
@@ -106,7 +100,8 @@ MultiRobotSimulationCore  (core_simulation.py)
 5. **Never import without `TYPE_CHECKING` guard** when it would cause circular deps.
 6. **Prefer `get_lazy_logger(__name__)`** for new code — avoids expensive f-string evaluation when log level is disabled.
 7. **Never call `__init__()` directly** on Agent or SimObject — use factory methods. `SimulationParams(...)` is fine.
-8. **Always run `make verify` before claiming work is done or pushing.**
+8. **Use the change-based verification matrix in `AGENTS.md`; run `make verify`
+   before final review of source changes or earlier for high-risk changes.**
 
 ## Common Patterns
 

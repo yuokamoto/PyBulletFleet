@@ -20,8 +20,10 @@ capability and the capability delivered by this slice as user actions and
 observable results. In replay scopes, name playback, re-execution, and
 restore/resume separately before deriving required state and inputs.
 
-**Candidate destination:** Snapshot/replay design template or repo-local Skill.
-**Status:** repeated; Human decision required before any promotion.
+**Status:** The general end-to-end goal/slice distinction is proposed for
+promotion into [`docs/AI_DEVELOPMENT_WORKFLOW.md`](docs/AI_DEVELOPMENT_WORKFLOW.md)
+in this PR. Keep this entry as evidence of the original replay-specific
+confusion; no separate template or Skill is proposed.
 
 ## Separate simulator capabilities from replay orchestration
 
@@ -57,3 +59,34 @@ boundaries.
 
 **Candidate destination:** Collision/performance development guidance if this
 recurs. **Status:** watch; no promotion yet.
+
+## Deliver a complete user operation before multiplying discovery slices
+
+**Occurrences:** Snapshot/replay work across merged #50–#56. This is one
+extended development theme, not seven independent confirmations of the same
+lesson.
+
+**Evidence:** #50 delivered restricted initial-state/input re-execution, while
+the intended recording, result playback and intermediate restart were still
+unclear to reviewers. #51 and #54 built useful fleet failure experiments, and
+#52–#53 corrected/exposed collision facts, but these primarily advanced
+evaluation rather than the user's save/restart/playback workflow. #55 inventoried
+manipulation state without restoring it. #56 proves fresh-process continuation
+only for one fixed straight-moving omni robot; ordinary examples still cannot
+opt into capture and restart. The product-goal document and state checklist
+were written after much of this work, so each narrow PR required repeated
+explanation of what it did *not* deliver. More examples, design documents and
+review rounds accumulated faster than the end-to-end capability.
+
+**Replay-specific follow-up:** Consider one supported scenario spanning
+navigation, joint motion and attachment if the next V1 user operation requires
+all three; narrow profiles can remain tests within that slice. Treat corridor
+evaluation as useful in its own right, but do not count it as checkpoint
+progress. Assess whether #50's re-execution code serves a real user operation
+before extending or removing it.
+
+**Status:** This PR proposes promoting the general rules about feature goals,
+split decisions, approval reuse, documentation and change-based verification into
+[`docs/AI_DEVELOPMENT_WORKFLOW.md`](docs/AI_DEVELOPMENT_WORKFLOW.md) and
+[`AGENTS.md`](AGENTS.md). This entry retains the historical evidence and
+replay-specific follow-up; assess the revised workflow during the next V1.
