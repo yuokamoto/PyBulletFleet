@@ -32,8 +32,11 @@ Each policy runs in a fresh simulation with the same initial scene and
 workload. The table compares their measured outcomes under those conditions.
 
 Local macOS 14.6.1 x86_64, Python 3.12.5, PyBullet build 2026-09-26.
-Two independent runs per policy produced the same simulated-time metrics.
-These figures describe this synthetic configuration, not a policy ranking:
+The table below was refreshed after shortening the corridor from x=[-3,3]
+to x=[-0.75,0.75]. Earlier geometry-specific counts were 188 over-capacity
+steps and 100 corridor overlap episodes for uncontrolled at 6 m, then 128 and
+88 at 3 m. The policy workload and endpoint timing remain unchanged. These
+figures describe this synthetic configuration, not a policy ranking:
 
 | Measurement | Uncontrolled | Direction gate |
 | --- | ---: | ---: |
@@ -41,9 +44,9 @@ These figures describe this synthetic configuration, not a policy ranking:
 | Completed by 60 s | 40 | 9 |
 | All tasks arrived by simulated second | 28.4 | 245.1 |
 | Median external admission delay, s | 0 | 49.95 |
-| Peak robot references in corridor | 20 | 2 |
-| Corridor steps with more than three robots | 188 | 0 |
-| Observed corridor geometric-overlap episodes | 100 | 0 |
+| Peak robot references in corridor | 14 | 2 |
+| Corridor steps with more than three robots | 98 | 0 |
+| Observed corridor geometric-overlap episodes | 72 | 0 |
 | Observed total geometric-overlap episodes | 180 | 116 |
 | Core detected threshold-entry count | 180 | 116 |
 
@@ -52,6 +55,10 @@ simulated second. That single rate hides the substantial latency difference.
 The gate reduces corridor overlap but still permits overlap outside the
 corridor, and it imposes long external admission delays. Uncontrolled robots
 pass through one another; the observed crowding is not physical blocking.
+The total geometric-overlap and core threshold-entry counts cover the entire
+scene, including initial areas and destinations outside the corridor. The
+monitor presents those core counts live; it does not apply this evaluator's
+corridor classification.
 This scenario therefore demonstrates density, overlap and policy-induced queue
 measurements, not a realistic traffic-jam dynamics model.
 
@@ -70,7 +77,8 @@ headless rerun, both policies retained the original margin-only, geometric-
 overlap and corridor-overlap episode counts (44/180/100 uncontrolled and
 46/116/0 direction gate). A pair that was not rechecked on a step remains
 active but is not counted as a new geometric sample. The original timing
-figures below describe the all-pair collector, not this later API.
+figures below describe the all-pair collector and the original 6 m corridor,
+not this later API or shortened geometry.
 
 The all-pair collector has visible cost: after adopting the standard
 `run_simulation()` loop, approximate 300 s runs took 5.5–5.8 s wall time with

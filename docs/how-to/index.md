@@ -32,6 +32,7 @@ custom-profiling
 capturing-demos
 replay
 fleet-corridor-evaluation
+fleet-corridor-traffic-failure
 ```
 
 ```{toctree}

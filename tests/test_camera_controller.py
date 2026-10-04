@@ -187,7 +187,7 @@ class TestRightDragPan:
 
 
 class TestKeyboardControls:
-    """Test keyboard-only controls (zoom, top-down, no-keys)."""
+    """Test keyboard-only pan, zoom, top-down, and no-input behavior."""
 
     @pytest.fixture()
     def controller(self):
@@ -198,6 +198,17 @@ class TestKeyboardControls:
     def test_zoom_in_decreases_distance(self, controller):
         dist, yaw, pitch, target = _extract(_call_update(controller, {ord("="): p.KEY_IS_DOWN}))
         assert dist < 10.0, "= key should zoom in (decrease distance)"
+
+    def test_arrow_keys_pan_at_default_yaw(self, controller):
+        _, _, _, right = _extract(_call_update(controller, {p.B3G_RIGHT_ARROW: p.KEY_WAS_TRIGGERED}))
+        _, _, _, up = _extract(_call_update(controller, {p.B3G_UP_ARROW: p.KEY_IS_DOWN}))
+        assert right[0] > 0 and right[1] == pytest.approx(0)
+        assert up[1] > 0 and up[0] == pytest.approx(0)
+
+    def test_arrow_pan_rotates_with_camera_yaw(self, controller):
+        rotated = (None,) * 8 + (90.0, -45.0, 10.0, (0.0, 0.0, 0.0))
+        _, _, _, target = _extract(_call_update(controller, {p.B3G_UP_ARROW: p.KEY_IS_DOWN}, camera=rotated))
+        assert target[0] < 0 and target[1] == pytest.approx(0, abs=1e-6)
 
     def test_zoom_out_increases_distance(self, controller):
         dist, yaw, pitch, target = _extract(_call_update(controller, {ord("-"): p.KEY_IS_DOWN}))

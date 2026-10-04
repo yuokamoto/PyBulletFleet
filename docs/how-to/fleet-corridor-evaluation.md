@@ -1,15 +1,25 @@
 # Run the synthetic fleet corridor evaluation
 
+This is an **evaluation example**, not a fleet-management algorithm supplied
+by PBF. It shows how an external application can run its own algorithms under
+equivalent simulation conditions and use PBF's commands, state and collision
+observations to compare their outcomes. The two policies below are deliberately
+simple examples; designing or judging a production algorithm is outside this
+repository's scope.
+
 This example runs two independent 20-robot simulations through a narrow
 corridor. It compares unrestricted bidirectional commands with an external
 direction gate. It is a synthetic movement workload, not a warehouse delivery
 benchmark or a reproduction of a field incident.
 
 ```bash
-python -m pybullet_fleet.examples.fleet_corridor_evaluation /tmp/pbf-corridor-run
+python -m pybullet_fleet.examples.fleet_corridor_evaluation
 ```
 
-The output directory must not already exist. `--dt 0.05` changes the timestep;
+With no output argument, each run creates a unique `pbf-corridor-*` directory
+under the system temporary directory and prints its path. Pass a positional
+directory to retain reports at a chosen location; an explicitly named
+directory must not already exist. `--dt 0.05` changes the timestep;
 `--cutoff 300` sets the fixed simulated-time window. The cutoff must be an
 integer number of steps. The command writes `uncontrolled.json`,
 `direction_gate.json`, and `comparison.json`. Each policy starts in a fresh
@@ -27,13 +37,22 @@ is written when the window closes. Blue robots start in area A; orange robots
 start in area B.
 
 ```bash
-python -m pybullet_fleet.examples.fleet_corridor_evaluation /tmp/pbf-corridor-watch-a \
-  --gui --policy uncontrolled --cutoff 30
-python -m pybullet_fleet.examples.fleet_corridor_evaluation /tmp/pbf-corridor-watch-b \
-  --gui --policy direction_gate --rtf 3
+python -m pybullet_fleet.examples.fleet_corridor_evaluation \
+  --gui --monitor --policy uncontrolled --cutoff 30
+python -m pybullet_fleet.examples.fleet_corridor_evaluation \
+  --gui --monitor --policy direction_gate --rtf 3
 ```
 
-The 30-second run is for a quick look and censors unfinished tasks. For the
+The initial camera is centered on the shortened corridor (x=[-0.75,0.75]).
+Use the arrow keys or right-drag to pan and `=` / `-` or the mouse wheel to
+zoom. `--monitor` opens the DataMonitor beside the PyBullet GUI; its
+`Collisions` field is the current active pair count, and `Tot Collis.` is
+the cumulative count of new PBF collision-margin pair entries. Both include
+the entire scene, including starts and destinations outside the corridor,
+and can include robot-wall pairs. They are not counts of geometric overlap
+only or counts of corridor traffic conflicts. The monitor updates during the
+run; its window refreshes about every 0.5 wall-clock seconds. The 30-second
+run is for a quick look and censors unfinished tasks. For the
 defined 300-second comparison, omit `--cutoff`; direction gate reaches its
 last endpoint at about 245 simulated seconds in the tested configuration.
 `--rtf` changes live GUI viewing speed, not the simulation timestep. This is a
@@ -48,7 +67,7 @@ can show the Linux GUI in a browser (requires Colima and Docker CLI):
 
 ```bash
 scripts/run_linux_gui_macos.sh fleet_corridor_evaluation.py \
-  /tmp/pbf-corridor-browser --gui --policy uncontrolled --cutoff 30
+  --gui --policy uncontrolled --cutoff 30
 ```
 
 That launcher runs in a temporary container; use the native Python command
@@ -70,7 +89,7 @@ fleet task outcomes in simulated time; wall seconds and RTF describe execution
 cost. Fixed-window rate can be identical even when task latency differs.
 
 The external evaluator marks corridor crowding when more than three robot
-reference points occupy x=[-3,3], y=[-0.17,0.17]. This is a transparent
+reference points occupy x=[-0.75,0.75], y=[-0.17,0.17]. This is a transparent
 scenario definition, not a PBF congestion verdict or a physical queue.
 The report retains each observed crowding interval with start/end step and
 peak occupancy, as well as the aggregate count of over-capacity steps.
@@ -96,6 +115,13 @@ records pair IDs, step/time, start positions, active task IDs, minimum sampled
 distance and observed duration. Events that begin and end between samples can
 still be missed, so smaller `--dt` improves resolution without guaranteeing
 continuous detection.
+
+`geometric_overlap_episodes` counts sampled robot/robot and robot/wall overlap
+episodes throughout the scene, including the initial areas and destinations.
+`corridor_geometric_overlap_episodes` counts the subset with at least one
+observed step whose pair midpoint lies within the corridor's x limits. It is
+therefore possible for both policies to have overlap outside the passage even
+when the direction gate has no observed corridor overlap.
 
 The report is a scenario-owned artifact. Its IDs and step/time fields permit
 later trace correlation, but it is not a replay artifact or a general PBF

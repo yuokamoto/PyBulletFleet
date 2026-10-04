@@ -1,6 +1,6 @@
 # Collision observation — implementation evidence
 
-**Status:** Implementation complete; awaiting independent and Human Final Review.
+**Status:** Merged in PR #53 after independent and Human Final Review.
 
 The core retains `_active_collision_pairs` as the state used for enter/exit
 transitions. A separate pair-keyed cache holds the last narrow-phase method,
@@ -47,6 +47,8 @@ still be appropriate for an explicit all-pairs study.
 - `PRE_COMMIT_HOME=/tmp/pbf-pre-commit make lint`: passed. Documentation build
   also passed with `LC_ALL=C LANG=C make docs`; the locale override is needed
   by the local shell.
+- After review fixes, `make verify` passed with 1,800 tests, 12 skipped and
+  81.45% coverage. The documentation build and all PR CI checks passed.
 - In a serial, dense-scene microbenchmark with all objects marked moved,
   100 objects produced 342 active pairs. The pre-change collision-check median
   was 21.0–21.5 ms across two runs; the current check median was 21.78 ms and
@@ -74,6 +76,24 @@ clear active pairs without emitting it. An event-only collector would still
 need a state reconciliation path. `check.pairs` supplies that current state;
 the evaluator's pair-keyed mapping associates PBF object IDs with scenario
 pair names.
+
+## Post-merge retrospective
+
+The narrow public observation removed the evaluator's private PyBullet ID
+access and second all-pairs distance pass without moving scenario-specific
+episode or congestion rules into PBF. Human review simplified the example's
+intermediate data to a pair-keyed mapping of the public records. Copilot review
+then exposed two real edge cases: a manual check in `POST_STEP` used an old
+timestamp, and observation invalidation after object disable left an episode
+open. Both were fixed with focused regressions before merge. The final review
+found no new code defect, but noted that `remove_object()` invalidation still
+lacks a regression with an already populated observation. Add that small test
+when next touching collision observation; it does not justify a new feature
+scope by itself.
+
+The process lesson is to test sampled-state APIs at callback-phase and
+lifecycle boundaries, including removal as well as disable. This is one
+occurrence, so no workflow, agent instruction or Skill change is proposed.
 
 ## Retrospective follow-up: step/time contract
 

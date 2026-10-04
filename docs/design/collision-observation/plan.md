@@ -1,6 +1,6 @@
 # Collision observation — implementation plan
 
-**Status:** Scope and architecture approved; implementation complete, awaiting review.
+**Status:** Implemented and merged in PR #53. This plan records the approved design.
 
 ## Findings
 
