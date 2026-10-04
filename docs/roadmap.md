@@ -99,6 +99,11 @@ New robot and infrastructure models:
   `docs/design/snapshot-replay/checkpoint-candidate.md` for the evidence-based
   minimum state and proposed acceptance criteria. This is a candidate for
   Human Scope / Architecture Approval, not an approved feature.
+  The manipulation scenario's
+  `docs/design/snapshot-replay/manipulation-state-scenario-evidence.md`
+  contains a state capability checklist that distinguishes values observable
+  today from the later save/load work needed for continuation. No manipulation
+  checkpoint is implemented yet.
 
   Distinguish three records where the user goals require them:
 
@@ -149,6 +154,22 @@ New robot and infrastructure models:
     explain their outcomes; then joint/action/device/BT and dynamic worlds as
     justified. Specify initial re-execution state separately from any
     intermediate checkpoint state.
+  - **Action-based manipulation checkpoint discovery:** after the explicit
+    Fleet API manipulation-state scenario has established the base, joint,
+    attachment and entity-lifecycle boundaries, have an external driver queue
+    an equivalent sequence through existing `MoveAction`, `JointAction`,
+    `PickAction` and `DropAction`
+    (or the smallest applicable subset). Compare the user-facing simplicity
+    and observable outcomes with the direct-command scenario, then identify
+    the additional execution state needed to continue mid-action: queued and
+    active action identity/order, phase/sub-action progress, targets, timers,
+    completion/failure state and any external driver state. Keep both examples
+    while they reveal different boundaries; decide whether to consolidate them
+    only after this comparison. Do not assume a CLI alone makes arbitrary
+    action-based demos restorable, or expand the current state-discovery slice
+    into an action framework. This is a later state-requirements investigation,
+    not part of the initial low-level navigation checkpoint proof or a promise
+    that either manipulation example can already be restored.
   - Reconstruct supported `Agent` and `SimObject` instances from their effective
     spawn information, instead of extending the replay-only `simple_cube` /
     `static_box` vocabulary as a general PBF entity model. Record enough spawn

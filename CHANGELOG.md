@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Add an optional-GUI mobile-manipulator state-discovery example that exercises
+  runtime object spawn/delete, base and joint motion, link attachment and
+  detachment, and completed-step observations without adding checkpoint APIs.
 - Add a one-sided corridor traffic experiment that compares ordinary kinematic
   passage through an entrance-side merge with an external collision-triggered
   stop/restart rule, optional
