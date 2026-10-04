@@ -20,7 +20,9 @@ so no material Architecture Gate is required.
 2. Implement the external response: after each completed check, form connected
    groups of fresh overlapping robot–robot pairs. Within each group, keep the
    robot nearest the B-side corridor exit moving, with stable-ID ties; stop the
-   others once and hold them for at least 1 simulated second. On later checks,
+   others once and normally hold them for 1 simulated second. If the selected
+   winner is already stopped, reissue its navigation immediately before
+   stopping the other group members. On later checks,
    reissue navigation for at most one stopped robot per step: the stopped robot
    nearest the exit, once its cooldown has elapsed. It can resume despite a
    persisting overlap; record repeated stops, stop/reissue acknowledgements

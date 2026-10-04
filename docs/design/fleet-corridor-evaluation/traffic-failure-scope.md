@@ -16,9 +16,10 @@ is no collision penalty in task timing.
 **Traffic-failure evaluation.** Spawn robots only in area A and give them
 simultaneous A-to-B movement tasks that converge before the narrow corridor.
 On a sampled robot–robot geometric overlap, an external app lets the robot
-nearest the B-side corridor exit continue and stops the others for at least
-one simulated second. Among all stopped robots, only the one nearest that exit
-is eligible to resume on a completed step after its cooldown. It may resume
+nearest the B-side corridor exit continue and stops the others for one
+simulated second. If that winner is already stopped, it resumes immediately;
+otherwise, among all stopped robots, only the one nearest that exit is eligible
+to resume on a completed step after its cooldown. It may resume
 despite a persisting overlap; repeated stop/restart is recorded. Delay and
 blocking are consequences of this explicit external
 response rule, not PyBullet contact dynamics or a core congestion state.
@@ -76,7 +77,8 @@ pass through them unless the external rule also stops it.
    For each connected conflict group, choose the robot nearest the B-side
    corridor exit plane; break ties by stable robot ID. Keep that
    winner moving toward its current route waypoint. Stop the others through Fleet API
-   and mark them blocked for **at least 1.0 simulated second**. Robot–wall
+   and mark them blocked for **1.0 simulated second**, except when a stopped
+   robot becomes the selected winner and must resume immediately. Robot–wall
    contacts are excluded from this experiment's trigger: they indicate a
    separate path-planning failure.
 3. At or after the one-second deadline, release only the blocked robot nearest
@@ -85,6 +87,8 @@ pass through them unless the external rule also stops it.
    because waiting for strict clearance deadlocked the initial pilot. A
    released robot may collide again; record any repeated stop/restart. Do not
    use teleport as silent recovery.
+   A stopped robot selected as a conflict-group winner resumes immediately
+   before the other members are stopped, even if its deadline has not elapsed.
 4. Make **time until every robot passes the corridor** the corridor outcome.
    Record each robot's first entry into the corridor and first exit through
    the B-side boundary, using the same reference-point geometry as the

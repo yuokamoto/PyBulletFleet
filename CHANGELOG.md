@@ -14,6 +14,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   stop/restart rule, optional
   single-policy GUI observation, auto-named result directories, and reports
   of all-robot passage time and blocking evidence.
+  A stopped conflict-group winner resumes immediately so the external response
+  does not stop every moving member of that group.
 - Expose the latest collision-check observation, including active pair IDs,
   detection branch, signed closest-point distance and sample time, without a
   second all-pairs query.

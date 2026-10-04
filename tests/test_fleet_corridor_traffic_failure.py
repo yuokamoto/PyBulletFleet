@@ -35,9 +35,7 @@ def test_four_robot_collision_response_recovers_after_minimum_stop():
             == {"entrance", "exit", "destination"}
             for task in report["tasks"]
         )
-    assert all(
-        interval["end_step"] - interval["start_step"] >= config.block_steps for interval in response["blocked_intervals"]
-    )
+    assert all(interval["end_step"] > interval["start_step"] for interval in response["blocked_intervals"])
     assert all(step > 0 for step in response["first_corridor_entry_step"].values())
 
 
@@ -81,6 +79,37 @@ def test_collision_after_corridor_exit_can_stop_robot_before_endpoint(monkeypatc
         for decision in report["decisions"]
     )
     assert report["metrics"]["endpoint_unfinished_count"] == 0
+
+
+def test_stopped_exit_priority_winner_resumes_before_other_robots_are_stopped(monkeypatch):
+    original_overlaps = traffic._robot_overlaps
+    original_priority = traffic._exit_priority
+    force_r02_priority = False
+
+    def with_stopped_winner_overlap(check, step, names, goals):
+        nonlocal force_r02_priority
+        overlaps = original_overlaps(check, step, names, goals)
+        if step == 40:
+            overlaps.add(("r02", "r03"))
+            force_r02_priority = True
+        return overlaps
+
+    def priority(name, states):
+        if force_r02_priority and name == "r02":
+            return (-100.0, name)
+        return original_priority(name, states)
+
+    monkeypatch.setattr(traffic, "_robot_overlaps", with_stopped_winner_overlap)
+    monkeypatch.setattr(traffic, "_exit_priority", priority)
+    report = run_policy("collision_stop", TrafficConfig(robots=4, cutoff=20))
+    decisions_at_40 = [decision for decision in report["decisions"] if decision["step"] == 40]
+    assert any(decision["action"] == "stop" and decision["robot_id"] == "r02" for decision in report["decisions"])
+    assert any(decision["action"] == "resume" and decision["robot_id"] == "r02" for decision in decisions_at_40)
+    assert any(decision["action"] == "stop" and decision["winner"] == "r02" for decision in decisions_at_40)
+    assert any(
+        interval["robot_id"] == "r02" and interval["end_step"] - interval["start_step"] < 10
+        for interval in report["blocked_intervals"]
+    )
 
 
 def test_completed_endpoint_is_not_restarted_by_later_overlap(monkeypatch):

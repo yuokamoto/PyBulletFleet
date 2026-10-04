@@ -73,8 +73,10 @@ after each completed step. A fresh robot–robot signed distance of zero or
 less forms a conflict; robot–wall observations are counted but do not trigger
 stops. Within a connected conflict group, the robot nearest the B-side exit
 plane at x=0.75 continues and other moving members receive `stop` commands.
-Among all stopped robots, at most one per step is eligible to resume after at
-least one simulated second: the one nearest the exit. The app then reissues
+If that winner is already stopped, the app immediately reissues its navigation
+command before stopping the others. Otherwise, among all stopped robots, at
+most one per step is eligible to resume after one simulated second: the one
+nearest the exit. The app then reissues
 its original `navigate` endpoint. It may still overlap another robot and be
 stopped again. PBF core itself does not stop robots on collision. The response
 can also stop a robot after it has passed the B-side corridor exit, until it
@@ -98,10 +100,10 @@ are separate from wall time.
 An accepted command is not arrival or passage.
 
 With the shortened x=[-0.75,0.75] corridor, all 20 robots passed the exit at
-8.6 simulated seconds for pass-through and 38.3 seconds for collision-stop;
-all reached their destinations at 16.1 and 45.8 seconds, respectively.
-In the response run, 156 robot-overlap entries were observed before x=-0.75,
-and the peak of 19 blocked robots was also before the entrance; no blocked
+8.6 simulated seconds for pass-through and 35.9 seconds for collision-stop;
+all reached their destinations at 16.1 and 43.4 seconds, respectively.
+In the response run, 170 robot-overlap entries were observed before x=-0.75,
+and the peak of 18 blocked robots was also before the entrance; no blocked
 robots were observed inside the corridor. No post-exit stop happened in this
 fixed run, though the response rule now permits one before endpoint arrival.
 Because kinematic

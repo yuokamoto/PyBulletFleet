@@ -302,6 +302,12 @@ def run_policy(
         issue_goal(name, step, action)
         return True
 
+    def resume_blocked(name: str, state: RobotState2D, step: int) -> None:
+        if not advance_route(name, state, step, action="resume"):
+            issue_goal(name, step, "resume")
+        block_intervals.append({"robot_id": name, "start_step": block_started.pop(name), "end_step": step})
+        del blocked[name]
+
     def before_step(**_: object) -> None:
         if callback_error:
             return
@@ -322,10 +328,7 @@ def run_policy(
                 return
             name = min(blocked, key=lambda robot: _exit_priority(robot, states))
             if step >= blocked[name]:
-                if not advance_route(name, states[name], step, action="resume"):
-                    issue_goal(name, step, "resume")
-                block_intervals.append({"robot_id": name, "start_step": block_started.pop(name), "end_step": step})
-                del blocked[name]
+                resume_blocked(name, states[name], step)
         except Exception as exc:
             callback_error.append(exc)
 
@@ -386,6 +389,10 @@ def run_policy(
                 response_pairs = {pair for pair in overlaps if pair[0] not in arrived and pair[1] not in arrived}
                 for group in _components(response_pairs):
                     winner = min(group, key=lambda name: _exit_priority(name, states))
+                    # A stopped winner must be able to proceed; otherwise this
+                    # response can stop every moving member of the group.
+                    if winner in blocked:
+                        resume_blocked(winner, states[winner], step)
                     for name in sorted(group - {winner}):
                         if name in blocked:
                             continue

@@ -130,13 +130,13 @@ The same 20-robot, 60 s check produced:
 | Outcome | Pass-through | Collision-stop |
 | --- | ---: | ---: |
 | Robots past the B-side exit | 20/20 | 20/20 |
-| Time when all passed | 8.6 s | 38.3 s |
-| Time when all reached endpoints | 16.1 s | 45.8 s |
-| Overlap entries before entrance | 136 | 156 |
+| Time when all passed | 8.6 s | 35.9 s |
+| Time when all reached endpoints | 16.1 s | 43.4 s |
+| Overlap entries before entrance | 136 | 170 |
 | Overlap entries in corridor/boundary | 0 | 0 |
 | Overlap entries after exit | 118 | 0 |
-| Stop / resume commands | 0 / 0 | 66 / 66 |
-| Peak blocked before entrance | 0 | 19 |
+| Stop / resume commands | 0 / 0 | 75 / 75 |
+| Peak blocked before entrance | 0 | 18 |
 | Peak blocked inside corridor | 0 | 0 |
 
 The entrance-side blocking and all-pass delay remain observable. Zone counts
@@ -145,7 +145,12 @@ measurements for their stated geometries.
 Following Human review, the response was extended from corridor exit through
 endpoint arrival. A 20-robot rerun at the 300 s cutoff retained the passage
 and overlap counts above; all endpoints were reached at 16.1 s for pass-through
-and 45.8 s for collision-stop. This particular workload produced no post-exit
+and 43.4 s for collision-stop. A later review fix immediately resumed a stopped
+robot selected as a conflict-group winner, rather than stopping every other
+moving member while it waited for its cooldown. In this run, 24 of the 75
+blocked intervals ended early for that reason. Earlier measurements of 38.3 s
+passage and 45.8 s endpoint arrival apply to the pre-fix response rule.
+This particular workload produced no post-exit
 stop under the extended rule. A focused injected-observation test confirms
 that a fresh overlap between unfinished, post-exit robots can trigger a stop,
 while a completed endpoint task is excluded. Thus the endpoint outcome is
