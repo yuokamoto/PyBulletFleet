@@ -61,6 +61,15 @@ def run_scenario(*, gui: bool = False, view_rtf: float = 1.0, hold_gui: bool = F
             log_level="warning",
         )
     )
+    try:
+        return _run_scenario_with_core(sim, dt=dt, gui=gui, hold_gui=hold_gui)
+    finally:
+        if p.isConnected(sim.client):
+            p.disconnect(sim.client)
+
+
+def _run_scenario_with_core(sim: MultiRobotSimulationCore, *, dt: float, gui: bool, hold_gui: bool) -> dict:
+    """Set up and run the scenario inside the caller's client cleanup scope."""
     robot = Agent.from_params(
         AgentSpawnParams(
             name=_ROBOT_NAME,
@@ -254,16 +263,12 @@ def run_scenario(*, gui: bool = False, view_rtf: float = 1.0, hold_gui: bool = F
     sim.events.on(SimEvents.PRE_STEP, before_step)
     sim.events.on(SimEvents.POST_STEP, after_step)
     observe("before_spawn", 0)
-    try:
-        sim.run_simulation(duration=3.0)
-        if callback_error:
-            raise RuntimeError("scenario callback failed") from callback_error[0]
-        if stage != "done":
-            raise RuntimeError(f"scenario did not finish: {stage}")
-        return {"observations": observations, "lifecycle": lifecycle, "identity": identity, "final_stage": stage}
-    finally:
-        if p.isConnected(sim.client):
-            p.disconnect(sim.client)
+    sim.run_simulation(duration=3.0)
+    if callback_error:
+        raise RuntimeError("scenario callback failed") from callback_error[0]
+    if stage != "done":
+        raise RuntimeError(f"scenario did not finish: {stage}")
+    return {"observations": observations, "lifecycle": lifecycle, "identity": identity, "final_stage": stage}
 
 
 def main() -> None:

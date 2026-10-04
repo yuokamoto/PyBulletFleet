@@ -4,6 +4,7 @@ import math
 import sys
 
 import pytest
+import pybullet as p
 
 import pybullet_fleet.examples.manipulation_state_scenario as scenario
 
@@ -94,3 +95,23 @@ def test_invalid_gui_rate_and_hold_mode():
         scenario.run_scenario(gui=True, view_rtf=0)
     with pytest.raises(ValueError, match="hold_gui"):
         scenario.run_scenario(hold_gui=True)
+
+
+def test_setup_failure_disconnects_client(monkeypatch):
+    real_core = scenario.MultiRobotSimulationCore
+    clients = []
+
+    def capture_core(params):
+        sim = real_core(params)
+        clients.append(sim.client)
+        return sim
+
+    def fail_spawn(*args, **kwargs):
+        raise RuntimeError("setup failed")
+
+    monkeypatch.setattr(scenario, "MultiRobotSimulationCore", capture_core)
+    monkeypatch.setattr(scenario.Agent, "from_params", fail_spawn)
+    with pytest.raises(RuntimeError, match="setup failed"):
+        scenario.run_scenario()
+    assert len(clients) == 1
+    assert not p.isConnected(clients[0])
