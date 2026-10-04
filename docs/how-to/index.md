@@ -33,6 +33,7 @@ capturing-demos
 replay
 fleet-corridor-evaluation
 fleet-corridor-traffic-failure
+manipulation-state-scenario
 ```
 
 ```{toctree}
