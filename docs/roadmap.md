@@ -99,6 +99,11 @@ New robot and infrastructure models:
   `docs/design/snapshot-replay/checkpoint-candidate.md` for the evidence-based
   minimum state and proposed acceptance criteria. This is a candidate for
   Human Scope / Architecture Approval, not an approved feature.
+  The manipulation scenario's
+  `docs/design/snapshot-replay/manipulation-state-scenario-evidence.md`
+  contains a state capability checklist that distinguishes values observable
+  today from the later save/load work needed for continuation. No manipulation
+  checkpoint is implemented yet.
 
   Distinguish three records where the user goals require them:
 
