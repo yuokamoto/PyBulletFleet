@@ -61,13 +61,21 @@ For non-trivial changes, implementation should not begin before the repository h
 
 The plan should be proportional to the uncertainty and impact of the change.
 
-### 2.3 Prefer one conceptual change per pull request
+### 2.3 Prefer a useful end-to-end capability per feature slice
 
-A pull request should represent a change that can reasonably be understood, reviewed, tested, and accepted as one concept.
+A pull request should represent a change that can reasonably be understood,
+reviewed, tested, and accepted as one concept. For feature work, prefer the
+smallest **useful end-to-end user operation**, not the smallest code diff or
+internal state profile. Tests may cover narrower profiles than the PR.
 
-Lines changed are not the primary measure of size.
+Lines changed are not the primary measure of size. Combining several states or
+components is appropriate when they are needed for one reviewable user
+operation; this is not permission for an unbounded feature PR.
 
-When independent changes can be reviewed and validated separately, prefer separate pull requests.
+Split work when there is a concrete reason, such as independent user value, a
+material architecture boundary, compatibility risk, a blocking technical
+unknown, or reviewability. State which end-to-end acceptance step each
+intermediate PR advances and what remains before the feature goal is usable.
 
 ### 2.4 Evidence before Done
 
@@ -140,6 +148,11 @@ Agents are expected to participate actively in reasoning. Human ownership should
 
 Use the lightest workflow that adequately controls the risk of the change.
 
+Apply this principle to the **whole feature theme**, not separately to every
+controller, entity type or proof. The workflows below are examples, not a
+ceremony to restart for each internal profile. Reuse approved scope and
+architecture decisions while implementation stays within their boundaries.
+
 Classification is based primarily on risk, uncertainty, architectural impact, compatibility risk, and review complexity rather than line count.
 
 Implementation size and engineering risk are separate dimensions. A small diff may be high-risk (for example, a public API compatibility break), while a large test-only change may be relatively low-risk. Workflow weight should follow risk and uncertainty, not raw change size.
@@ -207,10 +220,21 @@ Candidate work may originate from:
 Discovery does not imply implementation.
 
 A candidate should first be evaluated for relevance to the core value and direction of PyBulletFleet.
+Before placing an investigation, proof or evaluation on a feature's critical
+path, ask whether its uncertainty actually blocks the end-to-end acceptance
+demonstration or V1 delivery. Related work that does not block it belongs in
+follow-ups, even if it would reduce uncertainty.
 
 ### 5.2 Problem Definition and Task Specification
 
 Before significant implementation, establish enough information to make the intended change reviewable.
+
+For a feature theme spanning multiple changes, define its Product Goal,
+concrete user operation, end-to-end acceptance demonstration, supported V1
+boundary and explicit later/non-goal items **before** deriving PR slices.
+Each PR states how it advances that operation; an internal proof is not
+automatically a product milestone. This information may live in an existing
+Issue or design document rather than a new artifact.
 
 A useful specification normally includes:
 
@@ -249,6 +273,9 @@ A plan should cover, as appropriate:
 - possible decomposition into independently reviewable changes.
 
 Plans should not become design documents by default. Include only the detail needed to make implementation direction and risk understandable.
+If decomposing a feature, explain why each split is needed and which end-to-end
+acceptance step it advances. Different controller or state profiles alone do
+not require separate PRs or repeated approval gates.
 
 ### 5.5 External Research
 
@@ -306,6 +333,12 @@ This may include:
 
 The human does not normally need to execute automated tests manually.
 
+Choose local checks by change risk and affected surface as described in
+`AGENTS.md`. Focused tests support iteration; relevant checks support a push;
+full verification applies to high-risk changes and source PRs presented for
+final review. CI still runs repository-wide checks. Repeating the full suite
+after an unchanged documentation edit is not evidence of greater safety.
+
 The human reviews whether the tests and other evidence actually demonstrate the intended acceptance criteria.
 
 Manual verification remains appropriate when important behavior cannot be validated adequately through automation.
@@ -352,6 +385,9 @@ Useful questions are:
 2. What could the agent have handled better or more independently?
 3. Where did the workflow create unnecessary overhead or allow scope creep?
 4. Should any repeated knowledge or procedure be promoted into `AGENTS.md`, an agent-specific instruction, a Skill, ADR, template, CI rule, or this workflow?
+5. Did the feature advance a usable end-to-end operation, and did review,
+   approvals, documents or repeated verification cost more than the value they
+   added? If so, which step should be reused, combined or removed next time?
 
 A retrospective does not need to produce a workflow change. `No workflow changes` is a valid result.
 
@@ -370,6 +406,10 @@ The human should be able to answer:
 - Would satisfying the acceptance criteria solve the intended problem?
 
 Approval means that implementation planning may proceed. It does not imply approval of every implementation detail.
+For an approved feature theme, do not repeat Scope Approval solely because
+implementation moves to another internal state or controller profile. Return
+when the Product Goal, supported scope or acceptance demonstration changes
+materially, or an assumption underlying approval fails.
 
 ### 6.2 Gate 2 — Architecture Approval
 
@@ -386,6 +426,9 @@ Questions include:
 - Should this decision be recorded as an ADR?
 
 Agents should normally present alternatives and evidence rather than asking the human to invent all options from scratch.
+Reuse an approved architecture boundary across profiles. Return for approval
+only for a material responsibility change, public API direction change, major
+compatibility/performance trade-off, or invalidated architectural assumption.
 
 ### 6.3 Gate 3 — Final / Merge Approval
 
@@ -483,6 +526,10 @@ Useful PR information includes:
 Evidence should be connected to acceptance criteria whenever practical.
 
 The objective is not to maximize the number of tests. It is to make the claim that the change works inspectable.
+Before adding a separate spec, plan, evidence or validation document, identify
+the distinct review decision or durable knowledge it provides beyond the
+existing Issue, PR description and tests. Temporary proof results may stay in
+the PR and tests; do not create a repository document per internal profile.
 
 ## 8. Scope Control
 
