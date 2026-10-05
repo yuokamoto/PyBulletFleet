@@ -9,6 +9,10 @@ observable, and which supported profiles remain excluded. The [v1 scope](spec.md
 and [single-omni evidence](checkpoint-evidence.md) describe narrower delivered
 capabilities.
 
+The approved end-to-end feature theme is specified in the
+[Snapshot / Restore / Replay / Playback V1 plan](feature-v1-spec-plan.md).
+Its implementation is in progress; the plan is not a claim of delivered V1 support.
+
 ## Intended user workflow
 
 1. **Record:** A user opts in when running an ordinary simulation (conceptually
