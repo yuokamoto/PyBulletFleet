@@ -374,7 +374,10 @@ class BatchDifferentialController(BatchKinematicController):
         # forward-axis limit (ControllerParams scalar helper), not the axis mean.
         vmax = agent.controller_params.scalar_max_linear_vel()
         amax = agent.controller_params.scalar_max_linear_accel()
-        tpi = build_tpi(p0=0.0, pe=distance, vmax=vmax, accel=amax, t0=sim_time)
+        dmax = agent.controller_params.scalar_max_linear_decel()
+        # decel is forwarded so an asymmetric profile is rejected loudly by
+        # extract_phase_params() instead of being integrated as if symmetric.
+        tpi = build_tpi(p0=0.0, pe=distance, vmax=vmax, accel=amax, t0=sim_time, decel=dmax)
         t_acc, t_cst, t_tot, accel_eff = extract_phase_params(tpi)
 
         self._phase[idx] = _PHASE_FORWARD

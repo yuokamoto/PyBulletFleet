@@ -16,7 +16,8 @@ for ``(N,)`` arrays of such trajectories — the batched eval hot path.
 
 from __future__ import annotations
 
-from typing import Tuple
+import math
+from typing import Optional, Tuple
 
 import numpy as np
 from two_point_interpolation import TwoPointInterpolation
@@ -30,6 +31,7 @@ def build_tpi(
     t0: float,
     v0: float = 0.0,
     ve: float = 0.0,
+    decel: Optional[float] = None,
 ) -> TwoPointInterpolation:
     """Construct a ready-to-evaluate :class:`TwoPointInterpolation`.
 
@@ -37,14 +39,22 @@ def build_tpi(
     fallback (returns a degenerate ``p0 → p0`` trajectory if the requested
     motion is infeasible). This is the single canonical entry point for
     building a TPI in both per-agent and batched controllers.
+
+    Args:
+        decel: Deceleration magnitude. ``None`` (the default) reuses
+            ``accel``, giving the symmetric trapezoid that was the only
+            profile this helper could build previously. Pass a different
+            value for vehicles that brake harder (or softer) than they
+            accelerate.
     """
+    dec = accel if decel is None else decel
     tpi = TwoPointInterpolation()
     try:
-        tpi.init(p0=p0, pe=pe, acc_max=accel, vmax=vmax, t0=t0, v0=v0, ve=ve, dec_max=accel)
+        tpi.init(p0=p0, pe=pe, acc_max=accel, vmax=vmax, t0=t0, v0=v0, ve=ve, dec_max=dec)
         tpi.calc_trajectory()
     except ValueError:
         tpi = TwoPointInterpolation()
-        tpi.init(p0=p0, pe=p0, acc_max=accel, vmax=vmax, t0=t0, v0=0.0, ve=0.0, dec_max=accel)
+        tpi.init(p0=p0, pe=p0, acc_max=accel, vmax=vmax, t0=t0, v0=0.0, ve=0.0, dec_max=dec)
         tpi.calc_trajectory()
     return tpi
 
@@ -61,11 +71,24 @@ def extract_phase_params(tpi: TwoPointInterpolation) -> Tuple[float, float, floa
     - ``case == 0`` (triangle, ``vmax`` not reached): ``t_const = 0``.
     - ``case == 1`` (full trapezoid): three populated phases.
 
-    Assumes the TPI was built with symmetric accel/dec (the only case
-    used by current per-agent and batched controllers).
+    Raises:
+        ValueError: If the TPI was built with asymmetric accel/decel.
+            :func:`trapezoid_distance` integrates the decel phase with the
+            same scalar it uses for the accel phase, so an asymmetric
+            profile would silently yield wrong positions. The per-agent
+            controllers evaluate ``TwoPointInterpolation`` directly and are
+            unaffected; only the batched controllers go through here.
     """
     dt = tpi.dt
     accel = float(tpi.amax_accel)
+    decel = float(tpi.amax_decel)
+    if not math.isclose(accel, decel, rel_tol=1e-9, abs_tol=1e-12):
+        raise ValueError(
+            "extract_phase_params() requires a symmetric accel/decel profile "
+            f"(got accel={accel!r}, decel={decel!r}). The batched controllers "
+            "do not support asymmetric deceleration yet; use the per-agent "
+            "controllers for this agent, or leave max_linear_decel unset."
+        )
     if len(dt) == 0:
         return 0.0, 0.0, 0.0, accel
     if len(dt) == 2:

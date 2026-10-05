@@ -230,11 +230,15 @@ class BatchOmniController(BatchKinematicController):
             dir_body = np.asarray(rotate_vector(tuple(disp / total), (-qx, -qy, -qz, qw)))
             vmax = params.linear_vel_along_direction(dir_body)
             amax = params.linear_accel_along_direction(dir_body)
+            dmax = params.linear_decel_along_direction(dir_body)
         else:
             vmax = params.scalar_max_linear_vel()
             amax = params.scalar_max_linear_accel()
+            dmax = params.scalar_max_linear_decel()
 
-        tpi = build_tpi(p0=0.0, pe=total, vmax=vmax, accel=amax, t0=sim_time)
+        # decel is forwarded so an asymmetric profile is rejected loudly by
+        # extract_phase_params() instead of being integrated as if symmetric.
+        tpi = build_tpi(p0=0.0, pe=total, vmax=vmax, accel=amax, t0=sim_time, decel=dmax)
         t_accel, t_const, t_total_rel, accel_eff = extract_phase_params(tpi)
 
         self._phase[idx] = _PHASE_FORWARD

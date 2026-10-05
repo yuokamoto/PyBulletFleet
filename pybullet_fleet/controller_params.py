@@ -62,6 +62,12 @@ class ControllerParams:
             as ``max_linear_vel``. ``None`` → framework default.
         max_linear_accel: Maximum linear acceleration in m/s² (used by TPI).
             ``None`` → framework default.
+        max_linear_decel: Maximum linear deceleration in m/s² (used by TPI).
+            Same scalar/per-axis semantics as ``max_linear_accel``.
+            ``None`` → mirror ``max_linear_accel`` (symmetric trapezoid),
+            which is the behaviour of every release before this field
+            existed. Set it for vehicles that brake harder than they
+            accelerate.
         max_angular_accel: Maximum angular acceleration in rad/s² (used by TPI).
             ``None`` → framework default.
         cmd_vel_timeout: Watchdog timeout in seconds; ``0.0`` or ``None``
@@ -76,6 +82,7 @@ class ControllerParams:
     max_linear_vel: Optional[ScalarOrAxes] = None
     max_angular_vel: Optional[ScalarOrAxes] = None
     max_linear_accel: Optional[ScalarOrAxes] = None
+    max_linear_decel: Optional[ScalarOrAxes] = None
     max_angular_accel: Optional[ScalarOrAxes] = None
     cmd_vel_timeout: Optional[float] = None
     navigation_2d: Optional[bool] = None
@@ -109,6 +116,11 @@ class ControllerParams:
     def _eff_linear_accel(self) -> ScalarOrAxes:
         return self.max_linear_accel if self.max_linear_accel is not None else _CTRL_D["max_linear_accel"]
 
+    def _eff_linear_decel(self) -> ScalarOrAxes:
+        # Unset means "brakes as hard as it accelerates", so this mirrors the
+        # effective acceleration rather than carrying its own framework default.
+        return self.max_linear_decel if self.max_linear_decel is not None else self._eff_linear_accel()
+
     def _eff_angular_accel(self) -> ScalarOrAxes:
         return self.max_angular_accel if self.max_angular_accel is not None else _CTRL_D["max_angular_accel"]
 
@@ -122,6 +134,10 @@ class ControllerParams:
     def linear_accel_along_direction(self, direction_unit: np.ndarray) -> float:
         """Maximum scalar acceleration along *direction_unit* respecting per-axis limits."""
         return projected_axis_limit(self._eff_linear_accel(), direction_unit)
+
+    def linear_decel_along_direction(self, direction_unit: np.ndarray) -> float:
+        """Maximum scalar deceleration along *direction_unit* respecting per-axis limits."""
+        return projected_axis_limit(self._eff_linear_decel(), direction_unit)
 
     def clamp_linear_vec(self, vec: np.ndarray) -> np.ndarray:
         """Clamp a body-frame linear velocity vector ``(3,)``."""
@@ -140,6 +156,11 @@ class ControllerParams:
         """Forward-axis scalar ``max_linear_accel`` (for differential drive)."""
         a = self._eff_linear_accel()
         return float(a) if is_scalar(a) else float(as_axes(a)[0])  # type: ignore[arg-type]
+
+    def scalar_max_linear_decel(self) -> float:
+        """Forward-axis scalar ``max_linear_decel`` (for differential drive)."""
+        d = self._eff_linear_decel()
+        return float(d) if is_scalar(d) else float(as_axes(d)[0])  # type: ignore[arg-type]
 
     def scalar_max_angular_vel(self) -> float:
         """Yaw-axis scalar ``max_angular_vel`` (for differential drive)."""

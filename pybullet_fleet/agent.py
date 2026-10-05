@@ -483,6 +483,11 @@ class Agent(SimObject):
         return as_axes(self.controller_params._eff_linear_accel())
 
     @property
+    def max_linear_decel(self) -> np.ndarray:
+        """Effective deceleration limit; mirrors :attr:`max_linear_accel` when unset."""
+        return as_axes(self.controller_params._eff_linear_decel())
+
+    @property
     def max_angular_vel(self) -> np.ndarray:
         return as_axes(self.controller_params._eff_angular_vel())
 

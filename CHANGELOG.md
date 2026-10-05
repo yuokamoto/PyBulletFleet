@@ -13,6 +13,21 @@ are not recommended for production use yet.
 
 ### Changed
 
+- `build_tpi()` accepts a `decel` argument instead of pinning `dec_max` to
+  `accel`. `TwoPointInterpolation` has always supported an independent
+  deceleration; the wrapper was discarding it.
+
+- `extract_phase_params()` now raises `ValueError` on an asymmetric
+  accel/decel profile. `trapezoid_distance()` integrates the decel phase with
+  the accel scalar, so the batched controllers would otherwise report wrong
+  positions with no error. The per-agent controllers evaluate the
+  `TwoPointInterpolation` directly and support asymmetric profiles today;
+  batched support is still to come.
+
+- `OmniController.capture_straight_navigation()` now rejects an asymmetric
+  profile. Its record carries a single `accel`, so such a trajectory could not
+  be rebuilt from it; the checkpoint schema is unchanged.
+
 - An optional state-recorder error during a command, object spawn/removal, or
   completed-step capture now stops recording with an explicitly incomplete
   artifact while the simulation operation continues. GUI playback selects the
@@ -27,6 +42,13 @@ are not recommended for production use yet.
   Python module paths and documented run commands now use those folders.
 
 ### Added
+
+- Add `ControllerParams.max_linear_decel` (scalar or per-axis, same semantics
+  as `max_linear_accel`) so vehicles that brake harder — or softer — than they
+  accelerate can be modelled. Leaving it unset mirrors `max_linear_accel`, so
+  existing configurations keep their symmetric trapezoid unchanged.
+  `Agent.max_linear_decel`, `ControllerParams.linear_decel_along_direction()`
+  and `ControllerParams.scalar_max_linear_decel()` round out the accessors.
 
 - Add name-based simulation entity lookup on `MultiRobotSimulationCore`:
   ordered multi-result searches for objects and agents, plus unique-result
