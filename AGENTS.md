@@ -46,10 +46,13 @@ For mixed changes, use the highest applicable row. `make verify` runs
 `make lint` (all-file pre-commit, including black, pyright and flake8) and
 `make test` (full pytest with the CI coverage threshold). For a changed-file
 check, use `pre-commit run --files <changed paths> --show-diff-on-failure`.
-Record commands and any omitted checks in the PR; a passing focused check is
-not a claim that the full suite passed. If a targeted check cannot establish
-the changed behavior, broaden it before pushing. Do not claim a source PR is
-ready for final review until `make verify` and relevant integration checks pass.
+The relevant suite means the existing test modules for the affected component
+and its integration points; use the [testing guide](docs/testing/overview.md)
+to select them. Record commands and any omitted checks in the PR; a passing
+focused check is not a claim that the full suite passed. If targeted tests
+cannot establish the changed behavior, broaden them before pushing. Do not
+claim a source PR is ready for final review until `make verify` and relevant
+integration checks pass.
 
 If the agent sandbox cannot write to `~/.cache/pre-commit`, run lint with a
 temporary cache:

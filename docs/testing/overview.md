@@ -24,9 +24,15 @@ make docs
 make test-clean-install
 ```
 
-`make verify` is the normal pre-push check for Python, tests, examples,
-packaging, and documentation changes. It does **not** run the documentation
-build, the clean-install check, or any ROS 2 / RMF tests.
+Use the change-based verification matrix in the repository-root `AGENTS.md` for
+pre-push and final-review checks. Documentation/instructions-only changes need
+changed-file pre-commit checks and, when Sphinx content or links change,
+`PBF_DOCS_OFFLINE=1 make docs`; they do not require the Python test suite.
+Source changes need focused tests and the existing modules for the affected
+component and its integration points before pushing. Run `make verify` before
+final review of a source PR, or before the first push for high-risk changes.
+`make verify` itself does **not** run the documentation build, clean-install
+check, or any ROS 2 / RMF tests.
 
 ## Targeted Core Tests
 
@@ -82,7 +88,8 @@ depending on test order.
 `ros2_bridge/` is intentionally excluded from the core pytest suite and normal
 pre-commit hooks because it needs ROS 2 Jazzy, message packages, and RMF
 dependencies. When bridge code, Docker files, launch/config files, or RMF
-integration changes, run `make verify` **and** an appropriate bridge check.
+integration changes, apply the applicable `AGENTS.md` verification row **and**
+run an appropriate bridge check.
 
 ```bash
 # Docker bridge API smoke test
