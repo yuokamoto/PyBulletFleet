@@ -2495,9 +2495,8 @@ class MultiRobotSimulationCore:
         if enable_shadows is None:
             enable_shadows = self._params.enable_shadows
 
-        # Save original colors of all visual shapes ONCE
-        if not self._original_visual_colors:
-            self._save_original_visual_colors()
+        # Capture any shape not already recorded; existing entries are kept.
+        self._save_original_visual_colors()
 
         # Store initial states
         self._structure_transparent = enable_structure_transparency
@@ -2651,20 +2650,31 @@ class MultiRobotSimulationCore:
         )
 
     def _save_original_visual_colors(self) -> None:
-        """
-        Save original colors of all visual shapes for fast restoration.
-        Called once during configure_visualizer().
-        """
-        num_bodies = p.getNumBodies(physicsClientId=self._client)
-        for body_id in range(num_bodies):
-            visual_data = p.getVisualShapeData(body_id, physicsClientId=self._client)
-            for shape in visual_data:
-                link_index = shape[1]
-                rgba = shape[7]  # Original RGBA color
-                key = (body_id, link_index)
-                self._original_visual_colors[key] = rgba
+        """Record the colour each visual shape was loaded with.
 
-        logger.info(f"Saved original colors for {len(self._original_visual_colors)} visual shapes")
+        Called before every transparency change rather than once, so a body
+        spawned after the first call is covered too -- otherwise it stayed
+        opaque while the rest of the scene went translucent, and its own alpha
+        was unavailable to restore.
+
+        Existing entries are never overwritten. A body already repainted to
+        alpha 0.3 would otherwise have that recorded as its original, and the
+        colour it was authored with would be lost for the rest of the run.
+
+        Body ids are read through ``getBodyUniqueId`` rather than assumed to
+        run from 0: removing a body leaves them non-contiguous, and indexing
+        by position would then skip real bodies and query ids that do not
+        exist.
+        """
+        before = len(self._original_visual_colors)
+        for index in range(p.getNumBodies(physicsClientId=self._client)):
+            body_id = p.getBodyUniqueId(index, physicsClientId=self._client)
+            for shape in p.getVisualShapeData(body_id, physicsClientId=self._client):
+                self._original_visual_colors.setdefault((body_id, shape[1]), shape[7])
+
+        added = len(self._original_visual_colors) - before
+        if added:
+            logger.info("Saved original colors for %d visual shapes (%d total)", added, len(self._original_visual_colors))
 
     def _handle_keyboard_events(self) -> None:
         """
@@ -2739,8 +2749,7 @@ class MultiRobotSimulationCore:
             transparent: True for alpha 0.3 on every static body, False to
                 restore the alpha each shape was loaded with.
         """
-        if not self._original_visual_colors:
-            self._save_original_visual_colors()
+        self._save_original_visual_colors()
         self._structure_transparent = transparent
         self._set_structure_transparency(transparent)
 
