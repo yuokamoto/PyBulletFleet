@@ -15,7 +15,7 @@ capabilities.
 
 The approved end-to-end feature theme is specified in the
 [Snapshot / Restore / Replay / Playback V1 plan](feature-v1-spec-plan.md).
-Its implementation is in progress; the plan is not a claim of delivered V1 support.
+PR #59 delivered a validation profile, not general V1 support.
 
 ## Intended user workflow
 
@@ -30,9 +30,10 @@ Its implementation is in progress; the plan is not a claim of delivered V1 suppo
    parameters must be available for recording. This includes movement and,
    for future supported profiles, attach/detach, spawn/delete and permitted
    runtime configuration changes. PBF must expose trustworthy execution facts;
-   an external recorder may own the durable journal. Current v1 journaling is
-   limited to its supported navigate/stop boundary, and a current active goal
-   in a checkpoint does not recover the full earlier input history.
+   the current PBF recorder owns the durable journal. The supported Fleet API
+   commands and box lifecycle path are recorded, but direct mutators and other
+   inputs are not covered. A current active goal in a checkpoint does not
+   recover the full earlier input history.
 2. **Restart:** A user selects a recorded time (conceptually
    `pbf-restart <artifact> --time <t>`). The tool selects the latest usable
    checkpoint **at or before** `t`, never one after `t`, so the requested
@@ -96,6 +97,34 @@ is serializable. The checklist below tracks known checkpoint profile limits; it 
   scope decisions. Implementation should expand from concrete supported
   profiles and evidence rather than claiming whole-simulation capture.
 
+## Next priority after PR #59: one-call restore and reusable supported profile
+
+Promote the validation proof to a supported PBF user operation without claiming
+universal state capture. The next implementation plan should meet these
+acceptance conditions:
+
+1. A supported ordinary PBF example can enable recording during its normal run.
+2. In a fresh process, one public API accepts an artifact and constructs and
+   restores a simulation ready to run. Profile/handler resolution and artifact
+   validation are PBF's responsibility; application-owned continuation state
+   remains explicit where required.
+3. The restored simulation continues through ordinary `run_simulation()` with
+   no scenario-specific resume sequence.
+4. A second, differently composed supported simulation matches an equivalent
+   uninterrupted reference at the checkpoint, during continuation, and at the
+   final outcome under stated tolerances.
+5. Unsupported or missing execution state prevents a claim of successful
+   restore. During recording, such failures must be reported without stopping
+   an otherwise healthy simulation.
+6. Measure artifact size, per-step recording overhead and load time, including
+   the cost of storing both frames and checkpoints. Use those results to decide
+   whether the format needs a separate change; format redesign is not a
+   completion condition for this user operation.
+
+Choose the ordinary examples and supported state owners in the implementation
+plan. Reuse their normal execution paths rather than adding another validation
+program solely to satisfy this list.
+
 ## Checkpoint state capability checklist
 
 "Observed" means a value can be read or supplied in one run; it does **not**
@@ -114,7 +143,7 @@ state has already been identified.
 | Checkpoint validation responsibility and cadence | **TODO.** The recorder runs common-envelope and profile-specific validation after every completed step; the validation profile also rechecks invariant manifest fields and the robot asset hash. Loading and restoring validate again. | Separate construction/manifest compatibility checks at recording start and artifact load from changing-state checks per step and full restore checks. Compare declarative validation (for example, strict Pydantic models or JSON Schema) for both the common manifest/checkpoint envelope and concrete owner state before selecting one approach; check exact JSON types, versioning, added dependencies and per-step cost. Keep cross-field restore invariants and file hashes explicit where a schema alone is insufficient. Retain profile-specific support limits without placing scenario expected outcomes in reusable schemas. Measure cost before changing validation cadence, and ensure a failed capture is reported as an incomplete recording rather than silently trusted. Reuse state invariants in tests where useful; test assertions for trajectories, timing and final outcomes remain separate. |
 | Duplicate frame/checkpoint storage and long recordings | **TODO.** V1 writes a result frame and a full checkpoint at every completed step, duplicating much of the agent/object state; the one-robot measurement does not establish long-run or fleet-scale cost. | Prefer investigating full per-step checkpoints as the single stored state source, with playback frames projected from them without advancing controllers or physics. Preserve step/seek, lifecycle visibility, recording integrity and the ability to distinguish display data from restorable execution state. Compare artifact size, per-step write cost/RTF, playback seek/read cost and memory against the current format over longer runs and representative fleets before changing the format or checkpoint cadence. Playback may pay more read cost, but recording should remain practical. |
 | User-defined state extension | **TODO.** Callers can supply a whole `RecordingProfile` and additional `DataRecord` values, but no reusable registration/composition contract exists for custom execution-state handlers. | Let user code declare a versioned state schema and capture/validate/restore handler, then register it in a profile without modifying PBF core classes. A `DataRecord` alone is sufficient for inspectable data, but cannot imply resumable custom behavior. Define how unsupported or missing handlers are reported and keep callback code outside the artifact. |
-| Caller-defined data records | **Partial.** `DataRecord` callbacks receive a completed-step context and contribute named, versioned JSON data to results/checkpoints. The manipulation scenario records its stage through a required `scenario` record. | Callers must re-register callback code when continuing; its execution is not serialized. PBF does not infer how arbitrary record values affect future behavior. Callback failures still need the best-effort policy below. |
+| Caller-defined data records | **Partial.** `DataRecord` callbacks receive a completed-step context and contribute named, versioned JSON data to results/checkpoints. The manipulation scenario records its stage through a required `scenario` record. | Callers must re-register callback code when continuing; its execution is not serialized. PBF does not infer how arbitrary record values affect future behavior. Callback failures end recording and mark the artifact incomplete; partial-record recovery remains open. |
 | Completed step/time and base pose, velocity and moving flag | **Done: single-omni proof and supported manipulation profile.** A completed-step clock and `Agent` motion fields are restored in a fresh process. | Other world/controller profiles must verify their own state and step semantics. |
 | Active omni pose goal/trajectory | **Done for the supported manipulation profile.** The ordinary `set_goal_pose()` path, generated approach waypoint and current waypoint are captured and resumed. | Omni velocity-mode commands are not part of this profile. `Agent.restore_motion_state()` alone does not restore controller execution. |
 | Omni final-orientation rotation phase | **Done for the supported pose-navigation profile.** The final turn's slerp/TPI state resumes from an in-progress checkpoint and reaches completion. | Other controller modes and custom controller implementations need separate profiles. |
@@ -131,7 +160,7 @@ state has already been identified.
 | Durable entity identity and ordered spawn/delete | **Done for this artifact profile.** Unique stable names map to new runtime IDs; ordered spawn/delete inputs are recorded. | General cross-run identity and exact re-execution of arbitrary lifecycle histories remain open. |
 | External-driver stage and later inputs | **Partial.** The example saves/restores its stage and observation flags through a required `scenario` data record, so its existing callbacks continue after CP1/CP3. | Arbitrary application state and replay of later recorded inputs under an absent application are not supported. |
 | Effective PBF input history and timing | **Partial.** The supported Fleet API commands and box spawn/remove path are recorded with phase, step and order. | Direct unobserved mutators, other APIs and general manipulation input re-execution are not covered. |
-| Recording failure isolation / best-effort capture | **TODO.** Runtime spawn encoding, effective-input capture, profile/data-record capture, validation and durable-write errors can propagate through normal PBF operations or `step_once()` and interrupt the simulation. | Reject invalid recording configuration at setup, but isolate recording failures discovered during an otherwise valid run. An unsupported new object or one failed provider must not fail the spawn/step or silently make later checkpoints appear restorable. Report per-owner/per-step gaps and retain usable observations where possible; if durable output cannot continue, disable recording with an explicit incomplete status while simulation continues. Define what can still be read or restored after each failure class and test these paths. |
+| Recording failure isolation / best-effort capture | **Partial.** #59 isolates runtime recorder failures from normal spawn/step operations, closes the recorder and marks the artifact incomplete; restore rejects incomplete artifacts. | Invalid configuration still fails at setup. Recovery of valid records after one provider fails, per-owner/per-step gap reporting and a policy for partially usable artifacts remain open; do not advertise failed capture as a restorable checkpoint. |
 | Randomness, external clocks and integration state | **TODO: excluded from the proof.** | Identify seeds/generator state, timing and ROS/RMF or other external inputs when a concrete continuation depends on them. |
 | Action queue and in-progress Action | **TODO: not exercised in the manipulation scenario.** Other examples can queue Actions. | Investigate queue/order, phase, sub-action progress, targets, timers and outcomes before mid-Action restore. |
 | Devices/plugins and physics-engine state | **TODO: excluded from the proof.** | Inventory only for a concrete profile; Agent/controller restore does not imply arbitrary Python or engine-state serialization. Evaluate elevator and conveyor execution-state handlers when those devices have concrete behavior and continuation tests. |
@@ -145,7 +174,6 @@ For failure isolation, distinguish an invalid profile or output setting found
 before recording starts from a new unsupported state encountered during a run.
 The latter includes a runtime spawn outside the declared profile: the object
 operation should retain its normal PBF outcome, while recording reports the
-unsupported interval and does not advertise an incomplete checkpoint as
-usable. A single provider failure should not automatically discard unrelated
-valid records or stop simulation. This is the desired behavior, not a claim
-about the current implementation.
+failure and does not advertise an incomplete checkpoint as usable. #59 keeps
+simulation running but ends that recording. Retaining unrelated valid records
+and defining partial-artifact use remain future decisions.

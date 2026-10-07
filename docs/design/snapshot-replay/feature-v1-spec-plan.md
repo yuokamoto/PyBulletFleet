@@ -1,6 +1,7 @@
 # Snapshot / Restore / Replay / Playback V1 — feature specification and plan
 
-**Status:** Under development for a restricted validation profile; pending Human Review.
+**Status:** Restricted validation profile merged in PR #59; broader V1 remains
+under development.
 The current APIs and artifacts are not recommended for general or production
 use. The profile and extension boundary are still being reviewed.
 Material changes to the supported profile or state ownership return for Human
@@ -31,7 +32,7 @@ different profile as well as the existing CP1/CP3 fresh-process demonstration.
 This is an extension contract, not a claim that arbitrary kinematic state can
 already be restored.
 
-The correction is implemented in this working branch. `RecordingProfile`
+The correction was merged in PR #59. `RecordingProfile`
 declares construction, capture, validation, restore, profile ID/version and
 coverage. The common recorder stores named `DataRecord` values returned at a
 completed boundary. The artifact has versioned `sim`, `agents` and `objects`
@@ -41,9 +42,9 @@ GUI renderer live with the validation example. A second empty-world profile
 test records custom data and restores its clock without changing the writer.
 Fresh-process CP1, active-turn and CP3 continuation tests remain the acceptance
 checks. This proves extensibility of the writer, not support for every
-kinematic entity or controller. Data callback failures still follow the
-existing fail-visible recording path; the best-effort capture policy remains
-on the product-goal checklist.
+kinematic entity or controller. Runtime data callback failures now mark the
+artifact incomplete and stop recording while normal simulation continues;
+partial-record recovery remains on the product-goal checklist.
 
 Read the [product goals and capability checklist](product-goals.md) before
 changing this scope. The goal here is a usable path through those goals, not a
