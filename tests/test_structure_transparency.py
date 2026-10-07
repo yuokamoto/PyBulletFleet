@@ -35,11 +35,13 @@ def translucent(sim_core):
     return SimObject.from_params(
         SimObjectSpawnParams(
             visual_shape=ShapeParams(
-                shape_type="box", half_extents=[0.5, 0.5, 0.05],
+                shape_type="box",
+                half_extents=[0.5, 0.5, 0.05],
                 rgba_color=[0.07, 0.07, 0.07, AUTHORED_ALPHA],
             ),
             collision_shape=ShapeParams(shape_type="box", half_extents=[0.5, 0.5, 0.05]),
-            name="deck", initial_pose=Pose.from_xyz(0.0, 0.0, 0.0),
+            name="deck",
+            initial_pose=Pose.from_xyz(0.0, 0.0, 0.0),
             collision_mode=CollisionMode.STATIC,
         ),
         sim_core=sim_core,
@@ -70,10 +72,10 @@ class TestStructureTransparency:
     def test_an_opaque_body_stays_opaque_through_a_round_trip(self, sim_core):
         opaque = SimObject.from_params(
             SimObjectSpawnParams(
-                visual_shape=ShapeParams(shape_type="box", half_extents=[0.2, 0.2, 0.2],
-                                         rgba_color=[0.8, 0.12, 0.12, 1.0]),
+                visual_shape=ShapeParams(shape_type="box", half_extents=[0.2, 0.2, 0.2], rgba_color=[0.8, 0.12, 0.12, 1.0]),
                 collision_shape=ShapeParams(shape_type="box", half_extents=[0.2, 0.2, 0.2]),
-                name="post", initial_pose=Pose.from_xyz(2.0, 0.0, 0.0),
+                name="post",
+                initial_pose=Pose.from_xyz(2.0, 0.0, 0.0),
                 collision_mode=CollisionMode.STATIC,
             ),
             sim_core=sim_core,
