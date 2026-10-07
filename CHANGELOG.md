@@ -16,7 +16,8 @@ are not recommended for production use yet.
 - An optional state-recorder error during a command, object spawn/removal, or
   completed-step capture now stops recording with an explicitly incomplete
   artifact while the simulation operation continues. GUI playback selects the
-  first available checkpoint at the configured cadence.
+  first available checkpoint at the configured cadence. Checkpoint restore
+  also verifies the recorded result and input streams before loading state.
 
 - Group corridor policy evaluation programs under `examples/evaluation/` and
   checkpoint/state-discovery programs under `examples/validation/`. Their

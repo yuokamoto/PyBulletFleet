@@ -52,7 +52,11 @@ def _write_json_atomic(path: Path, value: dict) -> None:
 
 
 def _sha256(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def _read_json(path: Path) -> dict:
@@ -379,6 +383,40 @@ def load_recording_manifest(directory: str | Path) -> dict:
     return manifest
 
 
+def _load_recording_streams(path: Path, manifest: dict, *, retain: bool = False) -> tuple[list[dict], list[dict]]:
+    """Verify the complete result/input streams shared by restore and playback."""
+    frames_path = path / "frames.jsonl"
+    inputs_path = path / "inputs.jsonl"
+    try:
+        if _sha256(frames_path) != manifest.get("frames_sha256") or _sha256(inputs_path) != manifest.get("inputs_sha256"):
+            raise ValueError("Recording stream integrity check failed")
+    except OSError as exc:
+        raise ValueError("Recording stream is missing or unreadable") from exc
+    frames: list[dict] = []
+    inputs: list[dict] = []
+    try:
+        with frames_path.open(encoding="utf-8") as stream:
+            frame_count = 0
+            for frame_count, line in enumerate(stream, 1):
+                frame = json.loads(line)
+                if not isinstance(frame, dict) or type(frame.get("step")) is not int or frame["step"] != frame_count:
+                    raise ValueError("Recording frame sequence is incomplete")
+                if retain:
+                    frames.append(frame)
+        with inputs_path.open(encoding="utf-8") as stream:
+            for line in stream:
+                item = json.loads(line)
+                if not isinstance(item, dict):
+                    raise ValueError("Invalid recording input")
+                if retain:
+                    inputs.append(item)
+    except (OSError, ValueError, UnicodeError) as exc:
+        raise ValueError("Invalid recording stream") from exc
+    if type(manifest.get("last_completed_step")) is not int or frame_count != manifest["last_completed_step"]:
+        raise ValueError("Recording stream sequence is incomplete")
+    return frames, inputs
+
+
 def load_supported_checkpoint(directory: str | Path, *, at_or_before: float, profile: RecordingProfile) -> tuple[dict, dict]:
     """Load the latest completed checkpoint no later than the requested time."""
     path = Path(directory)
@@ -389,6 +427,7 @@ def load_supported_checkpoint(directory: str | Path, *, at_or_before: float, pro
         or not manifest.get("complete")
     ):
         raise ValueError("Unsupported or incomplete recording")
+    _load_recording_streams(path, manifest)
     construction = manifest["construction"]
     dt = construction["timestep"]
     if not math.isfinite(at_or_before) or at_or_before < 0 or not math.isfinite(dt) or dt <= 0:
@@ -434,16 +473,7 @@ class ResultPlayback:
         )
         if not self.manifest.get("complete") or wrong_profile:
             raise ValueError("Unsupported or incomplete playback artifact")
-        if _sha256(path / "frames.jsonl") != self.manifest.get("frames_sha256") or _sha256(
-            path / "inputs.jsonl"
-        ) != self.manifest.get("inputs_sha256"):
-            raise ValueError("Playback integrity check failed")
-        self.frames = [json.loads(line) for line in (path / "frames.jsonl").read_text().splitlines()]
-        self.inputs = [json.loads(line) for line in (path / "inputs.jsonl").read_text().splitlines()]
-        if len(self.frames) != self.manifest["last_completed_step"] or any(
-            frame["step"] != index for index, frame in enumerate(self.frames, 1)
-        ):
-            raise ValueError("Playback frame sequence is incomplete")
+        self.frames, self.inputs = _load_recording_streams(path, self.manifest, retain=True)
         self.index = 0
 
     @property

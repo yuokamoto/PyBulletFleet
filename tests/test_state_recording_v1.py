@@ -184,6 +184,15 @@ def test_checkpoint_selection_and_rejection(recorded_run: tuple[Path, dict]) -> 
         load_supported_checkpoint(directory, at_or_before=2.5, profile=_profile(directory))
 
 
+@pytest.mark.parametrize("stream", ["frames.jsonl", "inputs.jsonl"])
+def test_restore_rejects_corrupt_recording_stream(recorded_run: tuple[Path, dict], stream: str) -> None:
+    directory, _ = recorded_run
+    path = directory / stream
+    path.write_bytes(path.read_bytes()[:-1])
+    with pytest.raises(ValueError, match="stream integrity"):
+        load_supported_checkpoint(directory, at_or_before=2.5, profile=_profile(directory))
+
+
 def test_required_custom_data_and_state_type_are_checked_before_restore(recorded_run: tuple[Path, dict]) -> None:
     directory, _ = recorded_run
     manifest_path = directory / "manifest.json"
