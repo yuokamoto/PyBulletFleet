@@ -130,3 +130,29 @@ def test_field_order_is_unchanged_for_the_subclasses():
             "user_data",
         ]
         assert names[10] == "urdf_path"
+
+
+class TestReviewFollowUps:
+    """Cases raised in review on the first version of this change."""
+
+    def test_mass_none_totals_every_link_not_just_the_base(self, sim_core):
+        """use_fixed_base zeroes the base link, so reading the base alone made
+        a multi-link URDF come out mass 0 and is_kinematic True while its own
+        links were still dynamic. Agent.from_urdf already totals them."""
+        # kuka_iiwa: base link 0 kg under use_fixed_base, 17.5 kg across its
+        # own links.
+        obj = SimObject.from_urdf("kuka_iiwa", sim_core=sim_core, mass=None, use_fixed_base=True)
+        assert obj.mass == pytest.approx(17.5, abs=0.1)
+        assert obj.is_kinematic is False
+
+    def test_a_urdf_spawn_is_recorded_like_a_shape_spawn(self, sim_core):
+        """from_params() took an early return for the URDF branch, which
+        skipped the state-recording block the shape branch runs, so a URDF
+        object was silently missing from an active recording."""
+        recorded = []
+        sim_core._record_state_spawn = lambda obj, params: recorded.append((obj, params))
+
+        params = SimObjectSpawnParams(urdf_path=URDF, name="tile")
+        obj = SimObject.from_params(params, sim_core=sim_core)
+
+        assert recorded == [(obj, params)]

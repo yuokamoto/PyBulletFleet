@@ -841,6 +841,17 @@ class SimObject:
             p.changeDynamics(body_id, -1, mass=0.0, physicsClientId=pid)
             for joint_idx in range(p.getNumJoints(body_id, physicsClientId=pid)):
                 p.changeDynamics(body_id, joint_idx, mass=0.0, physicsClientId=pid)
+            resolved_mass: Optional[float] = 0.0
+        elif mass is None:
+            # Total it here rather than leaving SimObject.__init__ to read the
+            # base link alone: use_fixed_base zeroes the base, so a multi-link
+            # URDF whose child links are massive would come out mass 0 and
+            # is_kinematic True while its links are still dynamic.
+            resolved_mass = p.getDynamicsInfo(body_id, -1, physicsClientId=pid)[0]
+            for joint_idx in range(p.getNumJoints(body_id, physicsClientId=pid)):
+                resolved_mass += p.getDynamicsInfo(body_id, joint_idx, physicsClientId=pid)[0]
+        else:
+            resolved_mass = mass
 
         if name is None:
             body_info = p.getBodyInfo(body_id, physicsClientId=pid)
@@ -850,7 +861,7 @@ class SimObject:
             body_id=body_id,
             sim_core=sim_core,
             pickable=pickable,
-            mass=mass,
+            mass=resolved_mass,
             collision_mode=collision_mode,
             name=name,
             user_data=user_data,
@@ -985,19 +996,10 @@ class SimObject:
             )
             obj = SimObject.from_params(params, sim_core)
         """
-        if spawn_params.urdf_path is not None:
-            return cls.from_urdf(
-                **_forward_spawn_params(
-                    cls.from_urdf,
-                    spawn_params,
-                    aliases={"initial_pose": "pose"},
-                    extra_kwargs={"sim_core": sim_core},
-                )
-            )
-
-        obj = cls.from_mesh(
+        factory = cls.from_urdf if spawn_params.urdf_path is not None else cls.from_mesh
+        obj = factory(
             **_forward_spawn_params(
-                cls.from_mesh,
+                factory,
                 spawn_params,
                 aliases={"initial_pose": "pose"},
                 extra_kwargs={"sim_core": sim_core},
