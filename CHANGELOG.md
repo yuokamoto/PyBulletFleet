@@ -78,6 +78,16 @@ are not recommended for production use yet.
   the *next* simulation in the process report bodies and joints "not found"
   rather than failing where the leak happened. `close()` is safe to call more
   than once and on a simulation that was never run.
+- Add `Agent.set_joint_motion_profile()`, and `max_speed` / `max_accel` /
+  `max_decel` on `ElevatorParams`. A kinematic joint ran at the URDF's
+  `<limit velocity="...">` and reached it instantly, so its speed was a
+  property of the model file -- two installations differing only in how fast
+  a cabin travels needed two URDFs, and
+  `changeDynamics(maxJointVelocity=...)` does not help because
+  `getJointInfo()` keeps reporting the original. Giving an acceleration turns
+  the travel into a trapezoid, which is what a real cabin, hoist or linear
+  axis does: 0.6 m at 0.4 m/s takes 1.5 s flat and 1.9 s with 1.0 m/s^2
+  ramps. Both are opt-in; with neither, nothing changes.
 
 - Add name-based simulation entity lookup on `MultiRobotSimulationCore`:
   ordered multi-result searches for objects and agents, plus unique-result

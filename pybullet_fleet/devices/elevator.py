@@ -44,6 +44,15 @@ class ElevatorParams(AgentSpawnParams):
         joint_name: Name of the prismatic joint that moves the platform.
         platform_link: Name of the link with the platform collision box.
         request_policy: Handling for floor requests received while moving.
+        max_speed: Cabin speed in m/s.  ``None`` uses the URDF's
+            ``<limit velocity="...">`` on ``joint_name``, which is where the
+            speed otherwise has to be set -- so without this, two installations
+            that differ only in how fast the cabin travels need two URDFs.
+        max_accel: Cabin acceleration in m/s^2.  ``None`` keeps the cabin at
+            full speed from the first step, as before.  Giving it makes the
+            travel a trapezoid, which is what a real cabin does: 0.6 m at
+            0.4 m/s takes 1.5 s flat and 1.9 s with 1.0 m/s^2 ramps.
+        max_decel: Cabin deceleration.  Defaults to ``max_accel``.
     """
 
     floors: Optional[Dict[str, float]] = None
@@ -51,6 +60,9 @@ class ElevatorParams(AgentSpawnParams):
     joint_name: str = "lift"
     platform_link: str = "platform"
     request_policy: ElevatorRequestPolicy | str = ElevatorRequestPolicy.REJECT
+    max_speed: Optional[float] = None
+    max_accel: Optional[float] = None
+    max_decel: Optional[float] = None
 
     def __post_init__(self):
         super().__post_init__()
@@ -74,6 +86,9 @@ class ElevatorParams(AgentSpawnParams):
             floors=config.get("floors"),
             initial_floor=config.get("initial_floor", ""),
             joint_name=config.get("joint_name", "lift"),
+            max_speed=config.get("max_speed"),
+            max_accel=config.get("max_accel"),
+            max_decel=config.get("max_decel"),
             platform_link=config.get("platform_link", "platform"),
             request_policy=config.get("request_policy", ElevatorRequestPolicy.REJECT),
         )
@@ -123,6 +138,13 @@ class Elevator(Agent):
         agent._joint_name = spawn_params.joint_name
         agent._platform_link = spawn_params.platform_link
         agent._passengers = []  # Currently attached passengers
+        if spawn_params.max_speed or spawn_params.max_accel or spawn_params.max_decel:
+            agent.set_joint_motion_profile(
+                agent._joint_name,
+                max_velocity=spawn_params.max_speed,
+                max_accel=spawn_params.max_accel,
+                max_decel=spawn_params.max_decel,
+            )
         agent._state_machine = ElevatorStateMachine(
             agent._floors,
             spawn_params.initial_floor,

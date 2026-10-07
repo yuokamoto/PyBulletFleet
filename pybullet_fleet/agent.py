@@ -433,6 +433,11 @@ class Agent(SimObject):
         # Written by set_joint_target() in both kinematic and physics modes.
         # Used by are_joints_at_targets(None) and _update_kinematic_joints().
         self._last_joint_targets: Dict[int, float] = {}
+        #: Per-joint motion overrides, {joint_index: (max_vel, accel, decel)}.
+        #: See set_joint_motion_profile().
+        self._joint_motion_profiles: Dict[int, Tuple[float, Optional[float], Optional[float]]] = {}
+        #: Current speed of each ramped joint, carried between steps.
+        self._joint_speeds: Dict[int, float] = {}
 
         # Cached flag: True when joints must use kinematic interpolation
         # (mass=0 OR sim_core has physics disabled).  Computed once to avoid
@@ -1472,6 +1477,71 @@ class Agent(SimObject):
                 return True
         return False
 
+    def set_joint_motion_profile(
+        self,
+        joint: Union[int, str],
+        max_velocity: Optional[float] = None,
+        max_accel: Optional[float] = None,
+        max_decel: Optional[float] = None,
+    ) -> None:
+        """Override how fast a kinematic joint moves, and how it gets there.
+
+        Without this, a kinematic joint runs at the URDF's
+        ``<limit velocity="...">`` and reaches it instantly: the speed is a
+        property of the model file, so changing it means editing or
+        regenerating the URDF, and ``changeDynamics(maxJointVelocity=...)``
+        does not help because ``getJointInfo()`` keeps reporting the original.
+
+        Giving ``max_accel`` turns the motion into a trapezoid -- ramp up,
+        cruise, ramp down -- which is what a real lift, hoist or linear axis
+        does. A 0.6 m travel at 0.4 m/s takes 1.5 s at a constant speed and
+        1.9 s with 1.0 m/s ramps, so the difference is not cosmetic when
+        something downstream is timing the move.
+
+        Both are optional and independent. With neither, nothing changes; with
+        ``max_velocity`` alone the joint still steps instantly to that speed,
+        exactly as before.
+
+        Args:
+            joint: Joint index, or joint name as spelled in the URDF.
+            max_velocity: Speed cap, replacing the URDF limit. ``None`` keeps
+                whatever the joint already uses.
+            max_accel: Acceleration, in units/s^2. ``None`` means no ramp.
+            max_decel: Deceleration. Defaults to ``max_accel``.
+
+        Raises:
+            KeyError: If *joint* names a joint this body does not have.
+            ValueError: If any value given is not positive.
+        """
+        index = joint if isinstance(joint, int) else self._joint_index_by_name(joint)
+        for label, value in (("max_velocity", max_velocity), ("max_accel", max_accel), ("max_decel", max_decel)):
+            if value is not None and value <= 0.0:
+                raise ValueError(f"{label} must be > 0, got {value!r}")
+
+        current_vel, current_accel, current_decel = self._joint_motion_profiles.get(
+            index, (self._urdf_joint_velocity(index), None, None)
+        )
+        velocity = current_vel if max_velocity is None else float(max_velocity)
+        accel = current_accel if max_accel is None else float(max_accel)
+        decel = max_decel if max_decel is not None else (accel if max_accel is not None else current_decel)
+        self._joint_motion_profiles[index] = (velocity, accel, None if decel is None else float(decel))
+        self._joint_speeds.pop(index, None)
+
+    def _joint_index_by_name(self, name: str) -> int:
+        for index, info in enumerate(self.joint_info):
+            if info[1].decode("utf-8") == name:
+                return index
+        raise KeyError(f"no joint named {name!r} on body {self.body_id}")
+
+    def _urdf_joint_velocity(self, joint_index: int) -> float:
+        """The joint's speed cap from the URDF, or the fallback for its type."""
+        max_vel = self.joint_info[joint_index][11]
+        if max_vel > 0:
+            return float(max_vel)
+        if self.joint_info[joint_index][2] == p.JOINT_PRISMATIC:
+            return self._KINEMATIC_PRISMATIC_FALLBACK_VELOCITY
+        return self._KINEMATIC_JOINT_FALLBACK_VELOCITY
+
     def _update_kinematic_joints(self, dt: float) -> bool:
         """Interpolate joints toward targets for kinematic robots (mass=0).
 
@@ -1482,6 +1552,8 @@ class Agent(SimObject):
         velocity_limit comes from the URDF ``<limit velocity="...">`` attribute.
         Falls back to 2.0 rad/s for revolute or 0.5 m/s for prismatic
         if the URDF limit is 0 or missing.
+        :meth:`set_joint_motion_profile` overrides either, and adds an
+        acceleration ramp when one is configured.
 
         Iterates ``_last_joint_targets`` and skips joints that have already
         reached their target (``abs(diff) < 1e-7``).  Entries are **never**
@@ -1498,24 +1570,47 @@ class Agent(SimObject):
             current_pos = self._kinematic_joint_positions.get(joint_index, 0.0)
             diff = target - current_pos
             if abs(diff) < 1e-7:
+                self._joint_speeds.pop(joint_index, None)
                 continue  # Already at target — skip
-            # URDF velocity limit: joint_info[joint_index][11] is maxVelocity
-            max_vel = self.joint_info[joint_index][11]
-            if max_vel <= 0:
-                joint_type = self.joint_info[joint_index][2]
-                if joint_type == p.JOINT_PRISMATIC:
-                    max_vel = self._KINEMATIC_PRISMATIC_FALLBACK_VELOCITY
-                else:
-                    max_vel = self._KINEMATIC_JOINT_FALLBACK_VELOCITY
-            max_step = max_vel * dt
-            if abs(diff) <= max_step:
-                new_pos = target
+            max_vel, accel, decel = self._joint_motion_profiles.get(
+                joint_index, (self._urdf_joint_velocity(joint_index), None, None)
+            )
+            if accel is None:
+                step = max_vel * dt
             else:
-                new_pos = current_pos + math.copysign(max_step, diff)
+                step = self._ramped_step(joint_index, abs(diff), dt, max_vel, accel, decel or accel)
+            if abs(diff) <= step:
+                new_pos = target
+                self._joint_speeds.pop(joint_index, None)
+            else:
+                new_pos = current_pos + math.copysign(step, diff)
             p.resetJointState(self.body_id, joint_index, new_pos, physicsClientId=self._pid)
             self._kinematic_joint_positions[joint_index] = new_pos
             any_moved = True
         return any_moved
+
+    def _ramped_step(self, joint_index: int, remaining: float, dt: float, max_vel: float, accel: float, decel: float) -> float:
+        """How far a ramped joint may move this step, integrating a trapezoid.
+
+        Integrated step by step rather than planned once, so that a target
+        replaced mid-travel -- a lift redirected to another floor while the
+        car is moving -- is handled by simply carrying the current speed
+        forward, with no plan to invalidate.
+
+        Braking starts once the distance left is no more than what it takes to
+        stop from the current speed, ``v^2 / (2 * decel)``.
+        """
+        speed = self._joint_speeds.get(joint_index, 0.0)
+        if remaining <= speed * speed / (2.0 * decel):
+            speed = max(0.0, speed - decel * dt)
+        else:
+            speed = min(max_vel, speed + accel * dt)
+        # A joint at rest with a target still ahead must not stay at rest: one
+        # step of acceleration is the smallest move that makes progress.
+        if speed <= 0.0:
+            speed = min(max_vel, accel * dt)
+        self._joint_speeds[joint_index] = speed
+        return speed * dt
 
     def update(self, dt: float) -> bool:
         """
