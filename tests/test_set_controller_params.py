@@ -46,9 +46,7 @@ class TestSetControllerAdoptsParams:
         late.set_controller(OmniController(ControllerParams(**LIMITS)))
         early = _agent(sim_core, name="early", controller=OmniController(ControllerParams(**LIMITS)))
         for field in ("max_linear_vel", "max_linear_accel"):
-            assert list(getattr(late.controller_params, field)) == pytest.approx(
-                list(getattr(early.controller_params, field))
-            )
+            assert list(getattr(late.controller_params, field)) == pytest.approx(list(getattr(early.controller_params, field)))
 
     def test_the_delegating_properties_report_the_new_limits(self, sim_core):
         """max_linear_vel and friends read controller_params, so they were the
