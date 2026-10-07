@@ -153,8 +153,10 @@ are not recommended for production use yet.
   with `False` unconditionally -- the field was inert. `attach_object()`
   refuses a non-pickable body, so an agent meant to be carried failed to
   attach, far from where it was configured. The default is unchanged:
-  `AgentSpawnParams` now declares `pickable = False` explicitly, narrowing
-  `SimObjectSpawnParams`' `True`, and the inherited field order is unchanged.
+  `AgentSpawnParams` declares `pickable = False` explicitly, narrowing
+  `SimObjectSpawnParams`' `True`, and `from_dict()` applies that default
+  rather than inheriting the parent's resolved `True`. The inherited field
+  order is unchanged.
 
 - Include positive-gap pairs within `collision_margin` in closest-point
   collision checks, including pairs whose AABBs do not overlap.

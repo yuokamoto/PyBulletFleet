@@ -157,6 +157,14 @@ class AgentSpawnParams(SimObjectSpawnParams):
         base = SimObjectSpawnParams.from_dict(config)
         base_kwargs = {f.name: getattr(base, f.name) for f in fields(base)}
 
+        # ...except pickable, where this class narrows the parent's default to
+        # False. SimObjectSpawnParams.from_dict() has already resolved an
+        # absent key to its own True, and splatting that in would reinstate it
+        # for every config-driven agent -- the common path -- while the direct
+        # constructor said False.
+        if "pickable" not in config:
+            base_kwargs.pop("pickable", None)
+
         # Get motion_mode and convert string to enum if needed
         motion_mode_value = config.get("motion_mode", _AGT_D["motion_mode"])
         if isinstance(motion_mode_value, str):

@@ -82,3 +82,41 @@ def test_the_agent_default_narrows_the_sim_object_one():
     expected = [f.name for f in dataclasses.fields(SimObjectSpawnParams)]
     for cls in (AgentSpawnParams, ElevatorParams):
         assert [f.name for f in dataclasses.fields(cls)][: len(expected)] == expected
+
+
+class TestFromDictDefault:
+    """Raised in review: the dataclass default alone does not cover from_dict.
+
+    AgentSpawnParams.from_dict() builds its base fields from
+    SimObjectSpawnParams.from_dict(), which has already resolved an absent
+    `pickable` to its own True. Splatting that in reinstated True for every
+    config-driven agent -- the common path -- while the direct constructor
+    said False.
+    """
+
+    def test_an_omitted_key_gets_the_agent_default(self):
+        assert AgentSpawnParams.from_dict({"name": "bot", "urdf_path": URDF}).pickable is False
+
+    def test_it_agrees_with_the_direct_constructor(self):
+        assert (
+            AgentSpawnParams.from_dict({"name": "bot", "urdf_path": URDF}).pickable
+            is AgentSpawnParams(urdf_path=URDF).pickable
+        )
+
+    @pytest.mark.parametrize("value", [True, False])
+    def test_an_explicit_key_is_honoured(self, value):
+        params = AgentSpawnParams.from_dict({"name": "bot", "urdf_path": URDF, "pickable": value})
+        assert params.pickable is value
+
+    def test_subclasses_that_delegate_here_get_it_too(self):
+        from pybullet_fleet.devices.elevator import ElevatorParams
+
+        params = ElevatorParams.from_dict(
+            {"name": "lift", "urdf_path": "robots/elevator.urdf", "floors": {"0": 0.0}, "initial_floor": "0"}
+        )
+        assert params.pickable is False
+
+    def test_the_sim_object_default_is_untouched(self):
+        from pybullet_fleet.sim_object import SimObjectSpawnParams
+
+        assert SimObjectSpawnParams.from_dict({"name": "box"}).pickable is True
