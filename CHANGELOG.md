@@ -146,14 +146,6 @@ are not recommended for production use yet.
   reached for `controller_params` and `_batch_controller` on every object
   regardless. They now wire up agents only.
 
-- `AgentManager.add_object()` now raises `TypeError` for anything that is
-  not an `Agent`, instead of accepting it and failing later. Everything the
-  subclass adds is agent-only -- the fleet-controller defaults read
-  `controller_params`, the batch controller reads `_batch_controller` -- so a
-  plain `SimObject` went in quietly and raised `AttributeError` from inside
-  `add_object()` whenever a batch or fleet controller was attached, which
-  could be long afterwards. `SimObjectManager` still accepts both.
-
 - Include positive-gap pairs within `collision_margin` in closest-point
   collision checks, including pairs whose AABBs do not overlap.
 - Isolate the macOS Tkinter monitor in its own process to avoid native GUI
