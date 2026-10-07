@@ -90,9 +90,7 @@ class TestAccelerationRamp:
         distance."""
         agent = Agent.from_params(AgentSpawnParams(urdf_path=URDF, name="a", use_fixed_base=True), sim_core=sim_core)
         agent.set_joint_motion_profile(JOINT, max_velocity=2.0, max_accel=1.0)
-        assert _travel_time(sim_core, agent, distance=0.1) == pytest.approx(
-            2.0 * math.sqrt(0.1 / 1.0), abs=4 * DT
-        )
+        assert _travel_time(sim_core, agent, distance=0.1) == pytest.approx(2.0 * math.sqrt(0.1 / 1.0), abs=4 * DT)
 
     def test_an_asymmetric_ramp_is_slower_than_a_symmetric_one(self, sim_core):
         agent = Agent.from_params(AgentSpawnParams(urdf_path=URDF, name="a", use_fixed_base=True), sim_core=sim_core)
@@ -135,8 +133,11 @@ class TestElevatorParamsMotion:
     def _elevator(self, sim_core, **motion):
         return Elevator.from_params(
             ElevatorParams(
-                urdf_path=URDF, name="lift1", use_fixed_base=True,
-                floors={"0": 0.0, "1": TRAVEL, "2": 2 * TRAVEL}, initial_floor="0",
+                urdf_path=URDF,
+                name="lift1",
+                use_fixed_base=True,
+                floors={"0": 0.0, "1": TRAVEL, "2": 2 * TRAVEL},
+                initial_floor="0",
                 **motion,
             ),
             sim_core=sim_core,
@@ -175,8 +176,13 @@ class TestElevatorParamsMotion:
     def test_from_dict_carries_the_motion_fields(self):
         params = ElevatorParams.from_dict(
             {
-                "name": "lift1", "urdf_path": URDF, "floors": {"0": 0.0, "1": TRAVEL},
-                "initial_floor": "0", "max_speed": 0.4, "max_accel": 1.0, "max_decel": 0.5,
+                "name": "lift1",
+                "urdf_path": URDF,
+                "floors": {"0": 0.0, "1": TRAVEL},
+                "initial_floor": "0",
+                "max_speed": 0.4,
+                "max_accel": 1.0,
+                "max_decel": 0.5,
             }
         )
         assert (params.max_speed, params.max_accel, params.max_decel) == (0.4, 1.0, 0.5)
