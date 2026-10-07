@@ -172,8 +172,7 @@ class SimObjectSpawnParams:
             name (str, required): Object name.
             visual_shape (dict | ShapeParams, optional): Visual shape definition.
             collision_shape (dict | ShapeParams, optional): Collision shape.
-            urdf_path (str, optional): URDF model name or path, instead of
-                the two shape definitions.
+            urdf_path (str, optional): URDF model name or path, instead of the shape definitions.
             pose (list): ``[x, y, z]`` position.  Alternative to ``initial_pose``.
             yaw (float): Yaw angle in radians (used with ``pose``).
             initial_pose (Pose): Pose object (takes precedence over ``pose``).
