@@ -143,7 +143,7 @@ class TestAccelerationRamp:
         agent.clear_actions()
         agent.set_joint_target_by_name(JOINT, 0.3)
         carried = agent._joint_speeds.get(index, 0.0)
-        assert carried > 0.0, "the speed is carried into the new travel, not reset"
+        assert abs(carried) > 0.0, "the speed is carried into the new travel, not reset"
 
         for _ in range(4000):
             sim_core.step_once()
@@ -151,6 +151,100 @@ class TestAccelerationRamp:
                 break
         assert agent.get_joint_state_by_name(JOINT)[0] == pytest.approx(0.3, abs=1e-6)
         assert agent._joint_speeds.get(index) is None, "the speed is dropped on arrival"
+
+
+class TestDirectionReversal:
+    """Raised in review: an unsigned carried speed reversed instantaneously.
+
+    With a magnitude alone, a target moved to the other side of the joint let
+    the next step keep full speed and simply apply it the other way, skipping
+    the deceleration the profile asks for.
+    """
+
+    def _moving_agent(self, sim_core):
+        agent = Agent.from_params(AgentSpawnParams(urdf_path=URDF, name="a", use_fixed_base=True), sim_core=sim_core)
+        agent.set_joint_motion_profile(JOINT, max_velocity=0.4, max_accel=1.0)
+        agent.add_action(JointAction(target_joint_positions={JOINT: 2.0}))
+        for _ in range(40):
+            sim_core.step_once()
+        return agent, agent._joint_index_by_name(JOINT)
+
+    def test_the_carried_speed_is_signed(self, sim_core):
+        agent, index = self._moving_agent(sim_core)
+        assert agent._joint_speeds[index] > 0.0
+
+        agent.clear_actions()
+        agent.set_joint_target_by_name(JOINT, -1.0)
+        sim_core.step_once()
+
+        assert agent._joint_speeds[index] > 0.0, "still travelling the old way while braking"
+
+    def test_it_brakes_through_zero_before_reversing(self, sim_core):
+        agent, index = self._moving_agent(sim_core)
+        before = agent.get_joint_state_by_name(JOINT)[0]
+        speed = agent._joint_speeds[index]
+
+        agent.clear_actions()
+        agent.set_joint_target_by_name(JOINT, -1.0)
+
+        # It must still be moving the old way for at least one step: braking
+        # from `speed` at 1.0 m/s^2 takes `speed` seconds, many steps at DT.
+        sim_core.step_once()
+        assert agent.get_joint_state_by_name(JOINT)[0] > before
+
+        peak = before
+        steps_still_advancing = 0
+        for _ in range(400):
+            sim_core.step_once()
+            position = agent.get_joint_state_by_name(JOINT)[0]
+            if position > peak:
+                peak, steps_still_advancing = position, steps_still_advancing + 1
+            if agent._joint_speeds.get(index, 0.0) < 0.0:
+                break
+
+        # Braking from `speed` at 1.0 m/s^2 takes `speed` seconds, which is
+        # many steps at DT -- so the joint travels well past where the new
+        # target was issued before it turns around.
+        assert peak > before
+        assert steps_still_advancing > 1, "it reversed in a single step"
+        assert speed / 1.0 > 2 * DT, "the brake really does span several steps"
+
+    def test_it_still_reaches_the_new_target(self, sim_core):
+        agent, index = self._moving_agent(sim_core)
+        agent.clear_actions()
+        agent.set_joint_target_by_name(JOINT, -1.0)
+        for _ in range(4000):
+            sim_core.step_once()
+            if abs(agent.get_joint_state_by_name(JOINT)[0] + 1.0) < 1e-6:
+                break
+        assert agent.get_joint_state_by_name(JOINT)[0] == pytest.approx(-1.0, abs=1e-6)
+        assert agent._joint_speeds.get(index) is None
+
+    def test_a_reversal_takes_longer_than_the_same_move_from_rest(self, sim_core):
+        """The braking distance is the difference, and it is what the old
+        magnitude-only carry threw away."""
+        agent, _ = self._moving_agent(sim_core)
+        agent.clear_actions()
+        agent.set_joint_target_by_name(JOINT, -1.0)
+        moving = 0
+        for _ in range(4000):
+            sim_core.step_once()
+            moving += 1
+            if abs(agent.get_joint_state_by_name(JOINT)[0] + 1.0) < 1e-6:
+                break
+
+        rested = Agent.from_params(AgentSpawnParams(urdf_path=URDF, name="b", use_fixed_base=True), sim_core=sim_core)
+        rested.set_joint_motion_profile(JOINT, max_velocity=0.4, max_accel=1.0)
+        start = agent.get_joint_state_by_name(JOINT)[0]
+        del start
+        rested.set_joint_target_by_name(JOINT, -1.0)
+        from_rest = 0
+        for _ in range(4000):
+            sim_core.step_once()
+            from_rest += 1
+            if abs(rested.get_joint_state_by_name(JOINT)[0] + 1.0) < 1e-6:
+                break
+        assert moving > from_rest
 
 
 class TestCheckpointCarriesTheRampSpeed:

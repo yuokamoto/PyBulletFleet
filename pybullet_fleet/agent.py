@@ -1581,39 +1581,61 @@ class Agent(SimObject):
                 joint_index, (self._urdf_joint_velocity(joint_index), None, None)
             )
             if accel is None:
-                step = max_vel * dt
+                step = math.copysign(max_vel * dt, diff)
             else:
-                step = self._ramped_step(joint_index, abs(diff), dt, max_vel, accel, decel or accel)
-            if abs(diff) <= step:
+                step = self._ramped_step(joint_index, diff, dt, max_vel, accel, decel or accel)
+            # Only a step heading for the target can arrive at it. While
+            # braking out of a reversal the step points the other way, and
+            # comparing magnitudes alone would teleport the joint to a target
+            # it is still moving away from.
+            if step * diff > 0.0 and abs(step) >= abs(diff):
                 new_pos = target
                 self._joint_speeds.pop(joint_index, None)
             else:
-                new_pos = current_pos + math.copysign(step, diff)
+                new_pos = current_pos + step
             p.resetJointState(self.body_id, joint_index, new_pos, physicsClientId=self._pid)
             self._kinematic_joint_positions[joint_index] = new_pos
             any_moved = True
         return any_moved
 
-    def _ramped_step(self, joint_index: int, remaining: float, dt: float, max_vel: float, accel: float, decel: float) -> float:
-        """How far a ramped joint may move this step, integrating a trapezoid.
+    def _ramped_step(self, joint_index: int, diff: float, dt: float, max_vel: float, accel: float, decel: float) -> float:
+        """Signed distance a ramped joint may move this step.
 
         Integrated step by step rather than planned once, so that a target
         replaced mid-travel -- a lift redirected to another floor while the
-        car is moving -- is handled by simply carrying the current speed
-        forward, with no plan to invalidate.
+        car is moving -- is handled by carrying the current speed forward,
+        with no plan to invalidate.
 
-        Braking starts once the distance left is no more than what it takes to
-        stop from the current speed, ``v^2 / (2 * decel)``.
+        The carried speed is signed, and the sign is the direction of travel.
+        A target moved to the other side of the joint has to be braked into:
+        with a magnitude alone, the next step would keep full speed and simply
+        apply it the other way, reversing in one step and skipping the
+        deceleration the profile asks for.
+
+        Braking towards the target starts once the distance left is no more
+        than it takes to stop from the current speed, ``v^2 / (2 * decel)``.
         """
         speed = self._joint_speeds.get(joint_index, 0.0)
-        if remaining <= speed * speed / (2.0 * decel):
-            speed = max(0.0, speed - decel * dt)
+        direction = math.copysign(1.0, diff)
+
+        if speed * direction < 0.0:
+            # Travelling away from the target: decelerate towards zero and
+            # stop there, so the next step starts the new travel from rest.
+            speed += math.copysign(decel * dt, direction)
+            if speed * direction > 0.0:
+                speed = 0.0
         else:
-            speed = min(max_vel, speed + accel * dt)
-        # A joint at rest with a target still ahead must not stay at rest: one
-        # step of acceleration is the smallest move that makes progress.
-        if speed <= 0.0:
-            speed = min(max_vel, accel * dt)
+            magnitude = abs(speed)
+            if abs(diff) <= magnitude * magnitude / (2.0 * decel):
+                magnitude = max(0.0, magnitude - decel * dt)
+            else:
+                magnitude = min(max_vel, magnitude + accel * dt)
+            # A joint at rest with a target still ahead must not stay at rest:
+            # one step of acceleration is the smallest move that progresses.
+            if magnitude <= 0.0:
+                magnitude = min(max_vel, accel * dt)
+            speed = magnitude * direction
+
         self._joint_speeds[joint_index] = speed
         return speed * dt
 
@@ -1891,7 +1913,8 @@ class Agent(SimObject):
                     "target": self._last_joint_targets.get(index),
                     # Execution state once a joint ramps: restoring mid-travel
                     # without it resumes from a standstill and takes a
-                    # different path to the same target.
+                    # different path to the same target. Signed -- the sign is
+                    # the direction of travel.
                     "speed": self._joint_speeds.get(index),
                 }
             )
@@ -1912,7 +1935,9 @@ class Agent(SimObject):
             # restores: that joint simply starts its travel from rest.
             speed = state.get("speed")
             if speed is not None:
-                if isinstance(speed, bool) or not isinstance(speed, (int, float)) or not math.isfinite(speed) or speed < 0.0:
+                # Signed: the sign is the direction of travel, so a negative
+                # speed is ordinary rather than invalid.
+                if isinstance(speed, bool) or not isinstance(speed, (int, float)) or not math.isfinite(speed):
                     raise ValueError("Joint checkpoint contains a nonfinite or invalid value")
                 speeds[index] = float(speed)
             if (
