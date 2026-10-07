@@ -75,7 +75,18 @@ GLOBAL_LOG_LEVEL = "INFO"
 if "PYBULLET_LOG_LEVEL" in os.environ:
     GLOBAL_LOG_LEVEL = os.environ["PYBULLET_LOG_LEVEL"].upper()
 
-logging.basicConfig(level=logging.getLevelName(GLOBAL_LOG_LEVEL), format="%(asctime)s %(levelname)s %(message)s")
+#: The package's own logger. Everything below configures this rather than the
+#: root logger: importing a library must not decide how the application that
+#: imported it formats or filters its logs. A program that wants
+#: PyBulletFleet's output on screen and has configured nothing of its own gets
+#: it from the handler installed here; one that has called basicConfig() keeps
+#: its own, because the handler is only added when this logger has none.
+_PACKAGE_LOGGER = logging.getLogger(__name__.split(".")[0])
+_PACKAGE_LOGGER.setLevel(logging.getLevelName(GLOBAL_LOG_LEVEL))
+if not _PACKAGE_LOGGER.handlers:
+    _handler = logging.StreamHandler()
+    _handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
+    _PACKAGE_LOGGER.addHandler(_handler)
 
 # Create module logger (LazyLogger: avoids expensive f-string evaluation when log level is disabled)
 logger = get_lazy_logger(__name__)
@@ -131,7 +142,11 @@ class SimulationParams:
     gui: bool = _SIM_D["gui"]
     physics: bool = _SIM_D["physics"]
     monitor: bool = _SIM_D["monitor"]
-    enable_monitor_gui: bool = _SIM_D["enable_monitor_gui"]
+    #: Whether the DataMonitor opens a window. ``None`` (the default) follows
+    #: ``gui``: a headless simulation collects monitor data without putting a
+    #: Tk window on screen. ``True`` or ``False`` is honoured as given, so a
+    #: monitor window without the PyBullet viewer is still available.
+    enable_monitor_gui: Optional[bool] = _SIM_D["enable_monitor_gui"]
     collision_check_frequency: Optional[float] = None
     log_level: str = _SIM_D["log_level"]
     max_steps_per_frame: int = _SIM_D["max_steps_per_frame"]
@@ -362,10 +377,13 @@ class MultiRobotSimulationCore:
         return sim
 
     def __init__(self, params: SimulationParams, collision_color: Optional[List[float]] = None) -> None:
-        # Initialize log level from params
+        # Initialize log level from params, on this package's logger only.
+        # Setting it on the root logger silenced the host application's own
+        # output: log_level defaults to "warn", so merely constructing a
+        # simulation turned off every INFO line in the process.
         level_str = getattr(params, "log_level", GLOBAL_LOG_LEVEL)
         level_name = str(level_str).upper()
-        logging.getLogger().setLevel(logging.getLevelName(level_name))
+        _PACKAGE_LOGGER.setLevel(logging.getLevelName(level_name))
 
         # --- Public (read-only via @property, internal via self._X) ---
         self._client: Optional[int] = None
@@ -531,9 +549,16 @@ class MultiRobotSimulationCore:
         # If monitor: true and console_monitor: false, start DataMonitor
 
         if self._params.monitor:
+            # None means "follow gui": a headless run should not open a
+            # window. It used to open one regardless, so a program that
+            # builds several simulations -- a test suite, a sweep -- got a Tk
+            # window per simulation on a machine with no viewer in sight.
+            enable_gui = self._params.enable_monitor_gui
+            if enable_gui is None:
+                enable_gui = self._params.gui
             self._data_monitor = DataMonitor(
                 "PyBullet Simulation Monitor",
-                enable_gui=self._params.enable_monitor_gui,
+                enable_gui=enable_gui,
                 width=self._params.monitor_width,
                 height=self._params.monitor_height,
                 x=self._params.monitor_x,
@@ -4171,7 +4196,27 @@ class MultiRobotSimulationCore:
         except p.error:
             logger.info("PyBullet connection lost (GUI window closed)")
         self.update_monitor()
+        self.close()
 
+    # ------------------------------------------------------------------
+    # Teardown
+    # ------------------------------------------------------------------
+
+    def close(self) -> None:
+        """Release everything this simulation owns, including its client.
+
+        ``run_simulation()`` has always done this on the way out, but a
+        program that drives ``step_once()`` itself, or a test that only builds
+        a scene, never reached that code -- and nothing else disconnected. An
+        undisconnected client leaks for the life of the process, and because
+        PyBullet's module-level calls resolve against a default client, the
+        *next* simulation in the same process then finds bodies and joints
+        "not found" rather than failing where the leak happened.
+
+        Safe to call more than once, and safe on a simulation that was never
+        run: each step is guarded, and disconnecting an already-disconnected
+        client is a no-op.
+        """
         # Auto-save recording if active
         if self._recorder is not None:
             self.stop_recording()
@@ -4181,19 +4226,27 @@ class MultiRobotSimulationCore:
             except Exception as exc:
                 self._abort_state_recording(exc)
 
-        # Shutdown plugins before disconnecting
         self._shutdown_plugins()
 
+        # Kept as it was: on other platforms the monitor is not stopped here,
+        # which tests/test_monitor_macos.py pins. Out of scope for this change.
         if IS_MACOS and self._data_monitor:
             self._data_monitor.stop()
 
-        # Disconnect from PyBullet if still connected
+        # getConnectionInfo() does not raise on a disconnected client -- it
+        # returns isConnected 0 -- so the disconnect itself is what has to be
+        # guarded for close() to be safe to call twice.
         try:
-            p.getConnectionInfo(physicsClientId=self.client)
             p.disconnect(self.client)
-        except p.error:
-            # Already disconnected
+        except (p.error, TypeError):
+            # Already disconnected, or never connected (client is None).
             pass
+
+    def __enter__(self) -> "MultiRobotSimulationCore":
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        self.close()
 
     # ------------------------------------------------------------------
     # Pause / Resume

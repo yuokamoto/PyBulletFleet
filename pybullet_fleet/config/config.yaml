@@ -149,7 +149,7 @@ simulation:
   # Enable monitor GUI (visualization)
   # Recommended: false for headless performance testing
   # Default: true (GUI enabled when monitor=true)
-  enable_monitor_gui: true
+  enable_monitor_gui: null    # null follows `gui`; true/false forces it
 
   # ========================================
   # Logging Settings

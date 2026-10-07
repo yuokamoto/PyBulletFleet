@@ -2518,7 +2518,10 @@ class TestCustomProfilingFields:
         sim_core._profiling_stats["collision_check"].append(0.2)
         sim_core._profiling_stats["monitor_update"].append(0.1)
 
-        with caplog.at_level(logging.INFO):
+        # Scoped to the package logger: PyBulletFleet sets its level there
+        # rather than on the root logger, so raising the root level alone no
+        # longer lets its INFO records through.
+        with caplog.at_level(logging.INFO, logger="pybullet_fleet"):
             sim_core._print_profiling_summary()
 
         # Custom field "planner" should appear in the log output
