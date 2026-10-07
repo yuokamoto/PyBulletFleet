@@ -332,3 +332,92 @@ def test_recording_contract_accepts_an_independent_profile_and_custom_data(tmp_p
     finally:
         if p.isConnected(restored.client):
             p.disconnect(restored.client)
+
+
+def test_failed_capture_does_not_stop_simulation_or_publish_complete_artifact(tmp_path: Path) -> None:
+    import pybullet as p
+    from pybullet_fleet.core_simulation import MultiRobotSimulationCore, SimulationParams
+
+    class FailingProfile:
+        profile_id = "test.failing.v1"
+        version = 1
+        coverage = {}
+
+        def construction(self, sim):
+            return {"timestep": sim.params.timestep}
+
+        def capture(self, sim):
+            raise ValueError("unsupported state")
+
+    sim = MultiRobotSimulationCore(SimulationParams(gui=False, physics=False, enable_floor=False, timestep=0.1))
+    directory = tmp_path / "failed"
+    try:
+        sim.configure_state_recording(output=str(directory), profile=FailingProfile())
+        sim.run_simulation(duration=0.2)
+        assert sim.get_completed_step_boundary() == (2, pytest.approx(0.2))
+        manifest = json.loads((directory / "manifest.json").read_text())
+        assert manifest["complete"] is False
+        assert "unsupported state" in manifest["recording_error"]
+        with pytest.raises(ValueError, match="Incomplete"):
+            load_recording_manifest(directory)
+    finally:
+        if p.isConnected(sim.client):
+            p.disconnect(sim.client)
+
+
+def test_gui_playback_uses_first_available_checkpoint(recorded_run, monkeypatch: pytest.MonkeyPatch) -> None:
+    import pybullet_fleet.examples.validation.manipulation_recording_profile as module
+
+    directory, _ = recorded_run
+    manifest_path = directory / "manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    manifest["checkpoint_sha256"].pop("1")
+    manifest_path.write_text(json.dumps(manifest))
+    playback = ResultPlayback(directory, profile=_profile(directory))
+
+    def inspect_first_checkpoint(_manifest, state, **_kwargs):
+        assert state["sim"]["step"] == 2
+        raise RuntimeError("selected second checkpoint")
+
+    monkeypatch.setattr(module, "restore_supported_simulation", inspect_first_checkpoint)
+    with pytest.raises(RuntimeError, match="selected second checkpoint"):
+        playback.play_gui(rtf=1.0)
+
+
+def test_spawn_record_failure_preserves_spawn_and_marks_artifact_incomplete(tmp_path: Path) -> None:
+    import pybullet as p
+    from pybullet_fleet.core_simulation import MultiRobotSimulationCore, SimulationParams
+    from pybullet_fleet.geometry import Pose
+    from pybullet_fleet.sim_object import ShapeParams, SimObject, SimObjectSpawnParams
+
+    class RejectingProfile:
+        profile_id = "test.reject_spawn.v1"
+        version = 1
+        coverage = {}
+
+        def construction(self, sim):
+            return {"timestep": sim.params.timestep}
+
+        def spawn_record(self, obj, params):
+            raise ValueError("unsupported spawn")
+
+    sim = MultiRobotSimulationCore(SimulationParams(gui=False, physics=False, enable_floor=False))
+    directory = tmp_path / "spawn-failure"
+    try:
+        sim.configure_state_recording(output=str(directory), profile=RejectingProfile())
+        sim.initialize_simulation()
+        params = SimObjectSpawnParams(
+            visual_shape=ShapeParams(shape_type="box", half_extents=[0.1, 0.1, 0.1]),
+            collision_shape=ShapeParams(shape_type="box", half_extents=[0.1, 0.1, 0.1]),
+            initial_pose=Pose.from_xyz(0, 0, 0.5),
+            name="recording-rejected-box",
+        )
+        obj = SimObject.from_params(params, sim)
+        assert obj in sim.sim_objects
+        assert p.getBodyInfo(obj.body_id, physicsClientId=sim.client)
+        manifest = json.loads((directory / "manifest.json").read_text())
+        assert manifest["complete"] is False
+        assert "unsupported spawn" in manifest["recording_error"]
+    finally:
+        if p.isConnected(sim.client):
+            p.disconnect(sim.client)

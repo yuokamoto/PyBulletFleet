@@ -266,7 +266,10 @@ class FleetCommandDispatcher:
         return ack
 
     def _record_effective_input(self, operation: str, ack: CommandAck, effective: dict) -> None:
-        self.sim_core._record_state_input(
+        record = getattr(self.sim_core, "_record_state_input", None)
+        if record is None:
+            return
+        record(
             operation,
             {
                 "command_id": ack.command_id,

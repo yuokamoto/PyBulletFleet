@@ -932,14 +932,28 @@ class MultiRobotSimulationCore:
     def _record_state_input(self, operation: str, details: dict) -> None:
         """Forward an effective input when state recording is configured."""
         if self._state_recorder is not None:
-            self._state_recorder.record_input(operation, details)
+            try:
+                self._state_recorder.record_input(operation, details)
+            except Exception as exc:
+                self._abort_state_recording(exc)
+
+    def _abort_state_recording(self, exc: Exception) -> None:
+        """Keep an optional recorder failure from interrupting a valid simulation."""
+        recorder = self._state_recorder
+        self._state_recorder = None
+        logger.warning("State recording stopped after an error: %s", exc)
+        if recorder is not None:
+            recorder.abort(exc)
 
     def _record_state_spawn(self, obj: SimObject, spawn_params: Any) -> None:
         """Retain construction data and record a spawned entity if enabled."""
         if self._state_recorder is None:
             return
-        obj._checkpoint_spawn_params = copy.deepcopy(spawn_params)
-        self._state_recorder.record_spawn(obj, spawn_params)
+        try:
+            obj._checkpoint_spawn_params = copy.deepcopy(spawn_params)
+            self._state_recorder.record_spawn(obj, spawn_params)
+        except Exception as exc:
+            self._abort_state_recording(exc)
 
     def restore_completed_step_boundary(self, step: int, elapsed_time: float) -> None:
         """Restore the clock of a fresh, initialized fixed-step simulation."""
@@ -2443,7 +2457,7 @@ class MultiRobotSimulationCore:
 
         logger.info(f"Removed object {obj_id} (body {obj.body_id}) from simulation")
         if self._state_recorder is not None:
-            self._state_recorder.record_input("remove_object", {"key": obj.name})
+            self._record_state_input("remove_object", {"key": obj.name})
 
     def configure_visualizer(
         self,
@@ -4162,7 +4176,10 @@ class MultiRobotSimulationCore:
         if self._recorder is not None:
             self.stop_recording()
         if self._state_recorder is not None:
-            self._state_recorder.close()
+            try:
+                self._state_recorder.close()
+            except Exception as exc:
+                self._abort_state_recording(exc)
 
         # Shutdown plugins before disconnecting
         self._shutdown_plugins()
@@ -4487,7 +4504,10 @@ class MultiRobotSimulationCore:
             # A durable recorder must see the completed clock and propagate
             # failures; EventBus deliberately swallows subscriber exceptions.
             if self._state_recorder is not None:
-                self._state_recorder.on_completed_step()
+                try:
+                    self._state_recorder.on_completed_step()
+                except Exception as exc:
+                    self._abort_state_recording(exc)
             # Monitor: every step if GUI enabled, otherwise every second
             if measure_timing:
                 t_mon0 = time.perf_counter()

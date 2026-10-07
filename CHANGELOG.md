@@ -13,6 +13,11 @@ are not recommended for production use yet.
 
 ### Changed
 
+- An optional state-recorder error during a command, object spawn/removal, or
+  completed-step capture now stops recording with an explicitly incomplete
+  artifact while the simulation operation continues. GUI playback selects the
+  first available checkpoint at the configured cadence.
+
 - Group corridor policy evaluation programs under `examples/evaluation/` and
   checkpoint/state-discovery programs under `examples/validation/`. Their
   Python module paths and documented run commands now use those folders.
@@ -29,8 +34,8 @@ are not recommended for production use yet.
   restore/resume and result playback through the same example CLI. Capture
   every joint position/configured target on the supported robot, kinematic
   attachment relation, box lifecycle and
-  scenario progress in a versioned profile; unsupported active state fails
-  rather than being silently omitted.
+  scenario progress in a versioned profile; unsupported active state marks
+  recording incomplete rather than being silently omitted.
   The common recorder accepts declared profiles and named, versioned data
   callbacks. The example's Omni/box profile lives under `examples/validation/`.
 

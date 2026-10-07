@@ -883,7 +883,9 @@ class SimObject:
         # Runtime body/object IDs remain process-local; the core records the
         # effective construction request only when state recording is enabled.
         if sim_core is not None:
-            sim_core._record_state_spawn(obj, spawn_params)
+            record_spawn = getattr(sim_core, "_record_state_spawn", None)
+            if record_spawn is not None:
+                record_spawn(obj, spawn_params)
 
         return obj
 

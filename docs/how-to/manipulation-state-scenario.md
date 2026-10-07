@@ -72,6 +72,9 @@ python -m pybullet_fleet.examples.validation.manipulation_state_scenario --playb
 
 The recording stores one full checkpoint and one result frame after each
 completed step, plus ordered supported inputs and lifecycle operations. The
+recorder stops and marks the artifact incomplete if capture or an unsupported
+runtime spawn fails; the simulation continues. Incomplete artifacts cannot be
+loaded for restore or playback. The
 example registers a named, versioned data callback that saves its stage and
 observations in `records.scenario`. It reads the value and re-registers its
 callback code in a fresh process. Runtime PBF object IDs are remapped; the

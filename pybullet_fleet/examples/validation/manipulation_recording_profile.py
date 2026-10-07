@@ -427,11 +427,15 @@ class KinematicManipulationProfile:
     def play_gui(self, playback: ResultPlayback, *, rtf: float, hold: bool) -> None:
         """Render this validation profile's recorded poses without stepping."""
         manifest = playback.manifest
-        first_path = playback.path / "checkpoints" / "000000001.json"
+        checkpoint_steps = sorted(int(step) for step in manifest["checkpoint_sha256"])
+        if not checkpoint_steps:
+            raise ValueError("GUI playback requires a checkpoint")
+        first_step = checkpoint_steps[0]
+        first_path = playback.path / "checkpoints" / f"{first_step:09d}.json"
         from pybullet_fleet.replay.state_recording import _read_json, _sha256
 
         first_state = _read_json(first_path)
-        if _sha256(first_path) != manifest["checkpoint_sha256"].get("1"):
+        if _sha256(first_path) != manifest["checkpoint_sha256"].get(str(first_step)):
             raise ValueError("First checkpoint integrity check failed")
         sim = restore_supported_simulation(manifest, first_state, profile=self, gui=True)
         robot = sim.get_unique_agent_by_name(self.robot_name)

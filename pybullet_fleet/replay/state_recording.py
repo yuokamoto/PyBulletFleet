@@ -353,6 +353,23 @@ class StateRecorder:
         _write_json_atomic(self.path / "manifest.json", self._manifest)
         self._closed = True
 
+    def abort(self, error: Exception) -> None:
+        """Release resources and keep a failed artifact explicitly incomplete."""
+        if self._closed:
+            return
+        self._closed = True
+        for stream in (self._frames, self._inputs):
+            try:
+                stream.close()
+            except Exception:
+                pass
+        self._manifest["complete"] = False
+        self._manifest["recording_error"] = f"{type(error).__name__}: {error}"
+        try:
+            _write_json_atomic(self.path / "manifest.json", self._manifest)
+        except Exception:
+            pass
+
 
 def load_recording_manifest(directory: str | Path) -> dict:
     """Read a complete artifact's profile declaration before choosing a loader."""
