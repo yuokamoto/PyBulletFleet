@@ -18,6 +18,8 @@ are not recommended for production use yet.
   artifact while the simulation operation continues. GUI playback selects the
   first available checkpoint at the configured cadence. Checkpoint restore
   also verifies the recorded result and input streams before loading state.
+  Accepted inputs issued outside the final step are flushed when recording
+  closes, including runs with no completed steps.
 
 - Group corridor policy evaluation programs under `examples/evaluation/` and
   checkpoint/state-discovery programs under `examples/validation/`. Their

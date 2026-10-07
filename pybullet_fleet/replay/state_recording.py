@@ -306,6 +306,12 @@ class StateRecorder:
         if details is not None:
             self.record_input("spawn_object", details)
 
+    def _flush_pending_inputs(self) -> None:
+        for item in self._pending_inputs:
+            self._inputs.write(json.dumps(item, allow_nan=False, sort_keys=True) + "\n")
+        self._inputs.flush()
+        self._pending_inputs.clear()
+
     def on_completed_step(self) -> None:
         if self._closed:
             raise RuntimeError("State recorder is closed")
@@ -325,10 +331,7 @@ class StateRecorder:
         complete_manifest = {**self._manifest, "complete": True, "last_completed_step": step}
         _validate_envelope(complete_manifest, state, self.profile)
         self.profile.validate_checkpoint(complete_manifest, state)
-        for item in self._pending_inputs:
-            self._inputs.write(json.dumps(item, allow_nan=False, sort_keys=True) + "\n")
-        self._inputs.flush()
-        self._pending_inputs.clear()
+        self._flush_pending_inputs()
         # The result frame is a read-only state sample, not an execution checkpoint.
         frame = {
             "step": step,
@@ -349,6 +352,7 @@ class StateRecorder:
     def close(self) -> None:
         if self._closed:
             return
+        self._flush_pending_inputs()
         self._frames.close()
         self._inputs.close()
         self._manifest["frames_sha256"] = _sha256(self.path / "frames.jsonl")

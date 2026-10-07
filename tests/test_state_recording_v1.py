@@ -430,3 +430,52 @@ def test_spawn_record_failure_preserves_spawn_and_marks_artifact_incomplete(tmp_
     finally:
         if p.isConnected(sim.client):
             p.disconnect(sim.client)
+
+
+@pytest.mark.parametrize("completed_steps", [0, 1])
+def test_close_flushes_inputs_issued_outside_last_step(tmp_path: Path, completed_steps: int) -> None:
+    import pybullet as p
+    from pybullet_fleet.core_simulation import MultiRobotSimulationCore, SimulationParams
+
+    class ClockProfile:
+        profile_id = "test.clock.v1"
+        version = 1
+        coverage = {}
+
+        def construction(self, sim):
+            return {"timestep": sim.params.timestep}
+
+        def capture(self, sim):
+            step, elapsed_time = sim.get_completed_step_boundary()
+            return {
+                "sim": {"type": "kinematic", "version": 1, "step": step, "elapsed_time": elapsed_time},
+                "agents": {},
+                "objects": {},
+            }
+
+        def validate_checkpoint(self, manifest, state):
+            pass
+
+    sim = MultiRobotSimulationCore(SimulationParams(gui=False, physics=False, enable_floor=False, timestep=0.1))
+    directory = tmp_path / "outside-step"
+    try:
+        recorder = sim.configure_state_recording(output=str(directory), profile=ClockProfile())
+        sim.initialize_simulation()
+        for _ in range(completed_steps):
+            sim.step_once()
+        sim._record_state_input("test_command", {"accepted": True})
+        recorder.close()
+        playback = ResultPlayback(directory)
+        assert len(playback.frames) == completed_steps
+        assert playback.inputs == [
+            {
+                "operation": "test_command",
+                "details": {"accepted": True},
+                "step": completed_steps,
+                "phase": "outside_step",
+                "order": 0,
+            }
+        ]
+    finally:
+        if p.isConnected(sim.client):
+            p.disconnect(sim.client)
