@@ -111,6 +111,9 @@ class FakeSim:
     def record_profiling(self, name, value_ms):
         self.profile_records.append((name, value_ms))
 
+    def _record_state_input(self, operation, details):
+        pass
+
 
 def _node():
     node = MagicMock()
