@@ -35,16 +35,15 @@ class TestAgentPickable:
         assert agent.pickable is False
 
     def test_spawn_params_pickable_reaches_a_urdf_agent(self, sim_core):
-        agent = Agent.from_params(
-            AgentSpawnParams(urdf_path=URDF, name="cargo", pickable=True), sim_core=sim_core
-        )
+        agent = Agent.from_params(AgentSpawnParams(urdf_path=URDF, name="cargo", pickable=True), sim_core=sim_core)
         assert agent.pickable is True
 
     def test_spawn_params_pickable_reaches_a_mesh_agent(self, sim_core):
         agent = Agent.from_params(
             AgentSpawnParams(
                 visual_shape=ShapeParams(shape_type="box", half_extents=[0.1, 0.1, 0.1]),
-                name="cargo", pickable=True,
+                name="cargo",
+                pickable=True,
             ),
             sim_core=sim_core,
         )
@@ -60,8 +59,7 @@ class TestAgentPickable:
         where it was configured."""
         carrier = Agent.from_params(AgentSpawnParams(urdf_path=URDF, name="carrier"), sim_core=sim_core)
         cargo = Agent.from_params(
-            AgentSpawnParams(urdf_path=URDF, name="cargo", pickable=True,
-                             initial_pose=Pose.from_xyz(0.0, 0.0, 0.3)),
+            AgentSpawnParams(urdf_path=URDF, name="cargo", pickable=True, initial_pose=Pose.from_xyz(0.0, 0.0, 0.3)),
             sim_core=sim_core,
         )
         assert carrier.attach_object(cargo, keep_world_pose=True) is True
