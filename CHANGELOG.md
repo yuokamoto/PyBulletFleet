@@ -70,6 +70,12 @@ are not recommended for production use yet.
   existing configurations keep their symmetric trapezoid unchanged.
   `Agent.max_linear_decel`, `ControllerParams.linear_decel_along_direction()`
   and `ControllerParams.scalar_max_linear_decel()` round out the accessors.
+- Add `MultiRobotSimulationCore.set_structure_transparency()`, the public
+  form of the `t` key, which also works without a GUI. Offscreen renders
+  through `p.getCameraImage()` honour alpha just as the viewer does, but the
+  only way in was `configure_visualizer()`, which returns immediately when
+  `gui` is false -- so a headless render of a multi-level scene showed an
+  opaque lid over everything below the top level.
 
 - Add name-based simulation entity lookup on `MultiRobotSimulationCore`:
   ordered multi-result searches for objects and agents, plus unique-result
@@ -138,6 +144,11 @@ are not recommended for production use yet.
   from -- still held the defaults. A fleet that set its limits this way ran
   correctly under the per-agent controllers and at the default 2.0 m/s and
   5.0 m/s under a batch controller.
+- Turning structure transparency off now restores the alpha each shape was
+  loaded with, instead of forcing 1.0. A model whose material authored its own
+  translucency used to come back fully opaque with no way to recover it short
+  of reloading the body -- and since `transparent=False` is the default,
+  simply calling `configure_visualizer()` repainted every static body.
 
 - Include positive-gap pairs within `collision_margin` in closest-point
   collision checks, including pairs whose AABBs do not overlap.
