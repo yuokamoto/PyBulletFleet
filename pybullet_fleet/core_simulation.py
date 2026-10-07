@@ -2436,8 +2436,15 @@ class MultiRobotSimulationCore:
         if isinstance(obj, Agent):
             self.events.emit(SimEvents.AGENT_REMOVED, agent=obj)
 
-        # Remove original color cache (prevents stale color on body_id reuse)
+        # Remove original color caches (prevents stale color on body_id reuse)
         self._robot_original_colors.pop(obj.body_id, None)
+        # Per (body, link), so it has to be swept rather than popped. Without
+        # this a simulation that creates and removes objects over a long run
+        # keeps every shape it ever saw, and each transparency change walks
+        # the whole stale cache -- and a reused body id would come back
+        # wearing the removed body's colour.
+        for key in [k for k in self._original_visual_colors if k[0] == obj.body_id]:
+            del self._original_visual_colors[key]
 
         # Remove PyBullet body
         if obj.body_id is not None:

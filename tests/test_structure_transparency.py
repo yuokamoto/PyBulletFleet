@@ -148,3 +148,40 @@ class TestLateAddedBodies:
         assert _alpha(sim_core, survivor) == pytest.approx(0.3)
         sim_core.set_structure_transparency(False)
         assert _alpha(sim_core, survivor) == pytest.approx(0.7)
+
+
+class TestCacheDoesNotGrow:
+    """Raised in review: remove_object() cleaned _robot_original_colors but
+    not _original_visual_colors, so a long run that creates and removes
+    objects kept every shape it ever saw -- and each transparency change
+    walked the whole stale cache."""
+
+    def _static_box(self, sim_core, name, alpha=1.0):
+        return SimObject.from_params(
+            SimObjectSpawnParams(
+                visual_shape=ShapeParams(shape_type="box", half_extents=[0.1, 0.1, 0.1], rgba_color=[0.5, 0.5, 0.5, alpha]),
+                collision_shape=ShapeParams(shape_type="box", half_extents=[0.1, 0.1, 0.1]),
+                name=name,
+                initial_pose=Pose.from_xyz(0.0, 0.0, 0.0),
+                collision_mode=CollisionMode.STATIC,
+            ),
+            sim_core=sim_core,
+        )
+
+    def test_removing_an_object_drops_its_entries(self, sim_core):
+        obj = self._static_box(sim_core, "gone")
+        sim_core.set_structure_transparency(True)
+        assert any(key[0] == obj.body_id for key in sim_core._original_visual_colors)
+
+        sim_core.remove_object(obj)
+
+        assert not any(key[0] == obj.body_id for key in sim_core._original_visual_colors)
+
+    def test_the_cache_does_not_grow_over_a_churn_of_objects(self, sim_core):
+        sim_core.set_structure_transparency(True)
+        baseline = len(sim_core._original_visual_colors)
+        for i in range(20):
+            obj = self._static_box(sim_core, f"churn{i}")
+            sim_core.set_structure_transparency(True)
+            sim_core.remove_object(obj)
+        assert len(sim_core._original_visual_colors) == baseline
