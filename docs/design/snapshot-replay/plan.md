@@ -1,5 +1,8 @@
 # Navigation replay implementation plan and decisions
 
+**Usage status:** Development validation profile; not ready for general or
+production snapshot/replay use.
+
 Scope and architecture approved by the Human under
 `docs/AI_DEVELOPMENT_WORKFLOW.md`; implementation does not authorize merge.
 

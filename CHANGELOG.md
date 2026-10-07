@@ -7,13 +7,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+Snapshot/replay entries in this section describe development and validation
+profiles. They do not provide general save/load for ordinary simulations and
+are not recommended for production use yet.
+
 ### Changed
+
+- An optional state-recorder error during a command, object spawn/removal, or
+  completed-step capture now stops recording with an explicitly incomplete
+  artifact while the simulation operation continues. GUI playback selects the
+  first available checkpoint at the configured cadence. Checkpoint restore
+  also verifies the recorded result and input streams before loading state.
+  Accepted inputs issued outside the final step are flushed when recording
+  closes, including runs with no completed steps. Closing a recorder detaches
+  it from the simulation, so subsequent steps continue without recording.
 
 - Group corridor policy evaluation programs under `examples/evaluation/` and
   checkpoint/state-discovery programs under `examples/validation/`. Their
   Python module paths and documented run commands now use those folders.
 
 ### Added
+
+- Add name-based simulation entity lookup on `MultiRobotSimulationCore`:
+  ordered multi-result searches for objects and agents, plus unique-result
+  helpers that raise `LookupError` when a name is missing or ambiguous.
+
+- Add opt-in, per-completed-step execution recording for the supported
+  physics-off omni manipulation scenario, including its generated approach
+  waypoint and final orientation turn, with fresh-process checkpoint
+  restore/resume and result playback through the same example CLI. Capture
+  every joint position/configured target on the supported robot, kinematic
+  attachment relation, box lifecycle and
+  scenario progress in a versioned profile; unsupported active state marks
+  recording incomplete rather than being silently omitted.
+  The common recorder accepts declared profiles and named, versioned data
+  callbacks. The example's Omni/box profile lives under `examples/validation/`.
 
 - Add a profile-limited, fresh-process checkpoint/restore proof for one
   physics-off omni robot in straight navigation, with explicit

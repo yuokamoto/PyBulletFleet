@@ -2,6 +2,10 @@
 
 **Status:** Implemented and merged in PR #50 on 2026-09-29.
 
+PR #50 is a restricted development validation profile. Its implemented
+initial-state re-execution does not make the overall snapshot/replay feature
+ready for general or production use.
+
 This document fixes the approved **v1** boundary. Read the
 [overall product goals](product-goals.md) before scoping later work; v1 does
 not itself deliver the full recording/restart/playback/debug workflow.

@@ -321,6 +321,7 @@ class SimObject:
 
         # Attachment state (initialized with default zero offset)
         self._attach_offset: Pose = Pose(position=[0.0, 0.0, 0.0], orientation=[0.0, 0.0, 0.0, 1.0])
+        self._checkpoint_spawn_params: Optional[SimObjectSpawnParams] = None
         self._constraint_id: Optional[int] = None
         self._attached_to: Optional["SimObject"] = None  # Which object is this attached to
         self._attached_link_index: int = -1  # Which link is this attached to
@@ -879,6 +880,13 @@ class SimObject:
             )
         )
 
+        # Runtime body/object IDs remain process-local; the core records the
+        # effective construction request only when state recording is enabled.
+        if sim_core is not None:
+            record_spawn = getattr(sim_core, "_record_state_spawn", None)
+            if record_spawn is not None:
+                record_spawn(obj, spawn_params)
+
         return obj
 
     @classmethod
@@ -1417,6 +1425,25 @@ class SimObject:
             List of attached SimObject instances
         """
         return self.attached_objects.copy()
+
+    def get_kinematic_attachment_state(self) -> Optional[dict]:
+        """Describe a supported physics-off attachment without runtime body IDs."""
+        if self._attached_to is None:
+            return None
+        if self.mass > 0 or self._constraint_id is not None:
+            raise ValueError("Physics attachment is outside the kinematic checkpoint profile")
+        return {
+            "parent_name": self._attached_to.name,
+            "parent_link": (
+                p.getJointInfo(self._attached_to.body_id, self._attached_link_index, physicsClientId=self._pid)[12].decode(
+                    "utf-8"
+                )
+                if self._attached_link_index >= 0
+                else "base_link"
+            ),
+            "relative_position": list(self._attach_offset.position),
+            "relative_orientation": list(self._attach_offset.orientation),
+        }
 
     def is_attached(self) -> bool:
         """

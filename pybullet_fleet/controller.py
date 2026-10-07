@@ -792,6 +792,118 @@ class OmniController(KinematicController):
             t0=state["t0"],
         )
 
+    def capture_navigation_state(self) -> dict:
+        """Capture the active omni pose path, including waypoint and turn phases."""
+        if self._mode is not ControllerMode.POSE or self._goal_pose is None:
+            raise ValueError("Omni checkpoint requires active pose navigation")
+
+        def pose_value(pose: Pose) -> dict:
+            return {"position": list(pose.position), "orientation": list(pose.orientation)}
+
+        forward = None
+        if self._pose_phase is PosePhase.FORWARD:
+            if self._tpi_forward is None or (self._forward_start_pos is None and not self._is_final_orientation_aligning):
+                raise ValueError("Omni forward trajectory is incomplete")
+            forward = {
+                "origin": self._forward_start_pos.tolist() if self._forward_start_pos is not None else None,
+                "t0": float(self._tpi_forward.t0),
+                "vmax": float(self._tpi_forward.vmax),
+                "accel": float(self._tpi_forward.amax_accel),
+                "orientation_after_rotation": (
+                    self._rotation_target_quat.tolist() if self._rotation_target_quat is not None else None
+                ),
+            }
+        rotation = None
+        if self._pose_phase is PosePhase.ROTATE and self._tpi_rotation_angle is not None:
+            if self._rotation_start_quat is None or self._rotation_target_quat is None:
+                raise ValueError("Omni rotation trajectory is incomplete")
+            rotation = {
+                "start_orientation": self._rotation_start_quat.tolist(),
+                "target_orientation": self._rotation_target_quat.tolist(),
+                "t0": float(self._tpi_rotation_angle.t0),
+                "vmax": float(self._tpi_rotation_angle.vmax),
+                "accel": float(self._tpi_rotation_angle.amax_accel),
+            }
+        return {
+            "path": [pose_value(pose) for pose in self._path],
+            "waypoint_index": self._current_waypoint_index,
+            "goal": pose_value(self._goal_pose),
+            "align_final_orientation": self._align_final_orientation,
+            "final_target_orientation": (
+                self._final_target_orientation.tolist() if self._final_target_orientation is not None else None
+            ),
+            "final_alignment_in_progress": self._is_final_orientation_aligning,
+            "phase": self._pose_phase.value,
+            "forward": forward,
+            "rotation": rotation,
+        }
+
+    def restore_navigation_state(self, state: dict, orientation: list[float]) -> None:
+        """Restore an omni pose path without reissuing its navigation command."""
+        if self._mode is not ControllerMode.IDLE:
+            raise ValueError("Omni navigation restore requires an idle controller")
+
+        def pose_from(value: dict) -> Pose:
+            return Pose(position=list(value["position"]), orientation=list(value["orientation"]))
+
+        self._path = [pose_from(value) for value in state["path"]]
+        self._current_waypoint_index = state["waypoint_index"]
+        self._goal_pose = pose_from(state["goal"])
+        self._align_final_orientation = state["align_final_orientation"]
+        target = state["final_target_orientation"]
+        self._final_target_orientation = np.asarray(target, dtype=float) if target is not None else None
+        self._is_final_orientation_aligning = state["final_alignment_in_progress"]
+        self._mode = ControllerMode.POSE
+        self._pose_phase = PosePhase(state["phase"])
+
+        if self._pose_phase is PosePhase.FORWARD:
+            forward = state["forward"]
+            origin = np.asarray(forward["origin"], dtype=float) if forward["origin"] is not None else None
+            if origin is not None:
+                goal_position = np.asarray(self._goal_pose.position, dtype=float)
+                if self.params.navigation_2d:
+                    goal_position[2] = origin[2]
+                displacement = goal_position - origin
+                distance = float(np.linalg.norm(displacement))
+            else:
+                displacement = np.zeros(3)
+                distance = 0.0
+            self._forward_start_pos = origin
+            self._forward_direction_3d = displacement
+            self._forward_total_distance_3d = distance
+            self._forward_direction_unit = displacement / distance if distance > 1e-9 else np.zeros(3)
+            qx, qy, qz, qw = orientation
+            self._forward_direction_unit_body = np.asarray(
+                rotate_vector(tuple(self._forward_direction_unit), (-qx, -qy, -qz, qw))
+            )
+            after_rotation = forward["orientation_after_rotation"]
+            self._rotation_target_quat = np.asarray(after_rotation, dtype=float) if after_rotation is not None else None
+            self._tpi_forward = build_tpi(
+                p0=0.0,
+                pe=distance,
+                vmax=forward["vmax"],
+                accel=forward["accel"],
+                t0=forward["t0"],
+            )
+        else:
+            self._reset_forward_state()
+            rotation = state["rotation"]
+            if rotation is not None:
+                start = np.asarray(rotation["start_orientation"], dtype=float)
+                target = np.asarray(rotation["target_orientation"], dtype=float)
+                angle = quat_angle_between(tuple(start), tuple(target))
+                self._rotation_start_quat = start
+                self._rotation_target_quat = target
+                self._rotation_total_angle = float(angle)
+                self._tpi_rotation_angle = build_tpi(
+                    p0=0.0,
+                    pe=angle,
+                    vmax=rotation["vmax"],
+                    accel=rotation["accel"],
+                    t0=rotation["t0"],
+                )
+                self._slerp_precomp = quat_slerp_precompute(start, target)
+
     # -- Velocity kinematics -------------------------------------------
 
     def set_velocity(

@@ -1,7 +1,11 @@
 # Manipulation/entity-lifecycle scenario — implementation evidence
 
-**Status:** Scenario merged in PR #55. No checkpoint/restore,
-recording/playback or schema implementation is claimed.
+**Usage status:** State-discovery evidence; general snapshot/restore is still
+under development and not ready for production use.
+
+**Status:** Historical evidence for the scenario merged in PR #55. That slice
+did not implement checkpoint/restore or recording/playback. The later V1 proof
+and its current limits are described in [feature-v1-spec-plan.md](feature-v1-spec-plan.md).
 
 ## Headless run
 

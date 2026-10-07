@@ -94,6 +94,10 @@ class FakeSim:
         for agent in self.agents:
             agent.sim_core = self
 
+    def _record_state_input(self, operation, details):
+        """Match the core recording hook; this fake does not record."""
+        return None
+
 
 def test_fleet_state_provider_returns_3d_and_2d_snapshots():
     sim = FakeSim(

@@ -2,6 +2,13 @@
 
 Practical guides for common tasks.
 
+```{warning}
+Snapshot/replay, state recording, checkpoint/restore and result playback are
+under development. The linked replay and checkpoint guides describe restricted
+validation profiles, not general save/load support for ordinary simulations.
+Do not rely on these APIs or artifacts for production runs yet.
+```
+
 **📘 For Simulation Users** — building and configuring your own simulation:
 
 | Guide | What It Covers |
@@ -30,11 +37,8 @@ collision-config
 controller-config
 custom-profiling
 capturing-demos
-replay
 fleet-corridor-evaluation
 fleet-corridor-traffic-failure
-manipulation-state-scenario
-omni-checkpoint-proof
 ```
 
 ```{toctree}
@@ -44,4 +48,7 @@ omni-checkpoint-proof
 time-profiling
 memory-profiling
 logging
+replay
+manipulation-state-scenario
+omni-checkpoint-proof
 ```

@@ -99,6 +99,9 @@ class _FakeSim:
         for agent in self.agents:
             agent.sim_core = self
 
+    def _record_state_input(self, operation, details):
+        pass
+
 
 def test_client_factory_defaults_to_per_robot_ros(mock_node):
     from pybullet_fleet_rmf.fleet_clients import PerRobotRosClientFactory, create_rmf_client_factory

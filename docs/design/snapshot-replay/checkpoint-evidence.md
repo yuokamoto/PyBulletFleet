@@ -1,5 +1,8 @@
 # Single-omni checkpoint proof — implementation evidence
 
+**Usage status:** Evidence for one development proof, not a general or
+production checkpoint/restore capability.
+
 **Status:** Implemented locally for Human Review. Only the fixed one-robot
 straight-navigation profile is claimed.
 

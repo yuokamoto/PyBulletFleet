@@ -1734,6 +1734,49 @@ class Agent(SimObject):
             return (0.0, 0.0)
         return self.get_joint_state(idx)
 
+    def capture_kinematic_joint_execution(self) -> list[dict]:
+        """Capture every URDF joint position and its last kinematic target."""
+        if not self._use_kinematic_joints or not self.joint_info:
+            raise ValueError("Kinematic joint checkpoint requires a jointed kinematic URDF robot")
+        joints = []
+        for index, info in enumerate(self.joint_info):
+            joints.append(
+                {
+                    "name": info[1].decode("utf-8"),
+                    "position": float(self._kinematic_joint_positions[index]),
+                    "target": self._last_joint_targets.get(index),
+                }
+            )
+        return joints
+
+    def restore_kinematic_joint_execution(self, states: list[dict]) -> None:
+        """Restore all joint positions and targets without issuing commands."""
+        if not self._use_kinematic_joints or not isinstance(states, list) or len(states) != len(self.joint_info):
+            raise ValueError("Joint checkpoint does not match the kinematic URDF robot")
+        targets = {}
+        for index, (state, info) in enumerate(zip(states, self.joint_info)):
+            if not isinstance(state, dict) or state.get("name") != info[1].decode("utf-8"):
+                raise ValueError("Joint checkpoint names or order differ from the kinematic URDF")
+            position = state.get("position")
+            target = state.get("target")
+            if (
+                isinstance(position, bool)
+                or not isinstance(position, (int, float))
+                or not math.isfinite(position)
+                or (
+                    target is not None
+                    and (isinstance(target, bool) or not isinstance(target, (int, float)) or not math.isfinite(target))
+                )
+            ):
+                raise ValueError("Joint checkpoint contains a nonfinite or invalid value")
+            if target is not None:
+                targets[index] = float(target)
+        for index, state in enumerate(states):
+            position = float(state["position"])
+            p.resetJointState(self.body_id, index, position, physicsClientId=self._pid)
+            self._kinematic_joint_positions[index] = position
+        self._last_joint_targets = targets
+
     def get_all_joints_state(self) -> list:
         """
         Return a list of (position, velocity) for all joints.

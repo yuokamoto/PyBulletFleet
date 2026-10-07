@@ -1,5 +1,8 @@
 # Navigation replay: implementation evidence and review handoff
 
+**Usage status:** Evidence for a restricted development profile, not a general
+or production snapshot/replay capability.
+
 **Status:** Implementation verification complete; Copilot review findings
 addressed and PR #50 merged on 2026-09-29.
 

@@ -131,6 +131,19 @@ class FleetCommandDispatcher:
         by_name = _first_command_by_name(commands)
         for name in ack.accepted_names:
             accepted[name].set_goal_pose(by_name[name].to_pose())
+        self._record_effective_input(
+            "navigate",
+            ack,
+            {
+                name: {
+                    "position": list(by_name[name].to_pose().position),
+                    "orientation": list(by_name[name].to_pose().orientation),
+                    "auto_approach": True,
+                    "final_orientation_align": True,
+                }
+                for name in ack.accepted_names
+            },
+        )
         return ack
 
     def joint_command(
@@ -160,6 +173,18 @@ class FleetCommandDispatcher:
                 agent.set_all_joints_targets(list(command.positions))
             else:
                 agent.set_joints_targets_by_name(dict(command.positions))
+        self._record_effective_input(
+            "joint_command",
+            ack,
+            {
+                name: (
+                    dict(by_name[name].positions)
+                    if isinstance(by_name[name], RobotNamedJointPositionsCommand)
+                    else list(by_name[name].positions)
+                )
+                for name in ack.accepted_names
+            },
+        )
         return ack
 
     def stop(
@@ -176,6 +201,7 @@ class FleetCommandDispatcher:
         ack = self._ack("stop", resolved_id, source, target_names, accepted, rejected)
         for name in ack.accepted_names:
             accepted[name].stop()
+        self._record_effective_input("stop", ack, {name: {} for name in ack.accepted_names})
         return ack
 
     def attach(
@@ -222,7 +248,35 @@ class FleetCommandDispatcher:
                 rejected[name] = "attach mutation failed" if command.attach else "detach mutation failed"
                 del accepted[name]
 
-        return self._command_ack(event, accepted, rejected)
+        ack = self._command_ack(event, accepted, rejected)
+        self._record_effective_input(
+            "attach",
+            ack,
+            {
+                name: {
+                    "attach": by_name[name].attach,
+                    "object_name": by_name[name].object_name,
+                    "parent_link": by_name[name].parent_link,
+                    "offset_position": list(by_name[name].offset.position),
+                    "offset_orientation": list(by_name[name].offset.orientation),
+                }
+                for name in ack.accepted_names
+            },
+        )
+        return ack
+
+    def _record_effective_input(self, operation: str, ack: CommandAck, effective: dict) -> None:
+        record = getattr(self.sim_core, "_record_state_input", None)
+        if record is None:
+            return
+        record(
+            operation,
+            {
+                "command_id": ack.command_id,
+                "accepted": effective,
+                "rejected": dict(ack.rejected),
+            },
+        )
 
     def execute_action(
         self,
