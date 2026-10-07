@@ -138,7 +138,9 @@ class Elevator(Agent):
         agent._joint_name = spawn_params.joint_name
         agent._platform_link = spawn_params.platform_link
         agent._passengers = []  # Currently attached passengers
-        if spawn_params.max_speed or spawn_params.max_accel or spawn_params.max_decel:
+        # `is not None`, not truthiness: a zero is invalid, and skipping it
+        # here would silently fall back to the URDF instead of rejecting it.
+        if any(v is not None for v in (spawn_params.max_speed, spawn_params.max_accel, spawn_params.max_decel)):
             agent.set_joint_motion_profile(
                 agent._joint_name,
                 max_velocity=spawn_params.max_speed,

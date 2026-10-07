@@ -106,7 +106,9 @@ def _validate_checkpoint(manifest: dict, state: dict) -> None:
     if state["sim"]["type"] != "kinematic" or state["sim"]["version"] != 1:
         raise ValueError("Unsupported simulation state type or version")
     robot_entry = state["agents"][c["robot_name"]]
-    if robot_entry["type"] != "mobile_manipulator" or robot_entry["version"] != 1:
+    # v2 adds `speed` to each joint entry, so a v1 artifact no longer matches
+    # the joint schema and is refused here rather than failing deeper in.
+    if robot_entry["type"] != "mobile_manipulator" or robot_entry["version"] != 2:
         raise ValueError("Unsupported agent state type or version")
     robot = _keys(
         robot_entry["state"],
@@ -124,16 +126,23 @@ def _validate_checkpoint(manifest: dict, state: dict) -> None:
         raise ValueError("Invalid joint checkpoint")
     joint_names = set()
     for entry in joints:
-        joint = _keys(entry, {"name", "position", "target"}, "joint")
+        # `speed` is the ramp state a joint carries when it has a motion
+        # profile, and None when it does not. _keys() requires an exact match,
+        # so it is listed rather than optional: every checkpoint this version
+        # writes has it, and the agent-state version below is what tells an
+        # older artifact apart.
+        joint = _keys(entry, {"name", "position", "target", "speed"}, "joint")
         name = joint["name"]
         if not isinstance(name, str) or not name or name in joint_names:
             raise ValueError("Invalid or duplicate joint name")
         joint_names.add(name)
-        for key in ("position", "target"):
-            value = joint[key]
+        for key in ("position", "target", "speed"):
+            value = joint.get(key)
             if value is not None or key == "position":
                 if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
                     raise ValueError("Invalid joint position or target")
+        if joint.get("speed") is not None and joint["speed"] < 0.0:
+            raise ValueError("Invalid joint position or target")
     if c["joint_name"] not in joint_names:
         raise ValueError("Declared scenario joint is missing from checkpoint")
     controller_entry = _keys(robot["controller"], {"type", "version", "state"}, "controller")
@@ -403,7 +412,9 @@ class KinematicManipulationProfile:
             "agents": {
                 self.robot_name: {
                     "type": "mobile_manipulator",
-                    "version": 1,
+                    # v2: each joint entry carries `speed`, the ramp state of
+                    # a joint with a motion profile.
+                    "version": 2,
                     "state": {
                         "key": self.robot_name,
                         "pose": _pose_record(pose),

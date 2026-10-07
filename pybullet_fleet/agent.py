@@ -1515,8 +1515,13 @@ class Agent(SimObject):
         """
         index = joint if isinstance(joint, int) else self._joint_index_by_name(joint)
         for label, value in (("max_velocity", max_velocity), ("max_accel", max_accel), ("max_decel", max_decel)):
-            if value is not None and value <= 0.0:
-                raise ValueError(f"{label} must be > 0, got {value!r}")
+            if value is None:
+                continue
+            # isfinite before the comparison: NaN and inf both slip past
+            # `value <= 0.0`, and would then be stored and produce a nan or
+            # infinite step.
+            if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value <= 0.0:
+                raise ValueError(f"{label} must be a finite number > 0, got {value!r}")
 
         current_vel, current_accel, current_decel = self._joint_motion_profiles.get(
             index, (self._urdf_joint_velocity(index), None, None)
@@ -1884,6 +1889,10 @@ class Agent(SimObject):
                     "name": info[1].decode("utf-8"),
                     "position": float(self._kinematic_joint_positions[index]),
                     "target": self._last_joint_targets.get(index),
+                    # Execution state once a joint ramps: restoring mid-travel
+                    # without it resumes from a standstill and takes a
+                    # different path to the same target.
+                    "speed": self._joint_speeds.get(index),
                 }
             )
         return joints
@@ -1893,11 +1902,19 @@ class Agent(SimObject):
         if not self._use_kinematic_joints or not isinstance(states, list) or len(states) != len(self.joint_info):
             raise ValueError("Joint checkpoint does not match the kinematic URDF robot")
         targets = {}
+        speeds = {}
         for index, (state, info) in enumerate(zip(states, self.joint_info)):
             if not isinstance(state, dict) or state.get("name") != info[1].decode("utf-8"):
                 raise ValueError("Joint checkpoint names or order differ from the kinematic URDF")
             position = state.get("position")
             target = state.get("target")
+            # Absent in a checkpoint written before ramps existed, which still
+            # restores: that joint simply starts its travel from rest.
+            speed = state.get("speed")
+            if speed is not None:
+                if isinstance(speed, bool) or not isinstance(speed, (int, float)) or not math.isfinite(speed) or speed < 0.0:
+                    raise ValueError("Joint checkpoint contains a nonfinite or invalid value")
+                speeds[index] = float(speed)
             if (
                 isinstance(position, bool)
                 or not isinstance(position, (int, float))
@@ -1915,6 +1932,7 @@ class Agent(SimObject):
             p.resetJointState(self.body_id, index, position, physicsClientId=self._pid)
             self._kinematic_joint_positions[index] = position
         self._last_joint_targets = targets
+        self._joint_speeds = speeds
 
     def get_all_joints_state(self) -> list:
         """

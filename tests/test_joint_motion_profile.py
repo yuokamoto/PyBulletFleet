@@ -76,6 +76,15 @@ class TestJointSpeedOverride:
             with pytest.raises(ValueError):
                 agent.set_joint_motion_profile(JOINT, **kwargs)
 
+    def test_non_finite_values_are_refused(self, sim_core):
+        """NaN and inf both slip past `value <= 0.0`, and would then produce a
+        nan or infinite step."""
+        agent = Agent.from_params(AgentSpawnParams(urdf_path=URDF, name="a", use_fixed_base=True), sim_core=sim_core)
+        for bad in (float("nan"), float("inf"), float("-inf")):
+            for key in ("max_velocity", "max_accel", "max_decel"):
+                with pytest.raises(ValueError, match="finite"):
+                    agent.set_joint_motion_profile(JOINT, **{key: bad})
+
 
 class TestAccelerationRamp:
     def test_a_ramp_takes_the_trapezoid_time(self, sim_core):
@@ -113,20 +122,84 @@ class TestAccelerationRamp:
 
     def test_a_target_replaced_mid_travel_still_arrives(self, sim_core):
         """The reason the trapezoid is integrated step by step rather than
-        planned once: there is no plan to invalidate."""
+        planned once: there is no plan to invalidate.
+
+        The replacement goes through ``set_joint_target_by_name``, not a
+        second ``JointAction``: ``add_action()`` appends to the queue, so a
+        second action would wait for the first to finish rather than replace
+        its target, and the test would not exercise this at all.
+        """
         agent = Agent.from_params(AgentSpawnParams(urdf_path=URDF, name="a", use_fixed_base=True), sim_core=sim_core)
         agent.set_joint_motion_profile(JOINT, max_velocity=0.4, max_accel=1.0)
+        index = agent._joint_index_by_name(JOINT)
+
         agent.add_action(JointAction(target_joint_positions={JOINT: 2.0}))
         for _ in range(40):
             sim_core.step_once()
+        # Up to speed and still travelling, which is the state being replaced.
         assert agent.get_joint_state_by_name(JOINT)[0] > 0.0
+        assert agent._joint_speeds.get(index, 0.0) > 0.0
 
-        agent.add_action(JointAction(target_joint_positions={JOINT: 0.3}))
+        agent.clear_actions()
+        agent.set_joint_target_by_name(JOINT, 0.3)
+        carried = agent._joint_speeds.get(index, 0.0)
+        assert carried > 0.0, "the speed is carried into the new travel, not reset"
+
         for _ in range(4000):
             sim_core.step_once()
             if abs(agent.get_joint_state_by_name(JOINT)[0] - 0.3) < 1e-6:
                 break
         assert agent.get_joint_state_by_name(JOINT)[0] == pytest.approx(0.3, abs=1e-6)
+        assert agent._joint_speeds.get(index) is None, "the speed is dropped on arrival"
+
+
+class TestCheckpointCarriesTheRampSpeed:
+    """Raised in review: ramp speed is execution state, so a checkpoint taken
+    mid-travel has to carry it or the restored agent takes a different path to
+    the same target."""
+
+    def _ramping_agent(self, sim_core):
+        agent = Agent.from_params(AgentSpawnParams(urdf_path=URDF, name="a", use_fixed_base=True), sim_core=sim_core)
+        agent.set_joint_motion_profile(JOINT, max_velocity=0.4, max_accel=1.0)
+        agent.add_action(JointAction(target_joint_positions={JOINT: 2.0}))
+        for _ in range(40):
+            sim_core.step_once()
+        return agent
+
+    def test_capture_records_it(self, sim_core):
+        agent = self._ramping_agent(sim_core)
+        index = agent._joint_index_by_name(JOINT)
+        captured = agent.capture_kinematic_joint_execution()
+        assert captured[index]["speed"] == pytest.approx(agent._joint_speeds[index])
+
+    def test_restore_puts_it_back(self, sim_core):
+        agent = self._ramping_agent(sim_core)
+        index = agent._joint_index_by_name(JOINT)
+        captured = agent.capture_kinematic_joint_execution()
+        speed = agent._joint_speeds[index]
+
+        agent._joint_speeds.clear()
+        agent.restore_kinematic_joint_execution(captured)
+
+        assert agent._joint_speeds[index] == pytest.approx(speed)
+
+    def test_a_checkpoint_without_the_field_still_restores(self, sim_core):
+        """Written before ramps existed: that joint just starts from rest."""
+        agent = self._ramping_agent(sim_core)
+        captured = agent.capture_kinematic_joint_execution()
+        for entry in captured:
+            entry.pop("speed")
+
+        agent.restore_kinematic_joint_execution(captured)
+
+        assert agent._joint_speeds == {}
+
+    def test_a_nonfinite_speed_is_refused(self, sim_core):
+        agent = self._ramping_agent(sim_core)
+        captured = agent.capture_kinematic_joint_execution()
+        captured[agent._joint_index_by_name(JOINT)]["speed"] = float("nan")
+        with pytest.raises(ValueError, match="nonfinite"):
+            agent.restore_kinematic_joint_execution(captured)
 
 
 class TestElevatorParamsMotion:
@@ -172,6 +245,13 @@ class TestElevatorParamsMotion:
         assert flat == pytest.approx(1.5, abs=3 * DT)
         assert ramped > flat + 0.2
         assert ramped == pytest.approx(1.9, abs=0.15)
+
+    def test_a_zero_is_refused_rather_than_ignored(self, sim_core):
+        """Truthiness here would skip the profile for 0.0, silently falling
+        back to the URDF instead of rejecting an invalid value."""
+        for field in ("max_speed", "max_accel", "max_decel"):
+            with pytest.raises(ValueError):
+                self._elevator(sim_core, **{field: 0.0})
 
     def test_from_dict_carries_the_motion_fields(self):
         params = ElevatorParams.from_dict(

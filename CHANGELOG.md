@@ -39,6 +39,11 @@ are not recommended for production use yet.
 - `OmniController.capture_straight_navigation()` now rejects an asymmetric
   profile. Its record carries a single `accel`, so such a trajectory could not
   be rebuilt from it; the checkpoint schema is unchanged.
+- The kinematic manipulation validation profile's agent state is now
+  version 2: each joint entry carries `speed`, the ramp state of a joint with
+  a motion profile, which a checkpoint taken mid-travel needs so a restored
+  run takes the same path to its target. Version 1 artifacts are refused
+  rather than restored without it.
 
 - An optional state-recorder error during a command, object spawn/removal, or
   completed-step capture now stops recording with an explicitly incomplete
