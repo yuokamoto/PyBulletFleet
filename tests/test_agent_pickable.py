@@ -120,3 +120,30 @@ class TestFromDictDefault:
         from pybullet_fleet.sim_object import SimObjectSpawnParams
 
         assert SimObjectSpawnParams.from_dict({"name": "box"}).pickable is True
+
+
+class TestSpawnEventSeesTheConfiguredValue:
+    """Raised in review: SimObject.__init__ registers the body and emits
+    OBJECT_SPAWNED, so overwriting pickable after super() returned let every
+    listener observe the default instead of what the agent was configured
+    with."""
+
+    def test_the_spawn_event_carries_the_configured_value(self, sim_core):
+        from pybullet_fleet.events import SimEvents
+
+        seen = []
+        sim_core.events.on(SimEvents.OBJECT_SPAWNED, lambda obj=None, **_: seen.append(obj.pickable))
+
+        Agent.from_params(AgentSpawnParams(urdf_path=URDF, name="cargo", pickable=True), sim_core=sim_core)
+
+        assert seen == [True]
+
+    def test_and_the_default_at_spawn_time_too(self, sim_core):
+        from pybullet_fleet.events import SimEvents
+
+        seen = []
+        sim_core.events.on(SimEvents.OBJECT_SPAWNED, lambda obj=None, **_: seen.append(obj.pickable))
+
+        Agent.from_params(AgentSpawnParams(urdf_path=URDF, name="bot"), sim_core=sim_core)
+
+        assert seen == [False]

@@ -309,6 +309,10 @@ class Agent(SimObject):
         joint_tolerance: Optional[Union[float, list, dict]] = None,
         controller: Optional[Union[str, Dict[str, Any], "ControllerParams", "Controller"]] = None,
         notify_spawn: bool = True,
+        # Agents default to not pickable -- a robot is usually the thing doing
+        # the picking -- but an agent can be cargo too: a lift car's platform,
+        # or a pallet with a joint. attach_object() refuses a non-pickable
+        # body, so it has to be settable at the spawn rather than only after.
         pickable: bool = False,
     ):
         """
@@ -370,7 +374,19 @@ class Agent(SimObject):
         """
         # Initialize SimObject base class (collision_mode is forwarded so
         # add_object receives the correct mode directly – no post-hoc transition)
-        super().__init__(body_id, sim_core=sim_core, collision_mode=collision_mode, name=name, user_data=user_data, mass=mass)
+        # pickable goes in through super(), not assigned afterwards: SimObject
+        # registers the body and emits OBJECT_SPAWNED from there, so a late
+        # overwrite let every listener see the default rather than what the
+        # agent was configured with.
+        super().__init__(
+            body_id,
+            sim_core=sim_core,
+            collision_mode=collision_mode,
+            name=name,
+            user_data=user_data,
+            mass=mass,
+            pickable=pickable,
+        )
 
         self.urdf_path = urdf_path
 
@@ -431,13 +447,6 @@ class Agent(SimObject):
             self._kinematic_joint_positions: Dict[int, float] = {i: states[i][0] for i in indices}
         else:
             self._kinematic_joint_positions: Dict[int, float] = {}
-
-        # Agents default to not pickable -- a robot is usually the thing doing
-        # the picking -- but an agent can be cargo too: a lift car's platform,
-        # or a pallet with a joint. attach_object() refuses a non-pickable
-        # body, so this has to be settable at the spawn rather than only
-        # afterwards.
-        self.pickable = pickable
 
         # Per-agent plugin system (e.g. BatteryPlugin)
         self._plugins: List[AgentPlugin] = []
