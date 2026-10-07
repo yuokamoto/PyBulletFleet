@@ -1,5 +1,11 @@
 # Record and re-execute fleet navigation
 
+```{warning}
+Development preview. This API is a restricted validation profile and is not
+recommended for production use or general simulation recording. The broader
+snapshot/restore/playback workflow is still under development.
+```
+
 `pybullet_fleet.replay` records effective Fleet API inputs and re-executes them
 from the **recorded initial state** in a fresh PyBulletFleet instance. It applies
 the saved inputs at their original steps and compares computed results. Explicit

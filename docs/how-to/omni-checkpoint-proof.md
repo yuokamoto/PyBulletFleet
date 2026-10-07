@@ -1,5 +1,11 @@
 # Run the single-omni checkpoint proof
 
+```{warning}
+Development proof only. This checkpoint format and restore procedure validate
+one fixed scenario; they are not a supported general save/load facility and
+should not be used for production runs.
+```
+
 This example tests a **supported, limited execution checkpoint**: one
 physics-off `OmniController` robot on a single straight path with a fixed
 0.1 s timestep. It saves after completed step `S_3`, ends that process,

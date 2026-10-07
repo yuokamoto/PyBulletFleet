@@ -60,8 +60,14 @@ New robot and infrastructure models:
 
 ## Simulation Capabilities
 
-- **Snapshot, Event log & Replay** — Restricted kinematic navigation
-  re-execution from a recorded initial state is implemented: a session-owned
+- **Snapshot, Event log & Replay** —
+  **Development status:** The replay, recording, checkpoint and playback work
+  below consists of restricted validation profiles. It is not ready for
+  general use with ordinary simulations or production artifacts. The intended
+  save/restart/playback user workflow remains under development.
+
+  Restricted kinematic navigation re-execution from a recorded initial state
+  is implemented: a session-owned
   fresh instance, effective Fleet API navigate/stop inputs at a defined
   step/order, full observations, supported outcomes, and comparison. The
   versioned artifact is PBF-owned;
@@ -94,8 +100,8 @@ New robot and infrastructure models:
   and effective parameters. Names such as `save=on`, `pbf-restart --time` and
   `pbf-playback --rtf` are provisional. Time selection should begin from the
   nearest usable checkpoint **not later than** the requested time; exact
-  advance-to-time semantics remain to be designed. These are goals, not current
-  capabilities; the product-goals document defines their boundaries.
+  advance-to-time semantics remain to be designed. These are overall goals;
+  only declared supported profiles have the capabilities described below.
 
   The current initial-state input re-execution is a limited first step toward
   these goals. It can compare changed code/configuration from the beginning of
@@ -115,14 +121,22 @@ New robot and infrastructure models:
   single-omni subset from later save/load work. The manipulation scenario's
   `docs/design/snapshot-replay/manipulation-state-scenario-evidence.md`
   records the observation and ownership findings behind part of that list.
-  No manipulation checkpoint is implemented yet.
+  The example-side physics-off omni manipulation profile now offers opt-in
+  per-step state recording, fresh-process restore/resume and result playback
+  through the validation example. This is one robot with all kinematic joint
+  positions/targets recorded (one driven by the scenario), and one box, with
+  the ordinary omni pose path, generated approach waypoint, final turn,
+  direct supported commands and an explicit application-stage hook;
+  it is not arbitrary-example save/load or Action/BT/plugin restoration. See
+  [the manipulation guide](how-to/manipulation-state-scenario) and the
+  [V1 feature plan](https://github.com/yuokamoto/PyBulletFleet/blob/main/docs/design/snapshot-replay/feature-v1-spec-plan.md).
 
   Distinguish three records where the user goals require them:
 
   | Record | Primary question | Current status |
   | --- | --- | --- |
-  | State observation / future checkpoint | What was the world state? Can execution resume? | V1 has sampled, profile-full observations; a separate single-omni straight-navigation checkpoint proof can resume in a fresh process. Broader restore remains future work. |
-  | Input and event journal | Which effective input was applied, when, and what ack/outcome followed? | V1 durably records supported navigation inputs, acks and events; broader typed events remain future work. |
+  | State observation / execution checkpoint | What was the world state? Can execution resume? | The omni manipulation profile records a full checkpoint each completed step and resumes from it in a fresh process. Arbitrary controllers and state owners remain unsupported. |
+  | Input and event journal | Which effective input was applied, when, and what ack/outcome followed? | The manipulation profile records supported Fleet API commands and box spawn/remove operations; arbitrary direct mutators and broader typed events remain future work. |
   | Operation trace | Why did a task take this path across RMF, ROS, agents and devices? | Future sampled action/operation spans; not a replay input source. |
 
   Snapshots alone cannot yield the causal operation trace: sampled poses omit
@@ -159,8 +173,21 @@ New robot and infrastructure models:
     profile: explicit input order alone is insufficient without controlled
     randomness, time, external inputs, scheduling, assets and relevant runtime
     state. Preserve ordinary API compatibility during any migration.
-  - Result playback/seek for supported observations; delta encoding is a
-    separate storage optimization, not a playback prerequisite.
+  - Result playback/seek for supported observations, with GUI viewing as the
+    primary user operation. Resolve a registered renderer/profile from the
+    artifact manifest for a future `pbf-playback <artifact>` command, rather
+    than requiring users to instantiate an example-specific profile manually.
+    Share profile resolution with restart tooling; keep headless frame access
+    available for tests and external analysis. Define a separate explicit GUI
+    renderer contract instead of discovering optional `play_gui` with `getattr`.
+    Replace the validation renderer's hard-coded robot/box updates with a loop
+    over declared frame entities and registered display handlers; include
+    spawn/remove behavior and stable-key-to-rendered-object mapping before
+    claiming dynamic-world playback. Keep camera controls usable during
+    playback. Treat a recorded camera pose, if useful, as optional initial
+    display metadata with a user override, not as execution-checkpoint state
+    or a per-frame camera reset. Delta encoding is a separate storage
+    optimization, not a playback prerequisite.
   - Additional profiles, starting from concrete failure cases: differential
     navigation, attach/detach and the controller/attachment state needed to
     explain their outcomes; then joint/action/device/BT and dynamic worlds as

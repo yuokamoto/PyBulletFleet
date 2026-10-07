@@ -1,9 +1,49 @@
 # Snapshot / Restore / Replay / Playback V1 — feature specification and plan
 
-**Status:** Scope and architecture direction approved for implementation.
+**Status:** Under development for a restricted validation profile; pending Human Review.
+The current APIs and artifacts are not recommended for general or production
+use. The profile and extension boundary are still being reviewed.
 Material changes to the supported profile or state ownership return for Human
 Review. This applies to the whole feature theme; controller and entity-state
 tests are not separate feature themes.
+
+## Current architecture correction
+
+Human review identified that the first implementation embedded the validation
+scenario's one mobile manipulator, one box and `application_state` callback in
+PBF's recording module. Before this feature is ready for review, make the PBF
+recorder accept a versioned recording profile and named, versioned data-record
+callbacks with a defined completed-step input and JSON-compatible output.
+The recorder owns capture timing, validation of the record envelope and file
+I/O; the profile owns construction, supported state capture, validation and
+restore. A caller registers its own data provider, and a fresh process reads
+its saved value and re-registers its callback code. The scenario stage is one
+such provider, not a special `application` field in PBF.
+
+The scenario-specific profile belongs with the manipulation validation
+example. Profile state uses explicit `sim`, `agents` and `objects` sections
+keyed by durable names and type/version declarations; controller state is
+nested under each agent. Only the built-in omni controller, the demonstrated
+mobile manipulator and the constructed box need concrete handlers now.
+Unsupported live state must
+remain visible as unsupported. Verify the generic recorder with a second,
+different profile as well as the existing CP1/CP3 fresh-process demonstration.
+This is an extension contract, not a claim that arbitrary kinematic state can
+already be restored.
+
+The correction is implemented in this working branch. `RecordingProfile`
+declares construction, capture, validation, restore, profile ID/version and
+coverage. The common recorder stores named `DataRecord` values returned at a
+completed boundary. The artifact has versioned `sim`, `agents` and `objects`
+sections, with a versioned controller state inside its agent; the
+Omni/mobile-manipulator/box handlers and
+GUI renderer live with the validation example. A second empty-world profile
+test records custom data and restores its clock without changing the writer.
+Fresh-process CP1, active-turn and CP3 continuation tests remain the acceptance
+checks. This proves extensibility of the writer, not support for every
+kinematic entity or controller. Data callback failures still follow the
+existing fail-visible recording path; the best-effort capture policy remains
+on the product-goal checklist.
 
 Read the [product goals and capability checklist](product-goals.md) before
 changing this scope. The goal here is a usable path through those goals, not a
@@ -27,40 +67,41 @@ the recorded results for step/seek playback. The artifact reports exactly
 which inputs, state owners and steps it covers. A changed external policy or
 runtime setting is a new continuation, not proof of identical replay.
 
-The intended user-facing shape is below. Names are proposals, not existing
-APIs or commands:
+The implemented supported-profile Python shape is:
 
 ```python
-sim = build_supported_simulation()  # ordinary PBF setup, reused by the scenario
+sim = build_supported_simulation()  # ordinary PBF setup
 sim.configure_state_recording(
-    enabled=True, output="run-dir", checkpoint_every_steps=1,
-    profile="kinematic_manipulation_v1",
+    profile=KinematicManipulationProfile(...),  # validation example's declared support
+    records=(DataRecord("scenario", 1, capture_scenario_state, required_for_restore=True),),
+    output="run-dir",
+    checkpoint_every_steps=1,
 )
 register_scenario_callbacks(sim, scenario_state=ScenarioState())
 sim.run_simulation()  # PBF records completed steps; no user step loop
 
 # Separate process, after the source has exited:
-restored = load_supported_checkpoint("run-dir", at_or_before=2.1)
-sim, scenario_state = restored.create_simulation_and_scenario()
+profile = KinematicManipulationProfile.from_manifest(load_recording_manifest("run-dir"))
+manifest, checkpoint = load_supported_checkpoint("run-dir", at_or_before=2.1, profile=profile)
+sim = restore_supported_simulation(manifest, checkpoint, profile=profile)
+robot = next(agent for agent in sim.agents if agent.name == "mobile-arm")
+box = next((obj for obj in sim.sim_objects if obj.name == "box-001"), None)
+scenario_state = checkpoint["records"]["scenario"]["value"]
+register_scenario_callbacks(sim, scenario_state=scenario_state)
 sim.run_simulation(resume=True)
 
-with ResultPlayback.open("run-dir") as playback:
+with ResultPlayback("run-dir") as playback:
     playback.seek_step(21)
     print(playback.state, playback.events)
     playback.step()
 ```
 
-`configure_state_recording()` is a proposed simple setting, not an existing
-method. `record=True` in normal configuration could be equally appropriate;
-an output location can be auto-named when omitted. A context manager may be
-offered for callers that want explicit file lifetime, but it should not be
-required for ordinary runs. `create_simulation_and_scenario()` represents
-PBF-provided reconstruction tools plus a supported scenario entrypoint and
-an explicit external-state restore hook. V1 must **not** promise that an
-artifact can construct arbitrary user Python applications. A narrow example
-CLI should expose the same record, restart and playback operations, with an
-optional GUI for visual inspection. Exact API/CLI spelling belongs to the
-implementation review. The existing video `SimulationRecorder` and
+`configure_state_recording()` is an opt-in setting; the output location can
+be auto-named when omitted. PBF reconstructs its supported world, while the
+application restores its own stage and callback code. V1 does **not** promise
+that an artifact can construct arbitrary user Python applications. The
+scenario CLI exposes record, restart and playback with optional GUI. The
+existing video `SimulationRecorder` and
 `start_recording()` are for GIF/MP4 capture; state recording needs a distinct
 name.
 
@@ -111,16 +152,16 @@ usable for this operation. A reference run and both restored continuations
 must exercise the same supported sequence.
 
 The profile is one mobile manipulator, one supported built-in **omni**
-controller, one named kinematic joint, one constructed box, direct supported
-PBF/Fleet API operations, physics off, fixed timestep and packaged/available
-unchanged assets. This retains #56's controller state path while extending
-one user operation across joint, attachment and entity lifecycle. PR #55's
-example currently uses a differential controller. The first implementation
-check must confirm that the same mobile manipulator and route work with omni;
-if they do not, return with evidence and a profile choice rather than quietly
-dropping manipulation or adding differential support. Separate differential
-navigation, including its turning phase, is the next controller profile after
-V1.
+controller, one actively driven named kinematic joint (with every joint
+position and configured target captured), one constructed box, direct
+supported PBF/Fleet API operations, physics off, fixed timestep and
+packaged/available unchanged assets. Its navigation uses the ordinary
+`set_goal_pose()` path, including the generated approach waypoint and final
+orientation turn. Tests restore during forward travel and during that turn.
+This extends #56's controller state path across normal goal handling, joint,
+attachment and entity lifecycle. The default observation-only differential
+scenario remains available; restoring differential execution is a later
+controller profile.
 
 Existing `name` values are not unique and runtime PBF `object_id`/PyBullet
 body IDs are run-local. V1 therefore uses a recording-local stable entity key,
@@ -138,7 +179,7 @@ devices or custom SimObjects; physics-engine state; ROS/RMF/DDS state;
 multi-robot execution; universal schema; USO runtime unification; delta
 checkpoints; GUI editing; or warehouse evaluation. The selected scenario's
 registered callback code is recreated by the application, and its mutable
-stage is saved through an explicit application-state hook. An undeclared
+stage is saved through a named, versioned data callback. An undeclared
 stateful callback or plugin makes a checkpoint unsupported; V1 must fail
 closed instead of silently omitting it.
 
@@ -195,21 +236,19 @@ state fixtures, but cannot replace this complete demonstration.
 | --- | --- | --- |
 | Fixed timestep, physics mode, controller/robot configuration, asset identity | Core/world construction; #56 hard-codes `_make_sim()` | Persist effective supported construction and validate compatibility. Reconstruct without requiring the old process or its runtime IDs. |
 | Completed step and elapsed simulation time | Core; `POST_STEP` occurs before counters advance | Capture only after a completed boundary. On restore, the next step evaluates from that boundary; distinguish callback phase/order for inputs issued inside a step. |
-| Base pose/motion, active destination and omni trajectory phase | Agent/controller; #56 proves one straight-forward phase | Reuse #56 capture/restore where valid. Reject unimplemented omni phases rather than silently reissuing a goal; either constrain the V1 route to the proven phase or extend state for any phase the acceptance run actually reaches. |
+| Base pose/motion, active destination and omni trajectory phase | Agent/controller; #56 proves one forward phase | Capture the effective path, waypoint index, forward TPI or final-turn rotation TPI and alignment state; compare forward and turn continuations against the same ordinary goal run. |
 | Joint position, target and interpolation progress | Agent; #55 shows public kinematic velocity is `0.0` while moving | Capture private execution facts through a supported Agent operation; restore target/progress and prove subsequent positions. Do not relabel reported `0.0` as measured velocity. |
 | Live box construction, pose, membership and stable key | SimObject/core; #55 driver owns spawn parameters | Persist effective construction and checkpoint roster. Map artifact key to fresh runtime object on restore. |
 | Parent, named link and relative attachment transform | SimObject/Agent; #55 public attachment view is incomplete | Provide a narrow supported capture/restore operation and rebuild relation after both entities exist; do not infer it from current world pose. |
 | Accepted navigate/joint/attach/detach and spawn/delete operations | Fleet API plus core lifecycle paths | Record effective parameters, result/ack where available, stable targets, step, phase and order. A checkpoint's active goal does not replace the input history; no claim of complete arbitrary-input capture. |
-| Scenario stage, next intended operation and any scenario timer | External application | Save via an explicit application-state participant, restore after PBF state and before resuming callbacks. This is not a PBF core variable. |
+| Scenario stage, next intended operation and any scenario timer | External application | Save via the example's required `scenario` data record, read it after PBF restore and before resuming callbacks. This is not a PBF core variable. |
 | Per-step poses, joint/attachment/lifecycle results and events | PBF observations plus scenario-owned outcomes | Store immutable result frames separately from execution checkpoints and ordered events separately from sampled roster changes. |
 
 ## Architecture and implementation sequence
 
-1. **Confirm the vertical path.** Run the PR #55 sequence with the proposed
-   omni profile and inspect its actual controller phases. Inventory all active
-   mutable owners at CP1/CP3 and label each as PBF-owned or application-owned.
-   This check blocks V1 because the existing manipulation example and #56
-   use different controllers; it is not a separate feature proof.
+1. **Confirm the vertical path.** Run the PR #55 sequence with the omni
+   profile and inspect its actual controller phases. Inventory active mutable
+   owners at CP1/turn/CP3 and label each as PBF-owned or application-owned.
 2. **Establish one supported capture contract.** Add only the core/Agent/
    controller/SimObject state operations needed by the inventory, with
    profile-qualified validation. Expose a failure-visible completed-step
@@ -280,16 +319,15 @@ unsupported-state policy returns to Human Architecture Review.
   execution-state recording. The two may run together but have separate
   completeness claims.
 
-## Human decisions required before implementation
+## Human decisions recorded before implementation
 
 1. **Scope:** Approve the single-manipulator, direct-command, physics-off
    sequence with CP1 and CP3 as the V1 acceptance profile. Confirm that full
    manipulation re-execution is later, while #50's restricted re-execution
    remains available during V1.
-2. **Controller contingency:** Approve omni as the initial controller and a
-   mandatory early compatibility check against the PR #55 route. If it fails,
-   choose between adapting the route and bringing differential into V1; do
-   not silently narrow the acceptance sequence.
+2. **Controller:** Omni was approved and the manipulation route now runs
+   through ordinary goal navigation, including the generated approach waypoint
+   and final orientation turn. Differential restore remains a later profile.
 3. **Architecture:** Approve PBF-owned state recording, artifact handling and
    restore/playback tools, implemented outside the simulation core, plus a
    narrow failure-visible completed-step capture point and profile-specific
@@ -298,8 +336,8 @@ unsupported-state policy returns to Human Architecture Review.
    supported recorder attachment API.
 4. **Extension boundary:** Approve explicit completeness declarations and
    fail-closed handling of undeclared stateful plugins/callbacks/custom
-   objects. V1 supports one external scenario-state hook and defines a
-   future participant contract without claiming arbitrary serialization.
+   objects. V1 defines named, versioned data-record callbacks and uses one
+   required `scenario` record without claiming arbitrary callback serialization.
 5. **User surface:** Approve a Python API plus one scenario-specific CLI with
    optional GUI for record/restart/playback. Prefer a simple recording config
    (`record=True` plus optional output/frequency) over mandatory `with` usage.
@@ -318,3 +356,29 @@ re-executes recorded inputs to exactly the requested time remains open; the
 CP1/CP3 acceptance demonstration tests two representative choices from the
 per-step checkpoint sequence. The former is the proposed V1 behavior, and any
 stronger claim needs a separate test of the intervening input coverage.
+
+## Implementation evidence for Human Review
+
+The existing manipulation scenario now runs normally with `--record`, then
+supports `--restore DIR --time T` and `--playback DIR` in a fresh process.
+The recorded omni route reached CP1 at step 3 / 0.3 s, had its active final
+turn at steps 14–17 (the test restores at step 14), reached CP3 at step 25 /
+2.5 s, and removed the box at step 33. It uses the standard Fleet `navigate()` call with no
+checkpoint-only navigation flags. Separate-process tests compared the
+selected checkpoint before continuation and every subsequent sample with an
+uninterrupted reference. Playback seeks and steps through 50 recorded frames
+without calling `step_once()`. The default observation-only differential
+invocation remains available.
+
+On this machine, a five-run median for the 50-step headless route was about
+10.2 ms without recording and 44.7 ms with per-step full checkpoints, a 4.4×
+ratio; the artifact was about 193 KiB. This is a one-robot profile measurement,
+not a fleet-scale performance claim. The final core verification passed 1843
+tests with 12 skipped and 79.81% coverage; the documentation build passed.
+GUI playback is offered but was not exercised in the headless test environment.
+
+The completeness boundary remains explicit: direct unobserved mutators, omni
+velocity-mode commands, differential navigation, Actions, plugins, arbitrary
+callbacks or objects, physics and ROS/RMF state are outside the artifact. Supported input history
+does not yet constitute general manipulation input re-execution. The earlier
+PR #50 re-execution API remains separate.

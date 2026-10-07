@@ -1,5 +1,8 @@
 # Checkpoint / restore / resume: next-slice candidate
 
+**Usage status:** Checkpoint/restore remains under development and is not ready
+for general or production use.
+
 For the overall recording, restart, playback and debugging destination, read
 the [product goals](product-goals.md) before choosing another checkpoint slice.
 

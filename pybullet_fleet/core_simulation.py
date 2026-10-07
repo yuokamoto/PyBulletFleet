@@ -6,6 +6,7 @@ coordinate conversion, occupied judgment, transport path generation, debugging,
 monitoring, and log control for various robots, pallets, and meshes.
 """
 
+import copy
 import logging
 import math
 import os
@@ -501,6 +502,7 @@ class MultiRobotSimulationCore:
 
         # --- Recording ---
         self._recorder: Optional[Any] = None  # Optional[SimulationRecorder] (lazy import to avoid circular)
+        self._state_recorder: Optional[Any] = None  # Supported execution-state recorder
 
         # --- Registered managers (optional overlays for batch API) ---
         self._registered_managers: List[SimObjectManager] = []
@@ -863,6 +865,32 @@ class MultiRobotSimulationCore:
         """List of Agent instances."""
         return self._agents
 
+    def find_objects_by_name(self, name: str) -> List[SimObject]:
+        """Return all registered simulation objects whose name matches.
+
+        Names are not required to be unique. The result follows registration
+        order and includes Agents, which are also SimObjects.
+        """
+        return [obj for obj in self._sim_objects if obj.name == name]
+
+    def find_agents_by_name(self, name: str) -> List[Agent]:
+        """Return matching Agents in registration order."""
+        return [agent for agent in self._agents if agent.name == name]
+
+    def get_unique_object_by_name(self, name: str) -> SimObject:
+        """Return one named object, or raise if absent or ambiguous."""
+        matches = self.find_objects_by_name(name)
+        if len(matches) != 1:
+            raise LookupError(f"Expected one simulation object named {name!r}; found {len(matches)}")
+        return matches[0]
+
+    def get_unique_agent_by_name(self, name: str) -> Agent:
+        """Return one named Agent, or raise if absent or ambiguous."""
+        matches = self.find_agents_by_name(name)
+        if len(matches) != 1:
+            raise LookupError(f"Expected one Agent named {name!r}; found {len(matches)}")
+        return matches[0]
+
     @property
     def params(self) -> SimulationParams:
         """Simulation parameters."""
@@ -878,6 +906,40 @@ class MultiRobotSimulationCore:
         if self._in_step or self._in_post_step:
             raise RuntimeError("A completed-step boundary is unavailable during step_once()")
         return self._step_count, self._elapsed_sim_time
+
+    def configure_state_recording(
+        self,
+        *,
+        profile: Any,
+        output: Optional[str] = None,
+        checkpoint_every_steps: int = 1,
+        records: tuple[Any, ...] = (),
+    ) -> Any:
+        """Record a supported execution profile during ordinary simulation runs.
+
+        State recording is distinct from camera/video recording. The profile
+        declares what can be restored; named records capture caller-owned data
+        at the same completed boundary. Unsupported live state fails at capture.
+        """
+        if self._state_recorder is not None:
+            raise RuntimeError("State recording is already configured")
+        from pybullet_fleet.replay.state_recording import StateRecorder
+
+        recorder = StateRecorder(self, output, profile, records, checkpoint_every_steps)
+        self._state_recorder = recorder
+        return recorder
+
+    def _record_state_input(self, operation: str, details: dict) -> None:
+        """Forward an effective input when state recording is configured."""
+        if self._state_recorder is not None:
+            self._state_recorder.record_input(operation, details)
+
+    def _record_state_spawn(self, obj: SimObject, spawn_params: Any) -> None:
+        """Retain construction data and record a spawned entity if enabled."""
+        if self._state_recorder is None:
+            return
+        obj._checkpoint_spawn_params = copy.deepcopy(spawn_params)
+        self._state_recorder.record_spawn(obj, spawn_params)
 
     def restore_completed_step_boundary(self, step: int, elapsed_time: float) -> None:
         """Restore the clock of a fresh, initialized fixed-step simulation."""
@@ -2380,6 +2442,8 @@ class MultiRobotSimulationCore:
             self.set_collision_spatial_hash_cell_size_mode()
 
         logger.info(f"Removed object {obj_id} (body {obj.body_id}) from simulation")
+        if self._state_recorder is not None:
+            self._state_recorder.record_input("remove_object", {"key": obj.name})
 
     def configure_visualizer(
         self,
@@ -4097,6 +4161,8 @@ class MultiRobotSimulationCore:
         # Auto-save recording if active
         if self._recorder is not None:
             self.stop_recording()
+        if self._state_recorder is not None:
+            self._state_recorder.close()
 
         # Shutdown plugins before disconnecting
         self._shutdown_plugins()
@@ -4418,6 +4484,10 @@ class MultiRobotSimulationCore:
             self._elapsed_sim_time += self._params.timestep
             self._step_count += 1
             self._in_post_step = False
+            # A durable recorder must see the completed clock and propagate
+            # failures; EventBus deliberately swallows subscriber exceptions.
+            if self._state_recorder is not None:
+                self._state_recorder.on_completed_step()
             # Monitor: every step if GUI enabled, otherwise every second
             if measure_timing:
                 t_mon0 = time.perf_counter()

@@ -52,7 +52,14 @@ def sim_core():
 # ---------------------------------------------------------------------------
 
 
-def make_box(sim_core, position, size=0.25, collision_mode=CollisionMode.NORMAL_3D, mass=0.0):
+def make_box(
+    sim_core,
+    position,
+    size=0.25,
+    collision_mode=CollisionMode.NORMAL_3D,
+    mass=0.0,
+    name=None,
+):
     """Create a box SimObject registered to sim_core."""
     return SimObject.from_mesh(
         visual_shape=ShapeParams(shape_type="box", half_extents=[size, size, size]),
@@ -61,16 +68,18 @@ def make_box(sim_core, position, size=0.25, collision_mode=CollisionMode.NORMAL_
         mass=mass,
         sim_core=sim_core,
         collision_mode=collision_mode,
+        name=name,
     )
 
 
-def make_agent(sim_core, position=(0, 0, 0)):
+def make_agent(sim_core, position=(0, 0, 0), name=None):
     """Create an Agent registered to sim_core."""
     return Agent.from_params(
         AgentSpawnParams(
             urdf_path="robots/mobile_robot.urdf",
             initial_pose=Pose.from_xyz(*position),
             collision_mode=CollisionMode.NORMAL_3D,
+            name=name,
         ),
         sim_core=sim_core,
     )
@@ -166,6 +175,23 @@ class TestObjectLifecycle:
         agent = make_agent(sim_core)
         assert agent in sim_core.agents
         assert agent in sim_core.sim_objects
+
+    def test_name_lookup_preserves_duplicates_and_requires_unique_results(self, sim_core):
+        robot = make_agent(sim_core, name="shared")
+        box_a = make_box(sim_core, [0, 0, 0], name="shared")
+        box_b = make_box(sim_core, [2, 0, 0], name="shared")
+        unique_box = make_box(sim_core, [4, 0, 0], name="unique-box")
+
+        assert sim_core.find_objects_by_name("shared") == [robot, box_a, box_b]
+        assert sim_core.find_agents_by_name("shared") == [robot]
+        assert sim_core.get_unique_agent_by_name("shared") is robot
+        assert sim_core.get_unique_object_by_name("unique-box") is unique_box
+        with pytest.raises(LookupError, match="found 3"):
+            sim_core.get_unique_object_by_name("shared")
+        with pytest.raises(LookupError, match="found 0"):
+            sim_core.get_unique_object_by_name("missing")
+        with pytest.raises(LookupError, match="found 0"):
+            sim_core.get_unique_agent_by_name("missing")
 
     def test_add_disabled_object_skips_collision_system(self, sim_core):
         obj = make_box(sim_core, [0, 0, 0], collision_mode=CollisionMode.DISABLED)

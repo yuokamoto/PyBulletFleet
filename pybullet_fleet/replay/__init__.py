@@ -1,12 +1,38 @@
-"""Restricted kinematic navigation recording, re-execution and comparison.
+"""Restricted re-execution and declared execution-state recording profiles.
 
-These artifacts contain initial state and observations, not execution checkpoints.
-No ROS or USO runtime is required. See docs/how-to/replay.md for the v1 contract.
+The original ReplaySession artifact has no intermediate checkpoint. The state
+recorder accepts versioned profiles supplied by callers.
 """
 
 from .artifact import ReplayArtifact
 from .schema import ReplayError, ReplayInput
 from .session import ReplaySession
 from .runner import Comparison, compare, reexecute
+from .state_recording import (
+    CompletedStepContext,
+    DataRecord,
+    RecordingProfile,
+    ResultPlayback,
+    StateRecorder,
+    load_recording_manifest,
+    load_supported_checkpoint,
+    restore_supported_simulation,
+)
 
-__all__ = ["ReplayArtifact", "ReplayError", "ReplayInput", "ReplaySession", "Comparison", "compare", "reexecute"]
+__all__ = [
+    "ReplayArtifact",
+    "ReplayError",
+    "ReplayInput",
+    "ReplaySession",
+    "Comparison",
+    "compare",
+    "reexecute",
+    "CompletedStepContext",
+    "DataRecord",
+    "RecordingProfile",
+    "ResultPlayback",
+    "StateRecorder",
+    "load_recording_manifest",
+    "load_supported_checkpoint",
+    "restore_supported_simulation",
+]

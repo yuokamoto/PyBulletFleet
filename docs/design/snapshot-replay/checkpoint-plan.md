@@ -1,5 +1,8 @@
 # Single-omni checkpoint/restore proof — implementation plan
 
+**Usage status:** Development proof; not ready for general or production
+checkpoint/restore use.
+
 **Status:** Scope and architecture approved; implemented for Human Review.
 See [implementation evidence](checkpoint-evidence.md) for actual results.
 

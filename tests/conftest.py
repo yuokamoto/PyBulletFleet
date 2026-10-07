@@ -51,6 +51,10 @@ class MockSimCore:
     def add_object(self, obj):
         self.sim_objects.append(obj)
 
+    def _record_state_spawn(self, obj, spawn_params):
+        """Match the core recording hook; the test double does not record."""
+        return None
+
     def remove_object(self, obj):
         if obj in self.sim_objects:
             self.sim_objects.remove(obj)

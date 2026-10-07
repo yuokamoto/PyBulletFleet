@@ -1,5 +1,8 @@
 # Manipulation and entity-lifecycle state scenario — implementation plan
 
+**Usage status:** State-discovery example for development, not a general or
+production snapshot/restore capability.
+
 **Status:** Scenario implemented locally after Human Scope and Plan Approval;
 pending Human Review. No checkpoint/restore architecture approval is implied.
 

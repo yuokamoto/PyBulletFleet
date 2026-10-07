@@ -69,3 +69,6 @@ _roscon_jp_2026/
 /benchmark_results_*.json
 
 log/
+
+# Local state recordings (opt-in recording output)
+recordings/
