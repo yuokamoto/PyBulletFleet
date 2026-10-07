@@ -114,6 +114,16 @@ are not recommended for production use yet.
 
 ### Fixed
 
+- `Agent.set_controller()` now adopts the controller's own
+  `ControllerParams` as the agent's `controller_params`, matching what
+  `Agent.__init__` does when the controller is passed at construction.
+  Previously the two diverged silently: the controller moved the agent by its
+  own limits while `controller_params` -- which `Agent.max_linear_vel` and its
+  siblings delegate to, and which a batch controller builds its trajectory
+  from -- still held the defaults. A fleet that set its limits this way ran
+  correctly under the per-agent controllers and at the default 2.0 m/s and
+  5.0 m/s under a batch controller.
+
 - Include positive-gap pairs within `collision_margin` in closest-point
   collision checks, including pairs whose AABBs do not overlap.
 - Isolate the macOS Tkinter monitor in its own process to avoid native GUI
