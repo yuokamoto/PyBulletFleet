@@ -138,6 +138,21 @@ are not recommended for production use yet.
   from -- still held the defaults. A fleet that set its limits this way ran
   correctly under the per-agent controllers and at the default 2.0 m/s and
   5.0 m/s under a batch controller.
+- An `AgentManager` holding a plain `SimObject` no longer raises
+  `AttributeError` when a batch or fleet controller is attached.
+  `spawn_from_config()` dispatches on each entry's `type`, so a config may mix
+  `agent` and `sim_object` and a mixed manager is a supported arrangement, but
+  `add_object()`, `enable_batch()`, `disable_batch()` and `remove_object()`
+  reached for `controller_params` and `_batch_controller` on every object
+  regardless. They now wire up agents only.
+
+- `AgentManager.add_object()` now raises `TypeError` for anything that is
+  not an `Agent`, instead of accepting it and failing later. Everything the
+  subclass adds is agent-only -- the fleet-controller defaults read
+  `controller_params`, the batch controller reads `_batch_controller` -- so a
+  plain `SimObject` went in quietly and raised `AttributeError` from inside
+  `add_object()` whenever a batch or fleet controller was attached, which
+  could be long afterwards. `SimObjectManager` still accepts both.
 
 - Include positive-gap pairs within `collision_margin` in closest-point
   collision checks, including pairs whose AABBs do not overlap.

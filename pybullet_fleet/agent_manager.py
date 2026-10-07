@@ -807,9 +807,10 @@ class AgentManager(SimObjectManager[Agent]):
             self.disable_batch()
         bc = cls()
         self._batch_controller = bc
-        # Register agents already in the manager
+        # Register agents already in the manager. Non-agents are skipped:
+        # see add_object() for why the manager may be holding any.
         for agent in self.objects:
-            if agent._batch_controller is None:
+            if isinstance(agent, Agent) and agent._batch_controller is None:
                 bc.register_agent(agent)
         return bc
 
@@ -819,7 +820,7 @@ class AgentManager(SimObjectManager[Agent]):
         if bc is None:
             return
         for agent in list(self.objects):
-            if agent._batch_controller is bc:
+            if isinstance(agent, Agent) and agent._batch_controller is bc:
                 bc.unregister_agent(agent)
         self._batch_controller = None
 
@@ -828,7 +829,22 @@ class AgentManager(SimObjectManager[Agent]):
     # ------------------------------------------------------------------
 
     def add_object(self, obj: Agent) -> None:
+        """Add an object, wiring up the agent-only parts only for agents.
+
+        An ``AgentManager`` can legitimately hold a plain :class:`SimObject`:
+        :meth:`spawn_from_config` dispatches on each entry's ``type`` and a
+        config may mix ``agent`` and ``sim_object``. Everything below is
+        agent-only, though -- the fleet-controller defaults read
+        ``controller_params`` and the batch controller reads
+        ``_batch_controller``, neither of which a ``SimObject`` has -- so a
+        mixed manager used to raise ``AttributeError`` from inside this
+        method as soon as either controller was attached. That could be long
+        after the object was added, and it read as a fault in
+        :meth:`enable_batch` rather than in the mix.
+        """
         super().add_object(obj)
+        if not isinstance(obj, Agent):
+            return
         if self._fleet_controller:
             from dataclasses import fields as dc_fields
             from pybullet_fleet.controller_params import ControllerParams
@@ -852,7 +868,12 @@ class AgentManager(SimObjectManager[Agent]):
 
     def remove_object(self, obj: Agent) -> bool:
         result = super().remove_object(obj)
-        if result and self._batch_controller is not None and obj._batch_controller is self._batch_controller:
+        if (
+            result
+            and isinstance(obj, Agent)
+            and self._batch_controller is not None
+            and obj._batch_controller is self._batch_controller
+        ):
             self._batch_controller.unregister_agent(obj)
         return result
 
