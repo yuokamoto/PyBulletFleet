@@ -109,6 +109,7 @@ _DEFAULTS: Dict[str, Dict[str, Any]] = {
         #   initial_pose         — Pose object
         #   visual_shape         — ShapeParams (mesh/box/sphere/cylinder)
         #   collision_shape      — ShapeParams
+        #   urdf_path            — str, per-object model name or path
         #   visual_frame_pose    — Pose offset for visual shape
         #   collision_frame_pose — Pose offset for collision shape
         #   user_data            — dict, arbitrary per-object metadata

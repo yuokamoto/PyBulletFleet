@@ -82,7 +82,6 @@ class AgentSpawnParams(SimObjectSpawnParams):
         AgentManager.spawn_agents_grid() calculates positions automatically and may override initial_pose.
     """
 
-    urdf_path: Optional[str] = None
     motion_mode: Union[MotionMode, str] = MotionMode(_AGT_D["motion_mode"])
     use_fixed_base: bool = _AGT_D["use_fixed_base"]
     ik_params: Optional["IKParams"] = None
@@ -171,9 +170,10 @@ class AgentSpawnParams(SimObjectSpawnParams):
         # Parse plugins list (pass through as-is; resolved in from_params)
         plugins_value = list(config.get("plugins") or [])
 
+        # urdf_path is not repeated here: SimObjectSpawnParams carries it now,
+        # so it already arrives in base_kwargs.
         return cls(
             **base_kwargs,
-            urdf_path=config.get("urdf_path"),
             motion_mode=motion_mode_value,
             use_fixed_base=config.get("use_fixed_base", _AGT_D["use_fixed_base"]),
             ik_params=ik_params_value,

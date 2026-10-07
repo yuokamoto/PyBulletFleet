@@ -28,6 +28,15 @@ are not recommended for production use yet.
 
 ### Added
 
+- Add `SimObject.from_urdf()` and a `urdf_path` field on
+  `SimObjectSpawnParams`, so a URDF-defined body with no behaviour can be
+  loaded as a plain `SimObject` instead of an `Agent`. `from_sdf()` already
+  covered SDF; URDF had no non-agent loader, and `urdf_path` existed only on
+  `AgentSpawnParams`. Static scenery created this way stays out of the
+  per-step update loop (`_needs_update` is `False`): measured on a scene of
+  2376 fixed-base, jointless, controller-less bodies, 15.98 ms per step as
+  Agents against 0.78 ms as SimObjects.
+
 - Add name-based simulation entity lookup on `MultiRobotSimulationCore`:
   ordered multi-result searches for objects and agents, plus unique-result
   helpers that raise `LookupError` when a name is missing or ambiguous.
