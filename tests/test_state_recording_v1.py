@@ -465,6 +465,7 @@ def test_close_flushes_inputs_issued_outside_last_step(tmp_path: Path, completed
             sim.step_once()
         sim._record_state_input("test_command", {"accepted": True})
         recorder.close()
+        assert sim._state_recorder is None
         playback = ResultPlayback(directory)
         assert len(playback.frames) == completed_steps
         assert playback.inputs == [
@@ -476,6 +477,8 @@ def test_close_flushes_inputs_issued_outside_last_step(tmp_path: Path, completed
                 "order": 0,
             }
         ]
+        sim.step_once()
+        assert json.loads((directory / "manifest.json").read_text())["last_completed_step"] == completed_steps
     finally:
         if p.isConnected(sim.client):
             p.disconnect(sim.client)

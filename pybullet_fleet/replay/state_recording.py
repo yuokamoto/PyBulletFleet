@@ -360,6 +360,8 @@ class StateRecorder:
         self._manifest["complete"] = True
         _write_json_atomic(self.path / "manifest.json", self._manifest)
         self._closed = True
+        if self.sim._state_recorder is self:
+            self.sim._state_recorder = None
 
     def abort(self, error: Exception) -> None:
         """Release resources and keep a failed artifact explicitly incomplete."""

@@ -19,7 +19,8 @@ are not recommended for production use yet.
   first available checkpoint at the configured cadence. Checkpoint restore
   also verifies the recorded result and input streams before loading state.
   Accepted inputs issued outside the final step are flushed when recording
-  closes, including runs with no completed steps.
+  closes, including runs with no completed steps. Closing a recorder detaches
+  it from the simulation, so subsequent steps continue without recording.
 
 - Group corridor policy evaluation programs under `examples/evaluation/` and
   checkpoint/state-discovery programs under `examples/validation/`. Their
