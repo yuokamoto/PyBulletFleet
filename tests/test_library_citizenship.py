@@ -100,3 +100,100 @@ class TestMonitorWindowFollowsGui:
             assert sim._data_monitor.enable_gui is False
         finally:
             sim.close()
+
+
+class TestCloseIsOneShotAndAlwaysReleases:
+    """Cases raised in review on the first version of close()."""
+
+    def test_shutdown_callbacks_run_once(self):
+        """`with sim:` around a run_simulation() that already closed would
+        otherwise ask every plugin to shut down twice -- and a plugin that
+        closes a file or a socket there cannot do it twice."""
+        sim = MultiRobotSimulationCore(SimulationParams(**HEADLESS))
+        sim.initialize_simulation()
+        calls = []
+        sim._shutdown_plugins = lambda: calls.append(1)  # type: ignore[method-assign]
+
+        sim.close()
+        sim.close()
+
+        assert calls == [1]
+
+    def test_the_client_is_released_even_if_finalising_a_recording_raises(self):
+        """stop_recording() can raise while saving -- an MP4 without imageio,
+        for one -- and letting that escape before the disconnect would leak
+        the client this API exists to release."""
+
+        sim = MultiRobotSimulationCore(SimulationParams(**HEADLESS))
+        sim.initialize_simulation()
+        client = sim.client
+
+        class Boom:
+            pass
+
+        sim._recorder = Boom()
+        sim.stop_recording = lambda: (_ for _ in ()).throw(RuntimeError("imageio missing"))  # type: ignore
+
+        with pytest.raises(RuntimeError, match="imageio missing"):
+            sim.close()
+        assert not p.isConnected(client)
+
+    def test_the_client_id_stays_readable_after_close(self):
+        """run_simulation() ends by calling close(), and callers read .client
+        afterwards, so clearing it would break every such caller. The _closed
+        guard is what stops a second disconnect, not a cleared id."""
+        sim = MultiRobotSimulationCore(SimulationParams(**HEADLESS))
+        sim.initialize_simulation()
+        client = sim.client
+        sim.close()
+        assert sim.client == client
+
+    def test_a_second_close_cannot_disconnect_someone_else(self):
+        first = MultiRobotSimulationCore(SimulationParams(**HEADLESS))
+        first.initialize_simulation()
+        first.close()
+
+        second = MultiRobotSimulationCore(SimulationParams(**HEADLESS))
+        second.initialize_simulation()
+        try:
+            first.close()
+            assert p.isConnected(second.client)
+        finally:
+            second.close()
+
+
+class TestNoDuplicateLogRecords:
+    """Records propagate to root, so a handler here plus the host's own would
+    print every PyBulletFleet line twice."""
+
+    @staticmethod
+    def _loggers(name, root_handlers, package_handlers):
+        package, root = logging.getLogger(f"t.{name}.pkg"), logging.getLogger(f"t.{name}.root")
+        package.handlers.clear()
+        root.handlers.clear()
+        package.handlers.extend(package_handlers)
+        root.handlers.extend(root_handlers)
+        return package, root
+
+    def test_no_handler_when_the_host_has_configured_one(self):
+        from pybullet_fleet.core_simulation import _install_default_handler
+
+        package, root = self._loggers("a", [logging.NullHandler()], [])
+        assert _install_default_handler(package, root) is False
+        assert package.handlers == []
+
+    def test_a_handler_when_nothing_else_is_configured(self):
+        """A program that configured nothing still gets the output
+        basicConfig() used to give it."""
+        from pybullet_fleet.core_simulation import _install_default_handler
+
+        package, root = self._loggers("b", [], [])
+        assert _install_default_handler(package, root) is True
+        assert len(package.handlers) == 1
+
+    def test_it_does_not_stack_handlers(self):
+        from pybullet_fleet.core_simulation import _install_default_handler
+
+        package, root = self._loggers("c", [], [logging.NullHandler()])
+        assert _install_default_handler(package, root) is False
+        assert len(package.handlers) == 1
