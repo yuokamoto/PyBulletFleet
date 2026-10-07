@@ -156,3 +156,88 @@ class TestReviewFollowUps:
         obj = SimObject.from_params(params, sim_core=sim_core)
 
         assert recorded == [(obj, params)]
+
+
+class TestDisabledCollisionCoversEveryLink:
+    """Raised in review: this factory accepts articulated URDFs, and the
+    DISABLED filter was applied to link -1 alone -- so every child link kept
+    colliding physically while the object was excluded from PyBulletFleet's
+    own checks."""
+
+    ARTICULATED = "kuka_iiwa"  # seven revolute joints
+
+    @staticmethod
+    def _contacting_links(sim_core, obj, other):
+        """Which of obj's links PyBullet reports touching `other`."""
+        import pybullet as pb
+
+        pb.performCollisionDetection(physicsClientId=sim_core.client)
+        touching = []
+        for link in range(-1, pb.getNumJoints(obj.body_id, physicsClientId=sim_core.client)):
+            if pb.getContactPoints(bodyA=obj.body_id, linkIndexA=link, bodyB=other.body_id, physicsClientId=sim_core.client):
+                touching.append(link)
+        return touching
+
+    @pytest.fixture
+    def overlapping(self, sim_core):
+        """An articulated body and a box sharing the same space."""
+        arm = SimObject.from_urdf(self.ARTICULATED, sim_core=sim_core, use_fixed_base=True)
+        box = SimObject.from_params(
+            SimObjectSpawnParams(
+                visual_shape=ShapeParams(shape_type="box", half_extents=[1.0, 1.0, 1.0]),
+                collision_shape=ShapeParams(shape_type="box", half_extents=[1.0, 1.0, 1.0]),
+                name="box",
+                initial_pose=Pose.from_xyz(0.0, 0.0, 0.5),
+            ),
+            sim_core=sim_core,
+        )
+        return arm, box
+
+    def test_the_fixture_really_does_collide(self, sim_core, overlapping):
+        """Otherwise the two tests below would pass without proving anything."""
+        arm, box = overlapping
+        touching = self._contacting_links(sim_core, arm, box)
+        assert len(touching) > 1, "needs more than the base link touching to be meaningful"
+
+    def test_disabling_filters_out_every_link(self, sim_core, overlapping):
+        arm, box = overlapping
+        arm.set_collision_mode(CollisionMode.DISABLED)
+        assert self._contacting_links(sim_core, arm, box) == []
+
+    def test_re_enabling_brings_them_all_back(self, sim_core, overlapping):
+        """A superset, not an equality, and deliberately so.
+
+        Re-enabling writes PyBullet's documented defaults (1, -1), which a
+        fixed base loaded from URDF does not start with -- it is filtered more
+        tightly -- so the base link can come back colliding where it did not
+        before. That asymmetry is pre-existing for the base link and is now
+        applied consistently to the rest; restoring the true original would
+        need a getter PyBullet does not expose.
+        """
+        arm, box = overlapping
+        before = self._contacting_links(sim_core, arm, box)
+
+        arm.set_collision_mode(CollisionMode.DISABLED)
+        arm.set_collision_mode(CollisionMode.NORMAL_3D)
+
+        after = self._contacting_links(sim_core, arm, box)
+        assert set(before) <= set(after), "every link that collided before collides again"
+        assert set(after) - set(before) <= {-1}, "only the fixed base may differ"
+
+    def test_it_also_applies_at_spawn(self, sim_core):
+        arm = SimObject.from_urdf(
+            self.ARTICULATED,
+            sim_core=sim_core,
+            use_fixed_base=True,
+            collision_mode=CollisionMode.DISABLED,
+        )
+        box = SimObject.from_params(
+            SimObjectSpawnParams(
+                visual_shape=ShapeParams(shape_type="box", half_extents=[1.0, 1.0, 1.0]),
+                collision_shape=ShapeParams(shape_type="box", half_extents=[1.0, 1.0, 1.0]),
+                name="box",
+                initial_pose=Pose.from_xyz(0.0, 0.0, 0.5),
+            ),
+            sim_core=sim_core,
+        )
+        assert self._contacting_links(sim_core, arm, box) == []

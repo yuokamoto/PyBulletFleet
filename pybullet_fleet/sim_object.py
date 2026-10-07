@@ -359,9 +359,7 @@ class SimObject:
 
         # Disable PyBullet physics collision if collision_mode is DISABLED
         if self.collision_mode == CollisionMode.DISABLED:
-            # setCollisionFilterGroupMask: (bodyId, linkId, collisionFilterGroup, collisionFilterMask)
-            # Setting mask=0 disables collision with all objects
-            p.setCollisionFilterGroupMask(self.body_id, -1, 0, 0, physicsClientId=self._pid)
+            self._set_pybullet_collision_enabled(False)
             self._log.debug(f"Disabled PyBullet collision (body {self.body_id})")
 
         # Auto-register to sim_core if provided
@@ -1073,17 +1071,40 @@ class SimObject:
 
         # Update PyBullet collision filter if switching to/from DISABLED
         if mode == CollisionMode.DISABLED:
-            # Disable PyBullet collision
-            p.setCollisionFilterGroupMask(self.body_id, -1, 0, 0, physicsClientId=self._pid)
+            self._set_pybullet_collision_enabled(False)
         elif old_mode == CollisionMode.DISABLED:
-            # Re-enable PyBullet collision (default group=1, mask=-1)
-            p.setCollisionFilterGroupMask(self.body_id, -1, 1, -1, physicsClientId=self._pid)
+            self._set_pybullet_collision_enabled(True)
 
         # Notify sim_core to update collision system
         if self.sim_core is not None:
             self.sim_core._update_object_collision_mode(self.object_id, old_mode, mode)
 
         self._log.info(f"collision_mode changed from {old_mode.value} -> {mode.value}")
+
+    def _set_pybullet_collision_enabled(self, enabled: bool) -> None:
+        """Filter this body in or out of PyBullet's own collision detection.
+
+        Every link, not only the base. ``DISABLED`` is documented as turning
+        PyBullet collision off for the whole object, but the filter was
+        applied to link -1 alone -- so an articulated body kept every child
+        link colliding physically while being excluded from PyBulletFleet's
+        own checks. Single-link bodies are unaffected, there being nothing
+        else to set.
+
+        ``setCollisionFilterGroupMask(body, link, group, mask)``: mask 0
+        collides with nothing; group 1 and mask -1 are PyBullet's documented
+        defaults.
+
+        Re-enabling writes those defaults, which is not always what the link
+        started with: a fixed base loaded from URDF is filtered more tightly
+        than ``(1, -1)``, so a round trip through ``DISABLED`` can leave it
+        colliding where it did not before. That is pre-existing behaviour for
+        the base link, now applied consistently to the rest; restoring the
+        true original would need a getter PyBullet does not expose.
+        """
+        group, mask = (1, -1) if enabled else (0, 0)
+        for link_index in range(-1, p.getNumJoints(self.body_id, physicsClientId=self._pid)):
+            p.setCollisionFilterGroupMask(self.body_id, link_index, group, mask, physicsClientId=self._pid)
 
     def get_pose(self) -> Pose:
         """
