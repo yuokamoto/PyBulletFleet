@@ -388,3 +388,114 @@ class TestSecondRoundReviewFollowUps:
         state = agent._controllers[0].capture_navigation_state()
         assert state["forward"] is not None
         assert state["forward"]["accel"] == pytest.approx(1.5)
+
+
+class TestIsMovingIsSetUnderTheBatchLock:
+    """Raised in review: setting the flag after the lock released races a
+    concurrent step_once() that completes a zero-distance path and clears it,
+    leaving an idle row reporting is_moving."""
+
+    @pytest.fixture
+    def sim_core(self):
+        import pybullet as p
+
+        from pybullet_fleet import MultiRobotSimulationCore, SimulationParams
+
+        sim = MultiRobotSimulationCore(
+            SimulationParams(gui=False, physics=False, timestep=0.02, monitor=False, enable_monitor_gui=False)
+        )
+        sim.initialize_simulation()
+        yield sim
+        try:
+            p.disconnect(sim.client)
+        except p.error:
+            pass
+
+    def _managed(self, sim_core):
+        from pybullet_fleet import Agent, AgentManager, AgentSpawnParams, OmniController
+
+        manager = AgentManager(sim_core=sim_core)
+        manager.enable_batch("batch_omni")
+        agent = Agent.from_params(
+            AgentSpawnParams(
+                urdf_path="cube_small.urdf",
+                name="bot",
+                controller=OmniController(
+                    ControllerParams(max_linear_vel=[2.5, 2.5, 0.0], max_linear_accel=[1.5, 1.5, 0.0], navigation_2d=True)
+                ),
+            ),
+            sim_core=sim_core,
+        )
+        manager.add_object(agent)
+        return manager, agent
+
+    def test_a_step_landing_at_lock_release_is_not_overridden(self, sim_core):
+        """The race, made deterministic.
+
+        ``synchronized_batch_advance()`` takes the same lock, so a step can
+        only interleave once ``synchronized_set_path()`` has released it. This
+        wraps that method to run exactly one step at that moment, with a
+        zero-distance path the step completes immediately.
+
+        With the flag set inside the lock, the step's clear is the last word
+        and the agent is correctly idle. With it set by the caller afterwards,
+        the assignment lands after the step and revives an idle row.
+        """
+        from pybullet_fleet.geometry import Pose
+
+        manager, agent = self._managed(sim_core)
+        controller = manager.batch_controller
+        original = controller.synchronized_set_path
+
+        def step_at_lock_release(a, path, **kwargs):
+            original(a, path, **kwargs)
+            sim_core.step_once()
+
+        controller.synchronized_set_path = step_at_lock_release
+
+        here = agent.get_pose().position
+        agent.set_path([Pose.from_xyz(here[0], here[1], here[2])], auto_approach=False)
+
+        assert agent.is_moving is False
+
+    def test_a_step_completing_the_path_leaves_it_idle(self, sim_core):
+        """A zero-distance path is finished by the very next step; the flag
+        must not be revived afterwards."""
+        from pybullet_fleet.geometry import Pose
+
+        _, agent = self._managed(sim_core)
+        here = agent.get_pose().position
+
+        agent.set_path([Pose.from_xyz(here[0], here[1], here[2])], auto_approach=False)
+        for _ in range(5):
+            sim_core.step_once()
+
+        assert agent.is_moving is False
+
+    def test_a_refused_path_still_leaves_it_idle(self, sim_core):
+        """The flag is inside the lock, so a refusal never reaches it."""
+        from pybullet_fleet import Agent, AgentManager, AgentSpawnParams, OmniController
+        from pybullet_fleet.geometry import Pose
+
+        manager = AgentManager(sim_core=sim_core)
+        manager.enable_batch("batch_omni")
+        agent = Agent.from_params(
+            AgentSpawnParams(
+                urdf_path="cube_small.urdf",
+                name="bad",
+                controller=OmniController(
+                    ControllerParams(
+                        max_linear_vel=[2.5, 2.5, 0.0],
+                        max_linear_accel=[1.5, 1.5, 0.0],
+                        max_linear_decel=[0.5, 0.5, 0.0],
+                        navigation_2d=True,
+                    )
+                ),
+            ),
+            sim_core=sim_core,
+        )
+        manager.add_object(agent)
+
+        with pytest.raises(ValueError, match="asymmetric"):
+            agent.set_path([Pose.from_xyz(3.0, 0.0, 0.0)], auto_approach=False)
+        assert agent.is_moving is False

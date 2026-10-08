@@ -1276,6 +1276,10 @@ class Agent(SimObject):
         # leave an idle agent reporting is_moving with no trajectory behind
         # it, and the previous path's visualization already cleared.
         if self._batch_controller is not None:
+            # synchronized_set_path() sets _is_moving itself, under the same
+            # lock as the array writes. Setting it here instead would race a
+            # concurrent step_once() that completes a zero-distance path and
+            # clears the flag between the lock releasing and this line.
             self._batch_controller.synchronized_set_path(
                 self,
                 final_path,
@@ -1289,8 +1293,7 @@ class Agent(SimObject):
                 final_orientation_align=final_orientation_align,
                 direction=direction,
             )
-
-        self._is_moving = True
+            self._is_moving = True
 
         # Clear previous path visualization and visualize new path
         self._clear_path_visualization()
