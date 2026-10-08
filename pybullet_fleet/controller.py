@@ -813,6 +813,13 @@ class OmniController(KinematicController):
         if self._pose_phase is PosePhase.FORWARD:
             if self._tpi_forward is None or (self._forward_start_pos is None and not self._is_final_orientation_aligning):
                 raise ValueError("Omni forward trajectory is incomplete")
+            # Same reason as capture_straight_navigation(): this record carries
+            # a single "accel", and restore_navigation_state() rebuilds the
+            # forward TPI from it with symmetric braking. Capturing an
+            # asymmetric trajectory here would resume it at the wrong rate,
+            # and silently -- the schema is unchanged, so it is refused.
+            if float(self._tpi_forward.amax_decel) != float(self._tpi_forward.amax_accel):
+                raise ValueError("Unsupported omni navigation state: asymmetric deceleration cannot be checkpointed")
             forward = {
                 "origin": self._forward_start_pos.tolist() if self._forward_start_pos is not None else None,
                 "t0": float(self._tpi_forward.t0),

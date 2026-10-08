@@ -36,6 +36,7 @@ import numpy as np
 import pybullet as p
 
 from pybullet_fleet.controller import Controller
+from pybullet_fleet.controller_params import as_axes
 from pybullet_fleet.geometry import quat_angle_between, quat_slerp_batch
 from pybullet_fleet.logging_utils import get_lazy_logger
 
@@ -347,13 +348,22 @@ class BatchKinematicController(Controller):
         params = getattr(agent, "controller_params", None)
         if params is None or params.max_linear_decel is None:
             return
-        accel = params.scalar_max_linear_accel()
-        decel = params.scalar_max_linear_decel()
-        if not math.isclose(accel, decel, rel_tol=1e-9, abs_tol=1e-12):
+
+        # Every axis, not the forward scalar. BatchOmniController projects the
+        # per-axis limits onto the travel direction, so accel [1, 4, 0] with
+        # decel [1, 8, 0] agrees on x and diverges on y: a forward-scalar
+        # check would pass it here and let a y-directed path raise after the
+        # path state had been committed -- exactly what this guard exists to
+        # prevent. Comparing the whole vector can refuse a profile that is
+        # symmetric along the particular direction travelled, which is the
+        # conservative way round and matches what the limitation says.
+        accel = as_axes(params._eff_linear_accel())
+        decel = as_axes(params._eff_linear_decel())
+        if any(not math.isclose(a, d, rel_tol=1e-9, abs_tol=1e-12) for a, d in zip(accel, decel)):
             raise ValueError(
                 "batched controllers do not support asymmetric deceleration yet "
-                f"(accel={accel!r}, decel={decel!r}). Use the per-agent controllers "
-                "for this agent, or leave max_linear_decel unset."
+                f"(accel={list(accel)!r}, decel={list(decel)!r}). Use the per-agent "
+                "controllers for this agent, or leave max_linear_decel unset."
             )
 
     def compute(self, agent, dt: float) -> bool:

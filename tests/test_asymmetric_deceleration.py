@@ -293,3 +293,98 @@ class TestBatchedControllersRefuseAtThePathBoundary:
 
         agent.set_path([Pose.from_xyz(5.0, 0.0, 0.0)], auto_approach=False)
         assert agent.is_moving is True
+
+
+class TestSecondRoundReviewFollowUps:
+    """Two holes the first round of fixes left, raised in review."""
+
+    LIMITS = dict(max_linear_vel=[2.5, 2.5, 0.0], navigation_2d=True)
+
+    @pytest.fixture
+    def sim_core(self):
+        import pybullet as p
+
+        from pybullet_fleet import MultiRobotSimulationCore, SimulationParams
+
+        sim = MultiRobotSimulationCore(
+            SimulationParams(gui=False, physics=False, timestep=0.02, monitor=False, enable_monitor_gui=False)
+        )
+        sim.initialize_simulation()
+        yield sim
+        try:
+            p.disconnect(sim.client)
+        except p.error:
+            pass
+
+    def _agent(self, sim_core, name, **extra):
+        from pybullet_fleet import Agent, AgentSpawnParams, OmniController
+
+        return Agent.from_params(
+            AgentSpawnParams(
+                urdf_path="cube_small.urdf",
+                name=name,
+                controller=OmniController(ControllerParams(**{**self.LIMITS, **extra})),
+            ),
+            sim_core=sim_core,
+        )
+
+    def test_a_per_axis_profile_symmetric_only_on_x_is_refused(self, sim_core):
+        """The forward scalar agreed while y diverged, so the check passed and
+        a y-directed path raised after the path state had been committed."""
+        from pybullet_fleet import AgentManager
+        from pybullet_fleet.geometry import Pose
+
+        manager = AgentManager(sim_core=sim_core)
+        manager.enable_batch("batch_omni")
+        agent = self._agent(
+            sim_core,
+            "peraxis",
+            max_linear_accel=[1.0, 4.0, 0.0],
+            max_linear_decel=[1.0, 8.0, 0.0],
+        )
+        manager.add_object(agent)
+
+        controller = manager.batch_controller
+        idx = controller._agent_index[id(agent)]
+
+        with pytest.raises(ValueError, match="asymmetric"):
+            agent.set_path([Pose.from_xyz(0.0, 5.0, 0.0)], auto_approach=False)
+
+        # The point of the guard: nothing committed. Before this fix the
+        # forward-scalar check passed, set_path() wrote the path and waypoint
+        # index, and only then did _begin_waypoint() build a y-directed TPI
+        # and raise.
+        assert controller._paths[idx] == []
+        assert agent.is_moving is False
+
+    def test_the_generic_capture_path_refuses_it_too(self, sim_core):
+        """capture_navigation_state() serializes a single `accel`, and
+        restore_navigation_state() rebuilds the forward TPI from it with
+        symmetric braking -- so capturing an asymmetric trajectory would
+        resume it at the wrong rate, silently."""
+        from pybullet_fleet.geometry import Pose
+
+        agent = self._agent(
+            sim_core,
+            "capture",
+            max_linear_accel=[1.5, 1.5, 0.0],
+            max_linear_decel=[0.5, 0.5, 0.0],
+        )
+        agent.set_path([Pose.from_xyz(6.0, 0.0, 0.0)], auto_approach=False)
+        for _ in range(20):
+            sim_core.step_once()
+
+        with pytest.raises(ValueError, match="asymmetric"):
+            agent._controllers[0].capture_navigation_state()
+
+    def test_a_symmetric_trajectory_still_captures(self, sim_core):
+        from pybullet_fleet.geometry import Pose
+
+        agent = self._agent(sim_core, "sym_capture", max_linear_accel=[1.5, 1.5, 0.0])
+        agent.set_path([Pose.from_xyz(6.0, 0.0, 0.0)], auto_approach=False)
+        for _ in range(20):
+            sim_core.step_once()
+
+        state = agent._controllers[0].capture_navigation_state()
+        assert state["forward"] is not None
+        assert state["forward"]["accel"] == pytest.approx(1.5)
