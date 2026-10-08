@@ -525,3 +525,132 @@ class TestIsMovingIsSetUnderTheBatchLock:
             sim_core.step_once()
 
         assert agent.is_moving is False
+
+
+class TestRowCompactionCarriesTheBrakingScalar:
+    """Raised in review: the new per-row braking array was missing from
+    ``_swap_rows()``.
+
+    ``unregister_agent()`` compacts by moving the last row into the removed
+    one. Every other piece of the survivor's trajectory moved with it, so an
+    omitted array left that agent braking at the *removed* agent's rate --
+    silently, and only after an ordinary agent removal.
+    """
+
+    DT = 0.02
+
+    @pytest.fixture
+    def sim_core(self):
+        import pybullet as p
+
+        from pybullet_fleet import MultiRobotSimulationCore, SimulationParams
+
+        sim = MultiRobotSimulationCore(
+            SimulationParams(gui=False, physics=False, timestep=self.DT, monitor=False, enable_monitor_gui=False)
+        )
+        sim.initialize_simulation()
+        yield sim
+        try:
+            p.disconnect(sim.client)
+        except p.error:
+            pass
+
+    def _agent(self, sim_core, manager, name, decel):
+        from pybullet_fleet import Agent, AgentSpawnParams, OmniController
+
+        agent = Agent.from_params(
+            AgentSpawnParams(
+                urdf_path="cube_small.urdf",
+                name=name,
+                controller=OmniController(
+                    ControllerParams(
+                        max_linear_vel=[2.5, 2.5, 0.0],
+                        max_linear_accel=[1.5, 1.5, 0.0],
+                        max_linear_decel=[decel, decel, 0.0],
+                        navigation_2d=True,
+                    )
+                ),
+            ),
+            sim_core=sim_core,
+        )
+        manager.add_object(agent)
+        return agent
+
+    @pytest.mark.parametrize("mode,array", [("batch_omni", "_decel_buf"), ("batch_differential", "_fwd_decel")])
+    def test_removing_a_non_last_agent_keeps_each_survivor_scalar(self, sim_core, mode, array):
+        from pybullet_fleet import AgentManager
+
+        manager = AgentManager(sim_core=sim_core)
+        controller = manager.enable_batch(mode)
+
+        doomed = self._agent(sim_core, manager, "doomed", 0.5)
+        survivor = self._agent(sim_core, manager, "survivor", 6.0)
+
+        rows = getattr(controller, array)
+        rows[controller._agent_index[id(doomed)]] = 0.5
+        rows[controller._agent_index[id(survivor)]] = 6.0
+
+        # Remove the first of the two, so the survivor is compacted into row 0.
+        manager.remove_object(doomed)
+
+        idx = controller._agent_index[id(survivor)]
+        assert getattr(controller, array)[idx] == pytest.approx(6.0)
+
+    def _survivor_trace(self, remove_the_other):
+        """Drive two agents, optionally removing the first mid-trajectory.
+
+        Its own core per run: two runs sharing one would start from different
+        clocks and leave the earlier run's agents in the scene.
+        """
+        import pybullet as p
+
+        from pybullet_fleet import AgentManager, MultiRobotSimulationCore, SimulationParams
+        from pybullet_fleet.geometry import Pose
+
+        sim_core = MultiRobotSimulationCore(
+            SimulationParams(gui=False, physics=False, timestep=self.DT, monitor=False, enable_monitor_gui=False)
+        )
+        sim_core.initialize_simulation()
+        manager = AgentManager(sim_core=sim_core)
+        manager.enable_batch("batch_omni")
+        # Both on a path, so each row really holds its own braking scalar; an
+        # agent that never moved leaves its row at zero.
+        doomed = self._agent(sim_core, manager, "doomed", 0.5)
+        survivor = self._agent(sim_core, manager, "survivor", 6.0)
+        doomed.set_path([Pose.from_xyz(0.0, 8.0, 0.0)], auto_approach=False)
+        survivor.set_path([Pose.from_xyz(8.0, 0.0, 0.0)], auto_approach=False)
+        sim_core.step_once()
+
+        if remove_the_other:
+            manager.remove_object(doomed)
+
+        trace = []
+        for _ in range(3000):
+            sim_core.step_once()
+            trace.append(survivor.get_pose().position[0])
+            if not survivor.is_moving:
+                break
+        try:
+            p.disconnect(sim_core.client)
+        except p.error:
+            pass
+        return trace
+
+    def test_a_survivor_under_way_follows_the_same_path_either_way(self):
+        """The behaviour behind the array check.
+
+        A fresh ``set_path()`` rewrites the row, so a stale scalar only bites
+        an agent already on a trajectory when another is removed -- the
+        ordinary case, since agents come and go while the fleet keeps driving.
+
+        The arrival *time* is no help here: it comes from ``_t_total``, which
+        swaps correctly. What a wrong braking scalar changes is where the
+        agent is *during* the braking phase, so the two runs are compared
+        position by position.
+        """
+        undisturbed = self._survivor_trace(remove_the_other=False)
+        after_removal = self._survivor_trace(remove_the_other=True)
+
+        overlap = min(len(undisturbed), len(after_removal))
+        worst = max(abs(a - b) for a, b in zip(undisturbed[:overlap], after_removal[:overlap]))
+        assert worst < 1e-9, f"removing another agent moved this one by {worst} m"

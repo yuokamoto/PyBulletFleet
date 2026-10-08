@@ -157,6 +157,7 @@ class BatchOmniController(BatchKinematicController):
             self._t_const,
             self._t_total,
             self._accel_buf,
+            self._decel_buf,
             self._align_final_orient,
             self._rot_t_start,
             self._rot_dot,

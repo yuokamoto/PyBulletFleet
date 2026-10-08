@@ -1271,10 +1271,11 @@ class Agent(SimObject):
         final_path.extend(path)
 
         # Delegate first, and only call the agent moving once the controller
-        # has accepted the path. A controller that refuses -- a batched one
-        # given an asymmetric accel/decel profile, say -- would otherwise
-        # leave an idle agent reporting is_moving with no trajectory behind
-        # it, and the previous path's visualization already cleared.
+        # has accepted the path. A controller is free to refuse one -- an
+        # unregistered agent, a profile it cannot represent, a path its own
+        # validation rejects -- and setting the flag beforehand would leave an
+        # idle agent reporting is_moving with no trajectory behind it, and the
+        # previous path's visualization already cleared.
         if self._batch_controller is not None:
             # synchronized_set_path() sets _is_moving itself, under the same
             # lock as the array writes. Setting it here instead would race a

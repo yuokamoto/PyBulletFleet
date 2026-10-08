@@ -179,6 +179,7 @@ class BatchDifferentialController(BatchKinematicController):
             self._fwd_t_const,
             self._fwd_t_total,
             self._fwd_accel,
+            self._fwd_decel,
             self._align_final_orient,
         ):
             arr[[i, j]] = arr[[j, i]]
