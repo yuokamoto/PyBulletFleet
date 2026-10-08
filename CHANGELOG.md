@@ -147,6 +147,16 @@ are not recommended for production use yet.
   `AgentManager.agents` property, which filters. `set_goal_pose()` indexes
   that property rather than `objects`, so a non-agent no longer shifts the
   index of every agent after it.
+- `AgentSpawnParams.pickable` now reaches the agent. Neither
+  `Agent.from_mesh` nor `Agent.from_urdf` took the argument, so
+  `forward_spawn_params()` dropped it and `Agent.__init__` overwrote the flag
+  with `False` unconditionally -- the field was inert. `attach_object()`
+  refuses a non-pickable body, so an agent meant to be carried failed to
+  attach, far from where it was configured. The default is unchanged:
+  `AgentSpawnParams` declares `pickable = False` explicitly, narrowing
+  `SimObjectSpawnParams`' `True`, and `from_dict()` applies that default
+  rather than inheriting the parent's resolved `True`. The inherited field
+  order is unchanged.
 
 - Include positive-gap pairs within `collision_margin` in closest-point
   collision checks, including pairs whose AABBs do not overlap.

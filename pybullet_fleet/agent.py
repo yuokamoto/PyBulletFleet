@@ -81,6 +81,12 @@ class AgentSpawnParams(SimObjectSpawnParams):
         AgentManager.spawn_agents_grid() calculates positions automatically and may override initial_pose.
     """
 
+    #: Agents are not pickable by default -- a robot is usually the one doing
+    #: the picking -- which narrows SimObjectSpawnParams' default of True.
+    #: Redeclared rather than set elsewhere so the value a caller passes is
+    #: the value the agent gets; Agent.__init__ used to overwrite it
+    #: unconditionally, which made the field inert.
+    pickable: bool = False
     motion_mode: Union[MotionMode, str] = MotionMode(_AGT_D["motion_mode"])
     use_fixed_base: bool = _AGT_D["use_fixed_base"]
     ik_params: Optional["IKParams"] = None
@@ -150,6 +156,14 @@ class AgentSpawnParams(SimObjectSpawnParams):
         # Get base fields from parent
         base = SimObjectSpawnParams.from_dict(config)
         base_kwargs = {f.name: getattr(base, f.name) for f in fields(base)}
+
+        # ...except pickable, where this class narrows the parent's default to
+        # False. SimObjectSpawnParams.from_dict() has already resolved an
+        # absent key to its own True, and splatting that in would reinstate it
+        # for every config-driven agent -- the common path -- while the direct
+        # constructor said False.
+        if "pickable" not in config:
+            base_kwargs.pop("pickable", None)
 
         # Get motion_mode and convert string to enum if needed
         motion_mode_value = config.get("motion_mode", _AGT_D["motion_mode"])
@@ -295,6 +309,11 @@ class Agent(SimObject):
         joint_tolerance: Optional[Union[float, list, dict]] = None,
         controller: Optional[Union[str, Dict[str, Any], "ControllerParams", "Controller"]] = None,
         notify_spawn: bool = True,
+        # Agents default to not pickable -- a robot is usually the thing doing
+        # the picking -- but an agent can be cargo too: a lift car's platform,
+        # or a pallet with a joint. attach_object() refuses a non-pickable
+        # body, so it has to be settable at the spawn rather than only after.
+        pickable: bool = False,
     ):
         """
         Initialize Agent.
@@ -355,7 +374,19 @@ class Agent(SimObject):
         """
         # Initialize SimObject base class (collision_mode is forwarded so
         # add_object receives the correct mode directly – no post-hoc transition)
-        super().__init__(body_id, sim_core=sim_core, collision_mode=collision_mode, name=name, user_data=user_data, mass=mass)
+        # pickable goes in through super(), not assigned afterwards: SimObject
+        # registers the body and emits OBJECT_SPAWNED from there, so a late
+        # overwrite let every listener see the default rather than what the
+        # agent was configured with.
+        super().__init__(
+            body_id,
+            sim_core=sim_core,
+            collision_mode=collision_mode,
+            name=name,
+            user_data=user_data,
+            mass=mass,
+            pickable=pickable,
+        )
 
         self.urdf_path = urdf_path
 
@@ -416,9 +447,6 @@ class Agent(SimObject):
             self._kinematic_joint_positions: Dict[int, float] = {i: states[i][0] for i in indices}
         else:
             self._kinematic_joint_positions: Dict[int, float] = {}
-
-        # Override pickable default for Agent (robots are not pickable by default)
-        self.pickable = False
 
         # Per-agent plugin system (e.g. BatteryPlugin)
         self._plugins: List[AgentPlugin] = []
@@ -842,6 +870,7 @@ class Agent(SimObject):
         user_data: Optional[Dict[str, Any]] = None,
         controller: Optional[Union[str, Dict[str, Any], "ControllerParams", "Controller"]] = None,
         notify_spawn: bool = True,
+        pickable: bool = False,
     ) -> "Agent":
         """
         Create a mesh-based Agent with flexible shape control.
@@ -893,6 +922,7 @@ class Agent(SimObject):
             mass=mass,
             controller=controller,
             notify_spawn=notify_spawn,
+            pickable=pickable,
         )
 
         return agent
@@ -914,6 +944,7 @@ class Agent(SimObject):
         controller: Optional[Union[str, Dict[str, Any], "ControllerParams", "Controller"]] = None,
         notify_spawn: bool = True,
         global_scaling: float = 1.0,
+        pickable: bool = False,
     ) -> "Agent":
         """
         Create a URDF-based Agent (with joints).
@@ -928,6 +959,9 @@ class Agent(SimObject):
             motion_mode: MotionMode.OMNIDIRECTIONAL or MotionMode.DIFFERENTIAL
             use_fixed_base: If True, robot base is fixed in space
             global_scaling: Uniform scale factor applied when loading.
+            pickable: Whether the agent may be attached to another body
+                (default: False -- a robot is usually the one doing the
+                picking). ``attach_object()`` refuses a non-pickable body.
             sim_core: Reference to simulation core
             ik_params: IK solver configuration (default: ``IKParams()``).
             joint_tolerance: Default joint tolerance for convergence.
@@ -983,6 +1017,7 @@ class Agent(SimObject):
             joint_tolerance=joint_tolerance,
             controller=controller,
             notify_spawn=notify_spawn,
+            pickable=pickable,
         )
 
         return agent

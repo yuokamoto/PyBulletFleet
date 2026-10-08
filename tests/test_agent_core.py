@@ -489,7 +489,11 @@ class TestAgentSpawnParams:
         )
 
         assert params.mass == 0.0
-        assert params.pickable is True  # SimObjectSpawnParams default
+        # Narrows SimObjectSpawnParams' True: an agent is usually the one
+        # doing the picking. This used to read True while Agent.__init__
+        # overwrote the flag with False regardless, so the field was inert;
+        # now the params default states what the agent actually gets.
+        assert params.pickable is False
         assert params.name is None
         # No controller dict provided → stays None; framework defaults are
         # applied later at Agent construction time.
