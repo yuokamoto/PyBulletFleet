@@ -296,3 +296,55 @@ class TestSharedLoader:
             n = pb.getNumJoints(body.body_id, physicsClientId=sim_core.client)
             for link in range(-1, n):
                 assert pb.getDynamicsInfo(body.body_id, link, physicsClientId=sim_core.client)[0] == 0.0
+
+
+class TestTheModelNameIsResolvedOnce:
+    """Raised in review: `Agent.from_urdf()` resolved the name a second time
+    after the shared helper had already resolved it and loaded that path.
+
+    For an auto-discovered name that repeats an uncached
+    `robot_descriptions` scan, and a second resolution that disagreed would
+    leave the body just loaded orphaned.
+    """
+
+    def _count_resolutions(self, monkeypatch):
+        """Count every resolution, wherever the name was bound.
+
+        `agent.py` used to do `from .robot_models import resolve_model`, so
+        patching only `robot_models` misses its call entirely -- the name was
+        bound at import time. Both are patched, with `raising=False` because
+        the module-level binding is gone once the duplicate resolution is.
+        """
+        import pybullet_fleet.agent as agent_module
+        import pybullet_fleet.robot_models as robot_models
+
+        calls = []
+        original = robot_models.resolve_model
+
+        def counting(name, *args, **kwargs):
+            calls.append(name)
+            return original(name, *args, **kwargs)
+
+        monkeypatch.setattr(robot_models, "resolve_model", counting)
+        monkeypatch.setattr(agent_module, "resolve_model", counting, raising=False)
+        return calls
+
+    def test_the_agent_factory_resolves_once(self, sim_core, monkeypatch):
+        from pybullet_fleet import Agent
+
+        calls = self._count_resolutions(monkeypatch)
+        Agent.from_urdf(URDF, sim_core=sim_core, name="bot")
+        assert calls == [URDF]
+
+    def test_the_sim_object_factory_resolves_once(self, sim_core, monkeypatch):
+        calls = self._count_resolutions(monkeypatch)
+        SimObject.from_urdf(URDF, sim_core=sim_core, name="thing")
+        assert calls == [URDF]
+
+    def test_the_agent_keeps_the_resolved_path(self, sim_core):
+        """What the second resolution was there for."""
+        from pybullet_fleet import Agent
+        from pybullet_fleet.robot_models import resolve_model
+
+        agent = Agent.from_urdf(URDF, sim_core=sim_core, name="bot")
+        assert agent.urdf_path == resolve_model(URDF)

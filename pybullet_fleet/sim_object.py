@@ -4,7 +4,7 @@ Base class for simulation objects with attachment support.
 """
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Callable, List, Optional, Dict, Tuple, Union
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, NamedTuple, Optional, Tuple, Union
 import logging
 
 import pybullet as p
@@ -97,6 +97,15 @@ class ShapeParams:
         return dataclass_from_dict(cls, d)
 
 
+class LoadedUrdf(NamedTuple):
+    """What both ``from_urdf`` factories need out of a loaded URDF."""
+
+    body_id: int
+    mass: Optional[float]
+    name: Optional[str]
+    path: str
+
+
 def load_urdf_body(
     urdf_path: str,
     pose: Optional[Pose] = None,
@@ -105,7 +114,7 @@ def load_urdf_body(
     use_fixed_base: bool = True,
     global_scaling: float = 1.0,
     physics_client_id: int = 0,
-) -> Tuple[int, Optional[float], Optional[str]]:
+) -> LoadedUrdf:
     """Load a URDF and settle the three things both factories need from it.
 
     Shared by :meth:`SimObject.from_urdf` and :meth:`Agent.from_urdf`, which
@@ -123,11 +132,15 @@ def load_urdf_body(
         physics_client_id: Client to load into.
 
     Returns:
-        ``(body_id, resolved_mass, name)``. The mass is totalled across every
-        link rather than read from the base alone, because ``use_fixed_base``
-        zeroes the base: a multi-link URDF would otherwise report mass 0 while
-        its own links are still dynamic. The name is the URDF's own robot
-        name, for a caller with nothing better.
+        A :class:`LoadedUrdf`. The mass is totalled across every link rather
+        than read from the base alone, because ``use_fixed_base`` zeroes the
+        base: a multi-link URDF would otherwise report mass 0 while its own
+        links are still dynamic. The name is the URDF's own robot name, for a
+        caller with nothing better. The path is the resolved one, so a caller
+        that needs it does not pay for ``resolve_model()`` twice -- for an
+        auto-discovered name that is an uncached ``robot_descriptions`` scan,
+        and a second resolution that disagreed would orphan the body just
+        loaded.
 
     Raises:
         FileNotFoundError: If the URDF cannot be loaded.
@@ -169,7 +182,7 @@ def load_urdf_body(
 
     body_info = p.getBodyInfo(body_id, physicsClientId=physics_client_id)
     name = body_info[1].decode("utf-8") if body_info[1] else None
-    return body_id, resolved_mass, name
+    return LoadedUrdf(body_id=body_id, mass=resolved_mass, name=name, path=resolved_path)
 
 
 @dataclass
@@ -886,7 +899,7 @@ class SimObject:
                 collision_mode=CollisionMode.STATIC,
             )
         """
-        body_id, resolved_mass, default_name = load_urdf_body(
+        loaded = load_urdf_body(
             urdf_path,
             pose,
             mass=mass,
@@ -895,18 +908,18 @@ class SimObject:
             physics_client_id=sim_core.client if sim_core is not None else 0,
         )
         if name is None:
-            name = default_name
+            name = loaded.name
 
         obj = cls(
-            body_id=body_id,
+            body_id=loaded.body_id,
             sim_core=sim_core,
             pickable=pickable,
-            mass=resolved_mass,
+            mass=loaded.mass,
             collision_mode=collision_mode,
             name=name,
             user_data=user_data,
         )
-        lazy_logger.info(lambda: f"Loaded SimObject from URDF: {urdf_path}")
+        lazy_logger.info(lambda: f"Loaded SimObject from URDF: {loaded.path}")
         return obj
 
     @classmethod

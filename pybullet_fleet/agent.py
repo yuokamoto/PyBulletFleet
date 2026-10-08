@@ -19,7 +19,6 @@ from .types import MotionMode, MovementDirection, ActionStatus, CollisionMode
 from .tools import normalize_vector_param  # noqa: F401  (re-exported for legacy callers)
 from pybullet_fleet.tools import resolve_joint_index, resolve_link_index
 from .logging_utils import get_lazy_logger
-from .robot_models import resolve_model
 from pybullet_fleet.events import SimEvents
 from pybullet_fleet._defaults import AGENT as _AGT_D, IK as _IK_D
 from pybullet_fleet.config_utils import forward_spawn_params as _forward_spawn_params
@@ -949,7 +948,7 @@ class Agent(SimObject):
         # the URDF's own name are the same work either way, and the two had
         # drifted -- only one of them totalled the links' mass or turned an
         # unreadable file into a FileNotFoundError.
-        body_id, resolved_mass, _ = load_urdf_body(
+        loaded = load_urdf_body(
             urdf_path,
             pose,
             mass=mass,
@@ -957,7 +956,11 @@ class Agent(SimObject):
             global_scaling=global_scaling,
             physics_client_id=sim_core.client if sim_core is not None else 0,
         )
-        urdf_path = resolve_model(urdf_path)
+        # The resolved path comes back with the body: resolving again would
+        # repeat an uncached robot_descriptions scan for an auto-discovered
+        # name, and a second resolution that disagreed would leave the body
+        # just loaded orphaned.
+        body_id, resolved_mass, urdf_path = loaded.body_id, loaded.mass, loaded.path
 
         # Create agent instance (SimObject.__init__ handles auto-registration)
         # collision_mode is passed through __init__ -> super().__init__() -> add_object
