@@ -241,3 +241,58 @@ class TestDisabledCollisionCoversEveryLink:
             sim_core=sim_core,
         )
         assert self._contacting_links(sim_core, arm, box) == []
+
+
+class TestSharedLoader:
+    """`Agent.from_urdf` and `SimObject.from_urdf` load through one helper.
+
+    They were near-identical and had already drifted: only one totalled the
+    links' mass, and only one turned an unreadable file into a
+    `FileNotFoundError`.
+    """
+
+    def test_both_factories_resolve_the_same_mass(self, sim_core):
+        from pybullet_fleet import Agent, AgentSpawnParams
+
+        obj = SimObject.from_urdf("kuka_iiwa", sim_core=sim_core, mass=None, use_fixed_base=True)
+        agent = Agent.from_urdf("kuka_iiwa", sim_core=sim_core, mass=None, use_fixed_base=True)
+        assert obj.mass == pytest.approx(agent.mass)
+        assert obj.mass > 0.0
+
+    def test_both_report_a_missing_file_the_same_way(self, sim_core):
+        from pybullet_fleet import Agent
+
+        with pytest.raises(FileNotFoundError, match="Failed to load URDF"):
+            SimObject.from_urdf("/nonexistent/nope.urdf", sim_core=sim_core)
+        with pytest.raises(FileNotFoundError, match="Failed to load URDF"):
+            Agent.from_urdf("/nonexistent/nope.urdf", sim_core=sim_core)
+
+    def test_both_accept_global_scaling(self, sim_core):
+        import pybullet as pb
+
+        from pybullet_fleet import Agent
+
+        def extent(body):
+            lo, hi = pb.getAABB(body.body_id, physicsClientId=sim_core.client)
+            return hi[0] - lo[0]
+
+        plain = SimObject.from_urdf(URDF, sim_core=sim_core, name="plain")
+        scaled = SimObject.from_urdf(URDF, sim_core=sim_core, name="scaled", global_scaling=3.0)
+        assert extent(scaled) > extent(plain) * 2
+
+        agent_plain = Agent.from_urdf(URDF, sim_core=sim_core, name="ap")
+        agent_scaled = Agent.from_urdf(URDF, sim_core=sim_core, name="as", global_scaling=3.0)
+        assert extent(agent_scaled) > extent(agent_plain) * 2
+
+    def test_kinematic_mass_zeroes_every_link_either_way(self, sim_core):
+        import pybullet as pb
+
+        from pybullet_fleet import Agent
+
+        for body in (
+            SimObject.from_urdf("kuka_iiwa", sim_core=sim_core, mass=0.0, use_fixed_base=True),
+            Agent.from_urdf("kuka_iiwa", sim_core=sim_core, mass=0.0, use_fixed_base=True),
+        ):
+            n = pb.getNumJoints(body.body_id, physicsClientId=sim_core.client)
+            for link in range(-1, n):
+                assert pb.getDynamicsInfo(body.body_id, link, physicsClientId=sim_core.client)[0] == 0.0

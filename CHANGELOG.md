@@ -13,6 +13,12 @@ are not recommended for production use yet.
 
 ### Changed
 
+- `Agent.from_urdf()` and `SimObject.from_urdf()` load through one shared
+  helper, `load_urdf_body()`. `Agent.from_urdf()` gains `global_scaling` and
+  now raises `FileNotFoundError` for a URDF it cannot read, where it
+  previously let PyBullet's own `error` escape -- the two factories had
+  drifted on both points.
+
 - An optional state-recorder error during a command, object spawn/removal, or
   completed-step capture now stops recording with an explicitly incomplete
   artifact while the simulation operation continues. GUI playback selects the

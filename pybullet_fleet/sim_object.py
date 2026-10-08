@@ -97,6 +97,81 @@ class ShapeParams:
         return dataclass_from_dict(cls, d)
 
 
+def load_urdf_body(
+    urdf_path: str,
+    pose: Optional[Pose] = None,
+    *,
+    mass: Optional[float] = None,
+    use_fixed_base: bool = True,
+    global_scaling: float = 1.0,
+    physics_client_id: int = 0,
+) -> Tuple[int, Optional[float], Optional[str]]:
+    """Load a URDF and settle the three things both factories need from it.
+
+    Shared by :meth:`SimObject.from_urdf` and :meth:`Agent.from_urdf`, which
+    otherwise differ only in what they wrap the body in.
+
+    Args:
+        urdf_path: Model name or path, resolved via
+            :func:`~pybullet_fleet.robot_models.resolve_model`.
+        pose: Where to place the base (default: origin).
+        mass: ``0.0`` overrides every link to mass 0 for kinematic use;
+            ``None`` keeps the URDF's own values; anything else is taken as
+            given.
+        use_fixed_base: If True, the base is fixed in space.
+        global_scaling: Uniform scale factor.
+        physics_client_id: Client to load into.
+
+    Returns:
+        ``(body_id, resolved_mass, name)``. The mass is totalled across every
+        link rather than read from the base alone, because ``use_fixed_base``
+        zeroes the base: a multi-link URDF would otherwise report mass 0 while
+        its own links are still dynamic. The name is the URDF's own robot
+        name, for a caller with nothing better.
+
+    Raises:
+        FileNotFoundError: If the URDF cannot be loaded.
+    """
+    from pybullet_fleet.robot_models import resolve_model
+
+    resolved_path = resolve_model(urdf_path)
+    if pose is None:
+        pose = Pose.from_xyz(0.0, 0.0, 0.0)
+    position, orientation = pose.as_position_orientation()
+
+    try:
+        body_id = p.loadURDF(
+            resolved_path,
+            position,
+            orientation,
+            useFixedBase=use_fixed_base,
+            globalScaling=global_scaling,
+            flags=p.URDF_ENABLE_CACHED_GRAPHICS_SHAPES,
+            physicsClientId=physics_client_id,
+        )
+    except p.error as exc:
+        raise FileNotFoundError(f"Failed to load URDF: {resolved_path}") from exc
+
+    num_joints = p.getNumJoints(body_id, physicsClientId=physics_client_id)
+    if mass == 0.0:
+        # Every link, not just the base, or the articulated links keep their
+        # inertia and gravity still acts on them.
+        p.changeDynamics(body_id, -1, mass=0.0, physicsClientId=physics_client_id)
+        for joint_idx in range(num_joints):
+            p.changeDynamics(body_id, joint_idx, mass=0.0, physicsClientId=physics_client_id)
+        resolved_mass: Optional[float] = 0.0
+    elif mass is None:
+        resolved_mass = p.getDynamicsInfo(body_id, -1, physicsClientId=physics_client_id)[0]
+        for joint_idx in range(num_joints):
+            resolved_mass += p.getDynamicsInfo(body_id, joint_idx, physicsClientId=physics_client_id)[0]
+    else:
+        resolved_mass = mass
+
+    body_info = p.getBodyInfo(body_id, physicsClientId=physics_client_id)
+    name = body_info[1].decode("utf-8") if body_info[1] else None
+    return body_id, resolved_mass, name
+
+
 @dataclass
 class SimObjectSpawnParams:
     """
@@ -811,49 +886,16 @@ class SimObject:
                 collision_mode=CollisionMode.STATIC,
             )
         """
-        from pybullet_fleet.robot_models import resolve_model
-
-        resolved_path = resolve_model(urdf_path)
-        pid = sim_core.client if sim_core is not None else 0
-
-        if pose is None:
-            pose = Pose.from_xyz(0.0, 0.0, 0.0)
-        position, orientation = pose.as_position_orientation()
-
-        try:
-            body_id = p.loadURDF(
-                resolved_path,
-                position,
-                orientation,
-                useFixedBase=use_fixed_base,
-                globalScaling=global_scaling,
-                flags=p.URDF_ENABLE_CACHED_GRAPHICS_SHAPES,
-                physicsClientId=pid,
-            )
-        except p.error as exc:
-            raise FileNotFoundError(f"Failed to load URDF: {resolved_path}") from exc
-
-        if mass == 0.0:
-            # Kinematic: every link, not just the base, or the articulated
-            # links keep their inertia and gravity still acts on them.
-            p.changeDynamics(body_id, -1, mass=0.0, physicsClientId=pid)
-            for joint_idx in range(p.getNumJoints(body_id, physicsClientId=pid)):
-                p.changeDynamics(body_id, joint_idx, mass=0.0, physicsClientId=pid)
-            resolved_mass: Optional[float] = 0.0
-        elif mass is None:
-            # Total it here rather than leaving SimObject.__init__ to read the
-            # base link alone: use_fixed_base zeroes the base, so a multi-link
-            # URDF whose child links are massive would come out mass 0 and
-            # is_kinematic True while its links are still dynamic.
-            resolved_mass = p.getDynamicsInfo(body_id, -1, physicsClientId=pid)[0]
-            for joint_idx in range(p.getNumJoints(body_id, physicsClientId=pid)):
-                resolved_mass += p.getDynamicsInfo(body_id, joint_idx, physicsClientId=pid)[0]
-        else:
-            resolved_mass = mass
-
+        body_id, resolved_mass, default_name = load_urdf_body(
+            urdf_path,
+            pose,
+            mass=mass,
+            use_fixed_base=use_fixed_base,
+            global_scaling=global_scaling,
+            physics_client_id=sim_core.client if sim_core is not None else 0,
+        )
         if name is None:
-            body_info = p.getBodyInfo(body_id, physicsClientId=pid)
-            name = body_info[1].decode("utf-8") if body_info[1] else None
+            name = default_name
 
         obj = cls(
             body_id=body_id,
@@ -864,7 +906,7 @@ class SimObject:
             name=name,
             user_data=user_data,
         )
-        lazy_logger.info(lambda: f"Loaded SimObject from URDF: {resolved_path}")
+        lazy_logger.info(lambda: f"Loaded SimObject from URDF: {urdf_path}")
         return obj
 
     @classmethod
