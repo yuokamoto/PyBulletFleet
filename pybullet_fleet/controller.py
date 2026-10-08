@@ -452,11 +452,13 @@ class KinematicController(Controller):
             # safe scalar form (forward-axis limits).
             vmax = self.params.scalar_max_linear_vel()
             amax = self.params.scalar_max_linear_accel()
+            dmax = self.params.scalar_max_linear_decel()
         else:
             vmax = self.params.linear_vel_along_direction(direction_unit_body)
             amax = self.params.linear_accel_along_direction(direction_unit_body)
+            dmax = self.params.linear_decel_along_direction(direction_unit_body)
 
-        self._tpi_forward = build_tpi(p0=0.0, pe=distance, vmax=vmax, accel=amax, t0=t0)
+        self._tpi_forward = build_tpi(p0=0.0, pe=distance, vmax=vmax, accel=amax, t0=t0, decel=dmax)
 
     def _init_rotation_tpi(
         self,
@@ -490,7 +492,7 @@ class KinematicController(Controller):
         angular_accel = self.params.scalar_max_angular_accel()
 
         self._tpi_rotation_angle = build_tpi(p0=0.0, pe=rotation_angle, vmax=angular_vel, accel=angular_accel, t0=t0)
-        _, _, t_tot, _ = extract_phase_params(self._tpi_rotation_angle)
+        _, _, t_tot, _, _ = extract_phase_params(self._tpi_rotation_angle)
         if t_tot <= 0.0:
             # build_tpi produced a degenerate zero-duration trajectory (velocity or
             # accel limits are too small to plan the rotation). Treat as failure so
@@ -747,6 +749,10 @@ class OmniController(KinematicController):
             or self._is_final_orientation_aligning
             or self._forward_start_pos is None
             or tpi is None
+            # The captured record carries a single "accel", so an asymmetric
+            # profile could not be rebuilt from it. Refuse rather than restore
+            # a trajectory that silently brakes at the wrong rate.
+            or float(tpi.amax_decel) != float(tpi.amax_accel)
         ):
             raise ValueError("Unsupported omni navigation state for the straight checkpoint profile")
         return {
@@ -790,6 +796,9 @@ class OmniController(KinematicController):
             vmax=state["vmax"],
             accel=state["accel"],
             t0=state["t0"],
+            # Checkpoints written before asymmetric decel existed carry no
+            # "decel" key; None reproduces their symmetric profile.
+            decel=state.get("decel"),
         )
 
     def capture_navigation_state(self) -> dict:
@@ -804,6 +813,13 @@ class OmniController(KinematicController):
         if self._pose_phase is PosePhase.FORWARD:
             if self._tpi_forward is None or (self._forward_start_pos is None and not self._is_final_orientation_aligning):
                 raise ValueError("Omni forward trajectory is incomplete")
+            # Same reason as capture_straight_navigation(): this record carries
+            # a single "accel", and restore_navigation_state() rebuilds the
+            # forward TPI from it with symmetric braking. Capturing an
+            # asymmetric trajectory here would resume it at the wrong rate,
+            # and silently -- the schema is unchanged, so it is refused.
+            if float(self._tpi_forward.amax_decel) != float(self._tpi_forward.amax_accel):
+                raise ValueError("Unsupported omni navigation state: asymmetric deceleration cannot be checkpointed")
             forward = {
                 "origin": self._forward_start_pos.tolist() if self._forward_start_pos is not None else None,
                 "t0": float(self._tpi_forward.t0),
