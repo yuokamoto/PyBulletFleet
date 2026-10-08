@@ -13,13 +13,12 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional, Sequence, Tuple, Ty
 import numpy as np
 import pybullet as p
 from .geometry import Pose, as_axes
-from .sim_object import SimObject, SimObjectSpawnParams, ShapeParams
+from .sim_object import ShapeParams, SimObject, SimObjectSpawnParams, load_urdf_body
 from .action import Action
 from .types import MotionMode, MovementDirection, ActionStatus, CollisionMode
 from .tools import normalize_vector_param  # noqa: F401  (re-exported for legacy callers)
 from pybullet_fleet.tools import resolve_joint_index, resolve_link_index
 from .logging_utils import get_lazy_logger
-from .robot_models import resolve_model
 from pybullet_fleet.events import SimEvents
 from pybullet_fleet._defaults import AGENT as _AGT_D, IK as _IK_D
 from pybullet_fleet.config_utils import forward_spawn_params as _forward_spawn_params
@@ -82,7 +81,6 @@ class AgentSpawnParams(SimObjectSpawnParams):
         AgentManager.spawn_agents_grid() calculates positions automatically and may override initial_pose.
     """
 
-    urdf_path: Optional[str] = None
     motion_mode: Union[MotionMode, str] = MotionMode(_AGT_D["motion_mode"])
     use_fixed_base: bool = _AGT_D["use_fixed_base"]
     ik_params: Optional["IKParams"] = None
@@ -171,9 +169,10 @@ class AgentSpawnParams(SimObjectSpawnParams):
         # Parse plugins list (pass through as-is; resolved in from_params)
         plugins_value = list(config.get("plugins") or [])
 
+        # urdf_path is not repeated here: SimObjectSpawnParams carries it now,
+        # so it already arrives in base_kwargs.
         return cls(
             **base_kwargs,
-            urdf_path=config.get("urdf_path"),
             motion_mode=motion_mode_value,
             use_fixed_base=config.get("use_fixed_base", _AGT_D["use_fixed_base"]),
             ik_params=ik_params_value,
@@ -914,6 +913,7 @@ class Agent(SimObject):
         joint_tolerance: Optional[Union[float, list, dict]] = None,
         controller: Optional[Union[str, Dict[str, Any], "ControllerParams", "Controller"]] = None,
         notify_spawn: bool = True,
+        global_scaling: float = 1.0,
     ) -> "Agent":
         """
         Create a URDF-based Agent (with joints).
@@ -927,6 +927,7 @@ class Agent(SimObject):
                 - 0.0: Override all links to mass=0 for kinematic control (no physics)
             motion_mode: MotionMode.OMNIDIRECTIONAL or MotionMode.DIFFERENTIAL
             use_fixed_base: If True, robot base is fixed in space
+            global_scaling: Uniform scale factor applied when loading.
             sim_core: Reference to simulation core
             ik_params: IK solver configuration (default: ``IKParams()``).
             joint_tolerance: Default joint tolerance for convergence.
@@ -948,46 +949,23 @@ class Agent(SimObject):
             robot = Agent.from_urdf(urdf_path="panda", use_fixed_base=True)
             robot = Agent.from_urdf(urdf_path="arm_robot.urdf", mass=0.0)
         """
-        urdf_path = resolve_model(urdf_path)
-
-        if pose is None:
-            pose = Pose.from_xyz(0.0, 0.0, 0.0)
-
-        # Get position and orientation from Pose
-        position, orientation = pose.as_position_orientation()
-
-        _client = sim_core._client if sim_core is not None else 0
-        body_id = p.loadURDF(
+        # Shared with SimObject.from_urdf(): the load, the mass resolution and
+        # the URDF's own name are the same work either way, and the two had
+        # drifted -- only one of them totalled the links' mass or turned an
+        # unreadable file into a FileNotFoundError.
+        loaded = load_urdf_body(
             urdf_path,
-            position,
-            orientation,
-            useFixedBase=use_fixed_base,
-            flags=p.URDF_ENABLE_CACHED_GRAPHICS_SHAPES,
-            physicsClientId=_client,
+            pose,
+            mass=mass,
+            use_fixed_base=use_fixed_base,
+            global_scaling=global_scaling,
+            physics_client_id=sim_core.client if sim_core is not None else 0,
         )
-
-        # Override mass if explicitly set to 0.0 (kinematic control)
-        # mass=None (default) means use URDF's mass values as-is
-        if mass == 0.0:
-            # Kinematic control: set mass to 0 for all links
-            # This prevents gravity and inertia from affecting the robot
-            p.changeDynamics(body_id, -1, mass=0.0, physicsClientId=_client)
-            num_joints = p.getNumJoints(body_id, physicsClientId=_client)
-            for joint_idx in range(num_joints):
-                p.changeDynamics(body_id, joint_idx, mass=0.0, physicsClientId=_client)
-
-        # Resolve the mass value to pass to the constructor.
-        # When mass=None, compute total URDF mass (all links) so that
-        # is_kinematic is correctly False for physics robots, even when
-        # useFixedBase=True makes the base link mass 0.
-        if mass is None:
-            num_joints = p.getNumJoints(body_id, physicsClientId=_client)
-            total_mass = p.getDynamicsInfo(body_id, -1, physicsClientId=_client)[0]
-            for j in range(num_joints):
-                total_mass += p.getDynamicsInfo(body_id, j, physicsClientId=_client)[0]
-            resolved_mass = total_mass
-        else:
-            resolved_mass = mass
+        # The resolved path comes back with the body: resolving again would
+        # repeat an uncached robot_descriptions scan for an auto-discovered
+        # name, and a second resolution that disagreed would leave the body
+        # just loaded orphaned.
+        body_id, resolved_mass, urdf_path = loaded.body_id, loaded.mass, loaded.path
 
         # Create agent instance (SimObject.__init__ handles auto-registration)
         # collision_mode is passed through __init__ -> super().__init__() -> add_object

@@ -4,7 +4,7 @@ Base class for simulation objects with attachment support.
 """
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Callable, List, Optional, Dict, Tuple, Union
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, NamedTuple, Optional, Tuple, Union
 import logging
 
 import pybullet as p
@@ -97,6 +97,94 @@ class ShapeParams:
         return dataclass_from_dict(cls, d)
 
 
+class LoadedUrdf(NamedTuple):
+    """What both ``from_urdf`` factories need out of a loaded URDF."""
+
+    body_id: int
+    mass: Optional[float]
+    name: Optional[str]
+    path: str
+
+
+def load_urdf_body(
+    urdf_path: str,
+    pose: Optional[Pose] = None,
+    *,
+    mass: Optional[float] = None,
+    use_fixed_base: bool = True,
+    global_scaling: float = 1.0,
+    physics_client_id: int = 0,
+) -> LoadedUrdf:
+    """Load a URDF and settle the three things both factories need from it.
+
+    Shared by :meth:`SimObject.from_urdf` and :meth:`Agent.from_urdf`, which
+    otherwise differ only in what they wrap the body in.
+
+    Args:
+        urdf_path: Model name or path, resolved via
+            :func:`~pybullet_fleet.robot_models.resolve_model`.
+        pose: Where to place the base (default: origin).
+        mass: ``0.0`` overrides every link to mass 0 for kinematic use;
+            ``None`` keeps the URDF's own values; anything else is taken as
+            given.
+        use_fixed_base: If True, the base is fixed in space.
+        global_scaling: Uniform scale factor.
+        physics_client_id: Client to load into.
+
+    Returns:
+        A :class:`LoadedUrdf`. The mass is totalled across every link rather
+        than read from the base alone, because ``use_fixed_base`` zeroes the
+        base: a multi-link URDF would otherwise report mass 0 while its own
+        links are still dynamic. The name is the URDF's own robot name, for a
+        caller with nothing better. The path is the resolved one, so a caller
+        that needs it does not pay for ``resolve_model()`` twice -- for an
+        auto-discovered name that is an uncached ``robot_descriptions`` scan,
+        and a second resolution that disagreed would orphan the body just
+        loaded.
+
+    Raises:
+        FileNotFoundError: If the URDF cannot be loaded.
+    """
+    from pybullet_fleet.robot_models import resolve_model
+
+    resolved_path = resolve_model(urdf_path)
+    if pose is None:
+        pose = Pose.from_xyz(0.0, 0.0, 0.0)
+    position, orientation = pose.as_position_orientation()
+
+    try:
+        body_id = p.loadURDF(
+            resolved_path,
+            position,
+            orientation,
+            useFixedBase=use_fixed_base,
+            globalScaling=global_scaling,
+            flags=p.URDF_ENABLE_CACHED_GRAPHICS_SHAPES,
+            physicsClientId=physics_client_id,
+        )
+    except p.error as exc:
+        raise FileNotFoundError(f"Failed to load URDF: {resolved_path}") from exc
+
+    num_joints = p.getNumJoints(body_id, physicsClientId=physics_client_id)
+    if mass == 0.0:
+        # Every link, not just the base, or the articulated links keep their
+        # inertia and gravity still acts on them.
+        p.changeDynamics(body_id, -1, mass=0.0, physicsClientId=physics_client_id)
+        for joint_idx in range(num_joints):
+            p.changeDynamics(body_id, joint_idx, mass=0.0, physicsClientId=physics_client_id)
+        resolved_mass: Optional[float] = 0.0
+    elif mass is None:
+        resolved_mass = p.getDynamicsInfo(body_id, -1, physicsClientId=physics_client_id)[0]
+        for joint_idx in range(num_joints):
+            resolved_mass += p.getDynamicsInfo(body_id, joint_idx, physicsClientId=physics_client_id)[0]
+    else:
+        resolved_mass = mass
+
+    body_info = p.getBodyInfo(body_id, physicsClientId=physics_client_id)
+    name = body_info[1].decode("utf-8") if body_info[1] else None
+    return LoadedUrdf(body_id=body_id, mass=resolved_mass, name=name, path=resolved_path)
+
+
 @dataclass
 class SimObjectSpawnParams:
     """
@@ -105,6 +193,9 @@ class SimObjectSpawnParams:
     Attributes:
         visual_shape: Visual shape parameters (ShapeParams or None)
         collision_shape: Collision shape parameters (ShapeParams or None)
+        urdf_path: Model name or path to a URDF file, as an alternative to
+            ``visual_shape`` / ``collision_shape``.  Mutually exclusive with
+            them; the URDF wins if both are given.
         initial_pose: Initial Pose (position and orientation) in world coordinates (default: origin)
         mass: Object mass in kg (0.0 for static objects, >0 for dynamic)
         pickable: Whether this object can be picked by robots (default: True)
@@ -153,6 +244,9 @@ class SimObjectSpawnParams:
     collision_frame_pose: Optional[Pose] = None
     collision_mode: CollisionMode = CollisionMode.NORMAL_3D  # Collision detection mode
     user_data: Dict[str, Any] = field(default_factory=dict)  # Custom metadata storage
+    # Declared last so the positional order of the existing fields -- and of
+    # AgentSpawnParams and ElevatorParams, which inherit them -- is unchanged.
+    urdf_path: Optional[str] = None
 
     @classmethod
     def from_dict(cls, config: Dict[str, Any]) -> "SimObjectSpawnParams":
@@ -166,6 +260,7 @@ class SimObjectSpawnParams:
             name (str, required): Object name.
             visual_shape (dict | ShapeParams, optional): Visual shape definition.
             collision_shape (dict | ShapeParams, optional): Collision shape.
+            urdf_path (str, optional): URDF model name or path, instead of the shape definitions.
             pose (list): ``[x, y, z]`` position.  Alternative to ``initial_pose``.
             yaw (float): Yaw angle in radians (used with ``pose``).
             initial_pose (Pose): Pose object (takes precedence over ``pose``).
@@ -215,6 +310,7 @@ class SimObjectSpawnParams:
         return cls(
             visual_shape=vs,
             collision_shape=cs,
+            urdf_path=config.get("urdf_path"),
             initial_pose=initial_pose,
             mass=config.get("mass", _OBJ_D["mass"]),
             pickable=config.get("pickable", _OBJ_D["pickable"]),
@@ -351,9 +447,7 @@ class SimObject:
 
         # Disable PyBullet physics collision if collision_mode is DISABLED
         if self.collision_mode == CollisionMode.DISABLED:
-            # setCollisionFilterGroupMask: (bodyId, linkId, collisionFilterGroup, collisionFilterMask)
-            # Setting mask=0 disables collision with all objects
-            p.setCollisionFilterGroupMask(self.body_id, -1, 0, 0, physicsClientId=self._pid)
+            self._set_pybullet_collision_enabled(False)
             self._log.debug(f"Disabled PyBullet collision (body {self.body_id})")
 
         # Auto-register to sim_core if provided
@@ -745,6 +839,90 @@ class SimObject:
         )
 
     @classmethod
+    def from_urdf(
+        cls,
+        urdf_path: str,
+        pose: Optional[Pose] = None,
+        sim_core=None,
+        mass: Optional[float] = 0.0,
+        pickable: bool = False,
+        collision_mode: CollisionMode = CollisionMode.NORMAL_3D,
+        use_fixed_base: bool = True,
+        global_scaling: float = 1.0,
+        name: Optional[str] = None,
+        user_data: Optional[Dict[str, Any]] = None,
+    ) -> "SimObject":
+        """Load a URDF file and wrap the body in a SimObject.
+
+        The counterpart of :meth:`from_sdf` for single-body URDF models, and
+        the non-agent counterpart of :meth:`Agent.from_urdf`.
+
+        Use this for static structure -- walls, fixtures, shelving, fencing -- that has
+        a URDF but no behaviour.  Such a body does not belong in the per-step
+        update loop: ``SimObject._needs_update`` is ``False``, so
+        ``step_once()`` skips it entirely, where an ``Agent`` is visited every
+        step to walk an empty action queue, check joints it does not have and
+        sweep plugins it does not own.  Measured on a scene of 2376
+        fixed-base, jointless, controller-less bodies: 15.98 ms per step as
+        Agents against 0.78 ms as SimObjects.
+
+        Without this method, a URDF-defined static body has to be created as
+        an Agent, because ``urdf_path`` exists only on ``AgentSpawnParams``.
+
+        Args:
+            urdf_path: Model name (e.g. ``"panda"``) or path to a URDF file.
+                Resolved via :func:`~pybullet_fleet.robot_models.resolve_model`.
+            pose: Initial Pose (default: origin).
+            sim_core: Simulation core for registration.
+            mass: ``0.0`` (the default) overrides every link to mass 0 for
+                kinematic use; ``None`` keeps the URDF's own mass values.
+            pickable: Whether the object can be picked up (default: False,
+                since scenery is the usual case).
+            collision_mode: Collision detection mode.
+            use_fixed_base: If True, the base is fixed in space.
+            global_scaling: Uniform scale factor.
+            name: Human-readable name (default: the URDF's own robot name).
+            user_data: Custom metadata.
+
+        Returns:
+            SimObject instance.
+
+        Raises:
+            FileNotFoundError: If the URDF cannot be loaded.
+
+        Example::
+
+            tile = SimObject.from_urdf(
+                "frame_tile.urdf",
+                pose=Pose.from_xyz(1.0, 2.0, 0.0),
+                sim_core=sim,
+                collision_mode=CollisionMode.STATIC,
+            )
+        """
+        loaded = load_urdf_body(
+            urdf_path,
+            pose,
+            mass=mass,
+            use_fixed_base=use_fixed_base,
+            global_scaling=global_scaling,
+            physics_client_id=sim_core.client if sim_core is not None else 0,
+        )
+        if name is None:
+            name = loaded.name
+
+        obj = cls(
+            body_id=loaded.body_id,
+            sim_core=sim_core,
+            pickable=pickable,
+            mass=loaded.mass,
+            collision_mode=collision_mode,
+            name=name,
+            user_data=user_data,
+        )
+        lazy_logger.info(lambda: f"Loaded SimObject from URDF: {loaded.path}")
+        return obj
+
+    @classmethod
     def from_sdf(
         cls,
         sdf_path: str,
@@ -871,9 +1049,10 @@ class SimObject:
             )
             obj = SimObject.from_params(params, sim_core)
         """
-        obj = cls.from_mesh(
+        factory = cls.from_urdf if spawn_params.urdf_path is not None else cls.from_mesh
+        obj = factory(
             **_forward_spawn_params(
-                cls.from_mesh,
+                factory,
                 spawn_params,
                 aliases={"initial_pose": "pose"},
                 extra_kwargs={"sim_core": sim_core},
@@ -947,17 +1126,40 @@ class SimObject:
 
         # Update PyBullet collision filter if switching to/from DISABLED
         if mode == CollisionMode.DISABLED:
-            # Disable PyBullet collision
-            p.setCollisionFilterGroupMask(self.body_id, -1, 0, 0, physicsClientId=self._pid)
+            self._set_pybullet_collision_enabled(False)
         elif old_mode == CollisionMode.DISABLED:
-            # Re-enable PyBullet collision (default group=1, mask=-1)
-            p.setCollisionFilterGroupMask(self.body_id, -1, 1, -1, physicsClientId=self._pid)
+            self._set_pybullet_collision_enabled(True)
 
         # Notify sim_core to update collision system
         if self.sim_core is not None:
             self.sim_core._update_object_collision_mode(self.object_id, old_mode, mode)
 
         self._log.info(f"collision_mode changed from {old_mode.value} -> {mode.value}")
+
+    def _set_pybullet_collision_enabled(self, enabled: bool) -> None:
+        """Filter this body in or out of PyBullet's own collision detection.
+
+        Every link, not only the base. ``DISABLED`` is documented as turning
+        PyBullet collision off for the whole object, but the filter was
+        applied to link -1 alone -- so an articulated body kept every child
+        link colliding physically while being excluded from PyBulletFleet's
+        own checks. Single-link bodies are unaffected, there being nothing
+        else to set.
+
+        ``setCollisionFilterGroupMask(body, link, group, mask)``: mask 0
+        collides with nothing; group 1 and mask -1 are PyBullet's documented
+        defaults.
+
+        Re-enabling writes those defaults, which is not always what the link
+        started with: a fixed base loaded from URDF is filtered more tightly
+        than ``(1, -1)``, so a round trip through ``DISABLED`` can leave it
+        colliding where it did not before. That is pre-existing behaviour for
+        the base link, now applied consistently to the rest; restoring the
+        true original would need a getter PyBullet does not expose.
+        """
+        group, mask = (1, -1) if enabled else (0, 0)
+        for link_index in range(-1, p.getNumJoints(self.body_id, physicsClientId=self._pid)):
+            p.setCollisionFilterGroupMask(self.body_id, link_index, group, mask, physicsClientId=self._pid)
 
     def get_pose(self) -> Pose:
         """
