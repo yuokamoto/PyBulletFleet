@@ -777,6 +777,18 @@ class AgentManager(SimObjectManager[Agent]):
     # ------------------------------------------------------------------
 
     @property
+    def agents(self) -> List[Agent]:
+        """The agents this manager holds, skipping anything that is not one.
+
+        ``spawn_from_config()`` dispatches on each entry's ``type``, so a
+        config may mix ``agent`` and ``sim_object`` and ``objects`` can hold
+        both. Everything on this class that commands movement, reads motion
+        state or queues actions is agent-only, and reads this rather than
+        ``objects``.
+        """
+        return [obj for obj in self.objects if isinstance(obj, Agent)]
+
+    @property
     def batch_controller(self) -> Optional[Any]:
         """The fleet-wide :class:`BatchKinematicController`, or ``None``."""
         return self._batch_controller
@@ -807,8 +819,9 @@ class AgentManager(SimObjectManager[Agent]):
             self.disable_batch()
         bc = cls()
         self._batch_controller = bc
-        # Register agents already in the manager
-        for agent in self.objects:
+        # Register agents already in the manager; see the `agents` property
+        # for why `objects` may hold things that are not.
+        for agent in self.agents:
             if agent._batch_controller is None:
                 bc.register_agent(agent)
         return bc
@@ -818,7 +831,7 @@ class AgentManager(SimObjectManager[Agent]):
         bc = self._batch_controller
         if bc is None:
             return
-        for agent in list(self.objects):
+        for agent in self.agents:
             if agent._batch_controller is bc:
                 bc.unregister_agent(agent)
         self._batch_controller = None
@@ -828,7 +841,22 @@ class AgentManager(SimObjectManager[Agent]):
     # ------------------------------------------------------------------
 
     def add_object(self, obj: Agent) -> None:
+        """Add an object, wiring up the agent-only parts only for agents.
+
+        An ``AgentManager`` can legitimately hold a plain :class:`SimObject`:
+        :meth:`spawn_from_config` dispatches on each entry's ``type`` and a
+        config may mix ``agent`` and ``sim_object``. Everything below is
+        agent-only, though -- the fleet-controller defaults read
+        ``controller_params`` and the batch controller reads
+        ``_batch_controller``, neither of which a ``SimObject`` has -- so a
+        mixed manager used to raise ``AttributeError`` from inside this
+        method as soon as either controller was attached. That could be long
+        after the object was added, and it read as a fault in
+        :meth:`enable_batch` rather than in the mix.
+        """
         super().add_object(obj)
+        if not isinstance(obj, Agent):
+            return
         if self._fleet_controller:
             from dataclasses import fields as dc_fields
             from pybullet_fleet.controller_params import ControllerParams
@@ -852,7 +880,12 @@ class AgentManager(SimObjectManager[Agent]):
 
     def remove_object(self, obj: Agent) -> bool:
         result = super().remove_object(obj)
-        if result and self._batch_controller is not None and obj._batch_controller is self._batch_controller:
+        if (
+            result
+            and isinstance(obj, Agent)
+            and self._batch_controller is not None
+            and obj._batch_controller is self._batch_controller
+        ):
             self._batch_controller.unregister_agent(obj)
         return result
 
@@ -910,11 +943,14 @@ class AgentManager(SimObjectManager[Agent]):
         Set goal pose for a specific agent.
 
         Args:
-            agent_index: Index of agent in self.objects list
+            agent_index: Index into :attr:`agents`, not into ``objects`` --
+                a manager holding a non-agent would otherwise shift the
+                indices of everything after it.
             goal: Target Pose
         """
-        if 0 <= agent_index < len(self.objects):
-            self.objects[agent_index].set_goal_pose(goal)
+        agents = self.agents
+        if 0 <= agent_index < len(agents):
+            agents[agent_index].set_goal_pose(goal)
         else:
             logger.warning("Invalid agent index %d", agent_index)
 
@@ -931,8 +967,9 @@ class AgentManager(SimObjectManager[Agent]):
             body_id: PyBullet body ID
             goal: Target Pose
         """
-        if body_id in self.body_ids:
-            self.body_ids[body_id].set_goal_pose(goal)
+        target = self.body_ids.get(body_id)
+        if isinstance(target, Agent):
+            target.set_goal_pose(goal)
         else:
             logger.warning("Unknown agent body_id %d", body_id)
 
@@ -947,14 +984,15 @@ class AgentManager(SimObjectManager[Agent]):
             object_id: Simulation object ID (from SimObject.object_id)
             goal: Target Pose
         """
-        if object_id in self.object_ids:
-            self.object_ids[object_id].set_goal_pose(goal)
+        target = self.object_ids.get(object_id)
+        if isinstance(target, Agent):
+            target.set_goal_pose(goal)
         else:
             logger.warning("Unknown agent object_id %d", object_id)
 
     def stop_all(self):
         """Stop all agents and clear their goals."""
-        for agent in self.objects:
+        for agent in self.agents:
             agent.stop()
 
     def set_goal_pose_all(self, goal_factory: Callable[[Agent], Pose]) -> None:
@@ -987,7 +1025,7 @@ class AgentManager(SimObjectManager[Agent]):
             This is a convenience wrapper around individual set_goal_pose calls.
             No performance benefit over explicit loops, but improves code clarity.
         """
-        for agent in self.objects:
+        for agent in self.agents:
             goal = goal_factory(agent)
             agent.set_goal_pose(goal)
 
@@ -1023,13 +1061,13 @@ class AgentManager(SimObjectManager[Agent]):
             Only applicable to agents with controllable joints (robot arms, etc.).
             Mobile robots without arm joints will ignore this command.
         """
-        for agent in self.objects:
+        for agent in self.agents:
             targets = targets_factory(agent)
             agent.set_joints_targets(targets, max_force=max_force)
 
     def get_moving_count(self) -> int:
         """Get number of agents currently moving."""
-        return sum(1 for agent in self.objects if agent.is_moving)
+        return sum(1 for agent in self.agents if agent.is_moving)
 
     def add_action_sequence_all(self, action_factory: Callable[[Agent], List[Any]]) -> None:
         """
@@ -1060,7 +1098,7 @@ class AgentManager(SimObjectManager[Agent]):
             so there's no performance benefit over explicit loops. The main advantage
             is code clarity and reduced boilerplate.
         """
-        for agent in self.objects:
+        for agent in self.agents:
             actions = action_factory(agent)
             agent.add_action_sequence(actions)
 
@@ -1081,7 +1119,7 @@ class AgentManager(SimObjectManager[Agent]):
 
             manager.add_action_all(create_move_action)
         """
-        for agent in self.objects:
+        for agent in self.agents:
             action = action_factory(agent)
             agent.add_action(action)
 

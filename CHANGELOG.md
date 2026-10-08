@@ -138,6 +138,15 @@ are not recommended for production use yet.
   from -- still held the defaults. A fleet that set its limits this way ran
   correctly under the per-agent controllers and at the default 2.0 m/s and
   5.0 m/s under a batch controller.
+- An `AgentManager` holding a plain `SimObject` no longer raises
+  `AttributeError`. `spawn_from_config()` dispatches on each entry's `type`,
+  so a config may mix `agent` and `sim_object` and a mixed manager is a
+  supported arrangement, but every method that commands movement, reads
+  motion state or queues actions reached for attributes only an `Agent` has
+  -- `repr()` among them, by way of `get_moving_count()`. They now read a new
+  `AgentManager.agents` property, which filters. `set_goal_pose()` indexes
+  that property rather than `objects`, so a non-agent no longer shifts the
+  index of every agent after it.
 
 - Include positive-gap pairs within `collision_margin` in closest-point
   collision checks, including pairs whose AABBs do not overlap.
