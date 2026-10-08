@@ -98,6 +98,14 @@ def _install_default_handler(package_logger: logging.Logger, root_logger: loggin
     handler = logging.StreamHandler()
     handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
     package_logger.addHandler(handler)
+    # Propagation is left on. Turning it off would stop the one case this
+    # cannot catch -- a host that imports PyBulletFleet before configuring
+    # logging, then adds a root handler, and sees each line twice -- but it
+    # also cuts these records off from every handler the host adds later,
+    # pytest's caplog among them. Measured: 17 tests in this suite capture
+    # PyBulletFleet's own records through the root logger. The duplicate is
+    # cosmetic and the host can remove this handler; losing the records is
+    # not recoverable from the outside.
     return True
 
 
@@ -4247,8 +4255,7 @@ class MultiRobotSimulationCore:
             return
         self._closed = True
 
-        try:
-            # Auto-save recording if active
+        def _finalise_recording() -> None:
             if self._recorder is not None:
                 self.stop_recording()
             if self._state_recorder is not None:
@@ -4257,13 +4264,24 @@ class MultiRobotSimulationCore:
                 except Exception as exc:
                     self._abort_state_recording(exc)
 
-            self._shutdown_plugins()
-
+        def _stop_monitor() -> None:
             # Kept as it was: on other platforms the monitor is not stopped
             # here, which tests/test_monitor_macos.py pins.
             if IS_MACOS and self._data_monitor:
                 self._data_monitor.stop()
-        finally:
+
+        # Each step runs even if an earlier one raised, so one failure cannot
+        # strand the resources the later steps own -- and since _closed is
+        # already set, a retry would be a no-op. The first exception is kept
+        # and re-raised once everything has been given its chance.
+        first_error: Optional[BaseException] = None
+        for step in (_finalise_recording, self._shutdown_plugins, _stop_monitor):
+            try:
+                step()
+            except BaseException as exc:  # noqa: BLE001 - re-raised below
+                if first_error is None:
+                    first_error = exc
+        try:
             # PyBullet reuses client ids, so disconnecting twice could name a
             # later, unrelated simulation -- but the _closed guard above means
             # the disconnect runs at most once, so `client` stays readable
@@ -4274,6 +4292,9 @@ class MultiRobotSimulationCore:
                     p.disconnect(self._client)
                 except p.error:
                     pass  # already disconnected
+        finally:
+            if first_error is not None:
+                raise first_error
 
     def __enter__(self) -> "MultiRobotSimulationCore":
         return self

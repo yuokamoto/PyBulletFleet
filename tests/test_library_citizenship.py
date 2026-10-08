@@ -34,14 +34,20 @@ class TestLoggingStaysOnThePackageLogger:
         finally:
             sim.close()
 
-    def test_the_root_logger_has_no_handler_added_by_the_import(self):
-        """basicConfig() on import installed one on the root logger, which
-        changed the format of the host application's own output."""
+    def test_the_root_logger_carries_nothing_of_ours(self):
+        """basicConfig() on import installed a handler on the root logger,
+        which changed the format of the host application's own output.
+
+        Asserted as "root has none of ours", not "the package has one": when
+        the test runner or a fixture has already configured logging, the
+        package deliberately installs nothing, and asserting otherwise would
+        make this fail for the wrong reason.
+        """
         import pybullet_fleet  # noqa: F401
 
-        package = logging.getLogger("pybullet_fleet")
-        assert package.handlers, "the package logger carries its own handler"
-        assert all(h not in logging.getLogger().handlers for h in package.handlers)
+        package_handlers = set(map(id, logging.getLogger("pybullet_fleet").handlers))
+        root_handlers = set(map(id, logging.getLogger().handlers))
+        assert package_handlers & root_handlers == set()
 
 
 class TestClose:
@@ -197,3 +203,62 @@ class TestNoDuplicateLogRecords:
         package, root = self._loggers("c", [], [logging.NullHandler()])
         assert _install_default_handler(package, root) is False
         assert len(package.handlers) == 1
+
+
+class TestTeardownStepsAllRun:
+    """Raised in review: one failing step must not strand the resources the
+    later steps own, and _closed means a retry would be a no-op."""
+
+    def _sim_that_fails_to_finalise(self):
+        sim = MultiRobotSimulationCore(SimulationParams(**HEADLESS))
+        sim.initialize_simulation()
+        sim._recorder = object()
+        sim.stop_recording = lambda: (_ for _ in ()).throw(RuntimeError("imageio missing"))  # type: ignore
+        return sim
+
+    def test_plugins_still_shut_down(self):
+        sim = self._sim_that_fails_to_finalise()
+        calls = []
+        sim._shutdown_plugins = lambda: calls.append("plugins")  # type: ignore[method-assign]
+
+        with pytest.raises(RuntimeError, match="imageio missing"):
+            sim.close()
+
+        assert calls == ["plugins"]
+
+    def test_the_client_is_still_released(self):
+        sim = self._sim_that_fails_to_finalise()
+        client = sim.client
+        with pytest.raises(RuntimeError, match="imageio missing"):
+            sim.close()
+        assert not p.isConnected(client)
+
+    def test_the_first_failure_is_the_one_raised(self):
+        sim = self._sim_that_fails_to_finalise()
+        sim._shutdown_plugins = lambda: (_ for _ in ()).throw(ValueError("second"))  # type: ignore
+
+        with pytest.raises(RuntimeError, match="imageio missing"):
+            sim.close()
+
+
+class TestPropagation:
+    """Propagation stays on, so records still reach handlers the host adds
+    later -- pytest's caplog among them."""
+
+    def test_installing_a_handler_leaves_propagation_alone(self):
+        from pybullet_fleet.core_simulation import _install_default_handler
+
+        package, root = logging.getLogger("t.prop.pkg"), logging.getLogger("t.prop.root")
+        package.handlers.clear()
+        root.handlers.clear()
+        package.propagate = True
+
+        assert _install_default_handler(package, root) is True
+        assert package.propagate is True
+
+    def test_the_packages_records_reach_the_root_logger(self, caplog):
+        """What propagate=False would have cost: this suite captures
+        PyBulletFleet's own records this way in 17 places."""
+        with caplog.at_level(logging.WARNING, logger="pybullet_fleet"):
+            logging.getLogger("pybullet_fleet.core_simulation").warning("audible")
+        assert any("audible" in record.message for record in caplog.records)
