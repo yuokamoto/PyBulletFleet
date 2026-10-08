@@ -70,6 +70,14 @@ are not recommended for production use yet.
   existing configurations keep their symmetric trapezoid unchanged.
   `Agent.max_linear_decel`, `ControllerParams.linear_decel_along_direction()`
   and `ControllerParams.scalar_max_linear_decel()` round out the accessors.
+- Add `MultiRobotSimulationCore.close()` and context-manager support.
+  `run_simulation()` has always released the client on its way out, but a
+  program driving `step_once()` itself, or a test that only builds a scene,
+  never reached that code and nothing else disconnected. Because PyBullet's
+  module-level calls resolve against a default client, a leaked client made
+  the *next* simulation in the process report bodies and joints "not found"
+  rather than failing where the leak happened. `close()` is safe to call more
+  than once and on a simulation that was never run.
 
 - Add name-based simulation entity lookup on `MultiRobotSimulationCore`:
   ordered multi-result searches for objects and agents, plus unique-result
@@ -157,6 +165,19 @@ are not recommended for production use yet.
   `SimObjectSpawnParams`' `True`, and `from_dict()` applies that default
   rather than inheriting the parent's resolved `True`. The inherited field
   order is unchanged.
+- PyBulletFleet no longer configures the root logger. `logging.basicConfig()`
+  on import changed the format of the host application's own output, and
+  constructing a simulation called `logging.getLogger().setLevel(...)` from
+  `log_level` -- which defaults to `warn`, so merely building a simulation
+  turned off every INFO line in the process. Both now apply to the
+  `pybullet_fleet` logger, which carries its own handler.
+
+- A headless simulation no longer opens a monitor window. `enable_monitor_gui`
+  now defaults to `None`, meaning "follow `gui`"; an explicit `True` or
+  `False` is still honoured, so a monitor window without the PyBullet viewer
+  remains available. Building several simulations in one process -- a test
+  suite, a parameter sweep -- used to put a Tk window on screen per
+  simulation.
 
 - Include positive-gap pairs within `collision_margin` in closest-point
   collision checks, including pairs whose AABBs do not overlap.

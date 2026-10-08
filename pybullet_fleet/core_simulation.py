@@ -75,7 +75,43 @@ GLOBAL_LOG_LEVEL = "INFO"
 if "PYBULLET_LOG_LEVEL" in os.environ:
     GLOBAL_LOG_LEVEL = os.environ["PYBULLET_LOG_LEVEL"].upper()
 
-logging.basicConfig(level=logging.getLevelName(GLOBAL_LOG_LEVEL), format="%(asctime)s %(levelname)s %(message)s")
+
+#: The package's own logger. Everything below configures this rather than the
+#: root logger: importing a library must not decide how the application that
+#: imported it formats or filters its logs. A program that wants
+#: PyBulletFleet's output on screen and has configured nothing of its own gets
+#: it from the handler installed here; one that has called basicConfig() keeps
+#: its own, because the handler is only added when this logger has none.
+def _install_default_handler(package_logger: logging.Logger, root_logger: logging.Logger) -> bool:
+    """Give the package a handler only when nothing else is handling records.
+
+    Records propagate to the root logger, so installing one here while the
+    host application has its own would print every PyBulletFleet line twice.
+    A program that has configured nothing still gets the output it used to get
+    from ``basicConfig()``.
+
+    Returns whether a handler was added, which is what makes this testable
+    without re-importing the package.
+    """
+    if package_logger.handlers or root_logger.handlers:
+        return False
+    handler = logging.StreamHandler()
+    handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
+    package_logger.addHandler(handler)
+    # Propagation is left on. Turning it off would stop the one case this
+    # cannot catch -- a host that imports PyBulletFleet before configuring
+    # logging, then adds a root handler, and sees each line twice -- but it
+    # also cuts these records off from every handler the host adds later,
+    # pytest's caplog among them. Measured: 17 tests in this suite capture
+    # PyBulletFleet's own records through the root logger. The duplicate is
+    # cosmetic and the host can remove this handler; losing the records is
+    # not recoverable from the outside.
+    return True
+
+
+_PACKAGE_LOGGER = logging.getLogger(__name__.split(".")[0])
+_PACKAGE_LOGGER.setLevel(logging.getLevelName(GLOBAL_LOG_LEVEL))
+_install_default_handler(_PACKAGE_LOGGER, logging.getLogger())
 
 # Create module logger (LazyLogger: avoids expensive f-string evaluation when log level is disabled)
 logger = get_lazy_logger(__name__)
@@ -131,7 +167,11 @@ class SimulationParams:
     gui: bool = _SIM_D["gui"]
     physics: bool = _SIM_D["physics"]
     monitor: bool = _SIM_D["monitor"]
-    enable_monitor_gui: bool = _SIM_D["enable_monitor_gui"]
+    #: Whether the DataMonitor opens a window. ``None`` (the default) follows
+    #: ``gui``: a headless simulation collects monitor data without putting a
+    #: Tk window on screen. ``True`` or ``False`` is honoured as given, so a
+    #: monitor window without the PyBullet viewer is still available.
+    enable_monitor_gui: Optional[bool] = _SIM_D["enable_monitor_gui"]
     collision_check_frequency: Optional[float] = None
     log_level: str = _SIM_D["log_level"]
     max_steps_per_frame: int = _SIM_D["max_steps_per_frame"]
@@ -362,13 +402,18 @@ class MultiRobotSimulationCore:
         return sim
 
     def __init__(self, params: SimulationParams, collision_color: Optional[List[float]] = None) -> None:
-        # Initialize log level from params
+        # Initialize log level from params, on this package's logger only.
+        # Setting it on the root logger silenced the host application's own
+        # output: log_level defaults to "warn", so merely constructing a
+        # simulation turned off every INFO line in the process.
         level_str = getattr(params, "log_level", GLOBAL_LOG_LEVEL)
         level_name = str(level_str).upper()
-        logging.getLogger().setLevel(logging.getLevelName(level_name))
+        _PACKAGE_LOGGER.setLevel(logging.getLevelName(level_name))
 
         # --- Public (read-only via @property, internal via self._X) ---
         self._client: Optional[int] = None
+        #: Set by close(), so its shutdown callbacks run at most once.
+        self._closed: bool = False
         self._sim_objects: List[SimObject] = []  # List of all simulation objects (Agent, SimObject, etc.)
         self._sim_objects_dict: Dict[int, SimObject] = {}  # Dict for O(1) lookup: object_id -> SimObject
         self._agents: List[Agent] = []  # List of Agent instances only for O(M) iteration in step_once()
@@ -531,9 +576,16 @@ class MultiRobotSimulationCore:
         # If monitor: true and console_monitor: false, start DataMonitor
 
         if self._params.monitor:
+            # None means "follow gui": a headless run should not open a
+            # window. It used to open one regardless, so a program that
+            # builds several simulations -- a test suite, a sweep -- got a Tk
+            # window per simulation on a machine with no viewer in sight.
+            enable_gui = self._params.enable_monitor_gui
+            if enable_gui is None:
+                enable_gui = self._params.gui
             self._data_monitor = DataMonitor(
                 "PyBullet Simulation Monitor",
-                enable_gui=self._params.enable_monitor_gui,
+                enable_gui=enable_gui,
                 width=self._params.monitor_width,
                 height=self._params.monitor_height,
                 x=self._params.monitor_x,
@@ -4171,29 +4223,84 @@ class MultiRobotSimulationCore:
         except p.error:
             logger.info("PyBullet connection lost (GUI window closed)")
         self.update_monitor()
+        self.close()
 
-        # Auto-save recording if active
-        if self._recorder is not None:
-            self.stop_recording()
-        if self._state_recorder is not None:
+    # ------------------------------------------------------------------
+    # Teardown
+    # ------------------------------------------------------------------
+
+    def close(self) -> None:
+        """Release everything this simulation owns, including its client.
+
+        ``run_simulation()`` has always done this on the way out, but a
+        program that drives ``step_once()`` itself, or a test that only builds
+        a scene, never reached that code -- and nothing else disconnected. An
+        undisconnected client leaks for the life of the process, and because
+        PyBullet's module-level calls resolve against a default client, the
+        *next* simulation in the same process then finds bodies and joints
+        "not found" rather than failing where the leak happened.
+
+        Safe to call more than once, and safe on a simulation that was never
+        run. A second call does nothing at all: shutdown callbacks run once,
+        so a plugin that closes a file or a socket in ``on_shutdown()`` is not
+        asked to do it twice by ``with sim:`` around a ``run_simulation()``
+        that already closed.
+
+        Releasing the client is unconditional. Finalising a recording can
+        raise -- saving an MP4 without ``imageio``, for one -- and letting
+        that escape before the disconnect would leak the very client this
+        exists to release.
+        """
+        if self._closed:
+            return
+        self._closed = True
+
+        def _finalise_recording() -> None:
+            if self._recorder is not None:
+                self.stop_recording()
+            if self._state_recorder is not None:
+                try:
+                    self._state_recorder.close()
+                except Exception as exc:
+                    self._abort_state_recording(exc)
+
+        def _stop_monitor() -> None:
+            # Kept as it was: on other platforms the monitor is not stopped
+            # here, which tests/test_monitor_macos.py pins.
+            if IS_MACOS and self._data_monitor:
+                self._data_monitor.stop()
+
+        # Each step runs even if an earlier one raised, so one failure cannot
+        # strand the resources the later steps own -- and since _closed is
+        # already set, a retry would be a no-op. The first exception is kept
+        # and re-raised once everything has been given its chance.
+        first_error: Optional[BaseException] = None
+        for step in (_finalise_recording, self._shutdown_plugins, _stop_monitor):
             try:
-                self._state_recorder.close()
-            except Exception as exc:
-                self._abort_state_recording(exc)
-
-        # Shutdown plugins before disconnecting
-        self._shutdown_plugins()
-
-        if IS_MACOS and self._data_monitor:
-            self._data_monitor.stop()
-
-        # Disconnect from PyBullet if still connected
+                step()
+            except BaseException as exc:  # noqa: BLE001 - re-raised below
+                if first_error is None:
+                    first_error = exc
         try:
-            p.getConnectionInfo(physicsClientId=self.client)
-            p.disconnect(self.client)
-        except p.error:
-            # Already disconnected
-            pass
+            # PyBullet reuses client ids, so disconnecting twice could name a
+            # later, unrelated simulation -- but the _closed guard above means
+            # the disconnect runs at most once, so `client` stays readable
+            # after close() as it always has. run_simulation() ends by calling
+            # this, and callers do read it afterwards.
+            if self._client is not None:
+                try:
+                    p.disconnect(self._client)
+                except p.error:
+                    pass  # already disconnected
+        finally:
+            if first_error is not None:
+                raise first_error
+
+    def __enter__(self) -> "MultiRobotSimulationCore":
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        self.close()
 
     # ------------------------------------------------------------------
     # Pause / Resume
