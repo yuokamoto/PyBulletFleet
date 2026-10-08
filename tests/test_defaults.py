@@ -45,6 +45,7 @@ class TestDefaultsCompleteness:
         skip = {
             "visual_shape",
             "collision_shape",
+            "urdf_path",
             "initial_pose",
             "name",
             "visual_frame_pose",

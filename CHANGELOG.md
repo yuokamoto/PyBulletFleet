@@ -13,6 +13,12 @@ are not recommended for production use yet.
 
 ### Changed
 
+- `Agent.from_urdf()` and `SimObject.from_urdf()` load through one shared
+  helper, `load_urdf_body()`. `Agent.from_urdf()` gains `global_scaling` and
+  now raises `FileNotFoundError` for a URDF it cannot read, where it
+  previously let PyBullet's own `error` escape -- the two factories had
+  drifted on both points.
+
 - `build_tpi()` accepts a `decel` argument instead of pinning `dec_max` to
   `accel`. `TwoPointInterpolation` has always supported an independent
   deceleration; the wrapper was discarding it.
@@ -48,6 +54,15 @@ are not recommended for production use yet.
   Python module paths and documented run commands now use those folders.
 
 ### Added
+
+- Add `SimObject.from_urdf()` and a `urdf_path` field on
+  `SimObjectSpawnParams`, so a URDF-defined body with no behaviour can be
+  loaded as a plain `SimObject` instead of an `Agent`. `from_sdf()` already
+  covered SDF; URDF had no non-agent loader, and `urdf_path` existed only on
+  `AgentSpawnParams`. Static scenery created this way stays out of the
+  per-step update loop (`_needs_update` is `False`): measured on a scene of
+  2376 fixed-base, jointless, controller-less bodies, 15.98 ms per step as
+  Agents against 0.78 ms as SimObjects.
 
 - Add `ControllerParams.max_linear_decel` (scalar or per-axis, same semantics
   as `max_linear_accel`) so vehicles that brake harder — or softer — than they
