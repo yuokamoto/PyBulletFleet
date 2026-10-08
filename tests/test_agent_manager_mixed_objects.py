@@ -107,3 +107,73 @@ class TestBatchControllerWithMixedObjects:
 
         assert spawned[0]._batch_controller is bc
         assert not hasattr(spawned[1], "_batch_controller")
+
+
+class TestAgentOnlyMethodsSkipNonAgents:
+    """Every agent-only method on the manager, against a mixed one.
+
+    The first version of this change covered add_object(), enable_batch(),
+    disable_batch() and remove_object(). It missed the rest: anything that
+    commands movement, reads motion state or queues actions reaches for
+    attributes a SimObject does not have. `repr()` was among them, by way of
+    get_moving_count().
+    """
+
+    @pytest.fixture
+    def mixed(self, sim_core):
+        manager = AgentManager(sim_core=sim_core)
+        agent = _agent(sim_core, "bot")
+        manager.add_object(agent)
+        manager.add_object(_sim_object(sim_core, "wall"))
+        return manager, agent
+
+    def test_repr_does_not_raise(self, mixed):
+        manager, _ = mixed
+        assert "AgentManager" in repr(manager)
+
+    def test_get_moving_count_counts_agents_only(self, mixed):
+        manager, _ = mixed
+        assert manager.get_moving_count() == 0
+
+    def test_the_agents_property_filters(self, mixed):
+        manager, agent = mixed
+        assert manager.agents == [agent]
+        assert manager.get_object_count() == 2
+
+    def test_stop_all(self, mixed):
+        manager, _ = mixed
+        manager.stop_all()
+
+    def test_set_goal_pose_all(self, mixed):
+        manager, agent = mixed
+        manager.set_goal_pose_all(lambda a: Pose.from_xyz(1.0, 0.0, 0.0))
+        assert agent.is_moving is True
+
+    def test_set_joints_targets_all(self, mixed):
+        manager, _ = mixed
+        manager.set_joints_targets_all(lambda a: {})
+
+    def test_add_action_all(self, mixed):
+        manager, _ = mixed
+        manager.add_action_all(lambda a: None)
+
+    def test_add_action_sequence_all(self, mixed):
+        manager, _ = mixed
+        manager.add_action_sequence_all(lambda a: [])
+
+    def test_set_goal_pose_indexes_agents_not_objects(self, sim_core):
+        """A non-agent ahead of an agent would otherwise shift its index."""
+        manager = AgentManager(sim_core=sim_core)
+        manager.add_object(_sim_object(sim_core, "wall"))
+        agent = _agent(sim_core, "bot")
+        manager.add_object(agent)
+
+        manager.set_goal_pose(0, Pose.from_xyz(1.0, 0.0, 0.0))
+
+        assert agent.is_moving is True
+
+    def test_lookup_by_id_ignores_a_non_agent(self, mixed, sim_core):
+        manager, _ = mixed
+        wall = next(o for o in manager.objects if o.name == "wall")
+        manager.set_goal_pose_by_body_id(wall.body_id, Pose.from_xyz(1.0, 0.0, 0.0))
+        manager.set_goal_pose_by_object_id(wall.object_id, Pose.from_xyz(1.0, 0.0, 0.0))
