@@ -40,11 +40,22 @@ def build_tpi(
     building a TPI in both per-agent and batched controllers.
 
     Args:
-        decel: Deceleration magnitude. ``None`` (the default) reuses
-            ``accel``, giving the symmetric trapezoid that was the only
-            profile this helper could build previously. Pass a different
-            value for vehicles that brake harder (or softer) than they
-            accelerate.
+        p0: Start position along the travel axis.
+        pe: End position along the same axis.
+        vmax: Speed cap for the cruise phase.
+        accel: Acceleration magnitude for the ramp up.
+        t0: Simulation time the trajectory starts at; evaluation is relative
+            to it.
+        v0: Speed at ``p0`` (default: at rest).
+        ve: Speed to arrive at ``pe`` with (default: at rest).
+        decel: Deceleration magnitude for the ramp down. ``None`` (the
+            default) reuses ``accel``, giving the symmetric trapezoid that was
+            the only profile this helper could build previously. Pass a
+            different value for vehicles that brake harder, or softer, than
+            they accelerate.
+
+    Returns:
+        A ``TwoPointInterpolation`` with its trajectory already calculated.
     """
     dec = accel if decel is None else decel
     tpi = TwoPointInterpolation()
