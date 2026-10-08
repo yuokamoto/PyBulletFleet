@@ -1270,13 +1270,11 @@ class Agent(SimObject):
         # Add all path waypoints
         final_path.extend(path)
 
-        self._is_moving = True
-
-        # Clear previous path visualization and visualize new path
-        self._clear_path_visualization()
-        self._visualize_path(final_path)
-
-        # Delegate to batch controller when registered, otherwise per-agent.
+        # Delegate first, and only call the agent moving once the controller
+        # has accepted the path. A controller that refuses -- a batched one
+        # given an asymmetric accel/decel profile, say -- would otherwise
+        # leave an idle agent reporting is_moving with no trajectory behind
+        # it, and the previous path's visualization already cleared.
         if self._batch_controller is not None:
             self._batch_controller.synchronized_set_path(
                 self,
@@ -1291,6 +1289,12 @@ class Agent(SimObject):
                 final_orientation_align=final_orientation_align,
                 direction=direction,
             )
+
+        self._is_moving = True
+
+        # Clear previous path visualization and visualize new path
+        self._clear_path_visualization()
+        self._visualize_path(final_path)
 
     def _reset_pybullet_velocity(self) -> None:
         """Zero residual physics velocity (prevents drift in kinematic mode)."""

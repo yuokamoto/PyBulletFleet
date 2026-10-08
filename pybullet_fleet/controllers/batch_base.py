@@ -323,6 +323,39 @@ class BatchKinematicController(Controller):
     # (it should be dormant because register_agent sets _needs_update=False).
     # ------------------------------------------------------------------ #
 
+    @staticmethod
+    def check_profile_supported(agent) -> None:
+        """Refuse an agent whose accel and decel differ, before any state moves.
+
+        ``trapezoid_distance()`` integrates the decel phase with the accel
+        scalar, so a batched controller cannot represent an asymmetric
+        profile; ``extract_phase_params()`` raises rather than report wrong
+        positions silently. That rejection used to arrive partway through
+        ``set_path()`` -- after the path, waypoint index and align flags had
+        been written, and after ``Agent.set_path()`` had marked the agent
+        moving -- leaving an idle agent believing it was under way with no
+        trajectory behind it.
+
+        Called at the path API boundary so the refusal happens before
+        anything is committed. The per-agent controllers are unaffected: they
+        evaluate the ``TwoPointInterpolation`` directly and do support
+        asymmetric profiles.
+
+        Raises:
+            ValueError: If the agent's accel and decel limits differ.
+        """
+        params = getattr(agent, "controller_params", None)
+        if params is None or params.max_linear_decel is None:
+            return
+        accel = params.scalar_max_linear_accel()
+        decel = params.scalar_max_linear_decel()
+        if not math.isclose(accel, decel, rel_tol=1e-9, abs_tol=1e-12):
+            raise ValueError(
+                "batched controllers do not support asymmetric deceleration yet "
+                f"(accel={accel!r}, decel={decel!r}). Use the per-agent controllers "
+                "for this agent, or leave max_linear_decel unset."
+            )
+
     def compute(self, agent, dt: float) -> bool:
         return False
 

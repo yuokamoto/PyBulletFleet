@@ -226,6 +226,11 @@ class BatchDifferentialController(BatchKinematicController):
         idx = self._agent_index.get(id(agent))
         if idx is None:
             raise KeyError(f"Agent {agent} is not registered with this batch controller.")
+        # Before anything is committed: a profile this controller cannot
+        # represent must be refused at the path API boundary, not partway
+        # through, and not from inside a later simulation step.
+        self.check_profile_supported(agent)
+
         self._paths[idx] = list(path)
         self._wp_index[idx] = 0
         self._original_direction[idx] = direction

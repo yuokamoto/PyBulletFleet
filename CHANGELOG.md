@@ -17,6 +17,13 @@ are not recommended for production use yet.
   `accel`. `TwoPointInterpolation` has always supported an independent
   deceleration; the wrapper was discarding it.
 
+- The batched controllers now refuse an asymmetric accel/decel profile from
+  `set_path()`, before any path state is committed, rather than partway
+  through -- or, for a differential path that needs an initial rotation, from
+  inside a later simulation step. `Agent.set_path()` marks the agent moving
+  only once the controller has accepted the path, so a refusal no longer
+  leaves an idle agent reporting `is_moving`.
+
 - `extract_phase_params()` now raises `ValueError` on an asymmetric
   accel/decel profile. `trapezoid_distance()` integrates the decel phase with
   the accel scalar, so the batched controllers would otherwise report wrong
