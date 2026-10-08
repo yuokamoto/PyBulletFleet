@@ -353,6 +353,7 @@ class BatchDifferentialController(BatchKinematicController):
         ang_accel = float(agent.max_angular_accel[0])
         tpi = build_tpi(p0=0.0, pe=angle, vmax=ang_vel, accel=ang_accel, t0=sim_time)
         # Rotation is symmetric: angular limits carry no separate decel.
+        # See #67.
         t_acc, t_cst, t_tot, accel_eff, _ = extract_phase_params(tpi)
 
         self._phase[idx] = _PHASE_ROTATE
@@ -423,6 +424,7 @@ class BatchDifferentialController(BatchKinematicController):
         ang_accel = float(agent.max_angular_accel[0])
         tpi = build_tpi(p0=0.0, pe=angle, vmax=ang_vel, accel=ang_accel, t0=sim_time)
         # Rotation is symmetric: angular limits carry no separate decel.
+        # See #67.
         t_acc, t_cst, t_tot, accel_eff, _ = extract_phase_params(tpi)
 
         # Reuse the ROTATE state arrays (same slerp logic; different exit action).

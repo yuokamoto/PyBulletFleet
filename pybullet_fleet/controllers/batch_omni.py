@@ -286,7 +286,7 @@ class BatchOmniController(BatchKinematicController):
         ang_accel = float(agent.max_angular_accel[0])
         tpi = build_tpi(p0=0.0, pe=angle, vmax=ang_vel, accel=ang_accel, t0=sim_time)
         # Angular limits carry no separate deceleration, so rotation is
-        # symmetric and the fifth value equals the fourth.
+        # symmetric and the fifth value equals the fourth. See #67.
         t_acc, t_cst, t_tot, accel_eff, _ = extract_phase_params(tpi)
 
         self._phase[idx] = _PHASE_FINAL_ROTATE
