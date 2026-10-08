@@ -17,6 +17,7 @@ from .sim_object import ShapeParams, SimObject, SimObjectSpawnParams, load_urdf_
 from .action import Action
 from .types import MotionMode, MovementDirection, ActionStatus, CollisionMode
 from .tools import normalize_vector_param  # noqa: F401  (re-exported for legacy callers)
+from pybullet_fleet._tpi import build_tpi
 from pybullet_fleet.tools import resolve_joint_index, resolve_link_index
 from .logging_utils import get_lazy_logger
 from pybullet_fleet.events import SimEvents
@@ -436,8 +437,16 @@ class Agent(SimObject):
         #: Per-joint motion overrides, {joint_index: (max_vel, accel, decel)}.
         #: See set_joint_motion_profile().
         self._joint_motion_profiles: Dict[int, Tuple[float, Optional[float], Optional[float]]] = {}
-        #: Current speed of each ramped joint, carried between steps.
+        #: Current signed speed of each ramped joint. Carried between steps
+        #: so a target replaced mid-travel becomes the next trajectory's v0.
         self._joint_speeds: Dict[int, float] = {}
+        #: {joint_index: (target, TwoPointInterpolation)} for ramped joints.
+        #: Built when the target changes, evaluated every step. Not part of a
+        #: checkpoint: position, target and speed are enough to rebuild it.
+        self._joint_trajectories: Dict[int, Tuple[float, Any]] = {}
+        #: Time base for those trajectories. Kept here rather than read from
+        #: sim_core so an agent without one still ramps.
+        self._joint_clock: float = 0.0
 
         # Cached flag: True when joints must use kinematic interpolation
         # (mass=0 OR sim_core has physics disabled).  Computed once to avoid
@@ -1530,7 +1539,7 @@ class Agent(SimObject):
         accel = current_accel if max_accel is None else float(max_accel)
         decel = max_decel if max_decel is not None else (accel if max_accel is not None else current_decel)
         self._joint_motion_profiles[index] = (velocity, accel, None if decel is None else float(decel))
-        self._joint_speeds.pop(index, None)
+        self._clear_joint_trajectory(index)
 
     def _joint_index_by_name(self, name: str) -> int:
         for index, info in enumerate(self.joint_info):
@@ -1570,74 +1579,89 @@ class Agent(SimObject):
         if not self._last_joint_targets:
             return False
 
+        step_start, now = self._joint_clock, self._joint_clock + dt
+        self._joint_clock = now
+
         any_moved = False
         for joint_index, target in self._last_joint_targets.items():
             current_pos = self._kinematic_joint_positions.get(joint_index, 0.0)
             diff = target - current_pos
             if abs(diff) < 1e-7:
-                self._joint_speeds.pop(joint_index, None)
-                continue  # Already at target — skip
+                self._clear_joint_trajectory(joint_index)
+                continue  # Already at target -- skip
             max_vel, accel, decel = self._joint_motion_profiles.get(
                 joint_index, (self._urdf_joint_velocity(joint_index), None, None)
             )
             if accel is None:
+                # Constant speed, reached instantly: what every kinematic
+                # joint did before motion profiles existed, and what a profile
+                # that sets only a speed still gets.
                 step = math.copysign(max_vel * dt, diff)
+                new_pos = target if abs(step) >= abs(diff) else current_pos + step
             else:
-                step = self._ramped_step(joint_index, diff, dt, max_vel, accel, decel or accel)
-            # Only a step heading for the target can arrive at it. While
-            # braking out of a reversal the step points the other way, and
-            # comparing magnitudes alone would teleport the joint to a target
-            # it is still moving away from.
-            if step * diff > 0.0 and abs(step) >= abs(diff):
-                new_pos = target
-                self._joint_speeds.pop(joint_index, None)
-            else:
-                new_pos = current_pos + step
+                new_pos = self._ramped_joint_position(
+                    joint_index, current_pos, target, step_start, now, max_vel, accel, decel or accel
+                )
             p.resetJointState(self.body_id, joint_index, new_pos, physicsClientId=self._pid)
             self._kinematic_joint_positions[joint_index] = new_pos
             any_moved = True
         return any_moved
 
-    def _ramped_step(self, joint_index: int, diff: float, dt: float, max_vel: float, accel: float, decel: float) -> float:
-        """Signed distance a ramped joint may move this step.
+    def _clear_joint_trajectory(self, joint_index: int) -> None:
+        self._joint_speeds.pop(joint_index, None)
+        self._joint_trajectories.pop(joint_index, None)
 
-        Integrated step by step rather than planned once, so that a target
-        replaced mid-travel -- a lift redirected to another floor while the
-        car is moving -- is handled by carrying the current speed forward,
-        with no plan to invalidate.
+    def _ramped_joint_position(
+        self,
+        joint_index: int,
+        current_pos: float,
+        target: float,
+        step_start: float,
+        now: float,
+        max_vel: float,
+        accel: float,
+        decel: float,
+    ) -> float:
+        """Where a ramped joint is at ``now``, from a TwoPointInterpolation.
 
-        The carried speed is signed, and the sign is the direction of travel.
-        A target moved to the other side of the joint has to be braked into:
-        with a magnitude alone, the next step would keep full speed and simply
-        apply it the other way, reversing in one step and skipping the
-        deceleration the profile asks for.
+        The same solver the linear controllers use, rather than a trapezoid
+        integrated by hand. It handles the three cases exactly -- triangle,
+        trapezoid, degenerate -- and, given ``v0``, a target moved to the other
+        side of the joint: it brakes through zero and accelerates back, which a
+        magnitude-only integrator has to special-case.
 
-        Braking towards the target starts once the distance left is no more
-        than it takes to stop from the current speed, ``v^2 / (2 * decel)``.
+        One trajectory is built per target change, not per step, and ``t0`` is
+        the start of the step so the first evaluation already covers ``dt`` of
+        travel.
         """
-        speed = self._joint_speeds.get(joint_index, 0.0)
-        direction = math.copysign(1.0, diff)
-
-        if speed * direction < 0.0:
-            # Travelling away from the target: decelerate towards zero and
-            # stop there, so the next step starts the new travel from rest.
-            speed += math.copysign(decel * dt, direction)
-            if speed * direction > 0.0:
-                speed = 0.0
+        entry = self._joint_trajectories.get(joint_index)
+        if entry is None or entry[0] != target:
+            tpi = build_tpi(
+                p0=current_pos,
+                pe=target,
+                vmax=max_vel,
+                accel=accel,
+                t0=step_start,
+                v0=self._joint_speeds.get(joint_index, 0.0),
+                decel=decel,
+            )
+            self._joint_trajectories[joint_index] = (target, tpi)
         else:
-            magnitude = abs(speed)
-            if abs(diff) <= magnitude * magnitude / (2.0 * decel):
-                magnitude = max(0.0, magnitude - decel * dt)
-            else:
-                magnitude = min(max_vel, magnitude + accel * dt)
-            # A joint at rest with a target still ahead must not stay at rest:
-            # one step of acceleration is the smallest move that progresses.
-            if magnitude <= 0.0:
-                magnitude = min(max_vel, accel * dt)
-            speed = magnitude * direction
+            tpi = entry[1]
 
-        self._joint_speeds[joint_index] = speed
-        return speed * dt
+        if now >= tpi.get_end_time():
+            self._clear_joint_trajectory(joint_index)
+            return target
+
+        position, velocity, _ = tpi.get_point(now)
+        if abs(target - position) < 1e-9:
+            # Close enough that the remainder is float residue. Snapping here
+            # rather than waiting for get_end_time() keeps the invariant that
+            # a joint at its target carries no speed and no trajectory.
+            self._clear_joint_trajectory(joint_index)
+            return target
+        self._joint_speeds[joint_index] = float(velocity)
+        return float(position)
 
     def update(self, dt: float) -> bool:
         """
@@ -1958,6 +1982,9 @@ class Agent(SimObject):
             self._kinematic_joint_positions[index] = position
         self._last_joint_targets = targets
         self._joint_speeds = speeds
+        # Rebuilt on the next step from position, target and the restored
+        # speed, which is why the record carries no trajectory of its own.
+        self._joint_trajectories.clear()
 
     def get_all_joints_state(self) -> list:
         """

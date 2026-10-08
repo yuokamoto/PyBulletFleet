@@ -89,10 +89,12 @@ are not recommended for production use yet.
   property of the model file -- two installations differing only in how fast
   a cabin travels needed two URDFs, and
   `changeDynamics(maxJointVelocity=...)` does not help because
-  `getJointInfo()` keeps reporting the original. Giving an acceleration turns
-  the travel into a trapezoid, which is what a real cabin, hoist or linear
-  axis does: 0.6 m at 0.4 m/s takes 1.5 s flat and 1.9 s with 1.0 m/s^2
-  ramps. Both are opt-in; with neither, nothing changes.
+  `getJointInfo()` keeps reporting the original. Giving an acceleration makes
+  the travel a trapezoid solved by `TwoPointInterpolation`, the same solver
+  the linear controllers use: 0.6 m at 0.4 m/s takes 1.5 s flat and 1.9 s
+  with 1.0 m/s^2 ramps. Both are opt-in; with neither, and with a speed but
+  no acceleration, the joint keeps the constant-speed behaviour it always
+  had.
 
 - Add name-based simulation entity lookup on `MultiRobotSimulationCore`:
   ordered multi-result searches for objects and agents, plus unique-result

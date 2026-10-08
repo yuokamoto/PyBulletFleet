@@ -213,10 +213,16 @@ class TestDirectionReversal:
         agent, index = self._moving_agent(sim_core)
         agent.clear_actions()
         agent.set_joint_target_by_name(JOINT, -1.0)
+
+        # Run until the trajectory is finished rather than until the position
+        # looks close: a tolerance on position can be met a step before the
+        # trajectory ends, and then the carried speed is legitimately still
+        # set.
         for _ in range(4000):
             sim_core.step_once()
-            if abs(agent.get_joint_state_by_name(JOINT)[0] + 1.0) < 1e-6:
+            if agent._joint_speeds.get(index) is None:
                 break
+
         assert agent.get_joint_state_by_name(JOINT)[0] == pytest.approx(-1.0, abs=1e-6)
         assert agent._joint_speeds.get(index) is None
 
