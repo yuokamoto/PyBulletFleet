@@ -482,6 +482,11 @@ class Agent(SimObject):
         return as_axes(self.controller_params._eff_linear_accel())
 
     @property
+    def max_linear_decel(self) -> np.ndarray:
+        """Effective deceleration limit; mirrors :attr:`max_linear_accel` when unset."""
+        return as_axes(self.controller_params._eff_linear_decel())
+
+    @property
     def max_angular_vel(self) -> np.ndarray:
         return as_axes(self.controller_params._eff_angular_vel())
 
@@ -1243,14 +1248,17 @@ class Agent(SimObject):
         # Add all path waypoints
         final_path.extend(path)
 
-        self._is_moving = True
-
-        # Clear previous path visualization and visualize new path
-        self._clear_path_visualization()
-        self._visualize_path(final_path)
-
-        # Delegate to batch controller when registered, otherwise per-agent.
+        # Delegate first, and only call the agent moving once the controller
+        # has accepted the path. A controller is free to refuse one -- an
+        # unregistered agent, a profile it cannot represent, a path its own
+        # validation rejects -- and setting the flag beforehand would leave an
+        # idle agent reporting is_moving with no trajectory behind it, and the
+        # previous path's visualization already cleared.
         if self._batch_controller is not None:
+            # synchronized_set_path() sets _is_moving itself, under the same
+            # lock as the array writes. Setting it here instead would race a
+            # concurrent step_once() that completes a zero-distance path and
+            # clears the flag between the lock releasing and this line.
             self._batch_controller.synchronized_set_path(
                 self,
                 final_path,
@@ -1264,6 +1272,11 @@ class Agent(SimObject):
                 final_orientation_align=final_orientation_align,
                 direction=direction,
             )
+            self._is_moving = True
+
+        # Clear previous path visualization and visualize new path
+        self._clear_path_visualization()
+        self._visualize_path(final_path)
 
     def _reset_pybullet_velocity(self) -> None:
         """Zero residual physics velocity (prevents drift in kinematic mode)."""

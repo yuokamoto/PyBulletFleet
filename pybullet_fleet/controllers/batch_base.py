@@ -232,9 +232,20 @@ class BatchKinematicController(Controller):
     # ------------------------------------------------------------------ #
 
     def synchronized_set_path(self, agent: "Agent", path, **kwargs) -> None:
-        """Set one path without racing a concurrent simulation step."""
+        """Set one path without racing a concurrent simulation step.
+
+        ``_is_moving`` is set here, inside the lock, rather than by the caller
+        afterwards. The flag belongs to the same state transition as the
+        arrays: a concurrent ``step_once()`` can complete a very short or
+        zero-distance path and clear the flag, and a caller setting it after
+        the lock released would then leave an idle row reporting
+        ``is_moving``. Setting it before ``set_path()`` is equally wrong --
+        that is the half-committed state this guard exists to prevent -- so it
+        goes after the call and still under the lock.
+        """
         with self._state_lock:
             getattr(self, "set_path")(agent, path, **kwargs)
+            agent._is_moving = True
 
     def synchronized_cancel_path(self, agent: "Agent") -> None:
         """Cancel one path without racing a concurrent simulation step."""

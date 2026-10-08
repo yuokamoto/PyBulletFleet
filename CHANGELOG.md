@@ -19,6 +19,27 @@ are not recommended for production use yet.
   previously let PyBullet's own `error` escape -- the two factories had
   drifted on both points.
 
+- `build_tpi()` accepts a `decel` argument instead of pinning `dec_max` to
+  `accel`. `TwoPointInterpolation` has always supported an independent
+  deceleration; the wrapper was discarding it.
+
+- The batched controllers honour `max_linear_decel` too.
+  `trapezoid_distance()` takes the braking scalar as its own argument instead
+  of reusing the acceleration one, and `extract_phase_params()` returns it
+  alongside -- the phase durations in `tpi.dt` were already the asymmetric
+  ones. Batched and per-agent trajectories agree to floating-point noise on
+  the same profile. Rotation stays symmetric, angular limits having no
+  separate deceleration.
+
+- `Agent.set_path()` marks the agent moving only once the controller has
+  accepted the path, and the batched controllers set the flag inside the lock
+  that guards their array writes, so a controller that refuses a path does
+  not leave an idle agent reporting `is_moving`.
+
+- `OmniController.capture_straight_navigation()` now rejects an asymmetric
+  profile. Its record carries a single `accel`, so such a trajectory could not
+  be rebuilt from it; the checkpoint schema is unchanged.
+
 - An optional state-recorder error during a command, object spawn/removal, or
   completed-step capture now stops recording with an explicitly incomplete
   artifact while the simulation operation continues. GUI playback selects the
@@ -42,6 +63,13 @@ are not recommended for production use yet.
   per-step update loop (`_needs_update` is `False`): measured on a scene of
   2376 fixed-base, jointless, controller-less bodies, 15.98 ms per step as
   Agents against 0.78 ms as SimObjects.
+
+- Add `ControllerParams.max_linear_decel` (scalar or per-axis, same semantics
+  as `max_linear_accel`) so vehicles that brake harder — or softer — than they
+  accelerate can be modelled. Leaving it unset mirrors `max_linear_accel`, so
+  existing configurations keep their symmetric trapezoid unchanged.
+  `Agent.max_linear_decel`, `ControllerParams.linear_decel_along_direction()`
+  and `ControllerParams.scalar_max_linear_decel()` round out the accessors.
 
 - Add name-based simulation entity lookup on `MultiRobotSimulationCore`:
   ordered multi-result searches for objects and agents, plus unique-result
