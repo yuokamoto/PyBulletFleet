@@ -17,19 +17,18 @@ are not recommended for production use yet.
   `accel`. `TwoPointInterpolation` has always supported an independent
   deceleration; the wrapper was discarding it.
 
-- The batched controllers now refuse an asymmetric accel/decel profile from
-  `set_path()`, before any path state is committed, rather than partway
-  through -- or, for a differential path that needs an initial rotation, from
-  inside a later simulation step. `Agent.set_path()` marks the agent moving
-  only once the controller has accepted the path, so a refusal no longer
-  leaves an idle agent reporting `is_moving`.
+- The batched controllers honour `max_linear_decel` too.
+  `trapezoid_distance()` takes the braking scalar as its own argument instead
+  of reusing the acceleration one, and `extract_phase_params()` returns it
+  alongside -- the phase durations in `tpi.dt` were already the asymmetric
+  ones. Batched and per-agent trajectories agree to floating-point noise on
+  the same profile. Rotation stays symmetric, angular limits having no
+  separate deceleration.
 
-- `extract_phase_params()` now raises `ValueError` on an asymmetric
-  accel/decel profile. `trapezoid_distance()` integrates the decel phase with
-  the accel scalar, so the batched controllers would otherwise report wrong
-  positions with no error. The per-agent controllers evaluate the
-  `TwoPointInterpolation` directly and support asymmetric profiles today;
-  batched support is still to come.
+- `Agent.set_path()` marks the agent moving only once the controller has
+  accepted the path, and the batched controllers set the flag inside the lock
+  that guards their array writes, so a controller that refuses a path does
+  not leave an idle agent reporting `is_moving`.
 
 - `OmniController.capture_straight_navigation()` now rejects an asymmetric
   profile. Its record carries a single `accel`, so such a trajectory could not

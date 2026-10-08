@@ -137,7 +137,7 @@ agent.controller_params.max_linear_decel = [3.0, 3.0, 0.0]
 | `max_linear_vel` | Scalar magnitude cap, or `[vx, vy, vz]` per-axis cap in the body frame. |
 | `max_angular_vel` | Scalar magnitude cap, or `[wx, wy, wz]` per-axis cap. Differential drive uses `wz`. |
 | `max_linear_accel` | Scalar acceleration cap, or `[ax, ay, az]` per-axis cap in the body frame, used to construct translation trajectories. Differential drive uses `ax`. |
-| `max_linear_decel` | Braking cap, same form and frame as `max_linear_accel`. Unset mirrors `max_linear_accel`, which is the symmetric trapezoid every configuration had before this field existed. See the note below on batch controllers. |
+| `max_linear_decel` | Braking cap, same form and frame as `max_linear_accel`. Unset mirrors `max_linear_accel`, which is the symmetric trapezoid every configuration had before this field existed. |
 | `max_angular_accel` | Scalar acceleration cap, or `[αx, αy, αz]` per-axis cap, used to construct rotation trajectories. Differential drive uses `αz`. |
 | `cmd_vel_timeout` | Velocity-command watchdog in seconds; `0.0` disables it. |
 | `navigation_2d` | `True` preserves current Z for pose trajectories. `None` and `False` follow goal Z. |
@@ -159,13 +159,13 @@ spatial-grid work.
 | `batch_omni` | `omni` |
 | `batch_differential` | `differential` |
 
-They cannot represent an asymmetric braking profile. `trapezoid_distance()`
-integrates the deceleration phase with the acceleration scalar, so a
-`max_linear_decel` that differs from `max_linear_accel` would silently produce
-wrong positions; `set_path()` raises `ValueError` instead, at the call rather
-than from inside a later simulation step. Run such an agent on the per-agent
-controllers, which evaluate the `TwoPointInterpolation` directly and support
-asymmetric profiles, or leave `max_linear_decel` unset.
+They honour `max_linear_decel` like the per-agent controllers. The batched
+path evaluates a closed form rather than the `TwoPointInterpolation` itself,
+and that form takes the braking scalar as its own argument, so the two agree
+to floating-point noise on the same profile.
+
+Rotation is the exception: angular limits carry no separate deceleration, so
+a turn is always symmetric.
 
 ### Python API
 

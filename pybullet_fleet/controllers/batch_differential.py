@@ -86,6 +86,8 @@ class BatchDifferentialController(BatchKinematicController):
         self._fwd_t_const: np.ndarray = np.zeros((0,), dtype=np.float64)
         self._fwd_t_total: np.ndarray = np.zeros((0,), dtype=np.float64)
         self._fwd_accel: np.ndarray = np.zeros((0,), dtype=np.float64)
+        #: Braking scalar for the forward phase; see BatchOmniController.
+        self._fwd_decel: np.ndarray = np.zeros((0,), dtype=np.float64)
         self._fwd_target_quat: np.ndarray = np.zeros((0, 4), dtype=np.float64)
 
         # Per-agent direction and final-orientation state (Python lists — rare updates).
@@ -125,6 +127,7 @@ class BatchDifferentialController(BatchKinematicController):
         self._fwd_t_const = self._resize_rows(self._fwd_t_const, n)
         self._fwd_t_total = self._resize_rows(self._fwd_t_total, n)
         self._fwd_accel = self._resize_rows(self._fwd_accel, n)
+        self._fwd_decel = self._resize_rows(self._fwd_decel, n)
         self._fwd_target_quat = self._resize_rows(self._fwd_target_quat, n)
         # Final-orientation
         self._align_final_orient = self._resize_rows(self._align_final_orient, n)
@@ -226,11 +229,6 @@ class BatchDifferentialController(BatchKinematicController):
         idx = self._agent_index.get(id(agent))
         if idx is None:
             raise KeyError(f"Agent {agent} is not registered with this batch controller.")
-        # Before anything is committed: a profile this controller cannot
-        # represent must be refused at the path API boundary, not partway
-        # through, and not from inside a later simulation step.
-        self.check_profile_supported(agent)
-
         self._paths[idx] = list(path)
         self._wp_index[idx] = 0
         self._original_direction[idx] = direction
@@ -353,7 +351,8 @@ class BatchDifferentialController(BatchKinematicController):
         ang_vel = float(agent.max_angular_vel[0])
         ang_accel = float(agent.max_angular_accel[0])
         tpi = build_tpi(p0=0.0, pe=angle, vmax=ang_vel, accel=ang_accel, t0=sim_time)
-        t_acc, t_cst, t_tot, accel_eff = extract_phase_params(tpi)
+        # Rotation is symmetric: angular limits carry no separate decel.
+        t_acc, t_cst, t_tot, accel_eff, _ = extract_phase_params(tpi)
 
         self._phase[idx] = _PHASE_ROTATE
         self._rot_t_start[idx] = sim_time
@@ -380,10 +379,9 @@ class BatchDifferentialController(BatchKinematicController):
         vmax = agent.controller_params.scalar_max_linear_vel()
         amax = agent.controller_params.scalar_max_linear_accel()
         dmax = agent.controller_params.scalar_max_linear_decel()
-        # decel is forwarded so an asymmetric profile is rejected loudly by
-        # extract_phase_params() instead of being integrated as if symmetric.
         tpi = build_tpi(p0=0.0, pe=distance, vmax=vmax, accel=amax, t0=sim_time, decel=dmax)
-        t_acc, t_cst, t_tot, accel_eff = extract_phase_params(tpi)
+        # The forward phase is the one with a configurable braking rate.
+        t_acc, t_cst, t_tot, accel_eff, decel_eff = extract_phase_params(tpi)
 
         self._phase[idx] = _PHASE_FORWARD
         self._fwd_t_start[idx] = sim_time
@@ -391,6 +389,7 @@ class BatchDifferentialController(BatchKinematicController):
         self._fwd_t_const[idx] = t_cst
         self._fwd_t_total[idx] = t_tot
         self._fwd_accel[idx] = accel_eff
+        self._fwd_decel[idx] = decel_eff
 
     def _begin_final_rotate(self, idx: int, sim_time: float) -> None:
         """Start in-place rotation to ``_final_orient_target_quat[idx]``, then go IDLE."""
@@ -422,7 +421,8 @@ class BatchDifferentialController(BatchKinematicController):
         ang_vel = float(agent.max_angular_vel[0])
         ang_accel = float(agent.max_angular_accel[0])
         tpi = build_tpi(p0=0.0, pe=angle, vmax=ang_vel, accel=ang_accel, t0=sim_time)
-        t_acc, t_cst, t_tot, accel_eff = extract_phase_params(tpi)
+        # Rotation is symmetric: angular limits carry no separate decel.
+        t_acc, t_cst, t_tot, accel_eff, _ = extract_phase_params(tpi)
 
         # Reuse the ROTATE state arrays (same slerp logic; different exit action).
         self._phase[idx] = _PHASE_FINAL_ROTATE
@@ -543,6 +543,7 @@ class BatchDifferentialController(BatchKinematicController):
                 self._fwd_t_total[fm],
                 self._fwd_accel[fm],
                 self._fwd_total_distance[fm],
+                self._fwd_decel[fm],
             )
             total_dist_safe = np.where(self._fwd_total_distance[fm] > 1e-9, self._fwd_total_distance[fm], 1.0)
             ratio = np.clip(distance / total_dist_safe, 0.0, 1.0)

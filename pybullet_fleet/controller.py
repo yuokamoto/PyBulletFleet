@@ -492,7 +492,7 @@ class KinematicController(Controller):
         angular_accel = self.params.scalar_max_angular_accel()
 
         self._tpi_rotation_angle = build_tpi(p0=0.0, pe=rotation_angle, vmax=angular_vel, accel=angular_accel, t0=t0)
-        _, _, t_tot, _ = extract_phase_params(self._tpi_rotation_angle)
+        _, _, t_tot, _, _ = extract_phase_params(self._tpi_rotation_angle)
         if t_tot <= 0.0:
             # build_tpi produced a degenerate zero-duration trajectory (velocity or
             # accel limits are too small to plan the rotation). Treat as failure so

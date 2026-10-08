@@ -36,7 +36,6 @@ import numpy as np
 import pybullet as p
 
 from pybullet_fleet.controller import Controller
-from pybullet_fleet.controller_params import as_axes
 from pybullet_fleet.geometry import quat_angle_between, quat_slerp_batch
 from pybullet_fleet.logging_utils import get_lazy_logger
 
@@ -334,48 +333,6 @@ class BatchKinematicController(Controller):
     # safety net in case Agent.update() is ever called on a registered agent
     # (it should be dormant because register_agent sets _needs_update=False).
     # ------------------------------------------------------------------ #
-
-    @staticmethod
-    def check_profile_supported(agent) -> None:
-        """Refuse an agent whose accel and decel differ, before any state moves.
-
-        ``trapezoid_distance()`` integrates the decel phase with the accel
-        scalar, so a batched controller cannot represent an asymmetric
-        profile; ``extract_phase_params()`` raises rather than report wrong
-        positions silently. That rejection used to arrive partway through
-        ``set_path()`` -- after the path, waypoint index and align flags had
-        been written, and after ``Agent.set_path()`` had marked the agent
-        moving -- leaving an idle agent believing it was under way with no
-        trajectory behind it.
-
-        Called at the path API boundary so the refusal happens before
-        anything is committed. The per-agent controllers are unaffected: they
-        evaluate the ``TwoPointInterpolation`` directly and do support
-        asymmetric profiles.
-
-        Raises:
-            ValueError: If the agent's accel and decel limits differ.
-        """
-        params = getattr(agent, "controller_params", None)
-        if params is None or params.max_linear_decel is None:
-            return
-
-        # Every axis, not the forward scalar. BatchOmniController projects the
-        # per-axis limits onto the travel direction, so accel [1, 4, 0] with
-        # decel [1, 8, 0] agrees on x and diverges on y: a forward-scalar
-        # check would pass it here and let a y-directed path raise after the
-        # path state had been committed -- exactly what this guard exists to
-        # prevent. Comparing the whole vector can refuse a profile that is
-        # symmetric along the particular direction travelled, which is the
-        # conservative way round and matches what the limitation says.
-        accel = as_axes(params._eff_linear_accel())
-        decel = as_axes(params._eff_linear_decel())
-        if any(not math.isclose(a, d, rel_tol=1e-9, abs_tol=1e-12) for a, d in zip(accel, decel)):
-            raise ValueError(
-                "batched controllers do not support asymmetric deceleration yet "
-                f"(accel={list(accel)!r}, decel={list(decel)!r}). Use the per-agent "
-                "controllers for this agent, or leave max_linear_decel unset."
-            )
 
     def compute(self, agent, dt: float) -> bool:
         return False

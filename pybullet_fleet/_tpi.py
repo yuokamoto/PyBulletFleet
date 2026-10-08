@@ -16,7 +16,6 @@ for ``(N,)`` arrays of such trajectories — the batched eval hot path.
 
 from __future__ import annotations
 
-import math
 from typing import Optional, Tuple
 
 import numpy as np
@@ -59,11 +58,12 @@ def build_tpi(
     return tpi
 
 
-def extract_phase_params(tpi: TwoPointInterpolation) -> Tuple[float, float, float, float]:
-    """Read symmetric trapezoidal phase scalars from a constructed TPI.
+def extract_phase_params(tpi: TwoPointInterpolation) -> Tuple[float, float, float, float, float]:
+    """Read trapezoidal phase scalars from a constructed TPI.
 
-    Returns ``(t_accel, t_const, t_total, accel)`` relative to ``tpi.t0``
-    in the form expected by :func:`trapezoid_distance` for batched eval.
+    Returns ``(t_accel, t_const, t_total, accel, decel)`` relative to
+    ``tpi.t0`` in the form expected by :func:`trapezoid_distance` for batched
+    eval.
 
     Handles all three TPI cases:
 
@@ -71,35 +71,25 @@ def extract_phase_params(tpi: TwoPointInterpolation) -> Tuple[float, float, floa
     - ``case == 0`` (triangle, ``vmax`` not reached): ``t_const = 0``.
     - ``case == 1`` (full trapezoid): three populated phases.
 
-    Raises:
-        ValueError: If the TPI was built with asymmetric accel/decel.
-            :func:`trapezoid_distance` integrates the decel phase with the
-            same scalar it uses for the accel phase, so an asymmetric
-            profile would silently yield wrong positions. The per-agent
-            controllers evaluate ``TwoPointInterpolation`` directly and are
-            unaffected; only the batched controllers go through here.
+    An asymmetric profile needs nothing special here. ``tpi.dt`` already holds
+    the phase durations ``TwoPointInterpolation`` computed from both scalars;
+    only ``decel`` had to be carried out alongside ``accel`` for
+    :func:`trapezoid_distance` to integrate the braking phase with it.
     """
     dt = tpi.dt
     accel = float(tpi.amax_accel)
     decel = float(tpi.amax_decel)
-    if not math.isclose(accel, decel, rel_tol=1e-9, abs_tol=1e-12):
-        raise ValueError(
-            "extract_phase_params() requires a symmetric accel/decel profile "
-            f"(got accel={accel!r}, decel={decel!r}). The batched controllers "
-            "do not support asymmetric deceleration yet; use the per-agent "
-            "controllers for this agent, or leave max_linear_decel unset."
-        )
     if len(dt) == 0:
-        return 0.0, 0.0, 0.0, accel
+        return 0.0, 0.0, 0.0, accel, decel
     if len(dt) == 2:
         t_accel = float(dt[0])
         t_decel = float(dt[1])
-        return t_accel, 0.0, t_accel + t_decel, accel
+        return t_accel, 0.0, t_accel + t_decel, accel, decel
     # len == 3 (full trapezoid)
     t_accel = float(dt[0])
     t_const = float(dt[1])
     t_total = float(dt[0] + dt[1] + dt[2])
-    return t_accel, t_const, t_total, accel
+    return t_accel, t_const, t_total, accel, decel
 
 
 def trapezoid_distance(
@@ -109,11 +99,18 @@ def trapezoid_distance(
     t_total: np.ndarray,
     accel: np.ndarray,
     total_distance: np.ndarray,
+    decel: Optional[np.ndarray] = None,
 ) -> np.ndarray:
     """Vectorised distance-traveled lookup for trapezoidal profiles.
 
     All inputs are ``(N,)`` arrays; returns ``(N,)``.
+
+    ``decel`` is the braking scalar for the final phase. ``None`` reuses
+    ``accel``, which is the symmetric profile and what every caller got before
+    this parameter existed.
     """
+    if decel is None:
+        decel = accel
     out = np.zeros_like(tau)
     # phase masks
     in_const = (tau > t_accel) & (tau <= t_accel + t_const)
@@ -132,9 +129,9 @@ def trapezoid_distance(
         out[in_const] = 0.5 * a * ta * ta + (a * ta) * (tau[in_const] - ta)
     # decel phase: total_distance - 0.5 * a * (t_total - t)^2
     if in_decel.any():
-        a = accel[in_decel]
+        d = decel[in_decel]
         t_left = t_total[in_decel] - tau[in_decel]
-        out[in_decel] = total_distance[in_decel] - 0.5 * a * t_left * t_left
+        out[in_decel] = total_distance[in_decel] - 0.5 * d * t_left * t_left
     if done.any():
         out[done] = total_distance[done]
     return out
