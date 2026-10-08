@@ -1577,19 +1577,37 @@ class Agent(SimObject):
         When a controller is set, :meth:`update` delegates movement to
         ``controller.compute(agent, dt)``.
 
+        A controller that carries its own
+        :class:`~pybullet_fleet.controller_params.ControllerParams` also
+        becomes this agent's :attr:`controller_params`, which is what
+        ``Agent.__init__`` does when the controller is passed at construction.
+        Without that the two diverge silently: the controller moves the agent
+        by its own limits while ``controller_params`` -- the single source of
+        truth that :attr:`max_linear_vel` and its siblings delegate to, and
+        that a batch controller builds its trajectory from -- still holds
+        whatever was there before, usually the defaults.
+
         Note: A default controller is always assigned in ``from_params()``.
-        Setting ``None`` disables all movement.
+        Setting ``None`` disables all movement and leaves
+        ``controller_params`` as it is, since there are then no limits to
+        take.
 
         Args:
             controller: A :class:`~pybullet_fleet.controller.Controller`
                 instance, or ``None`` to disable movement.
         """
+        from pybullet_fleet.controller_params import ControllerParams
+
         if controller is None:
             self._controllers.clear()
-        elif self._controllers:
+            return
+        if self._controllers:
             self._controllers[0] = controller
         else:
             self._controllers.append(controller)
+        params = getattr(controller, "params", None)
+        if isinstance(params, ControllerParams):
+            self.controller_params = params
 
     def add_controller(self, controller) -> None:
         """Append a high-level controller to the chain.
