@@ -2436,8 +2436,15 @@ class MultiRobotSimulationCore:
         if isinstance(obj, Agent):
             self.events.emit(SimEvents.AGENT_REMOVED, agent=obj)
 
-        # Remove original color cache (prevents stale color on body_id reuse)
+        # Remove original color caches (prevents stale color on body_id reuse)
         self._robot_original_colors.pop(obj.body_id, None)
+        # Per (body, link), so it has to be swept rather than popped. Without
+        # this a simulation that creates and removes objects over a long run
+        # keeps every shape it ever saw, and each transparency change walks
+        # the whole stale cache -- and a reused body id would come back
+        # wearing the removed body's colour.
+        for key in [k for k in self._original_visual_colors if k[0] == obj.body_id]:
+            del self._original_visual_colors[key]
 
         # Remove PyBullet body
         if obj.body_id is not None:
@@ -2495,9 +2502,8 @@ class MultiRobotSimulationCore:
         if enable_shadows is None:
             enable_shadows = self._params.enable_shadows
 
-        # Save original colors of all visual shapes ONCE
-        if not self._original_visual_colors:
-            self._save_original_visual_colors()
+        # Capture any shape not already recorded; existing entries are kept.
+        self._save_original_visual_colors()
 
         # Store initial states
         self._structure_transparent = enable_structure_transparency
@@ -2651,20 +2657,31 @@ class MultiRobotSimulationCore:
         )
 
     def _save_original_visual_colors(self) -> None:
-        """
-        Save original colors of all visual shapes for fast restoration.
-        Called once during configure_visualizer().
-        """
-        num_bodies = p.getNumBodies(physicsClientId=self._client)
-        for body_id in range(num_bodies):
-            visual_data = p.getVisualShapeData(body_id, physicsClientId=self._client)
-            for shape in visual_data:
-                link_index = shape[1]
-                rgba = shape[7]  # Original RGBA color
-                key = (body_id, link_index)
-                self._original_visual_colors[key] = rgba
+        """Record the colour each visual shape was loaded with.
 
-        logger.info(f"Saved original colors for {len(self._original_visual_colors)} visual shapes")
+        Called before every transparency change rather than once, so a body
+        spawned after the first call is covered too -- otherwise it stayed
+        opaque while the rest of the scene went translucent, and its own alpha
+        was unavailable to restore.
+
+        Existing entries are never overwritten. A body already repainted to
+        alpha 0.3 would otherwise have that recorded as its original, and the
+        colour it was authored with would be lost for the rest of the run.
+
+        Body ids are read through ``getBodyUniqueId`` rather than assumed to
+        run from 0: removing a body leaves them non-contiguous, and indexing
+        by position would then skip real bodies and query ids that do not
+        exist.
+        """
+        before = len(self._original_visual_colors)
+        for index in range(p.getNumBodies(physicsClientId=self._client)):
+            body_id = p.getBodyUniqueId(index, physicsClientId=self._client)
+            for shape in p.getVisualShapeData(body_id, physicsClientId=self._client):
+                self._original_visual_colors.setdefault((body_id, shape[1]), shape[7])
+
+        added = len(self._original_visual_colors) - before
+        if added:
+            logger.info("Saved original colors for %d visual shapes (%d total)", added, len(self._original_visual_colors))
 
     def _handle_keyboard_events(self) -> None:
         """
@@ -2725,26 +2742,55 @@ class MultiRobotSimulationCore:
             self._set_structure_transparency(self._structure_transparent)
             print(f"\n[TOGGLE] Structure transparency: {'ON' if self._structure_transparent else 'OFF'}")
 
+    def set_structure_transparency(self, transparent: bool) -> None:
+        """Make static bodies semi-transparent, or restore their own alpha.
+
+        The public form of the ``t`` key, and unlike it this one works without
+        a GUI. Offscreen renders through ``p.getCameraImage()`` honour alpha
+        just as the viewer does, so a headless render of a multi-level scene
+        needed this to see anything under the top level; before, the only way
+        in was :meth:`configure_visualizer`, which returns immediately when
+        ``gui`` is false.
+
+        Args:
+            transparent: True for alpha 0.3 on every static body, False to
+                restore the alpha each shape was loaded with.
+        """
+        self._save_original_visual_colors()
+        self._structure_transparent = transparent
+        self._set_structure_transparency(transparent)
+
     def _set_structure_transparency(self, transparent: bool) -> None:
         """
         Set transparency of static bodies (structures).
         Uses pre-saved colors with modified alpha channel.
         Disables rendering during batch update for ~175x speedup in GUI mode.
 
-        Args:
-            transparent: True to make static objects semi-transparent, False for opaque
-        """
-        if not self._params.gui:
-            return
+        Turning transparency *off* restores each shape's own alpha rather than
+        forcing 1.0, so a model that authored its own translucency keeps it.
+        Forcing opaque made this lossy in one direction: a URDF or SDF whose
+        material says ``rgba="... 0.45"`` came back fully opaque, and there was
+        no way to get it back short of reloading the body. It also made the
+        call lossy when nothing had asked for anything -- ``transparent=False``
+        is the default, so simply calling :meth:`configure_visualizer` repainted
+        every static body.
 
-        alpha = 0.3 if transparent else 1.0
+        Args:
+            transparent: True to make static objects semi-transparent, False to
+                restore the alpha each shape was loaded with
+        """
+        alpha = 0.3 if transparent else None  # None: keep each shape's own
 
         # Use _static_collision_objects — world-loaded objects default to
         # CollisionMode.STATIC, so this covers walls, floors, furniture, etc.
         structure_body_ids = {
             self._sim_objects_dict[oid].body_id for oid in self._static_collision_objects if oid in self._sim_objects_dict
         }
-        logger.info(f"[TRANSPARENCY] Applying alpha={alpha} to {len(structure_body_ids)} static objects...")
+        logger.info(
+            "[TRANSPARENCY] Applying alpha=%s to %d static objects...",
+            alpha if alpha is not None else "original",
+            len(structure_body_ids),
+        )
 
         processed = 0
         # Disable rendering during batch update to avoid per-call OpenGL re-render
@@ -2758,9 +2804,14 @@ class MultiRobotSimulationCore:
                     continue
 
                 try:
-                    # Apply new alpha to the original color
+                    # Apply new alpha to the original colour, or put the
+                    # original colour back verbatim when alpha is None.
+                    new_alpha = rgba[3] if alpha is None else alpha
                     p.changeVisualShape(
-                        body_id, link_index, rgbaColor=[rgba[0], rgba[1], rgba[2], alpha], physicsClientId=self._client
+                        body_id,
+                        link_index,
+                        rgbaColor=[rgba[0], rgba[1], rgba[2], new_alpha],
+                        physicsClientId=self._client,
                     )
                     processed += 1
                 except Exception:
@@ -2772,7 +2823,10 @@ class MultiRobotSimulationCore:
             p.configureDebugVisualizer(p.COV_ENABLE_GUI, 0, physicsClientId=self._client)
 
         logger.info(f"[TRANSPARENCY] Complete: {processed} visual shapes updated")
-        logger.info(f"Static objects transparency {'enabled (alpha=0.3)' if transparent else 'disabled (alpha=1.0)'}")
+        logger.info(
+            "Static objects transparency %s",
+            "enabled (alpha=0.3)" if transparent else "disabled (original alpha restored)",
+        )
 
     def compute_scene_bounds(self) -> Tuple[List[float], List[float]]:
         """Compute scene bounding box from all sim_object positions.
