@@ -263,9 +263,21 @@ class Elevator(Agent):
         self.add_action(JointAction(target_joint_positions={self._joint_name: target_height}))
 
     def motion_in_progress(self) -> bool:
-        """Observe whether the active PyBullet joint action is still running."""
+        """Observe whether the cabin is still moving.
+
+        The action alone is not enough once the lift joint has a motion
+        profile. ``JointAction`` completes as soon as the joint is inside its
+        tolerance, but a ramped joint is still braking through the last
+        millimetres after that -- measured on a 0.6 m ride at 0.4 m/s with
+        1 m/s^2 ramps, the action finished at 1.78 s with the cabin 7.2 mm
+        short, and the joint settled at 1.88 s. Taking the action's word for
+        it let the state machine mark the cabin arrived and release its
+        passengers while it was still moving.
+        """
         action = self.get_current_action()
-        return action is not None and isinstance(action, JointAction) and action.status == ActionStatus.IN_PROGRESS
+        if action is not None and isinstance(action, JointAction) and action.status == ActionStatus.IN_PROGRESS:
+            return True
+        return self.has_joint_trajectory(self._joint_name)
 
     def attach_platform_passengers(self) -> int:
         """Attach platform occupants using PyBullet constraints."""

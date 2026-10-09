@@ -366,3 +366,130 @@ class TestElevatorParamsMotion:
             }
         )
         assert (params.max_speed, params.max_accel, params.max_decel) == (0.4, 1.0, 0.5)
+
+
+class TestThirdRoundReviewFollowUps:
+    """Three things the TPI conversion exposed, raised in review."""
+
+    DT = 0.02
+
+    @pytest.fixture
+    def sim_core(self):
+        import pybullet as p
+
+        from pybullet_fleet import MultiRobotSimulationCore, SimulationParams
+
+        sim = MultiRobotSimulationCore(
+            SimulationParams(gui=False, physics=False, timestep=self.DT, monitor=False, enable_monitor_gui=False)
+        )
+        sim.initialize_simulation()
+        yield sim
+        try:
+            p.disconnect(sim.client)
+        except p.error:
+            pass
+
+    def _agent(self, sim_core):
+        return Agent.from_params(AgentSpawnParams(urdf_path=URDF, name="a", use_fixed_base=True), sim_core=sim_core)
+
+    # -- an index that names no joint ---------------------------------------
+
+    @pytest.mark.parametrize("bad", [-1, 1, 99])
+    def test_an_out_of_range_index_is_refused(self, sim_core, bad):
+        """-1 stored a profile under a key the step loop never visits, so it
+        was silently ignored; a non-negative one got as far as
+        ``_urdf_joint_velocity()`` and raised Python's own "list index out of
+        range", which names neither the body nor how many joints it has.
+
+        Matched on the specific message, and on nothing being stored, because
+        a bare ``IndexError`` passes against the previous code for the two
+        non-negative cases.
+        """
+        agent = self._agent(sim_core)
+        with pytest.raises(IndexError, match=r"joint index .* is out of range for body"):
+            agent.set_joint_motion_profile(bad, max_velocity=0.4)
+        assert agent._joint_motion_profiles == {}
+
+    def test_a_valid_index_still_works(self, sim_core):
+        agent = self._agent(sim_core)
+        agent.set_joint_motion_profile(0, max_velocity=0.4)
+        assert agent._joint_motion_profiles[0][0] == pytest.approx(0.4)
+
+    # -- a braking rate with nothing to brake out of ------------------------
+
+    def test_max_decel_without_max_accel_is_refused(self, sim_core):
+        """It took the constant-speed path and ignored the value, so
+        ElevatorParams(max_decel=...) was silently a no-op."""
+        agent = self._agent(sim_core)
+        with pytest.raises(ValueError, match="max_decel needs max_accel"):
+            agent.set_joint_motion_profile(JOINT, max_velocity=0.4, max_decel=0.25)
+
+    def test_max_decel_is_accepted_alongside_an_existing_accel(self, sim_core):
+        """A second call may supply it once the profile already ramps."""
+        agent = self._agent(sim_core)
+        agent.set_joint_motion_profile(JOINT, max_velocity=0.4, max_accel=1.0)
+        agent.set_joint_motion_profile(JOINT, max_decel=0.25)
+        assert agent._joint_motion_profiles[agent._joint_index_by_name(JOINT)][2] == pytest.approx(0.25)
+
+    def test_the_elevator_refuses_it_too(self, sim_core):
+        from pybullet_fleet.devices.elevator import Elevator, ElevatorParams
+
+        with pytest.raises(ValueError, match="max_decel needs max_accel"):
+            Elevator.from_params(
+                ElevatorParams(
+                    urdf_path=URDF,
+                    name="lift",
+                    use_fixed_base=True,
+                    floors={"0": 0.0, "1": 0.6},
+                    initial_floor="0",
+                    max_speed=0.4,
+                    max_decel=0.25,
+                ),
+                sim_core=sim_core,
+            )
+
+    # -- the cabin must not arrive before it stops --------------------------
+
+    def _ride(self, sim_core, **motion):
+        from pybullet_fleet.devices.elevator import Elevator, ElevatorParams
+
+        car = Elevator.from_params(
+            ElevatorParams(
+                urdf_path=URDF,
+                name="lift",
+                use_fixed_base=True,
+                floors={"0": 0.0, "1": 0.6},
+                initial_floor="0",
+                **motion,
+            ),
+            sim_core=sim_core,
+        )
+        car.request_floor("1")
+        for _ in range(2000):
+            sim_core.step_once()
+            if car.current_floor == "1" and not car.is_moving:
+                return car, car.get_joint_state_by_name(JOINT)[0]
+        raise AssertionError("the cabin never arrived")
+
+    def test_a_ramped_cabin_is_at_its_floor_when_it_says_so(self, sim_core):
+        """JointAction completes inside its tolerance; a ramped joint is still
+        braking through the last millimetres. Taking the action's word for it
+        released the passengers 7.2 mm early."""
+        _, position = self._ride(sim_core, max_speed=0.4, max_accel=1.0, max_decel=1.0)
+        assert position == pytest.approx(0.6, abs=1e-9)
+
+    def test_an_unramped_cabin_is_unaffected(self, sim_core):
+        _, position = self._ride(sim_core, max_speed=0.4)
+        assert position == pytest.approx(0.6, abs=1e-9)
+
+    def test_motion_in_progress_covers_the_ramp(self, sim_core):
+        from pybullet_fleet.action import JointAction
+
+        agent = self._agent(sim_core)
+        agent.set_joint_motion_profile(JOINT, max_velocity=0.4, max_accel=1.0)
+        agent.add_action(JointAction(target_joint_positions={JOINT: 0.6}))
+        for _ in range(2000):
+            sim_core.step_once()
+            if not agent.has_joint_trajectory(JOINT):
+                break
+        assert agent.get_joint_state_by_name(JOINT)[0] == pytest.approx(0.6, abs=1e-9)

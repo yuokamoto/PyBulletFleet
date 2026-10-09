@@ -1522,7 +1522,19 @@ class Agent(SimObject):
             KeyError: If *joint* names a joint this body does not have.
             ValueError: If any value given is not positive.
         """
-        index = joint if isinstance(joint, int) else self._joint_index_by_name(joint)
+        if isinstance(joint, int):
+            # Checked here rather than left to the first use: a negative index
+            # would be stored under a key _update_kinematic_joints() never
+            # visits, so the profile would be silently ignored, and an
+            # out-of-range one would fail much later inside
+            # _urdf_joint_velocity().
+            if not 0 <= joint < len(self.joint_info):
+                raise IndexError(
+                    f"joint index {joint} is out of range for body {self.body_id} " f"({len(self.joint_info)} joints)"
+                )
+            index = joint
+        else:
+            index = self._joint_index_by_name(joint)
         for label, value in (("max_velocity", max_velocity), ("max_accel", max_accel), ("max_decel", max_decel)):
             if value is None:
                 continue
@@ -1538,6 +1550,15 @@ class Agent(SimObject):
         velocity = current_vel if max_velocity is None else float(max_velocity)
         accel = current_accel if max_accel is None else float(max_accel)
         decel = max_decel if max_decel is not None else (accel if max_accel is not None else current_decel)
+        if decel is not None and accel is None:
+            # Braking is the second half of a ramp; without an acceleration
+            # there is no ramp to brake out of, and the joint would take the
+            # constant-speed path and ignore this entirely. Refused rather
+            # than accepted as a setting that does nothing.
+            raise ValueError(
+                "max_decel needs max_accel: a joint with no acceleration runs at "
+                "constant speed, so there is no braking phase for it to apply to."
+            )
         self._joint_motion_profiles[index] = (velocity, accel, None if decel is None else float(decel))
         self._clear_joint_trajectory(index)
 
@@ -1606,6 +1627,18 @@ class Agent(SimObject):
             self._kinematic_joint_positions[joint_index] = new_pos
             any_moved = True
         return any_moved
+
+    def has_joint_trajectory(self, joint: Union[int, str]) -> bool:
+        """Whether a ramped joint is still following a trajectory.
+
+        An action reports complete once the joint is inside its tolerance,
+        which a ramped joint reaches while still braking through the last
+        fraction of a millimetre. Anything that has to know the joint has
+        actually stopped -- a lift releasing its passengers, say -- needs
+        this rather than the action's status.
+        """
+        index = joint if isinstance(joint, int) else self._joint_index_by_name(joint)
+        return index in self._joint_trajectories
 
     def _clear_joint_trajectory(self, joint_index: int) -> None:
         self._joint_speeds.pop(joint_index, None)
