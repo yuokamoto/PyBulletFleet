@@ -128,6 +128,10 @@ class TestAccelerationRamp:
         second ``JointAction``: ``add_action()`` appends to the queue, so a
         second action would wait for the first to finish rather than replace
         its target, and the test would not exercise this at all.
+
+        The new target is far enough ahead to be reachable from the speed the
+        joint is already carrying. A target inside the braking distance is a
+        different case, in ``TestTargetInsideBrakingDistance``.
         """
         agent = Agent.from_params(AgentSpawnParams(urdf_path=URDF, name="a", use_fixed_base=True), sim_core=sim_core)
         agent.set_joint_motion_profile(JOINT, max_velocity=0.4, max_accel=1.0)
@@ -141,15 +145,15 @@ class TestAccelerationRamp:
         assert agent._joint_speeds.get(index, 0.0) > 0.0
 
         agent.clear_actions()
-        agent.set_joint_target_by_name(JOINT, 0.3)
+        agent.set_joint_target_by_name(JOINT, 0.9)
         carried = agent._joint_speeds.get(index, 0.0)
         assert abs(carried) > 0.0, "the speed is carried into the new travel, not reset"
 
         for _ in range(4000):
             sim_core.step_once()
-            if abs(agent.get_joint_state_by_name(JOINT)[0] - 0.3) < 1e-6:
+            if abs(agent.get_joint_state_by_name(JOINT)[0] - 0.9) < 1e-6:
                 break
-        assert agent.get_joint_state_by_name(JOINT)[0] == pytest.approx(0.3, abs=1e-6)
+        assert agent.get_joint_state_by_name(JOINT)[0] == pytest.approx(0.9, abs=1e-6)
         assert agent._joint_speeds.get(index) is None, "the speed is dropped on arrival"
 
 
@@ -493,3 +497,71 @@ class TestThirdRoundReviewFollowUps:
             if not agent.has_joint_trajectory(JOINT):
                 break
         assert agent.get_joint_state_by_name(JOINT)[0] == pytest.approx(0.6, abs=1e-9)
+
+
+class TestTargetInsideBrakingDistance:
+    """Raised in review: an infeasible request teleported the joint.
+
+    ``build_tpi()`` answers a request it cannot plan with a degenerate
+    ``p0 -> p0`` trajectory whose end time is its start time. The ramp read
+    that as "trajectory over, so the joint arrived" and returned the target,
+    moving the joint there in a single step. The case is a target that moves
+    to just ahead of a joint already travelling too fast to stop at it.
+    """
+
+    SPEED, ACCEL, DECEL = 0.4, 1.0, 0.2  # stopping distance 0.4 m at full speed
+
+    def _moving_agent(self, sim_core):
+        """An agent whose lift is at full speed, aimed well past its target."""
+        agent = Agent.from_params(AgentSpawnParams(urdf_path=URDF, name="a", use_fixed_base=True), sim_core=sim_core)
+        agent.set_joint_motion_profile(JOINT, max_velocity=self.SPEED, max_accel=self.ACCEL, max_decel=self.DECEL)
+        agent.set_joint_target_by_name(JOINT, 5.0)
+        for _ in range(200):
+            sim_core.step_once()
+            if agent.get_joint_state_by_name(JOINT)[0] > 0.5:
+                return agent
+        raise AssertionError("the joint never got up to speed")
+
+    def test_the_joint_does_not_jump_to_an_unreachable_target(self, sim_core):
+        agent = self._moving_agent(sim_core)
+        here = agent.get_joint_state_by_name(JOINT)[0]
+        agent.clear_actions()
+        agent.set_joint_target_by_name(JOINT, here + 0.1)  # 0.4 m of braking needed
+
+        previous, largest = here, 0.0
+        for _ in range(2000):
+            sim_core.step_once()
+            position = agent.get_joint_state_by_name(JOINT)[0]
+            largest = max(largest, abs(position - previous))
+            previous = position
+        # Without the fix the first step alone covered the whole 0.1 m.
+        assert largest <= self.SPEED * DT + 1e-9
+
+    def test_it_brakes_at_the_configured_rate_and_recovers(self, sim_core):
+        agent = self._moving_agent(sim_core)
+        here = agent.get_joint_state_by_name(JOINT)[0]
+        target = here + 0.1
+        agent.clear_actions()
+        agent.set_joint_target_by_name(JOINT, target)
+
+        overshot = False
+        for _ in range(4000):
+            sim_core.step_once()
+            position = agent.get_joint_state_by_name(JOINT)[0]
+            overshot = overshot or position > target
+            if abs(position - target) < 1e-6:
+                break
+        else:
+            raise AssertionError("the joint never settled on its target")
+        assert overshot, "it should have run past the target it could not stop at"
+        assert agent.has_joint_trajectory(JOINT) is False
+
+    def test_the_ramp_stays_engaged_while_it_brakes(self, sim_core):
+        """has_joint_trajectory() is what a lift asks before releasing its
+        passengers, so it has to stay true through the unplannable steps."""
+        agent = self._moving_agent(sim_core)
+        here = agent.get_joint_state_by_name(JOINT)[0]
+        agent.clear_actions()
+        agent.set_joint_target_by_name(JOINT, here + 0.1)
+        sim_core.step_once()
+        assert agent.has_joint_trajectory(JOINT) is True

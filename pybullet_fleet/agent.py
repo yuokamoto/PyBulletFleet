@@ -17,7 +17,7 @@ from .sim_object import ShapeParams, SimObject, SimObjectSpawnParams, load_urdf_
 from .action import Action
 from .types import MotionMode, MovementDirection, ActionStatus, CollisionMode
 from .tools import normalize_vector_param  # noqa: F401  (re-exported for legacy callers)
-from pybullet_fleet._tpi import build_tpi
+from pybullet_fleet._tpi import try_build_tpi
 from pybullet_fleet.tools import resolve_joint_index, resolve_link_index
 from .logging_utils import get_lazy_logger
 from pybullet_fleet.events import SimEvents
@@ -1658,29 +1658,43 @@ class Agent(SimObject):
         """Where a ramped joint is at ``now``, from a TwoPointInterpolation.
 
         The same solver the linear controllers use, rather than a trapezoid
-        integrated by hand. It handles the three cases exactly -- triangle,
-        trapezoid, degenerate -- and, given ``v0``, a target moved to the other
-        side of the joint: it brakes through zero and accelerates back, which a
-        magnitude-only integrator has to special-case.
+        integrated by hand: it handles triangle, trapezoid and degenerate
+        exactly, and starts from the speed the joint is already carrying.
 
         One trajectory is built per target change, not per step, and ``t0`` is
         the start of the step so the first evaluation already covers ``dt`` of
         travel.
+
+        What the solver will not plan -- a target the joint is moving away
+        from, or one closer than its braking distance -- goes to
+        :meth:`_braking_joint_step` until it will.
         """
         entry = self._joint_trajectories.get(joint_index)
-        if entry is None or entry[0] != target:
-            tpi = build_tpi(
-                p0=current_pos,
-                pe=target,
-                vmax=max_vel,
-                accel=accel,
-                t0=step_start,
-                v0=self._joint_speeds.get(joint_index, 0.0),
-                decel=decel,
+        tpi = entry[1] if entry is not None and entry[0] == target else None
+        if tpi is None:
+            speed = self._joint_speeds.get(joint_index, 0.0)
+            # A joint travelling away from its target is braked here rather
+            # than by the solver: asked to turn a joint around inside the
+            # distance it needs to stop, the solver returns a trajectory that
+            # runs away from the target at many times vmax and then jumps back
+            # onto it, instead of reporting the request as infeasible.
+            heading_away = speed * (target - current_pos) < 0.0
+            tpi = (
+                None
+                if heading_away
+                else try_build_tpi(
+                    p0=current_pos,
+                    pe=target,
+                    vmax=max_vel,
+                    accel=accel,
+                    t0=step_start,
+                    v0=speed,
+                    decel=decel,
+                )
             )
+            if tpi is None:
+                return self._braking_joint_step(joint_index, current_pos, target, speed, decel, now - step_start)
             self._joint_trajectories[joint_index] = (target, tpi)
-        else:
-            tpi = entry[1]
 
         if now >= tpi.get_end_time():
             self._clear_joint_trajectory(joint_index)
@@ -1695,6 +1709,43 @@ class Agent(SimObject):
             return target
         self._joint_speeds[joint_index] = float(velocity)
         return float(position)
+
+    def _braking_joint_step(
+        self,
+        joint_index: int,
+        current_pos: float,
+        target: float,
+        speed: float,
+        decel: float,
+        dt: float,
+    ) -> float:
+        """One step of braking for a joint with no trajectory to follow.
+
+        Covers the two states a trapezoid cannot be fitted to: a target that
+        has moved inside the distance the joint needs to stop, which the
+        solver refuses, and a joint travelling away from its target, which the
+        solver mis-solves. Both used to end with the joint at ``target`` one
+        step later -- the first because an unplannable request comes back as a
+        zero-length trajectory that reads as "already arrived", the second
+        because the mis-solved trajectory ends on the target however far it
+        wandered first.
+
+        Instead the joint sheds speed at ``decel`` for this step and the
+        trajectory is planned again on the next one. Braking alone does not
+        close the gap on a target ahead -- the distance left and the distance
+        needed shrink at the same rate -- so the joint runs past it, and from
+        there every step is braking towards a target behind until the joint is
+        at rest, which the solver can plan from. It takes |v| / decel seconds,
+        and the joint never moves faster than ``decel`` allows.
+        """
+        slowed = speed - math.copysign(decel * dt, speed)
+        if slowed * speed <= 0.0:
+            slowed = 0.0  # braked through rest inside this step
+        self._joint_speeds[joint_index] = slowed
+        # A None trajectory keeps has_joint_trajectory() true -- the joint is
+        # still moving -- while marking it as needing a fresh plan next step.
+        self._joint_trajectories[joint_index] = (target, None)
+        return float(current_pos + 0.5 * (speed + slowed) * dt)
 
     def update(self, dt: float) -> bool:
         """
