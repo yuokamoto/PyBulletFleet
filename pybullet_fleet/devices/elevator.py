@@ -13,7 +13,12 @@ from dataclasses import dataclass, field, fields
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, cast
 
 from pybullet_fleet.action import JointAction
-from pybullet_fleet.agent import Agent, AgentSpawnParams, IKParams  # noqa: F401 - resolves inherited API type hints
+from pybullet_fleet.agent import (  # noqa: F401 - Agent/AgentSpawnParams/IKParams resolve inherited API type hints
+    Agent,
+    AgentSpawnParams,
+    IKParams,
+    validate_joint_motion_profile,
+)
 from pybullet_fleet.controller import Controller  # noqa: F401 - resolves inherited API type hints
 from pybullet_fleet.controller_params import ControllerParams  # noqa: F401 - resolves inherited API type hints
 from pybullet_fleet.devices.elevator_state_machine import (
@@ -44,6 +49,15 @@ class ElevatorParams(AgentSpawnParams):
         joint_name: Name of the prismatic joint that moves the platform.
         platform_link: Name of the link with the platform collision box.
         request_policy: Handling for floor requests received while moving.
+        max_speed: Cabin speed in m/s.  ``None`` uses the URDF's
+            ``<limit velocity="...">`` on ``joint_name``, which is where the
+            speed otherwise has to be set -- so without this, two installations
+            that differ only in how fast the cabin travels need two URDFs.
+        max_accel: Cabin acceleration in m/s^2.  ``None`` keeps the cabin at
+            full speed from the first step, as before.  Giving it makes the
+            travel a trapezoid, which is what a real cabin does: 0.6 m at
+            0.4 m/s takes 1.5 s flat and 1.9 s with 1.0 m/s^2 ramps.
+        max_decel: Cabin deceleration.  Defaults to ``max_accel``.
     """
 
     floors: Optional[Dict[str, float]] = None
@@ -51,6 +65,9 @@ class ElevatorParams(AgentSpawnParams):
     joint_name: str = "lift"
     platform_link: str = "platform"
     request_policy: ElevatorRequestPolicy | str = ElevatorRequestPolicy.REJECT
+    max_speed: Optional[float] = None
+    max_accel: Optional[float] = None
+    max_decel: Optional[float] = None
 
     def __post_init__(self):
         super().__post_init__()
@@ -74,6 +91,9 @@ class ElevatorParams(AgentSpawnParams):
             floors=config.get("floors"),
             initial_floor=config.get("initial_floor", ""),
             joint_name=config.get("joint_name", "lift"),
+            max_speed=config.get("max_speed"),
+            max_accel=config.get("max_accel"),
+            max_decel=config.get("max_decel"),
             platform_link=config.get("platform_link", "platform"),
             request_policy=config.get("request_policy", ElevatorRequestPolicy.REJECT),
         )
@@ -118,17 +138,53 @@ class Elevator(Agent):
         """
         if not isinstance(spawn_params, ElevatorParams):
             raise TypeError(f"Elevator.from_params requires ElevatorParams, got {type(spawn_params).__name__}")
+        # `is not None`, not truthiness: a zero is invalid, and skipping it
+        # here would silently fall back to the URDF instead of rejecting it.
+        has_profile = any(v is not None for v in (spawn_params.max_speed, spawn_params.max_accel, spawn_params.max_decel))
+        if has_profile:
+            # Before the body exists. super().from_params() registers the
+            # agent with sim_core and PyBullet, so a profile refused after
+            # that would leave a half-configured elevator in the simulation.
+            validate_joint_motion_profile(
+                max_velocity=spawn_params.max_speed,
+                max_accel=spawn_params.max_accel,
+                max_decel=spawn_params.max_decel,
+            )
         agent = cast("Elevator", super().from_params(spawn_params, sim_core))
-        agent._floors = spawn_params.floors  # type: ignore[assignment]
-        agent._joint_name = spawn_params.joint_name
-        agent._platform_link = spawn_params.platform_link
-        agent._passengers = []  # Currently attached passengers
-        agent._state_machine = ElevatorStateMachine(
-            agent._floors,
-            spawn_params.initial_floor,
-            agent,
-            request_policy=spawn_params.request_policy,
-        )
+        try:
+            agent._floors = spawn_params.floors  # type: ignore[assignment]
+            agent._joint_name = spawn_params.joint_name
+            agent._platform_link = spawn_params.platform_link
+            agent._passengers = []  # Currently attached passengers
+            if has_profile:
+                # Only the joint name is left to go wrong here, the values
+                # having been checked above.
+                agent.set_joint_motion_profile(
+                    agent._joint_name,
+                    max_velocity=spawn_params.max_speed,
+                    max_accel=spawn_params.max_accel,
+                    max_decel=spawn_params.max_decel,
+                )
+            agent._state_machine = ElevatorStateMachine(
+                agent._floors,
+                spawn_params.initial_floor,
+                agent,
+                request_policy=spawn_params.request_policy,
+            )
+        except Exception:
+            # The agent is already in the simulation by now -- an unknown
+            # joint name or starting floor would otherwise leave a body and a
+            # registry entry behind for a constructor that raised.
+            if agent.sim_core is not None:
+                agent.sim_core.remove_object(agent)
+            elif agent.body_id is not None:
+                # No core to unregister from, but from_params() still loaded
+                # the URDF into PyBullet, so the body is there regardless.
+                try:
+                    p.removeBody(agent.body_id, physicsClientId=agent._pid)
+                except p.error:
+                    logger.warning(f"Failed to remove PyBullet body {agent.body_id} for a refused elevator")
+            raise
         return agent
 
     # ------------------------------------------------------------------
@@ -239,9 +295,21 @@ class Elevator(Agent):
         self.add_action(JointAction(target_joint_positions={self._joint_name: target_height}))
 
     def motion_in_progress(self) -> bool:
-        """Observe whether the active PyBullet joint action is still running."""
+        """Observe whether the cabin is still moving.
+
+        The action alone is not enough once the lift joint has a motion
+        profile. ``JointAction`` completes as soon as the joint is inside its
+        tolerance, but a ramped joint is still braking through the last
+        millimetres after that -- measured on a 0.6 m ride at 0.4 m/s with
+        1 m/s^2 ramps, the action finished at 1.78 s with the cabin 7.2 mm
+        short, and the joint settled at 1.88 s. Taking the action's word for
+        it let the state machine mark the cabin arrived and release its
+        passengers while it was still moving.
+        """
         action = self.get_current_action()
-        return action is not None and isinstance(action, JointAction) and action.status == ActionStatus.IN_PROGRESS
+        if action is not None and isinstance(action, JointAction) and action.status == ActionStatus.IN_PROGRESS:
+            return True
+        return self.is_joint_moving(self._joint_name)
 
     def attach_platform_passengers(self) -> int:
         """Attach platform occupants using PyBullet constraints."""

@@ -3,7 +3,9 @@
 :func:`build_tpi` is the canonical factory wrapping the external
 ``TwoPointInterpolation`` package — used by both per-agent
 ``KinematicController`` and the vectorised ``BatchKinematicController``
-subclasses to construct a single trajectory.
+subclasses to construct a single trajectory. :func:`try_build_tpi` is the
+same construction without the fallback, for callers that have to tell an
+infeasible request apart from a trajectory that simply finishes early.
 
 :func:`extract_phase_params` lifts the symmetric trapezoidal phase scalars
 (``t_accel``, ``t_const``, ``t_total``, ``accel``) out of a constructed
@@ -57,15 +59,49 @@ def build_tpi(
     Returns:
         A ``TwoPointInterpolation`` with its trajectory already calculated.
     """
+    tpi = try_build_tpi(p0=p0, pe=pe, vmax=vmax, accel=accel, t0=t0, v0=v0, ve=ve, decel=decel)
+    if tpi is not None:
+        return tpi
+    dec = accel if decel is None else decel
+    tpi = TwoPointInterpolation()
+    tpi.init(p0=p0, pe=p0, acc_max=accel, vmax=vmax, t0=t0, v0=0.0, ve=0.0, dec_max=dec)
+    tpi.calc_trajectory()
+    return tpi
+
+
+def try_build_tpi(
+    p0: float,
+    pe: float,
+    vmax: float,
+    accel: float,
+    t0: float,
+    v0: float = 0.0,
+    ve: float = 0.0,
+    decel: Optional[float] = None,
+) -> Optional[TwoPointInterpolation]:
+    """Build a :class:`TwoPointInterpolation`, or ``None`` if there is none.
+
+    Same arguments and same solver as :func:`build_tpi`, without its
+    fallback. A request is infeasible when ``v0`` is too high to reach ``pe``
+    at ``ve`` within ``decel`` — the gap between ``p0`` and ``pe`` is shorter
+    than the braking distance the speed demands.
+
+    :func:`build_tpi` answers that with a degenerate ``p0 → p0`` trajectory,
+    which is the right default for a controller that re-plans from where it
+    stands. A caller that reads "trajectory over" as "target reached" needs
+    the two cases kept apart, and gets ``None`` here instead.
+
+    Returns:
+        The calculated trajectory, or ``None`` when the solver rejects the
+        request as infeasible.
+    """
     dec = accel if decel is None else decel
     tpi = TwoPointInterpolation()
     try:
         tpi.init(p0=p0, pe=pe, acc_max=accel, vmax=vmax, t0=t0, v0=v0, ve=ve, dec_max=dec)
         tpi.calc_trajectory()
     except ValueError:
-        tpi = TwoPointInterpolation()
-        tpi.init(p0=p0, pe=p0, acc_max=accel, vmax=vmax, t0=t0, v0=0.0, ve=0.0, dec_max=dec)
-        tpi.calc_trajectory()
+        return None
     return tpi
 
 

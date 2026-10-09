@@ -39,7 +39,6 @@ are not recommended for production use yet.
 - `OmniController.capture_straight_navigation()` now rejects an asymmetric
   profile. Its record carries a single `accel`, so such a trajectory could not
   be rebuilt from it; the checkpoint schema is unchanged.
-
 - An optional state-recorder error during a command, object spawn/removal, or
   completed-step capture now stops recording with an explicitly incomplete
   artifact while the simulation operation continues. GUI playback selects the
@@ -78,6 +77,25 @@ are not recommended for production use yet.
   the *next* simulation in the process report bodies and joints "not found"
   rather than failing where the leak happened. `close()` is safe to call more
   than once and on a simulation that was never run.
+- Add `Agent.set_joint_motion_profile()`, and `max_speed` / `max_accel` /
+  `max_decel` on `ElevatorParams`. A kinematic joint ran at the URDF's
+  `<limit velocity="...">` and reached it instantly, so its speed was a
+  property of the model file -- two installations differing only in how fast
+  a cabin travels needed two URDFs, and
+  `changeDynamics(maxJointVelocity=...)` does not help because
+  `getJointInfo()` keeps reporting the original. Giving an acceleration makes
+  the travel a trapezoid solved by `TwoPointInterpolation`, the same solver
+  the linear controllers use: 0.6 m at 0.4 m/s takes 1.5 s flat and 1.9 s
+  with 1.0 m/s^2 ramps. Both are opt-in; with neither, and with a speed but
+  no acceleration, the joint keeps the constant-speed behaviour it always
+  had. A target a ramped joint cannot stop at -- one inside its braking
+  distance, one it is moving away from, or one set to where it already is --
+  brakes at the configured rate and re-plans rather than snapping to the
+  target. A profile can be changed while the joint moves: it keeps the speed
+  it is carrying and re-plans from it under the new limits.
+  `Agent.is_joint_moving()` reports whether a ramped joint is still in
+  motion, which `Elevator` arrival now waits for instead of taking the
+  action's tolerance as arrival.
 
 - Add name-based simulation entity lookup on `MultiRobotSimulationCore`:
   ordered multi-result searches for objects and agents, plus unique-result

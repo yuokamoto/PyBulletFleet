@@ -133,7 +133,9 @@ def _validate_checkpoint(manifest: dict, state: dict) -> None:
             value = joint[key]
             if value is not None or key == "position":
                 if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
-                    raise ValueError("Invalid joint position or target")
+                    # Named individually, so a bad value does not send anyone
+                    # debugging it to the wrong field.
+                    raise ValueError(f"Invalid joint {key}")
     if c["joint_name"] not in joint_names:
         raise ValueError("Declared scenario joint is missing from checkpoint")
     controller_entry = _keys(robot["controller"], {"type", "version", "state"}, "controller")
