@@ -244,6 +244,51 @@ class IKParams:
     ik_joint_names: Optional[Tuple[str, ...]] = None
 
 
+def validate_joint_motion_profile(
+    max_velocity: Optional[float] = None,
+    max_accel: Optional[float] = None,
+    max_decel: Optional[float] = None,
+    current_accel: Optional[float] = None,
+) -> None:
+    """Refuse an unusable joint motion profile from the values alone.
+
+    :meth:`Agent.set_joint_motion_profile` needs a body to resolve the joint
+    against, which is too late for a caller that spawns the body and then
+    configures it: a profile refused at that point leaves the half-configured
+    object registered with the simulation. This checks everything that does
+    not need the body, so such a caller can refuse before spawning.
+
+    Args:
+        max_velocity: Speed cap, or ``None``.
+        max_accel: Acceleration, or ``None``.
+        max_decel: Deceleration, or ``None``.
+        current_accel: Acceleration the joint already has, for a profile being
+            changed rather than set. ``max_decel`` on its own is valid when
+            there is one.
+
+    Raises:
+        ValueError: If a value given is not a finite number above zero, or if
+            ``max_decel`` is given for a joint that has no acceleration.
+    """
+    for label, value in (("max_velocity", max_velocity), ("max_accel", max_accel), ("max_decel", max_decel)):
+        if value is None:
+            continue
+        # isfinite before the comparison: NaN and inf both slip past
+        # `value <= 0.0`, and would then be stored and produce a nan or
+        # infinite step.
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value <= 0.0:
+            raise ValueError(f"{label} must be a finite number > 0, got {value!r}")
+    if max_decel is not None and max_accel is None and current_accel is None:
+        # Braking is the second half of a ramp; without an acceleration there
+        # is no ramp to brake out of, and the joint would take the
+        # constant-speed path and ignore this entirely. Refused rather than
+        # accepted as a setting that does nothing.
+        raise ValueError(
+            "max_decel needs max_accel: a joint with no acceleration runs at "
+            "constant speed, so there is no braking phase for it to apply to."
+        )
+
+
 class Agent(SimObject):
     """
     Agent class with goal-based position control.
@@ -1520,7 +1565,9 @@ class Agent(SimObject):
 
         Raises:
             KeyError: If *joint* names a joint this body does not have.
-            ValueError: If any value given is not positive.
+            IndexError: If *joint* is an index this body does not have.
+            ValueError: If any value given is not positive, or if ``max_decel``
+                is given for a joint with no acceleration.
         """
         if isinstance(joint, int):
             # Checked here rather than left to the first use: a negative index
@@ -1535,30 +1582,14 @@ class Agent(SimObject):
             index = joint
         else:
             index = self._joint_index_by_name(joint)
-        for label, value in (("max_velocity", max_velocity), ("max_accel", max_accel), ("max_decel", max_decel)):
-            if value is None:
-                continue
-            # isfinite before the comparison: NaN and inf both slip past
-            # `value <= 0.0`, and would then be stored and produce a nan or
-            # infinite step.
-            if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value <= 0.0:
-                raise ValueError(f"{label} must be a finite number > 0, got {value!r}")
-
         current_vel, current_accel, current_decel = self._joint_motion_profiles.get(
             index, (self._urdf_joint_velocity(index), None, None)
         )
+        validate_joint_motion_profile(max_velocity, max_accel, max_decel, current_accel=current_accel)
+
         velocity = current_vel if max_velocity is None else float(max_velocity)
         accel = current_accel if max_accel is None else float(max_accel)
         decel = max_decel if max_decel is not None else (accel if max_accel is not None else current_decel)
-        if decel is not None and accel is None:
-            # Braking is the second half of a ramp; without an acceleration
-            # there is no ramp to brake out of, and the joint would take the
-            # constant-speed path and ignore this entirely. Refused rather
-            # than accepted as a setting that does nothing.
-            raise ValueError(
-                "max_decel needs max_accel: a joint with no acceleration runs at "
-                "constant speed, so there is no braking phase for it to apply to."
-            )
         self._joint_motion_profiles[index] = (velocity, accel, None if decel is None else float(decel))
         self._clear_joint_trajectory(index)
 
@@ -1607,9 +1638,15 @@ class Agent(SimObject):
         for joint_index, target in self._last_joint_targets.items():
             current_pos = self._kinematic_joint_positions.get(joint_index, 0.0)
             diff = target - current_pos
-            if abs(diff) < 1e-7:
+            if abs(diff) < 1e-7 and not self._joint_speeds.get(joint_index, 0.0):
+                # Already at target with nothing to wind down -- skip. A
+                # ramped joint still carrying speed is not: a target set to
+                # where the joint happens to be is inside its braking
+                # distance like any other, so stopping it here would ignore
+                # the profile's deceleration and report the motion over while
+                # the joint was still moving. It takes the braking path below.
                 self._clear_joint_trajectory(joint_index)
-                continue  # Already at target -- skip
+                continue
             max_vel, accel, decel = self._joint_motion_profiles.get(
                 joint_index, (self._urdf_joint_velocity(joint_index), None, None)
             )
@@ -1738,14 +1775,18 @@ class Agent(SimObject):
         at rest, which the solver can plan from. It takes |v| / decel seconds,
         and the joint never moves faster than ``decel`` allows.
         """
-        slowed = speed - math.copysign(decel * dt, speed)
+        # Only as much of the step as the joint is still moving for. Averaging
+        # the speeds over the whole dt when it comes to rest part-way through
+        # would carry it past the distance decel allows.
+        moving_for = min(dt, abs(speed) / decel)
+        slowed = speed - math.copysign(decel * moving_for, speed)
         if slowed * speed <= 0.0:
             slowed = 0.0  # braked through rest inside this step
         self._joint_speeds[joint_index] = slowed
         # A None trajectory keeps has_joint_trajectory() true -- the joint is
         # still moving -- while marking it as needing a fresh plan next step.
         self._joint_trajectories[joint_index] = (target, None)
-        return float(current_pos + 0.5 * (speed + slowed) * dt)
+        return float(current_pos + 0.5 * (speed + slowed) * moving_for)
 
     def update(self, dt: float) -> bool:
         """

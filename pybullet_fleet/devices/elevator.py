@@ -13,7 +13,12 @@ from dataclasses import dataclass, field, fields
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, cast
 
 from pybullet_fleet.action import JointAction
-from pybullet_fleet.agent import Agent, AgentSpawnParams, IKParams  # noqa: F401 - resolves inherited API type hints
+from pybullet_fleet.agent import (  # noqa: F401 - Agent/AgentSpawnParams/IKParams resolve inherited API type hints
+    Agent,
+    AgentSpawnParams,
+    IKParams,
+    validate_joint_motion_profile,
+)
 from pybullet_fleet.controller import Controller  # noqa: F401 - resolves inherited API type hints
 from pybullet_fleet.controller_params import ControllerParams  # noqa: F401 - resolves inherited API type hints
 from pybullet_fleet.devices.elevator_state_machine import (
@@ -133,26 +138,46 @@ class Elevator(Agent):
         """
         if not isinstance(spawn_params, ElevatorParams):
             raise TypeError(f"Elevator.from_params requires ElevatorParams, got {type(spawn_params).__name__}")
-        agent = cast("Elevator", super().from_params(spawn_params, sim_core))
-        agent._floors = spawn_params.floors  # type: ignore[assignment]
-        agent._joint_name = spawn_params.joint_name
-        agent._platform_link = spawn_params.platform_link
-        agent._passengers = []  # Currently attached passengers
         # `is not None`, not truthiness: a zero is invalid, and skipping it
         # here would silently fall back to the URDF instead of rejecting it.
-        if any(v is not None for v in (spawn_params.max_speed, spawn_params.max_accel, spawn_params.max_decel)):
-            agent.set_joint_motion_profile(
-                agent._joint_name,
+        has_profile = any(v is not None for v in (spawn_params.max_speed, spawn_params.max_accel, spawn_params.max_decel))
+        if has_profile:
+            # Before the body exists. super().from_params() registers the
+            # agent with sim_core and PyBullet, so a profile refused after
+            # that would leave a half-configured elevator in the simulation.
+            validate_joint_motion_profile(
                 max_velocity=spawn_params.max_speed,
                 max_accel=spawn_params.max_accel,
                 max_decel=spawn_params.max_decel,
             )
-        agent._state_machine = ElevatorStateMachine(
-            agent._floors,
-            spawn_params.initial_floor,
-            agent,
-            request_policy=spawn_params.request_policy,
-        )
+        agent = cast("Elevator", super().from_params(spawn_params, sim_core))
+        try:
+            agent._floors = spawn_params.floors  # type: ignore[assignment]
+            agent._joint_name = spawn_params.joint_name
+            agent._platform_link = spawn_params.platform_link
+            agent._passengers = []  # Currently attached passengers
+            if has_profile:
+                # Only the joint name is left to go wrong here, the values
+                # having been checked above.
+                agent.set_joint_motion_profile(
+                    agent._joint_name,
+                    max_velocity=spawn_params.max_speed,
+                    max_accel=spawn_params.max_accel,
+                    max_decel=spawn_params.max_decel,
+                )
+            agent._state_machine = ElevatorStateMachine(
+                agent._floors,
+                spawn_params.initial_floor,
+                agent,
+                request_policy=spawn_params.request_policy,
+            )
+        except Exception:
+            # The agent is already in the simulation by now -- an unknown
+            # joint name or starting floor would otherwise leave a body and a
+            # registry entry behind for a constructor that raised.
+            if agent.sim_core is not None:
+                agent.sim_core.remove_object(agent)
+            raise
         return agent
 
     # ------------------------------------------------------------------

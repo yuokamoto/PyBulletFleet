@@ -88,7 +88,12 @@ are not recommended for production use yet.
   the linear controllers use: 0.6 m at 0.4 m/s takes 1.5 s flat and 1.9 s
   with 1.0 m/s^2 ramps. Both are opt-in; with neither, and with a speed but
   no acceleration, the joint keeps the constant-speed behaviour it always
-  had.
+  had. A target a ramped joint cannot stop at -- one inside its braking
+  distance, one it is moving away from, or one set to where it already is --
+  brakes at the configured rate and re-plans rather than snapping to the
+  target. `Agent.has_joint_trajectory()` reports whether a ramped joint is
+  still moving, which `Elevator` arrival now waits for instead of taking the
+  action's tolerance as arrival.
 
 - Add name-based simulation entity lookup on `MultiRobotSimulationCore`:
   ordered multi-result searches for objects and agents, plus unique-result

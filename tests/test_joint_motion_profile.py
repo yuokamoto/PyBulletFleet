@@ -557,3 +557,158 @@ class TestTargetInsideBrakingDistance:
         agent.set_joint_target_by_name(JOINT, here + 0.1)
         sim_core.step_once()
         assert agent.has_joint_trajectory(JOINT) is True
+
+
+class TestBrakingStopsWithinItsDistance:
+    """Raised in review: a braking step that ends at rest part-way through
+    averaged the speeds over the whole step, carrying the joint past the
+    distance its deceleration allows."""
+
+    def test_a_step_that_reaches_rest_covers_only_the_braking_distance(self, sim_core):
+        agent = Agent.from_params(AgentSpawnParams(urdf_path=URDF, name="a", use_fixed_base=True), sim_core=sim_core)
+        agent.set_joint_motion_profile(JOINT, max_velocity=0.4, max_accel=1.0, max_decel=10.0)
+        index = agent._joint_index_by_name(JOINT)
+        speed, decel = 0.1, 10.0
+        assert speed / decel < DT, "the joint has to come to rest inside one step"
+
+        moved = agent._braking_joint_step(index, 0.0, 0.0, speed, decel, DT)
+
+        # v^2 / 2a = 0.0005 m. Averaging over the whole step gave 0.001 m.
+        assert moved == pytest.approx(speed**2 / (2 * decel))
+        assert agent._joint_speeds[index] == 0.0
+
+    def test_the_overrun_matches_the_braking_distance(self, sim_core):
+        """End to end, with a speed that is not a whole number of steps' worth
+        of braking, so the final partial step is the one under test."""
+        agent = Agent.from_params(AgentSpawnParams(urdf_path=URDF, name="a", use_fixed_base=True), sim_core=sim_core)
+        decel = 0.3  # 0.4 / 0.3 = 1.33 s, which is not a whole number of steps
+        agent.set_joint_motion_profile(JOINT, max_velocity=0.4, max_accel=1.0, max_decel=decel)
+        index = agent._joint_index_by_name(JOINT)
+        agent.set_joint_target_by_name(JOINT, 5.0)
+        for _ in range(200):
+            sim_core.step_once()
+            if agent.get_joint_state_by_name(JOINT)[0] > 0.5:
+                break
+        here, speed = agent.get_joint_state_by_name(JOINT)[0], agent._joint_speeds[index]
+
+        agent.clear_actions()
+        agent.set_joint_target_by_name(JOINT, here)  # nowhere to go but to stop
+
+        furthest = here
+        for _ in range(4000):
+            sim_core.step_once()
+            furthest = max(furthest, agent.get_joint_state_by_name(JOINT)[0])
+            if agent._joint_speeds.get(index, 0.0) == 0.0:
+                break
+        assert furthest - here == pytest.approx(speed**2 / (2 * decel), abs=1e-9)
+
+
+class TestTargetAtTheJointsOwnPosition:
+    """Raised in review: a target set to where a moving joint already is.
+
+    ``abs(diff) < 1e-7`` took that as "already there" and cleared the ramp,
+    stopping the joint in one step however it was configured to brake -- and
+    reporting the motion over while it was still moving.
+    """
+
+    SPEED, ACCEL, DECEL = 0.4, 1.0, 0.2
+
+    def _moving_agent(self, sim_core):
+        agent = Agent.from_params(AgentSpawnParams(urdf_path=URDF, name="a", use_fixed_base=True), sim_core=sim_core)
+        agent.set_joint_motion_profile(JOINT, max_velocity=self.SPEED, max_accel=self.ACCEL, max_decel=self.DECEL)
+        agent.set_joint_target_by_name(JOINT, 5.0)
+        for _ in range(200):
+            sim_core.step_once()
+            if agent.get_joint_state_by_name(JOINT)[0] > 0.5:
+                agent.clear_actions()
+                return agent, agent._joint_index_by_name(JOINT)
+        raise AssertionError("the joint never got up to speed")
+
+    def test_it_keeps_moving_and_brakes_within_its_limit(self, sim_core):
+        agent, index = self._moving_agent(sim_core)
+        here = agent.get_joint_state_by_name(JOINT)[0]
+        agent.set_joint_target_by_name(JOINT, here)
+
+        speeds, previous = [], here
+        for _ in range(8):
+            sim_core.step_once()
+            position = agent.get_joint_state_by_name(JOINT)[0]
+            speeds.append((position - previous) / DT)
+            previous = position
+        assert position > here, "it cannot stop where it stands, so it runs on"
+        for before, after in zip(speeds, speeds[1:]):
+            assert before - after == pytest.approx(self.DECEL * DT, abs=1e-9)
+
+    def test_it_reports_motion_until_it_has_actually_stopped(self, sim_core):
+        agent, _ = self._moving_agent(sim_core)
+        here = agent.get_joint_state_by_name(JOINT)[0]
+        agent.set_joint_target_by_name(JOINT, here)
+
+        steps = 0
+        for _ in range(4000):
+            sim_core.step_once()
+            if not agent.has_joint_trajectory(JOINT):
+                break
+            steps += 1
+        else:
+            raise AssertionError("the joint never settled")
+        # 0.4 m/s shed at 0.2 m/s^2 is 2 s of braking before it even turns round.
+        assert steps * DT > self.SPEED / self.DECEL
+        assert agent.get_joint_state_by_name(JOINT)[0] == pytest.approx(here, abs=1e-6)
+
+    def test_a_joint_at_rest_on_its_target_is_still_skipped(self, sim_core):
+        """The early exit is the common case and has to stay."""
+        agent, index = self._moving_agent(sim_core)
+        agent.set_joint_target_by_name(JOINT, agent.get_joint_state_by_name(JOINT)[0])
+        for _ in range(4000):
+            sim_core.step_once()
+            if not agent.has_joint_trajectory(JOINT):
+                break
+        settled = agent.get_joint_state_by_name(JOINT)[0]
+
+        assert agent._joint_speeds.get(index) is None
+        for _ in range(10):
+            sim_core.step_once()
+        assert agent.get_joint_state_by_name(JOINT)[0] == settled
+        assert agent.has_joint_trajectory(JOINT) is False
+
+
+class TestElevatorSpawnLeavesNothingBehind:
+    """Raised in review: `super().from_params()` registers the agent with
+    sim_core and PyBullet before the motion profile is applied, so a profile
+    refused afterwards left a half-configured elevator in the simulation."""
+
+    def _params(self, **motion):
+        return ElevatorParams(
+            urdf_path=URDF,
+            name="lift",
+            use_fixed_base=True,
+            floors={"0": 0.0, "1": 0.6},
+            initial_floor="0",
+            **motion,
+        )
+
+    @pytest.mark.parametrize(
+        "motion, exc",
+        [
+            ({"max_speed": 0.0}, ValueError),  # zero is refused, not ignored
+            ({"max_speed": 0.4, "max_accel": float("nan")}, ValueError),
+            ({"max_speed": 0.4, "max_decel": 1.0}, ValueError),  # decel with no accel
+            ({"max_speed": 0.4, "max_accel": 1.0, "joint_name": "nosuchjoint"}, KeyError),
+        ],
+    )
+    def test_a_refused_elevator_is_not_left_in_the_simulation(self, sim_core, motion, exc):
+        import pybullet as p
+
+        before = len(sim_core.sim_objects)
+        bodies_before = p.getNumBodies(physicsClientId=sim_core.client)
+
+        with pytest.raises(exc):
+            Elevator.from_params(self._params(**motion), sim_core=sim_core)
+
+        assert len(sim_core.sim_objects) == before
+        assert p.getNumBodies(physicsClientId=sim_core.client) == bodies_before
+
+    def test_a_good_one_still_spawns(self, sim_core):
+        car = Elevator.from_params(self._params(max_speed=0.4, max_accel=1.0), sim_core=sim_core)
+        assert car in sim_core.sim_objects
