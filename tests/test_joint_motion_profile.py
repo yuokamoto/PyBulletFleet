@@ -257,10 +257,9 @@ class TestDirectionReversal:
         assert moving > from_rest
 
 
-class TestCheckpointCarriesTheRampSpeed:
-    """Raised in review: ramp speed is execution state, so a checkpoint taken
-    mid-travel has to carry it or the restored agent takes a different path to
-    the same target."""
+class TestRestoreResetsTheRamp:
+    """A restored joint resumes from rest: the checkpoint carries no ramp
+    state, so a stale trajectory or speed must not survive the restore."""
 
     def _ramping_agent(self, sim_core):
         agent = Agent.from_params(AgentSpawnParams(urdf_path=URDF, name="a", use_fixed_base=True), sim_core=sim_core)
@@ -270,40 +269,33 @@ class TestCheckpointCarriesTheRampSpeed:
             sim_core.step_once()
         return agent
 
-    def test_capture_records_it(self, sim_core):
+    def test_the_checkpoint_does_not_carry_the_speed(self, sim_core):
+        agent = self._ramping_agent(sim_core)
+        index = agent._joint_index_by_name(JOINT)
+        assert agent._joint_speeds[index] > 0.0, "the joint is mid-ramp"
+        assert set(agent.capture_kinematic_joint_execution()[index]) == {"name", "position", "target"}
+
+    def test_restore_drops_the_ramp_state(self, sim_core):
         agent = self._ramping_agent(sim_core)
         index = agent._joint_index_by_name(JOINT)
         captured = agent.capture_kinematic_joint_execution()
-        assert captured[index]["speed"] == pytest.approx(agent._joint_speeds[index])
-
-    def test_restore_puts_it_back(self, sim_core):
-        agent = self._ramping_agent(sim_core)
-        index = agent._joint_index_by_name(JOINT)
-        captured = agent.capture_kinematic_joint_execution()
-        speed = agent._joint_speeds[index]
-
-        agent._joint_speeds.clear()
-        agent.restore_kinematic_joint_execution(captured)
-
-        assert agent._joint_speeds[index] == pytest.approx(speed)
-
-    def test_a_checkpoint_without_the_field_still_restores(self, sim_core):
-        """Written before ramps existed: that joint just starts from rest."""
-        agent = self._ramping_agent(sim_core)
-        captured = agent.capture_kinematic_joint_execution()
-        for entry in captured:
-            entry.pop("speed")
 
         agent.restore_kinematic_joint_execution(captured)
 
         assert agent._joint_speeds == {}
+        assert agent.has_joint_trajectory(JOINT) is False
 
-    def test_a_nonfinite_speed_is_refused(self, sim_core):
+    def test_the_restored_joint_still_reaches_its_target(self, sim_core):
         agent = self._ramping_agent(sim_core)
         captured = agent.capture_kinematic_joint_execution()
-        captured[agent._joint_index_by_name(JOINT)]["speed"] = float("nan")
-        with pytest.raises(ValueError, match="nonfinite"):
-            agent.restore_kinematic_joint_execution(captured)
+        agent.restore_kinematic_joint_execution(captured)
+
+        for _ in range(4000):
+            sim_core.step_once()
+            if abs(agent.get_joint_state_by_name(JOINT)[0] - 2.0) < 1e-6:
+                break
+        else:
+            raise AssertionError("the restored joint never reached its target")
 
 
 class TestElevatorParamsMotion:

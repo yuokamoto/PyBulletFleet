@@ -2019,11 +2019,6 @@ class Agent(SimObject):
                     "name": info[1].decode("utf-8"),
                     "position": float(self._kinematic_joint_positions[index]),
                     "target": self._last_joint_targets.get(index),
-                    # Execution state once a joint ramps: restoring mid-travel
-                    # without it resumes from a standstill and takes a
-                    # different path to the same target. Signed -- the sign is
-                    # the direction of travel.
-                    "speed": self._joint_speeds.get(index),
                 }
             )
         return joints
@@ -2033,21 +2028,11 @@ class Agent(SimObject):
         if not self._use_kinematic_joints or not isinstance(states, list) or len(states) != len(self.joint_info):
             raise ValueError("Joint checkpoint does not match the kinematic URDF robot")
         targets = {}
-        speeds = {}
         for index, (state, info) in enumerate(zip(states, self.joint_info)):
             if not isinstance(state, dict) or state.get("name") != info[1].decode("utf-8"):
                 raise ValueError("Joint checkpoint names or order differ from the kinematic URDF")
             position = state.get("position")
             target = state.get("target")
-            # Absent in a checkpoint written before ramps existed, which still
-            # restores: that joint simply starts its travel from rest.
-            speed = state.get("speed")
-            if speed is not None:
-                # Signed: the sign is the direction of travel, so a negative
-                # speed is ordinary rather than invalid.
-                if isinstance(speed, bool) or not isinstance(speed, (int, float)) or not math.isfinite(speed):
-                    raise ValueError("Joint checkpoint contains a nonfinite or invalid value")
-                speeds[index] = float(speed)
             if (
                 isinstance(position, bool)
                 or not isinstance(position, (int, float))
@@ -2065,9 +2050,11 @@ class Agent(SimObject):
             p.resetJointState(self.body_id, index, position, physicsClientId=self._pid)
             self._kinematic_joint_positions[index] = position
         self._last_joint_targets = targets
-        self._joint_speeds = speeds
-        # Rebuilt on the next step from position, target and the restored
-        # speed, which is why the record carries no trajectory of its own.
+        # The checkpoint carries no ramp state, so a restored joint resumes
+        # from rest and plans a fresh trajectory towards its target on the
+        # next step. Carrying the speed across a restore, so the restored run
+        # takes the same path, belongs with the replay work.
+        self._joint_speeds.clear()
         self._joint_trajectories.clear()
 
     def get_all_joints_state(self) -> list:

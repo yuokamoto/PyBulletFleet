@@ -202,9 +202,7 @@ def test_required_custom_data_and_state_type_are_checked_before_restore(recorded
 
     for change, message in (
         (lambda state: state["records"].pop("scenario"), "data records"),
-        # 3, not 2: the profile's agent state is at version 2 now that each
-        # joint entry carries its ramp speed, so 2 is supported.
-        (lambda state: state["agents"]["mobile-arm"].update({"version": 3}), "agent state type or version"),
+        (lambda state: state["agents"]["mobile-arm"].update({"version": 2}), "agent state type or version"),
     ):
         changed = json.loads(json.dumps(original))
         change(changed)
