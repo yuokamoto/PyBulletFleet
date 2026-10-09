@@ -1734,7 +1734,7 @@ class TestAgentJointControl:
 
         # Record ground truth BEFORE patching
         pb_pos = p.getJointState(agent.body_id, 0)[0]
-        cached_pos = agent._kinematic_joint_positions[0]
+        cached_pos = agent._joints[0].position
 
         # Patch p.getJointState — if get_joint_state calls it, the test fails
         from unittest.mock import patch

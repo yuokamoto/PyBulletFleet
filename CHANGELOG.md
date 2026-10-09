@@ -13,6 +13,11 @@ are not recommended for production use yet.
 
 ### Changed
 
+- Kinematic joint state moves into a `KinematicJoint` dataclass, one per
+  joint, replacing the five dictionaries keyed by joint index that held
+  position, last target, motion profile, speed and trajectory between them.
+  No behaviour change: the same fields, read and written in the same places.
+
 - `Agent.from_urdf()` and `SimObject.from_urdf()` load through one shared
   helper, `load_urdf_body()`. `Agent.from_urdf()` gains `global_scaling` and
   now raises `FileNotFoundError` for a URDF it cannot read, where it
