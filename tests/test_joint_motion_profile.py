@@ -61,10 +61,11 @@ class TestJointSpeedOverride:
     def test_a_joint_can_be_named_or_indexed(self, sim_core):
         agent = Agent.from_params(AgentSpawnParams(urdf_path=URDF, name="a", use_fixed_base=True), sim_core=sim_core)
         agent.set_joint_motion_profile(JOINT, max_velocity=0.4)
-        by_name = dict(agent._joint_motion_profiles)
-        agent._joint_motion_profiles.clear()
-        agent.set_joint_motion_profile(agent._joint_index_by_name(JOINT), max_velocity=0.4)
-        assert agent._joint_motion_profiles == by_name
+        index = agent._joint_index_by_name(JOINT)
+        by_name = agent._joints[index].max_velocity
+        agent._joints[index].max_velocity = None
+        agent.set_joint_motion_profile(index, max_velocity=0.4)
+        assert agent._joints[index].max_velocity == by_name
 
     def test_an_unknown_joint_is_refused(self, sim_core):
         agent = Agent.from_params(AgentSpawnParams(urdf_path=URDF, name="a", use_fixed_base=True), sim_core=sim_core)
@@ -143,11 +144,11 @@ class TestAccelerationRamp:
             sim_core.step_once()
         # Up to speed and still travelling, which is the state being replaced.
         assert agent.get_joint_state_by_name(JOINT)[0] > 0.0
-        assert agent._joint_speeds.get(index, 0.0) > 0.0
+        assert agent._joints[index].speed > 0.0
 
         agent.clear_actions()
         agent.set_joint_target_by_name(JOINT, 0.9)
-        carried = agent._joint_speeds.get(index, 0.0)
+        carried = agent._joints[index].speed
         assert abs(carried) > 0.0, "the speed is carried into the new travel, not reset"
 
         for _ in range(4000):
@@ -155,7 +156,7 @@ class TestAccelerationRamp:
             if abs(agent.get_joint_state_by_name(JOINT)[0] - 0.9) < 1e-6:
                 break
         assert agent.get_joint_state_by_name(JOINT)[0] == pytest.approx(0.9, abs=1e-6)
-        assert agent._joint_speeds.get(index) is None, "the speed is dropped on arrival"
+        assert agent._joints[index].speed == 0.0, "the speed is dropped on arrival"
 
 
 class TestDirectionReversal:
@@ -176,18 +177,18 @@ class TestDirectionReversal:
 
     def test_the_carried_speed_is_signed(self, sim_core):
         agent, index = self._moving_agent(sim_core)
-        assert agent._joint_speeds[index] > 0.0
+        assert agent._joints[index].speed > 0.0
 
         agent.clear_actions()
         agent.set_joint_target_by_name(JOINT, -1.0)
         sim_core.step_once()
 
-        assert agent._joint_speeds[index] > 0.0, "still travelling the old way while braking"
+        assert agent._joints[index].speed > 0.0, "still travelling the old way while braking"
 
     def test_it_brakes_through_zero_before_reversing(self, sim_core):
         agent, index = self._moving_agent(sim_core)
         before = agent.get_joint_state_by_name(JOINT)[0]
-        speed = agent._joint_speeds[index]
+        speed = agent._joints[index].speed
 
         agent.clear_actions()
         agent.set_joint_target_by_name(JOINT, -1.0)
@@ -204,7 +205,7 @@ class TestDirectionReversal:
             position = agent.get_joint_state_by_name(JOINT)[0]
             if position > peak:
                 peak, steps_still_advancing = position, steps_still_advancing + 1
-            if agent._joint_speeds.get(index, 0.0) < 0.0:
+            if agent._joints[index].speed < 0.0:
                 break
 
         # Braking from `speed` at 1.0 m/s^2 takes `speed` seconds, which is
@@ -225,11 +226,11 @@ class TestDirectionReversal:
         # set.
         for _ in range(4000):
             sim_core.step_once()
-            if agent._joint_speeds.get(index) is None:
+            if not agent._joints[index].is_moving:
                 break
 
         assert agent.get_joint_state_by_name(JOINT)[0] == pytest.approx(-1.0, abs=1e-6)
-        assert agent._joint_speeds.get(index) is None
+        assert agent._joints[index].speed == 0.0
 
     def test_a_reversal_takes_longer_than_the_same_move_from_rest(self, sim_core):
         """The braking distance is the difference, and it is what the old
@@ -273,7 +274,7 @@ class TestRestoreResetsTheRamp:
     def test_the_checkpoint_does_not_carry_the_speed(self, sim_core):
         agent = self._ramping_agent(sim_core)
         index = agent._joint_index_by_name(JOINT)
-        assert agent._joint_speeds[index] > 0.0, "the joint is mid-ramp"
+        assert agent._joints[index].speed > 0.0, "the joint is mid-ramp"
         assert set(agent.capture_kinematic_joint_execution()[index]) == {"name", "position", "target"}
 
     def test_restore_drops_the_ramp_state(self, sim_core):
@@ -283,7 +284,7 @@ class TestRestoreResetsTheRamp:
 
         agent.restore_kinematic_joint_execution(captured)
 
-        assert agent._joint_speeds == {}
+        assert all(j.speed == 0.0 for j in agent._joints.values())
         assert agent.is_joint_moving(JOINT) is False
 
     def test_the_restored_joint_still_reaches_its_target(self, sim_core):
@@ -405,12 +406,12 @@ class TestThirdRoundReviewFollowUps:
         agent = self._agent(sim_core)
         with pytest.raises(IndexError, match=r"joint index .* is out of range for body"):
             agent.set_joint_motion_profile(bad, max_velocity=0.4)
-        assert agent._joint_motion_profiles == {}
+        assert all(j.max_velocity is None for j in agent._joints.values())
 
     def test_a_valid_index_still_works(self, sim_core):
         agent = self._agent(sim_core)
         agent.set_joint_motion_profile(0, max_velocity=0.4)
-        assert agent._joint_motion_profiles[0][0] == pytest.approx(0.4)
+        assert agent._joints[0].max_velocity == pytest.approx(0.4)
 
     # -- a braking rate with nothing to brake out of ------------------------
 
@@ -426,7 +427,7 @@ class TestThirdRoundReviewFollowUps:
         agent = self._agent(sim_core)
         agent.set_joint_motion_profile(JOINT, max_velocity=0.4, max_accel=1.0)
         agent.set_joint_motion_profile(JOINT, max_decel=0.25)
-        assert agent._joint_motion_profiles[agent._joint_index_by_name(JOINT)][2] == pytest.approx(0.25)
+        assert agent._joints[agent._joint_index_by_name(JOINT)].max_decel == pytest.approx(0.25)
 
     def test_the_elevator_refuses_it_too(self, sim_core):
         from pybullet_fleet.devices.elevator import Elevator, ElevatorParams
@@ -572,11 +573,13 @@ class TestBrakingStopsWithinItsDistance:
         speed, decel = 0.1, 10.0
         assert speed / decel < DT, "the joint has to come to rest inside one step"
 
-        moved = agent._braking_joint_step(index, 0.0, 0.0, speed, decel, DT)
+        state = agent._joints[index]
+        state.position, state.target, state.speed = 0.0, 0.0, speed
+        moved = agent._braking_joint_step(state, decel, DT)
 
         # v^2 / 2a = 0.0005 m. Averaging over the whole step gave 0.001 m.
         assert moved == pytest.approx(speed**2 / (2 * decel))
-        assert agent._joint_speeds[index] == 0.0
+        assert state.speed == 0.0
 
     def test_the_overrun_matches_the_braking_distance(self, sim_core):
         """End to end, with a speed that is not a whole number of steps' worth
@@ -590,7 +593,7 @@ class TestBrakingStopsWithinItsDistance:
             sim_core.step_once()
             if agent.get_joint_state_by_name(JOINT)[0] > 0.5:
                 break
-        here, speed = agent.get_joint_state_by_name(JOINT)[0], agent._joint_speeds[index]
+        here, speed = agent.get_joint_state_by_name(JOINT)[0], agent._joints[index].speed
 
         agent.clear_actions()
         agent.set_joint_target_by_name(JOINT, here)  # nowhere to go but to stop
@@ -599,7 +602,7 @@ class TestBrakingStopsWithinItsDistance:
         for _ in range(4000):
             sim_core.step_once()
             furthest = max(furthest, agent.get_joint_state_by_name(JOINT)[0])
-            if agent._joint_speeds.get(index, 0.0) == 0.0:
+            if agent._joints[index].speed == 0.0:
                 break
         assert furthest - here == pytest.approx(speed**2 / (2 * decel), abs=1e-9)
 
@@ -667,7 +670,7 @@ class TestTargetAtTheJointsOwnPosition:
                 break
         settled = agent.get_joint_state_by_name(JOINT)[0]
 
-        assert agent._joint_speeds.get(index) is None
+        assert agent._joints[index].speed == 0.0
         for _ in range(10):
             sim_core.step_once()
         assert agent.get_joint_state_by_name(JOINT)[0] == settled
@@ -732,18 +735,18 @@ class TestProfileChangedMidTravel:
 
     def test_the_speed_survives_the_change(self, sim_core):
         agent, index = self._moving_agent(sim_core)
-        carried = agent._joint_speeds[index]
+        carried = agent._joints[index].speed
         assert carried > 0.0
 
         agent.set_joint_motion_profile(JOINT, max_velocity=0.2, max_accel=0.5, max_decel=0.5)
 
-        assert agent._joint_speeds[index] == carried
-        assert index not in agent._joint_trajectories, "the old plan is void under new limits"
+        assert agent._joints[index].speed == carried
+        assert agent._joints[index].trajectory is None, "the old plan is void under new limits"
         assert agent.is_joint_moving(JOINT) is True, "but the joint is still moving"
 
     def test_velocity_is_continuous_and_within_the_new_limit(self, sim_core):
         agent, index = self._moving_agent(sim_core)
-        carried = agent._joint_speeds[index]
+        carried = agent._joints[index].speed
         previous = agent.get_joint_state_by_name(JOINT)[0]
 
         decel = 0.5
@@ -779,7 +782,7 @@ class TestProfileChangedMidTravel:
         agent = Agent.from_params(AgentSpawnParams(urdf_path=URDF, name="a", use_fixed_base=True), sim_core=sim_core)
         agent.set_joint_motion_profile(JOINT, max_velocity=0.4, max_accel=1.0)
         agent.set_joint_motion_profile(JOINT, max_decel=0.5)
-        assert agent._joint_speeds == {}
+        assert all(j.speed == 0.0 for j in agent._joints.values())
 
 
 def test_a_refused_elevator_without_a_core_leaves_no_body(sim_core):
@@ -849,8 +852,8 @@ class TestProfileChangedWhileTheCabinBrakes:
         car.set_joint_motion_profile(JOINT, max_decel=0.5)
 
         # The trajectory is gone and the next one is not planned yet.
-        assert index not in car._joint_trajectories
-        assert car._joint_speeds[index] != 0.0
+        assert car._joints[index].trajectory is None
+        assert car._joints[index].speed != 0.0
         assert car.motion_in_progress() is True, "it is carrying speed, so it is moving"
 
         sim_core.step_once()
