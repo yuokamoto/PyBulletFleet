@@ -15,6 +15,7 @@ import pytest
 from pybullet_fleet import Agent, AgentSpawnParams, MultiRobotSimulationCore, SimulationParams
 from pybullet_fleet.action import JointAction
 from pybullet_fleet.devices.elevator import Elevator, ElevatorParams
+from pybullet_fleet.types import ActionStatus
 
 URDF = "robots/elevator.urdf"  # ships with pybullet_fleet: prismatic "lift", <limit velocity="2.0">
 JOINT = "lift"
@@ -283,7 +284,7 @@ class TestRestoreResetsTheRamp:
         agent.restore_kinematic_joint_execution(captured)
 
         assert agent._joint_speeds == {}
-        assert agent.has_joint_trajectory(JOINT) is False
+        assert agent.is_joint_moving(JOINT) is False
 
     def test_the_restored_joint_still_reaches_its_target(self, sim_core):
         agent = self._ramping_agent(sim_core)
@@ -486,7 +487,7 @@ class TestThirdRoundReviewFollowUps:
         agent.add_action(JointAction(target_joint_positions={JOINT: 0.6}))
         for _ in range(2000):
             sim_core.step_once()
-            if not agent.has_joint_trajectory(JOINT):
+            if not agent.is_joint_moving(JOINT):
                 break
         assert agent.get_joint_state_by_name(JOINT)[0] == pytest.approx(0.6, abs=1e-9)
 
@@ -546,17 +547,17 @@ class TestTargetInsideBrakingDistance:
         else:
             raise AssertionError("the joint never settled on its target")
         assert overshot, "it should have run past the target it could not stop at"
-        assert agent.has_joint_trajectory(JOINT) is False
+        assert agent.is_joint_moving(JOINT) is False
 
     def test_the_ramp_stays_engaged_while_it_brakes(self, sim_core):
-        """has_joint_trajectory() is what a lift asks before releasing its
+        """is_joint_moving() is what a lift asks before releasing its
         passengers, so it has to stay true through the unplannable steps."""
         agent = self._moving_agent(sim_core)
         here = agent.get_joint_state_by_name(JOINT)[0]
         agent.clear_actions()
         agent.set_joint_target_by_name(JOINT, here + 0.1)
         sim_core.step_once()
-        assert agent.has_joint_trajectory(JOINT) is True
+        assert agent.is_joint_moving(JOINT) is True
 
 
 class TestBrakingStopsWithinItsDistance:
@@ -647,7 +648,7 @@ class TestTargetAtTheJointsOwnPosition:
         steps = 0
         for _ in range(4000):
             sim_core.step_once()
-            if not agent.has_joint_trajectory(JOINT):
+            if not agent.is_joint_moving(JOINT):
                 break
             steps += 1
         else:
@@ -662,7 +663,7 @@ class TestTargetAtTheJointsOwnPosition:
         agent.set_joint_target_by_name(JOINT, agent.get_joint_state_by_name(JOINT)[0])
         for _ in range(4000):
             sim_core.step_once()
-            if not agent.has_joint_trajectory(JOINT):
+            if not agent.is_joint_moving(JOINT):
                 break
         settled = agent.get_joint_state_by_name(JOINT)[0]
 
@@ -670,7 +671,7 @@ class TestTargetAtTheJointsOwnPosition:
         for _ in range(10):
             sim_core.step_once()
         assert agent.get_joint_state_by_name(JOINT)[0] == settled
-        assert agent.has_joint_trajectory(JOINT) is False
+        assert agent.is_joint_moving(JOINT) is False
 
 
 class TestElevatorSpawnLeavesNothingBehind:
@@ -737,7 +738,8 @@ class TestProfileChangedMidTravel:
         agent.set_joint_motion_profile(JOINT, max_velocity=0.2, max_accel=0.5, max_decel=0.5)
 
         assert agent._joint_speeds[index] == carried
-        assert agent.has_joint_trajectory(JOINT) is False, "the old plan is void under new limits"
+        assert index not in agent._joint_trajectories, "the old plan is void under new limits"
+        assert agent.is_joint_moving(JOINT) is True, "but the joint is still moving"
 
     def test_velocity_is_continuous_and_within_the_new_limit(self, sim_core):
         agent, index = self._moving_agent(sim_core)
@@ -801,3 +803,68 @@ def test_a_refused_elevator_without_a_core_leaves_no_body(sim_core):
         Elevator.from_params(params, sim_core=None)
 
     assert p.getNumBodies(physicsClientId=sim_core.client) == before
+
+
+class TestProfileChangedWhileTheCabinBrakes:
+    """Raised in review: the window between voiding a trajectory and planning
+    its replacement.
+
+    `set_joint_motion_profile()` drops the trajectory, and the next step
+    builds the new one. A query that asked only about the trajectory went
+    false for that one step, and `Elevator.motion_in_progress()` falls back to
+    it once `JointAction` has reached its tolerance -- so a profile changed
+    during the final braking metres could mark the cabin arrived and release
+    its passengers while it was still moving.
+    """
+
+    def _cabin_past_its_action(self, sim_core):
+        """A cabin whose action has completed but whose joint is still braking."""
+        car = Elevator.from_params(
+            ElevatorParams(
+                urdf_path=URDF,
+                name="lift1",
+                use_fixed_base=True,
+                floors={"0": 0.0, "1": TRAVEL},
+                initial_floor="0",
+                max_speed=0.4,
+                max_accel=1.0,
+                max_decel=1.0,
+            ),
+            sim_core=sim_core,
+        )
+        car.request_floor("1")
+        for _ in range(4000):
+            sim_core.step_once()
+            action = car.get_current_action()
+            braking = action is None or action.status != ActionStatus.IN_PROGRESS
+            if braking and car.is_joint_moving(JOINT):
+                return car
+        raise AssertionError("never caught the cabin braking after its action finished")
+
+    def test_the_cabin_is_still_moving_right_after_the_change(self, sim_core):
+        car = self._cabin_past_its_action(sim_core)
+        index = car._joint_index_by_name(JOINT)
+        assert car.motion_in_progress() is True
+
+        car.set_joint_motion_profile(JOINT, max_decel=0.5)
+
+        # The trajectory is gone and the next one is not planned yet.
+        assert index not in car._joint_trajectories
+        assert car._joint_speeds[index] != 0.0
+        assert car.motion_in_progress() is True, "it is carrying speed, so it is moving"
+
+        sim_core.step_once()
+        assert car.motion_in_progress() is True
+
+    def test_arrival_waits_for_the_cabin_to_settle(self, sim_core):
+        car = self._cabin_past_its_action(sim_core)
+        car.set_joint_motion_profile(JOINT, max_decel=0.5)
+
+        for _ in range(4000):
+            if not car.motion_in_progress():
+                break
+            sim_core.step_once()
+        else:
+            raise AssertionError("the cabin never settled")
+        assert car.get_joint_state_by_name(JOINT)[0] == pytest.approx(TRAVEL, abs=1e-6)
+        assert car.current_floor == "1"

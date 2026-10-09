@@ -93,8 +93,8 @@ are not recommended for production use yet.
   brakes at the configured rate and re-plans rather than snapping to the
   target. A profile can be changed while the joint moves: it keeps the speed
   it is carrying and re-plans from it under the new limits.
-  `Agent.has_joint_trajectory()` reports whether a ramped joint is still
-  moving, which `Elevator` arrival now waits for instead of taking the
+  `Agent.is_joint_moving()` reports whether a ramped joint is still in
+  motion, which `Elevator` arrival now waits for instead of taking the
   action's tolerance as arrival.
 
 - Add name-based simulation entity lookup on `MultiRobotSimulationCore`:

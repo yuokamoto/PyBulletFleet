@@ -1685,17 +1685,25 @@ class Agent(SimObject):
             any_moved = True
         return any_moved
 
-    def has_joint_trajectory(self, joint: Union[int, str]) -> bool:
-        """Whether a ramped joint is still following a trajectory.
+    def is_joint_moving(self, joint: Union[int, str]) -> bool:
+        """Whether a ramped joint is still in motion.
 
         An action reports complete once the joint is inside its tolerance,
         which a ramped joint reaches while still braking through the last
         fraction of a millimetre. Anything that has to know the joint has
         actually stopped -- a lift releasing its passengers, say -- needs
         this rather than the action's status.
+
+        True while the joint is following a trajectory, while it is braking
+        with none to follow, and while it is between the two: changing a
+        motion profile voids the trajectory it was solved against but not the
+        speed the joint is carrying, and the replacement is not planned until
+        the next step. A joint that is only carrying speed is as much in
+        motion as one with a plan, which is why this asks about the motion
+        rather than about the trajectory.
         """
         index = joint if isinstance(joint, int) else self._joint_index_by_name(joint)
-        return index in self._joint_trajectories
+        return index in self._joint_trajectories or bool(self._joint_speeds.get(index, 0.0))
 
     def _clear_joint_trajectory(self, joint_index: int) -> None:
         self._joint_speeds.pop(joint_index, None)
@@ -1803,8 +1811,9 @@ class Agent(SimObject):
         if slowed * speed <= 0.0:
             slowed = 0.0  # braked through rest inside this step
         self._joint_speeds[joint_index] = slowed
-        # A None trajectory keeps has_joint_trajectory() true -- the joint is
-        # still moving -- while marking it as needing a fresh plan next step.
+        # A None trajectory keeps is_joint_moving() true even on the final
+        # step, where the speed reaches exactly zero but the joint is not
+        # at its target, while marking it as needing a fresh plan.
         self._joint_trajectories[joint_index] = (target, None)
         return float(current_pos + 0.5 * (speed + slowed) * moving_for)
 

@@ -309,7 +309,7 @@ class Elevator(Agent):
         action = self.get_current_action()
         if action is not None and isinstance(action, JointAction) and action.status == ActionStatus.IN_PROGRESS:
             return True
-        return self.has_joint_trajectory(self._joint_name)
+        return self.is_joint_moving(self._joint_name)
 
     def attach_platform_passengers(self) -> int:
         """Attach platform occupants using PyBullet constraints."""
