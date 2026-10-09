@@ -1556,12 +1556,26 @@ class Agent(SimObject):
         ``max_velocity`` alone the joint still steps instantly to that speed,
         exactly as before.
 
+        Every argument left at ``None`` keeps what the joint already has, so
+        this can be called again to change one of them. A ramp cannot be
+        taken off a joint once it has one.
+
+        Can be called while the joint is moving. The speed it is carrying is
+        kept and the next step re-plans from it under the new limits, so the
+        change is continuous; if the new limits can no longer stop the joint
+        at its target it brakes and comes back, as for any other target it
+        cannot reach.
+
         Args:
             joint: Joint index, or joint name as spelled in the URDF.
             max_velocity: Speed cap, replacing the URDF limit. ``None`` keeps
                 whatever the joint already uses.
-            max_accel: Acceleration, in units/s^2. ``None`` means no ramp.
-            max_decel: Deceleration. Defaults to ``max_accel``.
+            max_accel: Acceleration, in units/s^2. ``None`` keeps the
+                acceleration the joint already has, and means no ramp only
+                when it has none.
+            max_decel: Deceleration. ``None`` keeps the current one, or
+                follows ``max_accel`` when that is given. On its own it
+                changes the braking rate of a joint that already ramps.
 
         Raises:
             KeyError: If *joint* names a joint this body does not have.
@@ -1591,7 +1605,13 @@ class Agent(SimObject):
         accel = current_accel if max_accel is None else float(max_accel)
         decel = max_decel if max_decel is not None else (accel if max_accel is not None else current_decel)
         self._joint_motion_profiles[index] = (velocity, accel, None if decel is None else float(decel))
-        self._clear_joint_trajectory(index)
+        # The trajectory goes, because it was solved against the old limits.
+        # The speed stays: it is where the joint actually is, not a plan, and
+        # dropping it would restart the next trajectory from zero and step
+        # straight back up to speed past the acceleration just configured.
+        # _update_kinematic_joints() re-plans from it under the new limits on
+        # the next step, and brakes if they no longer reach the target.
+        self._joint_trajectories.pop(index, None)
 
     def _joint_index_by_name(self, name: str) -> int:
         for index, info in enumerate(self.joint_info):

@@ -177,6 +177,13 @@ class Elevator(Agent):
             # registry entry behind for a constructor that raised.
             if agent.sim_core is not None:
                 agent.sim_core.remove_object(agent)
+            elif agent.body_id is not None:
+                # No core to unregister from, but from_params() still loaded
+                # the URDF into PyBullet, so the body is there regardless.
+                try:
+                    p.removeBody(agent.body_id, physicsClientId=agent._pid)
+                except p.error:
+                    logger.warning(f"Failed to remove PyBullet body {agent.body_id} for a refused elevator")
             raise
         return agent
 

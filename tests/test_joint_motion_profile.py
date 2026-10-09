@@ -712,3 +712,92 @@ class TestElevatorSpawnLeavesNothingBehind:
     def test_a_good_one_still_spawns(self, sim_core):
         car = Elevator.from_params(self._params(max_speed=0.4, max_accel=1.0), sim_core=sim_core)
         assert car in sim_core.sim_objects
+
+
+class TestProfileChangedMidTravel:
+    """Raised in review: changing a profile while the joint moves used to drop
+    the speed it was carrying, so the next step re-planned from rest and
+    stepped straight back up to speed past the acceleration just configured."""
+
+    def _moving_agent(self, sim_core):
+        agent = Agent.from_params(AgentSpawnParams(urdf_path=URDF, name="a", use_fixed_base=True), sim_core=sim_core)
+        agent.set_joint_motion_profile(JOINT, max_velocity=0.4, max_accel=1.0)
+        agent.set_joint_target_by_name(JOINT, 5.0)
+        for _ in range(200):
+            sim_core.step_once()
+            if agent.get_joint_state_by_name(JOINT)[0] > 0.5:
+                return agent, agent._joint_index_by_name(JOINT)
+        raise AssertionError("the joint never got up to speed")
+
+    def test_the_speed_survives_the_change(self, sim_core):
+        agent, index = self._moving_agent(sim_core)
+        carried = agent._joint_speeds[index]
+        assert carried > 0.0
+
+        agent.set_joint_motion_profile(JOINT, max_velocity=0.2, max_accel=0.5, max_decel=0.5)
+
+        assert agent._joint_speeds[index] == carried
+        assert agent.has_joint_trajectory(JOINT) is False, "the old plan is void under new limits"
+
+    def test_velocity_is_continuous_and_within_the_new_limit(self, sim_core):
+        agent, index = self._moving_agent(sim_core)
+        carried = agent._joint_speeds[index]
+        previous = agent.get_joint_state_by_name(JOINT)[0]
+
+        decel = 0.5
+        agent.set_joint_motion_profile(JOINT, max_velocity=0.2, max_accel=1.0, max_decel=decel)
+
+        speeds = []
+        for _ in range(8):
+            sim_core.step_once()
+            position = agent.get_joint_state_by_name(JOINT)[0]
+            speeds.append((position - previous) / DT)
+            previous = position
+        # No jump at the boundary. A sampled step speed is the average over
+        # the step, so the first one sits half a step's braking below the
+        # speed the joint was carrying -- not at zero, and not back at 0.4.
+        assert speeds[0] == pytest.approx(carried - decel * DT / 2, abs=1e-9)
+        for before, after in zip(speeds, speeds[1:]):
+            assert before - after == pytest.approx(decel * DT, abs=1e-9)
+
+    def test_it_still_reaches_the_target(self, sim_core):
+        agent, _ = self._moving_agent(sim_core)
+        agent.clear_actions()
+        agent.set_joint_target_by_name(JOINT, 1.5)
+        agent.set_joint_motion_profile(JOINT, max_velocity=0.2, max_accel=0.5, max_decel=0.5)
+
+        for _ in range(8000):
+            sim_core.step_once()
+            if abs(agent.get_joint_state_by_name(JOINT)[0] - 1.5) < 1e-6:
+                break
+        else:
+            raise AssertionError("the joint never reached its target")
+
+    def test_a_joint_at_rest_is_unchanged(self, sim_core):
+        agent = Agent.from_params(AgentSpawnParams(urdf_path=URDF, name="a", use_fixed_base=True), sim_core=sim_core)
+        agent.set_joint_motion_profile(JOINT, max_velocity=0.4, max_accel=1.0)
+        agent.set_joint_motion_profile(JOINT, max_decel=0.5)
+        assert agent._joint_speeds == {}
+
+
+def test_a_refused_elevator_without_a_core_leaves_no_body(sim_core):
+    """Raised in review: with no sim_core there is nothing to unregister from,
+    but from_params() has still loaded the URDF into PyBullet."""
+    import pybullet as p
+
+    before = p.getNumBodies(physicsClientId=sim_core.client)
+    params = ElevatorParams(
+        urdf_path=URDF,
+        name="lift",
+        use_fixed_base=True,
+        floors={"0": 0.0, "1": 0.6},
+        initial_floor="0",
+        max_speed=0.4,
+        max_accel=1.0,
+        joint_name="nosuchjoint",
+    )
+
+    with pytest.raises(KeyError):
+        Elevator.from_params(params, sim_core=None)
+
+    assert p.getNumBodies(physicsClientId=sim_core.client) == before

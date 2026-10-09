@@ -91,8 +91,10 @@ are not recommended for production use yet.
   had. A target a ramped joint cannot stop at -- one inside its braking
   distance, one it is moving away from, or one set to where it already is --
   brakes at the configured rate and re-plans rather than snapping to the
-  target. `Agent.has_joint_trajectory()` reports whether a ramped joint is
-  still moving, which `Elevator` arrival now waits for instead of taking the
+  target. A profile can be changed while the joint moves: it keeps the speed
+  it is carrying and re-plans from it under the new limits.
+  `Agent.has_joint_trajectory()` reports whether a ramped joint is still
+  moving, which `Elevator` arrival now waits for instead of taking the
   action's tolerance as arrival.
 
 - Add name-based simulation entity lookup on `MultiRobotSimulationCore`:
