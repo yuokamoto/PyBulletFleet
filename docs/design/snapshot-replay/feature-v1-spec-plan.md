@@ -141,7 +141,7 @@ capture and re-execution; V1 does not assume that mechanism is already proven.
 
 ## Proposed supported V1 profile
 
-Use the existing [manipulation state scenario](../../how-to/manipulation-state-scenario.md)
+Use the existing [manipulation state scenario](manipulation-validation-guide.md)
 as the **acceptance sequence**, adapting rather than duplicating its setup:
 spawn a box; navigate while the base is moving (CP1); move one named joint;
 attach the box to a named robot link; move the attached joint while it is in

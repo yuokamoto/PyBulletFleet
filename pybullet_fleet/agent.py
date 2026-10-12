@@ -94,6 +94,8 @@ class AgentSpawnParams(SimObjectSpawnParams):
     ik_params: Optional["IKParams"] = None
     controller: Optional[Union[str, Dict[str, Any], List[Dict[str, Any]], "ControllerParams", "Controller"]] = None
     plugins: Optional[List[Dict[str, Any]]] = None
+    global_scaling: float = _AGT_D["global_scaling"]
+    joint_tolerance: Optional[Union[float, list, dict]] = _AGT_D["joint_tolerance"]
 
     def __post_init__(self):
         """Validate agent spawn parameters."""
@@ -194,6 +196,8 @@ class AgentSpawnParams(SimObjectSpawnParams):
             ik_params=ik_params_value,
             controller=controller_value,
             plugins=plugins_value or None,
+            global_scaling=config.get("global_scaling", 1.0),
+            joint_tolerance=config.get("joint_tolerance"),
         )
 
 
@@ -1076,6 +1080,29 @@ class Agent(SimObject):
             controller=controller,
             notify_spawn=notify_spawn,
             pickable=pickable,
+        )
+
+        # Retain effective construction parameters regardless of whether a
+        # particular checkpoint profile supports them. Profile-specific
+        # validation belongs to that profile, not to normal Agent creation.
+        # Keep a configuration descriptor, never the live controller (whose
+        # execution state changes as the simulation runs). Controllers without
+        # a registered name cannot be reconstructed by this descriptor.
+        controller_config = agent.controller._construction_config()
+        agent._checkpoint_spawn_params = AgentSpawnParams(
+            name=agent.name,
+            urdf_path=agent.urdf_path,
+            initial_pose=pose if pose is not None else Pose.from_xyz(0.0, 0.0, 0.0),
+            mass=agent.mass,
+            pickable=agent.pickable,
+            collision_mode=agent.collision_mode,
+            user_data=dict(agent.user_data),
+            motion_mode=agent._motion_mode,
+            use_fixed_base=agent.use_fixed_base,
+            controller=controller_config,
+            ik_params=ik_params,
+            global_scaling=global_scaling,
+            joint_tolerance=joint_tolerance,
         )
 
         return agent
@@ -2088,54 +2115,32 @@ class Agent(SimObject):
         return self.get_joint_state(idx)
 
     def capture_kinematic_joint_execution(self) -> list[dict]:
-        """Capture every URDF joint position and its last kinematic target."""
+        """Capture every joint's position, command, motion limits and execution.
+
+        A solved trajectory is represented by its primitive inputs and start
+        time relative to the joint clock. Rebuilding it preserves the phase
+        reached at this completed-step boundary without serializing the TPI
+        instance itself.
+        """
         if not self._use_kinematic_joints or not self.joint_info:
             raise ValueError("Kinematic joint checkpoint requires a jointed kinematic URDF robot")
-        joints = []
-        for index, info in enumerate(self.joint_info):
-            joints.append(
-                {
-                    "name": info[1].decode("utf-8"),
-                    "position": float(self._joints[index].position),
-                    "target": self._joints[index].target,
-                }
-            )
-        return joints
+        return [
+            self._joints[index].capture_execution(info[1].decode("utf-8"), self._joint_clock)
+            for index, info in enumerate(self.joint_info)
+        ]
 
     def restore_kinematic_joint_execution(self, states: list[dict]) -> None:
-        """Restore all joint positions and targets without issuing commands."""
+        """Restore joint commands and execution at a completed-step boundary."""
         if not self._use_kinematic_joints or not isinstance(states, list) or len(states) != len(self.joint_info):
             raise ValueError("Joint checkpoint does not match the kinematic URDF robot")
-        targets = {}
+        parsed = []
         for index, (state, info) in enumerate(zip(states, self.joint_info)):
             if not isinstance(state, dict) or state.get("name") != info[1].decode("utf-8"):
                 raise ValueError("Joint checkpoint names or order differ from the kinematic URDF")
-            position = state.get("position")
-            target = state.get("target")
-            if (
-                isinstance(position, bool)
-                or not isinstance(position, (int, float))
-                or not math.isfinite(position)
-                or (
-                    target is not None
-                    and (isinstance(target, bool) or not isinstance(target, (int, float)) or not math.isfinite(target))
-                )
-            ):
-                raise ValueError("Joint checkpoint contains a nonfinite or invalid value")
-            if target is not None:
-                targets[index] = float(target)
-        for index, state in enumerate(states):
-            position = float(state["position"])
-            p.resetJointState(self.body_id, index, position, physicsClientId=self._pid)
-            joint_state = self._joint(index)
-            joint_state.position = position
-            joint_state.target = targets.get(index)
-            # The checkpoint carries no ramp state, so a restored joint
-            # resumes from rest and plans a fresh trajectory towards its
-            # target on the next step. Carrying the speed across a restore, so
-            # the restored run takes the same path, belongs with the replay
-            # work.
-            joint_state.clear_motion()
+            parsed.append(KinematicJoint.from_execution(index, state, self._joint_clock))
+        for joint in parsed:
+            p.resetJointState(self.body_id, joint.index, joint.position, physicsClientId=self._pid)
+            self._joints[joint.index] = joint
         self._refresh_active_joints()
 
     def get_all_joints_state(self) -> list:
