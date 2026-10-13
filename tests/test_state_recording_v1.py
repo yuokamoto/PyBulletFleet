@@ -239,7 +239,9 @@ def test_undeclared_event_handler_is_not_silently_checkpointed() -> None:
     from pybullet_fleet.core_simulation import MultiRobotSimulationCore, SimulationParams
     from pybullet_fleet.events import SimEvents
 
-    sim = MultiRobotSimulationCore(SimulationParams(gui=False, monitor=False, enable_monitor_gui=False))
+    sim = MultiRobotSimulationCore(
+        SimulationParams(gui=False, monitor=False, enable_monitor_gui=False, collision_check_frequency=0)
+    )
     try:
         sim.events.on(SimEvents.PRE_STEP, lambda **_: None)
         profile = KinematicProfile()

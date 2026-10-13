@@ -308,6 +308,8 @@ def _validate_navigation(value: dict, *, differential: bool) -> None:
         or (final and navigation["path"])
     ):
         raise ValueError("Invalid navigation progress")
+    if not final and navigation["goal"] != navigation["path"][index]:
+        raise ValueError("Navigation goal differs from active waypoint")
     target = navigation["final_target_orientation"]
     if target is not None:
         _vector(target, 4, "final orientation")
@@ -450,7 +452,7 @@ class KinematicProfile:
             raise ValueError("Undeclared event handler is not checkpointable")
 
     def construction(self, sim: MultiRobotSimulationCore) -> dict:
-        if sim.params.physics or sim.params.collision_check_frequency != 0:
+        if sim.params.physics or sim._collision_check_frequency != 0:
             raise ValueError("Kinematic recording requires physics and collision checks disabled")
         self._check_live_extensions(sim)
         agents = {}
@@ -501,6 +503,8 @@ class KinematicProfile:
         return {"key": obj.name, "pose": _pose_record(params.initial_pose)}
 
     def capture(self, sim: MultiRobotSimulationCore) -> dict:
+        if sim.params.physics or sim._collision_check_frequency != 0:
+            raise ValueError("Kinematic recording requires physics and collision checks disabled")
         self._check_live_extensions(sim)
         step, elapsed = sim.get_completed_step_boundary()
         agents = {}
@@ -644,6 +648,14 @@ class KinematicProfile:
                 for name, entry in recorded_objects.items():
                     state = entry["state"]
                     obj = live_objects.get(name)
+                    if obj is not None and capture_primitive_state(obj)["construction"] != state["construction"]:
+                        current_attachment = obj.get_kinematic_attachment_state()
+                        if current_attachment is not None:
+                            parent = sim.get_unique_agent_by_name(current_attachment["parent_name"])
+                            if not parent.detach_object(obj):
+                                raise ValueError("Playback attachment detachment failed")
+                        sim.remove_object(obj)
+                        obj = None
                     if obj is None:
                         obj = restore_primitive(sim, name, state)
                         live_objects[name] = obj

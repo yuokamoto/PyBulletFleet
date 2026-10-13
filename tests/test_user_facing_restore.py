@@ -361,6 +361,13 @@ s.run_simulation(duration=7.0)
     )
     navigation = checkpoint["agents"]["diff"]["state"]["controller"]["state"]
     assert navigation is not None
+    if phase == "forward":
+        from pybullet_fleet.replay.kinematic_profile import KinematicProfile
+
+        changed = json.loads(json.dumps(checkpoint))
+        changed["agents"]["diff"]["state"]["controller"]["state"]["goal"]["position"][0] += 1
+        with pytest.raises(ValueError, match="Navigation goal differs from active waypoint"):
+            KinematicProfile().validate_checkpoint(load_recording_manifest(directory), changed)
     assert navigation["phase"] == phase
     assert navigation["movement_direction"] == "forward"
     assert navigation["requested_direction"] == "forward"

@@ -205,6 +205,55 @@ def test_spawn_hook_is_optional_for_factories(monkeypatch: pytest.MonkeyPatch) -
         p.disconnect(sim.client)
 
 
+def test_noncopyable_metadata_does_not_prevent_normal_spawns() -> None:
+    import threading
+
+    from pybullet_fleet.agent import Agent
+    from pybullet_fleet.core_simulation import MultiRobotSimulationCore, SimulationParams
+    from pybullet_fleet.sim_object import ShapeParams, SimObject
+
+    sim = MultiRobotSimulationCore(SimulationParams(gui=False, physics=False, collision_check_frequency=0))
+    lock = threading.Lock()
+    try:
+        obj = SimObject.from_mesh(
+            visual_shape=ShapeParams(shape_type="box", half_extents=[0.1, 0.1, 0.1]),
+            name="box",
+            user_data={"lock": lock},
+            sim_core=sim,
+        )
+        agent = Agent.from_urdf(
+            "pybullet_fleet/robots/mobile_robot.urdf", name="robot", user_data={"lock": lock}, sim_core=sim
+        )
+        assert obj._checkpoint_spawn_params.user_data["lock"] is lock
+        assert agent._checkpoint_spawn_params.user_data["lock"] is lock
+    finally:
+        p.disconnect(sim.client)
+
+
+@pytest.mark.parametrize("change", ["collision", "physics"])
+def test_runtime_profile_change_makes_recording_incomplete(tmp_path: Path, change: str) -> None:
+    from pybullet_fleet.core_simulation import MultiRobotSimulationCore, SimulationParams
+    from pybullet_fleet.sim_object import ShapeParams, SimObject
+
+    path = tmp_path / change
+    sim = MultiRobotSimulationCore(
+        SimulationParams(gui=False, physics=False, collision_check_frequency=0, target_rtf=0, timestep=0.1)
+    )
+    try:
+        SimObject.from_mesh(visual_shape=ShapeParams(shape_type="box", half_extents=[0.1, 0.1, 0.1]), name="box", sim_core=sim)
+        sim.configure_state_recording(profile=KinematicProfile(), output=str(path))
+        if change == "collision":
+            sim.set_collision_check_frequency(10)
+        else:
+            sim.params.physics = True
+        sim.run_simulation(duration=0.1)
+        assert json.loads((path / "manifest.json").read_text())["complete"] is False
+        assert sim.get_completed_step_boundary()[0] == 1
+    finally:
+        if p.isConnected(sim.client):
+            p.disconnect(sim.client)
+
+
 def test_playback_recreates_removed_name(primitive_artifact: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from pybullet_fleet.replay import ResultPlayback
     from pybullet_fleet.replay import kinematic_profile
@@ -221,12 +270,17 @@ def test_playback_recreates_removed_name(primitive_artifact: Path, monkeypatch: 
     monkeypatch.setattr(kinematic_profile.time, "sleep", lambda _seconds: None)
     playback = ResultPlayback(primitive_artifact, profile=KinematicProfile())
     first = copy.deepcopy(playback.frames[0])
+    first["objects"]["mixed"]["state"]["construction"]["visual_shape"]["half_extents"][0] = 0.4
     without = copy.deepcopy(first)
     del without["objects"]["mixed"]
-    playback.frames = [first, without, first]
+    respawned = copy.deepcopy(first)
+    respawned["objects"]["mixed"]["state"]["construction"]["visual_shape"]["half_extents"][0] = 0.6
+    playback.frames = [first, without, respawned]
     playback.play_gui(rtf=100)
     assert len(simulations) == 1
-    assert len(simulations[0].find_objects_by_name("mixed")) == 1
+    objects = simulations[0].find_objects_by_name("mixed")
+    assert len(objects) == 1
+    assert objects[0]._checkpoint_spawn_params.visual_shape.half_extents[0] == 0.6
 
 
 def test_primitive_only_world_records_and_restores_without_an_agent(tmp_path: Path) -> None:

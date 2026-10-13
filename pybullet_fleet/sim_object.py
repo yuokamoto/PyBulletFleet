@@ -849,17 +849,15 @@ class SimObject:
         )
         # Keep the effective factory inputs for declared kinematic checkpoint
         # handlers. Direct body-id construction remains unsupported.
-        obj._checkpoint_spawn_params = copy.deepcopy(
-            SimObjectSpawnParams(
-                name=name,
-                visual_shape=visual_shape,
-                collision_shape=collision_shape,
-                initial_pose=pose,
-                mass=mass,
-                pickable=pickable,
-                collision_mode=collision_mode,
-                user_data=user_data,
-            )
+        obj._checkpoint_spawn_params = SimObjectSpawnParams(
+            name=name,
+            visual_shape=copy.deepcopy(visual_shape),
+            collision_shape=copy.deepcopy(collision_shape),
+            initial_pose=copy.deepcopy(pose),
+            mass=mass,
+            pickable=pickable,
+            collision_mode=collision_mode,
+            user_data=dict(user_data) if user_data else {},
         )
         if sim_core is not None:
             record_spawn = getattr(sim_core, "_record_state_spawn", None)
