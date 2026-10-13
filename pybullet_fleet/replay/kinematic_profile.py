@@ -21,7 +21,7 @@ from pybullet_fleet.controller_params import ControllerParams
 from pybullet_fleet.core_simulation import MultiRobotSimulationCore, SimulationParams
 from pybullet_fleet.geometry import Pose
 from pybullet_fleet.sim_object import PRIMITIVE_SHAPE_TYPES, ShapeParams, SimObject, SimObjectSpawnParams
-from pybullet_fleet.types import CollisionMode, ControllerMode, MovementDirection
+from pybullet_fleet.types import CollisionMode, ControllerMode, MotionMode, MovementDirection
 
 from .state_recording import (
     ResultPlayback,
@@ -65,12 +65,16 @@ def _controller_spec(agent: Agent) -> dict:
     return {"type": kind, "parameters": {key: value for key, value in config.items() if key != "type"}}
 
 
-def capture_agent_state(agent: Agent) -> dict:
-    """Capture supported base, joint and controller execution from an Agent."""
+def _check_agent_owners(agent: Agent) -> None:
     if type(agent) is not Agent or agent.plugins or agent.callbacks or not agent.is_action_queue_empty():
         raise ValueError(f"Unsupported Agent execution state: {agent.name!r}")
     if len(agent.controllers) != 1 or (agent._events is not None and agent._events._handlers):
         raise ValueError(f"Undeclared Agent controller or event state: {agent.name!r}")
+
+
+def capture_agent_state(agent: Agent) -> dict:
+    """Capture supported base, joint and controller execution from an Agent."""
+    _check_agent_owners(agent)
     spec = _controller_spec(agent)
     navigation = agent.controller.capture_navigation_state() if agent.is_moving else None
     joints = agent.capture_kinematic_joint_execution() if agent.joint_info else []
@@ -200,7 +204,7 @@ def _validate_agent(name: str, construction: dict, entry: dict) -> None:
         raise ValueError(f"Unsupported Agent state type: {name!r}")
     value = _keys(entry["state"], {"pose", "velocity", "angular_velocity", "moving", "controller", "joints"}, "Agent state")
     _vector(value["pose"]["position"], 3, "Agent position")
-    _vector(value["pose"]["orientation"], 4, "Agent orientation")
+    _quaternion(value["pose"]["orientation"], "Agent orientation")
     _vector(value["velocity"], 3, "Agent velocity")
     angular_velocity = value["angular_velocity"]
     if (
@@ -264,6 +268,12 @@ def _validate_agent(name: str, construction: dict, entry: dict) -> None:
                 raise ValueError("Joint trajectory target differs from joint target")
 
 
+def _quaternion(value: object, label: str) -> None:
+    components = _vector(value, 4, label)
+    if not math.isclose(sum(component * component for component in components), 1.0, rel_tol=0, abs_tol=1e-4):
+        raise ValueError(f"Invalid {label} quaternion")
+
+
 def _validate_navigation(value: dict, *, differential: bool) -> None:
     """Check the supported pose-path fields before constructing a core."""
     navigation = _keys(
@@ -297,7 +307,7 @@ def _validate_navigation(value: dict, *, differential: bool) -> None:
     for pose in [*navigation["path"], navigation["goal"]]:
         _keys(pose, {"position", "orientation"}, "navigation pose")
         _vector(pose["position"], 3, "navigation position")
-        _vector(pose["orientation"], 4, "navigation orientation")
+        _quaternion(pose["orientation"], "navigation orientation")
     index = navigation["waypoint_index"]
     final = navigation["final_alignment_in_progress"]
     if (
@@ -312,7 +322,7 @@ def _validate_navigation(value: dict, *, differential: bool) -> None:
         raise ValueError("Navigation goal differs from active waypoint")
     target = navigation["final_target_orientation"]
     if target is not None:
-        _vector(target, 4, "final orientation")
+        _quaternion(target, "final orientation")
     elif navigation["align_final_orientation"]:
         raise ValueError("Missing final orientation target")
     phase = navigation["phase"]
@@ -327,7 +337,7 @@ def _validate_navigation(value: dict, *, differential: bool) -> None:
         elif not final:
             raise ValueError("Forward origin is missing")
         if trajectory["orientation_after_rotation"] is not None:
-            _vector(trajectory["orientation_after_rotation"], 4, "forward orientation")
+            _quaternion(trajectory["orientation_after_rotation"], "forward orientation")
     elif phase == "rotate":
         if navigation["forward"] is not None:
             raise ValueError("Rotation phase has forward state")
@@ -336,8 +346,8 @@ def _validate_navigation(value: dict, *, differential: bool) -> None:
             trajectory = _keys(
                 trajectory, {"start_orientation", "target_orientation", "t0", "vmax", "accel", "decel"}, "rotation"
             )
-            _vector(trajectory["start_orientation"], 4, "rotation start")
-            _vector(trajectory["target_orientation"], 4, "rotation target")
+            _quaternion(trajectory["start_orientation"], "rotation start")
+            _quaternion(trajectory["target_orientation"], "rotation target")
     else:
         raise ValueError("Unsupported navigation phase")
     if trajectory is not None:
@@ -380,7 +390,7 @@ def _validate_primitive_shape(value: dict | None, *, visual: bool) -> None:
     if shape["frame_pose"] is not None:
         _keys(shape["frame_pose"], {"position", "orientation"}, "primitive frame")
         _vector(shape["frame_pose"]["position"], 3, "primitive frame position")
-        _vector(shape["frame_pose"]["orientation"], 4, "primitive frame orientation")
+        _quaternion(shape["frame_pose"]["orientation"], "primitive frame orientation")
     if visual and shape["rgba_color"] is not None:
         _vector(shape["rgba_color"], 4, "primitive color")
 
@@ -391,7 +401,7 @@ def _validate_primitive(name: str, entry: dict, agent_names: set[str]) -> None:
         raise ValueError(f"Unsupported object state type: {name!r}")
     value = _keys(entry["state"], {"pose", "attachment", "construction"}, "primitive state")
     _vector(value["pose"]["position"], 3, "primitive position")
-    _vector(value["pose"]["orientation"], 4, "primitive orientation")
+    _quaternion(value["pose"]["orientation"], "primitive orientation")
     c = _keys(
         value["construction"],
         {"visual_shape", "collision_shape", "pickable", "collision_mode"},
@@ -413,7 +423,7 @@ def _validate_primitive(name: str, entry: dict, agent_names: set[str]) -> None:
         if attachment["parent_name"] not in agent_names or not isinstance(attachment["parent_link"], str):
             raise ValueError("Invalid attachment parent")
         _vector(attachment["relative_position"], 3, "attachment offset")
-        _vector(attachment["relative_orientation"], 4, "attachment orientation")
+        _quaternion(attachment["relative_orientation"], "attachment orientation")
 
 
 class KinematicProfile:
@@ -458,6 +468,7 @@ class KinematicProfile:
         agents = {}
         names = set()
         for agent in sim.agents:
+            _check_agent_owners(agent)
             params = agent._checkpoint_spawn_params
             if (
                 type(params) is not AgentSpawnParams
@@ -480,6 +491,7 @@ class KinematicProfile:
                 "mass": params.mass,
                 "fixed_base": params.use_fixed_base,
                 "collision_mode": agent.collision_mode.value,
+                "motion_mode": agent.motion_mode.value,
                 "controller": spec,
             }
         for obj in sim.sim_objects:
@@ -513,6 +525,9 @@ class KinematicProfile:
         for agent in sim.agents:
             if not agent.name or agent.name in names:
                 raise ValueError("Duplicate or missing Agent checkpoint name")
+            params = agent._checkpoint_spawn_params
+            if type(params) is not AgentSpawnParams or agent.motion_mode != params.motion_mode:
+                raise ValueError(f"Agent motion mode changed after construction: {agent.name!r}")
             names.add(agent.name)
             agents[agent.name] = {"type": "kinematic_agent", "version": 2, "state": capture_agent_state(agent)}
         for obj in sim.sim_objects:
@@ -542,9 +557,16 @@ class KinematicProfile:
                 raise ValueError("Invalid Agent key")
             _keys(
                 construction,
-                {"asset", "asset_sha256", "initial_pose", "mass", "fixed_base", "collision_mode", "controller"},
+                {"asset", "asset_sha256", "initial_pose", "mass", "fixed_base", "collision_mode", "motion_mode", "controller"},
                 "Agent construction",
             )
+            _keys(construction["initial_pose"], {"position", "orientation"}, "Agent initial pose")
+            _vector(construction["initial_pose"]["position"], 3, "Agent initial position")
+            _quaternion(construction["initial_pose"]["orientation"], "Agent initial orientation")
+            if not isinstance(construction["motion_mode"], str) or construction["motion_mode"] not in {
+                mode.value for mode in MotionMode
+            }:
+                raise ValueError("Unsupported Agent motion mode")
             if _asset_fingerprint(construction["asset"]) != construction["asset_sha256"]:
                 raise ValueError("Agent asset changed since recording")
             controller = _keys(construction["controller"], {"type", "parameters"}, "controller construction")
@@ -589,6 +611,7 @@ class KinematicProfile:
                         mass=construction["mass"],
                         use_fixed_base=construction["fixed_base"],
                         collision_mode=CollisionMode(construction["collision_mode"]),
+                        motion_mode=MotionMode(construction["motion_mode"]),
                         controller={
                             "type": controller["type"],
                             **controller["parameters"],

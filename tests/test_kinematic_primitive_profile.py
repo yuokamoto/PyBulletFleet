@@ -148,6 +148,62 @@ def test_unsupported_sim_state_is_rejected(primitive_artifact: Path, field: str,
         KinematicProfile().validate_checkpoint(manifest, state)
 
 
+@pytest.mark.parametrize("location", ["agent", "primitive", "frame", "attachment", "initial"])
+def test_nonunit_quaternion_is_rejected(primitive_artifact: Path, location: str) -> None:
+    manifest = copy.deepcopy(load_recording_manifest(primitive_artifact))
+    state = json.loads((primitive_artifact / "checkpoints" / "000000001.json").read_text())
+    if location == "agent":
+        orientation = state["agents"]["robot"]["state"]["pose"]["orientation"]
+    elif location == "primitive":
+        orientation = state["objects"]["sphere"]["state"]["pose"]["orientation"]
+    elif location == "frame":
+        orientation = state["objects"]["sphere"]["state"]["construction"]["visual_shape"]["frame_pose"]["orientation"]
+    elif location == "attachment":
+        orientation = state["objects"]["sphere"]["state"]["attachment"]["relative_orientation"]
+    else:
+        orientation = manifest["construction"]["agents"]["robot"]["initial_pose"]["orientation"]
+    orientation[:] = [0, 0, 0, 2]
+    with pytest.raises(ValueError, match="quaternion"):
+        KinematicProfile().validate_checkpoint(manifest, state)
+
+
+def test_existing_agent_callbacks_reject_recording_setup(tmp_path: Path) -> None:
+    from pybullet_fleet.agent import Agent
+    from pybullet_fleet.core_simulation import MultiRobotSimulationCore, SimulationParams
+
+    sim = MultiRobotSimulationCore(SimulationParams(gui=False, physics=False, collision_check_frequency=0))
+    try:
+        agent = Agent.from_urdf("pybullet_fleet/robots/mobile_robot.urdf", name="robot", sim_core=sim)
+        agent.callbacks.append({"func": lambda: None})
+        with pytest.raises(ValueError, match="Unsupported Agent execution state"):
+            sim.configure_state_recording(profile=KinematicProfile(), output=str(tmp_path / "recording"))
+        assert not (tmp_path / "recording").exists()
+    finally:
+        p.disconnect(sim.client)
+
+
+def test_unknown_agent_motion_mode_is_rejected(primitive_artifact: Path) -> None:
+    manifest = copy.deepcopy(load_recording_manifest(primitive_artifact))
+    state = json.loads((primitive_artifact / "checkpoints" / "000000001.json").read_text())
+    manifest["construction"]["agents"]["robot"]["motion_mode"] = "unsupported"
+    with pytest.raises(ValueError, match="Unsupported Agent motion mode"):
+        KinematicProfile().validate_checkpoint(manifest, state)
+
+
+def test_motion_mode_changed_after_spawn_is_not_silently_captured() -> None:
+    from pybullet_fleet.agent import Agent
+    from pybullet_fleet.core_simulation import MultiRobotSimulationCore, SimulationParams
+
+    sim = MultiRobotSimulationCore(SimulationParams(gui=False, physics=False, collision_check_frequency=0))
+    try:
+        agent = Agent.from_urdf("pybullet_fleet/robots/mobile_robot.urdf", name="robot", sim_core=sim)
+        assert agent.set_motion_mode("omnidirectional")
+        with pytest.raises(ValueError, match="motion mode changed"):
+            KinematicProfile().capture(sim)
+    finally:
+        p.disconnect(sim.client)
+
+
 def test_direct_primitive_spawn_is_recorded_once(tmp_path: Path) -> None:
     from pybullet_fleet.core_simulation import MultiRobotSimulationCore, SimulationParams
     from pybullet_fleet.geometry import Pose

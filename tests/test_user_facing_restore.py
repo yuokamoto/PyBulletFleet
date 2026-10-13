@@ -266,6 +266,7 @@ s = MultiRobotSimulationCore(SimulationParams(gui=False, physics=False, enable_f
 arm = Agent.from_params(AgentSpawnParams(name='mobile-arm',
     urdf_path=str(Path('pybullet_fleet/robots/mobile_manipulator.urdf').resolve()),
     initial_pose=Pose.from_xyz(0, 0, 0.3), mass=0, use_fixed_base=False,
+    motion_mode='omnidirectional',
     controller={'type': 'omni', 'navigation_2d': True,
                 'max_linear_vel': 1, 'max_linear_accel': 2, 'max_linear_decel': 0.5}), s)
 box = SimObject.from_params(SimObjectSpawnParams(name='box', initial_pose=Pose.from_xyz(0.5, 0, 0.5),
@@ -283,6 +284,7 @@ s.run_simulation(duration=2.0)
     )
     frames = _reference_frames(directory)
     checkpoint = json.loads((directory / "checkpoints" / "000000008.json").read_text())
+    assert load_recording_manifest(directory)["construction"]["agents"]["mobile-arm"]["motion_mode"] == "omnidirectional"
     assert checkpoint["agents"]["mobile-arm"]["state"]["moving"] is True
     assert checkpoint["agents"]["mobile-arm"]["state"]["controller"]["state"]["forward"]["decel"] == pytest.approx(0.5)
     assert checkpoint["objects"]["box"]["state"]["attachment"] is not None
@@ -306,11 +308,13 @@ def sample(**kwargs):
                 'box': list(box.get_pose().position), 'attached': box.get_kinematic_attachment_state()})
 s.events.on(SimEvents.POST_STEP, sample)
 s.run_simulation(duration=2.0)
-print('RESULT:' + json.dumps({'trajectory': out, 'time': s.get_completed_step_boundary()[1]}))
+print('RESULT:' + json.dumps({'trajectory': out, 'time': s.get_completed_step_boundary()[1],
+                              'motion_mode': s.get_unique_agent_by_name('mobile-arm').motion_mode.value}))
 """,
         str(directory),
     )
     assert result is not None
+    assert result["motion_mode"] == "omnidirectional"
     assert len(result["trajectory"]) == len(frames) - 8
     for observed in result["trajectory"]:
         frame = frames[observed["step"] - 1]
