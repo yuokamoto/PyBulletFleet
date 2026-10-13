@@ -5,6 +5,7 @@ Supports both mobile (use_fixed_base=False) and fixed (use_fixed_base=True) robo
 Supports both Mesh and URDF loading.
 """
 
+import copy
 import logging
 import math
 from dataclasses import dataclass, fields
@@ -1089,20 +1090,22 @@ class Agent(SimObject):
         # execution state changes as the simulation runs). Controllers without
         # a registered name cannot be reconstructed by this descriptor.
         controller_config = agent.controller._construction_config()
-        agent._checkpoint_spawn_params = AgentSpawnParams(
-            name=agent.name,
-            urdf_path=agent.urdf_path,
-            initial_pose=pose if pose is not None else Pose.from_xyz(0.0, 0.0, 0.0),
-            mass=agent.mass,
-            pickable=agent.pickable,
-            collision_mode=agent.collision_mode,
-            user_data=dict(agent.user_data),
-            motion_mode=agent._motion_mode,
-            use_fixed_base=agent.use_fixed_base,
-            controller=controller_config,
-            ik_params=ik_params,
-            global_scaling=global_scaling,
-            joint_tolerance=joint_tolerance,
+        agent._checkpoint_spawn_params = copy.deepcopy(
+            AgentSpawnParams(
+                name=agent.name,
+                urdf_path=agent.urdf_path,
+                initial_pose=pose if pose is not None else Pose.from_xyz(0.0, 0.0, 0.0),
+                mass=agent.mass,
+                pickable=agent.pickable,
+                collision_mode=agent.collision_mode,
+                user_data=dict(agent.user_data),
+                motion_mode=agent._motion_mode,
+                use_fixed_base=agent.use_fixed_base,
+                controller=controller_config,
+                ik_params=ik_params,
+                global_scaling=global_scaling,
+                joint_tolerance=joint_tolerance,
+            )
         )
 
         return agent

@@ -171,6 +171,40 @@ def test_direct_primitive_spawn_is_recorded_once(tmp_path: Path) -> None:
             p.disconnect(sim.client)
 
 
+def test_factory_spawn_params_are_independent_of_mutable_inputs() -> None:
+    from pybullet_fleet.core_simulation import MultiRobotSimulationCore, SimulationParams
+    from pybullet_fleet.geometry import Pose
+    from pybullet_fleet.sim_object import ShapeParams, SimObject
+
+    sim = MultiRobotSimulationCore(SimulationParams(gui=False, physics=False, collision_check_frequency=0))
+    try:
+        shape = ShapeParams(shape_type="box", half_extents=[0.1, 0.2, 0.3])
+        pose = Pose.from_xyz(1, 2, 3)
+        obj = SimObject.from_mesh(visual_shape=shape, pose=pose, name="box", sim_core=sim)
+        shape.half_extents[0] = 9
+        pose.position[0] = 9
+        state = KinematicProfile().capture(sim)["objects"]["box"]["state"]["construction"]
+        assert state["visual_shape"]["half_extents"] == [0.1, 0.2, 0.3]
+        assert list(obj._checkpoint_spawn_params.initial_pose.position) == [1, 2, 3]
+        assert obj.get_pose().position[0] == pytest.approx(1)
+    finally:
+        p.disconnect(sim.client)
+
+
+def test_spawn_hook_is_optional_for_factories(monkeypatch: pytest.MonkeyPatch) -> None:
+    from pybullet_fleet.core_simulation import MultiRobotSimulationCore, SimulationParams
+    from pybullet_fleet.sim_object import ShapeParams, SimObject
+
+    monkeypatch.delattr(MultiRobotSimulationCore, "_record_state_spawn")
+    sim = MultiRobotSimulationCore(SimulationParams(gui=False, physics=False, collision_check_frequency=0))
+    try:
+        SimObject.from_mesh(visual_shape=ShapeParams(shape_type="box", half_extents=[0.1, 0.1, 0.1]), sim_core=sim)
+        SimObject.from_urdf("pybullet_fleet/robots/simple_cube.urdf", sim_core=sim)
+        assert len(sim.sim_objects) == 2
+    finally:
+        p.disconnect(sim.client)
+
+
 def test_playback_recreates_removed_name(primitive_artifact: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from pybullet_fleet.replay import ResultPlayback
     from pybullet_fleet.replay import kinematic_profile

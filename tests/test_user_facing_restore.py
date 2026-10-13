@@ -59,15 +59,18 @@ def test_supported_agent_construction_uses_effective_spawn_params() -> None:
 
     sim = MultiRobotSimulationCore(SimulationParams(gui=False, physics=False, collision_check_frequency=0))
     try:
+        initial_pose = Pose.from_xyz(1, 2, 0.05)
         agent = Agent.from_urdf(
             "pybullet_fleet/robots/mobile_robot.urdf",
-            pose=Pose.from_xyz(1, 2, 0.05),
+            pose=initial_pose,
             mass=0,
             name="direct-agent",
             sim_core=sim,
         )
         params = agent._checkpoint_spawn_params
         assert type(params) is AgentSpawnParams
+        initial_pose.position[0] = 9
+        assert params.initial_pose.position[0] == pytest.approx(1)
         assert params.controller == agent.controller._construction_config()
         assert isinstance(params.controller, dict)
         assert params.controller["type"] == "differential"

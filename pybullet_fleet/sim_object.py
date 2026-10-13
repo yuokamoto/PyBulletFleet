@@ -3,6 +3,7 @@ sim_object.py
 Base class for simulation objects with attachment support.
 """
 
+import copy
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, NamedTuple, Optional, Tuple, Union
 import logging
@@ -848,18 +849,22 @@ class SimObject:
         )
         # Keep the effective factory inputs for declared kinematic checkpoint
         # handlers. Direct body-id construction remains unsupported.
-        obj._checkpoint_spawn_params = SimObjectSpawnParams(
-            name=name,
-            visual_shape=visual_shape,
-            collision_shape=collision_shape,
-            initial_pose=pose,
-            mass=mass,
-            pickable=pickable,
-            collision_mode=collision_mode,
-            user_data=user_data,
+        obj._checkpoint_spawn_params = copy.deepcopy(
+            SimObjectSpawnParams(
+                name=name,
+                visual_shape=visual_shape,
+                collision_shape=collision_shape,
+                initial_pose=pose,
+                mass=mass,
+                pickable=pickable,
+                collision_mode=collision_mode,
+                user_data=user_data,
+            )
         )
         if sim_core is not None:
-            sim_core._record_state_spawn(obj, obj._checkpoint_spawn_params)
+            record_spawn = getattr(sim_core, "_record_state_spawn", None)
+            if record_spawn is not None:
+                record_spawn(obj, obj._checkpoint_spawn_params)
         return obj
 
     @classmethod
@@ -947,7 +952,9 @@ class SimObject:
             # URDF objects are not yet supported by the kinematic profile. A
             # runtime spawn must still make the artifact incomplete rather
             # than silently omitting the new body.
-            sim_core._record_state_spawn(obj, SimObjectSpawnParams(urdf_path=urdf_path, name=name))
+            record_spawn = getattr(sim_core, "_record_state_spawn", None)
+            if record_spawn is not None:
+                record_spawn(obj, SimObjectSpawnParams(urdf_path=urdf_path, name=name))
         lazy_logger.info(lambda: f"Loaded SimObject from URDF: {loaded.path}")
         return obj
 
