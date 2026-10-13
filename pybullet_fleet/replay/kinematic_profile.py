@@ -260,6 +260,8 @@ def _validate_agent(name: str, construction: dict, entry: dict) -> None:
                 raise ValueError("Invalid joint trajectory")
             if any(trajectory[field] <= 0 for field in ("vmax", "accel", "decel")):
                 raise ValueError("Invalid joint trajectory limits")
+            if joint["target"] is None or trajectory["target"] != joint["target"]:
+                raise ValueError("Joint trajectory target differs from joint target")
 
 
 def _validate_navigation(value: dict, *, differential: bool) -> None:
@@ -524,6 +526,8 @@ class KinematicProfile:
 
     def validate_checkpoint(self, manifest: dict, state: dict) -> None:
         c = manifest["construction"]
+        if state["sim"]["type"] != "kinematic" or state["sim"]["version"] != 1:
+            raise ValueError("Unsupported kinematic checkpoint state")
         _keys(c, {"timestep", "physics", "enable_floor", "collision_check_frequency", "agents"}, "construction")
         if c["physics"] is not False or c["collision_check_frequency"] != 0 or not isinstance(c["agents"], dict):
             raise ValueError("Unsupported kinematic construction")
@@ -636,11 +640,13 @@ class KinematicProfile:
                 recorded_objects = frame["objects"]
                 for name in live_objects.keys() - recorded_objects.keys():
                     sim.remove_object(live_objects[name])
+                    del live_objects[name]
                 for name, entry in recorded_objects.items():
                     state = entry["state"]
                     obj = live_objects.get(name)
                     if obj is None:
                         obj = restore_primitive(sim, name, state)
+                        live_objects[name] = obj
                     current = obj.get_kinematic_attachment_state()
                     desired = state["attachment"]
                     if current != desired:

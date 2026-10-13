@@ -139,6 +139,62 @@ def test_invalid_agent_angular_velocity_is_rejected(primitive_artifact: Path) ->
             KinematicProfile().validate_checkpoint(manifest, state)
 
 
+@pytest.mark.parametrize("field,bad_value", [("type", "other"), ("version", 2)])
+def test_unsupported_sim_state_is_rejected(primitive_artifact: Path, field: str, bad_value: object) -> None:
+    manifest = load_recording_manifest(primitive_artifact)
+    state = json.loads((primitive_artifact / "checkpoints" / "000000001.json").read_text())
+    state["sim"][field] = bad_value
+    with pytest.raises(ValueError, match="Unsupported kinematic checkpoint state"):
+        KinematicProfile().validate_checkpoint(manifest, state)
+
+
+def test_direct_primitive_spawn_is_recorded_once(tmp_path: Path) -> None:
+    from pybullet_fleet.core_simulation import MultiRobotSimulationCore, SimulationParams
+    from pybullet_fleet.geometry import Pose
+    from pybullet_fleet.sim_object import ShapeParams, SimObject, SimObjectSpawnParams
+
+    path = tmp_path / "direct-spawn"
+    sim = MultiRobotSimulationCore(
+        SimulationParams(gui=False, physics=False, collision_check_frequency=0, target_rtf=0, timestep=0.1)
+    )
+    try:
+        sim.configure_state_recording(profile=KinematicProfile(), output=str(path))
+        shape = ShapeParams(shape_type="box", half_extents=[0.1, 0.1, 0.1])
+        SimObject.from_mesh(visual_shape=shape, pose=Pose.from_xyz(0, 0, 0.5), name="direct", sim_core=sim)
+        SimObject.from_params(SimObjectSpawnParams(name="params", visual_shape=shape), sim)
+        sim.run_simulation(duration=0.1)
+        inputs = [json.loads(line) for line in (path / "inputs.jsonl").read_text().splitlines()]
+        assert [item["details"]["key"] for item in inputs] == ["direct", "params"]
+        assert load_recording_manifest(path)["complete"] is True
+    finally:
+        if p.isConnected(sim.client):
+            p.disconnect(sim.client)
+
+
+def test_playback_recreates_removed_name(primitive_artifact: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from pybullet_fleet.replay import ResultPlayback
+    from pybullet_fleet.replay import kinematic_profile
+
+    original_restore = kinematic_profile.restore_supported_simulation
+    simulations = []
+
+    def headless_restore(manifest, state, **kwargs):
+        sim = original_restore(manifest, state, **{**kwargs, "gui": False})
+        simulations.append(sim)
+        return sim
+
+    monkeypatch.setattr(kinematic_profile, "restore_supported_simulation", headless_restore)
+    monkeypatch.setattr(kinematic_profile.time, "sleep", lambda _seconds: None)
+    playback = ResultPlayback(primitive_artifact, profile=KinematicProfile())
+    first = copy.deepcopy(playback.frames[0])
+    without = copy.deepcopy(first)
+    del without["objects"]["mixed"]
+    playback.frames = [first, without, first]
+    playback.play_gui(rtf=100)
+    assert len(simulations) == 1
+    assert len(simulations[0].find_objects_by_name("mixed")) == 1
+
+
 def test_primitive_only_world_records_and_restores_without_an_agent(tmp_path: Path) -> None:
     from pybullet_fleet.core_simulation import MultiRobotSimulationCore, SimulationParams
     from pybullet_fleet.geometry import Pose

@@ -111,6 +111,8 @@ class KinematicJoint:
                 raise ValueError("Joint checkpoint contains invalid trajectory")
             if not finite(trajectory_data["t0_offset"]) or not finite(trajectory_data["target"]):
                 raise ValueError("Joint checkpoint contains nonfinite trajectory metadata")
+            if target is None or trajectory_data["target"] != target:
+                raise ValueError("Joint checkpoint trajectory target differs from joint target")
             if max_accel is None:
                 raise ValueError("Unconfigured joint cannot have a ramp trajectory")
             trajectory = restore_tpi_state(

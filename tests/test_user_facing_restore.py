@@ -127,6 +127,31 @@ def _reference_frames(directory: Path) -> list[dict]:
     return [json.loads(line) for line in (directory / "frames.jsonl").read_text().splitlines()]
 
 
+def test_mismatched_joint_trajectory_target_is_rejected(fixed_arm_artifact: Path) -> None:
+    from pybullet_fleet.replay.kinematic_profile import KinematicProfile
+
+    manifest = load_recording_manifest(fixed_arm_artifact)
+    checkpoint = next((fixed_arm_artifact / "checkpoints").glob("*.json"))
+    state = json.loads(checkpoint.read_text())
+    joint = state["agents"]["pick-drop-arm"]["state"]["joints"][0]
+    joint["max_accel"] = 1.0
+    joint["max_decel"] = 1.0
+    joint["target"] = 1.0
+    joint["trajectory"] = {
+        "p0": 0.0,
+        "pe": 1.0,
+        "v0": 0.0,
+        "ve": 0.0,
+        "vmax": 1.0,
+        "accel": 1.0,
+        "decel": 1.0,
+        "t0_offset": 0.0,
+        "target": 1.1,
+    }
+    with pytest.raises(ValueError, match="Joint trajectory target differs"):
+        KinematicProfile().validate_checkpoint(manifest, state)
+
+
 def test_kinematic_gui_playback_supports_fixed_arm_entities_without_stepping(
     fixed_arm_artifact: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

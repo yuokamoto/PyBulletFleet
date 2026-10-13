@@ -858,6 +858,8 @@ class SimObject:
             collision_mode=collision_mode,
             user_data=user_data,
         )
+        if sim_core is not None:
+            sim_core._record_state_spawn(obj, obj._checkpoint_spawn_params)
         return obj
 
     @classmethod
@@ -941,6 +943,11 @@ class SimObject:
             name=name,
             user_data=user_data,
         )
+        if sim_core is not None:
+            # URDF objects are not yet supported by the kinematic profile. A
+            # runtime spawn must still make the artifact incomplete rather
+            # than silently omitting the new body.
+            sim_core._record_state_spawn(obj, SimObjectSpawnParams(urdf_path=urdf_path, name=name))
         lazy_logger.info(lambda: f"Loaded SimObject from URDF: {loaded.path}")
         return obj
 
@@ -1072,7 +1079,7 @@ class SimObject:
             obj = SimObject.from_params(params, sim_core)
         """
         factory = cls.from_urdf if spawn_params.urdf_path is not None else cls.from_mesh
-        obj = factory(
+        return factory(
             **_forward_spawn_params(
                 factory,
                 spawn_params,
@@ -1080,15 +1087,6 @@ class SimObject:
                 extra_kwargs={"sim_core": sim_core},
             )
         )
-
-        # Runtime body/object IDs remain process-local. Record the effective
-        # factory parameters, rather than the caller's pre-default request.
-        if sim_core is not None:
-            record_spawn = getattr(sim_core, "_record_state_spawn", None)
-            if record_spawn is not None:
-                record_spawn(obj, obj._checkpoint_spawn_params or spawn_params)
-
-        return obj
 
     @classmethod
     def from_dict(cls, config: Dict[str, Any], sim_core=None) -> "SimObject":

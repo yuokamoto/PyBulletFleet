@@ -110,7 +110,7 @@ whether to derive playback frames from checkpoints and change the format.
 - Effective input history is incomplete for direct mutators; a checkpoint can
   continue with installed application code, but the artifact alone cannot
   re-execute every later application decision.
-- The supported profile excludes active differential, physics, collision,
+- The supported profile excludes differential velocity/batch execution, physics, collision,
   Action/BT, device and undeclared custom owner state. A custom entity needs
   explicit versioned capture/restore support and a fresh-process test.
 - The example's stage restorer requires its code to be installed/imported in
