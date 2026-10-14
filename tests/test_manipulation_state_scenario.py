@@ -9,6 +9,13 @@ import pybullet as p
 import pybullet_fleet.examples.validation.manipulation_state_scenario as scenario
 
 
+def test_unknown_restored_scenario_stage_is_rejected() -> None:
+    with pytest.raises(ValueError, match="Invalid manipulation scenario state"):
+        scenario._restore_scenario_state(  # type: ignore[arg-type]
+            None, {"stage": "unknown", "observations": {}, "lifecycle": []}
+        )
+
+
 def test_manipulation_state_and_entity_lifecycle():
     result = scenario.run_scenario()
     samples = result["observations"]

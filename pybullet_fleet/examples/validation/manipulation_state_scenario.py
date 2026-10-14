@@ -366,6 +366,7 @@ def _restore_scenario_state(sim: MultiRobotSimulationCore, value: dict) -> None:
         not isinstance(value, dict)
         or set(value) != {"stage", "observations", "lifecycle"}
         or not isinstance(value["stage"], str)
+        or value["stage"] not in {"spawn", "base_motion", "arm_motion", "attached_motion", "delete", "done"}
         or not isinstance(value["observations"], dict)
         or not isinstance(value["lifecycle"], list)
     ):

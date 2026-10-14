@@ -898,7 +898,14 @@ class Agent(SimObject):
 
         # Agent is now fully constructed (controllers + plugins) — notify observers.
         agent._emit_agent_spawned()
+        agent._record_checkpoint_spawn(sim_core)
         return agent
+
+    def _record_checkpoint_spawn(self, sim_core) -> None:
+        """Report runtime Agent creation after its effective owner state exists."""
+        record_spawn = getattr(sim_core, "_record_state_spawn", None) if sim_core is not None else None
+        if record_spawn is not None:
+            record_spawn(self, self._checkpoint_spawn_params)
 
     @classmethod
     def from_dict(cls, config: Dict[str, Any], sim_core=None) -> "Agent":
@@ -987,6 +994,9 @@ class Agent(SimObject):
             notify_spawn=notify_spawn,
             pickable=pickable,
         )
+
+        if notify_spawn:
+            agent._record_checkpoint_spawn(sim_core)
 
         return agent
 
@@ -1105,6 +1115,9 @@ class Agent(SimObject):
             global_scaling=global_scaling,
             joint_tolerance=joint_tolerance,
         )
+
+        if notify_spawn:
+            agent._record_checkpoint_spawn(sim_core)
 
         return agent
 

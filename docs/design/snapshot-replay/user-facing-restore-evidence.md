@@ -101,6 +101,14 @@ duplication for these runs. Keep the current format for this user-operation
 slice. A separate, longer steady-state and fleet-size study should decide
 whether to derive playback frames from checkpoints and change the format.
 
+Asset-validation microbenchmark on this macOS development machine: 20 references
+to the bundled `mobile_robot.urdf` over 100 steps took 0.136 s when hashing at
+every step (1.36 ms/step), versus 0.025 s for file metadata checks (0.25
+ms/step). This isolates asset validation, not total recording overhead. The
+profile now hashes at recording setup, caches the verified file metadata during
+per-step validation, and hashes again before restore. The cache also rehashes
+if file size or modification time changes during recording.
+
 ## Remaining V1 user-visible gaps
 
 - General playback GUI/CLI and trace views are not supplied by this operation.

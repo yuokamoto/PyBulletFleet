@@ -204,6 +204,75 @@ def test_motion_mode_changed_after_spawn_is_not_silently_captured() -> None:
         p.disconnect(sim.client)
 
 
+def test_agent_collision_mode_change_is_not_silently_captured() -> None:
+    from pybullet_fleet.agent import Agent
+    from pybullet_fleet.core_simulation import MultiRobotSimulationCore, SimulationParams
+    from pybullet_fleet.types import CollisionMode
+
+    sim = MultiRobotSimulationCore(SimulationParams(gui=False, physics=False, collision_check_frequency=0))
+    try:
+        agent = Agent.from_urdf("pybullet_fleet/robots/mobile_robot.urdf", name="robot", sim_core=sim)
+        profile = KinematicProfile()
+        profile.construction(sim)
+        agent.set_collision_mode(CollisionMode.DISABLED)
+        with pytest.raises(ValueError, match="Agent mode changed"):
+            profile.capture(sim)
+    finally:
+        p.disconnect(sim.client)
+
+
+@pytest.mark.parametrize("factory", ["direct", "params"])
+def test_short_lived_runtime_agent_spawn_invalidates_recording(tmp_path: Path, factory: str) -> None:
+    from pybullet_fleet.agent import Agent, AgentSpawnParams
+    from pybullet_fleet.core_simulation import MultiRobotSimulationCore, SimulationParams
+
+    path = tmp_path / factory
+    sim = MultiRobotSimulationCore(
+        SimulationParams(gui=False, physics=False, collision_check_frequency=0, target_rtf=0, timestep=0.1)
+    )
+    try:
+        sim.configure_state_recording(profile=KinematicProfile(), output=str(path))
+        if factory == "direct":
+            agent = Agent.from_urdf("pybullet_fleet/robots/mobile_robot.urdf", name="robot", sim_core=sim)
+        else:
+            agent = Agent.from_params(AgentSpawnParams(name="robot", urdf_path="pybullet_fleet/robots/mobile_robot.urdf"), sim)
+        sim.remove_object(agent)
+        sim.run_simulation(duration=0.1)
+        assert json.loads((path / "manifest.json").read_text())["complete"] is False
+        assert sim.get_completed_step_boundary()[0] == 1
+    finally:
+        if p.isConnected(sim.client):
+            p.disconnect(sim.client)
+
+
+def test_asset_hash_is_cached_during_recording_validation(monkeypatch: pytest.MonkeyPatch) -> None:
+    from pybullet_fleet.agent import Agent
+    from pybullet_fleet.core_simulation import MultiRobotSimulationCore, SimulationParams
+    from pybullet_fleet.replay import kinematic_profile
+
+    sim = MultiRobotSimulationCore(SimulationParams(gui=False, physics=False, collision_check_frequency=0))
+    try:
+        Agent.from_urdf("pybullet_fleet/robots/mobile_robot.urdf", name="robot", sim_core=sim)
+        original = kinematic_profile._asset_fingerprint
+        calls = []
+
+        def counted(path):
+            calls.append(path)
+            return original(path)
+
+        monkeypatch.setattr(kinematic_profile, "_asset_fingerprint", counted)
+        profile = KinematicProfile()
+        construction = profile.construction(sim)
+        state = profile.capture(sim)
+        for _ in range(3):
+            profile.validate_checkpoint({"construction": construction}, state)
+        assert len(calls) == 1
+        KinematicProfile().validate_checkpoint({"construction": construction}, state)
+        assert len(calls) == 2
+    finally:
+        p.disconnect(sim.client)
+
+
 def test_direct_primitive_spawn_is_recorded_once(tmp_path: Path) -> None:
     from pybullet_fleet.core_simulation import MultiRobotSimulationCore, SimulationParams
     from pybullet_fleet.geometry import Pose
@@ -329,6 +398,7 @@ def test_playback_recreates_removed_name(primitive_artifact: Path, monkeypatch: 
     first["objects"]["mixed"]["state"]["construction"]["visual_shape"]["half_extents"][0] = 0.4
     without = copy.deepcopy(first)
     del without["objects"]["mixed"]
+    del without["objects"]["sphere"]
     respawned = copy.deepcopy(first)
     respawned["objects"]["mixed"]["state"]["construction"]["visual_shape"]["half_extents"][0] = 0.6
     playback.frames = [first, without, respawned]
@@ -337,6 +407,25 @@ def test_playback_recreates_removed_name(primitive_artifact: Path, monkeypatch: 
     objects = simulations[0].find_objects_by_name("mixed")
     assert len(objects) == 1
     assert objects[0]._checkpoint_spawn_params.visual_shape.half_extents[0] == 0.6
+    attached = simulations[0].get_unique_agent_by_name("robot").get_attached_objects()
+    assert [obj.name for obj in attached] == ["sphere"]
+
+
+def test_playback_skips_frames_before_first_checkpoint(primitive_artifact: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from pybullet_fleet.replay import ResultPlayback
+    from pybullet_fleet.replay import kinematic_profile
+
+    restore = kinematic_profile.restore_supported_simulation
+    monkeypatch.setattr(
+        kinematic_profile,
+        "restore_supported_simulation",
+        lambda manifest, state, **kwargs: restore(manifest, state, **{**kwargs, "gui": False}),
+    )
+    monkeypatch.setattr(kinematic_profile.time, "sleep", lambda _seconds: None)
+    playback = ResultPlayback(primitive_artifact, profile=KinematicProfile())
+    playback.manifest["checkpoint_sha256"].pop("1")
+    playback.frames[0]["agents"]["not-in-checkpoint"] = {}
+    playback.play_gui(rtf=100)
 
 
 def test_primitive_only_world_records_and_restores_without_an_agent(tmp_path: Path) -> None:

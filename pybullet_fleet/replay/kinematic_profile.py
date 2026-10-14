@@ -178,6 +178,15 @@ def restore_primitive(sim: MultiRobotSimulationCore, name: str, value: dict) -> 
     )
 
 
+def _remove_playback_primitive(sim: MultiRobotSimulationCore, obj: SimObject) -> None:
+    attachment = obj.get_kinematic_attachment_state()
+    if attachment is not None:
+        parent = sim.get_unique_agent_by_name(attachment["parent_name"])
+        if not parent.detach_object(obj):
+            raise ValueError("Playback attachment detachment failed")
+    sim.remove_object(obj)
+
+
 def restore_attachment(sim: MultiRobotSimulationCore, obj: SimObject, value: dict) -> None:
     """Apply a named parent/link relation after Agent and primitive construction."""
     attachment = value["attachment"]
@@ -446,6 +455,20 @@ class KinematicProfile:
     ) -> None:
         self.allowed_callbacks = allowed_callbacks
         self.allowed_event_handlers = allowed_event_handlers
+        self._recorded_agent_modes: dict[str, tuple[str, str]] = {}
+        self._asset_cache: dict[str, tuple[str, int, int]] = {}
+
+    def _check_asset(self, path: str, expected: str, *, force: bool = False) -> None:
+        asset = Path(path)
+        try:
+            stat = asset.stat()
+        except FileNotFoundError as exc:
+            raise ValueError(f"Checkpoint asset is missing: {path}") from exc
+        cached = self._asset_cache.get(path)
+        if force or cached != (expected, stat.st_mtime_ns, stat.st_size):
+            if _asset_fingerprint(path) != expected:
+                raise ValueError("Agent asset changed since recording")
+            self._asset_cache[path] = (expected, stat.st_mtime_ns, stat.st_size)
 
     @classmethod
     def from_manifest(cls, manifest: dict) -> "KinematicProfile":
@@ -465,6 +488,8 @@ class KinematicProfile:
         if sim.params.physics or sim._collision_check_frequency != 0:
             raise ValueError("Kinematic recording requires physics and collision checks disabled")
         self._check_live_extensions(sim)
+        self._recorded_agent_modes = {}
+        self._asset_cache = {}
         agents = {}
         names = set()
         for agent in sim.agents:
@@ -484,9 +509,14 @@ class KinematicProfile:
                 raise ValueError(f"Unsupported Agent spawn options for kinematic checkpoint: {agent.name!r}")
             names.add(agent.name)
             spec = _controller_spec(agent)
+            asset = str(Path(params.urdf_path).resolve())
+            digest = _asset_fingerprint(asset)
+            stat = Path(asset).stat()
+            self._asset_cache[asset] = (digest, stat.st_mtime_ns, stat.st_size)
+            self._recorded_agent_modes[agent.name] = (agent.motion_mode.value, agent.collision_mode.value)
             agents[agent.name] = {
-                "asset": str(Path(params.urdf_path).resolve()),
-                "asset_sha256": _asset_fingerprint(params.urdf_path),
+                "asset": asset,
+                "asset_sha256": digest,
                 "initial_pose": _pose_record(params.initial_pose),
                 "mass": params.mass,
                 "fixed_base": params.use_fixed_base,
@@ -528,6 +558,9 @@ class KinematicProfile:
             params = agent._checkpoint_spawn_params
             if type(params) is not AgentSpawnParams or agent.motion_mode != params.motion_mode:
                 raise ValueError(f"Agent motion mode changed after construction: {agent.name!r}")
+            expected_modes = self._recorded_agent_modes.get(agent.name)
+            if expected_modes is not None and expected_modes != (agent.motion_mode.value, agent.collision_mode.value):
+                raise ValueError(f"Agent mode changed after recording setup: {agent.name!r}")
             names.add(agent.name)
             agents[agent.name] = {"type": "kinematic_agent", "version": 2, "state": capture_agent_state(agent)}
         for obj in sim.sim_objects:
@@ -567,8 +600,7 @@ class KinematicProfile:
                 mode.value for mode in MotionMode
             }:
                 raise ValueError("Unsupported Agent motion mode")
-            if _asset_fingerprint(construction["asset"]) != construction["asset_sha256"]:
-                raise ValueError("Agent asset changed since recording")
+            self._check_asset(construction["asset"], construction["asset_sha256"])
             controller = _keys(construction["controller"], {"type", "parameters"}, "controller construction")
             parameters = controller["parameters"]
             if (
@@ -587,6 +619,8 @@ class KinematicProfile:
     def restore(self, manifest: dict, state: dict, *, gui: bool, target_rtf: float) -> MultiRobotSimulationCore:
         self.validate_checkpoint(manifest, state)
         c = manifest["construction"]
+        for construction in c["agents"].values():
+            self._check_asset(construction["asset"], construction["asset_sha256"], force=True)
         sim = MultiRobotSimulationCore(
             SimulationParams(
                 gui=gui,
@@ -656,7 +690,7 @@ class KinematicProfile:
         try:
             if camera_config is not None:
                 sim.setup_camera(camera_config=camera_config)
-            for frame in playback.frames:
+            for frame in playback.frames[first_step - 1 :]:
                 for name, entry in frame["agents"].items():
                     agent = sim.get_unique_agent_by_name(name)
                     state = entry["state"]
@@ -666,18 +700,13 @@ class KinematicProfile:
                 live_objects = {obj.name: obj for obj in sim.sim_objects if obj not in sim.agents}
                 recorded_objects = frame["objects"]
                 for name in live_objects.keys() - recorded_objects.keys():
-                    sim.remove_object(live_objects[name])
+                    _remove_playback_primitive(sim, live_objects[name])
                     del live_objects[name]
                 for name, entry in recorded_objects.items():
                     state = entry["state"]
                     obj = live_objects.get(name)
                     if obj is not None and capture_primitive_state(obj)["construction"] != state["construction"]:
-                        current_attachment = obj.get_kinematic_attachment_state()
-                        if current_attachment is not None:
-                            parent = sim.get_unique_agent_by_name(current_attachment["parent_name"])
-                            if not parent.detach_object(obj):
-                                raise ValueError("Playback attachment detachment failed")
-                        sim.remove_object(obj)
+                        _remove_playback_primitive(sim, obj)
                         obj = None
                     if obj is None:
                         obj = restore_primitive(sim, name, state)
