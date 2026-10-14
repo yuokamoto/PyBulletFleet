@@ -418,6 +418,14 @@ def test_runtime_unsupported_callback_aborts_recording_but_not_simulation(tmp_pa
     assert "Undeclared simulation callback" in manifest["recording_error"]
 
 
+def test_missing_pick_link_is_rejected_before_callback_setup() -> None:
+    from pybullet_fleet.examples.validation.pick_drop_arm_recording import restore_pick_drop_stage
+
+    stage = {"model": "arm_robot", "step_state": 1, "targets_set": False, "picked": False, "pick_link_name": None}
+    with pytest.raises(ValueError, match="Saved pick link name is missing"):
+        restore_pick_drop_stage(None, stage)
+
+
 def test_runtime_plugin_aborts_recording_but_not_simulation(tmp_path: Path) -> None:
     from pybullet_fleet.examples.validation.pick_drop_arm_recording import build_example
     from pybullet_fleet.replay.kinematic_profile import KinematicProfile

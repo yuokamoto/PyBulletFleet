@@ -126,6 +126,8 @@ def restore_pick_drop_stage(sim: MultiRobotSimulationCore, value: dict) -> None:
         raise ValueError("Invalid pick/drop stage value")
     if value["model"] not in JOINT_PRESETS or not 0 <= value["step_state"] <= 7:
         raise ValueError("Unsupported pick/drop stage")
+    if not isinstance(value["pick_link_name"], str) or not value["pick_link_name"]:
+        raise ValueError("Saved pick link name is missing")
     configure_demo(sim, value["model"], pick_link_name=value["pick_link_name"], recording=True)
     picked, step_state, _targets_set = value["picked"], value["step_state"], value["targets_set"]
 

@@ -92,7 +92,13 @@ def _validate_controller_parameters(parameters: dict) -> None:
 
 
 def _check_agent_owners(agent: Agent) -> None:
-    if type(agent) is not Agent or agent.plugins or agent.callbacks or not agent.is_action_queue_empty():
+    if (
+        type(agent) is not Agent
+        or agent.plugins
+        or agent.callbacks
+        or agent._batch_controller is not None
+        or not agent.is_action_queue_empty()
+    ):
         raise ValueError(f"Unsupported Agent execution state: {agent.name!r}")
     if len(agent.controllers) != 1 or (agent._events is not None and agent._events._handlers):
         raise ValueError(f"Undeclared Agent controller or event state: {agent.name!r}")
@@ -591,8 +597,13 @@ class KinematicProfile:
             expected_modes = self._recorded_agent_modes.get(agent.name)
             if expected_modes is not None and expected_modes != (agent.motion_mode.value, agent.collision_mode.value):
                 raise ValueError(f"Agent mode changed after recording setup: {agent.name!r}")
-            if agent.user_data or (
-                agent.name in self._recorded_agent_specs and _controller_spec(agent) != self._recorded_agent_specs[agent.name]
+            if (
+                agent.user_data
+                or agent.pickable != params.pickable
+                or (
+                    agent.name in self._recorded_agent_specs
+                    and _controller_spec(agent) != self._recorded_agent_specs[agent.name]
+                )
             ):
                 raise ValueError(f"Unsupported Agent metadata or controller change: {agent.name!r}")
             names.add(agent.name)
@@ -615,7 +626,12 @@ class KinematicProfile:
         if state["sim"]["type"] != "kinematic" or state["sim"]["version"] != 1:
             raise ValueError("Unsupported kinematic checkpoint state")
         _keys(c, {"timestep", "physics", "enable_floor", "collision_check_frequency", "agents"}, "construction")
-        if c["physics"] is not False or c["collision_check_frequency"] != 0 or not isinstance(c["agents"], dict):
+        if (
+            c["physics"] is not False
+            or c["collision_check_frequency"] != 0
+            or type(c["enable_floor"]) is not bool
+            or not isinstance(c["agents"], dict)
+        ):
             raise ValueError("Unsupported kinematic construction")
         if set(state["agents"]) != set(c["agents"]) or set(state["objects"]) & set(c["agents"]):
             raise ValueError("Checkpoint entity roster differs from construction")

@@ -326,6 +326,14 @@ class SimObjectSpawnParams:
         )
 
 
+@dataclass
+class _UrdfSpawnDescriptor(SimObjectSpawnParams):
+    """Effective URDF-only options retained for declared recording handlers."""
+
+    use_fixed_base: bool = True
+    global_scaling: float = 1.0
+
+
 class SimObject:
     """
     Base class for simulation objects (robots, pallets, obstacles).
@@ -946,13 +954,23 @@ class SimObject:
             name=name,
             user_data=user_data,
         )
+        # Keep the complete effective construction for future declared URDF
+        # handlers. The built-in kinematic profile still rejects URDF objects.
+        obj._checkpoint_spawn_params = _UrdfSpawnDescriptor(
+            urdf_path=loaded.path,
+            name=name,
+            initial_pose=copy.deepcopy(pose) if pose is not None else Pose.from_xyz(0.0, 0.0, 0.0),
+            mass=loaded.mass,
+            pickable=pickable,
+            collision_mode=collision_mode,
+            user_data=dict(user_data) if user_data else {},
+            use_fixed_base=use_fixed_base,
+            global_scaling=global_scaling,
+        )
         if sim_core is not None:
-            # URDF objects are not yet supported by the kinematic profile. A
-            # runtime spawn must still make the artifact incomplete rather
-            # than silently omitting the new body.
             record_spawn = getattr(sim_core, "_record_state_spawn", None)
             if record_spawn is not None:
-                record_spawn(obj, SimObjectSpawnParams(urdf_path=urdf_path, name=name))
+                record_spawn(obj, obj._checkpoint_spawn_params)
         lazy_logger.info(lambda: f"Loaded SimObject from URDF: {loaded.path}")
         return obj
 

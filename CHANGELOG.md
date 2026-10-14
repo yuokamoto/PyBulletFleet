@@ -14,6 +14,11 @@ are not recommended for production use yet.
 
 ### Changed
 
+- URDF SimObject and mesh Agent factories retain their effective spawn
+  descriptors for recording handlers, including URDF fixed-base and scale
+  settings. The development kinematic profile rejects batch-owned Agents,
+  changed Agent pickability and malformed floor settings before restore.
+
 - The development kinematic recording profile accepts a physics-off world
   containing supported primitives without requiring an initial Agent.
 

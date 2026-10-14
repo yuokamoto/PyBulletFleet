@@ -895,6 +895,8 @@ class Agent(SimObject):
 
             for entry in spawn_params.plugins:
                 agent.add_plugin(create_agent_plugin_from_entry(entry, agent))
+            if isinstance(agent._checkpoint_spawn_params, AgentSpawnParams):
+                agent._checkpoint_spawn_params.plugins = list(spawn_params.plugins)
 
         # Agent is now fully constructed (controllers + plugins) — notify observers.
         agent._emit_agent_spawned()
@@ -993,6 +995,20 @@ class Agent(SimObject):
             controller=controller,
             notify_spawn=notify_spawn,
             pickable=pickable,
+        )
+
+        agent._checkpoint_spawn_params = AgentSpawnParams(
+            name=agent.name,
+            visual_shape=copy.deepcopy(visual_shape),
+            collision_shape=copy.deepcopy(collision_shape),
+            initial_pose=copy.deepcopy(pose),
+            mass=agent.mass,
+            pickable=agent.pickable,
+            collision_mode=agent.collision_mode,
+            user_data=dict(agent.user_data),
+            motion_mode=agent._motion_mode,
+            use_fixed_base=agent.use_fixed_base,
+            controller=copy.deepcopy(agent.controller._construction_config()),
         )
 
         if notify_spawn:

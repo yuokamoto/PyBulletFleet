@@ -207,6 +207,78 @@ def test_invalid_agent_construction_is_rejected(primitive_artifact: Path, field:
         KinematicProfile().validate_checkpoint(manifest, state)
 
 
+def test_nonboolean_enable_floor_is_rejected(primitive_artifact: Path) -> None:
+    manifest = copy.deepcopy(load_recording_manifest(primitive_artifact))
+    state = json.loads((primitive_artifact / "checkpoints" / "000000001.json").read_text())
+    manifest["construction"]["enable_floor"] = "false"
+    with pytest.raises(ValueError, match="Unsupported kinematic construction"):
+        KinematicProfile().validate_checkpoint(manifest, state)
+
+
+def test_unsupported_urdf_object_retains_effective_spawn_descriptor() -> None:
+    from pybullet_fleet.core_simulation import MultiRobotSimulationCore, SimulationParams
+    from pybullet_fleet.geometry import Pose
+    from pybullet_fleet.sim_object import SimObject, SimObjectSpawnParams
+    from pybullet_fleet.types import CollisionMode
+
+    sim = MultiRobotSimulationCore(SimulationParams(gui=False, physics=False, collision_check_frequency=0))
+    try:
+        obj = SimObject.from_urdf(
+            "pybullet_fleet/robots/simple_cube.urdf",
+            name="fixture",
+            pose=Pose.from_xyz(1, 2, 3),
+            mass=0,
+            pickable=True,
+            collision_mode=CollisionMode.STATIC,
+            use_fixed_base=True,
+            global_scaling=0.5,
+            sim_core=sim,
+        )
+        saved = obj._checkpoint_spawn_params
+        assert saved.name == "fixture"
+        assert list(saved.initial_pose.position) == [1, 2, 3]
+        assert saved.mass == 0
+        assert saved.pickable is True
+        assert saved.collision_mode is CollisionMode.STATIC
+        assert getattr(saved, "use_fixed_base") is True
+        assert getattr(saved, "global_scaling") == 0.5
+        assert Path(saved.urdf_path).is_file()
+        via_params = SimObject.from_params(
+            SimObjectSpawnParams(name="via-params", urdf_path="pybullet_fleet/robots/simple_cube.urdf", mass=0), sim
+        )
+        assert via_params._checkpoint_spawn_params.name == "via-params"
+        assert getattr(via_params._checkpoint_spawn_params, "global_scaling") == 1.0
+    finally:
+        p.disconnect(sim.client)
+
+
+def test_mesh_agent_retains_effective_spawn_descriptor() -> None:
+    from pybullet_fleet.agent import Agent, AgentSpawnParams
+    from pybullet_fleet.core_simulation import MultiRobotSimulationCore, SimulationParams
+    from pybullet_fleet.geometry import Pose
+    from pybullet_fleet.sim_object import ShapeParams
+
+    sim = MultiRobotSimulationCore(SimulationParams(gui=False, physics=False, collision_check_frequency=0))
+    try:
+        agent = Agent.from_mesh(
+            visual_shape=ShapeParams(shape_type="box", half_extents=[0.2, 0.2, 0.2]),
+            collision_shape=ShapeParams(shape_type="box", half_extents=[0.2, 0.2, 0.2]),
+            pose=Pose.from_xyz(1, 2, 3),
+            mass=0,
+            name="mesh-agent",
+            sim_core=sim,
+        )
+        saved = agent._checkpoint_spawn_params
+        assert isinstance(saved, AgentSpawnParams)
+        assert saved.visual_shape.shape_type == "box"
+        assert saved.collision_shape.shape_type == "box"
+        assert list(saved.initial_pose.position) == [1, 2, 3]
+        assert isinstance(saved.controller, dict)
+        assert saved.controller["type"] == agent.controller._registry_name
+    finally:
+        p.disconnect(sim.client)
+
+
 @pytest.mark.parametrize(
     "field,value",
     [("max_linear_vel", "fast"), ("max_linear_accel", [1, 2]), ("cmd_vel_timeout", -1), ("navigation_2d", "yes")],
@@ -250,7 +322,7 @@ def test_frequency_callback_is_rejected_even_if_allowlisted(tmp_path: Path) -> N
         p.disconnect(sim.client)
 
 
-@pytest.mark.parametrize("change", ["metadata", "controller"])
+@pytest.mark.parametrize("change", ["metadata", "controller", "pickable", "batch"])
 def test_live_agent_construction_change_is_rejected(change: str) -> None:
     from pybullet_fleet.agent import Agent
     from pybullet_fleet.core_simulation import MultiRobotSimulationCore, SimulationParams
@@ -262,9 +334,13 @@ def test_live_agent_construction_change_is_rejected(change: str) -> None:
         profile.construction(sim)
         if change == "metadata":
             agent.user_data["extra"] = 1
-        else:
+        elif change == "controller":
             agent.controller.params.max_linear_vel = 0.5
-        with pytest.raises(ValueError, match="Unsupported Agent metadata or controller change"):
+        elif change == "pickable":
+            agent.pickable = not agent.pickable
+        else:
+            agent._batch_controller = object()
+        with pytest.raises(ValueError):
             profile.capture(sim)
     finally:
         p.disconnect(sim.client)
