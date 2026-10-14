@@ -65,6 +65,32 @@ def _controller_spec(agent: Agent) -> dict:
     return {"type": kind, "parameters": {key: value for key, value in config.items() if key != "type"}}
 
 
+def _validate_controller_parameters(parameters: dict) -> None:
+    if not isinstance(parameters, dict) or set(parameters) != {field.name for field in fields(ControllerParams)}:
+        raise ValueError("Unsupported controller parameters")
+    for name in ("max_linear_vel", "max_angular_vel", "max_linear_accel", "max_linear_decel", "max_angular_accel"):
+        value = parameters[name]
+        if value is None:
+            continue
+        if isinstance(value, list):
+            if len(value) != 3:
+                raise ValueError(f"Invalid controller limit: {name}")
+            values = value
+        else:
+            values = [value]
+        if any(type(item) not in (int, float) or not math.isfinite(item) or item <= 0 for item in values):
+            raise ValueError(f"Invalid controller limit: {name}")
+    timeout = parameters["cmd_vel_timeout"]
+    if timeout is not None and (type(timeout) not in (int, float) or not math.isfinite(timeout) or timeout < 0):
+        raise ValueError("Invalid controller timeout")
+    if parameters["navigation_2d"] is not None and type(parameters["navigation_2d"]) is not bool:
+        raise ValueError("Invalid controller navigation_2d")
+    if not isinstance(parameters["default_direction"], str) or parameters["default_direction"] not in {
+        direction.value for direction in MovementDirection
+    }:
+        raise ValueError("Invalid controller default direction")
+
+
 def _check_agent_owners(agent: Agent) -> None:
     if type(agent) is not Agent or agent.plugins or agent.callbacks or not agent.is_action_queue_empty():
         raise ValueError(f"Unsupported Agent execution state: {agent.name!r}")
@@ -147,6 +173,7 @@ def capture_primitive_state(obj: SimObject) -> dict:
         or (params.visual_shape is None and params.collision_shape is None)
         or obj.mass != 0
         or obj.user_data
+        or obj.pickable != params.pickable
     ):
         raise ValueError(f"Object lacks supported primitive construction: {obj.name!r}")
     return {
@@ -456,6 +483,7 @@ class KinematicProfile:
         self.allowed_callbacks = allowed_callbacks
         self.allowed_event_handlers = allowed_event_handlers
         self._recorded_agent_modes: dict[str, tuple[str, str]] = {}
+        self._recorded_agent_specs: dict[str, dict] = {}
         self._asset_cache: dict[str, tuple[str, int, int]] = {}
 
     def _check_asset(self, path: str, expected: str, *, force: bool = False) -> None:
@@ -478,7 +506,7 @@ class KinematicProfile:
         if sim._plugins or sim._behavior_tree_callbacks or sim._registered_managers:
             raise ValueError("Plugins, BTs or managers are outside this checkpoint profile")
         allowed = {id(callback) for callback in self.allowed_callbacks}
-        if any(id(info["func"]) not in allowed for info in sim._callbacks):
+        if any(id(info["func"]) not in allowed or info["frequency"] is not None for info in sim._callbacks):
             raise ValueError("Undeclared simulation callback is not checkpointable")
         event_allowed = {id(handler) for handler in self.allowed_event_handlers}
         if any(id(handler) not in event_allowed for handlers in sim.events._handlers.values() for _, handler in handlers):
@@ -489,6 +517,7 @@ class KinematicProfile:
             raise ValueError("Kinematic recording requires physics and collision checks disabled")
         self._check_live_extensions(sim)
         self._recorded_agent_modes = {}
+        self._recorded_agent_specs = {}
         self._asset_cache = {}
         agents = {}
         names = set()
@@ -514,6 +543,7 @@ class KinematicProfile:
             stat = Path(asset).stat()
             self._asset_cache[asset] = (digest, stat.st_mtime_ns, stat.st_size)
             self._recorded_agent_modes[agent.name] = (agent.motion_mode.value, agent.collision_mode.value)
+            self._recorded_agent_specs[agent.name] = spec
             agents[agent.name] = {
                 "asset": asset,
                 "asset_sha256": digest,
@@ -561,6 +591,10 @@ class KinematicProfile:
             expected_modes = self._recorded_agent_modes.get(agent.name)
             if expected_modes is not None and expected_modes != (agent.motion_mode.value, agent.collision_mode.value):
                 raise ValueError(f"Agent mode changed after recording setup: {agent.name!r}")
+            if agent.user_data or (
+                agent.name in self._recorded_agent_specs and _controller_spec(agent) != self._recorded_agent_specs[agent.name]
+            ):
+                raise ValueError(f"Unsupported Agent metadata or controller change: {agent.name!r}")
             names.add(agent.name)
             agents[agent.name] = {"type": "kinematic_agent", "version": 2, "state": capture_agent_state(agent)}
         for obj in sim.sim_objects:
@@ -600,16 +634,29 @@ class KinematicProfile:
                 mode.value for mode in MotionMode
             }:
                 raise ValueError("Unsupported Agent motion mode")
+            mass = construction["mass"]
+            if mass is not None and (type(mass) not in (int, float) or not math.isfinite(mass) or mass < 0):
+                raise ValueError("Invalid Agent mass")
+            if type(construction["fixed_base"]) is not bool:
+                raise ValueError("Invalid Agent fixed_base")
+            if not isinstance(construction["collision_mode"], str) or construction["collision_mode"] not in {
+                mode.value for mode in CollisionMode
+            }:
+                raise ValueError("Invalid Agent collision mode")
+            if (
+                not isinstance(construction["asset"], str)
+                or not Path(construction["asset"]).is_absolute()
+                or not isinstance(construction["asset_sha256"], str)
+                or len(construction["asset_sha256"]) != 64
+                or any(ch not in "0123456789abcdef" for ch in construction["asset_sha256"])
+            ):
+                raise ValueError("Invalid Agent asset identifier")
             self._check_asset(construction["asset"], construction["asset_sha256"])
             controller = _keys(construction["controller"], {"type", "parameters"}, "controller construction")
             parameters = controller["parameters"]
-            if (
-                controller["type"] not in _SUPPORTED_CONTROLLER_NAMES
-                or not isinstance(parameters, dict)
-                or set(parameters) != {field.name for field in fields(ControllerParams)}
-                or parameters["default_direction"] not in {direction.value for direction in MovementDirection}
-            ):
+            if not isinstance(controller["type"], str) or controller["type"] not in _SUPPORTED_CONTROLLER_NAMES:
                 raise ValueError("Unsupported controller construction")
+            _validate_controller_parameters(parameters)
             _validate_agent(name, construction, state["agents"][name])
         for name, entry in state["objects"].items():
             if not name or not isinstance(name, str):

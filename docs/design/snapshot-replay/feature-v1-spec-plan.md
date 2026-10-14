@@ -68,12 +68,13 @@ the recorded results for step/seek playback. The artifact reports exactly
 which inputs, state owners and steps it covers. A changed external policy or
 runtime setting is a new continuation, not proof of identical replay.
 
-The implemented supported-profile Python shape is:
+The current supported-profile Python shape is (application callbacks and
+their data restorer must be installed by the caller):
 
 ```python
 sim = build_supported_simulation()  # ordinary PBF setup
 sim.configure_state_recording(
-    profile=KinematicManipulationProfile(...),  # validation example's declared support
+    profile=KinematicProfile(allowed_callbacks=(scenario_callback,)),
     records=(DataRecord("scenario", 1, capture_scenario_state, required_for_restore=True),),
     output="run-dir",
     checkpoint_every_steps=1,
@@ -82,14 +83,9 @@ register_scenario_callbacks(sim, scenario_state=ScenarioState())
 sim.run_simulation()  # PBF records completed steps; no user step loop
 
 # Separate process, after the source has exited:
-profile = KinematicManipulationProfile.from_manifest(load_recording_manifest("run-dir"))
-manifest, checkpoint = load_supported_checkpoint("run-dir", at_or_before=2.1, profile=profile)
-sim = restore_supported_simulation(manifest, checkpoint, profile=profile)
-robot = next(agent for agent in sim.agents if agent.name == "mobile-arm")
-box = next((obj for obj in sim.sim_objects if obj.name == "box-001"), None)
-scenario_state = checkpoint["records"]["scenario"]["value"]
-register_scenario_callbacks(sim, scenario_state=scenario_state)
-sim.run_simulation(resume=True)
+register_data_restorer("scenario", 1, restore_scenario_state)
+sim = load_supported_simulation("run-dir", at_or_before=2.1)
+sim.run_simulation()
 
 with ResultPlayback("run-dir") as playback:
     playback.seek_step(21)

@@ -92,7 +92,7 @@ Acceptance conditions:
    Decide whether format optimization is needed; changing the format is **not**
    a completion condition here.
 
-## Findings from current code
+## Pre-implementation baseline (superseded by this PR)
 
 - `StateRecorder` already owns completed-step capture, `manifest.json`,
   `frames.jsonl`, `inputs.jsonl` and checkpoint files. `RecordingProfile` is

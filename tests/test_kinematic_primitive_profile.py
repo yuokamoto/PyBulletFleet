@@ -190,6 +190,86 @@ def test_unknown_agent_motion_mode_is_rejected(primitive_artifact: Path) -> None
         KinematicProfile().validate_checkpoint(manifest, state)
 
 
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("mass", -1),
+        ("fixed_base", "false"),
+        ("collision_mode", "unknown"),
+        ("asset_sha256", "bad"),
+    ],
+)
+def test_invalid_agent_construction_is_rejected(primitive_artifact: Path, field: str, value: object) -> None:
+    manifest = copy.deepcopy(load_recording_manifest(primitive_artifact))
+    state = json.loads((primitive_artifact / "checkpoints" / "000000001.json").read_text())
+    manifest["construction"]["agents"]["robot"][field] = value
+    with pytest.raises(ValueError):
+        KinematicProfile().validate_checkpoint(manifest, state)
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [("max_linear_vel", "fast"), ("max_linear_accel", [1, 2]), ("cmd_vel_timeout", -1), ("navigation_2d", "yes")],
+)
+def test_invalid_controller_construction_is_rejected(primitive_artifact: Path, field: str, value: object) -> None:
+    manifest = copy.deepcopy(load_recording_manifest(primitive_artifact))
+    state = json.loads((primitive_artifact / "checkpoints" / "000000001.json").read_text())
+    manifest["construction"]["agents"]["robot"]["controller"]["parameters"][field] = value
+    with pytest.raises(ValueError, match="controller"):
+        KinematicProfile().validate_checkpoint(manifest, state)
+
+
+def test_live_pickability_change_is_rejected(primitive_artifact: Path) -> None:
+    from pybullet_fleet.replay import load_supported_simulation
+
+    sim = load_supported_simulation(primitive_artifact, at_or_before=0.1)
+    try:
+        obj = sim.get_unique_object_by_name("sphere")
+        obj.pickable = not obj.pickable
+        with pytest.raises(ValueError, match="supported primitive construction"):
+            KinematicProfile().capture(sim)
+    finally:
+        p.disconnect(sim.client)
+
+
+def test_frequency_callback_is_rejected_even_if_allowlisted(tmp_path: Path) -> None:
+    from pybullet_fleet.core_simulation import MultiRobotSimulationCore, SimulationParams
+
+    sim = MultiRobotSimulationCore(SimulationParams(gui=False, physics=False, collision_check_frequency=0))
+    try:
+
+        def callback(_sim, _dt):
+            pass
+
+        sim.register_callback(callback, frequency=10)
+        with pytest.raises(ValueError, match="Undeclared simulation callback"):
+            sim.configure_state_recording(
+                profile=KinematicProfile(allowed_callbacks=(callback,)), output=str(tmp_path / "recording")
+            )
+    finally:
+        p.disconnect(sim.client)
+
+
+@pytest.mark.parametrize("change", ["metadata", "controller"])
+def test_live_agent_construction_change_is_rejected(change: str) -> None:
+    from pybullet_fleet.agent import Agent
+    from pybullet_fleet.core_simulation import MultiRobotSimulationCore, SimulationParams
+
+    sim = MultiRobotSimulationCore(SimulationParams(gui=False, physics=False, collision_check_frequency=0))
+    try:
+        agent = Agent.from_urdf("pybullet_fleet/robots/mobile_robot.urdf", name="robot", sim_core=sim)
+        profile = KinematicProfile()
+        profile.construction(sim)
+        if change == "metadata":
+            agent.user_data["extra"] = 1
+        else:
+            agent.controller.params.max_linear_vel = 0.5
+        with pytest.raises(ValueError, match="Unsupported Agent metadata or controller change"):
+            profile.capture(sim)
+    finally:
+        p.disconnect(sim.client)
+
+
 def test_motion_mode_changed_after_spawn_is_not_silently_captured() -> None:
     from pybullet_fleet.agent import Agent
     from pybullet_fleet.core_simulation import MultiRobotSimulationCore, SimulationParams
