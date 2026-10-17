@@ -28,6 +28,7 @@ from pybullet_fleet.config_utils import forward_spawn_params as _forward_spawn_p
 from pybullet_fleet.agent_plugin import AgentPlugin
 
 if TYPE_CHECKING:
+    from pybullet_fleet._replan import PathRejection
     from pybullet_fleet.controller import Controller
     from pybullet_fleet.controller_params import ControllerParams
 
@@ -1158,23 +1159,30 @@ class Agent(SimObject):
         # Single goal is just a path with one waypoint
         return self.set_path([goal], direction=direction)
 
-    def path_rejection(self, path: List[Pose]) -> Optional[str]:
+    def path_rejection(self, path: List[Pose]) -> "Optional[PathRejection]":
         """Why :meth:`set_path` would refuse ``path`` right now, or ``None``.
+
+        A :class:`~pybullet_fleet._replan.PathRejection`: ``reason`` says why,
+        ``temporary`` whether it lasts only until the current motion ends (a
+        fixed-base robot and an empty path are permanent).
 
         A moving omni agent continues its motion into a new path, so it can
         only take one whose straight-line trajectory from its current
         velocity exists within its configured limits; at rest every path is
         taken. Asking first lets a caller report a refusal before acting.
         """
+        from pybullet_fleet._replan import PathRejection
+
         if self.use_fixed_base:
-            return "fixed-base robot"
+            return PathRejection("fixed-base robot", temporary=False)
         if len(path) == 0:
-            return "empty path"
+            return PathRejection("empty path", temporary=False)
+        reason = None
         if self._batch_controller is not None:
-            return self._batch_controller.path_rejection(self, path)
-        if self._controllers:
-            return self._controllers[0].path_rejection(self, path)
-        return None
+            reason = self._batch_controller.path_rejection(self, path)
+        elif self._controllers:
+            reason = self._controllers[0].path_rejection(self, path)
+        return PathRejection(reason, temporary=True) if reason is not None else None
 
     def _make_default_controller(self):
         """Build the default Omni/Diff controller from ``self._motion_mode``.

@@ -378,7 +378,9 @@ def _validate_navigation(value: dict, *, differential: bool) -> None:
             "forward",
         )
         v0 = trajectory["v0"]
-        if isinstance(v0, bool) or not isinstance(v0, (int, float)) or not math.isfinite(v0) or v0 < 0:
+        # Signed: a trajectory started moving away from its goal records a
+        # negative initial speed.
+        if isinstance(v0, bool) or not isinstance(v0, (int, float)) or not math.isfinite(v0):
             raise ValueError("Invalid navigation initial speed")
         if trajectory["origin"] is not None:
             _vector(trajectory["origin"], 3, "forward origin")

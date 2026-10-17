@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pybullet_fleet._replan import refused_for_now
 from pybullet_fleet.controller import Controller
 from pybullet_fleet.geometry import Pose
 from pybullet_fleet.logging_utils import get_lazy_logger
@@ -49,7 +50,8 @@ class PatrolController(Controller):
             target = self._waypoints[self._current_idx]
             # Refused while the agent is still moving somewhere it cannot turn
             # from (see Agent.set_path): try again on the next update.
-            self._started = agent.set_goal_pose(Pose.from_xyz(*target)) is not False
+            goal = Pose.from_xyz(*target)
+            self._started = agent.set_goal_pose(goal) is not False or not refused_for_now(agent, [goal])
             return False
 
         # Advance when agent stops moving
@@ -63,7 +65,8 @@ class PatrolController(Controller):
             target = self._waypoints[next_idx]
             # Advance only once the goal is taken; a refused one (see
             # Agent.set_path) is tried again on the next update.
-            if agent.set_goal_pose(Pose.from_xyz(*target)) is not False:
+            goal = Pose.from_xyz(*target)
+            if agent.set_goal_pose(goal) is not False or not refused_for_now(agent, [goal]):
                 self._current_idx = next_idx
                 self._wait_timer = self._wait_time
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 import math
 import random
 
+from pybullet_fleet._replan import refused_for_now
 from pybullet_fleet.controller import Controller
 from pybullet_fleet.geometry import Pose
 
@@ -50,7 +51,8 @@ class RandomWalkController(Controller):
                 z,
             ]
             # A refused goal (see Agent.set_path) is replaced on the next update.
-            if agent.set_goal_pose(Pose.from_xyz(*target)) is not False:
+            goal = Pose.from_xyz(*target)
+            if agent.set_goal_pose(goal) is not False or not refused_for_now(agent, [goal]):
                 self._wait_timer = random.uniform(*self._wait_range)
 
         return False

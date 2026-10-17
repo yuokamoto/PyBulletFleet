@@ -132,9 +132,9 @@ class FleetCommandDispatcher:
         # Agent.set_path); report the others as rejected before acting.
         for name in list(accepted):
             check = getattr(accepted[name], "path_rejection", None)
-            reason = check([by_name[name].to_pose()]) if callable(check) else None
-            if reason is not None:
-                rejected[name] = reason
+            rejection = check([by_name[name].to_pose()]) if callable(check) else None
+            if rejection is not None:
+                rejected[name] = str(getattr(rejection, "reason", rejection))
                 del accepted[name]
         ack = self._ack("navigate", resolved_id, source, tuple(command.name for command in commands), accepted, rejected)
         for name in ack.accepted_names:

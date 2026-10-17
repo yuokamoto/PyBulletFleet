@@ -16,6 +16,7 @@ from pybullet_fleet.behavior_tree_core import (
     Position3,
     TickResult,
 )
+from pybullet_fleet._replan import refused_for_now
 from pybullet_fleet.geometry import Pose
 
 
@@ -44,7 +45,10 @@ class PyBulletFleetNavigationAdapter:
     agent: GoalPoseAgent
 
     def start_navigation(self, goal: Position3) -> bool:
-        return self.agent.set_goal_pose(Pose.from_xyz(*goal))
+        pose = Pose.from_xyz(*goal)
+        # False only for a refusal that ends with the current motion; a
+        # permanent one counts as started, as before.
+        return self.agent.set_goal_pose(pose) is not False or not refused_for_now(self.agent, [pose])
 
     def navigation_status(self) -> NavigationStatus:
         if self.agent.is_moving or self.agent.goal_pose is not None:

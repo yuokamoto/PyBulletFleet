@@ -26,8 +26,11 @@ are not recommended for production use yet.
   and path continue unchanged, no limit is ever exceeded, and
   `Agent.set_path` / `set_goal_pose` return `False` (`True` when taken; the
   `AgentManager.set_goal_pose*` wrappers pass it on). `Agent.path_rejection()`
-  gives the reason without acting. At rest every goal is taken, as before.
-  Callers inside the library retry a refused goal on their next update
+  gives the reason without acting, as a `PathRejection` whose `temporary`
+  flag tells a refusal that lasts only while the agent moves from a
+  permanent one (fixed base, empty path). At rest every goal is taken, as
+  before. Callers inside the library retry a temporarily refused goal on
+  their next update
   (`MoveAction`, `PatrolController`, `RandomWalkController`, the behaviour
   tree's `NavigateTo`, whose `NavigationAdapter.start_navigation()` may now
   return `False`), and `FleetCommandDispatcher.navigate()` reports it in the

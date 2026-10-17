@@ -19,7 +19,7 @@ and the motion cannot disagree.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Optional, Sequence, Tuple
+from typing import TYPE_CHECKING, Any, NamedTuple, Optional, Sequence, Tuple
 
 import numpy as np
 
@@ -28,6 +28,33 @@ from pybullet_fleet.geometry import rotate_vector
 
 if TYPE_CHECKING:
     from pybullet_fleet.controller_params import ControllerParams
+
+
+class PathRejection(NamedTuple):
+    """Why an agent refuses a path.
+
+    ``temporary`` is ``True`` for a refusal that lasts only while the agent is
+    moving (no trajectory from its current velocity): the same path is taken
+    once that motion ends, so a caller can try again. ``False`` is permanent
+    for this agent and path (a fixed-base robot, an empty path).
+    """
+
+    reason: str
+    temporary: bool
+
+
+def refused_for_now(agent: Any, path: Sequence[Any]) -> bool:
+    """Whether ``agent`` refuses ``path`` only until its current motion ends.
+
+    For callers that retry: a permanent refusal must not be retried forever.
+    Works with any agent-like object; one without ``path_rejection`` never
+    refuses.
+    """
+    check = getattr(agent, "path_rejection", None)
+    if not callable(check):
+        return False
+    return bool(getattr(check(list(path)), "temporary", False))
+
 
 #: Below this speed (m/s) the agent counts as at rest.
 REST_SPEED = 1e-6

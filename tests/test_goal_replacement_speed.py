@@ -420,3 +420,65 @@ def test_a_checkpoint_of_a_reversal_restores_the_same_trajectory(sim):
     restored.restore_navigation_state(state, list(agent.get_pose().orientation))
     for t in np.linspace(sim.sim_time, sim.sim_time + 2.0, 9):
         assert restored._tpi_forward.get_point(t)[0] == pytest.approx(controller._tpi_forward.get_point(t)[0])
+
+
+def test_a_reversal_checkpoint_passes_profile_validation(sim):
+    """The recorded initial speed is signed; validation accepts a negative one."""
+    from pybullet_fleet.replay.kinematic_profile import _validate_navigation
+
+    agent = _agent(sim)
+    _cruise(sim, agent)
+    agent.set_goal_pose(_goal(agent.get_pose().position[0] - 2.0))
+    sim.step_once()
+    state = agent._controllers[0].capture_navigation_state()
+    assert state["forward"]["v0"] < 0
+    _validate_navigation(state, differential=False)
+
+
+class TestPermanentRefusalsAreNotRetried:
+    """A refusal that ends with the motion is retried; a permanent one is not."""
+
+    def _fixed(self, sim):
+        return Agent.from_params(
+            AgentSpawnParams(
+                urdf_path="robots/simple_cube.urdf",
+                initial_pose=Pose.from_xyz(0.0, 0.0, 0.1),
+                motion_mode=MotionMode.OMNIDIRECTIONAL,
+                use_fixed_base=True,
+            ),
+            sim_core=sim,
+        )
+
+    def test_the_rejection_says_which_kind(self, sim):
+        fixed = self._fixed(sim)
+        assert fixed.path_rejection([_goal(1.0)]).temporary is False
+        moving = _agent(sim)
+        _cruise(sim, moving)
+        x, y, _ = moving.get_pose().position
+        rejection = moving.path_rejection([_goal(x, y + 1.0)])
+        assert rejection.temporary is True and "off the line" in rejection.reason
+
+    def test_a_move_action_on_a_fixed_base_completes(self, sim):
+        from pybullet_fleet.action import MoveAction
+        from pybullet_fleet.geometry import Path
+        from pybullet_fleet.types import ActionStatus
+
+        agent = self._fixed(sim)
+        action = MoveAction(path=Path.from_positions([[1.0, 0.0, 0.1]]))
+        agent.add_action(action)
+        for _ in range(3):
+            sim.step_once()
+        assert action.status == ActionStatus.COMPLETED
+
+    def test_navigate_to_on_a_fixed_base_counts_as_started(self, sim):
+        from pybullet_fleet.agent_behavior_tree import PyBulletFleetNavigationAdapter
+
+        assert PyBulletFleetNavigationAdapter(self._fixed(sim)).start_navigation((1.0, 0.0, 0.1)) is True
+
+    def test_navigate_to_while_moving_off_line_is_retried(self, sim):
+        from pybullet_fleet.agent_behavior_tree import PyBulletFleetNavigationAdapter
+
+        agent = _agent(sim)
+        _cruise(sim, agent)
+        x, y, _ = agent.get_pose().position
+        assert PyBulletFleetNavigationAdapter(agent).start_navigation((x, y + 1.0, 0.1)) is False
