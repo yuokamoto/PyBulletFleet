@@ -115,6 +115,14 @@ anything read from the bodies with `sim_core.step_end_time`: `sim_time +
 timestep` from the object update on, `sim_time` in a `pre_step` subscriber
 (which runs before it), and the elapsed time outside a step.
 
+It is also the time position controllers work in. The object update evaluates
+each trajectory at `step_end_time` (the end of the step), and a trajectory
+started now begins at `step_end_time`, so a pose and its stamp always agree --
+the same rule kinematic joints follow. A goal set in a `pre_step` subscriber
+therefore moves in that same step; one set later in the step, or outside it,
+moves from the next step. A goal replaced mid-motion continues from the speed
+of the pose in effect at `step_end_time`.
+
 ### Frequency-limited handlers
 
 Callbacks and plugins with a `frequency`, `collision_check_frequency` and the

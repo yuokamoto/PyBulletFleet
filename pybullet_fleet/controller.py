@@ -69,6 +69,21 @@ if TYPE_CHECKING:
 logger = get_lazy_logger(__name__)
 
 
+def pose_time(sim_core: Any) -> float:
+    """Simulated time of the poses in effect, for trajectory start and evaluation.
+
+    :attr:`MultiRobotSimulationCore.step_end_time`: the end of the step from
+    its object update on, so a trajectory evaluated during the update yields
+    the pose the step ends at, and one started now begins from the pose in
+    effect. A stand-in core without it (a test double) falls back to
+    ``sim_time``.
+    """
+    if sim_core is None:
+        return 0.0
+    stamp = getattr(sim_core, "step_end_time", None)
+    return float(sim_core.sim_time if stamp is None else stamp)
+
+
 # ---------------------------------------------------------------------------
 # Registry
 # ---------------------------------------------------------------------------
@@ -499,7 +514,7 @@ class KinematicController(Controller):
         :func:`~pybullet_fleet._tpi.build_tpi_from_speed`); ``0`` starts from
         rest.
         """
-        t0 = agent.sim_core.sim_time if agent.sim_core is not None else 0.0
+        t0 = pose_time(agent.sim_core)
 
         direction_unit_body = self._forward_direction_unit_body
         if direction_unit_body is None or not np.any(direction_unit_body):
@@ -577,7 +592,7 @@ class KinematicController(Controller):
         - Differential: ``ROTATE``, then ``FORWARD``
         """
         current_pose = agent.get_pose()
-        current_time = agent.sim_core.sim_time if agent.sim_core is not None else 0.0
+        current_time = pose_time(agent.sim_core)
 
         if self._pose_phase == PosePhase.ROTATE:
             if self._apply_rotation(agent, current_time, current_pose):
@@ -935,7 +950,7 @@ class OmniController(KinematicController):
         if not self._under_way(agent):
             return None
         pose = agent.get_pose()
-        t0 = agent.sim_core.sim_time if agent.sim_core is not None else 0.0
+        t0 = pose_time(agent.sim_core)
         return replacement_rejection(
             self.params, pose.position, pose.orientation, agent._current_velocity, path[0].position, t0
         )
@@ -1065,7 +1080,7 @@ class OmniController(KinematicController):
         the zero-distance forward phase.
         """
         current_pose = agent.get_pose()
-        t0 = agent.sim_core.sim_time if agent.sim_core is not None else 0.0
+        t0 = pose_time(agent.sim_core)
 
         self._pose_phase = PosePhase.ROTATE
         self._reset_forward_state()
@@ -1229,7 +1244,7 @@ class DifferentialController(KinematicController):
         else:
             self._forward_direction_unit_body = np.zeros(3)
 
-        t0 = agent.sim_core.sim_time if agent.sim_core is not None else 0.0
+        t0 = pose_time(agent.sim_core)
 
         self._pose_phase = PosePhase.ROTATE
 

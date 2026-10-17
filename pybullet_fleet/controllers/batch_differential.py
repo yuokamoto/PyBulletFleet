@@ -31,6 +31,7 @@ import numpy as np
 from scipy.spatial.transform import Rotation as R
 
 from pybullet_fleet._tpi import build_tpi, extract_phase_params, trapezoid_distance
+from pybullet_fleet.controller import pose_time
 from pybullet_fleet.controllers.batch_base import BatchKinematicController
 from pybullet_fleet.geometry import Pose, quat_angle_between, quat_slerp_batch
 from pybullet_fleet.logging_utils import get_lazy_logger
@@ -238,7 +239,7 @@ class BatchDifferentialController(BatchKinematicController):
             self._final_orient_target_quat[idx] = np.asarray(path[-1].orientation, dtype=np.float64)
         else:
             self._align_final_orient[idx] = False
-        self._begin_waypoint(idx, agent, path[0], float(self._sim_core.sim_time), direction=direction)
+        self._begin_waypoint(idx, agent, path[0], pose_time(self._sim_core), direction=direction)
 
     # ------------------------------------------------------------------ #
     # Waypoint lifecycle (per-agent, called rarely)
@@ -497,7 +498,7 @@ class BatchDifferentialController(BatchKinematicController):
                 self._apply_phase1(dt)
             return self._moved_mask
 
-        now = float(sim_core.sim_time)
+        now = pose_time(sim_core)
 
         # ----- ROTATE / FINAL_ROTATE: slerp orientation -----
         completed_rotate = np.zeros(n, dtype=bool)

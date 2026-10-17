@@ -14,6 +14,18 @@ are not recommended for production use yet.
 
 ### Changed
 
+- Position controllers (`OmniController`, `DifferentialController` and the
+  batched omni and differential controllers) evaluate their trajectories at
+  the end of the step, `step_end_time`, and start a trajectory there, as
+  kinematic joints already did. A step's pose is now the trajectory at the time
+  `step_end_time` stamps it with; before, it was the trajectory one step
+  earlier. Consequences: a goal set in a `pre_step` subscriber moves in that
+  same step, a motion completes one step sooner, and a goal replaced
+  mid-motion is judged on the speed of the pose in effect when it is set,
+  per-agent and batched alike, whichever phase sets it. The omni checkpoint
+  proof's evidence
+  values change accordingly (its pose at `S_3` is the trajectory at 0.3 s).
+
 - A goal or path set on a moving omnidirectional agent (per-agent
   `OmniController` and `BatchOmniController`) now continues the motion: the
   new trajectory starts from the agent's speed toward the new goal instead of

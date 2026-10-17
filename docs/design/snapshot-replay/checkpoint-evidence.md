@@ -25,26 +25,28 @@ flag; the runtime PyBullet/PBF object IDs are not persisted.
 
 | Boundary | Reference X / velocity X / moving | Restored X / velocity X / moving |
 | --- | --- | --- |
-| `S_3`, 0.3 s | 0.020 / 0.200 / true | 0.020 / 0.200 / true |
-| `S_4`, 0.4 s | 0.045 / 0.300 / true | 0.045 / 0.300 / true |
-| `S_8`, 0.8 s | 0.24044 / 0.56491 / true | 0.24044 / 0.56491 / true |
-| `S_12`, 1.2 s | 0.38640 / 0.16491 / true | 0.38640 / 0.16491 / true |
-| `S_14`, 1.4 s | 0.400 / 0.000 / false | 0.400 / 0.000 / false |
+| `S_3`, 0.3 s | 0.045 / 0.300 / true | 0.045 / 0.300 / true |
+| `S_4`, 0.4 s | 0.080 / 0.400 / true | 0.080 / 0.400 / true |
+| `S_8`, 0.8 s | 0.29193 / 0.46491 / true | 0.29193 / 0.46491 / true |
+| `S_12`, 1.2 s | 0.39789 / 0.06491 / true | 0.39789 / 0.06491 / true |
+| `S_13`, 1.3 s | 0.400 / 0.000 / false | 0.400 / 0.000 / false |
 
 The fresh-process test compares **every** suffix step, not only these display
 rows. The largest observed position difference in the inspected headless run
-was about `1.4e-17 m`; tests use an explicit `1e-8` absolute pose/velocity
+was 0 m; tests use an explicit `1e-8` absolute pose/velocity
 tolerance rather than asserting bitwise identity. A negative control that
 reissues the goal at the checkpoint pose differs from the reference on the
 next step. Invalid profile/version, changed construction conditions, clock
 inconsistency, missing/nonfinite trajectory fields and inconsistent pose or
 velocity are rejected before restoring core state.
 
-`step_once()` evaluates controller motion at the step's starting time, then
-updates elapsed time and step count after `POST_STEP`. Capture therefore runs
-after `step_once()` returns. At completed `S_3`, elapsed time is `0.3 s` and
-the last pose was evaluated at `0.2 s`; the next evaluation is at `0.3 s`.
-The restored run starts at the same next evaluation time. A `POST_STEP`
+`step_once()` evaluates controller motion at the step's end time
+(`step_end_time`), then updates elapsed time and step count after `POST_STEP`.
+Capture therefore runs after `step_once()` returns. At completed `S_3`, elapsed
+time is `0.3 s` and the last pose is the trajectory at `0.3 s`; the next
+evaluation is at `0.4 s`. The restored run starts at the same next evaluation
+time. The trajectory ends at about 1.265 s, so arrival is the step ending at
+`1.3 s`. A `POST_STEP`
 subscriber collecting the resumed trace labels it with the completing step
 because the core counter has not advanced yet. The proof does not change this
 existing callback-time contract.

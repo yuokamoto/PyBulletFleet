@@ -27,6 +27,7 @@ import numpy as np
 
 from pybullet_fleet._replan import replacement_rejection
 from pybullet_fleet._tpi import build_tpi, build_tpi_from_speed, extract_phase_params, trapezoid_distance
+from pybullet_fleet.controller import pose_time
 from pybullet_fleet.controllers.batch_base import BatchKinematicController
 from pybullet_fleet.geometry import Pose, quat_angle_between, quat_slerp_batch, rotate_vector
 from pybullet_fleet.logging_utils import get_lazy_logger
@@ -205,7 +206,7 @@ class BatchOmniController(BatchKinematicController):
         idx = self._agent_index.get(id(agent))
         if idx is None or not path or self._sim_core is None or self._phase[idx] != _PHASE_FORWARD:
             return None
-        now = float(self._sim_core.sim_time)
+        now = pose_time(self._sim_core)
         current = agent.get_pose()
         return replacement_rejection(
             agent.controller_params,
@@ -248,7 +249,7 @@ class BatchOmniController(BatchKinematicController):
         # OmniController keeps: the agent's reported velocity here is the last
         # step's average (low while accelerating, high while braking) and,
         # right after arrival, still non-zero.
-        now = float(self._sim_core.sim_time)
+        now = pose_time(self._sim_core)
         initial_velocity = None
         if self._phase[idx] == _PHASE_FORWARD:
             initial_velocity = self._row_velocity(idx, now)
@@ -442,8 +443,8 @@ class BatchOmniController(BatchKinematicController):
                 self._apply_phase1(dt)
             return self._moved_mask
 
-        # Match OmniController._apply_pose semantics: evaluates at sim_core.sim_time.
-        now = float(sim_core.sim_time)
+        # Match OmniController._apply_pose semantics: evaluates at the poses' time (step_end_time).
+        now = pose_time(sim_core)
 
         # ----- TRANSLATE phase -----
         completed = np.zeros(n, dtype=bool)

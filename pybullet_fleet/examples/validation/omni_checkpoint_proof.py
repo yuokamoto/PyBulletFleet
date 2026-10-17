@@ -31,7 +31,7 @@ PROFILE = "pbf.single_omni_straight_checkpoint"
 VERSION = 2
 DT = 0.1
 CHECKPOINT_STEP = 3
-END_TIME = 1.4
+END_TIME = 1.3
 ROBOT_NAME = "checkpoint-robot"
 INITIAL = Pose.from_xyz(0.0, 0.0, 0.1)
 GOAL = Pose.from_xyz(0.4, 0.0, 0.1)
@@ -250,11 +250,12 @@ def validate_checkpoint(checkpoint: object) -> dict:
         or forward["v0"] != 0.0
     ):
         raise ValueError("Checkpoint trajectory differs from the supported profile")
-    # The last step evaluated its TPI at (k-1)*dt, not at the next-step time.
+    # A completed step's pose is its trajectory at the step's end, k*dt: the
+    # checkpoint's elapsed time (step_end_time).
     from pybullet_fleet._tpi import build_tpi
 
     tpi = build_tpi(0, math.dist(origin, goal), vmax, accel, t0, decel=decel)
-    traveled, expected_speed, _ = tpi.get_point((CHECKPOINT_STEP - 1) * DT)
+    traveled, expected_speed, _ = tpi.get_point(CHECKPOINT_STEP * DT)
     direction = [(g - o) / math.dist(origin, goal) for o, g in zip(origin, goal)]
     expected_position = [o + d * traveled for o, d in zip(origin, direction)]
     expected_velocity = [d * expected_speed for d in direction]

@@ -603,8 +603,9 @@ class MultiRobotSimulationCore:
         # See docs/design/two-phase-step/spec.md.
         self._in_step: bool = False
         self._in_post_step: bool = False  # Counters advance after POST_STEP callbacks.
-        # Set once the step's object update has run: from then on the poses are
-        # those of the end of the step (see step_end_time). PRE_STEP precedes it.
+        # Raised when the step's object update starts: from then on the poses
+        # are computed for, and then are, those of the end of the step (see
+        # step_end_time). PRE_STEP precedes it.
         self._poses_advanced: bool = False
         self._resume_ready: bool = False  # Set only by a validated completed-step restore.
         self._pending_pose_ids: Set[int] = set()
@@ -1261,12 +1262,15 @@ class MultiRobotSimulationCore:
     def step_end_time(self) -> float:
         """Simulated time the bodies' poses belong to.
 
-        Once a step has updated its objects -- in Phase-1 callbacks, plugin
-        hooks, the ``post_step`` event and post-step callbacks -- the poses are
-        those at the end of the step while :attr:`sim_time` still holds its
-        start; this is ``sim_time + timestep`` there. Before the update (a
-        ``pre_step`` subscriber) the poses are still those at the start, and
-        this is ``sim_time``. Outside a step it is the completed elapsed time.
+        This is also the time position controllers evaluate their trajectories
+        at, and the start time they give a trajectory begun now, so a pose and
+        its stamp always agree. A step computes the poses at its end: from the
+        object update on -- the update itself, Phase-1 callbacks, plugin hooks,
+        the ``post_step`` event and post-step callbacks -- this is
+        ``sim_time + timestep`` while :attr:`sim_time` still holds the step's
+        start. Before the update (a ``pre_step`` subscriber) the poses are
+        still those at the start, and this is ``sim_time``. Outside a step it is
+        the completed elapsed time.
         """
         if self._in_step or self._in_post_step:
             return self.sim_time + self._params.timestep if self._poses_advanced else self.sim_time
@@ -4717,6 +4721,9 @@ class MultiRobotSimulationCore:
             # _needs_update=True, but their own controller is IDLE so the
             # per-object loop is a cheap no-op for them.
             # BCs are owned by AgentManagers registered with this sim_core.
+            # From here on the poses are computed for the end of the step:
+            # controllers evaluate their trajectories at step_end_time.
+            self._poses_advanced = True
             for mgr in self._registered_managers:
                 bc = getattr(mgr, "batch_controller", None)
                 if bc is not None:
@@ -4727,7 +4734,6 @@ class MultiRobotSimulationCore:
                     moved = obj.update(self._params.timestep)
                     if moved and obj.object_id in self._kinematic_objects:
                         self._moved_this_step.add(obj.object_id)
-            self._poses_advanced = True
 
             if measure_timing:
                 t1 = time.perf_counter()
