@@ -16,7 +16,7 @@ import pybullet as p
 from .geometry import Pose, as_axes
 from .sim_object import ShapeParams, SimObject, SimObjectSpawnParams, load_urdf_body
 from .action import Action
-from .types import MotionMode, MovementDirection, ActionStatus, CollisionMode
+from .types import ControllerMode, MotionMode, MovementDirection, ActionStatus, CollisionMode
 from .tools import normalize_vector_param  # noqa: F401  (re-exported for legacy callers)
 from pybullet_fleet._tpi import try_build_tpi
 from pybullet_fleet.joint import KinematicJoint
@@ -1386,13 +1386,21 @@ class Agent(SimObject):
 
         final_path = []
 
-        # Add approach waypoint if needed. Not while a path is under way: it is
-        # the current pose, a zero-length first segment, and would stop the
+        # Add approach waypoint if needed. Not while the agent is under way: it
+        # is the current pose, a zero-length first segment, and would stop the
         # agent dead before the new path -- a new goal mid-motion continues the
-        # motion instead. Navigation state, not the reported velocity: a batch
-        # controller reports the arrival step's average speed until its next
-        # flush, after the agent has already stopped.
-        if auto_approach and distance_to_first > approach_threshold and not self.is_moving:
+        # motion instead. Under way is a path in progress (navigation state, not
+        # the reported velocity: a batch controller reports the arrival step's
+        # average speed until its next flush, after the agent has stopped) or a
+        # velocity command still moving it.
+        base = self._controllers[0] if self._batch_controller is None and self._controllers else None
+        under_velocity_command = (
+            base is not None
+            and getattr(base, "_mode", None) is ControllerMode.VELOCITY
+            and bool(np.any(self._current_velocity))
+        )
+        under_way = self.is_moving or under_velocity_command
+        if auto_approach and distance_to_first > approach_threshold and not under_way:
             # Add current position as approach waypoint
             # This creates a path: current_pose -> path[0] -> path[1] -> ...
             final_path.append(current_pose)

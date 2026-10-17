@@ -182,6 +182,19 @@ class TestGoalReplacedMidMotion:
         # the arrival step's average speed would put it at or above.
         assert speed < ACCEL * DT - 1e-6
 
+    def test_a_goal_after_a_velocity_command_continues_its_speed(self, sim):
+        """Velocity mode does not set is_moving; the switch to a goal must not
+        insert the zero-length approach waypoint and restart from rest."""
+        agent = _agent(sim)
+        agent._controllers[0].set_velocity(vx=VMAX)
+        for _ in range(5):
+            sim.step_once()
+        assert np.linalg.norm(agent.velocity[:2]) == pytest.approx(VMAX, rel=1e-3)
+        x0 = agent.get_pose().position[0]
+        agent.set_goal_pose(_goal(x0 + 20.0))
+        samples = _run(sim, agent, 3)
+        assert all(speed == pytest.approx(VMAX, rel=1e-3) for _, _, speed in samples)
+
     def test_a_path_set_on_arrival_keeps_its_approach_waypoint(self, sim, batch):
         """Arrived is not moving, whatever the arrival step's speed says."""
         agent = _agent(sim, batch)
