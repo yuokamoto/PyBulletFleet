@@ -143,6 +143,14 @@ class TestPostStepPhase:
         assert [end - start for start, end in seen] == [pytest.approx(0.1)] * 4
         assert sim.step_end_time == pytest.approx(0.2)  # outside a step: the elapsed time
 
+    def test_step_end_time_is_the_start_before_the_update(self, sim):
+        """PRE_STEP runs before the objects move: its poses are the start's."""
+        seen = []
+        sim.events.on(SimEvents.PRE_STEP, lambda **_: seen.append((sim.sim_time, sim.step_end_time)))
+        sim.step_once()
+        sim.step_once()
+        assert [end - start for start, end in seen] == [0.0, 0.0]
+
     def test_rejects_an_unknown_phase(self, sim):
         with pytest.raises(ValueError):
             sim.register_callback(lambda sc, dt: None, phase="later")

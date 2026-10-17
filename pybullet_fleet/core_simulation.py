@@ -601,6 +601,9 @@ class MultiRobotSimulationCore:
         # See docs/design/two-phase-step/spec.md.
         self._in_step: bool = False
         self._in_post_step: bool = False  # Counters advance after POST_STEP callbacks.
+        # Set once the step's object update has run: from then on the poses are
+        # those of the end of the step (see step_end_time). PRE_STEP precedes it.
+        self._poses_advanced: bool = False
         self._resume_ready: bool = False  # Set only by a validated completed-step restore.
         self._pending_pose_ids: Set[int] = set()
         # Parent object ids that have link-level kinematic attachments.
@@ -1245,13 +1248,15 @@ class MultiRobotSimulationCore:
     def step_end_time(self) -> float:
         """Simulated time the bodies' poses belong to.
 
-        During a step -- in callbacks, events and controllers -- the poses are
-        already advanced to the end of the step while :attr:`sim_time` still
-        holds its start; this is ``sim_time + timestep`` there. Outside a step
-        it is the completed elapsed time.
+        Once a step has updated its objects -- in Phase-1 callbacks, plugin
+        hooks, the ``post_step`` event and post-step callbacks -- the poses are
+        those at the end of the step while :attr:`sim_time` still holds its
+        start; this is ``sim_time + timestep`` there. Before the update (a
+        ``pre_step`` subscriber) the poses are still those at the start, and
+        this is ``sim_time``. Outside a step it is the completed elapsed time.
         """
         if self._in_step or self._in_post_step:
-            return self.sim_time + self._params.timestep
+            return self.sim_time + self._params.timestep if self._poses_advanced else self.sim_time
         return self._elapsed_sim_time
 
     @staticmethod
@@ -4659,6 +4664,7 @@ class MultiRobotSimulationCore:
         # _in_step gates SimObject._set_pose_internal between buffered and immediate paths.
         # try/finally guarantees the flag is cleared even if a callback / plugin raises.
         self._in_step = True
+        self._poses_advanced = False
         if measure_timing:
             t_phase1 = time.perf_counter()
         try:
@@ -4700,6 +4706,7 @@ class MultiRobotSimulationCore:
                     moved = obj.update(self._params.timestep)
                     if moved and obj.object_id in self._kinematic_objects:
                         self._moved_this_step.add(obj.object_id)
+            self._poses_advanced = True
 
             if measure_timing:
                 t1 = time.perf_counter()
@@ -4890,6 +4897,7 @@ class MultiRobotSimulationCore:
         finally:
             self._in_step = False
             self._in_post_step = False
+            self._poses_advanced = False
 
     def _print_profiling_summary(self) -> None:
         """Print profiling statistics summary (average over last N steps).

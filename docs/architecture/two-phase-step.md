@@ -107,11 +107,12 @@ opportunity.
 
 ### Which time a pose belongs to
 
-During a step, Phase 1 has already advanced the bodies, so in callbacks, plugin
-hooks and step events `sim_core.sim_time` is the time the step **started** at
-while every pose read is the one at its **end**. Stamp anything read from the
-bodies with `sim_core.step_end_time` (`sim_time + timestep` during a step, the
-elapsed time outside one).
+Once Phase 1 has updated the objects -- in callbacks, plugin hooks, the
+`post_step` event and post-step callbacks -- `sim_core.sim_time` is the time
+the step **started** at while every pose read is the one at its **end**. Stamp
+anything read from the bodies with `sim_core.step_end_time`: `sim_time +
+timestep` from the object update on, `sim_time` in a `pre_step` subscriber
+(which runs before it), and the elapsed time outside a step.
 
 ### Frequency-limited handlers
 

@@ -91,8 +91,9 @@ are not recommended for production use yet.
   end of the step, right after the `post_step` event, once poses are written
   and the collision check is done, with the same `frequency` option as Phase-1
   callbacks. Add `MultiRobotSimulationCore.step_end_time`, the simulated time
-  the bodies' poses belong to: during a step `sim_time` is the step's start
-  while poses are already at its end.
+  the bodies' poses belong to: once a step has updated its objects `sim_time`
+  is still the step's start while poses are already at its end (in a
+  `pre_step` subscriber, before the update, it is the start).
 
 - Add `MultiRobotSimulationCore.set_collision_ignore_filter(fn)`: touching
   pairs for which `fn(obj_a, obj_b)` returns `True` are excluded from
