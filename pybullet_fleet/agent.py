@@ -1386,11 +1386,13 @@ class Agent(SimObject):
 
         final_path = []
 
-        # Add approach waypoint if needed. Not while moving: it is the current
-        # pose, a zero-length first segment, and would stop the agent dead
-        # before the path -- a new goal mid-motion continues the motion instead.
-        moving = float(np.linalg.norm(self._current_velocity)) > 1e-9
-        if auto_approach and distance_to_first > approach_threshold and not moving:
+        # Add approach waypoint if needed. Not while a path is under way: it is
+        # the current pose, a zero-length first segment, and would stop the
+        # agent dead before the new path -- a new goal mid-motion continues the
+        # motion instead. Navigation state, not the reported velocity: a batch
+        # controller reports the arrival step's average speed until its next
+        # flush, after the agent has already stopped.
+        if auto_approach and distance_to_first > approach_threshold and not self.is_moving:
             # Add current position as approach waypoint
             # This creates a path: current_pose -> path[0] -> path[1] -> ...
             final_path.append(current_pose)

@@ -182,6 +182,28 @@ class TestGoalReplacedMidMotion:
         # the arrival step's average speed would put it at or above.
         assert speed < ACCEL * DT - 1e-6
 
+    def test_a_path_set_on_arrival_keeps_its_approach_waypoint(self, sim, batch):
+        """Arrived is not moving, whatever the arrival step's speed says."""
+        agent = _agent(sim, batch)
+        agent.set_goal_pose(_goal(1.0))
+        paths = []
+
+        def next_path(sim_core, dt):
+            if not agent.is_moving and not paths:
+                agent.set_goal_pose(_goal(5.0))
+                if batch:
+                    bc = agent._batch_controller
+                    paths.append(bc._paths[bc._agent_index[id(agent)]])
+                else:
+                    paths.append(agent._controllers[0]._path)
+
+        sim.register_callback(next_path, phase="post_step")
+        for _ in range(200):
+            sim.step_once()
+            if paths:
+                break
+        assert paths and len(paths[0]) == 2, "approach waypoint + goal"
+
 
 class TestFromRestUnchanged:
     def test_a_goal_from_rest_ramps_up_from_zero(self, sim, batch):
