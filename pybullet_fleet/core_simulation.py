@@ -463,6 +463,8 @@ class MultiRobotSimulationCore:
         self._next_object_id: int = 0  # Counter for unique object IDs (read/incremented by SimObject.__init__)
         self._last_logged_collision_count: int = 0  # Track last logged collision count
         self._monitor_enabled: bool = params.monitor
+        # Rebuilt in initialize_simulation(): setup_pybullet() may still turn
+        # the GUI off (RECORD), which changes the default refresh rate.
         self._monitor_update_gate = FrequencyGate(self._monitor_update_frequency(params))
         self._last_monitor_log: Optional[float] = None  # time.monotonic() of the last INFO [MONITOR] line
         self._callbacks: List[Dict[str, Any]] = []  # List of callback functions
@@ -1563,6 +1565,7 @@ class MultiRobotSimulationCore:
         if os.environ.get("RECORD") and self._params.gui and not os.environ.get("RECORD_GUI"):
             logger.info("RECORD env var detected: forcing gui=False for headless recording")
             self._params.gui = False
+            self._monitor_update_gate = FrequencyGate(self._monitor_update_frequency(self._params))
 
         options = ""
         if self._params.gui and self._params.window_width > 0 and self._params.window_height > 0:
@@ -3814,7 +3817,8 @@ class MultiRobotSimulationCore:
         self._elapsed_sim_time = 0.0
         self._resume_ready = False
         self._collision_check_gate.reset()
-        self._monitor_update_gate.reset()
+        # From the final GUI mode: setup_pybullet() may have turned it off.
+        self._monitor_update_gate = FrequencyGate(self._monitor_update_frequency(self._params))
         self._last_monitor_log = None  # a fresh run logs its first step
         self._last_logged_collision_count = 0
         self._last_monitor_frame = None

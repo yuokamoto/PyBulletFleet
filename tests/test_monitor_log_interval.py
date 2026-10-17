@@ -167,3 +167,26 @@ def test_nothing_is_computed_when_info_is_off(make_sim):
     for _ in range(5):
         sim.step_once()
     assert len(sim._speed_history) == 0
+
+
+def test_record_forced_headless_keeps_the_headless_monitor_rate(monkeypatch, tmp_path):
+    """setup_pybullet() turns the GUI off under RECORD; the monitor's default
+    rate must follow the final mode (once a second), not the requested GUI's
+    every step."""
+    import pybullet as p
+
+    monkeypatch.setenv("RECORD", str(tmp_path / "unused.gif"))
+    monkeypatch.delenv("RECORD_GUI", raising=False)
+    sim = MultiRobotSimulationCore(
+        SimulationParams(gui=True, monitor=True, enable_monitor_gui=False, target_rtf=0, timestep=0.1, monitor_log_interval=0)
+    )
+    try:
+        assert sim.params.gui is False
+        sim.initialize_simulation()
+        calls = []
+        monkeypatch.setattr(sim, "update_monitor", lambda: calls.append(sim.sim_time))
+        for _ in range(40):
+            sim.step_once()
+        assert len(calls) == 3  # at 1, 2 and 3 s
+    finally:
+        p.disconnect(sim.client)
