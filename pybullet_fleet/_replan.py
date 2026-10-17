@@ -1,16 +1,20 @@
-"""Whether a moving omni agent can take a new goal without breaking its limits.
+"""Whether a moving omni agent can take a new goal within its limits.
 
 A goal or path set while the agent is moving continues the motion: the new
-trajectory starts from the agent's current speed. That is only physically
-possible when the first waypoint lies straight ahead along the current
-velocity and the agent can still stop there at its configured deceleration.
-Anything else -- a goal closer than the braking distance, a goal behind, a
-change of direction -- would need a harder stop than the agent can make, so
-it is rejected: the current motion continues unchanged and the caller is told.
-At rest any goal is accepted.
+straight-line trajectory to the first waypoint starts from the agent's current
+velocity -- its signed component along the new direction, so a goal behind is
+reached by slowing, reversing and driving back. The goal is taken when that
+trajectory exists within the configured limits and rejected otherwise: the
+current motion then continues unchanged and the caller is told. Rejected are a
+goal closer than the braking distance at the configured deceleration, a goal
+where the agent is (it cannot stop on the spot), and a goal off the line of
+motion, whose sideways velocity a straight-line trajectory cannot represent.
+At rest any goal the trajectory solver accepts is taken.
 
 :func:`replacement_rejection` is the one check both omni controllers
-(per-agent and batched) apply.
+(per-agent and batched) apply. It uses the same solver call as the trajectory
+itself (:func:`~pybullet_fleet._tpi.try_build_tpi_from_speed`), so the check
+and the motion cannot disagree.
 """
 
 from __future__ import annotations
@@ -64,9 +68,8 @@ def replacement_rejection(
 ) -> Optional[str]:
     """Why an agent moving at ``velocity`` cannot head for ``goal_position`` now.
 
-    Returns ``None`` when it can: it is at rest, or the goal is ahead along its
-    velocity and it can stop there at its configured deceleration. Otherwise
-    returns a short reason.
+    Returns ``None`` when it can: the straight-line trajectory from its
+    current state exists within its limits. Otherwise returns a short reason.
     """
     pos = np.asarray(position, dtype=float)
     vel = np.asarray(velocity, dtype=float)
@@ -87,8 +90,6 @@ def replacement_rejection(
     unit = disp / distance
     along = float(np.dot(vel, unit))
     across = float(np.linalg.norm(vel - along * unit))
-    if along <= 0.0:
-        return f"goal is behind the motion ({speed:.3g} m/s away from it)"
     if across > CROSS_SPEED_ABS + CROSS_SPEED_REL * speed:
         return f"goal is off the line of motion ({across:.3g} m/s across it)"
     vmax, accel, decel = limits_along(params, orientation, unit)

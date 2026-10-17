@@ -409,6 +409,17 @@ class KinematicController(Controller):
         self._forward_direction_unit_body = None
         self._forward_total_distance_3d = 0.0
 
+    def _under_way(self, agent: "Agent") -> bool:
+        """Whether the agent is moving under this controller.
+
+        A translation in progress or a velocity command -- not the reported
+        velocity alone: on the arrival step it still holds that step's motion
+        although the agent has stopped.
+        """
+        if self._mode == ControllerMode.VELOCITY:
+            return True
+        return agent.is_moving and self._pose_phase == PosePhase.FORWARD
+
     def path_rejection(self, agent: "Agent", path: List[Pose]) -> Optional[str]:
         """Why ``path`` cannot be taken now, or ``None`` if it can.
 
@@ -464,7 +475,7 @@ class KinematicController(Controller):
         # Start trajectory for first waypoint. The agent's velocity is read
         # before anything zeroes it: a controller that can continue the motion
         # (OmniController) starts the new trajectory from it instead of rest.
-        initial_velocity = np.array(agent._current_velocity, dtype=float)
+        initial_velocity = np.array(agent._current_velocity, dtype=float) if self._under_way(agent) else None
         if self._mode == ControllerMode.VELOCITY:
             self._zero_velocity()
         self._mode = ControllerMode.POSE
@@ -911,20 +922,17 @@ class OmniController(KinematicController):
     def path_rejection(self, agent: "Agent", path: List[Pose]) -> Optional[str]:
         """Why ``path`` cannot be taken now, or ``None`` if it can.
 
-        A path set while the agent is moving continues the motion from its
-        current speed. That is only possible when the first waypoint lies
-        straight ahead and the agent can stop there at its configured
-        deceleration; a goal inside the braking distance, behind, or off the
-        line of motion is refused. At rest every path is accepted. See
-        :mod:`pybullet_fleet._replan`.
+        A path set while the agent is moving continues the motion: the
+        straight-line trajectory to the first waypoint starts from the agent's
+        current velocity (its signed component along the line, so a goal
+        behind is reached by reversing). The path is refused when no such
+        trajectory exists within the configured limits -- a goal inside the
+        braking distance, where the agent is, or off the line of motion. At
+        rest every path is accepted. See :mod:`pybullet_fleet._replan`.
         """
         if not path:
             return None
-        # Under way is a translation in progress or a velocity command, not the
-        # reported velocity alone: on the arrival step it still holds that
-        # step's motion although the agent has stopped.
-        translating = self._mode == ControllerMode.POSE and agent.is_moving and self._pose_phase == PosePhase.FORWARD
-        if not translating and self._mode != ControllerMode.VELOCITY:
+        if not self._under_way(agent):
             return None
         pose = agent.get_pose()
         t0 = agent.sim_core.sim_time if agent.sim_core is not None else 0.0
@@ -1040,7 +1048,9 @@ class OmniController(KinematicController):
         v0 = 0.0
         initial_velocity = kwargs.get("initial_velocity")
         if initial_velocity is not None and total_dist > 1e-9:
-            v0 = max(0.0, float(np.dot(initial_velocity, self._forward_direction_unit)))
+            # Signed: negative is moving away from the goal, which the
+            # trajectory turns around (see build_tpi_from_speed).
+            v0 = float(np.dot(initial_velocity, self._forward_direction_unit))
         self._init_forward_trajectory(agent, total_dist, v0=v0)
 
     def _init_final_orientation_trajectory(self, agent: "Agent", goal: Pose) -> None:

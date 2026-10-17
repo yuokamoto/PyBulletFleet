@@ -325,7 +325,8 @@ class BatchOmniController(BatchKinematicController):
 
         v0 = 0.0
         if initial_velocity is not None and total > 1e-9:
-            v0 = max(0.0, float(np.dot(initial_velocity, disp / total)))
+            # Signed, as OmniController: negative is moving away from the goal.
+            v0 = float(np.dot(initial_velocity, disp / total))
         tpi = build_tpi_from_speed(p0=0.0, pe=total, vmax=vmax, accel=amax, t0=sim_time, v0=v0, decel=dmax)
         t_accel, t_const, t_total_rel, accel_eff, decel_eff = extract_phase_params(tpi)
 
@@ -460,7 +461,9 @@ class BatchOmniController(BatchKinematicController):
                 self._v0_buf,
             )
             total_dist_safe = np.where(self._total_distance > 1e-9, self._total_distance, 1.0)
-            ratio = np.clip(distance / total_dist_safe, 0.0, 1.0)
+            # No lower clip: a trajectory started moving away from its goal
+            # (negative v0) runs behind its start before turning around.
+            ratio = np.minimum(distance / total_dist_safe, 1.0)
             new_pos = self._p_start + ratio[:, None] * self._displacement
 
             completed_trans = active & (tau >= self._t_total)

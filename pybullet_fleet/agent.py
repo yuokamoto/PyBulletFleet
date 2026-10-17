@@ -1162,8 +1162,8 @@ class Agent(SimObject):
         """Why :meth:`set_path` would refuse ``path`` right now, or ``None``.
 
         A moving omni agent continues its motion into a new path, so it can
-        only take one whose first waypoint is straight ahead and within its
-        braking distance at the configured deceleration; at rest every path is
+        only take one whose straight-line trajectory from its current
+        velocity exists within its configured limits; at rest every path is
         taken. Asking first lets a caller report a refusal before acting.
         """
         if self.use_fixed_base:
@@ -1372,14 +1372,15 @@ class Agent(SimObject):
         """
         Set a path (list of waypoints) for the robot to follow.
 
-        A path set while the agent is moving continues the motion from its
-        current speed, which is only possible when the first waypoint lies
-        straight ahead and the agent can still stop there at its configured
-        deceleration. A path that cannot -- inside the braking distance,
-        behind, or off the line of motion -- is refused: nothing changes, the
-        current motion continues, and this returns ``False`` (the reason is
-        logged and available from :meth:`path_rejection`). At rest every path
-        is taken.
+        A path set while an omnidirectional agent is moving continues the
+        motion: the straight-line trajectory to the first waypoint starts from
+        the agent's current velocity (signed along the line, so a goal behind
+        is reached by slowing and reversing). When no such trajectory exists
+        within the configured limits -- a goal inside the braking distance,
+        where the agent is, or off the line of motion -- the path is refused:
+        nothing changes, the current motion continues, and this returns
+        ``False`` (the reason is logged and available from
+        :meth:`path_rejection`). At rest every path is taken.
 
         Args:
             path: List of Pose waypoints to follow in sequence

@@ -18,12 +18,12 @@ are not recommended for production use yet.
   `OmniController` and `BatchOmniController`) now continues the motion: the
   new trajectory starts from the agent's speed toward the new goal instead of
   from rest, and `Agent.set_path` no longer puts a zero-length approach
-  waypoint (the current pose) in front of it while the agent moves. Only a
-  goal the agent can physically take is accepted: its first waypoint must lie
-  straight ahead along the current motion, within the braking distance at the
-  configured deceleration. Any other goal -- inside the braking distance,
-  behind, or off the line of motion -- is refused: the current motion and
-  path continue unchanged, the configured deceleration is never exceeded, and
+  waypoint (the current pose) in front of it while the agent moves. The speed
+  is signed along the new line, so a goal behind is reached by slowing,
+  reversing and driving back. A goal is taken when that trajectory exists
+  within the configured limits and refused otherwise -- inside the braking
+  distance, where the agent is, or off the line of motion: the current motion
+  and path continue unchanged, no limit is ever exceeded, and
   `Agent.set_path` / `set_goal_pose` return `False` (`True` when taken; the
   `AgentManager.set_goal_pose*` wrappers pass it on). `Agent.path_rejection()`
   gives the reason without acting. At rest every goal is taken, as before.
@@ -31,7 +31,10 @@ are not recommended for production use yet.
   (`MoveAction`, `PatrolController`, `RandomWalkController`, the behaviour
   tree's `NavigateTo`, whose `NavigationAdapter.start_navigation()` may now
   return `False`), and `FleetCommandDispatcher.navigate()` reports it in the
-  ack's `rejected` map. Differential agents, which turn in place first, still
+  ack's `rejected` map. Trajectories are now checked to end at their target:
+  for a body starting away from it, the installed `two-point-interpolation`
+  can pick a first-phase root that does not, and the other root is used.
+  Differential agents, which turn in place first, still
   start from rest. Navigation checkpoints record the trajectory's initial
   speed (`forward.v0`); the kinematic profile's controller state is now
   version 2.

@@ -106,7 +106,78 @@ def try_build_tpi(
         tpi.calc_trajectory()
     except ValueError:
         return None
-    return tpi
+    if _ends_at(tpi, pe, ve):
+        return tpi
+    # A body starting away from pe (v0 against the travel direction) gives
+    # the solver two positive roots for the first phase, and it takes the
+    # smaller one, which does not end at pe at rest. The larger one does:
+    # keep accelerating toward pe through zero speed. Rebuild with it.
+    if _rebuild_with_larger_root(tpi) and _ends_at(tpi, pe, ve):
+        return tpi
+    return None
+
+
+def _ends_at(tpi: TwoPointInterpolation, pe: float, ve: float) -> bool:
+    """Whether a calculated trajectory really ends at ``(pe, ve)``."""
+    if not tpi.dt:
+        return True
+    if any(d < -1e-12 for d in tpi.dt):
+        return False
+    p_end = tpi.p[-1] + tpi.v[-1] * tpi.dt[-1] + 0.5 * tpi.a[-1] * tpi.dt[-1] ** 2
+    v_end = tpi.v[-1] + tpi.a[-1] * tpi.dt[-1]
+    scale = max(1.0, abs(pe - tpi.p0))
+    return abs(p_end - pe) <= 1e-6 * scale and abs(v_end - ve) <= 1e-6 * max(1.0, abs(tpi.vmax))
+
+
+def _rebuild_with_larger_root(tpi: TwoPointInterpolation) -> bool:
+    """Redo the solver's phases with the larger first-phase root.
+
+    Mirrors ``TwoPointInterpolation.calc_trajectory`` for constant
+    acceleration (both of its cases); only the root choice differs.
+    """
+    p0, pe, v0, ve, vmax = float(tpi.p0), float(tpi.pe), float(tpi.v0), float(tpi.ve), float(tpi.vmax)
+    dp = pe - p0
+    if dp == 0.0:
+        return False
+    sign = 1.0 if dp > 0 else -1.0
+    acc = float(tpi.amax_accel) * sign
+    dec = float(tpi.amax_decel) * sign
+    ratio = acc / dec
+    a_coeff = 0.5 * acc * (1 + ratio)
+    b_coeff = v0 * (1 + ratio)
+    c_coeff = -dp + (v0**2 - ve**2) / (2 * dec)
+    disc = b_coeff**2 - 4 * a_coeff * c_coeff
+    if disc <= 0:
+        return False
+    root = max((-b_coeff + np.sqrt(disc)) / (2 * a_coeff), (-b_coeff - np.sqrt(disc)) / (2 * a_coeff))
+    if root <= 0:
+        return False
+    v1 = v0 + acc * root
+    if abs(v1) < vmax:
+        p1 = p0 + v0 * root + 0.5 * acc * root**2
+        tpi.case = 0
+        tpi.dt = [root, abs((v1 - ve) / dec)]
+        tpi.a = [acc, -dec]
+        tpi.v = [v0, v1]
+        tpi.p = [p0, p1]
+    else:
+        v1 = vmax * sign
+        dt01 = abs((v1 - v0) / acc)
+        p1 = p0 + v0 * dt01 + 0.5 * acc * dt01**2
+        dt2e = abs((v1 - ve) / dec)
+        dp2e = v1 * dt2e - 0.5 * dec * dt2e**2
+        dt12 = (pe - p1 - dp2e) / v1
+        if dt12 < 0:
+            return False
+        tpi.case = 1
+        tpi.dt = [dt01, dt12, dt2e]
+        tpi.a = [acc, 0.0, -dec]
+        tpi.v = [v0, v1, v1]
+        tpi.p = [p0, p1, pe - dp2e]
+    tpi.trajectory_calced = True
+    tpi.duration = float(sum(tpi.dt))
+    tpi.te = tpi.t0 + tpi.duration
+    return True
 
 
 #: Fraction below ``vmax`` an initial speed is clamped to. The solver treats an
@@ -124,17 +195,17 @@ def try_build_tpi_from_speed(
     v0: float,
     decel: Optional[float] = None,
 ) -> Optional[TwoPointInterpolation]:
-    """A trajectory to ``pe`` for a body already moving at ``v0`` toward it, or ``None``.
+    """A trajectory to ``pe`` for a body already moving at ``v0``, or ``None``.
 
-    ``v0`` is clamped to ``[0, vmax]``; ``v0 <= 0`` is a start from rest.
-    ``None`` means the body cannot stop at ``pe`` from ``v0`` within
-    ``decel``: ``pe`` is closer than its braking distance. The deceleration is
-    never raised to make it fit -- the caller decides what to do instead (see
-    :mod:`pybullet_fleet._replan`, which brakes to a stop first).
+    ``v0`` is signed along ``p0 -> pe``: negative is moving away from ``pe``,
+    and the trajectory then slows, reverses and drives to ``pe`` (that first
+    slowing uses ``accel``, the solver's first-phase limit). Its magnitude is
+    clamped to ``vmax``. ``None`` means no trajectory within the limits
+    exists -- ``pe`` is closer than the braking distance, or the body is
+    moving with nowhere to go -- and no limit is ever raised to make one fit;
+    see :mod:`pybullet_fleet._replan`.
     """
-    if not v0 > 0.0:
-        return try_build_tpi(p0=p0, pe=pe, vmax=vmax, accel=accel, t0=t0, decel=decel)
-    v0 = min(float(v0), vmax * _V0_CAP)
+    v0 = max(-vmax * _V0_CAP, min(float(v0), vmax * _V0_CAP))
     return try_build_tpi(p0=p0, pe=pe, vmax=vmax, accel=accel, t0=t0, v0=v0, decel=decel)
 
 
@@ -149,23 +220,23 @@ def build_tpi_from_speed(
 ) -> TwoPointInterpolation:
     """A trajectory to ``pe`` for a body already moving at ``v0`` toward it.
 
-    For a goal replaced mid-motion: the body keeps its speed instead of
-    dropping to rest and accelerating again. From rest (``v0 <= 0``) this is
+    For a goal replaced mid-motion: the body keeps its (signed) speed instead
+    of dropping to rest and accelerating again. From rest this is
     :func:`build_tpi`.
 
     Raises:
-        ValueError: ``pe`` is closer than the braking distance from ``v0`` at
-            ``decel``. Callers plan around it with
-            :func:`pybullet_fleet._replan.brake_point` first; the deceleration
-            is never exceeded to make a goal fit.
+        ValueError: no trajectory within the limits exists (see
+            :func:`try_build_tpi_from_speed`). Callers check first with
+            :func:`pybullet_fleet._replan.replacement_rejection`; no limit is
+            ever raised to make a goal fit.
     """
-    if not v0 > 0.0:
+    if v0 == 0.0:
         return build_tpi(p0=p0, pe=pe, vmax=vmax, accel=accel, t0=t0, decel=decel)
     tpi = try_build_tpi_from_speed(p0=p0, pe=pe, vmax=vmax, accel=accel, t0=t0, v0=v0, decel=decel)
     if tpi is None:
         raise ValueError(
-            f"cannot stop within {abs(pe - p0):.6g} from speed {v0:.6g} at deceleration "
-            f"{accel if decel is None else decel:.6g}; brake to a stop first"
+            f"no trajectory over {abs(pe - p0):.6g} from speed {v0:.6g} within accel "
+            f"{accel:.6g} / decel {accel if decel is None else decel:.6g}"
         )
     return tpi
 
