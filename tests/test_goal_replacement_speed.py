@@ -213,6 +213,30 @@ class TestFromRestUnchanged:
         assert speeds[0] <= ACCEL * DT + 1e-9
         assert np.max(np.diff([0.0] + speeds)) <= ACCEL * DT + 1e-6
 
+
+class TestPerAgentMatchesBatch:
+    @pytest.mark.parametrize("phase_steps", [3, 14], ids=["accelerating", "braking"])
+    def test_per_agent_and_batch_agree_when_replaced_mid_ramp(self, phase_steps):
+        """The batch row continues from its profile speed, as the per-agent
+        controller does, not from the last step's average."""
+        tracks = []
+        for batch in (False, True):
+            sc = MultiRobotSimulationCore(
+                SimulationParams(gui=False, monitor=False, physics=False, timestep=DT, target_rtf=0, log_level="warning")
+            )
+            sc.initialize_simulation()
+            try:
+                agent = _agent(sc, batch)
+                agent.set_goal_pose(_goal(1.2))  # reaches ~VMAX, then brakes
+                for _ in range(phase_steps):
+                    sc.step_once()
+                x0 = agent.get_pose().position[0]
+                agent.set_goal_pose(_goal(x0 + 4.0))
+                tracks.append([x - x0 for x, _, _ in _run(sc, agent, 40)])
+            finally:
+                p.disconnect(sc.client)
+        assert tracks[0] == pytest.approx(tracks[1], abs=1e-6)
+
     def test_per_agent_and_batch_follow_the_same_trajectory(self):
         tracks = []
         for batch in (False, True):

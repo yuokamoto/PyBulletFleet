@@ -218,13 +218,36 @@ class BatchOmniController(BatchKinematicController):
         else:
             self._align_final_orient[idx] = False
         # Continue from the agent's current motion, as OmniController does --
-        # but only while a path is under way. A row that has just finished
-        # still reports its last step's average speed until the next flush
-        # zeroes it; the per-agent controller zeroes it on arrival.
+        # but only while a translation is under way. The speed is the row's own
+        # profile speed at the time it was last evaluated, which is what
+        # OmniController keeps: the agent's reported velocity here is the last
+        # step's average (low while accelerating, high while braking) and,
+        # right after arrival, still non-zero.
         initial_velocity = None
         if self._phase[idx] == _PHASE_FORWARD:
-            initial_velocity = np.array(agent._current_velocity, dtype=np.float64)
+            initial_velocity = self._row_velocity(idx, float(self._sim_core.sim_time))
         self._begin_waypoint(idx, agent, path[0], float(self._sim_core.sim_time), initial_velocity)
+
+    def _row_velocity(self, idx: int, now: float) -> np.ndarray:
+        """World-frame velocity of row ``idx``'s translation profile at ``now``."""
+        total = float(self._total_distance[idx])
+        if total <= 1e-9:
+            return np.zeros(3)
+        tau = max(now - float(self._t_start[idx]), 0.0)
+        t_accel = float(self._t_accel[idx])
+        t_const = float(self._t_const[idx])
+        t_total = float(self._t_total[idx])
+        v0 = float(self._v0_buf[idx])
+        accel = float(self._accel_buf[idx])
+        if tau >= t_total:
+            speed = 0.0
+        elif tau <= t_accel:
+            speed = v0 + accel * tau
+        elif tau <= t_accel + t_const:
+            speed = v0 + accel * t_accel
+        else:
+            speed = float(self._decel_buf[idx]) * (t_total - tau)
+        return self._displacement[idx] / total * speed
 
     def _begin_waypoint(
         self,
