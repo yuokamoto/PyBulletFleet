@@ -207,3 +207,22 @@ class TestFromRestUnchanged:
             finally:
                 p.disconnect(sc.client)
         assert tracks[0] == pytest.approx(tracks[1], abs=1e-6)
+
+
+def test_a_checkpoint_keeps_the_initial_speed(sim):
+    """A trajectory continued from speed restores with the same speed."""
+    agent = _agent(sim)
+    _cruise(sim, agent)
+    x0 = agent.get_pose().position[0]
+    agent.set_goal_pose(_goal(x0 + 6.0))
+    sim.step_once()
+    controller = agent._controllers[0]
+    state = controller.capture_navigation_state()
+    assert state["forward"]["v0"] == pytest.approx(VMAX, rel=1e-3)
+
+    from pybullet_fleet.controller import OmniController
+
+    restored = OmniController(controller.params)
+    restored.restore_navigation_state(state, list(agent.get_pose().orientation))
+    for t in np.linspace(sim.sim_time, sim.sim_time + 3.0, 7):
+        assert restored._tpi_forward.get_point(t)[0] == pytest.approx(controller._tpi_forward.get_point(t)[0])

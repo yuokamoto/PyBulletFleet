@@ -22,7 +22,9 @@ are not recommended for production use yet.
   closer than the braking distance is reached by braking as hard as needed
   rather than overshot. Speed across the new direction, or away from it, is
   dropped at once, as before. Differential agents, which turn in place first,
-  still start from rest.
+  still start from rest. Navigation checkpoints record the trajectory's
+  initial speed (`forward.v0`); the kinematic profile's controller state is
+  now version 2.
 
 - URDF SimObject and mesh Agent factories retain their effective spawn
   descriptors for recording handlers, including URDF fixed-base and scale

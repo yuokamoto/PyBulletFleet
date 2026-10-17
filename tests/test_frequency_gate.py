@@ -46,6 +46,12 @@ class TestFrequencyGate:
         assert [round(now, 6) for now, _ in fires] == [0.5]
         assert fires[0][1] == pytest.approx(0.5)
 
+    def test_a_first_call_on_a_due_time_runs_at_once(self):
+        """After a restore at 10.0 s, a 10 Hz schedule runs at 10.0, not 10.1."""
+        gate = FrequencyGate(10.0)
+        assert gate.due(10.0, 0.1) == pytest.approx(0.1)
+        assert gate.due(10.1, 0.1) == pytest.approx(0.1)
+
     def test_a_gap_runs_once_not_once_per_missed_beat(self):
         gate = FrequencyGate(10.0)
         assert gate.due(0.0, 0.1) is None
@@ -176,6 +182,13 @@ class TestPostStepPhase:
         sim.step_once()
         assert [end - start for start, end in seen] == [pytest.approx(0.1)] * 4
         assert sim.step_end_time == pytest.approx(0.2)  # outside a step: the elapsed time
+
+    def test_a_post_step_schedule_at_the_step_rate_runs_from_the_first_step(self, sim):
+        seen = []
+        sim.register_callback(lambda sc, dt: seen.append(round(sc.step_end_time, 9)), frequency=10.0, phase="post_step")
+        for _ in range(3):
+            sim.step_once()
+        assert seen == [0.1, 0.2, 0.3]
 
     def test_step_end_time_is_the_start_before_the_update(self, sim):
         """PRE_STEP runs before the objects move: its poses are the start's."""

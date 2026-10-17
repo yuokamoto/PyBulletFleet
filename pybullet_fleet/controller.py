@@ -758,6 +758,8 @@ class KinematicController(Controller):
                 "vmax": forward_tpi["vmax"],
                 "accel": forward_tpi["accel"],
                 "decel": forward_tpi["decel"],
+                # Non-zero when a goal replaced mid-motion continued from speed.
+                "v0": forward_tpi["v0"],
                 "orientation_after_rotation": (
                     self._rotation_target_quat.tolist() if self._rotation_target_quat is not None else None
                 ),
@@ -833,7 +835,7 @@ class KinematicController(Controller):
                 {
                     "p0": 0.0,
                     "pe": distance,
-                    "v0": 0.0,
+                    "v0": forward["v0"],
                     "ve": 0.0,
                     "vmax": forward["vmax"],
                     "accel": forward["accel"],
