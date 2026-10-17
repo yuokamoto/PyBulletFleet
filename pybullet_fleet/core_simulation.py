@@ -190,8 +190,9 @@ class SimulationParams:
     #: monitor window without the PyBullet viewer is still available.
     enable_monitor_gui: Optional[bool] = _SIM_D["enable_monitor_gui"]
     #: Simulated seconds between DataMonitor refreshes while ``monitor`` is
-    #: on. ``None`` (the default) is every step with a GUI, so the window stays
-    #: live, and every second without one. ``0`` is every step.
+    #: on. ``None`` (the default) is every step while the monitor window is
+    #: open (``enable_monitor_gui``, or ``gui`` when that is ``None``), so the
+    #: window stays live, and every second otherwise. ``0`` is every step.
     monitor_update_interval: Optional[float] = _SIM_D["monitor_update_interval"]
     #: Wall-clock seconds between ``[MONITOR]`` lines logged at INFO -- RTF,
     #: collision totals, step count -- independent of ``monitor``, ``gui`` and
@@ -1283,10 +1284,16 @@ class MultiRobotSimulationCore:
 
     @staticmethod
     def _monitor_update_frequency(params: "SimulationParams") -> Optional[float]:
-        """DataMonitor refresh rate: ``monitor_update_interval``, else every step with a GUI and 1 Hz without."""
+        """DataMonitor refresh rate: ``monitor_update_interval``, else every step while its window is open and 1 Hz otherwise.
+
+        The window is open when ``enable_monitor_gui`` says so, or, left at
+        ``None``, when ``gui`` is on -- the same rule the DataMonitor itself
+        follows -- so a monitor window on a headless run stays live too.
+        """
         interval = params.monitor_update_interval
         if interval is None:
-            return None if params.gui else 1.0
+            window = params.enable_monitor_gui if params.enable_monitor_gui is not None else params.gui
+            return None if window else 1.0
         return 1.0 / interval if interval > 0 else None
 
     def register_behavior_tree(self, tree: BehaviorTree) -> BehaviorTree:

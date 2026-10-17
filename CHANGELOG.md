@@ -148,8 +148,10 @@ are not recommended for production use yet.
 
 - Add `SimulationParams.monitor_update_interval`: simulated seconds between
   DataMonitor refreshes, which were fixed at every step with a GUI and every
-  second without one. That remains the default (`None`); `0` is every step.
-  It is independent of `monitor_log_interval`.
+  second without one. The default (`None`) is every step while the monitor
+  window is open (`enable_monitor_gui`, or `gui` when that is unset), so a
+  monitor window on a headless run stays live too, and every second
+  otherwise; `0` is every step. It is independent of `monitor_log_interval`.
 
 - The monitor's real-time factor is measured against the newest sample older
   than its 10 s window as well, so updates sparser than the window no longer
