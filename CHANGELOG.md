@@ -34,9 +34,9 @@ are not recommended for production use yet.
   (`MoveAction`, `PatrolController`, `RandomWalkController`, the behaviour
   tree's `NavigateTo`, whose `NavigationAdapter.start_navigation()` may now
   return `False`), and `FleetCommandDispatcher.navigate()` reports it in the
-  ack's `rejected` map. Trajectories are now checked to end at their target:
-  for a body starting away from it, the installed `two-point-interpolation`
-  can pick a first-phase root that does not, and the other root is used.
+  ack's `rejected` map. This needs `two-point-interpolation>=1.3.2`: earlier
+  versions could return a trajectory that never reached its target for a body
+  starting away from it, which a reversal is.
   Differential agents, which turn in place first, still
   start from rest. Navigation checkpoints record the trajectory's initial
   speed (`forward.v0`); the kinematic profile's controller state is now

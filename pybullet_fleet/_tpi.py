@@ -106,78 +106,7 @@ def try_build_tpi(
         tpi.calc_trajectory()
     except ValueError:
         return None
-    if _ends_at(tpi, pe, ve):
-        return tpi
-    # A body starting away from pe (v0 against the travel direction) gives
-    # the solver two positive roots for the first phase, and it takes the
-    # smaller one, which does not end at pe at rest. The larger one does:
-    # keep accelerating toward pe through zero speed. Rebuild with it.
-    if _rebuild_with_larger_root(tpi) and _ends_at(tpi, pe, ve):
-        return tpi
-    return None
-
-
-def _ends_at(tpi: TwoPointInterpolation, pe: float, ve: float) -> bool:
-    """Whether a calculated trajectory really ends at ``(pe, ve)``."""
-    if not tpi.dt:
-        return True
-    if any(d < -1e-12 for d in tpi.dt):
-        return False
-    p_end = tpi.p[-1] + tpi.v[-1] * tpi.dt[-1] + 0.5 * tpi.a[-1] * tpi.dt[-1] ** 2
-    v_end = tpi.v[-1] + tpi.a[-1] * tpi.dt[-1]
-    scale = max(1.0, abs(pe - tpi.p0))
-    return abs(p_end - pe) <= 1e-6 * scale and abs(v_end - ve) <= 1e-6 * max(1.0, abs(tpi.vmax))
-
-
-def _rebuild_with_larger_root(tpi: TwoPointInterpolation) -> bool:
-    """Redo the solver's phases with the larger first-phase root.
-
-    Mirrors ``TwoPointInterpolation.calc_trajectory`` for constant
-    acceleration (both of its cases); only the root choice differs.
-    """
-    p0, pe, v0, ve, vmax = float(tpi.p0), float(tpi.pe), float(tpi.v0), float(tpi.ve), float(tpi.vmax)
-    dp = pe - p0
-    if dp == 0.0:
-        return False
-    sign = 1.0 if dp > 0 else -1.0
-    acc = float(tpi.amax_accel) * sign
-    dec = float(tpi.amax_decel) * sign
-    ratio = acc / dec
-    a_coeff = 0.5 * acc * (1 + ratio)
-    b_coeff = v0 * (1 + ratio)
-    c_coeff = -dp + (v0**2 - ve**2) / (2 * dec)
-    disc = b_coeff**2 - 4 * a_coeff * c_coeff
-    if disc <= 0:
-        return False
-    root = max((-b_coeff + np.sqrt(disc)) / (2 * a_coeff), (-b_coeff - np.sqrt(disc)) / (2 * a_coeff))
-    if root <= 0:
-        return False
-    v1 = v0 + acc * root
-    if abs(v1) < vmax:
-        p1 = p0 + v0 * root + 0.5 * acc * root**2
-        tpi.case = 0
-        tpi.dt = [root, abs((v1 - ve) / dec)]
-        tpi.a = [acc, -dec]
-        tpi.v = [v0, v1]
-        tpi.p = [p0, p1]
-    else:
-        v1 = vmax * sign
-        dt01 = abs((v1 - v0) / acc)
-        p1 = p0 + v0 * dt01 + 0.5 * acc * dt01**2
-        dt2e = abs((v1 - ve) / dec)
-        dp2e = v1 * dt2e - 0.5 * dec * dt2e**2
-        dt12 = (pe - p1 - dp2e) / v1
-        if dt12 < 0:
-            return False
-        tpi.case = 1
-        tpi.dt = [dt01, dt12, dt2e]
-        tpi.a = [acc, 0.0, -dec]
-        tpi.v = [v0, v1, v1]
-        tpi.p = [p0, p1, pe - dp2e]
-    tpi.trajectory_calced = True
-    tpi.duration = float(sum(tpi.dt))
-    tpi.te = tpi.t0 + tpi.duration
-    return True
+    return tpi
 
 
 #: Fraction below ``vmax`` an initial speed is clamped to. The solver treats an
