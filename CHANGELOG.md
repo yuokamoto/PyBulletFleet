@@ -14,6 +14,16 @@ are not recommended for production use yet.
 
 ### Changed
 
+- A goal or path set on a moving omnidirectional agent (per-agent
+  `OmniController` and `BatchOmniController`) now continues the motion: the
+  new trajectory starts from the agent's speed toward the new goal instead of
+  from rest, and `Agent.set_path` no longer puts a zero-length approach
+  waypoint (the current pose) in front of it while the agent moves. A goal
+  closer than the braking distance is reached by braking as hard as needed
+  rather than overshot. Speed across the new direction, or away from it, is
+  dropped at once, as before. Differential agents, which turn in place first,
+  still start from rest.
+
 - URDF SimObject and mesh Agent factories retain their effective spawn
   descriptors for recording handlers, including URDF fixed-base and scale
   settings. The development kinematic profile rejects batch-owned Agents,

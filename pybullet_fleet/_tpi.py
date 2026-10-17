@@ -14,6 +14,9 @@ infeasible request apart from a trajectory that simply finishes early.
 
 :func:`trapezoid_distance` evaluates the distance traveled at time ``tau``
 for ``(N,)`` arrays of such trajectories — the batched eval hot path.
+
+:func:`build_tpi_from_speed` starts a trajectory from a body already moving
+along the travel axis, for a goal replaced mid-motion.
 """
 
 from __future__ import annotations
@@ -105,6 +108,49 @@ def try_build_tpi(
     return tpi
 
 
+#: Fraction below ``vmax`` an initial speed is clamped to. The solver treats an
+#: initial speed equal to ``vmax`` as exceeding it (and warns), so a body that
+#: is cruising at the cap starts a hair below it instead.
+_V0_CAP = 1.0 - 1e-9
+
+
+def build_tpi_from_speed(
+    p0: float,
+    pe: float,
+    vmax: float,
+    accel: float,
+    t0: float,
+    v0: float,
+    decel: Optional[float] = None,
+) -> TwoPointInterpolation:
+    """A trajectory to ``pe`` for a body already moving at ``v0`` toward it.
+
+    For a goal replaced mid-motion: the body keeps its speed instead of
+    dropping to rest and accelerating again. ``v0`` is clamped to ``[0,
+    vmax]``; a body moving away from the goal (``v0 <= 0``) starts from rest,
+    as before.
+
+    When ``pe`` is closer than the braking distance at ``decel``, the body
+    brakes exactly as hard as it needs to stop at ``pe`` -- harder than
+    ``decel`` -- rather than overshoot and come back. A kinematic body has no
+    other way to honour a goal it can no longer stop at.
+    """
+    if not v0 > 0.0:
+        return build_tpi(p0=p0, pe=pe, vmax=vmax, accel=accel, t0=t0, decel=decel)
+    v0 = min(float(v0), vmax * _V0_CAP)
+    tpi = try_build_tpi(p0=p0, pe=pe, vmax=vmax, accel=accel, t0=t0, v0=v0, decel=decel)
+    if tpi is not None:
+        return tpi
+    distance = abs(pe - p0)
+    if distance > 1e-9:
+        needed = v0 * v0 / (2.0 * distance) * (1.0 + 1e-6)
+        dec = accel if decel is None else decel
+        tpi = try_build_tpi(p0=p0, pe=pe, vmax=vmax, accel=accel, t0=t0, v0=v0, decel=max(dec, needed))
+        if tpi is not None:
+            return tpi
+    return build_tpi(p0=p0, pe=pe, vmax=vmax, accel=accel, t0=t0, decel=decel)
+
+
 def extract_phase_params(tpi: TwoPointInterpolation) -> Tuple[float, float, float, float, float]:
     """Read trapezoidal phase scalars from a constructed TPI.
 
@@ -147,10 +193,14 @@ def trapezoid_distance(
     accel: np.ndarray,
     total_distance: np.ndarray,
     decel: Optional[np.ndarray] = None,
+    v0: Optional[np.ndarray] = None,
 ) -> np.ndarray:
     """Vectorised distance-traveled lookup for trapezoidal profiles.
 
     All inputs are ``(N,)`` arrays; returns ``(N,)``.
+
+    ``v0`` is the speed each trajectory starts at (``None``: at rest), as built
+    by :func:`build_tpi_from_speed`; the ramp up then starts from it.
 
     ``decel`` is the braking scalar for the final phase. ``None`` reuses
     ``accel``, which is the symmetric profile and what every caller got before
@@ -165,15 +215,19 @@ def trapezoid_distance(
     done = tau >= t_total
     in_accel = (tau > 0.0) & ~in_const & ~in_decel & ~done
 
-    # accel phase: 0.5 * a * t^2
+    if v0 is None:
+        v0 = np.zeros_like(tau)
+    # accel phase: v0 * t + 0.5 * a * t^2
     if in_accel.any():
-        out[in_accel] = 0.5 * accel[in_accel] * tau[in_accel] * tau[in_accel]
-    # const phase: 0.5 * a * t_accel^2 + v_peak * (t - t_accel),
-    # where v_peak = a * t_accel
+        t = tau[in_accel]
+        out[in_accel] = v0[in_accel] * t + 0.5 * accel[in_accel] * t * t
+    # const phase: v0 * t_accel + 0.5 * a * t_accel^2 + v_peak * (t - t_accel),
+    # where v_peak = v0 + a * t_accel
     if in_const.any():
         ta = t_accel[in_const]
         a = accel[in_const]
-        out[in_const] = 0.5 * a * ta * ta + (a * ta) * (tau[in_const] - ta)
+        u = v0[in_const]
+        out[in_const] = u * ta + 0.5 * a * ta * ta + (u + a * ta) * (tau[in_const] - ta)
     # decel phase: total_distance - 0.5 * a * (t_total - t)^2
     if in_decel.any():
         d = decel[in_decel]

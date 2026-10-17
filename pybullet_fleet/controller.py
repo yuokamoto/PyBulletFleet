@@ -57,7 +57,7 @@ from pybullet_fleet.types import ControllerMode, MovementDirection, PosePhase
 
 from two_point_interpolation import TwoPointInterpolation
 
-from pybullet_fleet._tpi import build_tpi, extract_phase_params
+from pybullet_fleet._tpi import build_tpi, build_tpi_from_speed, extract_phase_params
 from pybullet_fleet._tpi_state import capture_tpi_state, restore_tpi_state
 from pybullet_fleet._motion_planning import align_x_axis_quat
 from pybullet_fleet.controller_params import ControllerParams
@@ -444,13 +444,16 @@ class KinematicController(Controller):
             self._final_target_orientation = None
             self._align_final_orientation = False
 
-        # Start trajectory for first waypoint
+        # Start trajectory for first waypoint. The agent's velocity is read
+        # before anything zeroes it: a controller that can continue the motion
+        # (OmniController) starts the new trajectory from it instead of rest.
+        initial_velocity = np.array(agent._current_velocity, dtype=float)
         if self._mode == ControllerMode.VELOCITY:
             self._zero_velocity()
         self._mode = ControllerMode.POSE
-        self._init_pose_trajectory(agent, path[0], direction=effective_direction)
+        self._init_pose_trajectory(agent, path[0], direction=effective_direction, initial_velocity=initial_velocity)
 
-    def _init_forward_trajectory(self, agent: "Agent", distance: float) -> None:
+    def _init_forward_trajectory(self, agent: "Agent", distance: float, v0: float = 0.0) -> None:
         """Initialize a single distance TPI for straight-line forward motion.
 
         Uses direction-projected scalar limits derived from
@@ -462,6 +465,10 @@ class KinematicController(Controller):
         the body-frame direction, not the world-frame travel direction.
         After calling this, ``_apply_forward()`` can interpolate position
         along the cached world-frame direction vector.
+
+        ``v0`` is the speed the agent already has along the direction (see
+        :func:`~pybullet_fleet._tpi.build_tpi_from_speed`); ``0`` starts from
+        rest.
         """
         t0 = agent.sim_core.sim_time if agent.sim_core is not None else 0.0
 
@@ -477,7 +484,7 @@ class KinematicController(Controller):
             amax = self.params.linear_accel_along_direction(direction_unit_body)
             dmax = self.params.linear_decel_along_direction(direction_unit_body)
 
-        self._tpi_forward = build_tpi(p0=0.0, pe=distance, vmax=vmax, accel=amax, t0=t0, decel=dmax)
+        self._tpi_forward = build_tpi_from_speed(p0=0.0, pe=distance, vmax=vmax, accel=amax, t0=t0, v0=v0, decel=dmax)
 
     def _init_rotation_tpi(
         self,
@@ -980,7 +987,15 @@ class OmniController(KinematicController):
             self._forward_direction_unit = np.zeros(3)
             self._forward_direction_unit_body = np.zeros(3)
 
-        self._init_forward_trajectory(agent, total_dist)
+        # A goal set while moving continues the motion: start from the speed
+        # the agent already has toward the new goal. The component across the
+        # new direction is dropped at once -- an omni base can change direction
+        # without turning, and a kinematic one has no lateral dynamics to model.
+        v0 = 0.0
+        initial_velocity = kwargs.get("initial_velocity")
+        if initial_velocity is not None and total_dist > 1e-9:
+            v0 = max(0.0, float(np.dot(initial_velocity, self._forward_direction_unit)))
+        self._init_forward_trajectory(agent, total_dist, v0=v0)
 
     def _init_final_orientation_trajectory(self, agent: "Agent", goal: Pose) -> None:
         """Rotation-only final alignment (no position movement)."""
