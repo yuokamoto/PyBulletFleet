@@ -413,3 +413,24 @@ def test_named_joint_command_positions_are_immutable():
     assert command.positions == {"joint": 1.5}
     with pytest.raises(TypeError):
         cast(dict[str, float], command.positions)["other"] = 0.1
+
+
+def test_dispatcher_reports_a_goal_the_robot_cannot_take_as_rejected():
+    """A moving robot refuses a goal it cannot reach within its limits; the
+    ack says so and the robot is not touched."""
+
+    class MovingAgent(FakeAgent):
+        def path_rejection(self, path):
+            return "goal is behind the motion"
+
+    robot0 = MovingAgent("robot0", 1)
+    robot1 = FakeAgent("robot1", 2)
+    dispatcher = FleetCommandDispatcher(FakeSim([robot0, robot1]))
+    ack = dispatcher.navigate(
+        [RobotGoalCommand2D("robot0", position=(1.0, 0.0)), RobotGoalCommand2D("robot1", position=(2.0, 0.0))]
+    )
+
+    assert ack.accepted_names == ("robot1",)
+    assert ack.rejected == {"robot0": "goal is behind the motion"}
+    assert robot0.goal_calls == []
+    assert len(robot1.goal_calls) == 1

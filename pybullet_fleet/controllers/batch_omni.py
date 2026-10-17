@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING, List, Optional
 
 import numpy as np
 
+from pybullet_fleet._replan import replacement_rejection
 from pybullet_fleet._tpi import build_tpi, build_tpi_from_speed, extract_phase_params, trapezoid_distance
 from pybullet_fleet.controllers.batch_base import BatchKinematicController
 from pybullet_fleet.geometry import Pose, quat_angle_between, quat_slerp_batch, rotate_vector
@@ -193,7 +194,29 @@ class BatchOmniController(BatchKinematicController):
     # Public API — set a path for an already-registered agent
     # ------------------------------------------------------------------ #
 
-    def set_path(self, agent: "Agent", path: List[Pose], final_orientation_align: bool = True, **kwargs) -> None:
+    def path_rejection(self, agent: "Agent", path: List[Pose]) -> Optional[str]:
+        """Why ``path`` cannot be taken now, or ``None`` -- the same rule as
+        :meth:`OmniController.path_rejection <pybullet_fleet.controller.OmniController.path_rejection>`.
+
+        The motion is the row's own profile velocity, and only while a
+        translation is under way: the agent's reported velocity is the last
+        step's average and, right after arrival, still non-zero.
+        """
+        idx = self._agent_index.get(id(agent))
+        if idx is None or not path or self._sim_core is None or self._phase[idx] != _PHASE_FORWARD:
+            return None
+        now = float(self._sim_core.sim_time)
+        current = agent.get_pose()
+        return replacement_rejection(
+            agent.controller_params,
+            current.position,
+            current.orientation,
+            self._row_velocity(idx, now),
+            path[0].position,
+            now,
+        )
+
+    def set_path(self, agent: "Agent", path: List[Pose], final_orientation_align: bool = True, **kwargs) -> bool:
         """Set a waypoint path.
 
         Args:
@@ -201,6 +224,10 @@ class BatchOmniController(BatchKinematicController):
             path: Non-empty list of goal poses.
             final_orientation_align: If ``True`` (default), rotate to match
                 ``path[-1].orientation`` after reaching the last waypoint.
+
+        Returns:
+            ``False``, with the current motion and path untouched, when
+            :meth:`path_rejection` refuses the path; ``True`` once it is set.
         """
         if self._sim_core is None:
             raise RuntimeError("BatchOmniController must be attached to a sim_core before set_path.")
@@ -210,6 +237,22 @@ class BatchOmniController(BatchKinematicController):
         if idx is None:
             raise KeyError(f"Agent {agent} is not registered with this batch controller.")
 
+        reason = self.path_rejection(agent, path)
+        if reason is not None:
+            logger.info(f"Path rejected for {agent.name or agent.object_id}: {reason}")
+            return False
+
+        # Continue from the agent's current motion, as OmniController does --
+        # but only while a translation is under way. The speed is the row's own
+        # profile speed at the time it was last evaluated, which is what
+        # OmniController keeps: the agent's reported velocity here is the last
+        # step's average (low while accelerating, high while braking) and,
+        # right after arrival, still non-zero.
+        now = float(self._sim_core.sim_time)
+        initial_velocity = None
+        if self._phase[idx] == _PHASE_FORWARD:
+            initial_velocity = self._row_velocity(idx, now)
+
         self._paths[idx] = list(path)
         self._wp_index[idx] = 0
         if final_orientation_align:
@@ -217,16 +260,8 @@ class BatchOmniController(BatchKinematicController):
             self._final_orient_target_quat[idx] = np.asarray(path[-1].orientation, dtype=np.float64)
         else:
             self._align_final_orient[idx] = False
-        # Continue from the agent's current motion, as OmniController does --
-        # but only while a translation is under way. The speed is the row's own
-        # profile speed at the time it was last evaluated, which is what
-        # OmniController keeps: the agent's reported velocity here is the last
-        # step's average (low while accelerating, high while braking) and,
-        # right after arrival, still non-zero.
-        initial_velocity = None
-        if self._phase[idx] == _PHASE_FORWARD:
-            initial_velocity = self._row_velocity(idx, float(self._sim_core.sim_time))
-        self._begin_waypoint(idx, agent, path[0], float(self._sim_core.sim_time), initial_velocity)
+        self._begin_waypoint(idx, agent, path[0], now, initial_velocity)
+        return True
 
     def _row_velocity(self, idx: int, now: float) -> np.ndarray:
         """World-frame velocity of row ``idx``'s translation profile at ``now``."""

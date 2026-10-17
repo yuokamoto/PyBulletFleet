@@ -25,8 +25,8 @@ class GoalPoseAgent(Protocol):
     is_moving: bool
     goal_pose: Pose | None
 
-    def set_goal_pose(self, goal: Pose) -> None:
-        """Begin moving toward a goal pose."""
+    def set_goal_pose(self, goal: Pose) -> bool:
+        """Begin moving toward a goal pose; ``False`` if the agent refused it."""
 
 
 class AgentActionId(str, Enum):
@@ -43,8 +43,8 @@ class PyBulletFleetNavigationAdapter:
 
     agent: GoalPoseAgent
 
-    def start_navigation(self, goal: Position3) -> None:
-        self.agent.set_goal_pose(Pose.from_xyz(*goal))
+    def start_navigation(self, goal: Position3) -> bool:
+        return self.agent.set_goal_pose(Pose.from_xyz(*goal))
 
     def navigation_status(self) -> NavigationStatus:
         if self.agent.is_moving or self.agent.goal_pose is not None:
@@ -73,7 +73,10 @@ class AgentBehaviorTree(BehaviorTree):
             goal = self._port(node.attrib.get("goal", "{goal}"))
             if not isinstance(goal, (tuple, list)) or len(goal) != 3:
                 return TickResult.FAILURE
-            self._navigation.start_navigation(cast(Position3, tuple(goal)))
+            if self._navigation.start_navigation(cast(Position3, tuple(goal))) is False:
+                # The agent refused the goal while still moving (see
+                # Agent.set_path); try again on the next tick.
+                return TickResult.RUNNING
             state["started"] = True
             return TickResult.RUNNING
         navigation_status = self._navigation.navigation_status()

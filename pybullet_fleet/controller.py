@@ -58,6 +58,7 @@ from pybullet_fleet.types import ControllerMode, MovementDirection, PosePhase
 from two_point_interpolation import TwoPointInterpolation
 
 from pybullet_fleet._tpi import build_tpi, build_tpi_from_speed, extract_phase_params
+from pybullet_fleet._replan import replacement_rejection
 from pybullet_fleet._tpi_state import capture_tpi_state, restore_tpi_state
 from pybullet_fleet._motion_planning import align_x_axis_quat
 from pybullet_fleet.controller_params import ControllerParams
@@ -408,14 +409,26 @@ class KinematicController(Controller):
         self._forward_direction_unit_body = None
         self._forward_total_distance_3d = 0.0
 
+    def path_rejection(self, agent: "Agent", path: List[Pose]) -> Optional[str]:
+        """Why ``path`` cannot be taken now, or ``None`` if it can.
+
+        The base controller accepts every path. A controller that continues
+        the current motion into the new path (``OmniController``) refuses one
+        it cannot reach within its limits.
+        """
+        return None
+
     def set_path(
         self,
         agent: "Agent",
         path: List[Pose],
         final_orientation_align: bool = True,
         direction: Optional[MovementDirection] = None,
-    ) -> None:
+    ) -> bool:
         """Set a waypoint path for the agent to follow.
+
+        Returns ``False``, leaving the current motion and path untouched, when
+        :meth:`path_rejection` refuses the path; ``True`` once it is set.
 
         The controller owns all path-navigation state: waypoint index, movement
         direction, final-orientation alignment.  ``Agent.set_path()`` handles
@@ -429,6 +442,10 @@ class KinematicController(Controller):
             direction: ``None`` (use ``default_direction``), ``FORWARD``, ``AUTO``,
                 or ``BACKWARD`` (differential only).
         """
+        reason = self.path_rejection(agent, path)
+        if reason is not None:
+            logger.info(f"Path rejected for {agent.name or agent.object_id}: {reason}")
+            return False
         effective_direction = direction if direction is not None else self.params.default_direction
         self._path = list(path)
         self._current_waypoint_index = 0
@@ -452,6 +469,7 @@ class KinematicController(Controller):
             self._zero_velocity()
         self._mode = ControllerMode.POSE
         self._init_pose_trajectory(agent, path[0], direction=effective_direction, initial_velocity=initial_velocity)
+        return True
 
     def _init_forward_trajectory(self, agent: "Agent", distance: float, v0: float = 0.0) -> None:
         """Initialize a single distance TPI for straight-line forward motion.
@@ -890,6 +908,30 @@ class OmniController(KinematicController):
     def __init__(self, params: Optional[ControllerParams] = None) -> None:
         super().__init__(params)
 
+    def path_rejection(self, agent: "Agent", path: List[Pose]) -> Optional[str]:
+        """Why ``path`` cannot be taken now, or ``None`` if it can.
+
+        A path set while the agent is moving continues the motion from its
+        current speed. That is only possible when the first waypoint lies
+        straight ahead and the agent can stop there at its configured
+        deceleration; a goal inside the braking distance, behind, or off the
+        line of motion is refused. At rest every path is accepted. See
+        :mod:`pybullet_fleet._replan`.
+        """
+        if not path:
+            return None
+        # Under way is a translation in progress or a velocity command, not the
+        # reported velocity alone: on the arrival step it still holds that
+        # step's motion although the agent has stopped.
+        translating = self._mode == ControllerMode.POSE and agent.is_moving and self._pose_phase == PosePhase.FORWARD
+        if not translating and self._mode != ControllerMode.VELOCITY:
+            return None
+        pose = agent.get_pose()
+        t0 = agent.sim_core.sim_time if agent.sim_core is not None else 0.0
+        return replacement_rejection(
+            self.params, pose.position, pose.orientation, agent._current_velocity, path[0].position, t0
+        )
+
     # -- Velocity kinematics -------------------------------------------
 
     def set_velocity(
@@ -990,9 +1032,11 @@ class OmniController(KinematicController):
             self._forward_direction_unit_body = np.zeros(3)
 
         # A goal set while moving continues the motion: start from the speed
-        # the agent already has toward the new goal. The component across the
-        # new direction is dropped at once -- an omni base can change direction
-        # without turning, and a kinematic one has no lateral dynamics to model.
+        # the agent already has toward the new goal. set_path() only lets a
+        # goal through here when that is possible at the configured
+        # deceleration and the motion is along the line to it (see
+        # path_rejection); whatever is left across that line is numerical noise
+        # (see _replan.CROSS_SPEED_*).
         v0 = 0.0
         initial_velocity = kwargs.get("initial_velocity")
         if initial_velocity is not None and total_dist > 1e-9:

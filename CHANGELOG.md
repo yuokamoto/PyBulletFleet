@@ -18,13 +18,23 @@ are not recommended for production use yet.
   `OmniController` and `BatchOmniController`) now continues the motion: the
   new trajectory starts from the agent's speed toward the new goal instead of
   from rest, and `Agent.set_path` no longer puts a zero-length approach
-  waypoint (the current pose) in front of it while the agent moves. A goal
-  closer than the braking distance is reached by braking as hard as needed
-  rather than overshot. Speed across the new direction, or away from it, is
-  dropped at once, as before. Differential agents, which turn in place first,
-  still start from rest. Navigation checkpoints record the trajectory's
-  initial speed (`forward.v0`); the kinematic profile's controller state is
-  now version 2.
+  waypoint (the current pose) in front of it while the agent moves. Only a
+  goal the agent can physically take is accepted: its first waypoint must lie
+  straight ahead along the current motion, within the braking distance at the
+  configured deceleration. Any other goal -- inside the braking distance,
+  behind, or off the line of motion -- is refused: the current motion and
+  path continue unchanged, the configured deceleration is never exceeded, and
+  `Agent.set_path` / `set_goal_pose` return `False` (`True` when taken; the
+  `AgentManager.set_goal_pose*` wrappers pass it on). `Agent.path_rejection()`
+  gives the reason without acting. At rest every goal is taken, as before.
+  Callers inside the library retry a refused goal on their next update
+  (`MoveAction`, `PatrolController`, `RandomWalkController`, the behaviour
+  tree's `NavigateTo`, whose `NavigationAdapter.start_navigation()` may now
+  return `False`), and `FleetCommandDispatcher.navigate()` reports it in the
+  ack's `rejected` map. Differential agents, which turn in place first, still
+  start from rest. Navigation checkpoints record the trajectory's initial
+  speed (`forward.v0`); the kinematic profile's controller state is now
+  version 2.
 
 - URDF SimObject and mesh Agent factories retain their effective spawn
   descriptors for recording handlers, including URDF fixed-base and scale

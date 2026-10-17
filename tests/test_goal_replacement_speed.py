@@ -4,9 +4,13 @@ Every new goal or path used to build its trajectory from rest, and
 ``Agent.set_path`` put a zero-length approach waypoint (the current pose) in
 front of it. A robot cruising at full speed that received a new goal straight
 ahead dropped to 0 in one step and accelerated again. The omni controllers --
-per-agent and batched -- now start from the agent's speed toward the new goal,
-and brake as hard as needed rather than overshoot a goal closer than the
-braking distance.
+per-agent and batched -- now start from the agent's speed toward the new goal
+when it is straight ahead and within reach at the configured deceleration.
+Anything else -- a goal inside the braking distance, behind, or off the line
+of motion -- would need a harder stop than the agent can make, so it is
+refused: set_goal_pose() returns False and the current motion continues
+unchanged. At rest every goal is taken. No case exceeds the configured
+deceleration.
 """
 
 from __future__ import annotations
@@ -75,6 +79,28 @@ def _run(sim, agent, steps):
     return out
 
 
+def _run_vel(sim, agent, steps):
+    """Per-step (x, y, vx, vy) samples."""
+    out = []
+    for _ in range(steps):
+        sim.step_once()
+        x, y, _ = agent.get_pose().position
+        vx, vy = agent.velocity[:2]
+        out.append((x, y, float(vx), float(vy)))
+    return out
+
+
+def _assert_within_ramps(start_velocity, samples):
+    """The velocity never changes faster than the configured ramps allow.
+
+    Compared as vectors, so a turn counts too: dropping the motion across a
+    new direction at once would show up here.
+    """
+    vels = [np.asarray(start_velocity, dtype=float)] + [np.array([vx, vy]) for _, _, vx, vy in samples]
+    jumps = [float(np.linalg.norm(b - a)) for a, b in zip(vels, vels[1:])]
+    assert max(jumps) <= max(ACCEL, DECEL) * DT + 1e-6, max(jumps)
+
+
 def _cruise(sim, agent, far=100.0):
     agent.set_goal_pose(_goal(far))
     _run(sim, agent, int(2 * VMAX / ACCEL / DT) + 5)
@@ -127,34 +153,47 @@ class TestGoalReplacedMidMotion:
         assert xs[-1] == pytest.approx(goal_x, abs=1e-6)
         assert all(abs(y) < 1e-9 for _, y, _ in samples)
 
-    def test_a_goal_inside_the_braking_distance_is_not_overshot(self, sim, batch):
+    @pytest.mark.parametrize(
+        "offset",
+        [(0.2, 0.0), (-5.0, 0.0), (0.0, 5.0), (0.0, 0.0)],
+        ids=["inside_braking_distance", "behind", "right_angle", "where_it_is"],
+    )
+    def test_an_infeasible_goal_is_refused_and_the_motion_runs_on(self, sim, batch, offset):
         agent = _agent(sim, batch)
-        _cruise(sim, agent)
-        x0 = agent.get_pose().position[0]
-        goal_x = x0 + 0.2  # braking distance is 0.5 m
-        agent.set_goal_pose(_goal(goal_x))
-        samples = _run(sim, agent, 20)
-        xs = [x for x, _, _ in samples]
-        assert max(xs) <= goal_x + 1e-6
-        assert all(b >= a - 1e-9 for a, b in zip(xs, xs[1:]))
-        assert xs[-1] == pytest.approx(goal_x, abs=1e-6)
-
-    def test_a_goal_behind_starts_from_rest(self, sim, batch):
-        agent = _agent(sim, batch)
-        _cruise(sim, agent)
-        x0 = agent.get_pose().position[0]
-        agent.set_goal_pose(_goal(x0 - 5.0))
-        speed = _run(sim, agent, 1)[0][2]
-        assert speed <= ACCEL * DT + 1e-9  # restarted, not carried
-
-    def test_a_goal_across_the_motion_starts_from_rest_along_it(self, sim, batch):
-        agent = _agent(sim, batch)
-        _cruise(sim, agent)
+        agent.set_goal_pose(_goal(6.0))
+        _run(sim, agent, int(VMAX / ACCEL / DT) + 2)  # cruising toward x = 6
         x0, y0, _ = agent.get_pose().position
-        agent.set_goal_pose(_goal(x0, y0 + 5.0))
-        (x, y, speed) = _run(sim, agent, 1)[0]
-        assert x == pytest.approx(x0)  # the motion across is dropped at once
-        assert speed <= ACCEL * DT + 1e-9
+        before = [list(w.position) for w in agent.path]
+        new_goal = _goal(x0 + offset[0], y0 + offset[1])
+
+        assert agent.path_rejection([new_goal]) is not None
+        assert agent.set_goal_pose(new_goal) is False
+        assert [list(w.position) for w in agent.path] == before
+        samples = _run_vel(sim, agent, 80)
+        _assert_within_ramps((VMAX, 0.0), samples)
+        assert samples[-1][0] == pytest.approx(6.0, abs=1e-6), "the previous goal is still followed"
+        assert all(abs(y - y0) < 1e-9 for _, y, _, _ in samples)
+
+    def test_at_rest_any_goal_is_taken(self, sim, batch):
+        agent = _agent(sim, batch)
+        assert agent.path_rejection([_goal(-3.0, 2.0)]) is None
+        assert agent.set_goal_pose(_goal(-3.0, 2.0)) is True
+        samples = _run_vel(sim, agent, 80)
+        _assert_within_ramps((0.0, 0.0), samples)
+        assert samples[-1][:2] == pytest.approx((-3.0, 2.0), abs=1e-6)
+
+    def test_a_goal_ahead_stays_continuous(self, sim, batch):
+        """No dip: the speed toward a goal further ahead is kept exactly."""
+        agent = _agent(sim, batch)
+        _cruise(sim, agent)
+        x0 = agent.get_pose().position[0]
+        agent.set_goal_pose(_goal(x0 + 3.0))
+        samples = _run_vel(sim, agent, 60)
+        _assert_within_ramps((VMAX, 0.0), samples)
+        assert samples[0][2] == pytest.approx(VMAX, rel=1e-3)
+        xs = [x for x, _, _, _ in samples]
+        assert all(b >= a - 1e-9 for a, b in zip(xs, xs[1:])), "reversed"
+        assert xs[-1] == pytest.approx(x0 + 3.0, abs=1e-6)
 
     def test_a_goal_set_on_arrival_starts_from_rest(self, sim, batch):
         """Arrived is at rest, whatever the arrival step's average speed says.
@@ -181,6 +220,17 @@ class TestGoalReplacedMidMotion:
         # From rest the first step is below one step of acceleration; carrying
         # the arrival step's average speed would put it at or above.
         assert speed < ACCEL * DT - 1e-6
+
+    def test_a_goal_behind_a_velocity_command_is_refused(self, sim):
+        """The switch from a velocity command to a goal follows the same rule."""
+        agent = _agent(sim)
+        agent._controllers[0].set_velocity(vx=VMAX)
+        for _ in range(5):
+            sim.step_once()
+        x0 = agent.get_pose().position[0]
+        assert agent.set_goal_pose(_goal(x0 - 3.0)) is False
+        samples = _run_vel(sim, agent, 3)
+        assert all(vx == pytest.approx(VMAX, rel=1e-3) for _, _, vx, _ in samples)
 
     def test_a_goal_after_a_velocity_command_continues_its_speed(self, sim):
         """Velocity mode does not set is_moving; the switch to a goal must not
@@ -285,3 +335,32 @@ def test_a_checkpoint_keeps_the_initial_speed(sim):
     restored.restore_navigation_state(state, list(agent.get_pose().orientation))
     for t in np.linspace(sim.sim_time, sim.sim_time + 3.0, 7):
         assert restored._tpi_forward.get_point(t)[0] == pytest.approx(controller._tpi_forward.get_point(t)[0])
+
+
+def test_a_refused_move_action_starts_once_the_motion_ends(sim):
+    """MoveAction retries a refused path instead of completing or failing."""
+    from pybullet_fleet.action import MoveAction
+    from pybullet_fleet.geometry import Path
+    from pybullet_fleet.types import ActionStatus
+
+    agent = _agent(sim)
+    agent.set_goal_pose(_goal(3.0))
+    _run(sim, agent, int(VMAX / ACCEL / DT) + 2)
+    action = MoveAction(path=Path.from_positions([[-2.0, 0.0, 0.1]]))
+    agent.add_action(action)
+    sim.step_once()
+    assert action.status == ActionStatus.NOT_STARTED  # refused while heading to x = 3
+    for _ in range(400):
+        sim.step_once()
+        if action.status == ActionStatus.COMPLETED:
+            break
+    assert action.status == ActionStatus.COMPLETED
+    assert agent.get_pose().position[0] == pytest.approx(-2.0, abs=1e-6)
+
+
+def test_from_speed_never_raises_the_deceleration():
+    from pybullet_fleet._tpi import build_tpi_from_speed, try_build_tpi_from_speed
+
+    assert try_build_tpi_from_speed(p0=0.0, pe=0.2, vmax=VMAX, accel=ACCEL, t0=0.0, v0=VMAX, decel=DECEL) is None
+    with pytest.raises(ValueError):
+        build_tpi_from_speed(p0=0.0, pe=0.2, vmax=VMAX, accel=ACCEL, t0=0.0, v0=VMAX, decel=DECEL)

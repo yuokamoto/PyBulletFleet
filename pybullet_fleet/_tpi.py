@@ -16,7 +16,8 @@ infeasible request apart from a trajectory that simply finishes early.
 for ``(N,)`` arrays of such trajectories — the batched eval hot path.
 
 :func:`build_tpi_from_speed` starts a trajectory from a body already moving
-along the travel axis, for a goal replaced mid-motion.
+along the travel axis, for a goal replaced mid-motion, and
+:func:`try_build_tpi_from_speed` says whether it can stop in time.
 """
 
 from __future__ import annotations
@@ -114,6 +115,29 @@ def try_build_tpi(
 _V0_CAP = 1.0 - 1e-9
 
 
+def try_build_tpi_from_speed(
+    p0: float,
+    pe: float,
+    vmax: float,
+    accel: float,
+    t0: float,
+    v0: float,
+    decel: Optional[float] = None,
+) -> Optional[TwoPointInterpolation]:
+    """A trajectory to ``pe`` for a body already moving at ``v0`` toward it, or ``None``.
+
+    ``v0`` is clamped to ``[0, vmax]``; ``v0 <= 0`` is a start from rest.
+    ``None`` means the body cannot stop at ``pe`` from ``v0`` within
+    ``decel``: ``pe`` is closer than its braking distance. The deceleration is
+    never raised to make it fit -- the caller decides what to do instead (see
+    :mod:`pybullet_fleet._replan`, which brakes to a stop first).
+    """
+    if not v0 > 0.0:
+        return try_build_tpi(p0=p0, pe=pe, vmax=vmax, accel=accel, t0=t0, decel=decel)
+    v0 = min(float(v0), vmax * _V0_CAP)
+    return try_build_tpi(p0=p0, pe=pe, vmax=vmax, accel=accel, t0=t0, v0=v0, decel=decel)
+
+
 def build_tpi_from_speed(
     p0: float,
     pe: float,
@@ -126,29 +150,24 @@ def build_tpi_from_speed(
     """A trajectory to ``pe`` for a body already moving at ``v0`` toward it.
 
     For a goal replaced mid-motion: the body keeps its speed instead of
-    dropping to rest and accelerating again. ``v0`` is clamped to ``[0,
-    vmax]``; a body moving away from the goal (``v0 <= 0``) starts from rest,
-    as before.
+    dropping to rest and accelerating again. From rest (``v0 <= 0``) this is
+    :func:`build_tpi`.
 
-    When ``pe`` is closer than the braking distance at ``decel``, the body
-    brakes exactly as hard as it needs to stop at ``pe`` -- harder than
-    ``decel`` -- rather than overshoot and come back. A kinematic body has no
-    other way to honour a goal it can no longer stop at.
+    Raises:
+        ValueError: ``pe`` is closer than the braking distance from ``v0`` at
+            ``decel``. Callers plan around it with
+            :func:`pybullet_fleet._replan.brake_point` first; the deceleration
+            is never exceeded to make a goal fit.
     """
     if not v0 > 0.0:
         return build_tpi(p0=p0, pe=pe, vmax=vmax, accel=accel, t0=t0, decel=decel)
-    v0 = min(float(v0), vmax * _V0_CAP)
-    tpi = try_build_tpi(p0=p0, pe=pe, vmax=vmax, accel=accel, t0=t0, v0=v0, decel=decel)
-    if tpi is not None:
-        return tpi
-    distance = abs(pe - p0)
-    if distance > 1e-9:
-        needed = v0 * v0 / (2.0 * distance) * (1.0 + 1e-6)
-        dec = accel if decel is None else decel
-        tpi = try_build_tpi(p0=p0, pe=pe, vmax=vmax, accel=accel, t0=t0, v0=v0, decel=max(dec, needed))
-        if tpi is not None:
-            return tpi
-    return build_tpi(p0=p0, pe=pe, vmax=vmax, accel=accel, t0=t0, decel=decel)
+    tpi = try_build_tpi_from_speed(p0=p0, pe=pe, vmax=vmax, accel=accel, t0=t0, v0=v0, decel=decel)
+    if tpi is None:
+        raise ValueError(
+            f"cannot stop within {abs(pe - p0):.6g} from speed {v0:.6g} at deceleration "
+            f"{accel if decel is None else decel:.6g}; brake to a stop first"
+        )
+    return tpi
 
 
 def extract_phase_params(tpi: TwoPointInterpolation) -> Tuple[float, float, float, float, float]:

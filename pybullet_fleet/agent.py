@@ -1141,7 +1141,7 @@ class Agent(SimObject):
         self,
         goal: Pose,
         direction: Union[MovementDirection, str, None] = None,
-    ):
+    ) -> bool:
         """
         Set goal pose for the robot to move to.
 
@@ -1151,9 +1151,30 @@ class Agent(SimObject):
             goal: Target Pose (compatible with ROS2 geometry_msgs/Pose)
             direction: Movement direction override, or ``None`` to use
                 the controller's ``default_direction``.
+
+        Returns:
+            Whether the goal was taken; see :meth:`set_path`.
         """
         # Single goal is just a path with one waypoint
-        self.set_path([goal], direction=direction)
+        return self.set_path([goal], direction=direction)
+
+    def path_rejection(self, path: List[Pose]) -> Optional[str]:
+        """Why :meth:`set_path` would refuse ``path`` right now, or ``None``.
+
+        A moving omni agent continues its motion into a new path, so it can
+        only take one whose first waypoint is straight ahead and within its
+        braking distance at the configured deceleration; at rest every path is
+        taken. Asking first lets a caller report a refusal before acting.
+        """
+        if self.use_fixed_base:
+            return "fixed-base robot"
+        if len(path) == 0:
+            return "empty path"
+        if self._batch_controller is not None:
+            return self._batch_controller.path_rejection(self, path)
+        if self._controllers:
+            return self._controllers[0].path_rejection(self, path)
+        return None
 
     def _make_default_controller(self):
         """Build the default Omni/Diff controller from ``self._motion_mode``.
@@ -1347,9 +1368,18 @@ class Agent(SimObject):
         auto_approach: bool = True,
         final_orientation_align: bool = True,
         direction: Union[MovementDirection, str, None] = None,
-    ):
+    ) -> bool:
         """
         Set a path (list of waypoints) for the robot to follow.
+
+        A path set while the agent is moving continues the motion from its
+        current speed, which is only possible when the first waypoint lies
+        straight ahead and the agent can still stop there at its configured
+        deceleration. A path that cannot -- inside the braking distance,
+        behind, or off the line of motion -- is refused: nothing changes, the
+        current motion continues, and this returns ``False`` (the reason is
+        logged and available from :meth:`path_rejection`). At rest every path
+        is taken.
 
         Args:
             path: List of Pose waypoints to follow in sequence
@@ -1362,14 +1392,18 @@ class Agent(SimObject):
                       ("auto", "forward", "backward").
                       Only used in differential drive mode (MotionMode.DIFFERENTIAL).
                       In omnidirectional mode, this parameter is ignored.
+
+        Returns:
+            ``True`` when the path was taken; ``False`` for a fixed-base robot,
+            an empty path, or a path the controller refused.
         """
         if self.use_fixed_base:
             self._log.warning("Cannot set path for fixed-base robot")
-            return
+            return False
 
         if len(path) == 0:
             self._log.warning("Empty path provided")
-            return
+            return False
 
         # Normalize direction string → enum (None passes through to controller)
         if isinstance(direction, str):
@@ -1422,24 +1456,28 @@ class Agent(SimObject):
             # lock as the array writes. Setting it here instead would race a
             # concurrent step_once() that completes a zero-distance path and
             # clears the flag between the lock releasing and this line.
-            self._batch_controller.synchronized_set_path(
+            accepted = self._batch_controller.synchronized_set_path(
                 self,
                 final_path,
                 final_orientation_align=final_orientation_align,
                 direction=direction,
             )
         else:
-            self._controllers[0].set_path(
+            accepted = self._controllers[0].set_path(
                 self,
                 final_path,
                 final_orientation_align=final_orientation_align,
                 direction=direction,
             )
-            self._is_moving = True
+            if accepted is not False:
+                self._is_moving = True
+        if accepted is False:
+            return False
 
         # Clear previous path visualization and visualize new path
         self._clear_path_visualization()
         self._visualize_path(final_path)
+        return True
 
     def _reset_pybullet_velocity(self) -> None:
         """Zero residual physics velocity (prevents drift in kinematic mode)."""

@@ -1,0 +1,98 @@
+"""Whether a moving omni agent can take a new goal without breaking its limits.
+
+A goal or path set while the agent is moving continues the motion: the new
+trajectory starts from the agent's current speed. That is only physically
+possible when the first waypoint lies straight ahead along the current
+velocity and the agent can still stop there at its configured deceleration.
+Anything else -- a goal closer than the braking distance, a goal behind, a
+change of direction -- would need a harder stop than the agent can make, so
+it is rejected: the current motion continues unchanged and the caller is told.
+At rest any goal is accepted.
+
+:func:`replacement_rejection` is the one check both omni controllers
+(per-agent and batched) apply.
+"""
+
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Optional, Sequence, Tuple
+
+import numpy as np
+
+from pybullet_fleet._tpi import try_build_tpi_from_speed
+from pybullet_fleet.geometry import rotate_vector
+
+if TYPE_CHECKING:
+    from pybullet_fleet.controller_params import ControllerParams
+
+#: Below this speed (m/s) the agent counts as at rest.
+REST_SPEED = 1e-6
+
+#: Velocity across the line to the new goal that still counts as moving along
+#: it: an absolute floor plus a fraction of the speed. It absorbs numerical
+#: noise and is dropped when the trajectory starts; anything larger is a change
+#: of direction and is rejected.
+CROSS_SPEED_ABS = 1e-6
+CROSS_SPEED_REL = 1e-3
+
+
+def limits_along(
+    params: "ControllerParams", orientation: Sequence[float], direction_unit: np.ndarray
+) -> Tuple[float, float, float]:
+    """``(vmax, accel, decel)`` along a world-frame unit direction.
+
+    The per-axis caps are body-frame, so the direction is rotated into the
+    body frame first -- the same projection both omni controllers use when
+    they build a trajectory.
+    """
+    qx, qy, qz, qw = orientation
+    direction_body = np.asarray(rotate_vector(tuple(direction_unit), (-qx, -qy, -qz, qw)))
+    return (
+        params.linear_vel_along_direction(direction_body),
+        params.linear_accel_along_direction(direction_body),
+        params.linear_decel_along_direction(direction_body),
+    )
+
+
+def replacement_rejection(
+    params: "ControllerParams",
+    position: Sequence[float],
+    orientation: Sequence[float],
+    velocity: Sequence[float],
+    goal_position: Sequence[float],
+    t0: float,
+) -> Optional[str]:
+    """Why an agent moving at ``velocity`` cannot head for ``goal_position`` now.
+
+    Returns ``None`` when it can: it is at rest, or the goal is ahead along its
+    velocity and it can stop there at its configured deceleration. Otherwise
+    returns a short reason.
+    """
+    pos = np.asarray(position, dtype=float)
+    vel = np.asarray(velocity, dtype=float)
+    goal = np.asarray(goal_position, dtype=float)
+    if params.navigation_2d:
+        goal = goal.copy()
+        goal[2] = pos[2]
+        vel = vel.copy()
+        vel[2] = 0.0
+    speed = float(np.linalg.norm(vel))
+    if speed < REST_SPEED:
+        return None
+
+    disp = goal - pos
+    distance = float(np.linalg.norm(disp))
+    if distance <= 1e-9:
+        return f"moving at {speed:.3g} m/s, cannot stop where it is"
+    unit = disp / distance
+    along = float(np.dot(vel, unit))
+    across = float(np.linalg.norm(vel - along * unit))
+    if along <= 0.0:
+        return f"goal is behind the motion ({speed:.3g} m/s away from it)"
+    if across > CROSS_SPEED_ABS + CROSS_SPEED_REL * speed:
+        return f"goal is off the line of motion ({across:.3g} m/s across it)"
+    vmax, accel, decel = limits_along(params, orientation, unit)
+    if try_build_tpi_from_speed(p0=0.0, pe=distance, vmax=vmax, accel=accel, t0=t0, v0=along, decel=decel) is None:
+        braking = along * along / (2.0 * decel)
+        return f"goal is {distance:.3g} m ahead, inside the {braking:.3g} m braking distance"
+    return None

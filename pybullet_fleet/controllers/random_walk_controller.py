@@ -49,7 +49,8 @@ class RandomWalkController(Controller):
                 self._origin[1] + dist * math.sin(angle),
                 z,
             ]
-            agent.set_goal_pose(Pose.from_xyz(*target))
-            self._wait_timer = random.uniform(*self._wait_range)
+            # A refused goal (see Agent.set_path) is replaced on the next update.
+            if agent.set_goal_pose(Pose.from_xyz(*target)) is not False:
+                self._wait_timer = random.uniform(*self._wait_range)
 
         return False
