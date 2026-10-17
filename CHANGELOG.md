@@ -90,7 +90,7 @@ are not recommended for production use yet.
 - Add `register_callback(..., phase="post_step")`: a callback that runs at the
   end of the step, right after the `post_step` event, once poses are written
   and the collision check is done, with the same `frequency` option as Phase-1
-  callbacks. Add `MultiRobotSimulationCore.step_end_time`, the simulated time
+  callbacks, scheduled on the time of the poses it sees. Add `MultiRobotSimulationCore.step_end_time`, the simulated time
   the bodies' poses belong to: once a step has updated its objects `sim_time`
   is still the step's start while poses are already at its end (in a
   `pre_step` subscriber, before the update, it is the start).

@@ -217,8 +217,13 @@ class BatchOmniController(BatchKinematicController):
             self._final_orient_target_quat[idx] = np.asarray(path[-1].orientation, dtype=np.float64)
         else:
             self._align_final_orient[idx] = False
-        # Continue from the agent's current motion, as OmniController does.
-        initial_velocity = np.array(agent._current_velocity, dtype=np.float64)
+        # Continue from the agent's current motion, as OmniController does --
+        # but only while a path is under way. A row that has just finished
+        # still reports its last step's average speed until the next flush
+        # zeroes it; the per-agent controller zeroes it on arrival.
+        initial_velocity = None
+        if self._phase[idx] == _PHASE_FORWARD:
+            initial_velocity = np.array(agent._current_velocity, dtype=np.float64)
         self._begin_waypoint(idx, agent, path[0], float(self._sim_core.sim_time), initial_velocity)
 
     def _begin_waypoint(

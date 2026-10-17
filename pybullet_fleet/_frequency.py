@@ -46,10 +46,10 @@ class FrequencyGate:
     def due(self, now: float, timestep: float) -> Optional[float]:
         """Return the time since the handler last ran if it is due at ``now``, else ``None``.
 
-        The first call of a run only sets the baseline unless ``now`` is
-        already on a due time, matching handlers that first run one interval
-        into the run. The returned ``dt`` is the simulated time since the
-        previous run (or since that baseline), never zero or negative.
+        The first call of a run only sets the baseline, matching handlers
+        that first run one interval into the run. The returned ``dt`` is the
+        simulated time since the previous run; the first run reports one
+        interval (at least one timestep). It is never zero or negative.
         """
         if self.frequency is None:
             dt = timestep if self._last_time is None else now - self._last_time
@@ -62,7 +62,6 @@ class FrequencyGate:
             # Baseline: the first grid point strictly after the start, so a
             # handler first runs one interval into the run.
             self._next_index = max(1, math.floor((now + slack) / interval) + 1)
-            self._last_time = now
             return None
         if now + slack < self._next_index * interval:
             return None
@@ -71,5 +70,7 @@ class FrequencyGate:
         self._next_index = max(self._next_index + 1, math.floor((now + slack) / interval) + 1)
         last = self._last_time
         self._last_time = now
-        dt = now - last if last is not None else interval
+        # The first run has no previous one: report the interval, or one step
+        # when the interval is shorter than a step.
+        dt = now - last if last is not None else max(interval, timestep)
         return dt if dt > 0 else timestep

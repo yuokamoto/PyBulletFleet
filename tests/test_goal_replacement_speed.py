@@ -156,6 +156,32 @@ class TestGoalReplacedMidMotion:
         assert x == pytest.approx(x0)  # the motion across is dropped at once
         assert speed <= ACCEL * DT + 1e-9
 
+    def test_a_goal_set_on_arrival_starts_from_rest(self, sim, batch):
+        """Arrived is at rest, whatever the arrival step's average speed says.
+
+        The next goal is set from the step the agent arrives in, before
+        anything has zeroed the reported velocity.
+        """
+        agent = _agent(sim, batch)
+        agent.set_goal_pose(_goal(1.0))
+        handed = []
+
+        def next_goal(sim_core, dt):
+            if not agent.is_moving and not handed:
+                handed.append(np.linalg.norm(agent.velocity[:2]))
+                agent.set_goal_pose(_goal(5.0))
+
+        sim.register_callback(next_goal, phase="post_step")
+        for _ in range(200):
+            sim.step_once()
+            if handed:
+                break
+        assert handed, "never arrived"
+        speed = _run(sim, agent, 1)[0][2]
+        # From rest the first step is below one step of acceleration; carrying
+        # the arrival step's average speed would put it at or above.
+        assert speed < ACCEL * DT - 1e-6
+
 
 class TestFromRestUnchanged:
     def test_a_goal_from_rest_ramps_up_from_zero(self, sim, batch):

@@ -100,7 +100,8 @@ sim.events.on(SimEvents.POST_STEP, on_post_step)
 `register_callback()` runs in Phase 1 by default. Pass `phase="post_step"` for
 a callback that runs right after the `POST_STEP` event, with its own
 `frequency` -- for example to publish or record each step's outcome at a fixed
-rate. `set_pose()` calls from a `POST_STEP` handler or a post-step callback are
+rate. Its schedule runs on `step_end_time`, so a 10 Hz post-step callback runs
+when the poses reach 0.1 s, 0.2 s, ... `set_pose()` calls from a `POST_STEP` handler or a post-step callback are
 immediate, but the step's collision check has already completed. A collision
 caused by such a write is therefore observed by the next collision-check
 opportunity.

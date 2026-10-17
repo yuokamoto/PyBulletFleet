@@ -116,6 +116,39 @@ class TestTheCoreUsesIt:
             sim.step_once()
         assert len(checks) == 100
 
+    def test_plugin_back_from_every_step_starts_a_fresh_schedule(self, sim):
+        class Counter(SimPlugin):
+            def __init__(self, sim_core):
+                super().__init__(sim_core)
+                self.dts = []
+
+            def on_step(self, dt):
+                self.dts.append(dt)
+
+        plugin = sim.register_plugin(Counter(sim), frequency=1.0)
+        for _ in range(15):
+            sim.step_once()
+        plugin.frequency = None
+        for _ in range(30):
+            sim.step_once()
+        plugin.frequency = 1.0
+        plugin.dts.clear()
+        sim.step_once()
+        # Not an immediate run carrying the whole gap since the last one.
+        assert plugin.dts == []
+        for _ in range(10):
+            sim.step_once()
+        assert plugin.dts == [pytest.approx(1.0)]
+
+    @pytest.mark.parametrize("frequency", [0, -1.0])
+    def test_a_non_positive_collision_frequency_disables_checks(self, sim, monkeypatch, frequency):
+        checks = []
+        monkeypatch.setattr(sim, "check_collisions", lambda **kw: checks.append(1) or ([], None))
+        sim.set_collision_check_frequency(frequency)
+        for _ in range(5):
+            sim.step_once()
+        assert checks == []
+
 
 class TestPostStepPhase:
     def test_runs_after_the_post_step_event(self, sim):
@@ -127,12 +160,13 @@ class TestPostStepPhase:
         assert order == ["step", "event", "post_step"]
 
     def test_is_frequency_limited_like_the_rest(self, sim):
-        dts = []
-        sim.register_callback(lambda sc, dt: dts.append(dt), frequency=5.0, phase="post_step")
-        for _ in range(21):
+        seen = []
+        sim.register_callback(lambda sc, dt: seen.append((sc.step_end_time, dt)), frequency=5.0, phase="post_step")
+        for _ in range(20):
             sim.step_once()
-        assert len(dts) == 10
-        assert all(dt == pytest.approx(0.2) for dt in dts)
+        # Scheduled on the poses' time: runs when they reach 0.2, 0.4 ... 2.0 s.
+        assert [round(t, 9) for t, _ in seen] == [round(0.2 * k, 9) for k in range(1, 11)]
+        assert all(dt == pytest.approx(0.2) for _, dt in seen)
 
     def test_step_end_time_is_the_poses_time(self, sim):
         seen = []

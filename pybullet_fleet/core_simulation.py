@@ -479,7 +479,7 @@ class MultiRobotSimulationCore:
         self._viewport_left_click_start: Optional[Tuple[int, int]] = None
         self._viewport_drag_entity_id: Optional[int] = None
         self._collision_check_frequency: Optional[float] = params.collision_check_frequency  # If None, check every step
-        self._collision_check_gate = FrequencyGate(params.collision_check_frequency or None)
+        self._collision_check_gate = self._collision_gate_for(params.collision_check_frequency)
         self._log_level: str = params.log_level
         self._params: SimulationParams = params
         self._collision_color: List[float] = collision_color if collision_color is not None else [0, 0, 1, 1]
@@ -1159,6 +1159,8 @@ class MultiRobotSimulationCore:
         for plugin in self._plugins:
             freq = plugin.frequency
             if freq is None:
+                # Back to every step: a later frequency starts a fresh schedule.
+                plugin._frequency_gate = None
                 try:
                     plugin.on_step(dt)
                 except Exception:
@@ -1204,9 +1206,11 @@ class MultiRobotSimulationCore:
                   their new poses are written to PyBullet and before the collision
                   check.
                 - ``"post_step"``: at the end of the step, right after the
-                  ``post_step`` event: poses are written and collisions are those
-                  of the new poses. Use it to publish or record the step's
-                  outcome.
+                  ``post_step`` event: poses are written, and when the step ran
+                  a collision check (see ``collision_check_frequency``) the
+                  active pairs are those of the new poses. Its ``frequency``
+                  schedule runs on :attr:`step_end_time`, the poses' time. Use
+                  it to publish or record the step's outcome.
 
                 In both phases ``sim_core.sim_time`` is the time the step started
                 at, while the poses are already those at its end,
@@ -1236,11 +1240,18 @@ class MultiRobotSimulationCore:
         )
 
     def _run_callbacks(self, phase: str) -> None:
-        """Run the callbacks registered for ``phase`` that are due this step."""
+        """Run the callbacks registered for ``phase`` that are due this step.
+
+        Phase-1 callbacks keep their schedule on the step's start time, as
+        before. Post-step callbacks schedule on :attr:`step_end_time`, the time
+        of the poses they see, so a ``frequency`` handler there runs when the
+        poses reach ``k / frequency``.
+        """
+        now = self.step_end_time if phase == CALLBACK_PHASE_POST_STEP else self.sim_time
         for cbinfo in list(self._callbacks):
             if cbinfo["phase"] != phase:
                 continue
-            dt = cbinfo["gate"].due(self.sim_time, self._params.timestep)
+            dt = cbinfo["gate"].due(now, self._params.timestep)
             if dt is not None:
                 cbinfo["func"](self, dt)
 
@@ -1258,6 +1269,11 @@ class MultiRobotSimulationCore:
         if self._in_step or self._in_post_step:
             return self.sim_time + self._params.timestep if self._poses_advanced else self.sim_time
         return self._elapsed_sim_time
+
+    @staticmethod
+    def _collision_gate_for(frequency: Optional[float]) -> FrequencyGate:
+        """Schedule for ``collision_check_frequency``: every step for ``None``; ``<= 0`` (disabled) never consults it."""
+        return FrequencyGate(frequency if frequency is not None and frequency > 0 else None)
 
     @staticmethod
     def _monitor_update_frequency(params: "SimulationParams") -> Optional[float]:
@@ -1527,8 +1543,9 @@ class MultiRobotSimulationCore:
 
         Note: Higher frequency increases computational cost but improves collision detection accuracy.
         """
+        gate = self._collision_gate_for(frequency)
         self._collision_check_frequency = frequency
-        self._collision_check_gate = FrequencyGate(frequency or None)
+        self._collision_check_gate = gate
 
         # Log the setting for clarity
         if frequency is None:
