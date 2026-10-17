@@ -77,6 +77,13 @@ are not recommended for production use yet.
 
 ### Added
 
+- Add `register_callback(..., phase="post_step")`: a callback that runs at the
+  end of the step, right after the `post_step` event, once poses are written
+  and the collision check is done, with the same `frequency` option as Phase-1
+  callbacks. Add `MultiRobotSimulationCore.step_end_time`, the simulated time
+  the bodies' poses belong to: during a step `sim_time` is the step's start
+  while poses are already at its end.
+
 - Add `MultiRobotSimulationCore.set_collision_ignore_filter(fn)`: touching
   pairs for which `fn(obj_a, obj_b)` returns `True` are excluded from
   collision results -- active pairs, `collision_count`, collision colouring,
@@ -236,6 +243,16 @@ are not recommended for production use yet.
 - Keep replay input application and result capture in `ReplaySession`, without replay-specific mutation guards in ordinary simulation and Fleet APIs. Direct core calls are outside the recorded-input contract.
 
 ### Fixed
+
+- Frequency-limited callbacks and plugins, `collision_check_frequency` and the
+  DataMonitor refresh no longer skip beats or drift. They compared the
+  accumulated (float) simulation time with the interval since their last run,
+  so a 10 Hz callback on a 0.1 s timestep ran at gaps of 0.1 s and 0.2 s, a
+  1 Hz plugin missed every other second, and an interval that is not a whole
+  number of timesteps drifted. They now run on a fixed grid, `k / frequency`
+  from the start of the run, at most once per step, with a tolerance for float
+  error; after a gap they run once at the next due time. A DataMonitor with a
+  GUI now refreshes on every step, as documented.
 
 - `Agent.set_controller()` now adopts the controller's own
   `ControllerParams` as the agent's `controller_params`, matching what

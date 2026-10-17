@@ -168,7 +168,7 @@ class SimPlugin:
         self.sim_core = sim_core
         self.config: Dict[str, Any] = {}
         self.frequency: Optional[float] = None  # Step frequency in Hz (None = every step)
-        self._accumulator: float = 0.0  # Time accumulator for frequency control
+        self._frequency_gate: Optional[Any] = None  # FrequencyGate for ``frequency``, built on first use
 
     @classmethod
     def from_config(cls, sim_core: "MultiRobotSimulationCore", config: Dict[str, Any] | None = None) -> "SimPlugin":

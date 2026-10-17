@@ -46,6 +46,7 @@ step_once()
 │
 ├── check_collisions         (frequency-gated; sees up-to-date AABBs/grid)
 ├── post-step events
+├── post-step callbacks      (register_callback(..., phase="post_step"))
 └── monitor update
 ```
 
@@ -96,10 +97,32 @@ from pybullet_fleet.events import SimEvents
 sim.events.on(SimEvents.POST_STEP, on_post_step)
 ```
 
-`register_callback()` is a Phase-1 callback API; it does not create a post-step
-callback. `set_pose()` calls from a `POST_STEP` handler are immediate, but the
-step's collision check has already completed. A collision caused by such a
-write is therefore observed by the next collision-check opportunity.
+`register_callback()` runs in Phase 1 by default. Pass `phase="post_step"` for
+a callback that runs right after the `POST_STEP` event, with its own
+`frequency` -- for example to publish or record each step's outcome at a fixed
+rate. `set_pose()` calls from a `POST_STEP` handler or a post-step callback are
+immediate, but the step's collision check has already completed. A collision
+caused by such a write is therefore observed by the next collision-check
+opportunity.
+
+### Which time a pose belongs to
+
+During a step, Phase 1 has already advanced the bodies, so in callbacks, plugin
+hooks and step events `sim_core.sim_time` is the time the step **started** at
+while every pose read is the one at its **end**. Stamp anything read from the
+bodies with `sim_core.step_end_time` (`sim_time + timestep` during a step, the
+elapsed time outside one).
+
+### Frequency-limited handlers
+
+Callbacks and plugins with a `frequency`, `collision_check_frequency` and the
+DataMonitor refresh run on a fixed grid of simulated time, `k / frequency`
+seconds from the start of the run: on the first step at or after each due
+time, at most once per step, and after a gap (a pause, a late registration)
+once at the next due time rather than once per missed one. The comparison
+tolerates the float error in the accumulated simulation time, so a 10 Hz
+handler on a 0.1 s timestep runs every step, and an interval that is not a
+whole number of timesteps does not drift.
 
 ### What Phase 1 does not promise
 
