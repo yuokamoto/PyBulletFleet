@@ -35,7 +35,7 @@ write behavior.
 Each command starts a separate process. The source writes one complete JSON
 checkpoint; the other output files contain observed per-step states. The
 automated test compares the restored suffix with the uninterrupted reference
-at every completed step, including movement completion at `S_14`. The
+at every completed step, including movement completion at `S_13`. The
 reference mode observes `POST_STEP` while using ordinary `run_simulation()`.
 The source mode deliberately calls `step_once()` three times so it can capture
 only after the completed boundary; `POST_STEP` runs before the core advances

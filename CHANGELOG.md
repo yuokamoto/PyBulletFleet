@@ -14,6 +14,46 @@ are not recommended for production use yet.
 
 ### Changed
 
+- Position controllers (`OmniController`, `DifferentialController` and the
+  batched omni and differential controllers) evaluate their trajectories at
+  the end of the step, `step_end_time`, and start a trajectory there, as
+  kinematic joints already did. A step's pose is now the trajectory at the time
+  `step_end_time` stamps it with; before, it was the trajectory one step
+  earlier. Consequences: a goal set in a `pre_step` subscriber moves in that
+  same step, a motion completes one step sooner, and a goal replaced
+  mid-motion is judged on the speed of the pose in effect when it is set,
+  per-agent and batched alike, whichever phase sets it. The omni checkpoint
+  proof's evidence
+  values change accordingly (its pose at `S_3` is the trajectory at 0.3 s).
+
+- A goal or path set on a moving omnidirectional agent (per-agent
+  `OmniController` and `BatchOmniController`) now continues the motion: the
+  new trajectory starts from the agent's speed toward the new goal instead of
+  from rest, and `Agent.set_path` no longer puts a zero-length approach
+  waypoint (the current pose) in front of it while the agent moves. The speed
+  is signed along the new line, so a goal behind is reached by slowing,
+  reversing and driving back. A goal is taken when that trajectory exists
+  within the configured limits and refused otherwise -- inside the braking
+  distance, where the agent is, or off the line of motion: the current motion
+  and path continue unchanged, no limit is ever exceeded, and
+  `Agent.set_path` / `set_goal_pose` return `False` (`True` when taken; the
+  `AgentManager.set_goal_pose*` wrappers pass it on). `Agent.path_rejection()`
+  gives the reason without acting, as a `PathRejection` whose `temporary`
+  flag tells a refusal that lasts only while the agent moves from a
+  permanent one (fixed base, empty path). At rest every goal is taken, as
+  before. Callers inside the library retry a temporarily refused goal on
+  their next update
+  (`MoveAction`, `PatrolController`, `RandomWalkController`, the behaviour
+  tree's `NavigateTo`, whose `NavigationAdapter.start_navigation()` may now
+  return `False`), and `FleetCommandDispatcher.navigate()` reports it in the
+  ack's `rejected` map. This needs `two-point-interpolation>=1.3.2`: earlier
+  versions could return a trajectory that never reached its target for a body
+  starting away from it, which a reversal is.
+  Differential agents, which turn in place first, still
+  start from rest. Navigation checkpoints record the trajectory's initial
+  speed (`forward.v0`); the kinematic profile's controller state is now
+  version 2.
+
 - URDF SimObject and mesh Agent factories retain their effective spawn
   descriptors for recording handlers, including URDF fixed-base and scale
   settings. The development kinematic profile rejects batch-owned Agents,
@@ -77,6 +117,14 @@ are not recommended for production use yet.
 
 ### Added
 
+- Add `register_callback(..., phase="post_step")`: a callback that runs at the
+  end of the step, right after the `post_step` event, once poses are written
+  and the collision check is done, with the same `frequency` option as Phase-1
+  callbacks, scheduled on the time of the poses it sees. Add `MultiRobotSimulationCore.step_end_time`, the simulated time
+  the bodies' poses belong to: once a step has updated its objects `sim_time`
+  is still the step's start while poses are already at its end (in a
+  `pre_step` subscriber, before the update, it is the start).
+
 - Add `MultiRobotSimulationCore.set_collision_ignore_filter(fn)`: touching
   pairs for which `fn(obj_a, obj_b)` returns `True` are excluded from
   collision results -- active pairs, `collision_count`, collision colouring,
@@ -100,8 +148,10 @@ are not recommended for production use yet.
 
 - Add `SimulationParams.monitor_update_interval`: simulated seconds between
   DataMonitor refreshes, which were fixed at every step with a GUI and every
-  second without one. That remains the default (`None`); `0` is every step.
-  It is independent of `monitor_log_interval`.
+  second without one. The default (`None`) is every step while the monitor
+  window is open (`enable_monitor_gui`, or `gui` when that is unset), so a
+  monitor window on a headless run stays live too, and every second
+  otherwise; `0` is every step. It is independent of `monitor_log_interval`.
 
 - The monitor's real-time factor is measured against the newest sample older
   than its 10 s window as well, so updates sparser than the window no longer
@@ -236,6 +286,16 @@ are not recommended for production use yet.
 - Keep replay input application and result capture in `ReplaySession`, without replay-specific mutation guards in ordinary simulation and Fleet APIs. Direct core calls are outside the recorded-input contract.
 
 ### Fixed
+
+- Frequency-limited callbacks and plugins, `collision_check_frequency` and the
+  DataMonitor refresh no longer skip beats or drift. They compared the
+  accumulated (float) simulation time with the interval since their last run,
+  so a 10 Hz callback on a 0.1 s timestep ran at gaps of 0.1 s and 0.2 s, a
+  1 Hz plugin missed every other second, and an interval that is not a whole
+  number of timesteps drifted. They now run on a fixed grid, `k / frequency`
+  from the start of the run, at most once per step, with a tolerance for float
+  error; after a gap they run once at the next due time. A DataMonitor with a
+  GUI now refreshes on every step, as documented.
 
 - `Agent.set_controller()` now adopts the controller's own
   `ControllerParams` as the agent's `controller_params`, matching what

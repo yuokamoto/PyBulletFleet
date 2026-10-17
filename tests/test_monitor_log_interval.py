@@ -134,11 +134,11 @@ def test_the_monitor_refresh_is_set_separately(make_sim, monkeypatch):
     twice_as_often = _monitor_updates(make_sim, monkeypatch, monitor_update_interval=0.5)
     every_step = _monitor_updates(make_sim, monkeypatch, monitor_update_interval=0)
     assert SimulationParams().monitor_update_interval is None
-    # 4 simulated seconds: about once a second headless by default, about
-    # twice as often at 0.5 s, and on every step but the first at 0.
-    assert 3 <= headless_default <= 4
-    assert twice_as_often >= 2 * headless_default
-    assert every_step == 39
+    # 40 steps of 0.1 s start at 0.0 .. 3.9 s: once a second headless by
+    # default (1, 2, 3 s), every 0.5 s at 0.5, and on every step at 0.
+    assert headless_default == 3
+    assert twice_as_often == 7
+    assert every_step == 40
 
 
 def test_zero_turns_it_off(make_sim, caplog):
@@ -167,3 +167,41 @@ def test_nothing_is_computed_when_info_is_off(make_sim):
     for _ in range(5):
         sim.step_once()
     assert len(sim._speed_history) == 0
+
+
+def test_record_forced_headless_keeps_the_headless_monitor_rate(monkeypatch, tmp_path):
+    """setup_pybullet() turns the GUI off under RECORD; the monitor's default
+    rate must follow the final mode (once a second), not the requested GUI's
+    every step."""
+    import pybullet as p
+
+    monkeypatch.setenv("RECORD", str(tmp_path / "unused.gif"))
+    monkeypatch.delenv("RECORD_GUI", raising=False)
+    sim = MultiRobotSimulationCore(
+        SimulationParams(gui=True, monitor=True, enable_monitor_gui=False, target_rtf=0, timestep=0.1, monitor_log_interval=0)
+    )
+    try:
+        assert sim.params.gui is False
+        sim.initialize_simulation()
+        calls = []
+        monkeypatch.setattr(sim, "update_monitor", lambda: calls.append(sim.sim_time))
+        for _ in range(40):
+            sim.step_once()
+        assert len(calls) == 3  # at 1, 2 and 3 s
+    finally:
+        p.disconnect(sim.client)
+
+
+def test_the_default_refresh_follows_the_monitor_window(make_sim, monkeypatch):
+    """The per-step default keeps the monitor window live, so it follows the
+    window: on for a headless run that opens one, off for a GUI run that does
+    not (enable_monitor_gui, or gui when that is None)."""
+    from pybullet_fleet.core_simulation import MultiRobotSimulationCore
+
+    assert _monitor_updates(make_sim, monkeypatch, enable_monitor_gui=True) == 40
+
+    frequency = MultiRobotSimulationCore._monitor_update_frequency
+    assert frequency(SimulationParams(gui=False, enable_monitor_gui=True)) is None
+    assert frequency(SimulationParams(gui=True, enable_monitor_gui=False)) == 1.0
+    assert frequency(SimulationParams(gui=True, enable_monitor_gui=None)) is None
+    assert frequency(SimulationParams(gui=False, enable_monitor_gui=None)) == 1.0

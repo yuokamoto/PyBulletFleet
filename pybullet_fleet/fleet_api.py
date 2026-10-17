@@ -127,8 +127,16 @@ class FleetCommandDispatcher:
         commands = tuple(goals)
         resolved_id = _resolve_command_id(command_id, commands)
         accepted, rejected = self._resolve_targets(command.name for command in commands)
-        ack = self._ack("navigate", resolved_id, source, tuple(command.name for command in commands), accepted, rejected)
         by_name = _first_command_by_name(commands)
+        # A moving robot only takes a goal it can reach within its limits (see
+        # Agent.set_path); report the others as rejected before acting.
+        for name in list(accepted):
+            check = getattr(accepted[name], "path_rejection", None)
+            rejection = check([by_name[name].to_pose()]) if callable(check) else None
+            if rejection is not None:
+                rejected[name] = str(getattr(rejection, "reason", rejection))
+                del accepted[name]
+        ack = self._ack("navigate", resolved_id, source, tuple(command.name for command in commands), accepted, rejected)
         for name in ack.accepted_names:
             accepted[name].set_goal_pose(by_name[name].to_pose())
         self._record_effective_input(

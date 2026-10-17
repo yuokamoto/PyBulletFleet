@@ -14,6 +14,10 @@ infeasible request apart from a trajectory that simply finishes early.
 
 :func:`trapezoid_distance` evaluates the distance traveled at time ``tau``
 for ``(N,)`` arrays of such trajectories — the batched eval hot path.
+
+:func:`build_tpi_from_speed` starts a trajectory from a body already moving
+along the travel axis, for a goal replaced mid-motion, and
+:func:`try_build_tpi_from_speed` says whether it can stop in time.
 """
 
 from __future__ import annotations
@@ -105,6 +109,67 @@ def try_build_tpi(
     return tpi
 
 
+#: Fraction below ``vmax`` an initial speed is clamped to. The solver treats an
+#: initial speed equal to ``vmax`` as exceeding it (and warns), so a body that
+#: is cruising at the cap starts a hair below it instead.
+_V0_CAP = 1.0 - 1e-9
+
+
+def try_build_tpi_from_speed(
+    p0: float,
+    pe: float,
+    vmax: float,
+    accel: float,
+    t0: float,
+    v0: float,
+    decel: Optional[float] = None,
+) -> Optional[TwoPointInterpolation]:
+    """A trajectory to ``pe`` for a body already moving at ``v0``, or ``None``.
+
+    ``v0`` is signed along ``p0 -> pe``: negative is moving away from ``pe``,
+    and the trajectory then slows, reverses and drives to ``pe`` (that first
+    slowing uses ``accel``, the solver's first-phase limit). Its magnitude is
+    clamped to ``vmax``. ``None`` means no trajectory within the limits
+    exists -- ``pe`` is closer than the braking distance, or the body is
+    moving with nowhere to go -- and no limit is ever raised to make one fit;
+    see :mod:`pybullet_fleet._replan`.
+    """
+    v0 = max(-vmax * _V0_CAP, min(float(v0), vmax * _V0_CAP))
+    return try_build_tpi(p0=p0, pe=pe, vmax=vmax, accel=accel, t0=t0, v0=v0, decel=decel)
+
+
+def build_tpi_from_speed(
+    p0: float,
+    pe: float,
+    vmax: float,
+    accel: float,
+    t0: float,
+    v0: float,
+    decel: Optional[float] = None,
+) -> TwoPointInterpolation:
+    """A trajectory to ``pe`` for a body already moving at ``v0`` toward it.
+
+    For a goal replaced mid-motion: the body keeps its (signed) speed instead
+    of dropping to rest and accelerating again. From rest this is
+    :func:`build_tpi`.
+
+    Raises:
+        ValueError: no trajectory within the limits exists (see
+            :func:`try_build_tpi_from_speed`). Callers check first with
+            :func:`pybullet_fleet._replan.replacement_rejection`; no limit is
+            ever raised to make a goal fit.
+    """
+    if v0 == 0.0:
+        return build_tpi(p0=p0, pe=pe, vmax=vmax, accel=accel, t0=t0, decel=decel)
+    tpi = try_build_tpi_from_speed(p0=p0, pe=pe, vmax=vmax, accel=accel, t0=t0, v0=v0, decel=decel)
+    if tpi is None:
+        raise ValueError(
+            f"no trajectory over {abs(pe - p0):.6g} from speed {v0:.6g} within accel "
+            f"{accel:.6g} / decel {accel if decel is None else decel:.6g}"
+        )
+    return tpi
+
+
 def extract_phase_params(tpi: TwoPointInterpolation) -> Tuple[float, float, float, float, float]:
     """Read trapezoidal phase scalars from a constructed TPI.
 
@@ -147,10 +212,14 @@ def trapezoid_distance(
     accel: np.ndarray,
     total_distance: np.ndarray,
     decel: Optional[np.ndarray] = None,
+    v0: Optional[np.ndarray] = None,
 ) -> np.ndarray:
     """Vectorised distance-traveled lookup for trapezoidal profiles.
 
     All inputs are ``(N,)`` arrays; returns ``(N,)``.
+
+    ``v0`` is the speed each trajectory starts at (``None``: at rest), as built
+    by :func:`build_tpi_from_speed`; the ramp up then starts from it.
 
     ``decel`` is the braking scalar for the final phase. ``None`` reuses
     ``accel``, which is the symmetric profile and what every caller got before
@@ -165,15 +234,19 @@ def trapezoid_distance(
     done = tau >= t_total
     in_accel = (tau > 0.0) & ~in_const & ~in_decel & ~done
 
-    # accel phase: 0.5 * a * t^2
+    if v0 is None:
+        v0 = np.zeros_like(tau)
+    # accel phase: v0 * t + 0.5 * a * t^2
     if in_accel.any():
-        out[in_accel] = 0.5 * accel[in_accel] * tau[in_accel] * tau[in_accel]
-    # const phase: 0.5 * a * t_accel^2 + v_peak * (t - t_accel),
-    # where v_peak = a * t_accel
+        t = tau[in_accel]
+        out[in_accel] = v0[in_accel] * t + 0.5 * accel[in_accel] * t * t
+    # const phase: v0 * t_accel + 0.5 * a * t_accel^2 + v_peak * (t - t_accel),
+    # where v_peak = v0 + a * t_accel
     if in_const.any():
         ta = t_accel[in_const]
         a = accel[in_const]
-        out[in_const] = 0.5 * a * ta * ta + (a * ta) * (tau[in_const] - ta)
+        u = v0[in_const]
+        out[in_const] = u * ta + 0.5 * a * ta * ta + (u + a * ta) * (tau[in_const] - ta)
     # decel phase: total_distance - 0.5 * a * (t_total - t)^2
     if in_decel.any():
         d = decel[in_decel]

@@ -18,10 +18,10 @@ and `sim.remove_object()` for box lifecycle. Its observations remain in memory.
 | --- | --- | ---: | ---: | --- |
 | Before spawn | 0 / 0.0 s | 0.00 | 0.00 | Absent |
 | CP1, base moving | 3 / 0.3 s | 0.01 | 0.00 | Independent at (1.00, 0.00, 0.70) |
-| CP2, joint moving | 16 / 1.6 s | 0.60 | 0.18 | Independent at (1.00, 0.00, 0.70) |
-| CP3, attached joint moving | 21 / 2.1 s | 0.60 | 0.62 | Attached; approximately (0.85, -0.273, 1.183) |
-| CP4, after detach | 28 / 2.8 s | 0.60 | -0.60 | Independent; approximately (0.85, 0.265, 1.188) |
-| After delete | 29 / 2.9 s | 0.60 | -0.60 | Absent |
+| CP2, joint moving | 15 / 1.5 s | 0.60 | 0.18 | Independent at (1.00, 0.00, 0.70) |
+| CP3, attached joint moving | 20 / 2.0 s | 0.60 | 0.62 | Attached; approximately (0.85, -0.273, 1.183) |
+| CP4, after detach | 27 / 2.7 s | 0.60 | -0.60 | Independent; approximately (0.85, 0.265, 1.188) |
+| After delete | 28 / 2.8 s | 0.60 | -0.60 | Absent |
 
 At CP1 the base reports `is_moving=True`. At CP2 and CP3 the joint position
 changes across steps, but `get_joint_state_by_name()` reports velocity `0.0`:
@@ -41,9 +41,9 @@ The driver maps stable label `box-001` to runtime PBF `object_id=1` in this
 run. Robot `object_id=0` and box `object_id=1` are observations of this run,
 not cross-run identity promises. The `OBJECT_SPAWNED` callback ran in
 `PRE_STEP` with core counter 0; the box exists before step 1. The
-`OBJECT_REMOVED` callback ran in `POST_STEP` after step 29's state update,
-while the core counter still read 28. The driver labels this as completed
-step 29 / 2.9 s. In general, `POST_STEP` callbacks see the resulting state
+`OBJECT_REMOVED` callback ran in `POST_STEP` after step 28's state update,
+while the core counter still read 27. The driver labels this as completed
+step 28 / 2.8 s. In general, `POST_STEP` callbacks see the resulting state
 before the core increments `step_count` and `sim_time`; operations issued
 inside that callback need an explicit phase and completed-step label. The
 example's CP4 is observed immediately after detach within `POST_STEP`, so
