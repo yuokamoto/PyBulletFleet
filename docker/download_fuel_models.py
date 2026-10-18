@@ -16,7 +16,8 @@ Environment variables:
     GZ_FUEL_CACHE_DIR      Override cache directory (default: ``~/.gz/fuel``)
     FUEL_MAPS_DIR          Override maps search directory
     ALLOW_NO_FUEL_MODELS   Set to ``1`` to accept worlds that reference no Fuel
-                           models (an empty cache) instead of failing
+                           models (an empty cache) instead of failing. Missing
+                           world files fail regardless.
 
 The cache directory is always created, so a Dockerfile that copies it never
 fails on an empty result. Finding no world files, or worlds that name no Fuel
@@ -199,8 +200,10 @@ def main():
     print(f"Scanning world files in {MAPS_DIR} ...")
     worlds = glob.glob(os.path.join(MAPS_DIR, "**", "*.world"), recursive=True)
     if not worlds:
+        # Always fatal, override or not: an image without its demo worlds is the
+        # base-image regression this check exists to catch.
         print(f"ERROR: no .world files under {MAPS_DIR}. Has the base image moved its maps?", file=sys.stderr)
-        return 0 if allow_empty else 1
+        return 1
 
     models = find_fuel_models(MAPS_DIR)
     print(f"Found {len(models)} unique Fuel models in {len(worlds)} world files")
