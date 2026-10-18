@@ -46,7 +46,9 @@ are not recommended for production use yet.
   (`MoveAction`, `PatrolController`, `RandomWalkController`, the behaviour
   tree's `NavigateTo`, whose `NavigationAdapter.start_navigation()` may now
   return `False`), and `FleetCommandDispatcher.navigate()` reports it in the
-  ack's `rejected` map. This needs `two-point-interpolation>=1.3.2`: earlier
+  ack's `rejected` map -- also when the refusal comes only after the command
+  event was emitted (a handler of it changed the robot): the returned ack and
+  the recorded input then list only the goals actually applied. This needs `two-point-interpolation>=1.3.2`: earlier
   versions could return a trajectory that never reached its target for a body
   starting away from it, which a reversal is.
   Differential agents, which turn in place first, still
