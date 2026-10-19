@@ -1364,13 +1364,14 @@ class TestReset:
 
     def test_resets_counters(self, sim_core):
         """Step count, collision count, and sim_time are zeroed."""
-        sim_core._step_count = 100
+        for _ in range(3):
+            sim_core.step_once()
         sim_core._collision_count = 50
-        sim_core._elapsed_sim_time = 99.9
+        assert sim_core.step_count == 3 and sim_core.sim_time > 0.0
 
         sim_core.reset()
 
-        assert sim_core._step_count == 0
+        assert sim_core.step_count == 0
         assert sim_core._collision_count == 0
         assert sim_core.sim_time == 0.0
 
@@ -1508,12 +1509,13 @@ class TestInitializeSimulation:
 
     def test_counters_reset(self, sim_core):
         """Basic counters should all be zeroed."""
-        sim_core._step_count = 100
+        for _ in range(3):
+            sim_core.step_once()
         sim_core._collision_count = 50
-        sim_core._elapsed_sim_time = 99.9
+        assert sim_core.step_count == 3 and sim_core.sim_time > 0.0
 
         sim_core.initialize_simulation()
-        assert sim_core._step_count == 0
+        assert sim_core.step_count == 0
         assert sim_core._collision_count == 0
         assert sim_core.sim_time == 0.0
 

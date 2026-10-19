@@ -17,6 +17,24 @@ from pybullet_fleet.sim_object import SimObject
 # ---------------------------------------------------------------------------
 
 
+class AtTime:
+    """A simulation as seen at simulated time ``sim_time`` (test-only).
+
+    ``MultiRobotSimulationCore.sim_time`` is read-only: the clock moves only by
+    stepping, or by ``restore_completed_step_boundary()`` on a fresh simulation.
+    A test that drives a time-dependent component directly, without stepping,
+    hands that component this view. It reports ``sim_time`` and forwards
+    everything else to the real simulation.
+    """
+
+    def __init__(self, sim, sim_time: float) -> None:
+        self._sim = sim
+        self.sim_time = sim_time
+
+    def __getattr__(self, name):
+        return getattr(self._sim, name)
+
+
 class MockSimCore:
     """Minimal sim_core mock for tests.
 
