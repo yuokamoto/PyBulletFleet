@@ -1180,10 +1180,10 @@ class MultiRobotSimulationCore:
                 gate = plugin._frequency_gate
                 if gate is None or gate.frequency != freq:
                     gate = plugin._frequency_gate = FrequencyGate(freq)
-                elapsed = gate.due(self.sim_time, dt)
-                if elapsed is not None:
+                dt_since_last_run = gate.due(self.sim_time, dt)
+                if dt_since_last_run is not None:
                     try:
-                        plugin.on_step(elapsed)
+                        plugin.on_step(dt_since_last_run)
                     except Exception:
                         logger.error("Plugin %s.on_step() failed", type(plugin).__name__, exc_info=True)
 
@@ -1263,9 +1263,9 @@ class MultiRobotSimulationCore:
         for cbinfo in list(self._callbacks):
             if cbinfo["phase"] != phase:
                 continue
-            dt = cbinfo["gate"].due(now, self._params.timestep)
-            if dt is not None:
-                cbinfo["func"](self, dt)
+            dt_since_last_run = cbinfo["gate"].due(now, self._params.timestep)
+            if dt_since_last_run is not None:
+                cbinfo["func"](self, dt_since_last_run)
 
     @staticmethod
     def _collision_gate_for(frequency: Optional[float]) -> FrequencyGate:
