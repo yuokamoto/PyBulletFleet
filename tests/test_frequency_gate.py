@@ -8,7 +8,7 @@ the collision check and the DataMonitor refresh all share :class:`FrequencyGate`
 
 import pytest
 
-from pybullet_fleet import MultiRobotSimulationCore, SimulationParams
+from pybullet_fleet import CallbackPhase, MultiRobotSimulationCore, SimulationParams
 from pybullet_fleet._frequency import FrequencyGate
 from pybullet_fleet.events import SimEvents
 from pybullet_fleet.sim_plugin import SimPlugin
@@ -200,6 +200,14 @@ class TestPostStepPhase:
     def test_rejects_an_unknown_phase(self, sim):
         with pytest.raises(ValueError):
             sim.register_callback(lambda sc, dt: None, phase="later")
+
+    @pytest.mark.parametrize("phase", [CallbackPhase.POST_STEP, "post_step"])
+    def test_takes_the_enum_or_its_value(self, sim, phase):
+        order = []
+        sim.events.on(SimEvents.POST_STEP, lambda **_: order.append("event"))
+        sim.register_callback(lambda sc, dt: order.append("callback"), phase=phase)
+        sim.step_once()
+        assert order == ["event", "callback"]
 
 
 class TestNonPositiveDt:

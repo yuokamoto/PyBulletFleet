@@ -97,7 +97,8 @@ from pybullet_fleet.events import SimEvents
 sim.events.on(SimEvents.POST_STEP, on_post_step)
 ```
 
-`register_callback()` runs in Phase 1 by default. Pass `phase="post_step"` for
+`register_callback()` runs in Phase 1 by default. Pass
+`phase=CallbackPhase.POST_STEP` (or `"post_step"`) for
 a callback that runs right after the `POST_STEP` event, with its own
 `frequency` -- for example to publish or record each step's outcome at a fixed
 rate. Its schedule runs on `sim_time`, the time of the state it sees, so a 10 Hz

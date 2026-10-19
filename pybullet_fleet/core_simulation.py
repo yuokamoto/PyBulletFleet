@@ -62,7 +62,7 @@ from pybullet_fleet.sim_object import SimObject
 from pybullet_fleet.agent import Agent
 from pybullet_fleet.agent_manager import SimObjectManager
 from pybullet_fleet.behavior_tree_core import BehaviorTree
-from pybullet_fleet.types import SpatialHashCellSizeMode, CollisionDetectionMethod, CollisionMode
+from pybullet_fleet.types import CallbackPhase, SpatialHashCellSizeMode, CollisionDetectionMethod, CollisionMode
 from pybullet_fleet._defaults import SIMULATION as _SIM_D
 
 if TYPE_CHECKING:
@@ -126,11 +126,6 @@ logger = get_lazy_logger(__name__)
 # Wall-vs-monotonic divergence (seconds) worth flagging as a clock jump. WARNING
 # log only; does not affect pacing.
 _CLOCK_JUMP_LOG_THRESHOLD_S = 0.5
-
-#: ``register_callback(phase=...)``: after the object update, or at the end of the step.
-CALLBACK_PHASE_STEP = "step"
-CALLBACK_PHASE_POST_STEP = "post_step"
-_CALLBACK_PHASES = (CALLBACK_PHASE_STEP, CALLBACK_PHASE_POST_STEP)
 
 # Real seconds between consecutive run_simulation() loop iterations worth
 # flagging as a stall (host overloaded, GUI event processing stuck, etc.).
@@ -1201,7 +1196,10 @@ class MultiRobotSimulationCore:
                 logger.error("Plugin %s.on_shutdown() failed", type(plugin).__name__, exc_info=True)
 
     def register_callback(
-        self, callback: Callable, frequency: Optional[float] = None, phase: str = CALLBACK_PHASE_STEP
+        self,
+        callback: Callable,
+        frequency: Optional[float] = None,
+        phase: Union[CallbackPhase, str] = CallbackPhase.STEP,
     ) -> None:
         """
         Register a callback function to be called during simulation.
@@ -1214,12 +1212,13 @@ class MultiRobotSimulationCore:
                 Due times are a fixed grid of ``k / frequency`` seconds of simulated
                 time, so a callback neither skips beats nor drifts; it runs at most
                 once per step, and the first time one interval into the run.
-            phase: When in the step the callback runs.
+            phase: When in the step the callback runs, a :class:`CallbackPhase`
+                or its value as a string.
 
-                - ``"step"`` (default): after the objects have been updated, before
+                - ``CallbackPhase.STEP`` / ``"step"`` (default): after the objects have been updated, before
                   their new poses are written to PyBullet and before the collision
                   check.
-                - ``"post_step"``: at the end of the step, right after the
+                - ``CallbackPhase.POST_STEP`` / ``"post_step"``: at the end of the step, right after the
                   ``post_step`` event: poses are written, and when the step ran
                   a collision check (see ``collision_check_frequency``) the
                   active pairs are those of the new poses. Use it to publish or
@@ -1243,15 +1242,17 @@ class MultiRobotSimulationCore:
                 stamp = sim_core.sim_time
                 ...
 
-            sim_core.register_callback(publish, frequency=10.0, phase="post_step")
+            sim_core.register_callback(publish, frequency=10.0, phase=CallbackPhase.POST_STEP)
         """
-        if phase not in _CALLBACK_PHASES:
-            raise ValueError("phase must be one of {}, got {!r}".format(_CALLBACK_PHASES, phase))
+        try:
+            phase = CallbackPhase(phase)
+        except ValueError:
+            raise ValueError("phase must be one of {}, got {!r}".format([p.value for p in CallbackPhase], phase)) from None
         self._callbacks.append(
             {"func": callback, "frequency": frequency, "phase": phase, "gate": FrequencyGate(frequency or None)}
         )
 
-    def _run_callbacks(self, phase: str) -> None:
+    def _run_callbacks(self, phase: CallbackPhase) -> None:
         """Run the callbacks registered for ``phase`` that are due this step.
 
         Both phases schedule on :attr:`sim_time`, the time of the state they
@@ -4749,7 +4750,7 @@ class MultiRobotSimulationCore:
             if measure_timing:
                 t_cb0 = time.perf_counter()
 
-            self._run_callbacks("step")
+            self._run_callbacks(CallbackPhase.STEP)
 
             if measure_timing:
                 t_cb1 = time.perf_counter()
@@ -4845,7 +4846,7 @@ class MultiRobotSimulationCore:
             if measure_timing:
                 t_ev1 = time.perf_counter()
             self.events.emit(SimEvents.POST_STEP, dt=self._params.timestep, sim_time=self.sim_time)
-            self._run_callbacks("post_step")
+            self._run_callbacks(CallbackPhase.POST_STEP)
             if measure_timing:
                 self._profiling_stats["events_post_step"][-1] = (time.perf_counter() - t_ev1) * 1000
 

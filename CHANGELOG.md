@@ -103,7 +103,8 @@ are not recommended for production use yet.
 
 ### Added
 
-- Add `register_callback(..., phase="post_step")`: a callback that runs at the
+- Add `register_callback(..., phase=CallbackPhase.POST_STEP)` (`CallbackPhase`
+  in `pybullet_fleet.types`; the string `"post_step"` works too): a callback that runs at the
   end of the step, right after the `post_step` event, once poses are written
   and the collision check is done, with the same `frequency` option as Phase-1
   callbacks, scheduled on `sim_time`, the time of the state it sees.
