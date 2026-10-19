@@ -237,3 +237,60 @@ class TestNonPositiveDt:
             _fires(FrequencyGate(3.0), 0.1, 100)
             _fires(FrequencyGate(None), 0.1, 100)
         assert not [r for r in caplog.records if "non-positive dt" in r.getMessage()]
+
+
+class TestSetFrequency:
+    """An owner keeps one gate and changes its rate through set_frequency()."""
+
+    def test_the_same_rate_keeps_the_schedule(self):
+        gate = FrequencyGate(2.0)
+        assert gate.due(0.5, 0.1) is not None  # first due time, 0.5 s
+        gate.set_frequency(2.0)
+        # Not restarted: the next run reports the time since the last one (0.7 s),
+        # not the one-interval dt of a fresh schedule's first run.
+        assert gate.due(1.2, 0.1) == pytest.approx(0.7)
+
+    def test_a_new_rate_starts_a_fresh_schedule(self):
+        gate = FrequencyGate(2.0)
+        assert gate.due(0.5, 0.1) is not None
+        gate.set_frequency(10.0)
+        assert gate.frequency == 10.0
+        # Fresh: the first due time at or after now runs at once, reporting one interval.
+        assert gate.due(0.6, 0.1) == pytest.approx(0.1)
+
+    @pytest.mark.parametrize("frequency", [0.0, -1.0, float("inf"), float("nan")])
+    def test_rejects_a_bad_rate_and_keeps_the_old_one(self, frequency):
+        gate = FrequencyGate(2.0)
+        with pytest.raises(ValueError):
+            gate.set_frequency(frequency)
+        assert gate.frequency == 2.0
+
+    def test_frequency_is_read_only(self):
+        gate = FrequencyGate(2.0)
+        with pytest.raises(AttributeError):
+            gate.frequency = 3.0  # type: ignore[misc]
+
+
+class TestPluginFrequency:
+    def test_setting_plugin_frequency_reschedules_its_gate(self, sim):
+        class Counter(SimPlugin):
+            def __init__(self, sim_core):
+                super().__init__(sim_core)
+                self.dts = []
+
+            def on_step(self, dt):
+                self.dts.append(dt)
+
+        plugin = sim.register_plugin(Counter(sim), frequency=None)
+        gate = plugin._frequency_gate
+        sim.step_once()
+        assert plugin.dts == [pytest.approx(0.1)]  # every step: the step's dt
+        plugin.frequency = 2.0
+        assert plugin._frequency_gate is gate and gate.frequency == 2.0
+        plugin.dts.clear()
+        for _ in range(10):
+            sim.step_once()
+        assert plugin.dts == [pytest.approx(0.5), pytest.approx(0.5)]
+        with pytest.raises(ValueError):
+            plugin.frequency = -1.0
+        assert plugin.frequency == 2.0

@@ -31,16 +31,38 @@ class FrequencyGate:
 
     ``frequency`` ``None`` means every step. The gate keeps no reference to
     the simulation; callers pass the step's simulated time and timestep.
+    An owner creates its gate once and changes the rate with
+    :meth:`set_frequency`.
     """
 
-    __slots__ = ("frequency", "_next_index", "_last_time", "_warned")
+    __slots__ = ("_frequency", "_next_index", "_last_time", "_warned")
 
     def __init__(self, frequency: Optional[float] = None) -> None:
-        if frequency is not None and not (math.isfinite(frequency) and frequency > 0):
-            raise ValueError("frequency must be None or a positive finite number, got {!r}".format(frequency))
-        self.frequency = frequency
+        self._frequency = self._checked(frequency)
         self._warned = False
         self.reset()
+
+    @property
+    def frequency(self) -> Optional[float]:
+        """Rate in Hz, or ``None`` for every step. Change it with :meth:`set_frequency`."""
+        return self._frequency
+
+    def set_frequency(self, frequency: Optional[float]) -> None:
+        """Run at ``frequency`` from now on; a new rate starts a fresh schedule.
+
+        Setting the current rate again changes nothing.
+        """
+        frequency = self._checked(frequency)
+        if frequency == self._frequency:
+            return
+        self._frequency = frequency
+        self.reset()
+
+    @staticmethod
+    def _checked(frequency: Optional[float]) -> Optional[float]:
+        if frequency is not None and not (math.isfinite(frequency) and frequency > 0):
+            raise ValueError("frequency must be None or a positive finite number, got {!r}".format(frequency))
+        return frequency
 
     def reset(self) -> None:
         """Forget the schedule, as at the start of a run."""

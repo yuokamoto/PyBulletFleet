@@ -459,8 +459,8 @@ class MultiRobotSimulationCore:
         self._next_object_id: int = 0  # Counter for unique object IDs (read/incremented by SimObject.__init__)
         self._last_logged_collision_count: int = 0  # Track last logged collision count
         self._monitor_enabled: bool = params.monitor
-        # Rebuilt in initialize_simulation(): setup_pybullet() may still turn
-        # the GUI off (RECORD), which changes the default refresh rate.
+        # Its rate is set again in setup_pybullet() and initialize_simulation():
+        # RECORD may turn the GUI off, which changes the default refresh rate.
         self._monitor_update_gate = FrequencyGate(self._monitor_update_frequency(params))
         self._last_monitor_log: Optional[float] = None  # time.monotonic() of the last INFO [MONITOR] line
         self._callbacks: List[Dict[str, Any]] = []  # List of callback functions
@@ -477,7 +477,7 @@ class MultiRobotSimulationCore:
         self._viewport_left_click_start: Optional[Tuple[int, int]] = None
         self._viewport_drag_entity_id: Optional[int] = None
         self._collision_check_frequency: Optional[float] = params.collision_check_frequency  # If None, check every step
-        self._collision_check_gate = self._collision_gate_for(params.collision_check_frequency)
+        self._collision_check_gate = FrequencyGate(self._collision_gate_frequency(params.collision_check_frequency))
         self._log_level: str = params.log_level
         self._params: SimulationParams = params
         self._collision_color: List[float] = collision_color if collision_color is not None else [0, 0, 1, 1]
@@ -1166,26 +1166,16 @@ class MultiRobotSimulationCore:
     def _step_plugins(self, dt: float) -> None:
         """Dispatch ``on_step()`` to plugins respecting frequency control."""
         for plugin in self._plugins:
-            freq = plugin.frequency
-            if freq is None:
-                # Back to every step: a later frequency starts a fresh schedule.
-                plugin._frequency_gate = None
-                try:
-                    plugin.on_step(dt)
-                except Exception:
-                    logger.error("Plugin %s.on_step() failed", type(plugin).__name__, exc_info=True)
-            else:
-                # Same fixed-grid schedule as frequency-limited callbacks; the
-                # gate is rebuilt when ``plugin.frequency`` is changed.
-                gate = plugin._frequency_gate
-                if gate is None or gate.frequency != freq:
-                    gate = plugin._frequency_gate = FrequencyGate(freq)
-                dt_since_last_run = gate.due(self.sim_time, dt)
-                if dt_since_last_run is not None:
-                    try:
-                        plugin.on_step(dt_since_last_run)
-                    except Exception:
-                        logger.error("Plugin %s.on_step() failed", type(plugin).__name__, exc_info=True)
+            gate = plugin._frequency_gate
+            # Every step: the step's own dt. Otherwise the fixed-grid schedule
+            # of frequency-limited callbacks, and the time since the last run.
+            step_dt = dt if gate.frequency is None else gate.due(self.sim_time, dt)
+            if step_dt is None:
+                continue
+            try:
+                plugin.on_step(step_dt)
+            except Exception:
+                logger.error("Plugin %s.on_step() failed", type(plugin).__name__, exc_info=True)
 
     def _shutdown_plugins(self) -> None:
         """Call ``on_shutdown()`` on all plugins."""
@@ -1268,9 +1258,13 @@ class MultiRobotSimulationCore:
                 cbinfo["func"](self, dt_since_last_run)
 
     @staticmethod
-    def _collision_gate_for(frequency: Optional[float]) -> FrequencyGate:
-        """Schedule for ``collision_check_frequency``: every step for ``None``; ``<= 0`` (disabled) never consults it."""
-        return FrequencyGate(frequency if frequency is not None and frequency > 0 else None)
+    def _collision_gate_frequency(frequency: Optional[float]) -> Optional[float]:
+        """Gate rate for ``collision_check_frequency``.
+
+        ``None`` (every step) also for ``<= 0``: that disables the check, which
+        then never consults the gate.
+        """
+        return frequency if frequency is not None and frequency > 0 else None
 
     @staticmethod
     def _monitor_update_frequency(params: "SimulationParams") -> Optional[float]:
@@ -1546,9 +1540,8 @@ class MultiRobotSimulationCore:
 
         Note: Higher frequency increases computational cost but improves collision detection accuracy.
         """
-        gate = self._collision_gate_for(frequency)
+        self._collision_check_gate.set_frequency(self._collision_gate_frequency(frequency))
         self._collision_check_frequency = frequency
-        self._collision_check_gate = gate
 
         # Log the setting for clarity
         if frequency is None:
@@ -1566,7 +1559,7 @@ class MultiRobotSimulationCore:
         if os.environ.get("RECORD") and self._params.gui and not os.environ.get("RECORD_GUI"):
             logger.info("RECORD env var detected: forcing gui=False for headless recording")
             self._params.gui = False
-            self._monitor_update_gate = FrequencyGate(self._monitor_update_frequency(self._params))
+            self._monitor_update_gate.set_frequency(self._monitor_update_frequency(self._params))
 
         options = ""
         if self._params.gui and self._params.window_width > 0 and self._params.window_height > 0:
@@ -3819,7 +3812,8 @@ class MultiRobotSimulationCore:
         self._resume_ready = False
         self._collision_check_gate.reset()
         # From the final GUI mode: setup_pybullet() may have turned it off.
-        self._monitor_update_gate = FrequencyGate(self._monitor_update_frequency(self._params))
+        self._monitor_update_gate.set_frequency(self._monitor_update_frequency(self._params))
+        self._monitor_update_gate.reset()
         self._last_monitor_log = None  # a fresh run logs its first step
         self._last_logged_collision_count = 0
         self._last_monitor_frame = None
@@ -3849,7 +3843,7 @@ class MultiRobotSimulationCore:
         for cbinfo in self._callbacks:
             cbinfo["gate"].reset()
         for plugin in self._plugins:
-            plugin._frequency_gate = None
+            plugin._frequency_gate.reset()
 
         # Clear profiling statistics (#4: prevents mixing data across runs)
         for key in self._profiling_stats:
@@ -3945,7 +3939,7 @@ class MultiRobotSimulationCore:
 
         # Restart plugin schedules
         for plugin in self._plugins:
-            plugin._frequency_gate = None
+            plugin._frequency_gate.reset()
 
         # 2. Reset PyBullet world (removes all bodies including ground plane)
         p.resetSimulation(physicsClientId=self._client)
