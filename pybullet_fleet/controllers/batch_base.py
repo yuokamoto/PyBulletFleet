@@ -35,7 +35,9 @@ from typing import TYPE_CHECKING, Dict, List, Optional, Type
 import numpy as np
 import pybullet as p
 
-from pybullet_fleet.controller import Controller
+from pybullet_fleet._replan import PathRequest, braking_request
+from pybullet_fleet.controller import Controller, _log_dropped
+from pybullet_fleet.types import GoalReplacement, MovementDirection
 from pybullet_fleet.geometry import quat_angle_between, quat_slerp_batch
 from pybullet_fleet.logging_utils import get_lazy_logger
 
@@ -99,6 +101,13 @@ class BatchKinematicController(Controller):
         # zero an agent's reported velocity on the step it stops.
         self._was_moved: np.ndarray = np.zeros((0,), dtype=bool)
 
+        # Goal replacement (see GoalReplacement), keyed by id(agent) so row
+        # compaction does not move it: a path accepted while the agent brakes
+        # or finishes its current path, started once it stops.
+        self._pending: Dict[int, PathRequest] = {}
+        # Agents whose active path is the braking path set for their pending one.
+        self._braking: set = set()
+
     # ------------------------------------------------------------------ #
     # Lifecycle: agent registration (sim_core attachment is implicit)
     # ------------------------------------------------------------------ #
@@ -158,6 +167,7 @@ class BatchKinematicController(Controller):
             raise KeyError(f"Agent {agent} is not registered with this batch controller.")
         idx = self._agent_index.pop(key)
         agent._batch_controller = None
+        self._drop_pending(agent, "the agent left the batch controller")
         last = len(self._agents) - 1
         if idx != last:
             # Swap last row into the freed slot.
@@ -253,6 +263,25 @@ class BatchKinematicController(Controller):
             agent._is_moving = True
             return True
 
+    def _replacement_obstacle(self, agent: "Agent", path, direction: Optional[MovementDirection] = None) -> Optional[str]:
+        """Why ``path`` cannot continue the agent's current motion, or ``None``.
+
+        The base restarts every path from the motion as it is, so it has no
+        such limit. Subclasses that continue motion override this, with the
+        same rule as the per-agent controllers (see :mod:`pybullet_fleet._replan`).
+        """
+        return None
+
+    def path_rejection(self, agent: "Agent", path, direction: Optional[MovementDirection] = None) -> Optional[str]:
+        """Why ``path`` would be refused now, or ``None``.
+
+        Only ``goal_replacement="reject"`` refuses a path that cannot continue
+        the current motion; the other modes take every path.
+        """
+        if not path or agent.controller_params._eff_goal_replacement() is not GoalReplacement.REJECT:
+            return None
+        return self._replacement_obstacle(agent, path, direction)
+
     def continuation_velocity(self, agent: "Agent") -> Optional[np.ndarray]:
         """World-frame velocity a new path would continue from, or ``None``.
 
@@ -262,10 +291,93 @@ class BatchKinematicController(Controller):
         """
         return None
 
+    def pending_path(self, agent: "Agent") -> Optional[PathRequest]:
+        """The accepted path waiting for ``agent`` to stop, or ``None``."""
+        return self._pending.get(id(agent))
+
+    def _replace_path(self, agent: "Agent", request: PathRequest, preempt: bool = False) -> bool:
+        """Take ``request`` as ``goal_replacement`` says, as the per-agent controllers do.
+
+        See :meth:`KinematicController.set_path
+        <pybullet_fleet.controller.KinematicController.set_path>`.
+        """
+        key = id(agent)
+        name = str(agent.name or agent.object_id)
+        mode = agent.controller_params._eff_goal_replacement()
+        if mode is GoalReplacement.WAIT_COMPLETE and not preempt and agent.is_moving:
+            logger.info(f"Path for {name} starts once the current path is finished (wait_complete)")
+            self._hold(agent, request)
+            return True
+
+        obstacle = self._replacement_obstacle(agent, request.path, request.direction)
+        if obstacle is None:
+            self._drop_pending(agent, "a newer path started at once")
+            self._start_row_path(agent, request, continue_motion=True)
+            return True
+
+        if mode is GoalReplacement.REJECT:
+            logger.debug(f"Path rejected for {name}: {obstacle}")
+            return False
+        if mode is GoalReplacement.IMMEDIATE:
+            logger.info(f"Path for {name} starts from rest at once: {obstacle}")
+            self._drop_pending(agent, "a newer path started at once")
+            self._start_row_path(agent, request, continue_motion=False)
+            return True
+        if key not in self._braking:
+            pose = agent.get_pose()
+            braking = braking_request(
+                agent.controller_params, pose.position, pose.orientation, self.continuation_velocity(agent)
+            )
+            if braking is None:
+                self._drop_pending(agent, "a newer path started at once")
+                self._start_row_path(agent, request, continue_motion=False)
+                return True
+            self._start_row_path(agent, braking, continue_motion=True)
+            self._braking.add(key)
+        logger.info(f"Path for {name} starts once the agent stops (brake): {obstacle}")
+        self._hold(agent, request)
+        return True
+
+    def _hold(self, agent: "Agent", request: PathRequest) -> None:
+        """Make ``request`` the agent's pending path, dropping (and logging) the one before."""
+        previous = self._pending.get(id(agent))
+        if previous is not None:
+            _log_dropped(str(agent.name or agent.object_id), previous, "a newer path replaced it")
+        self._pending[id(agent)] = request
+
+    def _drop_pending(self, agent: "Agent", reason: str) -> None:
+        """Drop the agent's pending path (logging it with ``reason``) and braking flag."""
+        key = id(agent)
+        self._braking.discard(key)
+        previous = self._pending.pop(key, None)
+        if previous is not None:
+            _log_dropped(str(agent.name or agent.object_id), previous, reason)
+
+    def _start_row_path(self, agent: "Agent", request: PathRequest, continue_motion: bool) -> None:
+        """Make ``request`` the agent's active path. Subclasses implement it."""
+        raise NotImplementedError
+
+    def _row_finished(self, idx: int) -> None:
+        """The row's path has ended (the agent is at rest): start its pending path, if any.
+
+        Subclasses call this right after setting a row IDLE and clearing its
+        ``_is_moving`` flag.
+        """
+        agent = self._agents[idx]
+        key = id(agent)
+        self._braking.discard(key)
+        request = self._pending.pop(key, None)
+        if request is None:
+            return
+        agent._is_moving = True
+        self._start_row_path(agent, request, continue_motion=False)
+
     def synchronized_cancel_path(self, agent: "Agent") -> None:
         """Cancel one path without racing a concurrent simulation step."""
         with self._state_lock:
-            idx = self._agent_index.get(id(agent))
+            key = id(agent)
+            self._drop_pending(agent, "the agent was stopped")
+            idx = self._agent_index.get(key)
             if idx is not None:
                 self._on_cancel_path(idx)
 

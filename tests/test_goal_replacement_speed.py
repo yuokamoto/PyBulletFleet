@@ -5,9 +5,11 @@ trajectory from the agent's speed toward it, signed along the new line, so a
 goal behind is reached by slowing, reversing and driving back; no zero-length
 approach waypoint is put in front of a moving agent's path. A goal whose
 trajectory does not exist within the configured limits -- inside the braking
-distance, where the agent is, or off the line of motion -- is refused:
-set_goal_pose() returns False and the current motion continues unchanged. At
-rest every goal is taken. No case exceeds the configured limits.
+distance, where the agent is, or off the line of motion -- is refused under
+``goal_replacement="reject"``, which this module runs with: set_goal_pose()
+returns False and the current motion continues unchanged. At rest every goal
+is taken. No case exceeds the configured limits. The other modes are covered
+in test_goal_replacement_modes.py.
 """
 
 from __future__ import annotations
@@ -18,6 +20,8 @@ import pytest
 
 from pybullet_fleet import Agent, AgentSpawnParams, MotionMode, MultiRobotSimulationCore, Pose, SimulationParams
 from pybullet_fleet.types import CollisionMode
+
+pytestmark = pytest.mark.usefixtures("reject_mode")
 
 DT = 0.05
 VMAX = 2.0

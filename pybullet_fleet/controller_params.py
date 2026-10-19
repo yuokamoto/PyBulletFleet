@@ -38,7 +38,7 @@ from pybullet_fleet.geometry import (
     is_scalar,
     projected_axis_limit,
 )
-from pybullet_fleet.types import MovementDirection
+from pybullet_fleet.types import GoalReplacement, MovementDirection
 
 
 @dataclass
@@ -77,6 +77,13 @@ class ControllerParams:
             explicitly set (treated as ``False`` by all controllers).
         default_direction: Default movement direction for ``set_path``.
             Only meaningful for differential-drive controllers.
+        goal_replacement: What a moving agent does with a new path it cannot
+            reach from its current motion within these limits -- a
+            :class:`~pybullet_fleet.types.GoalReplacement` or its string value
+            (``"brake"``, ``"reject"``, ``"wait_complete"``, ``"immediate"``).
+            ``None`` → framework default, ``"brake"`` unless changed (see
+            :data:`pybullet_fleet._defaults.CONTROLLER`, overridable with the
+            ``PBF_CONTROLLER_GOAL_REPLACEMENT`` environment variable).
     """
 
     max_linear_vel: Optional[ScalarOrAxes] = None
@@ -87,6 +94,13 @@ class ControllerParams:
     cmd_vel_timeout: Optional[float] = None
     navigation_2d: Optional[bool] = None
     default_direction: MovementDirection = MovementDirection.FORWARD
+    goal_replacement: Optional[str] = None
+
+    def __post_init__(self) -> None:
+        # Stored as the plain string value so the params stay plain data
+        # (asdict(), YAML, checkpoints); an unknown value fails here, not later.
+        if self.goal_replacement is not None:
+            self.goal_replacement = parse_goal_replacement(self.goal_replacement).value
 
     @classmethod
     def from_dict(cls, config: Dict[str, Any]) -> "ControllerParams":
@@ -123,6 +137,10 @@ class ControllerParams:
 
     def _eff_angular_accel(self) -> ScalarOrAxes:
         return self.max_angular_accel if self.max_angular_accel is not None else _CTRL_D["max_angular_accel"]
+
+    def _eff_goal_replacement(self) -> GoalReplacement:
+        value = self.goal_replacement if self.goal_replacement is not None else _CTRL_D["goal_replacement"]
+        return parse_goal_replacement(value)
 
     def _eff_cmd_vel_timeout(self) -> float:
         return self.cmd_vel_timeout if self.cmd_vel_timeout is not None else _CTRL_D["cmd_vel_timeout"]
@@ -173,4 +191,17 @@ class ControllerParams:
         return float(a) if is_scalar(a) else float(as_axes(a)[2])  # type: ignore[arg-type]
 
 
-__all__: List[str] = ["ControllerParams", "ScalarOrAxes"]
+def parse_goal_replacement(value: Any) -> GoalReplacement:
+    """A :class:`~pybullet_fleet.types.GoalReplacement` from itself or its string value.
+
+    Raises:
+        ValueError: for any other value, naming the accepted ones.
+    """
+    try:
+        return GoalReplacement(value)
+    except ValueError:
+        accepted = ", ".join(repr(mode.value) for mode in GoalReplacement)
+        raise ValueError(f"Unknown goal_replacement {value!r}; expected one of {accepted}") from None
+
+
+__all__: List[str] = ["ControllerParams", "ScalarOrAxes", "parse_goal_replacement"]

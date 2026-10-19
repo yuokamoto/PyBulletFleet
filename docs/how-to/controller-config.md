@@ -142,6 +142,7 @@ agent.controller_params.max_linear_decel = [3.0, 3.0, 0.0]
 | `cmd_vel_timeout` | Velocity-command watchdog in seconds; `0.0` disables it. |
 | `navigation_2d` | `True` preserves current Z for pose trajectories. `None` and `False` follow goal Z. |
 | `default_direction` | Default `set_path()` direction for differential drive. |
+| `goal_replacement` | What a moving agent does with a goal it cannot reach from its current motion: `"brake"` (default), `"immediate"`, `"reject"` or `"wait_complete"`. See [A new goal while moving](#a-new-goal-while-moving). |
 
 All numeric values default to `None`, which resolves to the framework default
 when used. This lets a manager provide only the fields that an agent did not
@@ -149,44 +150,76 @@ set explicitly.
 
 ### A new goal while moving
 
-An omnidirectional agent (per-agent or batched) that gets a new goal or path
-while it is moving continues its motion: the straight-line trajectory to the
-first waypoint starts from its current velocity, signed along the line. A
-goal ahead keeps the speed; a goal behind is reached by slowing, reversing and
-driving back. The goal is taken when that trajectory exists within the
-configured limits, and refused otherwise -- a goal inside the braking distance
-at `max_linear_decel`, where the agent is, or off the line of motion (a
-straight-line trajectory cannot carry the sideways velocity). A refused goal
-changes nothing: the current motion continues.
+An agent (omnidirectional or differential, per-agent or batched) that gets a
+new goal or path while it is moving continues its motion when it can: the
+straight-line trajectory to the first waypoint starts from its current
+velocity, signed along the line. A goal ahead keeps the speed; a goal behind
+is reached by slowing, reversing and driving back. Slowing down before a
+reversal is the trajectory's first phase, which uses `max_linear_accel`. A
+differential agent continues only into a goal that needs no turn: one straight
+ahead, or straight behind with `direction="auto"` or `"backward"`.
+
+The agent cannot continue into a goal inside the braking distance at
+`max_linear_decel`, where the agent is, off the line of motion (a
+straight-line trajectory cannot carry the sideways velocity), or, for
+differential drive, one that needs a turn in place. `goal_replacement`
+decides what happens then:
+
+| `goal_replacement` | A goal the agent cannot continue into | A goal it can continue into |
+|--------------------|---------------------------------------|-----------------------------|
+| `"brake"` (default) | Brakes along the current motion at `max_linear_decel`, then starts the goal from rest. | Taken at once. |
+| `"immediate"` | Starts the goal from rest at once: the velocity drops to zero in one step, ignoring `max_linear_decel`. | Taken at once. |
+| `"reject"` | Refused: `set_path()` / `set_goal_pose()` return `False` and the current motion and path continue unchanged. | Taken at once. |
+| `"wait_complete"` | Held until the current path is finished, then started from rest. | Also held: the current goal has priority. |
+
+At rest every goal is taken at once. A held goal (`brake`, `wait_complete`) is
+accepted: `set_path()` returns `True`. Only the latest one is kept; a newer
+request replaces it, and `stop()`, `brake()` or a velocity command drops it.
+Each drop is logged at INFO with the agent, the goal and the reason. Under a
+velocity command there is no path to wait for, so `wait_complete` brakes like
+`brake`.
+
+Set the mode for one agent, for every agent of a manager, or globally:
+
+```python
+# One agent.
+agent.controller_params.goal_replacement = "reject"
+
+# Every agent of a manager that does not set its own.
+manager = AgentManager(sim_core=sim, fleet_controller={"type": "batch_omni", "goal_replacement": "wait_complete"})
+```
+
+The global default is `_defaults.CONTROLLER["goal_replacement"]`, which the
+`PBF_CONTROLLER_GOAL_REPLACEMENT` environment variable overrides (see
+[Defaults and environment overrides](../configuration/reference.md#defaults-and-environment-overrides)).
+
+Under `reject`, check the result:
 
 ```python
 if not agent.set_goal_pose(goal):  # True when taken, False when refused
     print(agent.path_rejection([goal]))  # the reason, e.g. "goal is off the line of motion"
 ```
 
-Slowing down before a reversal is the trajectory's first phase, which uses
-`max_linear_accel`.
-
-At rest every goal is taken. `MoveAction`, `PatrolController`,
-`RandomWalkController` and the behaviour tree's `NavigateTo` retry a refused
-goal on their next update; `FleetCommandDispatcher.navigate()` reports it in
-the ack's `rejected` map.
+`MoveAction`, `PatrolController`, `RandomWalkController` and the behaviour
+tree's `NavigateTo` retry a refused goal on their next update;
+`FleetCommandDispatcher.navigate()` reports it in the ack's `rejected` map. In
+the other modes nothing is refused, so these never retry.
 
 ### Stopping: `brake()` and `stop()`
 
-`agent.brake()` brings a moving omnidirectional agent (per-agent or batched) to
-rest at `max_linear_decel`: it keeps its line of motion and heading, drops the
-rest of its path, and stops at the braking point `|v|^2 / (2 * decel)` ahead.
-It also ends a velocity command the same way. It returns `False` when there is
-nothing to brake (at rest, fixed base) and for differential drive, which still
-restarts paths from rest. `agent.stop()` is the immediate stop: the velocity is
-zeroed at once.
+`agent.brake()` brings a moving agent (per-agent or batched) to rest at
+`max_linear_decel`: it keeps its line of motion and heading, drops the rest of
+its path and any held goal, and stops at the braking point `|v|^2 / (2 * decel)`
+ahead. A differential agent brakes straight along its heading, backwards when
+it is backing up. `brake()` also ends a velocity command the same way, and it
+does not wait for the current path under `wait_complete`. It returns `False`
+when there is nothing to brake (at rest, fixed base). `agent.stop()` is the
+immediate stop: the velocity is zeroed at once.
 
-To change direction mid-motion, brake and then send the new goal: it is refused
-until the agent has stopped, and a caller that retries refusals (such as
-`MoveAction`) starts it as soon as the braking ends. `brake()` leaves the action
-queue alone; a `MoveAction` still executing completes once the agent is at rest,
-so call `clear_actions()` first to cancel it instead.
+To change direction mid-motion, send the new goal: under the default `brake`
+mode the agent brakes and then heads for it. `brake()` leaves the action queue
+alone; a `MoveAction` still executing completes once the agent is at rest, so
+call `clear_actions()` first to cancel it instead.
 
 ## Batch controllers
 
