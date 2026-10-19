@@ -2,6 +2,7 @@
 
 from contextlib import contextmanager
 from types import SimpleNamespace
+from typing import TYPE_CHECKING, cast
 
 import pybullet as p
 import pybullet_data
@@ -11,19 +12,22 @@ from pybullet_fleet.data_monitor import DataMonitor
 from pybullet_fleet.events import EventBus
 from pybullet_fleet.sim_object import SimObject
 
+if TYPE_CHECKING:
+    from pybullet_fleet.core_simulation import MultiRobotSimulationCore
+
 
 # ---------------------------------------------------------------------------
 # Shared mock sim_core classes
 # ---------------------------------------------------------------------------
 
 
-class AtTime:
+class _AtTime:
     """A simulation as seen at simulated time ``sim_time`` (test-only).
 
     ``MultiRobotSimulationCore.sim_time`` is read-only: the clock moves only by
     stepping, or by ``restore_completed_step_boundary()`` on a fresh simulation.
     A test that drives a time-dependent component directly, without stepping,
-    hands that component this view. It reports ``sim_time`` and forwards
+    hands that component this view (through :func:`at_time`). It reports ``sim_time`` and forwards
     everything else to the real simulation.
     """
 
@@ -33,6 +37,11 @@ class AtTime:
 
     def __getattr__(self, name):
         return getattr(self._sim, name)
+
+
+def at_time(sim: "MultiRobotSimulationCore", sim_time: float) -> "MultiRobotSimulationCore":
+    """``sim`` as seen at ``sim_time``; see :class:`_AtTime`. Typed as the simulation it stands in for."""
+    return cast("MultiRobotSimulationCore", _AtTime(sim, sim_time))
 
 
 class MockSimCore:
