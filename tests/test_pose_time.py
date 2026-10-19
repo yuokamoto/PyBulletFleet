@@ -212,6 +212,32 @@ def test_a_failed_step_restores_the_exact_clock():
         p.disconnect(sim.client)
 
 
+def test_a_failed_step_gives_back_its_scheduling_state():
+    """A frequency-limited callback that ran in a step which then failed runs
+    again when the step is retried: its schedule returns with the clock."""
+    sim = MultiRobotSimulationCore(SimulationParams(gui=False, monitor=False, physics=False, timestep=1.0))
+    try:
+        ran = []
+        fail = [True]
+
+        def first(sc, dt):
+            ran.append(sc.sim_time)
+
+        def second(sc, dt):
+            if fail[0]:
+                fail[0] = False
+                raise RuntimeError("callback failed")
+
+        sim.register_callback(first, frequency=1.0)
+        sim.register_callback(second, frequency=1.0)
+        with pytest.raises(RuntimeError, match="callback failed"):
+            sim.step_once()
+        sim.step_once()  # the retry of the failed step
+        assert ran == [pytest.approx(1.0), pytest.approx(1.0)]
+    finally:
+        p.disconnect(sim.client)
+
+
 def test_a_pose_written_in_pre_step_stays_visible_until_flushed(sim):
     """A dynamic (mass > 0) body moved from pre_step keeps its pending pose
     after the clock advances: get_pose() must not reread the unflushed

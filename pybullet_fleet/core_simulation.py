@@ -1159,6 +1159,23 @@ class MultiRobotSimulationCore:
         for plugin in self._plugins:
             plugin.on_init()
 
+    def _capture_schedule_state(self) -> Tuple[Any, ...]:
+        """Frequency-scheduling state a step advances: callbacks, plugins, collision checks, monitor."""
+        return (
+            [(cbinfo, cbinfo.get("last_exec", 0.0)) for cbinfo in self._callbacks],
+            [(plugin, plugin._accumulator) for plugin in self._plugins],
+            self._last_collision_check,
+            self._last_monitor_update,
+        )
+
+    def _restore_schedule_state(self, state: Tuple[Any, ...]) -> None:
+        """Give back what :meth:`_capture_schedule_state` saved, for a step that failed."""
+        callbacks, plugins, self._last_collision_check, self._last_monitor_update = state
+        for cbinfo, last_exec in callbacks:
+            cbinfo["last_exec"] = last_exec
+        for plugin, accumulator in plugins:
+            plugin._accumulator = accumulator
+
     def _step_plugins(self, dt: float) -> None:
         """Dispatch ``on_step()`` to plugins respecting frequency control."""
         for plugin in self._plugins:
@@ -4606,6 +4623,9 @@ class MultiRobotSimulationCore:
         # before its end gives it back, so a failed step never looks completed.
         clock_advanced = step_completed = False
         completed_clock = self._elapsed_sim_time
+        # Time-based scheduling state the step may advance before it fails;
+        # given back with the clock so a retried step runs the same handlers.
+        completed_schedule = self._capture_schedule_state()
         if measure_timing:
             t_phase1 = time.perf_counter()
         try:
@@ -4875,6 +4895,7 @@ class MultiRobotSimulationCore:
                 # in floating point (0.2 + 0.1 - 0.1 != 0.2).
                 self._elapsed_sim_time = completed_clock
                 self._step_count -= 1
+                self._restore_schedule_state(completed_schedule)
                 self._restamp_pending_pose_cache()
 
     def _restamp_pending_pose_cache(self) -> None:
