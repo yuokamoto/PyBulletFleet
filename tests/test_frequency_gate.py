@@ -306,3 +306,8 @@ class TestPluginFrequency:
         with pytest.raises(ValueError):
             plugin.frequency = -1.0
         assert plugin.frequency == 2.0
+
+    def test_an_invalid_frequency_does_not_register_the_plugin(self, sim):
+        with pytest.raises(ValueError):
+            sim.register_plugin(SimPlugin(sim), frequency=-1.0)
+        assert sim.plugins == []

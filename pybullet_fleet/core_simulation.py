@@ -1142,8 +1142,8 @@ class MultiRobotSimulationCore:
         else:
             raise TypeError(f"Expected SimPlugin instance or subclass, got {plugin_or_cls!r}")
 
+        plugin.frequency = frequency  # validates before the plugin is registered
         self._plugins.append(plugin)
-        plugin.frequency = frequency
         return plugin
 
     @property
