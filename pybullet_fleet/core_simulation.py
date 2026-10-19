@@ -4605,6 +4605,7 @@ class MultiRobotSimulationCore:
         # The clock advances before the step completes; a step that raises
         # before its end gives it back, so a failed step never looks completed.
         clock_advanced = step_completed = False
+        completed_clock = self._elapsed_sim_time
         if measure_timing:
             t_phase1 = time.perf_counter()
         try:
@@ -4631,6 +4632,7 @@ class MultiRobotSimulationCore:
             # of this step, so the clock and counter move first: sim_time is the
             # time of the state any later code sees (object update, callbacks,
             # plugins, collision check, POST_STEP, and outside the step).
+            completed_clock = self._elapsed_sim_time
             self._elapsed_sim_time += self._params.timestep
             self._step_count += 1
             clock_advanced = True
@@ -4869,7 +4871,9 @@ class MultiRobotSimulationCore:
             self._in_post_step = False
             self._in_pre_step = False
             if clock_advanced and not step_completed:
-                self._elapsed_sim_time -= self._params.timestep
+                # The saved value, not t + dt - dt: that subtraction is not exact
+                # in floating point (0.2 + 0.1 - 0.1 != 0.2).
+                self._elapsed_sim_time = completed_clock
                 self._step_count -= 1
                 self._restamp_pending_pose_cache()
 

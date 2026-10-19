@@ -190,6 +190,28 @@ def test_a_failed_step_gives_its_clock_back(sim):
     assert sim.sim_time == pytest.approx(DT)
 
 
+def test_a_failed_step_restores_the_exact_clock():
+    """The rollback restores the saved boundary, not t + dt - dt, which is not
+    exact in floating point: with dt = 0.1, 0.2 + 0.1 - 0.1 is not 0.2."""
+    sim = MultiRobotSimulationCore(SimulationParams(gui=False, monitor=False, physics=False, timestep=0.1))
+    try:
+        sim.step_once()
+        sim.step_once()
+        before = sim.get_completed_step_boundary()
+        assert before[1] + 0.1 - 0.1 != before[1]  # the case the rollback must not hit
+
+        def boom(sc, dt):
+            raise RuntimeError("callback failed")
+
+        sim.register_callback(boom)
+        with pytest.raises(RuntimeError, match="callback failed"):
+            sim.step_once()
+        assert sim.get_completed_step_boundary() == before
+        assert sim.sim_time == before[1]
+    finally:
+        p.disconnect(sim.client)
+
+
 def test_a_pose_written_in_pre_step_stays_visible_until_flushed(sim):
     """A dynamic (mass > 0) body moved from pre_step keeps its pending pose
     after the clock advances: get_pose() must not reread the unflushed
