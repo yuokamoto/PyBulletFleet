@@ -284,7 +284,7 @@ class TestPluginFrequency:
         plugin = sim.register_plugin(Counter(sim), frequency=None)
         gate = plugin._frequency_gate
         sim.step_once()
-        assert plugin.dts == [pytest.approx(0.1)]  # every step: the step's dt
+        assert plugin.dts == [pytest.approx(0.1)]  # every step: one timestep since the last run
         plugin.frequency = 2.0
         assert plugin._frequency_gate is gate and gate.frequency == 2.0
         plugin.dts.clear()

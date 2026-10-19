@@ -1166,14 +1166,13 @@ class MultiRobotSimulationCore:
     def _step_plugins(self, dt: float) -> None:
         """Dispatch ``on_step()`` to plugins respecting frequency control."""
         for plugin in self._plugins:
-            gate = plugin._frequency_gate
-            # Every step: the step's own dt. Otherwise the fixed-grid schedule
-            # of frequency-limited callbacks, and the time since the last run.
-            step_dt = dt if gate.frequency is None else gate.due(self.sim_time, dt)
-            if step_dt is None:
+            # The same schedule as callbacks: every step without a frequency,
+            # else the fixed grid; None when the plugin is not due this step.
+            dt_since_last_run = plugin._frequency_gate.due(self.sim_time, dt)
+            if dt_since_last_run is None:
                 continue
             try:
-                plugin.on_step(step_dt)
+                plugin.on_step(dt_since_last_run)
             except Exception:
                 logger.error("Plugin %s.on_step() failed", type(plugin).__name__, exc_info=True)
 
