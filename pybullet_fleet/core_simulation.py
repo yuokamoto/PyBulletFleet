@@ -459,9 +459,6 @@ class MultiRobotSimulationCore:
         self._next_object_id: int = 0  # Counter for unique object IDs (read/incremented by SimObject.__init__)
         self._last_logged_collision_count: int = 0  # Track last logged collision count
         self._monitor_enabled: bool = params.monitor
-        # Its rate is set again in setup_pybullet() and initialize_simulation():
-        # RECORD may turn the GUI off, which changes the default refresh rate.
-        self._monitor_update_gate = FrequencyGate(self._monitor_update_frequency(params))
         self._last_monitor_log: Optional[float] = None  # time.monotonic() of the last INFO [MONITOR] line
         self._callbacks: List[Dict[str, Any]] = []  # List of callback functions
         self._behavior_tree_callbacks: List[Tuple[BehaviorTree, Callable]] = []
@@ -477,7 +474,7 @@ class MultiRobotSimulationCore:
         self._viewport_left_click_start: Optional[Tuple[int, int]] = None
         self._viewport_drag_entity_id: Optional[int] = None
         self._collision_check_frequency: Optional[float] = params.collision_check_frequency  # If None, check every step
-        self._collision_check_gate = FrequencyGate(self._collision_gate_frequency(params.collision_check_frequency))
+        self._collision_check_gate = FrequencyGate()  # follows _collision_check_frequency while enabled
         self._log_level: str = params.log_level
         self._params: SimulationParams = params
         self._collision_color: List[float] = collision_color if collision_color is not None else [0, 0, 1, 1]
@@ -613,6 +610,15 @@ class MultiRobotSimulationCore:
         self._plugins: List["SimPlugin"] = []
 
         self.setup_pybullet()
+        # DataMonitor refresh: monitor_update_interval, else every step while
+        # its window is open (enable_monitor_gui, or gui when that is None) and
+        # once a second otherwise. Set after setup_pybullet(): RECORD may turn
+        # the GUI off.
+        interval = params.monitor_update_interval
+        if interval is None:
+            window = params.enable_monitor_gui if params.enable_monitor_gui is not None else params.gui
+            interval = 0.0 if window else 1.0
+        self._monitor_update_gate = FrequencyGate(1.0 / interval if interval > 0 else None)
         self.setup_monitor()
 
     def setup_monitor(self) -> None:
@@ -1256,29 +1262,6 @@ class MultiRobotSimulationCore:
             if dt_since_last_run is not None:
                 cbinfo["func"](self, dt_since_last_run)
 
-    @staticmethod
-    def _collision_gate_frequency(frequency: Optional[float]) -> Optional[float]:
-        """Gate rate for ``collision_check_frequency``.
-
-        ``None`` (every step) also for ``<= 0``: that disables the check, which
-        then never consults the gate.
-        """
-        return frequency if frequency is not None and frequency > 0 else None
-
-    @staticmethod
-    def _monitor_update_frequency(params: "SimulationParams") -> Optional[float]:
-        """DataMonitor refresh rate: ``monitor_update_interval``, else every step while its window is open and 1 Hz otherwise.
-
-        The window is open when ``enable_monitor_gui`` says so, or, left at
-        ``None``, when ``gui`` is on -- the same rule the DataMonitor itself
-        follows -- so a monitor window on a headless run stays live too.
-        """
-        interval = params.monitor_update_interval
-        if interval is None:
-            window = params.enable_monitor_gui if params.enable_monitor_gui is not None else params.gui
-            return None if window else 1.0
-        return 1.0 / interval if interval > 0 else None
-
     def register_behavior_tree(self, tree: BehaviorTree) -> BehaviorTree:
         """Register a behavior tree to tick once per simulation step.
 
@@ -1539,7 +1522,6 @@ class MultiRobotSimulationCore:
 
         Note: Higher frequency increases computational cost but improves collision detection accuracy.
         """
-        self._collision_check_gate.set_frequency(self._collision_gate_frequency(frequency))
         self._collision_check_frequency = frequency
 
         # Log the setting for clarity
@@ -1558,7 +1540,6 @@ class MultiRobotSimulationCore:
         if os.environ.get("RECORD") and self._params.gui and not os.environ.get("RECORD_GUI"):
             logger.info("RECORD env var detected: forcing gui=False for headless recording")
             self._params.gui = False
-            self._monitor_update_gate.set_frequency(self._monitor_update_frequency(self._params))
 
         options = ""
         if self._params.gui and self._params.window_width > 0 and self._params.window_height > 0:
@@ -3810,8 +3791,6 @@ class MultiRobotSimulationCore:
         self._elapsed_sim_time = 0.0
         self._resume_ready = False
         self._collision_check_gate.reset()
-        # From the final GUI mode: setup_pybullet() may have turned it off.
-        self._monitor_update_gate.set_frequency(self._monitor_update_frequency(self._params))
         self._monitor_update_gate.reset()
         self._last_monitor_log = None  # a fresh run logs its first step
         self._last_logged_collision_count = 0
@@ -4816,14 +4795,11 @@ class MultiRobotSimulationCore:
                 t_col0 = time.perf_counter()
 
             collision_breakdown = None  # per-phase breakdown (only when return_profiling=True)
-            freq = self._collision_check_frequency
-            # freq = None: check every step
-            # freq = 0: disabled (never check)
-            # freq > 0: check at specified frequency (Hz)
+            freq = self._collision_check_frequency  # None: every step, <= 0: disabled
             if freq is None or freq > 0:
+                self._collision_check_gate.set_frequency(freq)  # no-op unless it changed
                 if self._collision_check_gate.due(self.sim_time, self._params.timestep) is not None:
                     _, collision_breakdown = self.check_collisions(return_profiling=return_profiling)
-            # else: freq = 0, skip collision checks entirely
 
             if measure_timing:
                 t_col1 = time.perf_counter()

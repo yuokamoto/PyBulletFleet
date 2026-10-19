@@ -144,6 +144,18 @@ class TestTheCoreUsesIt:
             sim.step_once()
         assert plugin.dts == [pytest.approx(1.0)]
 
+    def test_a_new_collision_frequency_takes_effect_mid_run(self, sim, monkeypatch):
+        checks = []
+        monkeypatch.setattr(sim, "check_collisions", lambda **kw: checks.append(sim.sim_time) or ([], None))
+        sim.set_collision_check_frequency(10.0)
+        for _ in range(10):
+            sim.step_once()
+        sim.set_collision_check_frequency(2.0)
+        for _ in range(10):  # 1.1 .. 2.0 s: the 2 Hz grid points 1.5 and 2.0 s
+            sim.step_once()
+        assert len(checks) == 12
+        assert checks[-2:] == [pytest.approx(1.5), pytest.approx(2.0)]
+
     @pytest.mark.parametrize("frequency", [0, -1.0])
     def test_a_non_positive_collision_frequency_disables_checks(self, sim, monkeypatch, frequency):
         checks = []

@@ -82,35 +82,26 @@ class FrequencyGate:
         after time zero), or at once when its first call is already on a due
         time.
         """
-        if self.frequency is None:
-            dt = timestep if self._last_time is None else now - self._last_time
-            last = self._last_time
-            self._last_time = now
-            return self._positive(dt, now, last, timestep)
-
-        # Grid points within ``tolerance`` of ``now`` count as ``now`` itself, in
-        # either direction, so float error in the accumulated time neither skips
-        # a due time nor runs the same one twice.
-        interval = 1.0 / self.frequency
-        tolerance = _TOLERANCE * timestep
-        if self._next_index is None:
-            # Baseline: the first grid point at or after now, and never the
-            # run's start itself -- a handler first runs one interval into the
-            # run. A first call already on a due time (after a restore, or a
-            # post-step schedule whose first time is one step in) runs at once.
-            # ceil((now - tolerance) / interval): the first grid point at or after now.
-            self._next_index = max(1, math.ceil((now - tolerance) / interval))
-        if now + tolerance < self._next_index * interval:
-            return None
-        # Due. Schedule the next grid point after now: normally the following
-        # one, after a gap the first one still ahead. floor((now + tolerance) /
-        # interval) is the last grid point at or before now.
-        self._next_index = max(self._next_index + 1, math.floor((now + tolerance) / interval) + 1)
-        last = self._last_time
-        self._last_time = now
-        # The first run has no previous one: report the interval, or one step
-        # when the interval is shorter than a step.
-        dt = now - last if last is not None else max(interval, timestep)
+        if self._frequency is None:
+            first_dt = timestep
+        else:
+            # Grid points within ``tolerance`` of ``now`` count as ``now`` itself,
+            # in either direction, so float error in the accumulated time neither
+            # skips a due time nor runs the same one twice.
+            interval = 1.0 / self._frequency
+            tolerance = _TOLERANCE * timestep
+            if self._next_index is None:
+                # The first grid point at or after now, but never time zero.
+                self._next_index = max(1, math.ceil((now - tolerance) / interval))
+            if now + tolerance < self._next_index * interval:
+                return None
+            # Next: the following grid point, or after a gap the first one
+            # still ahead of now.
+            self._next_index = max(self._next_index + 1, math.floor((now + tolerance) / interval) + 1)
+            # The first run has no previous one: one interval, at least a step.
+            first_dt = max(interval, timestep)
+        last, self._last_time = self._last_time, now
+        dt = first_dt if last is None else now - last
         return self._positive(dt, now, last, timestep)
 
     def _positive(self, dt: float, now: float, last: Optional[float], timestep: float) -> float:

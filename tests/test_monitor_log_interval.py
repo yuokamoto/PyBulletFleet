@@ -194,14 +194,6 @@ def test_record_forced_headless_keeps_the_headless_monitor_rate(monkeypatch, tmp
 
 def test_the_default_refresh_follows_the_monitor_window(make_sim, monkeypatch):
     """The per-step default keeps the monitor window live, so it follows the
-    window: on for a headless run that opens one, off for a GUI run that does
-    not (enable_monitor_gui, or gui when that is None)."""
-    from pybullet_fleet.core_simulation import MultiRobotSimulationCore
-
+    window (enable_monitor_gui, or gui when that is None), not gui alone."""
     assert _monitor_updates(make_sim, monkeypatch, enable_monitor_gui=True) == 40
-
-    frequency = MultiRobotSimulationCore._monitor_update_frequency
-    assert frequency(SimulationParams(gui=False, enable_monitor_gui=True)) is None
-    assert frequency(SimulationParams(gui=True, enable_monitor_gui=False)) == 1.0
-    assert frequency(SimulationParams(gui=True, enable_monitor_gui=None)) is None
-    assert frequency(SimulationParams(gui=False, enable_monitor_gui=None)) == 1.0
+    assert _monitor_updates(make_sim, monkeypatch, enable_monitor_gui=None) == 4
