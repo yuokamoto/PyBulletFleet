@@ -200,3 +200,32 @@ class TestPostStepPhase:
     def test_rejects_an_unknown_phase(self, sim):
         with pytest.raises(ValueError):
             sim.register_callback(lambda sc, dt: None, phase="later")
+
+
+class TestNonPositiveDt:
+    """A gate asked twice at one time, or with the clock moved back, is a caller error."""
+
+    def test_repeated_time_warns_once_and_reports_one_timestep(self, caplog):
+        gate = FrequencyGate(None)
+        gate.due(0.1, 0.1)
+        with caplog.at_level("WARNING", logger="pybullet_fleet._frequency"):
+            assert gate.due(0.1, 0.1) == pytest.approx(0.1)  # asked twice at one time
+            assert gate.due(0.05, 0.1) == pytest.approx(0.1)  # clock moved back without reset()
+            gate.reset()
+            gate.due(0.0, 0.1)
+            assert gate.due(0.0, 0.1) == pytest.approx(0.1)
+        warnings = [r for r in caplog.records if "non-positive dt" in r.getMessage()]
+        assert len(warnings) == 1  # once per gate, reset() included
+
+    def test_a_frequency_gate_is_not_due_again_at_the_same_time(self, caplog):
+        gate = FrequencyGate(10.0)
+        assert gate.due(0.1, 0.1) is not None
+        with caplog.at_level("WARNING", logger="pybullet_fleet._frequency"):
+            assert gate.due(0.1, 0.1) is None
+        assert not caplog.records
+
+    def test_a_normal_run_does_not_warn(self, caplog):
+        with caplog.at_level("WARNING", logger="pybullet_fleet._frequency"):
+            _fires(FrequencyGate(3.0), 0.1, 100)
+            _fires(FrequencyGate(None), 0.1, 100)
+        assert not [r for r in caplog.records if "non-positive dt" in r.getMessage()]

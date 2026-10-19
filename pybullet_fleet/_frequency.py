@@ -16,6 +16,10 @@ rather than firing once for every point it missed.
 import math
 from typing import Optional
 
+from pybullet_fleet.logging_utils import get_lazy_logger
+
+logger = get_lazy_logger(__name__)
+
 #: Fraction of a timestep by which simulated time may fall short of a due time
 #: and still count as reaching it. Accumulated error is many orders of magnitude
 #: smaller than this; a real shortfall is a whole timestep.
@@ -29,12 +33,13 @@ class FrequencyGate:
     the simulation; callers pass the step's simulated time and timestep.
     """
 
-    __slots__ = ("frequency", "_next_index", "_last_time")
+    __slots__ = ("frequency", "_next_index", "_last_time", "_warned")
 
     def __init__(self, frequency: Optional[float] = None) -> None:
         if frequency is not None and not (math.isfinite(frequency) and frequency > 0):
             raise ValueError("frequency must be None or a positive finite number, got {!r}".format(frequency))
         self.frequency = frequency
+        self._warned = False
         self.reset()
 
     def reset(self) -> None:
@@ -53,25 +58,53 @@ class FrequencyGate:
         """
         if self.frequency is None:
             dt = timestep if self._last_time is None else now - self._last_time
+            last = self._last_time
             self._last_time = now
-            return dt if dt > 0 else timestep
+            return self._positive(dt, now, last, timestep)
 
+        # Grid points within ``tolerance`` of ``now`` count as ``now`` itself, in
+        # either direction, so float error in the accumulated time neither skips
+        # a due time nor runs the same one twice.
         interval = 1.0 / self.frequency
-        slack = _TOLERANCE * timestep
+        tolerance = _TOLERANCE * timestep
         if self._next_index is None:
             # Baseline: the first grid point at or after now, and never the
             # run's start itself -- a handler first runs one interval into the
             # run. A first call already on a due time (after a restore, or a
             # post-step schedule whose first time is one step in) runs at once.
-            self._next_index = max(1, math.ceil((now - slack) / interval))
-        if now + slack < self._next_index * interval:
+            # ceil((now - tolerance) / interval): the first grid point at or after now.
+            self._next_index = max(1, math.ceil((now - tolerance) / interval))
+        if now + tolerance < self._next_index * interval:
             return None
         # Due. Schedule the next grid point after now: normally the following
-        # one, after a gap the first one still ahead.
-        self._next_index = max(self._next_index + 1, math.floor((now + slack) / interval) + 1)
+        # one, after a gap the first one still ahead. floor((now + tolerance) /
+        # interval) is the last grid point at or before now.
+        self._next_index = max(self._next_index + 1, math.floor((now + tolerance) / interval) + 1)
         last = self._last_time
         self._last_time = now
         # The first run has no previous one: report the interval, or one step
         # when the interval is shorter than a step.
         dt = now - last if last is not None else max(interval, timestep)
-        return dt if dt > 0 else timestep
+        return self._positive(dt, now, last, timestep)
+
+    def _positive(self, dt: float, now: float, last: Optional[float], timestep: float) -> float:
+        """``dt``, or one timestep with a warning when it is not positive.
+
+        A non-positive ``dt`` means the gate was asked twice at the same time or
+        the clock went back without :meth:`reset` -- a caller error. Handlers
+        still get a usable ``dt``; the warning is logged once per gate.
+        """
+        if dt > 0:
+            return dt
+        if not self._warned:
+            self._warned = True
+            logger.warning(
+                "FrequencyGate: non-positive dt %.9g at time %.9g (previous run at %r); "
+                "was the gate called twice in one step, or the clock moved back without reset()? "
+                "Using one timestep (%.9g) instead.",
+                dt,
+                now,
+                last,
+                timestep,
+            )
+        return timestep
