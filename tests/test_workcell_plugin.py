@@ -11,7 +11,6 @@ import pybullet as p
 from pybullet_fleet.action import PickAction, DropAction
 from pybullet_fleet.agent import Agent, AgentSpawnParams
 from pybullet_fleet.core_simulation import MultiRobotSimulationCore, SimulationParams
-from tests.conftest import at_time
 from pybullet_fleet.geometry import Pose
 from pybullet_fleet.plugins.workcell_plugin import WorkcellPlugin
 from pybullet_fleet.sim_object import SimObject, SimObjectSpawnParams, ShapeParams
@@ -706,23 +705,18 @@ class TestReturnHome:
         drop = plugin.ingest("wc", robot, key="i1")
         drop._target_object = item
         drop.status = ActionStatus.COMPLETED
-        # The plugin reads the time from its simulation; drive it at chosen
-        # times without stepping (which would also run the robot's actions).
-        plugin.sim_core = at_time(sim, 5.0)  # the time the return home is scheduled at
-        plugin.on_step(0.1)
+        plugin.on_step(0.1)  # schedules the return home at sim time 0 + delay (1.0)
 
         # Move item away with different orientation
         item.set_pose_raw([10.0, 10.0, 0.1], [0, 0, 0, 1])
 
         # 1. Before delay expires — item should NOT have returned
-        plugin.sim_core = at_time(sim, 5.5)  # only 0.5s after scheduling (delay=1.0)
-        plugin._process_return_home()
+        plugin._process_return_home(0.5)
         pos = item.get_pose().position
         assert abs(pos[0] - 10.0) < 0.1, "Item should still be at 10,10 before delay"
 
         # 2. After delay expires — item should return
-        plugin.sim_core = at_time(sim, 7.0)  # well past the scheduled time
-        plugin._process_return_home()
+        plugin._process_return_home(2.0)
 
         pose = item.get_pose()
         # Position should be item's original spawn position
