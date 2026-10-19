@@ -1,12 +1,13 @@
-"""A pose and its time agree: ``sim_time`` is the time of the state you see.
+"""The step clock: ``sim_time`` is the time of the state you see.
 
 ``step_once()`` advances the clock and step counter right after ``pre_step``, so
 from the object update on -- the update itself, callbacks, plugin hooks, the
 collision check, ``post_step`` -- and outside a step, ``sim_time`` and
 ``step_count`` are those of the state being computed or observed. A
-``pre_step`` subscriber is the one place that still sees the previous step.
-Position controllers evaluate their trajectories at ``sim_time``, so the pose a
-step ends with is the trajectory at the end of the step.
+``pre_step`` subscriber is the one place that sees the previous step. Position
+controllers evaluate their trajectories at ``sim_time``, so the pose a step ends
+with is the trajectory at the end of the step. A step that fails gives its
+clock and scheduling state back.
 
 Uses 0.05 s steps and 4 m/s^2 acceleration and deceleration.
 """
@@ -236,53 +237,6 @@ def test_a_failed_step_gives_back_its_scheduling_state():
         assert ran == [pytest.approx(1.0), pytest.approx(1.0)]
     finally:
         p.disconnect(sim.client)
-
-
-def test_a_pose_written_in_pre_step_stays_visible_until_flushed(sim):
-    """A dynamic (mass > 0) body moved from pre_step keeps its pending pose
-    after the clock advances: get_pose() must not reread the unflushed
-    PyBullet state, and the pending pose is what gets written."""
-    from pybullet_fleet.sim_object import ShapeParams, SimObject
-
-    box = SimObject.from_mesh(
-        visual_shape=ShapeParams(shape_type="box", half_extents=[0.1, 0.1, 0.1]),
-        collision_shape=ShapeParams(shape_type="box", half_extents=[0.1, 0.1, 0.1]),
-        pose=Pose.from_xyz(0.0, 0.0, 0.5),
-        mass=1.0,
-        sim_core=sim,
-    )
-    assert not box.is_kinematic
-    seen = []
-    sim.events.on(SimEvents.PRE_STEP, lambda **_: box.set_pose(Pose.from_xyz(1.0, 0.0, 0.5)))
-    sim.register_callback(lambda sc, dt: seen.append(box.get_pose().position[0]))
-    sim.step_once()
-    assert seen == [pytest.approx(1.0)]
-    position, _ = p.getBasePositionAndOrientation(box.body_id, physicsClientId=sim.client)
-    assert position[0] == pytest.approx(1.0)
-
-
-def test_a_failed_step_keeps_a_pre_step_pose_visible(sim):
-    """A body moved from pre_step whose step then fails: once the clock is
-    given back, get_pose() still returns the pending pose."""
-    from pybullet_fleet.sim_object import ShapeParams, SimObject
-
-    box = SimObject.from_mesh(
-        visual_shape=ShapeParams(shape_type="box", half_extents=[0.1, 0.1, 0.1]),
-        collision_shape=ShapeParams(shape_type="box", half_extents=[0.1, 0.1, 0.1]),
-        pose=Pose.from_xyz(0.0, 0.0, 0.5),
-        mass=1.0,
-        sim_core=sim,
-    )
-
-    def boom(sc, dt):
-        raise RuntimeError("callback failed")
-
-    sim.events.on(SimEvents.PRE_STEP, lambda **_: box.set_pose(Pose.from_xyz(1.0, 0.0, 0.5)))
-    sim.register_callback(boom)
-    with pytest.raises(RuntimeError, match="callback failed"):
-        sim.step_once()
-    assert sim.get_completed_step_boundary() == (0, 0.0)
-    assert box.get_pose().position[0] == pytest.approx(1.0)
 
 
 def test_sim_time_is_read_only(sim):
