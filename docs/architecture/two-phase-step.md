@@ -101,10 +101,11 @@ sim.events.on(SimEvents.POST_STEP, on_post_step)
 a callback that runs right after the `POST_STEP` event, with its own
 `frequency` -- for example to publish or record each step's outcome at a fixed
 rate. Its schedule runs on `sim_time`, the time of the state it sees, so a 10 Hz
-post-step callback runs when the poses reach 0.1 s, 0.2 s, ... `set_pose()` calls
-from a `POST_STEP` handler or a post-step callback are immediate, but the step's collision check has already completed. A collision
-caused by such a write is therefore observed by the next collision-check
-opportunity.
+post-step callback runs when the poses reach 0.1 s, 0.2 s, ...
+
+`set_pose()` from a `POST_STEP` handler or a post-step callback writes to
+PyBullet at once, but the step's collision check has already run. A collision
+such a write causes is found by the next collision check.
 
 ### Which time a pose belongs to
 
