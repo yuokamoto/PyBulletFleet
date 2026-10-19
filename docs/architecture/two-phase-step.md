@@ -119,8 +119,14 @@ read anywhere else -- a pose, an action's start or end time, a collision
 observation -- is stamped correctly with `sim_time`.
 
 A step that raises before it completes (an exception from a Phase-1 callback,
-say) gives the clock back: `sim_time`, the elapsed time and `step_count` return
+say) gives the clock back: `sim_time` and `step_count` return
 to the last completed boundary, so a failed step never looks completed.
+
+`sim_time` is a read-only view of the simulation's single clock (there is no
+separate elapsed-time value that could disagree with it). Outside a step it
+equals the completed boundary returned by `get_completed_step_boundary()`. The
+only supported way to move the clock is `restore_completed_step_boundary()`,
+when resuming a fresh simulation from a checkpoint.
 
 Position controllers evaluate their trajectories at `sim_time`, so the pose a
 step ends with is the trajectory at the end of the step, the same rule

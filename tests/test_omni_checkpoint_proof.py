@@ -115,7 +115,6 @@ def test_reissue_goal_from_checkpoint_pose_changes_trajectory(tmp_path):
         state = checkpoint["state"]
         robot.set_pose(proof.Pose(position=state["position"], orientation=state["orientation"]))
         sim.restore_completed_step_boundary(state["step"], state["elapsed_time"])
-        sim.sim_time = state["elapsed_time"]
         proof._issue_goal(robot)
         sim.step_once()
         assert math.dist(robot.get_pose().position, reference[proof.CHECKPOINT_STEP + 1]["position"]) > 0.01

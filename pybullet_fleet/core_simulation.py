@@ -448,8 +448,8 @@ class MultiRobotSimulationCore:
         self._robot_original_colors: Dict[int, List[float]] = {}  # body_id: rgbaColor
         self._collision_count: int = 0
         self._step_count: int = 0
-        self.sim_time: float = 0.0  # Simulation time (kept public for hot-path access)
-        self._elapsed_sim_time: float = 0.0  # Canonical accumulated simulation time
+        # The simulation clock: the one source of time; ``sim_time`` reads it.
+        self._elapsed_sim_time: float = 0.0
         self._enable_time_profiling: bool = params.enable_time_profiling
 
         # --- Fully private (no external access) ---
@@ -992,6 +992,20 @@ class MultiRobotSimulationCore:
         """Current simulation step count."""
         return self._step_count
 
+    @property
+    def sim_time(self) -> float:
+        """Simulated time of the state you see (read-only).
+
+        Outside a step it is the completed step's time, the same as
+        :meth:`get_completed_step_boundary`. Inside :meth:`step_once` the clock
+        advances right after the ``pre_step`` event, so from the object update
+        on -- callbacks, plugins, the collision check, ``post_step`` -- it is the
+        time of the state that step computes. A ``pre_step`` subscriber sees the
+        previous step's time. To move the clock (resuming from a checkpoint),
+        use :meth:`restore_completed_step_boundary`.
+        """
+        return self._elapsed_sim_time
+
     def get_completed_step_boundary(self) -> tuple[int, float]:
         """Return the completed step and canonical elapsed time outside a step."""
         if self._in_step or self._in_post_step:
@@ -1057,8 +1071,6 @@ class MultiRobotSimulationCore:
             raise ValueError("Completed-step time does not match the fixed timestep")
         self._step_count = step
         self._elapsed_sim_time = elapsed_time
-        # Outside a step sim_time is the completed boundary's time.
-        self.sim_time = elapsed_time
         self._resume_ready = True
 
     @property
@@ -3722,7 +3734,6 @@ class MultiRobotSimulationCore:
         self._start_time = time.monotonic()  # monotonic: elapsed/RTF immune to wall-clock jumps
         self._step_count = 0
         self._collision_count = 0
-        self.sim_time = 0.0
         self._elapsed_sim_time = 0.0
         self._resume_ready = False
         self._last_collision_check = 0.0
@@ -4603,8 +4614,6 @@ class MultiRobotSimulationCore:
             # across multiple steps when collision_check_frequency < step_frequency
             self._moved_this_step.update(self._physics_objects)
 
-            self.sim_time = self._elapsed_sim_time
-
             # --- pre_step event ---
             # The last point of the step that sees the previous state's time.
             if measure_timing:
@@ -4624,7 +4633,6 @@ class MultiRobotSimulationCore:
             # plugins, collision check, POST_STEP, and outside the step).
             self._elapsed_sim_time += self._params.timestep
             self._step_count += 1
-            self.sim_time = self._elapsed_sim_time
             clock_advanced = True
             # Poses written from pre_step are still pending (buffered).
             self._restamp_pending_pose_cache()
@@ -4863,7 +4871,6 @@ class MultiRobotSimulationCore:
             if clock_advanced and not step_completed:
                 self._elapsed_sim_time -= self._params.timestep
                 self._step_count -= 1
-                self.sim_time = self._elapsed_sim_time
                 self._restamp_pending_pose_cache()
 
     def _restamp_pending_pose_cache(self) -> None:

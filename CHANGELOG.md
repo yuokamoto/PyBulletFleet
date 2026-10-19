@@ -33,6 +33,10 @@ are not recommended for production use yet.
     collision observations carry the time of the step that produced them.
   - A step that raises before it completes returns the clock and counter to
     the last completed boundary.
+  - `sim_time` is read-only: it reads the simulation's one clock, so it can no
+    longer drift from the elapsed time by assignment. Move the clock with
+    `restore_completed_step_boundary()` (resuming from a checkpoint); assigning
+    `sim_time` raises `AttributeError`.
   - The snapshot-replay evidence documents keep the values recorded before this
     change, with a note.
 

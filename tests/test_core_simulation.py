@@ -1366,7 +1366,7 @@ class TestReset:
         """Step count, collision count, and sim_time are zeroed."""
         sim_core._step_count = 100
         sim_core._collision_count = 50
-        sim_core.sim_time = 99.9
+        sim_core._elapsed_sim_time = 99.9
 
         sim_core.reset()
 
@@ -1510,7 +1510,7 @@ class TestInitializeSimulation:
         """Basic counters should all be zeroed."""
         sim_core._step_count = 100
         sim_core._collision_count = 50
-        sim_core.sim_time = 99.9
+        sim_core._elapsed_sim_time = 99.9
 
         sim_core.initialize_simulation()
         assert sim_core._step_count == 0

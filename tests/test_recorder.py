@@ -160,17 +160,17 @@ class TestRecorderCapture:
         rec = SimulationRecorder(sim_core, output=tmp_gif, duration=1.0, width=160, height=120)
         rec.start()
         # Simulate time passing beyond duration
-        sim_core.sim_time = 0.0
+        sim_core._elapsed_sim_time = 0.0
         rec._start_sim_time = 0.0
 
         # Capture within duration
-        sim_core.sim_time = 0.5
+        sim_core._elapsed_sim_time = 0.5
         rec._capture_frame(sim_core, 0.5)
         assert rec.is_recording is True
         assert rec.frame_count == 1
 
         # Capture at duration boundary
-        sim_core.sim_time = 1.1
+        sim_core._elapsed_sim_time = 1.1
         rec._capture_frame(sim_core, 0.6)
         assert rec.is_recording is False
         # Frame should NOT be captured after duration exceeded
@@ -285,11 +285,11 @@ class TestRecorderCamera:
         )
         rec.start()
         rec._start_sim_time = 0.0
-        sim_core.sim_time = 0.0
+        sim_core._elapsed_sim_time = 0.0
         rec._capture_frame(sim_core, 0.1)
         frame1 = rec._frames[0].copy()
 
-        sim_core.sim_time = 1.0
+        sim_core._elapsed_sim_time = 1.0
         rec._capture_frame(sim_core, 1.0)
         frame2 = rec._frames[1].copy()
 
@@ -467,16 +467,16 @@ class TestRecorderTimeBase:
         rec = SimulationRecorder(sim_core, output=tmp_gif, width=80, height=60, fps=10, duration=1.0, time_base="sim")
         rec.start()
         rec._start_sim_time = 0.0
-        sim_core.sim_time = 0.0
+        sim_core._elapsed_sim_time = 0.0
 
         # Capture within duration
-        sim_core.sim_time = 0.5
+        sim_core._elapsed_sim_time = 0.5
         rec._capture_frame(sim_core, 0.1)
         assert rec.is_recording is True
         assert rec.frame_count == 1
 
         # Sim time exceeds duration → stop
-        sim_core.sim_time = 1.1
+        sim_core._elapsed_sim_time = 1.1
         rec._capture_frame(sim_core, 0.6)
         assert rec.is_recording is False
         assert rec.frame_count == 1

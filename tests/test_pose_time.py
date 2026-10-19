@@ -235,3 +235,30 @@ def test_a_failed_step_keeps_a_pre_step_pose_visible(sim):
         sim.step_once()
     assert sim.get_completed_step_boundary() == (0, 0.0)
     assert box.get_pose().position[0] == pytest.approx(1.0)
+
+
+def test_sim_time_is_read_only(sim):
+    """One clock: sim_time reads it and cannot drift from it by assignment."""
+    with pytest.raises(AttributeError):
+        sim.sim_time = 1.0
+
+
+def test_sim_time_is_the_clock_everywhere(sim):
+    """Outside a step it is the completed boundary's time; inside, from the
+    object update on, the time of the state the step computes."""
+    agent = _agent(sim)
+    _start(sim, agent)
+    seen = []
+    sim.events.on(SimEvents.PRE_STEP, lambda **_: seen.append(("pre", sim.sim_time, sim.step_count)))
+    sim.register_callback(lambda s, dt: seen.append(("callback", s.sim_time, s.step_count)))
+    sim.events.on(SimEvents.POST_STEP, lambda **_: seen.append(("post", sim.sim_time, sim.step_count)))
+    for k in range(1, 4):
+        sim.step_once()
+        step, elapsed = sim.get_completed_step_boundary()
+        assert (step, sim.sim_time) == (k, elapsed)
+        assert elapsed == pytest.approx(k * DT)
+    for k in range(1, 4):
+        pre, callback, post = seen[3 * (k - 1) : 3 * k]
+        assert pre[1:] == (pytest.approx((k - 1) * DT), k - 1)
+        assert callback[1:] == (pytest.approx(k * DT), k)
+        assert post[1:] == (pytest.approx(k * DT), k)
