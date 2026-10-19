@@ -1,16 +1,13 @@
-"""A goal replaced mid-motion continues the motion instead of restarting from rest.
+"""A goal replaced mid-motion continues the motion from the agent's current speed.
 
-Every new goal or path used to build its trajectory from rest, and
-``Agent.set_path`` put a zero-length approach waypoint (the current pose) in
-front of it. A robot cruising at full speed that received a new goal straight
-ahead dropped to 0 in one step and accelerated again. The omni controllers --
-per-agent and batched -- now start from the agent's speed toward the new goal
--- signed along the new line, so a goal behind is reached by slowing,
-reversing and driving back. A goal whose trajectory does not exist within the
-configured limits -- inside the braking distance, where the agent is, or off
-the line of motion -- is refused: set_goal_pose() returns False and the
-current motion continues unchanged. At rest every goal is taken. No case
-exceeds the configured limits.
+The omni controllers -- per-agent and batched -- start a replaced goal's
+trajectory from the agent's speed toward it, signed along the new line, so a
+goal behind is reached by slowing, reversing and driving back; no zero-length
+approach waypoint is put in front of a moving agent's path. A goal whose
+trajectory does not exist within the configured limits -- inside the braking
+distance, where the agent is, or off the line of motion -- is refused:
+set_goal_pose() returns False and the current motion continues unchanged. At
+rest every goal is taken. No case exceeds the configured limits.
 """
 
 from __future__ import annotations

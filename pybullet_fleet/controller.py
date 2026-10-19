@@ -474,7 +474,7 @@ class KinematicController(Controller):
 
         # Start trajectory for first waypoint. The agent's velocity is read
         # before anything zeroes it: a controller that can continue the motion
-        # (OmniController) starts the new trajectory from it instead of rest.
+        # (OmniController) starts the new trajectory from it.
         initial_velocity = np.array(agent._current_velocity, dtype=float) if self._under_way(agent) else None
         if self._mode == ControllerMode.VELOCITY:
             self._zero_velocity()
