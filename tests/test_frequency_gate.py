@@ -1,10 +1,9 @@
 """Frequency-limited handlers run on a fixed grid of simulated time.
 
-Simulated time accumulates one timestep at a time and carries float error, so
-``now - last >= interval`` skipped beats (a 10 Hz callback on a 0.1 s timestep
-ran at gaps of 0.1 s and 0.2 s) and resetting ``last`` to the run time drifted
-when the interval was not a whole number of timesteps. Callbacks, plugins, the
-collision check and the DataMonitor refresh all share :class:`FrequencyGate`.
+Simulated time accumulates one timestep at a time and carries float error
+(ten steps of 0.1 s add up to 0.9999999999999999 s); due times on a fixed grid
+with a small tolerance keep every beat and keep the phase. Callbacks, plugins,
+the collision check and the DataMonitor refresh all share :class:`FrequencyGate`.
 """
 
 import pytest
@@ -108,8 +107,7 @@ class TestTheCoreUsesIt:
         plugin = sim.register_plugin(Counter(sim), frequency=1.0)
         for _ in range(101):
             sim.step_once()
-        # Accumulating 0.1 ten times is 0.9999999999999999: the old
-        # accumulator missed every other beat.
+        # Accumulating 0.1 ten times is 0.9999999999999999; every beat still runs.
         assert len(plugin.dts) == 10
         assert all(dt == pytest.approx(1.0) for dt in plugin.dts)
 

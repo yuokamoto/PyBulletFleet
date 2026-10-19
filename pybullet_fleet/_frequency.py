@@ -1,11 +1,10 @@
 """When a frequency-limited handler is due, on simulated time.
 
 Simulated time is accumulated one timestep at a time, so it carries floating
-point error: ten steps of 0.1 s add up to 0.9999999999999999 s. Comparing
-``now - last >= interval`` against that skips a beat whenever the error falls
-short -- a 10 Hz handler on a 0.1 s timestep ran at gaps of 0.1 s and 0.2 s --
-and resetting ``last`` to the time it actually ran lets the phase drift when
-the interval is not a whole number of timesteps.
+point error: ten steps of 0.1 s add up to 0.9999999999999999 s. A check of
+``now - last >= interval`` would miss a beat whenever that error falls short,
+and measuring from the time a handler actually ran would let its phase drift
+when the interval is not a whole number of timesteps.
 
 :class:`FrequencyGate` instead fires on a fixed grid of due times, ``k *
 interval`` from time zero, with a tolerance far below one timestep. It fires
