@@ -6,8 +6,7 @@ collision check, ``post_step`` -- and outside a step, ``sim_time`` and
 ``step_count`` are those of the state being computed or observed. A
 ``pre_step`` subscriber is the one place that sees the previous step. Position
 controllers evaluate their trajectories at ``sim_time``, so the pose a step ends
-with is the trajectory at the end of the step. A step that fails gives its
-clock and scheduling state back.
+with is the trajectory at the end of the step.
 
 Uses 0.05 s steps and 4 m/s^2 acceleration and deceleration.
 """
@@ -173,70 +172,6 @@ def test_a_differential_pose_is_stamped_with_its_trajectory_time(sim, batch):
         seen.append((sim.sim_time, agent.get_pose().position[0]))
     for stamp, x in seen:
         assert x == pytest.approx(0.5 * ACCEL * stamp**2, abs=1e-9)
-
-
-def test_a_failed_step_gives_its_clock_back(sim):
-    """The clock advances before the step completes. A step that raises before
-    its end must not look completed: time and counter return to the last
-    completed boundary."""
-
-    def boom(sc, dt):
-        raise RuntimeError("callback failed")
-
-    sim.step_once()
-    sim.register_callback(boom)
-    with pytest.raises(RuntimeError, match="callback failed"):
-        sim.step_once()
-    assert sim.get_completed_step_boundary() == (1, pytest.approx(DT))
-    assert sim.sim_time == pytest.approx(DT)
-
-
-def test_a_failed_step_restores_the_exact_clock():
-    """The rollback restores the saved boundary, not t + dt - dt, which is not
-    exact in floating point: with dt = 0.1, 0.2 + 0.1 - 0.1 is not 0.2."""
-    sim = MultiRobotSimulationCore(SimulationParams(gui=False, monitor=False, physics=False, timestep=0.1))
-    try:
-        sim.step_once()
-        sim.step_once()
-        before = sim.get_completed_step_boundary()
-        assert before[1] + 0.1 - 0.1 != before[1]  # the case the rollback must not hit
-
-        def boom(sc, dt):
-            raise RuntimeError("callback failed")
-
-        sim.register_callback(boom)
-        with pytest.raises(RuntimeError, match="callback failed"):
-            sim.step_once()
-        assert sim.get_completed_step_boundary() == before
-        assert sim.sim_time == before[1]
-    finally:
-        p.disconnect(sim.client)
-
-
-def test_a_failed_step_gives_back_its_scheduling_state():
-    """A frequency-limited callback that ran in a step which then failed runs
-    again when the step is retried: its schedule returns with the clock."""
-    sim = MultiRobotSimulationCore(SimulationParams(gui=False, monitor=False, physics=False, timestep=1.0))
-    try:
-        ran = []
-        fail = [True]
-
-        def first(sc, dt):
-            ran.append(sc.sim_time)
-
-        def second(sc, dt):
-            if fail[0]:
-                fail[0] = False
-                raise RuntimeError("callback failed")
-
-        sim.register_callback(first, frequency=1.0)
-        sim.register_callback(second, frequency=1.0)
-        with pytest.raises(RuntimeError, match="callback failed"):
-            sim.step_once()
-        sim.step_once()  # the retry of the failed step
-        assert ran == [pytest.approx(1.0), pytest.approx(1.0)]
-    finally:
-        p.disconnect(sim.client)
 
 
 def test_sim_time_is_read_only(sim):

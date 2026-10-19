@@ -118,9 +118,9 @@ right after the `pre_step` event, before anything computes the new state:
 read anywhere else -- a pose, an action's start or end time, a collision
 observation -- is stamped correctly with `sim_time`.
 
-A step that raises before it completes (an exception from a Phase-1 callback,
-say) gives the clock back: `sim_time` and `step_count` return
-to the last completed boundary, so a failed step never looks completed.
+A step that raises (an exception from a Phase-1 callback, say) propagates the
+exception and leaves the simulation in an unspecified state; nothing is rolled
+back.
 
 `sim_time` is a read-only view of the simulation's single clock. Outside a step it
 equals the completed boundary returned by `get_completed_step_boundary()`. The

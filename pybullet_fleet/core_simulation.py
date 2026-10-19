@@ -1159,23 +1159,6 @@ class MultiRobotSimulationCore:
         for plugin in self._plugins:
             plugin.on_init()
 
-    def _capture_schedule_state(self) -> Tuple[Any, ...]:
-        """Frequency-scheduling state a step advances: callbacks, plugins, collision checks, monitor."""
-        return (
-            [(cbinfo, cbinfo.get("last_exec", 0.0)) for cbinfo in self._callbacks],
-            [(plugin, plugin._accumulator) for plugin in self._plugins],
-            self._last_collision_check,
-            self._last_monitor_update,
-        )
-
-    def _restore_schedule_state(self, state: Tuple[Any, ...]) -> None:
-        """Give back what :meth:`_capture_schedule_state` saved, for a step that failed."""
-        callbacks, plugins, self._last_collision_check, self._last_monitor_update = state
-        for cbinfo, last_exec in callbacks:
-            cbinfo["last_exec"] = last_exec
-        for plugin, accumulator in plugins:
-            plugin._accumulator = accumulator
-
     def _step_plugins(self, dt: float) -> None:
         """Dispatch ``on_step()`` to plugins respecting frequency control."""
         for plugin in self._plugins:
@@ -4619,13 +4602,6 @@ class MultiRobotSimulationCore:
         # _in_step gates SimObject._set_pose_internal between buffered and immediate paths.
         # try/finally guarantees the flag is cleared even if a callback / plugin raises.
         self._in_step = True
-        # The clock advances before the step completes; a step that raises
-        # before its end gives it back, so a failed step never looks completed.
-        clock_advanced = step_completed = False
-        completed_clock = self._elapsed_sim_time
-        # Time-based scheduling state the step may advance before it fails;
-        # given back with the clock so a retried step runs the same handlers.
-        completed_schedule = self._capture_schedule_state()
         if measure_timing:
             t_phase1 = time.perf_counter()
         try:
@@ -4652,10 +4628,8 @@ class MultiRobotSimulationCore:
             # of this step, so the clock and counter move first: sim_time is the
             # time of the state any later code sees (object update, callbacks,
             # plugins, collision check, POST_STEP, and outside the step).
-            completed_clock = self._elapsed_sim_time
             self._elapsed_sim_time += self._params.timestep
             self._step_count += 1
-            clock_advanced = True
             # Poses written from pre_step are still pending (buffered).
             self._restamp_pending_pose_cache()
 
@@ -4808,7 +4782,6 @@ class MultiRobotSimulationCore:
 
             self._update_selected_nameplate()
             self._in_post_step = False
-            step_completed = True
             # A durable recorder must see the completed clock and propagate
             # failures; EventBus deliberately swallows subscriber exceptions.
             if self._state_recorder is not None:
@@ -4890,22 +4863,15 @@ class MultiRobotSimulationCore:
             self._in_step = False
             self._in_post_step = False
             self._in_pre_step = False
-            if clock_advanced and not step_completed:
-                # The saved value, not t + dt - dt: that subtraction is not exact
-                # in floating point (0.2 + 0.1 - 0.1 != 0.2).
-                self._elapsed_sim_time = completed_clock
-                self._step_count -= 1
-                self._restore_schedule_state(completed_schedule)
-                self._restamp_pending_pose_cache()
 
     def _restamp_pending_pose_cache(self) -> None:
         """Keep buffered poses' cache valid across a change of ``sim_time``.
 
         A dynamic body's cached pose is valid for one ``sim_time``. A pose
         written but not yet flushed to PyBullet lives only in that cache, so
-        when the clock moves -- advancing after ``pre_step``, or given back by
-        a failed step -- the pending bodies are restamped; otherwise
-        ``get_pose()`` would reread the unflushed PyBullet state.
+        when the clock advances after ``pre_step`` the pending bodies are
+        restamped; otherwise ``get_pose()`` would reread the unflushed PyBullet
+        state.
         """
         for object_id in self._pending_pose_ids:
             pending = self._sim_objects_dict.get(object_id)

@@ -537,24 +537,3 @@ class TestPendingPoseFromPreStep:
         assert seen == [pytest.approx(1.0)]
         position, _ = p.getBasePositionAndOrientation(box.body_id, physicsClientId=sim.client)
         assert position[0] == pytest.approx(1.0)
-
-    def test_a_failed_step_keeps_a_pre_step_pose_visible(self, sim):
-        """A body moved from pre_step whose step then fails: once the clock is
-        given back, get_pose() still returns the pending pose."""
-        box = SimObject.from_mesh(
-            visual_shape=ShapeParams(shape_type="box", half_extents=[0.1, 0.1, 0.1]),
-            collision_shape=ShapeParams(shape_type="box", half_extents=[0.1, 0.1, 0.1]),
-            pose=Pose.from_xyz(0.0, 0.0, 0.5),
-            mass=1.0,
-            sim_core=sim,
-        )
-
-        def boom(sc, dt):
-            raise RuntimeError("callback failed")
-
-        sim.events.on(SimEvents.PRE_STEP, lambda **_: box.set_pose(Pose.from_xyz(1.0, 0.0, 0.5)))
-        sim.register_callback(boom)
-        with pytest.raises(RuntimeError, match="callback failed"):
-            sim.step_once()
-        assert sim.get_completed_step_boundary() == (0, 0.0)
-        assert box.get_pose().position[0] == pytest.approx(1.0)
