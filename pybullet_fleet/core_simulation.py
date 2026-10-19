@@ -4626,13 +4626,8 @@ class MultiRobotSimulationCore:
             self._step_count += 1
             self.sim_time = self._elapsed_sim_time
             clock_advanced = True
-            # Poses written from pre_step are still pending (buffered); keep
-            # their cached value current so get_pose() does not reread the
-            # unflushed PyBullet state now that the time has moved.
-            for object_id in self._pending_pose_ids:
-                pending = self._sim_objects_dict.get(object_id)
-                if pending is not None:
-                    pending._cached_pose_sim_time = self.sim_time
+            # Poses written from pre_step are still pending (buffered).
+            self._restamp_pending_pose_cache()
 
             # Update all simulation objects that need per-step updates.
             # Agent and Device subclasses set _needs_update = True.
@@ -4869,6 +4864,21 @@ class MultiRobotSimulationCore:
                 self._elapsed_sim_time -= self._params.timestep
                 self._step_count -= 1
                 self.sim_time = self._elapsed_sim_time
+                self._restamp_pending_pose_cache()
+
+    def _restamp_pending_pose_cache(self) -> None:
+        """Keep buffered poses' cache valid across a change of ``sim_time``.
+
+        A dynamic body's cached pose is valid for one ``sim_time``. A pose
+        written but not yet flushed to PyBullet lives only in that cache, so
+        when the clock moves -- advancing after ``pre_step``, or given back by
+        a failed step -- the pending bodies are restamped; otherwise
+        ``get_pose()`` would reread the unflushed PyBullet state.
+        """
+        for object_id in self._pending_pose_ids:
+            pending = self._sim_objects_dict.get(object_id)
+            if pending is not None:
+                pending._cached_pose_sim_time = self.sim_time
 
     def _print_profiling_summary(self) -> None:
         """Print profiling statistics summary (average over last N steps).
