@@ -31,6 +31,8 @@ are not recommended for production use yet.
   - Outside a step `sim_time` is the completed time (it used to lag one step
     behind `step_count`); actions' start and end times, behavior-tree ticks and
     collision observations carry the time of the step that produced them.
+  - A step that raises before it completes returns the clock and counter to
+    the last completed boundary.
   - The snapshot-replay evidence documents keep the values recorded before this
     change, with a note.
 

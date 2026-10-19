@@ -118,6 +118,10 @@ right after the `pre_step` event, before anything computes the new state:
 read anywhere else -- a pose, an action's start or end time, a collision
 observation -- is stamped correctly with `sim_time`.
 
+A step that raises before it completes (an exception from a Phase-1 callback,
+say) gives the clock back: `sim_time`, the elapsed time and `step_count` return
+to the last completed boundary, so a failed step never looks completed.
+
 Position controllers evaluate their trajectories at `sim_time`, so the pose a
 step ends with is the trajectory at the end of the step, the same rule
 kinematic joints follow. A trajectory started now begins at `sim_time`: a path

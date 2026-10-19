@@ -172,3 +172,42 @@ def test_a_differential_pose_is_stamped_with_its_trajectory_time(sim, batch):
         seen.append((sim.sim_time, agent.get_pose().position[0]))
     for stamp, x in seen:
         assert x == pytest.approx(0.5 * ACCEL * stamp**2, abs=1e-9)
+
+
+def test_a_failed_step_gives_its_clock_back(sim):
+    """The clock advances before the step completes. A step that raises before
+    its end must not look completed: time and counter return to the last
+    completed boundary."""
+
+    def boom(sc, dt):
+        raise RuntimeError("callback failed")
+
+    sim.step_once()
+    sim.register_callback(boom)
+    with pytest.raises(RuntimeError, match="callback failed"):
+        sim.step_once()
+    assert sim.get_completed_step_boundary() == (1, pytest.approx(DT))
+    assert sim.sim_time == pytest.approx(DT)
+
+
+def test_a_pose_written_in_pre_step_stays_visible_until_flushed(sim):
+    """A dynamic (mass > 0) body moved from pre_step keeps its pending pose
+    after the clock advances: get_pose() must not reread the unflushed
+    PyBullet state, and the pending pose is what gets written."""
+    from pybullet_fleet.sim_object import ShapeParams, SimObject
+
+    box = SimObject.from_mesh(
+        visual_shape=ShapeParams(shape_type="box", half_extents=[0.1, 0.1, 0.1]),
+        collision_shape=ShapeParams(shape_type="box", half_extents=[0.1, 0.1, 0.1]),
+        pose=Pose.from_xyz(0.0, 0.0, 0.5),
+        mass=1.0,
+        sim_core=sim,
+    )
+    assert not box.is_kinematic
+    seen = []
+    sim.events.on(SimEvents.PRE_STEP, lambda **_: box.set_pose(Pose.from_xyz(1.0, 0.0, 0.5)))
+    sim.register_callback(lambda sc, dt: seen.append(box.get_pose().position[0]))
+    sim.step_once()
+    assert seen == [pytest.approx(1.0)]
+    position, _ = p.getBasePositionAndOrientation(box.body_id, physicsClientId=sim.client)
+    assert position[0] == pytest.approx(1.0)
