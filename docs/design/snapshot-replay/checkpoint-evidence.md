@@ -6,6 +6,8 @@ production checkpoint/restore capability.
 **Status:** Implemented locally for Human Review. Only the fixed one-robot
 straight-navigation profile is claimed.
 
+**Note (2026-10-19):** recorded before `step_once()` advanced its clock before the object update (see "Which time a pose belongs to" in [two-phase-step.md](../../architecture/two-phase-step.md)). A rerun shows the same results one step earlier, and a `post_step` subscriber now sees the counter and time of the step it completes.
+
 ## Four capability levels
 
 | Level | Evidence in this profile | Boundary |

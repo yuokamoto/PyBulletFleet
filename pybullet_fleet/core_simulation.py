@@ -594,7 +594,10 @@ class MultiRobotSimulationCore:
         # _pending_pose_ids holds object_ids whose _pending_pose buffer is non-empty.
         # See docs/design/two-phase-step/spec.md.
         self._in_step: bool = False
-        self._in_post_step: bool = False  # Counters advance after POST_STEP callbacks.
+        self._in_post_step: bool = False
+        # True only while PRE_STEP is emitted: the one point of a step where the
+        # clock and step counter still hold the previous step (see step_once()).
+        self._in_pre_step: bool = False
         self._resume_ready: bool = False  # Set only by a validated completed-step restore.
         self._pending_pose_ids: Set[int] = set()
         # Parent object ids that have link-level kinematic attachments.
@@ -1054,9 +1057,8 @@ class MultiRobotSimulationCore:
             raise ValueError("Completed-step time does not match the fixed timestep")
         self._step_count = step
         self._elapsed_sim_time = elapsed_time
-        # Match the post-step field value; step_once() sets it to elapsed_time
-        # before evaluating the next step.
-        self.sim_time = (step - 1) * self._params.timestep
+        # Outside a step sim_time is the completed boundary's time.
+        self.sim_time = elapsed_time
         self._resume_ready = True
 
     @property
@@ -3353,9 +3355,10 @@ class MultiRobotSimulationCore:
             new_collisions = set()
             resolved_collisions = set()
 
-            completing_step = self._in_step or self._in_post_step
-            sample_step = self._step_count + int(completing_step)
-            sample_time = self._elapsed_sim_time + (self._params.timestep if completing_step else 0.0)
+            # The clock advances before a step's update, so the counters are the
+            # sampled state's step and time whether or not a step is under way.
+            sample_step = self._step_count
+            sample_time = self._elapsed_sim_time
 
             for obj_id_i, obj_id_j in pairs_to_check:
                 obj_i = self._sim_objects_dict.get(obj_id_i)
@@ -4600,11 +4603,25 @@ class MultiRobotSimulationCore:
             self.sim_time = self._elapsed_sim_time
 
             # --- pre_step event ---
+            # The last point of the step that sees the previous state's time.
             if measure_timing:
                 t_ev0 = time.perf_counter()
-            self.events.emit(SimEvents.PRE_STEP, dt=self._params.timestep, sim_time=self.sim_time)
+            self._in_pre_step = True
+            try:
+                self.events.emit(SimEvents.PRE_STEP, dt=self._params.timestep, sim_time=self.sim_time)
+            finally:
+                self._in_pre_step = False
             if measure_timing:
                 self._profiling_stats["events_pre_step"][-1] = (time.perf_counter() - t_ev0) * 1000
+
+            # --- Advance the clock ---
+            # Everything from here on computes or observes the state at the end
+            # of this step, so the clock and counter move first: sim_time is the
+            # time of the state any later code sees (object update, callbacks,
+            # plugins, collision check, POST_STEP, and outside the step).
+            self._elapsed_sim_time += self._params.timestep
+            self._step_count += 1
+            self.sim_time = self._elapsed_sim_time
 
             # Update all simulation objects that need per-step updates.
             # Agent and Device subclasses set _needs_update = True.
@@ -4754,8 +4771,6 @@ class MultiRobotSimulationCore:
                 self._profiling_stats["events_post_step"][-1] = (time.perf_counter() - t_ev1) * 1000
 
             self._update_selected_nameplate()
-            self._elapsed_sim_time += self._params.timestep
-            self._step_count += 1
             self._in_post_step = False
             # A durable recorder must see the completed clock and propagate
             # failures; EventBus deliberately swallows subscriber exceptions.
@@ -4837,6 +4852,7 @@ class MultiRobotSimulationCore:
         finally:
             self._in_step = False
             self._in_post_step = False
+            self._in_pre_step = False
 
     def _print_profiling_summary(self) -> None:
         """Print profiling statistics summary (average over last N steps).

@@ -14,6 +14,26 @@ are not recommended for production use yet.
 
 ### Changed
 
+- `step_once()` advances `sim_time`, the elapsed time and `step_count` right
+  after the `pre_step` event, before the object update, instead of after the
+  `post_step` event. `sim_time` is now the time of the state you see everywhere
+  except a `pre_step` subscriber:
+  - Position controllers (`OmniController`, `DifferentialController` and the
+    batched omni and differential controllers) evaluate their trajectories at
+    the end of the step, as kinematic joints already did; before, a step's pose
+    was the trajectory one step earlier. A path set in a `pre_step` subscriber
+    moves in that same step (with `auto_approach=False`; the default
+    zero-length approach waypoint still takes a step), and a motion completes
+    one step sooner.
+  - `post_step` subscribers (and the `post_step` payload's `sim_time`) see the
+    step they complete: `step_count` and `sim_time` have already advanced. Code
+    that added one to `step_count` in a `post_step` handler must drop it.
+  - Outside a step `sim_time` is the completed time (it used to lag one step
+    behind `step_count`); actions' start and end times, behavior-tree ticks and
+    collision observations carry the time of the step that produced them.
+  - The snapshot-replay evidence documents keep the values recorded before this
+    change, with a note.
+
 - URDF SimObject and mesh Agent factories retain their effective spawn
   descriptors for recording handlers, including URDF fixed-base and scale
   settings. The development kinematic profile rejects batch-owned Agents,

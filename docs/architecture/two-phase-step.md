@@ -101,6 +101,32 @@ callback. `set_pose()` calls from a `POST_STEP` handler are immediate, but the
 step's collision check has already completed. A collision caused by such a
 write is therefore observed by the next collision-check opportunity.
 
+### Which time a pose belongs to
+
+One rule: **`sim_core.sim_time` (and `step_count`) is the time (and step) of
+the state you see.** `step_once()` advances the clock and the step counter
+right after the `pre_step` event, before anything computes the new state:
+
+| Where | `sim_time` / `step_count` | State it describes |
+|---|---|---|
+| `pre_step` subscriber (payload `sim_time` too) | previous step, `t` / `k` | the previous step's state |
+| object update, Phase-1 callbacks, plugin `on_step`, behavior trees | new step, `t + dt` / `k + 1` | being computed for `t + dt` |
+| collision check, `post_step` subscriber (payload `sim_time` too) | `t + dt` / `k + 1` | the step's result |
+| outside a step | completed step, `t + dt` / `k + 1` | the completed step's result |
+
+`pre_step` is the only place that still sees the previous step. Everything
+read anywhere else -- a pose, an action's start or end time, a collision
+observation -- is stamped correctly with `sim_time`.
+
+Position controllers evaluate their trajectories at `sim_time`, so the pose a
+step ends with is the trajectory at the end of the step, the same rule
+kinematic joints follow. A trajectory started now begins at `sim_time`: a path
+set in a `pre_step` subscriber therefore moves in that same step; one set later
+in the step, or outside it, moves from the next step. With `Agent.set_path()`'s
+default `auto_approach=True` (which `set_goal_pose()` uses), a goal more than
+0.5 m away gets the current pose as a zero-length first waypoint, and that
+waypoint takes the first step.
+
 ### What Phase 1 does not promise
 
 Phase 1 batches framework **base-pose** writes. It is not a general prohibition
@@ -132,7 +158,7 @@ exposes the phase split:
 
 `ReplaySession.step()` applies its ordered input batch at the step-start time,
 then calls the ordinary `MultiRobotSimulationCore.step_once()` and records
-results after the core advances its counter. Replay control and required
+results once the step has completed. Replay control and required
 recording calls stay in the session, outside EventBus exception isolation.
 The core has no replay-specific step hooks or mutation guards; ordinary
 simulations keep their existing step and event behavior.

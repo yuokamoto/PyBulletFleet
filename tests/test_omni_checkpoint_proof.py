@@ -139,7 +139,7 @@ def test_capture_rejected_inside_post_step_and_resume_requires_restore():
 
         sim.events.on(SimEvents.POST_STEP, after_step)
         sim.step_once()
-        assert errors == [0]
+        assert errors == [1]  # POST_STEP sees the counter of the step it completes
         assert sim.get_completed_step_boundary() == (1, proof.DT)
     finally:
         if p.isConnected(sim.client):

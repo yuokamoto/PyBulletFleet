@@ -1,5 +1,7 @@
 # Manipulation/entity-lifecycle scenario — implementation evidence
 
+**Note (2026-10-19):** recorded before `step_once()` advanced its clock before the object update (see "Which time a pose belongs to" in [two-phase-step.md](../../architecture/two-phase-step.md)). A rerun shows the same results one step earlier, and a `post_step` subscriber now sees the counter and time of the step it completes.
+
 **Usage status:** State-discovery evidence; general snapshot/restore is still
 under development and not ready for production use.
 
