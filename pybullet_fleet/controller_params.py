@@ -98,13 +98,17 @@ class ControllerParams:
     default_direction: MovementDirection = MovementDirection.FORWARD
     goal_replacement: Optional[GoalReplacement] = None
 
-    def __post_init__(self) -> None:
-        # The enum fields take the enum or its string value however the params
-        # are built (directly, from_dict, YAML) and are stored as the enum; an
-        # unknown value fails here, not later. as_config() writes the values.
-        self.default_direction = _parse_enum(MovementDirection, self.default_direction, "default_direction")
-        if self.goal_replacement is not None:
-            self.goal_replacement = parse_goal_replacement(self.goal_replacement)
+    def __setattr__(self, name: str, value: Any) -> None:
+        # The enum fields take the enum or its string value on every
+        # assignment -- construction (directly, from_dict, YAML) and later,
+        # e.g. ``agent.controller_params.goal_replacement = "reject"`` -- and
+        # are stored as the enum; an unknown value fails there, not later.
+        # as_config() writes the values.
+        if name == "default_direction":
+            value = _parse_enum(MovementDirection, value, name)
+        elif name == "goal_replacement" and value is not None:
+            value = parse_goal_replacement(value)
+        super().__setattr__(name, value)
 
     def as_config(self) -> Dict[str, Any]:
         """The fields as plain data -- enums as their string values -- for

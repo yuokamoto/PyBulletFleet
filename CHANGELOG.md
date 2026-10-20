@@ -44,8 +44,9 @@ are not recommended for production use yet.
 ### Changed
 
 - `ControllerParams` takes either enum field -- `default_direction` and
-  `goal_replacement` -- as the enum or its string value however it is built
-  and stores the enum; an unknown value raises `ValueError` at construction.
+  `goal_replacement` -- as the enum or its string value, on construction and
+  on any later assignment, and stores the enum; an unknown value raises
+  `ValueError` there.
   `default_direction` given as a string to the constructor used to stay a
   string (only `from_dict()` converted it). `ControllerParams.as_config()`
   returns the fields as plain data, enums as their string values.

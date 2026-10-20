@@ -385,6 +385,25 @@ class TestConfiguration:
         assert params.default_direction is MovementDirection.BACKWARD
         assert ControllerParams().goal_replacement is None  # unset: a manager or the default decides
 
+    def test_enum_fields_take_their_string_values_when_assigned_later(self, sim, batch):
+        """The documented way to change one agent: assign after construction."""
+        params = ControllerParams()
+        params.goal_replacement = "reject"
+        params.default_direction = "backward"
+        assert params.goal_replacement is GoalReplacement.REJECT
+        assert params.default_direction is MovementDirection.BACKWARD
+        with pytest.raises(ValueError, match="Unknown goal_replacement 'later'"):
+            params.goal_replacement = "later"
+        with pytest.raises(ValueError, match="Unknown default_direction 'sideways'"):
+            params.default_direction = "sideways"
+        params.goal_replacement = None  # back to unset
+        assert params.goal_replacement is None
+
+        agent = _agent(sim, batch, MotionMode.OMNIDIRECTIONAL)
+        agent.controller_params.goal_replacement = "reject"
+        _cruise(sim, agent)
+        assert agent.set_path(_goal(OFF_LINE), auto_approach=False) is False  # rejected, not braked
+
     def test_as_config_writes_plain_values_that_build_the_same_params(self):
         params = ControllerParams(max_linear_vel=1.5, goal_replacement="wait_complete", default_direction="auto")
         config = params.as_config()

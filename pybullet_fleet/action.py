@@ -318,7 +318,7 @@ class MoveAction(Action):
         # agent stands at this path's end -- not if the path was braked or
         # replaced. agent.path is not consulted: a batch-owned agent's base
         # controller is idle, so it is always empty there.
-        if not agent.is_moving and not agent.path and _pending_path(agent) is None:
+        if not agent.is_moving and _pending_path(agent) is None:
             self.end_time = agent.sim_core.sim_time if agent.sim_core else 0.0
             if self._reached_end(agent):
                 self.status = ActionStatus.COMPLETED
