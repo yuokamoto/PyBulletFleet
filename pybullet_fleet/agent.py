@@ -1860,7 +1860,8 @@ class Agent(SimObject):
         any_moved = False
         for state in self._active_joints:
             target = state.target
-            assert target is not None  # _active_joints is kept to those that have one
+            if target is None:
+                raise RuntimeError(f"Active joint {state.index} has no target; _active_joints holds only joints with one")
             diff = target - state.position
             if abs(diff) < 1e-7 and not state.speed:
                 # Already at target with nothing to wind down -- skip. A
@@ -1948,7 +1949,8 @@ class Agent(SimObject):
         """
         accel = state.max_accel
         decel = state.decel
-        assert accel is not None and decel is not None  # is_ramped, checked by the caller
+        if accel is None or decel is None:
+            raise RuntimeError(f"Joint {state.index} is not ramped; the caller checks is_ramped first")
 
         tpi = state.trajectory if state.trajectory_target == target else None
         if tpi is None:

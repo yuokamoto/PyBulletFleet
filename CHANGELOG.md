@@ -407,6 +407,12 @@ are not recommended for production use yet.
   while backing up under `auto` was taken and turned around at once instead of
   being refused (`reject`) or braked to (`brake`).
 
+- A null `shadow_map_world_size` or `shadow_map_resolution` in the lighting
+  config now takes the default for the GUI lighting sliders, as a null
+  `light_position` already did; it used to fail an internal assertion.
+  Internal consistency checks raise `RuntimeError` or `ValueError` with a
+  message instead of using `assert`, so they hold under `python -O`.
+
 - Frequency-limited callbacks and plugins, `collision_check_frequency` and the
   DataMonitor refresh no longer skip beats or drift. They compared the
   accumulated (float) simulation time with the interval since their last run,
