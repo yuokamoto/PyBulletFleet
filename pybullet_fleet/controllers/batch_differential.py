@@ -274,17 +274,9 @@ class BatchDifferentialController(BatchKinematicController):
             self._align_final_orient[idx] = False
         self._begin_waypoint(idx, agent, path[0], now, direction=direction, initial_velocity=initial_velocity)
 
-    def continuation_velocity(self, agent: "Agent") -> Optional[np.ndarray]:
-        """The agent's velocity while it drives straight, else ``None``.
-
-        A turn in place has no linear velocity to continue. See
-        :meth:`BatchOmniController.continuation_velocity
-        <pybullet_fleet.controllers.batch_omni.BatchOmniController.continuation_velocity>`.
-        """
-        idx = self._agent_index.get(id(agent))
-        if idx is None or self._phase[idx] != _PHASE_FORWARD:
-            return None
-        return np.array(agent._current_velocity, dtype=float)
+    def _translating(self, idx: int) -> bool:
+        # Driving straight; a turn in place has no linear velocity to continue.
+        return bool(self._phase[idx] == _PHASE_FORWARD)
 
     def _replacement_obstacle(
         self, agent: "Agent", path: List[Pose], direction: Optional[MovementDirection] = None

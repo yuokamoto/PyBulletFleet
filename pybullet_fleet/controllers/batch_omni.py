@@ -201,18 +201,8 @@ class BatchOmniController(BatchKinematicController):
     # Public API — set a path for an already-registered agent
     # ------------------------------------------------------------------ #
 
-    def continuation_velocity(self, agent: "Agent") -> Optional[np.ndarray]:
-        """The agent's velocity while a translation is under way, else ``None``.
-
-        The velocity state the batch step sets (the row's profile velocity at
-        the pose's time), as :meth:`OmniController.continuation_velocity
-        <pybullet_fleet.controller.KinematicController.continuation_velocity>`
-        reads it. :meth:`path_rejection` and :meth:`set_path` continue from it.
-        """
-        idx = self._agent_index.get(id(agent))
-        if idx is None or self._phase[idx] != _PHASE_FORWARD:
-            return None
-        return np.array(agent._current_velocity, dtype=float)
+    def _translating(self, idx: int) -> bool:
+        return bool(self._phase[idx] == _PHASE_FORWARD)
 
     def _replacement_obstacle(
         self, agent: "Agent", path: List[Pose], direction: Optional[MovementDirection] = None

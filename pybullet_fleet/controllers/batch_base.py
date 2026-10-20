@@ -282,13 +282,25 @@ class BatchKinematicController(GoalReplacementPolicy, Controller):
         return None
 
     def continuation_velocity(self, agent: "Agent") -> Optional[np.ndarray]:
-        """World-frame velocity a new path would continue from, or ``None``.
+        """The agent's velocity while its row translates, else ``None``.
 
-        The base restarts every path from rest, so it returns ``None``; see
-        :meth:`KinematicController.continuation_velocity
-        <pybullet_fleet.controller.KinematicController.continuation_velocity>`.
+        The velocity state the batch step sets (the row's profile velocity at
+        the pose's time), as :meth:`KinematicController.continuation_velocity
+        <pybullet_fleet.controller.KinematicController.continuation_velocity>`
+        reads it; ``path_rejection`` and ``set_path`` continue from it. A turn
+        in place or a finished row has no linear velocity to continue.
         """
-        return None
+        idx = self._agent_index.get(id(agent))
+        if idx is None or not self._translating(idx):
+            return None
+        return np.array(agent._current_velocity, dtype=float)
+
+    def _translating(self, idx: int) -> bool:
+        """Whether row ``idx`` is in a translation a new path can continue.
+
+        The base never continues one; subclasses that do override this.
+        """
+        return False
 
     def pending_path(self, agent: "Agent") -> Optional[PathRequest]:
         """The accepted path waiting for ``agent`` to stop, or ``None``."""
