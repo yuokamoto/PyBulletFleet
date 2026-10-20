@@ -455,7 +455,7 @@ class KinematicController(Controller):
         """
         reason = self.path_rejection(agent, path)
         if reason is not None:
-            logger.info(f"Path rejected for {agent.name or agent.object_id}: {reason}")
+            logger.debug(f"Path rejected for {agent.name or agent.object_id}: {reason}")
             return False
         effective_direction = direction if direction is not None else self.params.default_direction
         self._path = list(path)

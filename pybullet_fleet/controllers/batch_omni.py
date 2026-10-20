@@ -239,7 +239,7 @@ class BatchOmniController(BatchKinematicController):
 
         reason = self.path_rejection(agent, path)
         if reason is not None:
-            logger.info(f"Path rejected for {agent.name or agent.object_id}: {reason}")
+            logger.debug(f"Path rejected for {agent.name or agent.object_id}: {reason}")
             return False
 
         # Continue from the agent's current motion, as OmniController does --

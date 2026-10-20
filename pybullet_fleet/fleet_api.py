@@ -131,11 +131,13 @@ class FleetCommandDispatcher:
         resolved_id = _resolve_command_id(command_id, commands)
         accepted, rejected = self._resolve_targets(command.name for command in commands)
         by_name = _first_command_by_name(commands)
+        # A planar goal without a height keeps the robot's present one.
+        goal_poses = {name: by_name[name].to_pose(_current_z(agent)) for name, agent in accepted.items()}
         # A moving robot only takes a goal it can reach within its limits (see
         # Agent.set_path); report the others as rejected before acting.
         for name in list(accepted):
             check = getattr(accepted[name], "path_rejection", None)
-            rejection = check([by_name[name].to_pose()]) if callable(check) else None
+            rejection = check([goal_poses[name]]) if callable(check) else None
             if rejection is not None:
                 rejected[name] = str(getattr(rejection, "reason", rejection))
                 del accepted[name]
@@ -147,9 +149,9 @@ class FleetCommandDispatcher:
         refused: dict[str, str] = {}
         for name in ack.accepted_names:
             agent = accepted[name]
-            if agent.set_goal_pose(by_name[name].to_pose()) is False:
+            if agent.set_goal_pose(goal_poses[name]) is False:
                 check = getattr(agent, "path_rejection", None)
-                rejection = check([by_name[name].to_pose()]) if callable(check) else None
+                rejection = check([goal_poses[name]]) if callable(check) else None
                 refused[name] = str(getattr(rejection, "reason", rejection)) if rejection is not None else "goal refused"
         if refused:
             logger.warning(
@@ -167,8 +169,8 @@ class FleetCommandDispatcher:
             ack,
             {
                 name: {
-                    "position": list(by_name[name].to_pose().position),
-                    "orientation": list(by_name[name].to_pose().orientation),
+                    "position": list(goal_poses[name].position),
+                    "orientation": list(goal_poses[name].orientation),
                     "auto_approach": True,
                     "final_orientation_align": True,
                 }
@@ -504,6 +506,15 @@ def _resolve_command_id(command_id: str | None, commands: Iterable[Any]) -> str:
 
 def _new_command_id() -> str:
     return uuid4().hex
+
+
+def _current_z(agent: Any) -> float:
+    """The robot's present height, for a planar goal that does not name one."""
+    get_pose = getattr(agent, "get_pose", None)
+    if not callable(get_pose):
+        return 0.0
+    pose: Any = get_pose()
+    return float(pose.position[2])
 
 
 def _first_command_by_name(commands: Iterable[Any]) -> dict[str, Any]:

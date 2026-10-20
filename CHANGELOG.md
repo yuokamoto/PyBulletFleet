@@ -71,7 +71,15 @@ are not recommended for production use yet.
   reversal is. Differential agents, which turn in place first, still start
   from rest. Navigation checkpoints record the trajectory's initial
   speed (`forward.v0`); the kinematic profile's controller state is now
-  version 2.
+  version 2. A refusal is logged at DEBUG. A speed above `vmax` (lowered
+  during the motion) is clamped to it with a warning.
+
+- `RobotGoalCommand2D.z` defaults to `None`: the robot keeps its present
+  height (`to_pose(current_z)`, which `FleetCommandDispatcher.navigate()`
+  passes). It was `0.0`, which made a planar goal a 3D move for a robot whose
+  pose is not at `z = 0` -- one a moving omni agent refuses as off its line of
+  motion. An explicit `z` is kept; `ReplayInput.navigate()` and recorded
+  `navigate` inputs accept `z: null` the same way.
 
 - URDF SimObject and mesh Agent factories retain their effective spawn
   descriptors for recording handlers, including URDF fixed-base and scale

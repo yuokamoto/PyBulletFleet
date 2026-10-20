@@ -120,6 +120,21 @@ class TestGoalReplacedMidMotion:
         # Distance covered at full speed, not a restart from rest.
         assert samples[-1][0] - start_x == pytest.approx(5 * DT * VMAX, rel=1e-3)
 
+    def test_a_planar_goal_keeps_the_agents_height(self, sim, batch):
+        """A planar command without ``z`` keeps the agent's height, so a moving
+        agent continues into it; a goal at another height is a 3D move off the
+        line of motion and is refused."""
+        from pybullet_fleet import RobotGoalCommand2D
+
+        agent = _agent(sim, batch)
+        _cruise(sim, agent)
+        x = agent.get_pose().position[0]
+        assert agent.set_goal_pose(Pose.from_xyz(x + 10.0, 0.0, 0.0)) is False  # 0.1 m down: off the line
+        planar = RobotGoalCommand2D("robot", position=(x + 10.0, 0.0)).to_pose(agent.get_pose().position[2])
+        assert agent.set_goal_pose(planar) is True
+        samples = _run(sim, agent, 5)
+        assert all(speed == pytest.approx(VMAX, rel=1e-3) for _, _, speed in samples)
+
     def test_speed_never_jumps_more_than_the_ramps_allow(self, sim, batch):
         agent = _agent(sim, batch)
         _cruise(sim, agent)
@@ -386,6 +401,21 @@ def test_from_speed_never_raises_the_deceleration():
     assert try_build_tpi_from_speed(p0=0.0, pe=0.2, vmax=VMAX, accel=ACCEL, t0=0.0, v0=VMAX, decel=DECEL) is None
     with pytest.raises(ValueError):
         build_tpi_from_speed(p0=0.0, pe=0.2, vmax=VMAX, accel=ACCEL, t0=0.0, v0=VMAX, decel=DECEL)
+
+
+def test_an_initial_speed_over_vmax_is_reported(caplog):
+    """Above vmax (lowered mid-motion) the trajectory starts at vmax: a speed
+    drop no deceleration covers, so it is logged rather than silent."""
+    from pybullet_fleet._tpi import build_tpi_from_speed
+
+    with caplog.at_level("WARNING", logger="pybullet_fleet._tpi"):
+        tpi = build_tpi_from_speed(p0=0.0, pe=10.0, vmax=VMAX, accel=ACCEL, t0=0.0, v0=1.5 * VMAX, decel=DECEL)
+    assert tpi.get_point(0.0)[1] == pytest.approx(VMAX)
+    assert "exceeds vmax" in caplog.text
+    caplog.clear()
+    with caplog.at_level("WARNING", logger="pybullet_fleet._tpi"):
+        build_tpi_from_speed(p0=0.0, pe=10.0, vmax=VMAX, accel=ACCEL, t0=0.0, v0=VMAX, decel=DECEL)
+    assert caplog.text == ""  # cruising at the cap is not an excess
 
 
 def test_a_reversal_trajectory_ends_at_its_target():

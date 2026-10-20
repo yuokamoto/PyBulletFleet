@@ -27,6 +27,10 @@ from typing import Optional, Tuple
 import numpy as np
 from two_point_interpolation import TwoPointInterpolation
 
+from pybullet_fleet.logging_utils import get_lazy_logger
+
+logger = get_lazy_logger(__name__)
+
 
 def build_tpi(
     p0: float,
@@ -114,6 +118,10 @@ def try_build_tpi(
 #: is cruising at the cap starts a hair below it instead.
 _V0_CAP = 1.0 - 1e-9
 
+#: Relative excess over ``vmax`` an initial speed may have before clamping it
+#: is reported: float noise of a body cruising at the cap stays below it.
+_V0_OVER_VMAX_WARN = 1e-6
+
 
 def try_build_tpi_from_speed(
     p0: float,
@@ -161,6 +169,10 @@ def build_tpi_from_speed(
     """
     if v0 == 0.0:
         return build_tpi(p0=p0, pe=pe, vmax=vmax, accel=accel, t0=t0, decel=decel)
+    if abs(v0) > vmax * (1.0 + _V0_OVER_VMAX_WARN):
+        # The trajectory starts at vmax: the speed drops in one step, which no
+        # deceleration limit covers (vmax was lowered during the motion).
+        logger.warning("initial speed %.6g exceeds vmax %.6g; the new trajectory starts at vmax", abs(v0), vmax)
     tpi = try_build_tpi_from_speed(p0=p0, pe=pe, vmax=vmax, accel=accel, t0=t0, v0=v0, decel=decel)
     if tpi is None:
         raise ValueError(
