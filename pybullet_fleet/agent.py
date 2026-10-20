@@ -1173,16 +1173,25 @@ class Agent(SimObject):
         """
         from pybullet_fleet._replan import PathRejection
 
-        if self.use_fixed_base:
-            return PathRejection("fixed-base robot", temporary=False)
-        if len(path) == 0:
-            return PathRejection("empty path", temporary=False)
+        permanent = self._permanent_path_rejection(path)
+        if permanent is not None:
+            return permanent
         reason = None
         if self._batch_controller is not None:
             reason = self._batch_controller.path_rejection(self, path)
         elif self._controllers:
             reason = self._controllers[0].path_rejection(self, path)
         return PathRejection(reason, temporary=True) if reason is not None else None
+
+    def _permanent_path_rejection(self, path: List[Pose]) -> "Optional[PathRejection]":
+        """The refusals that do not depend on the motion: a fixed base, an empty path."""
+        from pybullet_fleet._replan import PathRejection
+
+        if self.use_fixed_base:
+            return PathRejection("fixed-base robot", temporary=False)
+        if len(path) == 0:
+            return PathRejection("empty path", temporary=False)
+        return None
 
     def _make_default_controller(self):
         """Build the default Omni/Diff controller from ``self._motion_mode``.
@@ -1406,12 +1415,9 @@ class Agent(SimObject):
             ``True`` when the path was taken; ``False`` for a fixed-base robot,
             an empty path, or a path the controller refused.
         """
-        if self.use_fixed_base:
-            self._log.warning("Cannot set path for fixed-base robot")
-            return False
-
-        if len(path) == 0:
-            self._log.warning("Empty path provided")
+        permanent = self._permanent_path_rejection(path)
+        if permanent is not None:
+            self._log.warning(f"Path refused: {permanent.reason}")
             return False
 
         # Normalize direction string → enum (None passes through to controller)

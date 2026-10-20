@@ -16,21 +16,22 @@ from pybullet_fleet.behavior_tree_core import (
     Position3,
     TickResult,
 )
-from pybullet_fleet._replan import PathRejection, refused_for_now
+from pybullet_fleet._replan import RefusesPaths, refused_for_now
 from pybullet_fleet.geometry import Pose
 
 
-class GoalPoseAgent(Protocol):
-    """PyBulletFleet Agent surface used by the default navigation adapter."""
+class GoalPoseAgent(RefusesPaths, Protocol):
+    """PyBulletFleet Agent surface used by the default navigation adapter.
+
+    ``path_rejection`` (from :class:`~pybullet_fleet._replan.RefusesPaths`)
+    tells a refusal that lasts only while the agent moves, which is retried.
+    """
 
     is_moving: bool
     goal_pose: Pose | None
 
     def set_goal_pose(self, goal: Pose) -> bool:
         """Begin moving toward a goal pose; ``False`` if the agent refused it."""
-
-    def path_rejection(self, path: list[Pose]) -> PathRejection | None:
-        """Why :meth:`set_goal_pose` would refuse ``path`` now, or ``None``."""
 
 
 class AgentActionId(str, Enum):
