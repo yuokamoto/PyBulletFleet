@@ -47,7 +47,8 @@ class TestFrequencyGate:
         assert fires[0][1] == pytest.approx(0.5)
 
     def test_a_first_call_on_a_due_time_runs_at_once(self):
-        """After a restore at 10.0 s, a 10 Hz schedule runs at 10.0, not 10.1."""
+        """A handler registered at 9.9 s whose first step ends on the 10 Hz
+        grid point 10.0 s runs at 10.0, not one interval later at 10.1."""
         gate = FrequencyGate(10.0)
         assert gate.due(10.0, 0.1) == pytest.approx(0.1)
         assert gate.due(10.1, 0.1) == pytest.approx(0.1)
