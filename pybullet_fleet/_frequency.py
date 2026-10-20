@@ -1,16 +1,21 @@
 """When a frequency-limited handler is due, on simulated time.
 
-Simulated time is accumulated one timestep at a time, so it carries floating
-point error: ten steps of 0.1 s add up to 0.9999999999999999 s. A check of
-``now - last >= interval`` would miss a beat whenever that error falls short,
-and measuring from the time a handler actually ran would let its phase drift
-when the interval is not a whole number of timesteps.
+Simulated time carries floating point error: ten steps of 0.1 s add up to
+0.9999999999999999 s. A check of ``now - last >= interval`` would miss a beat
+whenever that error falls short, and measuring from the time a handler
+actually ran would let its phase drift when the interval is not a whole number
+of timesteps.
 
 :class:`FrequencyGate` instead fires on a fixed grid of due times, ``k *
-interval`` from time zero, with a tolerance far below one timestep. It fires
-at most once per call (one call per step), and after a gap -- a pause, a
-handler registered late, a restore -- it moves on to the next grid point
-rather than firing once for every point it missed.
+interval`` from time zero, with a tolerance far below one timestep. Its caller
+passes a time computed from the step count rather than accumulated step by
+step, whose error grows with the run until it exceeds any such tolerance.
+
+A gate fires at most once per call (one call per step). One that starts mid-run
+-- a handler registered late, or after :meth:`FrequencyGate.reset` -- first
+fires at the next grid point. If calls stop while time moves on, the first
+call past the missed due times fires once and the schedule returns to the
+grid, rather than firing once for every point it missed.
 """
 
 import math
@@ -21,8 +26,9 @@ from pybullet_fleet.logging_utils import get_lazy_logger
 logger = get_lazy_logger(__name__)
 
 #: Fraction of a timestep by which simulated time may fall short of a due time
-#: and still count as reaching it. Accumulated error is many orders of magnitude
-#: smaller than this; a real shortfall is a whole timestep.
+#: and still count as reaching it. The rounding error of a time computed from
+#: the step count is many orders of magnitude smaller than this; a real
+#: shortfall is a whole timestep.
 _TOLERANCE = 1e-6
 
 
@@ -86,8 +92,8 @@ class FrequencyGate:
             first_dt = timestep
         else:
             # Grid points within ``tolerance`` of ``now`` count as ``now`` itself,
-            # in either direction, so float error in the accumulated time neither
-            # skips a due time nor runs the same one twice.
+            # in either direction, so float error in the time neither skips a due
+            # time nor runs the same one twice.
             interval = 1.0 / self._frequency
             tolerance = _TOLERANCE * timestep
             if self._next_index is None:
@@ -95,8 +101,8 @@ class FrequencyGate:
                 self._next_index = max(1, math.ceil((now - tolerance) / interval))
             if now + tolerance < self._next_index * interval:
                 return None
-            # Next: the following grid point, or after a gap the first one
-            # still ahead of now.
+            # Next: the following grid point, or when calls stopped past several,
+            # the first one still ahead of now.
             self._next_index = max(self._next_index + 1, math.floor((now + tolerance) / interval) + 1)
             # The first run has no previous one: one interval, at least a step.
             first_dt = max(interval, timestep)

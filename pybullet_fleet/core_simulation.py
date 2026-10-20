@@ -188,6 +188,7 @@ class SimulationParams:
     #: on. ``None`` (the default) is every step while the monitor window is
     #: open (``enable_monitor_gui``, or ``gui`` when that is ``None``), so the
     #: window stays live, and every second otherwise. ``0`` is every step.
+    #: Read once, when the simulation is created.
     monitor_update_interval: Optional[float] = _SIM_D["monitor_update_interval"]
     #: Wall-clock seconds between ``[MONITOR]`` lines logged at INFO -- RTF,
     #: collision totals, step count -- independent of ``monitor``, ``gui`` and
@@ -452,6 +453,8 @@ class MultiRobotSimulationCore:
         self._step_count: int = 0
         # The simulation clock: the one source of time; ``sim_time`` reads it.
         self._elapsed_sim_time: float = 0.0
+        # The step and time _schedule_time() counts whole timesteps from.
+        self._schedule_origin: Tuple[int, float] = (0, 0.0)
         self._enable_time_profiling: bool = params.enable_time_profiling
 
         # --- Fully private (no external access) ---
@@ -516,6 +519,7 @@ class MultiRobotSimulationCore:
             "collision_check": [],
             "events_pre_step": [],
             "events_post_step": [],
+            "callbacks_post_step": [],
             "events_collision": [],
             "monitor_update": [],
             "total": [],
@@ -758,6 +762,7 @@ class MultiRobotSimulationCore:
         if target_rtf is not None:
             self._params.target_rtf = target_rtf
         if timestep is not None:
+            self._schedule_origin = (self._step_count, self._schedule_time())
             self._params.timestep = timestep
             p.setTimeStep(timestep, physicsClientId=self._client)
         self._pacing_rebase_requested = True
@@ -1016,6 +1021,19 @@ class MultiRobotSimulationCore:
         """
         return self._elapsed_sim_time
 
+    def _schedule_time(self) -> float:
+        """:attr:`sim_time` without its accumulated float error, for frequency gates.
+
+        ``sim_time`` adds one timestep per step, so its error grows with the
+        run: at a 1 ms timestep it passes a millionth of a timestep within
+        minutes, enough to move a due time by a step. This counts whole
+        timesteps from an origin that moves whenever the timestep changes or
+        the clock is restored, so its error stays at the rounding of one
+        product.
+        """
+        step, time_at_step = self._schedule_origin
+        return time_at_step + (self._step_count - step) * self._params.timestep
+
     def get_completed_step_boundary(self) -> tuple[int, float]:
         """Return the completed step and canonical elapsed time outside a step."""
         if self._in_step or self._in_post_step:
@@ -1081,6 +1099,7 @@ class MultiRobotSimulationCore:
             raise ValueError("Completed-step time does not match the fixed timestep")
         self._step_count = step
         self._elapsed_sim_time = elapsed_time
+        self._schedule_origin = (step, elapsed_time)
         self._resume_ready = True
 
     @property
@@ -1174,7 +1193,7 @@ class MultiRobotSimulationCore:
         for plugin in self._plugins:
             # The same schedule as callbacks: every step without a frequency,
             # else the fixed grid; None when the plugin is not due this step.
-            dt_since_last_run = plugin._frequency_gate.due(self.sim_time, dt)
+            dt_since_last_run = plugin._frequency_gate.due(self._schedule_time(), dt)
             if dt_since_last_run is None:
                 continue
             try:
@@ -1203,10 +1222,11 @@ class MultiRobotSimulationCore:
             callback: Function with signature callback(sim_core, dt) -> None
                      - sim_core: Reference to MultiRobotSimulationCore instance
                      - dt: Simulated time since this callback last ran (seconds)
-            frequency: Callback frequency in Hz. If None, called every simulation step.
-                Due times are a fixed grid of ``k / frequency`` seconds of simulated
-                time, so a callback neither skips beats nor drifts; it runs at most
-                once per step, and the first time one interval into the run.
+            frequency: Callback frequency in Hz. If None (or 0), called every
+                simulation step. Due times are a fixed grid of ``k / frequency``
+                seconds of simulated time, so a callback neither skips beats nor
+                drifts; it runs at most once per step, and the first time one
+                interval into the run.
             phase: When in the step the callback runs, a :class:`CallbackPhase`
                 or its value as a string.
 
@@ -1222,6 +1242,17 @@ class MultiRobotSimulationCore:
                 In both phases ``sim_core.sim_time`` is the time of the state the
                 callback sees, the end of the step; stamp anything read from the
                 bodies with it. Both schedule their ``frequency`` on it.
+
+        Raises:
+            ValueError: ``frequency`` is negative or not finite, or ``phase`` is
+                not a :class:`CallbackPhase`.
+
+        A callback's exception is not caught (unlike a plugin's): it propagates
+        out of :meth:`step_once` with the clock already advanced, and the rest
+        of the step is skipped -- later callbacks, and for a ``STEP`` callback
+        the collision check, the ``post_step`` event and ``POST_STEP``
+        callbacks; for either phase the state recorder's completed step and the
+        DataMonitor refresh.
 
         Example::
 
@@ -1243,18 +1274,16 @@ class MultiRobotSimulationCore:
             phase = CallbackPhase(phase)
         except ValueError:
             raise ValueError("phase must be one of {}, got {!r}".format([p.value for p in CallbackPhase], phase)) from None
-        self._callbacks.append(
-            {"func": callback, "frequency": frequency, "phase": phase, "gate": FrequencyGate(frequency or None)}
-        )
+        self._callbacks.append({"func": callback, "phase": phase, "gate": FrequencyGate(frequency or None)})
 
     def _run_callbacks(self, phase: CallbackPhase) -> None:
         """Run the callbacks registered for ``phase`` that are due this step.
 
-        Both phases schedule on :attr:`sim_time`, the time of the state they
-        see, so a ``frequency`` handler runs when that state reaches
-        ``k / frequency``.
+        Both phases schedule on the time of the state they see
+        (:meth:`_schedule_time`), so a ``frequency`` handler runs when that
+        state reaches ``k / frequency``.
         """
-        now = self.sim_time
+        now = self._schedule_time()
         for cbinfo in list(self._callbacks):
             if cbinfo["phase"] != phase:
                 continue
@@ -3789,6 +3818,7 @@ class MultiRobotSimulationCore:
         self._step_count = 0
         self._collision_count = 0
         self._elapsed_sim_time = 0.0
+        self._schedule_origin = (0, 0.0)
         self._resume_ready = False
         self._collision_check_gate.reset()
         self._monitor_update_gate.reset()
@@ -4605,6 +4635,7 @@ class MultiRobotSimulationCore:
                     },
                     'events_pre_step': float,
                     'events_post_step': float,
+                    'callbacks_post_step': float,  # CallbackPhase.POST_STEP callbacks
                     'events_collision': float,
                     'monitor_update': float,
                     'total': float,
@@ -4798,8 +4829,11 @@ class MultiRobotSimulationCore:
             freq = self._collision_check_frequency  # None: every step, <= 0: disabled
             if freq is None or freq > 0:
                 self._collision_check_gate.set_frequency(freq)  # no-op unless it changed
-                if self._collision_check_gate.due(self.sim_time, self._params.timestep) is not None:
+                if self._collision_check_gate.due(self._schedule_time(), self._params.timestep) is not None:
                     _, collision_breakdown = self.check_collisions(return_profiling=return_profiling)
+            else:
+                # Re-enabled later, even at the same rate, it starts a fresh schedule.
+                self._collision_check_gate.reset()
 
             if measure_timing:
                 t_col1 = time.perf_counter()
@@ -4815,9 +4849,12 @@ class MultiRobotSimulationCore:
             if measure_timing:
                 t_ev1 = time.perf_counter()
             self.events.emit(SimEvents.POST_STEP, dt=self._params.timestep, sim_time=self.sim_time)
+            if measure_timing:
+                t_cb2 = time.perf_counter()
+                self._profiling_stats["events_post_step"][-1] = (t_cb2 - t_ev1) * 1000
             self._run_callbacks(CallbackPhase.POST_STEP)
             if measure_timing:
-                self._profiling_stats["events_post_step"][-1] = (time.perf_counter() - t_ev1) * 1000
+                self._profiling_stats["callbacks_post_step"][-1] = (time.perf_counter() - t_cb2) * 1000
 
             self._update_selected_nameplate()
             self._in_post_step = False
@@ -4833,7 +4870,7 @@ class MultiRobotSimulationCore:
                 t_mon0 = time.perf_counter()
 
             if self._monitor_enabled:
-                if self._monitor_update_gate.due(self.sim_time, self._params.timestep) is not None:
+                if self._monitor_update_gate.due(self._schedule_time(), self._params.timestep) is not None:
                     self.update_monitor()
 
             if self._params.monitor_log_interval > 0:

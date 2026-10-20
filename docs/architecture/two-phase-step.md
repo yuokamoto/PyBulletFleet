@@ -148,11 +148,13 @@ waypoint takes the first step.
 Callbacks and plugins with a `frequency`, `collision_check_frequency` and the
 DataMonitor refresh run on a fixed grid of simulated time, `k / frequency`
 seconds from the start of the run: on the first step at or after each due
-time, at most once per step, and after a gap (a pause, a late registration)
-once at the next due time rather than once per missed one. The comparison
-tolerates the float error in the accumulated simulation time, so a 10 Hz
-handler on a 0.1 s timestep runs every step, and an interval that is not a
-whole number of timesteps does not drift.
+time, at most once per step. A handler registered mid-run first runs at the
+next due time; missed due times never cause a burst of runs. The schedule
+reads the time as the step count times the timestep (counted again from any
+change of timestep or restore) rather than the accumulated simulation time,
+whose float error grows with the run, and tolerates the rounding left. So a
+10 Hz handler on a 0.1 s timestep runs every step, however long the run, and
+an interval that is not a whole number of timesteps does not drift.
 
 ### What Phase 1 does not promise
 

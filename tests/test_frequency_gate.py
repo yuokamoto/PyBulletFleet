@@ -1,8 +1,9 @@
 """Frequency-limited handlers run on a fixed grid of simulated time.
 
-Simulated time accumulates one timestep at a time and carries float error
-(ten steps of 0.1 s add up to 0.9999999999999999 s); due times on a fixed grid
-with a small tolerance keep every beat and keep the phase. Callbacks, plugins,
+Simulated time carries float error (ten steps of 0.1 s add up to
+0.9999999999999999 s); due times on a fixed grid with a small tolerance keep
+every beat and keep the phase. The core passes the gates a time computed from
+the step count, whose error does not grow with the run. Callbacks, plugins,
 the collision check and the DataMonitor refresh all share :class:`FrequencyGate`.
 """
 
@@ -15,7 +16,7 @@ from pybullet_fleet.sim_plugin import SimPlugin
 
 
 def _times(timestep, steps):
-    """Step start times the way the core produces them: accumulated."""
+    """Times accumulated one timestep at a time, float error included."""
     now, out = 0.0, []
     for _ in range(steps):
         out.append(now)
@@ -156,6 +157,32 @@ class TestTheCoreUsesIt:
         assert len(checks) == 12
         assert checks[-2:] == [pytest.approx(1.5), pytest.approx(2.0)]
 
+    def test_collision_check_back_at_the_same_rate_starts_a_fresh_schedule(self, sim, monkeypatch):
+        checks = []
+        monkeypatch.setattr(sim, "check_collisions", lambda **kw: checks.append(round(sim.sim_time, 9)) or ([], None))
+        sim.set_collision_check_frequency(2.0)
+        for _ in range(5):  # 0.1 .. 0.5 s: the beat at 0.5 s
+            sim.step_once()
+        sim.set_collision_check_frequency(0)
+        for _ in range(12):  # 0.6 .. 1.7 s, past the beats at 1.0 and 1.5 s
+            sim.step_once()
+        sim.set_collision_check_frequency(2.0)
+        for _ in range(3):  # 1.8 .. 2.0 s
+            sim.step_once()
+        # Not at once at 1.8 s for the missed beats: on the grid again at 2.0 s.
+        assert checks == [0.5, 2.0]
+
+    def test_a_timestep_change_keeps_the_schedule(self, sim):
+        seen = []
+        sim.register_callback(lambda sc, dt: seen.append((round(sc.sim_time, 9), dt)), frequency=2.0)
+        for _ in range(5):  # 0.1 .. 0.5 s
+            sim.step_once()
+        sim._set_simulation_pacing(None, 0.05, source="test")
+        for _ in range(10):  # 0.55 .. 1.0 s
+            sim.step_once()
+        assert [t for t, _ in seen] == [0.5, 1.0]
+        assert seen[-1][1] == pytest.approx(0.5)
+
     @pytest.mark.parametrize("frequency", [0, -1.0])
     def test_a_non_positive_collision_frequency_disables_checks(self, sim, monkeypatch, frequency):
         checks = []
@@ -164,6 +191,37 @@ class TestTheCoreUsesIt:
         for _ in range(5):
             sim.step_once()
         assert checks == []
+
+
+class TestLongRuns:
+    """sim_time adds one timestep per step, so its float error grows with the
+    run; the gates read the time from the step count instead."""
+
+    def test_accumulated_time_outgrows_the_tolerance(self):
+        # Why the core does not pass sim_time: at 1 ms a few minutes of steps
+        # are more than a millionth of a step off.
+        now = 0.0
+        for _ in range(400_000):
+            now += 0.001
+        assert abs(now - 400_000 * 0.001) > 1e-6 * 0.001
+
+    def test_a_step_rate_callback_keeps_every_beat_late_in_a_run(self):
+        import pybullet as p
+
+        sim = MultiRobotSimulationCore(
+            SimulationParams(gui=False, monitor=False, timestep=0.001, target_rtf=0, monitor_log_interval=0)
+        )
+        try:
+            sim.initialize_simulation()
+            sim.restore_completed_step_boundary(200_000_000, 200_000_000 * 0.001)  # 55.6 h into the run
+            dts = []
+            sim.register_callback(lambda sc, dt: dts.append(dt), frequency=1000.0)
+            for _ in range(2000):
+                sim.step_once()
+            assert len(dts) == 2000
+            assert all(dt == pytest.approx(0.001) for dt in dts)
+        finally:
+            p.disconnect(sim.client)
 
 
 class TestPostStepPhase:
@@ -208,6 +266,14 @@ class TestPostStepPhase:
         for _ in range(3):
             sim.step_once()
         assert seen == [0.1, 0.2, 0.3]
+
+    def test_profiled_apart_from_the_post_step_event(self, sim):
+        import time
+
+        sim.register_callback(lambda sc, dt: time.sleep(0.02), phase="post_step")
+        profile = sim.step_once(return_profiling=True)
+        assert profile["callbacks_post_step"] >= 20.0
+        assert profile["events_post_step"] < 20.0
 
     def test_rejects_an_unknown_phase(self, sim):
         with pytest.raises(ValueError):
