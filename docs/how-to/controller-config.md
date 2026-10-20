@@ -218,8 +218,9 @@ immediate stop: the velocity is zeroed at once.
 
 To change direction mid-motion, send the new goal: under the default `brake`
 mode the agent brakes and then heads for it. `brake()` leaves the action queue
-alone; a `MoveAction` still executing completes once the agent is at rest, so
-call `clear_actions()` first to cancel it instead.
+alone; a `MoveAction` still executing ends `CANCELLED` once the agent is at
+rest, short of its path's end, and the queue moves on to the next action, so
+call `clear_actions()` first to drop the queued actions too.
 
 ## Batch controllers
 
