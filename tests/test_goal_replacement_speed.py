@@ -396,26 +396,29 @@ def test_a_refused_move_action_starts_once_the_motion_ends(sim):
 
 
 def test_from_speed_never_raises_the_deceleration():
-    from pybullet_fleet._tpi import build_tpi_from_speed, try_build_tpi_from_speed
+    from pybullet_fleet._tpi import build_tpi_from_speed, try_build_tpi
 
-    assert try_build_tpi_from_speed(p0=0.0, pe=0.2, vmax=VMAX, accel=ACCEL, t0=0.0, v0=VMAX, decel=DECEL) is None
+    assert try_build_tpi(p0=0.0, pe=0.2, vmax=VMAX, accel=ACCEL, t0=0.0, v0=VMAX, decel=DECEL) is None
     with pytest.raises(ValueError):
         build_tpi_from_speed(p0=0.0, pe=0.2, vmax=VMAX, accel=ACCEL, t0=0.0, v0=VMAX, decel=DECEL)
 
 
-def test_an_initial_speed_over_vmax_is_reported(caplog):
-    """Above vmax (lowered mid-motion) the trajectory starts at vmax: a speed
-    drop no deceleration covers, so it is logged rather than silent."""
-    from pybullet_fleet._tpi import build_tpi_from_speed
+def test_an_initial_speed_over_vmax_first_slows_down_to_it():
+    """Above vmax (lowered mid-motion) the trajectory keeps the speed it has
+    and slows down to vmax at the ramp limit -- no jump. Cruising at the cap,
+    up to float noise, starts there."""
+    from pybullet_fleet._tpi import try_build_tpi
 
-    with caplog.at_level("WARNING", logger="pybullet_fleet._tpi"):
-        tpi = build_tpi_from_speed(p0=0.0, pe=10.0, vmax=VMAX, accel=ACCEL, t0=0.0, v0=1.5 * VMAX, decel=DECEL)
-    assert tpi.get_point(0.0)[1] == pytest.approx(VMAX)
-    assert "exceeds vmax" in caplog.text
-    caplog.clear()
-    with caplog.at_level("WARNING", logger="pybullet_fleet._tpi"):
-        build_tpi_from_speed(p0=0.0, pe=10.0, vmax=VMAX, accel=ACCEL, t0=0.0, v0=VMAX, decel=DECEL)
-    assert caplog.text == ""  # cruising at the cap is not an excess
+    with pytest.warns(UserWarning, match="exceeds vmax"):
+        tpi = try_build_tpi(p0=0.0, pe=10.0, vmax=VMAX, accel=ACCEL, t0=0.0, v0=1.5 * VMAX, decel=DECEL)
+    assert tpi is not None
+    speeds = [tpi.get_point(t)[1] for t in np.arange(0.0, tpi.get_end_time(), DT)]
+    assert speeds[0] == pytest.approx(1.5 * VMAX)
+    assert max(np.abs(np.diff(speeds))) <= max(ACCEL, DECEL) * DT + 1e-9
+    assert max(speeds[int(0.5 * VMAX / ACCEL / DT) + 1 :]) <= VMAX + 1e-9
+    assert tpi.get_point(tpi.get_end_time())[0] == pytest.approx(10.0)
+    cruising = try_build_tpi(p0=0.0, pe=10.0, vmax=VMAX, accel=ACCEL, t0=0.0, v0=VMAX * (1 + 1e-9), decel=DECEL)
+    assert cruising is not None and cruising.get_point(0.0)[1] == pytest.approx(VMAX)
 
 
 def test_trapezoid_speed_matches_the_trajectory():

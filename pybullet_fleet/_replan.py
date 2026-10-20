@@ -13,7 +13,7 @@ At rest any goal the trajectory solver accepts is taken.
 
 :func:`replacement_rejection` is the one check both omni controllers
 (per-agent and batched) apply. It uses the same solver call as the trajectory
-itself (:func:`~pybullet_fleet._tpi.try_build_tpi_from_speed`), so the check
+itself (:func:`~pybullet_fleet._tpi.try_build_tpi`), so the check
 and the motion cannot disagree.
 """
 
@@ -23,7 +23,7 @@ from typing import TYPE_CHECKING, List, NamedTuple, Optional, Protocol, Sequence
 
 import numpy as np
 
-from pybullet_fleet._tpi import try_build_tpi_from_speed
+from pybullet_fleet._tpi import try_build_tpi
 from pybullet_fleet.geometry import rotate_vector
 
 if TYPE_CHECKING:
@@ -124,7 +124,7 @@ def replacement_rejection(
     if across > CROSS_SPEED_ABS + CROSS_SPEED_REL * speed:
         return f"goal is off the line of motion ({across:.3g} m/s across it)"
     vmax, accel, decel = limits_along(params, orientation, unit)
-    if try_build_tpi_from_speed(p0=0.0, pe=distance, vmax=vmax, accel=accel, t0=t0, v0=along, decel=decel) is None:
+    if try_build_tpi(p0=0.0, pe=distance, vmax=vmax, accel=accel, t0=t0, v0=along, decel=decel) is None:
         braking = along * along / (2.0 * decel)
         return f"goal is {distance:.3g} m ahead, inside the {braking:.3g} m braking distance"
     return None

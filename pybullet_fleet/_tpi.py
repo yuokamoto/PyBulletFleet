@@ -17,8 +17,8 @@ for ``(N,)`` arrays of such trajectories — the batched eval hot path — and
 :func:`trapezoid_speed` the speed, its time derivative.
 
 :func:`build_tpi_from_speed` starts a trajectory from a body already moving
-along the travel axis, for a goal replaced mid-motion, and
-:func:`try_build_tpi_from_speed` says whether it can stop in time.
+along the travel axis, for a goal replaced mid-motion; :func:`try_build_tpi`
+with the same ``v0`` says whether it can stop in time.
 """
 
 from __future__ import annotations
@@ -28,9 +28,16 @@ from typing import Optional, Tuple
 import numpy as np
 from two_point_interpolation import TwoPointInterpolation
 
-from pybullet_fleet.logging_utils import get_lazy_logger
 
-logger = get_lazy_logger(__name__)
+#: Fraction below ``vmax`` an initial speed is clamped to. The solver treats an
+#: initial speed equal to ``vmax`` as exceeding it (and warns), so a body that
+#: is cruising at the cap starts a hair below it instead.
+_V0_CAP = 1.0 - 1e-9
+
+#: Relative excess over ``vmax`` that still counts as cruising at the cap (float
+#: noise). A larger initial speed -- vmax lowered during the motion -- is left
+#: to the solver, whose trajectory first slows down to ``vmax``.
+_V0_OVER_VMAX_TOL = 1e-6
 
 
 def build_tpi(
@@ -95,6 +102,13 @@ def try_build_tpi(
     at ``ve`` within ``decel`` — the gap between ``p0`` and ``pe`` is shorter
     than the braking distance the speed demands.
 
+    ``v0`` is signed along ``p0 -> pe``: negative is moving away from ``pe``,
+    and the trajectory then slows, reverses and drives to ``pe`` (that first
+    slowing uses ``accel``, the solver's first-phase limit). A ``v0`` at
+    ``vmax`` up to float noise starts a hair below it; from one really above
+    ``vmax`` (lowered during the motion) the trajectory first slows down to
+    it, again at ``accel``. No limit is ever raised to make one fit.
+
     :func:`build_tpi` answers that with a degenerate ``p0 → p0`` trajectory,
     which is the right default for a controller that re-plans from where it
     stands. A caller that reads "trajectory over" as "target reached" needs
@@ -105,6 +119,9 @@ def try_build_tpi(
         request as infeasible.
     """
     dec = accel if decel is None else decel
+    if abs(v0) <= vmax * (1.0 + _V0_OVER_VMAX_TOL):
+        # The solver treats v0 == vmax as exceeding it.
+        v0 = max(-vmax * _V0_CAP, min(float(v0), vmax * _V0_CAP))
     tpi = TwoPointInterpolation()
     try:
         tpi.init(p0=p0, pe=pe, acc_max=accel, vmax=vmax, t0=t0, v0=v0, ve=ve, dec_max=dec)
@@ -112,39 +129,6 @@ def try_build_tpi(
     except ValueError:
         return None
     return tpi
-
-
-#: Fraction below ``vmax`` an initial speed is clamped to. The solver treats an
-#: initial speed equal to ``vmax`` as exceeding it (and warns), so a body that
-#: is cruising at the cap starts a hair below it instead.
-_V0_CAP = 1.0 - 1e-9
-
-#: Relative excess over ``vmax`` an initial speed may have before clamping it
-#: is reported: float noise of a body cruising at the cap stays below it.
-_V0_OVER_VMAX_WARN = 1e-6
-
-
-def try_build_tpi_from_speed(
-    p0: float,
-    pe: float,
-    vmax: float,
-    accel: float,
-    t0: float,
-    v0: float,
-    decel: Optional[float] = None,
-) -> Optional[TwoPointInterpolation]:
-    """A trajectory to ``pe`` for a body already moving at ``v0``, or ``None``.
-
-    ``v0`` is signed along ``p0 -> pe``: negative is moving away from ``pe``,
-    and the trajectory then slows, reverses and drives to ``pe`` (that first
-    slowing uses ``accel``, the solver's first-phase limit). Its magnitude is
-    clamped to ``vmax``. ``None`` means no trajectory within the limits
-    exists -- ``pe`` is closer than the braking distance, or the body is
-    moving with nowhere to go -- and no limit is ever raised to make one fit;
-    see :mod:`pybullet_fleet._replan`.
-    """
-    v0 = max(-vmax * _V0_CAP, min(float(v0), vmax * _V0_CAP))
-    return try_build_tpi(p0=p0, pe=pe, vmax=vmax, accel=accel, t0=t0, v0=v0, decel=decel)
 
 
 def build_tpi_from_speed(
@@ -164,17 +148,11 @@ def build_tpi_from_speed(
 
     Raises:
         ValueError: no trajectory within the limits exists (see
-            :func:`try_build_tpi_from_speed`). Callers check first with
+            :func:`try_build_tpi`). Callers check first with
             :func:`pybullet_fleet._replan.replacement_rejection`; no limit is
             ever raised to make a goal fit.
     """
-    if v0 == 0.0:
-        return build_tpi(p0=p0, pe=pe, vmax=vmax, accel=accel, t0=t0, decel=decel)
-    if abs(v0) > vmax * (1.0 + _V0_OVER_VMAX_WARN):
-        # The trajectory starts at vmax: the speed drops in one step, which no
-        # deceleration limit covers (vmax was lowered during the motion).
-        logger.warning("initial speed %.6g exceeds vmax %.6g; the new trajectory starts at vmax", abs(v0), vmax)
-    tpi = try_build_tpi_from_speed(p0=p0, pe=pe, vmax=vmax, accel=accel, t0=t0, v0=v0, decel=decel)
+    tpi = try_build_tpi(p0=p0, pe=pe, vmax=vmax, accel=accel, t0=t0, v0=v0, decel=decel)
     if tpi is None:
         raise ValueError(
             f"no trajectory over {abs(pe - p0):.6g} from speed {v0:.6g} within accel "
