@@ -6,6 +6,7 @@ from typing import cast
 import numpy as np
 import pytest
 
+from pybullet_fleet._replan import PathRejection
 from pybullet_fleet.events import EventBus
 from pybullet_fleet.fleet_api import (
     FLEET_COMMAND_EVENT,
@@ -434,7 +435,7 @@ def test_dispatcher_reports_a_goal_the_robot_cannot_take_as_rejected():
 
     class MovingAgent(FakeAgent):
         def path_rejection(self, path):
-            return "goal is behind the motion"
+            return PathRejection("goal is behind the motion", temporary=True)
 
     robot0 = MovingAgent("robot0", 1)
     robot1 = FakeAgent("robot1", 2)
@@ -463,7 +464,7 @@ def test_a_goal_refused_after_the_command_event_is_not_acknowledged():
             return super().set_goal_pose(pose)
 
         def path_rejection(self, path):
-            return "goal is behind the motion" if self.refuse else None
+            return PathRejection("goal is behind the motion", temporary=True) if self.refuse else None
 
     robot0 = RefusingAgent("robot0", 1)
     robot1 = FakeAgent("robot1", 2)

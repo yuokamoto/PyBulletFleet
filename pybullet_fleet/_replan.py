@@ -19,7 +19,7 @@ and the motion cannot disagree.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, NamedTuple, Optional, Sequence, Tuple
+from typing import TYPE_CHECKING, List, NamedTuple, Optional, Protocol, Sequence, Tuple
 
 import numpy as np
 
@@ -28,6 +28,7 @@ from pybullet_fleet.geometry import rotate_vector
 
 if TYPE_CHECKING:
     from pybullet_fleet.controller_params import ControllerParams
+    from pybullet_fleet.geometry import Pose
 
 
 class PathRejection(NamedTuple):
@@ -43,17 +44,20 @@ class PathRejection(NamedTuple):
     temporary: bool
 
 
-def refused_for_now(agent: Any, path: Sequence[Any]) -> bool:
+class RefusesPaths(Protocol):
+    """An agent that says why it would refuse a path (:meth:`Agent.path_rejection
+    <pybullet_fleet.agent.Agent.path_rejection>`)."""
+
+    def path_rejection(self, path: List["Pose"]) -> Optional[PathRejection]: ...
+
+
+def refused_for_now(agent: RefusesPaths, path: Sequence["Pose"]) -> bool:
     """Whether ``agent`` refuses ``path`` only until its current motion ends.
 
     For callers that retry: a permanent refusal must not be retried forever.
-    Works with any agent-like object; one without ``path_rejection`` never
-    refuses.
     """
-    check = getattr(agent, "path_rejection", None)
-    if not callable(check):
-        return False
-    return bool(getattr(check(list(path)), "temporary", False))
+    rejection = agent.path_rejection(list(path))
+    return rejection is not None and rejection.temporary
 
 
 #: Below this speed (m/s) the agent counts as at rest.
