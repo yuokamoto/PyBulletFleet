@@ -47,14 +47,14 @@ def _sim():
     return sc
 
 
-def _agent(sim, mode, batch):
+def _agent(sim, mode, batch, **controller):
     agent = Agent.from_params(
         AgentSpawnParams(
             urdf_path="robots/simple_cube.urdf",
             initial_pose=Pose.from_xyz(0.0, 0.0, 0.1),
             motion_mode=mode,
             collision_mode=CollisionMode.NORMAL_3D,
-            controller=dict(CONTROLLER),
+            controller={**CONTROLLER, **controller},
         ),
         sim_core=sim,
     )
@@ -133,7 +133,10 @@ def test_batch_velocity_is_the_profile_velocity_not_the_step_average():
 
 def test_a_restored_velocity_state_is_continued_into_a_replaced_goal():
     """After restoring an agent mid-cruise, a new goal continues from the
-    restored velocity: the agent keeps cruising instead of restarting."""
+    restored velocity: the agent keeps cruising instead of restarting.
+
+    Per-agent only: the kinematic checkpoint profile does not cover
+    batch-owned agents (it rejects them before capture)."""
     from pybullet_fleet.controller import OmniController
 
     sim = _sim()
@@ -162,5 +165,28 @@ def test_a_restored_velocity_state_is_continued_into_a_replaced_goal():
             sim.step_once()
             speeds.append(float(agent.velocity[0]))
         assert speeds == pytest.approx([VMAX] * 5)
+    finally:
+        p.disconnect(sim.client)
+
+
+@pytest.mark.parametrize("batch", [False, True], ids=["per_agent", "batch"])
+def test_a_path_started_from_rest_resets_the_velocity_state(batch):
+    """``immediate`` starts an off-line goal from rest: the velocity state is
+    rest at once, so a brake() in the same step has nothing to brake instead of
+    braking the replaced motion."""
+    sim = _sim()
+    try:
+        agent = _agent(sim, MotionMode.OMNIDIRECTIONAL, batch, goal_replacement="immediate")
+        agent.set_goal_pose(_goal(100.0))
+        for _ in range(int(VMAX / ACCEL / DT) + 5):
+            sim.step_once()
+        assert np.linalg.norm(agent.velocity[:2]) == pytest.approx(VMAX)
+        x, y, _ = agent.get_pose().position
+        assert agent.set_goal_pose(_goal(x, y + 5.0)) is True  # off the line: from rest
+        assert np.linalg.norm(agent.velocity) == 0.0
+        assert agent.brake() is False  # at rest: nothing to brake
+        for _ in range(200):
+            sim.step_once()
+        assert agent.get_pose().position[:2] == pytest.approx([x, y + 5.0], abs=1e-6)
     finally:
         p.disconnect(sim.client)

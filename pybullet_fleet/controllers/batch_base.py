@@ -394,7 +394,7 @@ class BatchKinematicController(GoalReplacementPolicy, Controller):
             ``self._moved_mask`` — a (N,) boolean array.
         """
 
-    def _apply_phase1(self, dt: float = 0.0) -> None:
+    def _apply_phase1(self, dt: Optional[float] = None) -> None:  # dt: unused, kept for subclass callers
         """Write the rows flagged in ``self._moved_mask`` back to sim via the
         buffered batch API ``sim_core.set_poses``, and set each moved agent's
         velocity state.
@@ -403,8 +403,9 @@ class BatchKinematicController(GoalReplacementPolicy, Controller):
         (``self._lin_vel_buf`` / ``self._ang_vel_buf``), as the per-agent
         controllers report the trajectory's, so ``RobotHandler`` odometry and a
         goal replaced mid-motion read the same state either way. Agents that
-        stopped this step get zero. ``dt`` is unused (kept for subclasses
-        that pass it).
+        stopped this step get zero. ``dt`` is not used: the velocity comes
+        from the profile, not from the pose change over the step. The
+        parameter stays so subclasses that still pass it keep working.
 
         No-op when no agents moved (and none just stopped) or no sim_core attached.
         """

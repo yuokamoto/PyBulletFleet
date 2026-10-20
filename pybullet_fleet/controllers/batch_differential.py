@@ -74,6 +74,8 @@ class BatchDifferentialController(BatchKinematicController):
         # Slerp precompute (per agent): cached dot (always >= 0) and theta_0/sin_theta_0.
         self._rot_dot: np.ndarray = np.zeros((0,), dtype=np.float64)
         self._rot_theta0: np.ndarray = np.zeros((0,), dtype=np.float64)
+        #: z of the rotation's world axis (+1 counter-clockwise): the yaw rate's sign.
+        self._rot_axis_z: np.ndarray = np.zeros((0,), dtype=np.float64)
         self._rot_sin_theta0: np.ndarray = np.zeros((0,), dtype=np.float64)
         # Rotation angle TPI params.
         self._rot_total_angle: np.ndarray = np.zeros((0,), dtype=np.float64)
@@ -122,6 +124,7 @@ class BatchDifferentialController(BatchKinematicController):
         self._rot_snap_quat = self._resize_rows(self._rot_snap_quat, n)
         self._rot_dot = self._resize_rows(self._rot_dot, n)
         self._rot_theta0 = self._resize_rows(self._rot_theta0, n)
+        self._rot_axis_z = self._resize_rows(self._rot_axis_z, n)
         self._rot_sin_theta0 = self._resize_rows(self._rot_sin_theta0, n)
         self._rot_total_angle = self._resize_rows(self._rot_total_angle, n)
         self._rot_t_accel = self._resize_rows(self._rot_t_accel, n)
@@ -178,6 +181,7 @@ class BatchDifferentialController(BatchKinematicController):
             self._rot_t_start,
             self._rot_dot,
             self._rot_theta0,
+            self._rot_axis_z,
             self._rot_sin_theta0,
             self._rot_total_angle,
             self._rot_t_accel,
@@ -273,6 +277,14 @@ class BatchDifferentialController(BatchKinematicController):
         else:
             self._align_final_orient[idx] = False
         self._begin_waypoint(idx, agent, path[0], now, direction=direction, initial_velocity=initial_velocity)
+        # The velocity state is the new trajectory's from now on (see
+        # BatchOmniController._start_row_path); a turn in place starts at rest.
+        total = float(self._fwd_total_distance[idx])
+        if self._phase[idx] == _PHASE_FORWARD and total > 1e-9:
+            agent._current_velocity[:] = self._fwd_displacement[idx] / total * float(self._fwd_v0[idx])
+        else:
+            agent._current_velocity[:] = 0.0
+        agent._current_angular_velocity = 0.0
 
     def _translating(self, idx: int) -> bool:
         # Driving straight; a turn in place has no linear velocity to continue.
@@ -382,6 +394,7 @@ class BatchDifferentialController(BatchKinematicController):
         self._rot_snap_quat[idx] = target_quat  # un-flipped for snap
         self._rot_dot[idx] = dot
         self._rot_theta0[idx] = theta0
+        self._rot_axis_z[idx] = float(rotation_axis_z(start_quat, target_for_slerp))
         self._rot_sin_theta0[idx] = sin_theta0
         self._rot_total_angle[idx] = angle
         self._rot_t_accel[idx] = t_acc
@@ -457,6 +470,7 @@ class BatchDifferentialController(BatchKinematicController):
         self._fwd_target_quat[idx] = target_quat  # also store unflipped here
         self._rot_dot[idx] = dot
         self._rot_theta0[idx] = theta0
+        self._rot_axis_z[idx] = float(rotation_axis_z(start_quat, target_for_slerp))
         self._rot_sin_theta0[idx] = sin_theta0
         self._rot_total_angle[idx] = angle
         self._rot_t_accel[idx] = t_acc
@@ -516,7 +530,7 @@ class BatchDifferentialController(BatchKinematicController):
             # Nothing active. Still flush once if agents moved last step, so
             # _apply_phase1 can zero the velocity of any that just stopped.
             if self._was_moved.any():
-                self._apply_phase1(dt)
+                self._apply_phase1()
             return self._moved_mask
 
         now = float(sim_core.sim_time)
@@ -551,7 +565,7 @@ class BatchDifferentialController(BatchKinematicController):
                 tau, self._rot_t_accel[rm], self._rot_t_const[rm], self._rot_t_total[rm], self._rot_accel[rm]
             )
             self._lin_vel_buf[rm] = 0.0
-            self._ang_vel_buf[rm] = angular_speed * rotation_axis_z(self._rot_start_quat[rm], self._rot_target_quat[rm])
+            self._ang_vel_buf[rm] = angular_speed * self._rot_axis_z[rm]
             self._moved_mask[rm] = True
             # Completed rotations.
             done = tau >= self._rot_t_total[rm]
@@ -620,7 +634,7 @@ class BatchDifferentialController(BatchKinematicController):
                     self._begin_forward(ii, self._agents[ii], self._rot_snap_quat[ii], now)
 
         # Write rows to sim (and refresh per-agent reported velocities).
-        self._apply_phase1(dt)
+        self._apply_phase1()
 
         # Handle waypoint advance for completed forwards.
         if completed_forward.any():

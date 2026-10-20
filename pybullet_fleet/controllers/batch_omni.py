@@ -82,6 +82,8 @@ class BatchOmniController(BatchKinematicController):
         self._rot_snap_quat: np.ndarray = np.zeros((0, 4), dtype=np.float64)
         self._rot_dot: np.ndarray = np.zeros((0,), dtype=np.float64)
         self._rot_theta0: np.ndarray = np.zeros((0,), dtype=np.float64)
+        #: z of the rotation's world axis (+1 counter-clockwise): the yaw rate's sign.
+        self._rot_axis_z: np.ndarray = np.zeros((0,), dtype=np.float64)
         self._rot_sin_theta0: np.ndarray = np.zeros((0,), dtype=np.float64)
         self._rot_total_angle: np.ndarray = np.zeros((0,), dtype=np.float64)
         self._rot_t_accel: np.ndarray = np.zeros((0,), dtype=np.float64)
@@ -123,6 +125,7 @@ class BatchOmniController(BatchKinematicController):
         self._rot_snap_quat = self._resize_rows(self._rot_snap_quat, n)
         self._rot_dot = self._resize_rows(self._rot_dot, n)
         self._rot_theta0 = self._resize_rows(self._rot_theta0, n)
+        self._rot_axis_z = self._resize_rows(self._rot_axis_z, n)
         self._rot_sin_theta0 = self._resize_rows(self._rot_sin_theta0, n)
         self._rot_total_angle = self._resize_rows(self._rot_total_angle, n)
         self._rot_t_accel = self._resize_rows(self._rot_t_accel, n)
@@ -175,6 +178,7 @@ class BatchOmniController(BatchKinematicController):
             self._rot_t_start,
             self._rot_dot,
             self._rot_theta0,
+            self._rot_axis_z,
             self._rot_sin_theta0,
             self._rot_total_angle,
             self._rot_t_accel,
@@ -266,6 +270,16 @@ class BatchOmniController(BatchKinematicController):
         else:
             self._align_final_orient[idx] = False
         self._begin_waypoint(idx, agent, path[0], now, initial_velocity)
+        # The velocity state is the new trajectory's from now on, not the
+        # motion it replaced: a path started from rest is at rest, so a
+        # replacement later in this step (brake(), another goal) continues
+        # from the right speed.
+        total = float(self._total_distance[idx])
+        if self._phase[idx] == _PHASE_FORWARD and total > 1e-9:
+            agent._current_velocity[:] = self._displacement[idx] / total * float(self._v0_buf[idx])
+        else:
+            agent._current_velocity[:] = 0.0
+        agent._current_angular_velocity = 0.0
 
     def _begin_waypoint(
         self,
@@ -367,6 +381,7 @@ class BatchOmniController(BatchKinematicController):
         self._rot_snap_quat[idx] = target_quat  # un-flipped for snap
         self._rot_dot[idx] = dot
         self._rot_theta0[idx] = theta0
+        self._rot_axis_z[idx] = float(rotation_axis_z(start_quat, target_for_slerp))
         self._rot_sin_theta0[idx] = sin_theta0
         self._rot_total_angle[idx] = angle
         self._rot_t_accel[idx] = t_acc
@@ -424,7 +439,7 @@ class BatchOmniController(BatchKinematicController):
             # Nothing active. Still flush once if agents moved last step, so
             # _apply_phase1 can zero the velocity of any that just stopped.
             if self._was_moved.any():
-                self._apply_phase1(dt)
+                self._apply_phase1()
             return self._moved_mask
 
         # Match OmniController._apply_pose semantics: evaluates at sim_core.sim_time,
@@ -496,7 +511,7 @@ class BatchOmniController(BatchKinematicController):
                 tau, self._rot_t_accel[rm], self._rot_t_const[rm], self._rot_t_total[rm], self._rot_accel[rm]
             )
             self._lin_vel_buf[rm] = 0.0
-            self._ang_vel_buf[rm] = angular_speed * rotation_axis_z(self._rot_start_quat[rm], self._rot_target_quat[rm])
+            self._ang_vel_buf[rm] = angular_speed * self._rot_axis_z[rm]
             self._moved_mask[rm] = True
             done = tau >= self._rot_t_total[rm]
             if done.any():
@@ -507,7 +522,7 @@ class BatchOmniController(BatchKinematicController):
                 completed_rot[done_rows] = True
 
         # Write to sim (and refresh per-agent reported velocities).
-        self._apply_phase1(dt)
+        self._apply_phase1()
 
         # Advance translate completions.
         if completed.any():
