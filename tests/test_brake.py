@@ -103,9 +103,15 @@ def _assert_braked(start, velocity, track, decel=DECEL):
 
 
 def _cruise(sim, agent, goal=(100.0, 0.0)):
+    """Accelerate toward a far ``goal`` and stop stepping while cruising at VMAX."""
     agent.set_path([Pose.from_xyz(goal[0], goal[1], 0.1)], auto_approach=False)
     for _ in range(int(2 * VMAX / ACCEL / DT) + 5):
         sim.step_once()
+    # Still on the way, at full speed: the profile speed, not a batch row's
+    # reported last-step average.
+    controller = agent._batch_controller or agent._controllers[0]
+    assert agent.is_moving
+    assert np.linalg.norm(controller.continuation_velocity(agent)) == pytest.approx(VMAX, rel=1e-6)
 
 
 class TestBrake:
@@ -184,21 +190,29 @@ class TestAfterBraking:
         """Refused while braking, taken when at rest -- MoveAction retries."""
         agent = _agent(sim, batch)
         _cruise(sim, agent)
+        controller = agent._batch_controller or agent._controllers[0]
+        velocity = np.array(controller.continuation_velocity(agent)[:2], dtype=float)
+        speed = float(np.linalg.norm(velocity))
+        braking_point = _xy(agent) + velocity / speed * speed * speed / (2.0 * DECEL)
         assert agent.brake() is True
-        braking_point = None
         action = MoveAction(path=Path.from_positions([[0.0, 5.0, 0.1]]), auto_approach=False)
         agent.add_action(action)
         sim.step_once()
         assert action.status == ActionStatus.NOT_STARTED  # off the line: refused for now
+        track = [_xy(agent)]
         for _ in range(300):
             sim.step_once()
-            if braking_point is None and action.status == ActionStatus.IN_PROGRESS:
-                braking_point = _xy(agent)
+            track.append(_xy(agent))
             if action.status == ActionStatus.COMPLETED:
                 break
         assert action.status == ActionStatus.COMPLETED
-        assert braking_point is not None
-        assert _xy(agent) == pytest.approx([0.0, 5.0], abs=1e-6)
+        assert track[-1] == pytest.approx([0.0, 5.0], abs=1e-6)
+        # Taken only once the agent stood at the end of the braking, not on the
+        # way: the last pose before it leaves the line of motion is the braking
+        # point. (A batch row takes it in the arrival step itself, after the
+        # batch advance; a per-agent controller in the next one.)
+        first_off_line = next(i for i, xy in enumerate(track) if abs(xy[1]) > 1e-9)
+        assert track[first_off_line - 1] == pytest.approx(braking_point, abs=1e-5)
 
     def test_clear_actions_first_cancels_the_move(self, sim):
         agent = _agent(sim)
