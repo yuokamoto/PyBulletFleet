@@ -37,7 +37,6 @@ Registry
 import inspect
 import math
 from abc import ABC, abstractmethod
-from dataclasses import asdict
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Type, TypeVar
 
 import numpy as np
@@ -176,11 +175,7 @@ class Controller(ABC):
         kind = type(self).__dict__.get("_registry_name")
         if kind is None or not isinstance(self.params, ControllerParams):
             return None
-        config = {"type": kind, **asdict(self.params)}
-        direction = config.get("default_direction")
-        if isinstance(direction, MovementDirection):
-            config["default_direction"] = direction.value
-        return config
+        return {"type": kind, **self.params.as_config()}
 
     @classmethod
     def from_config(cls: Type[_ControllerT], config: dict) -> "_ControllerT":
@@ -293,9 +288,7 @@ class KinematicController(Controller):
 
     @default_direction.setter
     def default_direction(self, value: MovementDirection) -> None:
-        if isinstance(value, str):
-            value = MovementDirection(value)
-        self.params.default_direction = value
+        self.params.default_direction = MovementDirection(value)
 
     @property
     def mode(self) -> ControllerMode:

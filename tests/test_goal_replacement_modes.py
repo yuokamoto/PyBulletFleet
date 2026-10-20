@@ -20,7 +20,7 @@ import pytest
 
 from pybullet_fleet import Agent, AgentSpawnParams, MotionMode, MultiRobotSimulationCore, Pose, SimulationParams
 from pybullet_fleet.controller_params import ControllerParams
-from pybullet_fleet.types import CollisionMode, GoalReplacement
+from pybullet_fleet.types import MovementDirection, CollisionMode, GoalReplacement
 
 DT = 0.05
 VMAX = 2.0
@@ -373,7 +373,24 @@ class TestConfiguration:
     def test_an_unknown_mode_is_an_error(self):
         with pytest.raises(ValueError, match="Unknown goal_replacement 'later'"):
             ControllerParams(goal_replacement="later")
-        assert ControllerParams(goal_replacement=GoalReplacement.REJECT).goal_replacement == "reject"
+        with pytest.raises(ValueError, match="Unknown default_direction 'sideways'"):
+            ControllerParams(default_direction="sideways")
+
+    @pytest.mark.parametrize("build", ["direct", "from_dict"])
+    def test_enum_fields_take_their_string_values(self, build):
+        """Both enum fields are stored as the enum however the params are built."""
+        values = {"goal_replacement": "reject", "default_direction": "backward"}
+        params = ControllerParams(**values) if build == "direct" else ControllerParams.from_dict(values)
+        assert params.goal_replacement is GoalReplacement.REJECT
+        assert params.default_direction is MovementDirection.BACKWARD
+        assert ControllerParams().goal_replacement is None  # unset: a manager or the default decides
+
+    def test_as_config_writes_plain_values_that_build_the_same_params(self):
+        params = ControllerParams(max_linear_vel=1.5, goal_replacement="wait_complete", default_direction="auto")
+        config = params.as_config()
+        assert config["goal_replacement"] == "wait_complete" and type(config["goal_replacement"]) is str
+        assert config["default_direction"] == "auto" and type(config["default_direction"]) is str
+        assert ControllerParams.from_dict(config) == params
 
 
 class TestCheckpoint:
