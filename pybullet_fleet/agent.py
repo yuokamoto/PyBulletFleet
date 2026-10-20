@@ -1479,10 +1479,12 @@ class Agent(SimObject):
             direction: Movement direction override, or ``None`` to use the controller's
                       ``default_direction``.  Can be MovementDirection enum or string
                       ("auto", "forward", "backward").
-            _preempt: Internal: start without waiting for the current path
-                      under ``wait_complete`` (used by :meth:`brake`).
                       Only used in differential drive mode (MotionMode.DIFFERENTIAL).
                       In omnidirectional mode, this parameter is ignored.
+            _preempt: Internal: start without waiting for the current path
+                      under ``wait_complete`` (used by :meth:`brake`), for
+                      every kinematic controller, omnidirectional or
+                      differential, per-agent or batched.
 
         Returns:
             ``True`` when the path was taken (started or held to start later);

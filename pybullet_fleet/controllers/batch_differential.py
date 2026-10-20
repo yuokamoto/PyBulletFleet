@@ -231,7 +231,8 @@ class BatchDifferentialController(BatchKinematicController):
             path: Non-empty list of goal poses.
             direction: ``FORWARD`` (default), ``BACKWARD``, or ``AUTO``
                 (re-evaluated per waypoint based on heading delta).
-                ``None`` defaults to ``MovementDirection.FORWARD``.
+                ``None`` uses the agent's ``controller_params.default_direction``
+                (``FORWARD`` unless configured), as the per-agent controller does.
             final_orientation_align: If ``True`` (default), rotate to match
                 ``path[-1].orientation`` after reaching the last waypoint.
 
@@ -264,13 +265,16 @@ class BatchDifferentialController(BatchKinematicController):
             initial_velocity = self._row_velocity(idx, now)
         self._paths[idx] = list(path)
         self._wp_index[idx] = 0
-        self._original_direction[idx] = request.direction
+        # Unset means the agent's default_direction, as the per-agent
+        # controller resolves it -- not the previous path's direction.
+        direction = request.direction if request.direction is not None else agent.controller_params.default_direction
+        self._original_direction[idx] = direction
         if request.final_orientation_align:
             self._align_final_orient[idx] = True
             self._final_orient_target_quat[idx] = np.asarray(path[-1].orientation, dtype=np.float64)
         else:
             self._align_final_orient[idx] = False
-        self._begin_waypoint(idx, agent, path[0], now, direction=request.direction, initial_velocity=initial_velocity)
+        self._begin_waypoint(idx, agent, path[0], now, direction=direction, initial_velocity=initial_velocity)
 
     def continuation_velocity(self, agent: "Agent") -> Optional[np.ndarray]:
         """The row's forward profile velocity while it drives straight, else ``None``.
@@ -298,7 +302,9 @@ class BatchDifferentialController(BatchKinematicController):
         velocity = self._row_velocity(idx, now)
         if float(np.linalg.norm(velocity)) < REST_SPEED:
             return None
-        requested = direction if direction is not None else self._original_direction[idx]
+        # The direction the new path will use (see _start_row_path), not the
+        # current path's.
+        requested = direction if direction is not None else agent.controller_params.default_direction
         _, target_quat, _, distance = self._heading_target(agent, path[0], requested)
         current = agent.get_pose()
         if distance > 1e-6:

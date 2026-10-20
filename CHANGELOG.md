@@ -383,6 +383,14 @@ are not recommended for production use yet.
 
 ### Fixed
 
+- `BatchDifferentialController` uses the agent's
+  `controller_params.default_direction` for a path set without a direction, as
+  the per-agent `DifferentialController` does; it always drove `FORWARD`. A
+  goal replacement on a batched differential agent is judged with the new
+  path's direction, not the previous path's: a goal set without a direction
+  while backing up under `auto` was taken and turned around at once instead of
+  being refused (`reject`) or braked to (`brake`).
+
 - Frequency-limited callbacks and plugins, `collision_check_frequency` and the
   DataMonitor refresh no longer skip beats or drift. They compared the
   accumulated (float) simulation time with the interval since their last run,

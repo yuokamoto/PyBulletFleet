@@ -540,3 +540,74 @@ class TestMoveActionOutcome:
         self._until_done(sim, action)
         assert action.status == ActionStatus.CANCELLED
         assert _xy(agent) == pytest.approx(newer, abs=1e-6)
+
+
+class TestDefaultDirection:
+    """A path without a direction uses the agent's default_direction, per-agent
+    and batched alike, both to judge a replacement and to drive it."""
+
+    @staticmethod
+    def _differential(sim, batch, mode, default_direction="forward"):
+        agent = Agent.from_params(
+            AgentSpawnParams(
+                urdf_path="robots/simple_cube.urdf",
+                initial_pose=Pose.from_xyz(0.0, 0.0, 0.1),
+                motion_mode=MotionMode.DIFFERENTIAL,
+                collision_mode=CollisionMode.NORMAL_3D,
+                controller={
+                    "max_linear_vel": VMAX,
+                    "max_linear_accel": ACCEL,
+                    "max_linear_decel": DECEL,
+                    "goal_replacement": mode,
+                    "default_direction": default_direction,
+                },
+            ),
+            sim_core=sim,
+        )
+        if batch:
+            from pybullet_fleet.agent_manager import AgentManager
+
+            AgentManager(sim_core=sim, fleet_controller={"type": "batch_differential"}).add_object(agent)
+        return agent
+
+    @pytest.mark.parametrize("mode", ["reject", "brake"])
+    def test_backing_up_then_a_goal_behind_without_a_direction(self, sim, batch, mode):
+        """Backing up under ``direction="auto"``, a new goal further behind with
+        no direction is a forward path (the default): it needs a turn, so
+        ``reject`` refuses it and the agent keeps backing up, and ``brake``
+        stops it at the deceleration before it turns."""
+        agent = self._differential(sim, batch, mode)
+        agent.set_path([Pose.from_xyz(-10.0, 0.0, 0.1)], direction="auto", auto_approach=False, final_orientation_align=False)
+        for _ in range(15):
+            sim.step_once()
+        assert agent.velocity[0] == pytest.approx(-VMAX)
+        x0 = _xy(agent)[0]
+        taken = agent.set_path([Pose.from_xyz(-20.0, 0.0, 0.1)], auto_approach=False, final_orientation_align=False)
+        assert taken is (mode != "reject")
+        xs = [x0]
+        for _ in range(10):
+            sim.step_once()
+            xs.append(_xy(agent)[0])
+        speeds = -np.diff(xs) / DT  # backing up: x decreases
+        if mode == "reject":
+            assert speeds == pytest.approx([VMAX] * 10)
+        else:
+            assert np.all(np.diff(speeds) <= 1e-9)  # never speeds up
+            assert np.max(-np.diff(np.r_[VMAX, speeds])) <= DECEL * DT + 1e-6  # within the deceleration
+
+    def test_a_backward_default_drives_alike_per_agent_and_batched(self):
+        tracks = []
+        for batch in (False, True):
+            sc = _world()
+            try:
+                agent = self._differential(sc, batch, "brake", default_direction="backward")
+                agent.set_path([Pose.from_xyz(3.0, 0.0, 0.1)], auto_approach=False, final_orientation_align=False)
+                track = []
+                for _ in range(80):
+                    sc.step_once()
+                    track.append(tuple(agent.get_pose().position[:2]) + (agent.get_pose().yaw,))
+                tracks.append(track)
+            finally:
+                p.disconnect(sc.client)
+        assert np.asarray(tracks[1]) == pytest.approx(np.asarray(tracks[0]), abs=1e-6)
+        assert tracks[0][-1][0] == pytest.approx(3.0, abs=1e-6)
