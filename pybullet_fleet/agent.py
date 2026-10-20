@@ -1514,10 +1514,8 @@ class Agent(SimObject):
         # Add approach waypoint if needed. Not while the agent is under way: it
         # is the current pose, a zero-length first segment, and would stop the
         # agent dead before the new path -- a new goal mid-motion continues the
-        # motion instead. Under way is a path in progress (navigation state, not
-        # the reported velocity: a batch controller reports the arrival step's
-        # average speed until its next flush, after the agent has stopped) or a
-        # velocity command still moving it.
+        # motion instead. Under way is a path in progress (navigation state) or
+        # a velocity command still moving it.
         from pybullet_fleet.controller import KinematicController
 
         base = self._controllers[0] if self._batch_controller is None and self._controllers else None

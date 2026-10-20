@@ -49,6 +49,7 @@ from pybullet_fleet.geometry import (
     quat_slerp,
     quat_slerp_precompute,
     rotate_vector,
+    rotation_axis_z,
 )
 from pybullet_fleet.logging_utils import get_lazy_logger
 from pybullet_fleet.plugin_utils import PluginRegistry
@@ -762,8 +763,10 @@ class KinematicController(GoalReplacementPolicy, Controller):
         agent.set_pose_raw(current_pose.position, orientation)
         agent._current_velocity[:] = 0.0
         if self._tpi_rotation_angle is not None:
+            # The TPI runs over the unsigned angle; the yaw rate takes the turn's sense.
             _, angular_vel, _ = self._tpi_rotation_angle.get_point(current_time)
-            agent._current_angular_velocity = angular_vel
+            yaw_axis = float(rotation_axis_z(self._rotation_start_quat, self._rotation_target_quat))
+            agent._current_angular_velocity = angular_vel * yaw_axis
         else:
             agent._current_angular_velocity = 0.0
         return False

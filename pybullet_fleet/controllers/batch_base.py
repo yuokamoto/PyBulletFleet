@@ -27,13 +27,11 @@ sized with ``self._agents``.
 
 from __future__ import annotations
 
-import math
 import threading
 from abc import abstractmethod
 from typing import TYPE_CHECKING, Dict, List, Optional, Type
 
 import numpy as np
-import pybullet as p
 
 from pybullet_fleet._replacement import GoalReplacementPolicy
 from pybullet_fleet._replan import PathRequest
@@ -99,6 +97,11 @@ class BatchKinematicController(GoalReplacementPolicy, Controller):
         self._pos_buf: np.ndarray = np.zeros((0, 3), dtype=np.float64)
         self._orn_buf: np.ndarray = np.zeros((0, 4), dtype=np.float64)
         self._moved_mask: np.ndarray = np.zeros((0,), dtype=bool)
+        # The velocity of each row's profile at the step's time, as the
+        # per-agent controllers report it: world-frame linear (m/s) and yaw
+        # rate (rad/s). batch_advance fills them for the rows it moves.
+        self._lin_vel_buf: np.ndarray = np.zeros((0, 3), dtype=np.float64)
+        self._ang_vel_buf: np.ndarray = np.zeros((0,), dtype=np.float64)
         # True for rows that moved on the *previous* flush — lets _apply_phase1
         # zero an agent's reported velocity on the step it stops.
         self._was_moved: np.ndarray = np.zeros((0,), dtype=bool)
@@ -197,6 +200,8 @@ class BatchKinematicController(GoalReplacementPolicy, Controller):
         self._pos_buf = self._resize_rows(self._pos_buf, n)
         self._orn_buf = self._resize_rows(self._orn_buf, n)
         self._moved_mask = self._resize_rows(self._moved_mask, n)
+        self._lin_vel_buf = self._resize_rows(self._lin_vel_buf, n)
+        self._ang_vel_buf = self._resize_rows(self._ang_vel_buf, n)
         self._was_moved = self._resize_rows(self._was_moved, n)
 
     @staticmethod
@@ -224,6 +229,8 @@ class BatchKinematicController(GoalReplacementPolicy, Controller):
         self._pos_buf[[i, j]] = self._pos_buf[[j, i]]
         self._orn_buf[[i, j]] = self._orn_buf[[j, i]]
         self._moved_mask[[i, j]] = self._moved_mask[[j, i]]
+        self._lin_vel_buf[[i, j]] = self._lin_vel_buf[[j, i]]
+        self._ang_vel_buf[[i, j]] = self._ang_vel_buf[[j, i]]
         self._was_moved[[i, j]] = self._was_moved[[j, i]]
 
     def _on_agent_registered(self, idx: int, agent: "Agent") -> None:
@@ -366,7 +373,9 @@ class BatchKinematicController(GoalReplacementPolicy, Controller):
 
         1. Fill ``self._pos_buf`` and ``self._orn_buf`` with new poses for all
            agents.
-        2. Fill ``self._moved_mask`` with True for agents whose pose changed.
+        2. Fill ``self._moved_mask`` with True for agents whose pose changed,
+           and ``self._lin_vel_buf`` / ``self._ang_vel_buf`` with their
+           profile velocity at the step's time.
         3. Call ``self._apply_phase1()`` to write the moved rows back to sim.
 
         Returns:
@@ -375,15 +384,15 @@ class BatchKinematicController(GoalReplacementPolicy, Controller):
 
     def _apply_phase1(self, dt: float = 0.0) -> None:
         """Write the rows flagged in ``self._moved_mask`` back to sim via the
-        buffered batch API ``sim_core.set_poses``, and refresh each moved agent's
-        reported velocity.
+        buffered batch API ``sim_core.set_poses``, and set each moved agent's
+        velocity state.
 
-        Batch controllers otherwise never set ``_current_velocity`` /
-        ``_current_angular_velocity``, so ``RobotHandler`` would publish zero
-        odometry/diagnostics velocity for moving robots (unlike the per-agent
-        controllers). When ``dt > 0`` we derive linear/yaw velocity from the
-        cached pre-update pose → new pose for the moved rows, and zero the
-        velocity of agents that stopped this step.
+        The velocity is the row's profile velocity at the step's time
+        (``self._lin_vel_buf`` / ``self._ang_vel_buf``), as the per-agent
+        controllers report the trajectory's, so ``RobotHandler`` odometry and a
+        goal replaced mid-motion read the same state either way. Agents that
+        stopped this step get zero. ``dt`` is unused (kept for subclasses
+        that pass it).
 
         No-op when no agents moved (and none just stopped) or no sim_core attached.
         """
@@ -404,19 +413,10 @@ class BatchKinematicController(GoalReplacementPolicy, Controller):
         if not bool(mask.any()):
             return
 
-        # Per-agent velocity from the cached (pre-update) pose → new pose. The
-        # agent's pose cache still holds the old pose because set_poses() runs
-        # afterwards. get_pose() is cached for kinematic agents (no PyBullet call).
-        if dt > 0.0:
-            inv_dt = 1.0 / dt
-            for i in np.flatnonzero(mask):
-                ag = self._agents[i]
-                old = ag.get_pose()
-                np.subtract(self._pos_buf[i], old.position, out=ag._current_velocity)
-                ag._current_velocity *= inv_dt
-                new_yaw = p.getEulerFromQuaternion(tuple(self._orn_buf[i]))[2]
-                dyaw = (new_yaw - old.yaw + math.pi) % (2.0 * math.pi) - math.pi
-                ag._current_angular_velocity = dyaw * inv_dt
+        for i in np.flatnonzero(mask):
+            ag = self._agents[i]
+            ag._current_velocity[:] = self._lin_vel_buf[i]
+            ag._current_angular_velocity = float(self._ang_vel_buf[i])
 
         # set_poses accepts a Sequence[int] for object_ids; passing a NumPy
         # boolean-indexed view of int64 ids is cheap (no Python loop).
