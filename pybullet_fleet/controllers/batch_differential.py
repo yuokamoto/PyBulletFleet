@@ -30,7 +30,7 @@ from typing import TYPE_CHECKING, List, Optional
 import numpy as np
 from scipy.spatial.transform import Rotation as R
 
-from pybullet_fleet._replan import REST_SPEED, PathRequest, replacement_rejection
+from pybullet_fleet._replan import HEADING_TOL, REST_SPEED, PathRequest, replacement_rejection
 from pybullet_fleet._tpi import (
     build_tpi,
     build_tpi_from_speed,
@@ -303,7 +303,7 @@ class BatchDifferentialController(BatchKinematicController):
         current = agent.get_pose()
         if distance > 1e-6:
             turn = quat_angle_between(np.asarray(current.orientation, dtype=np.float64), target_quat)
-            if turn > 1e-6:
+            if turn > HEADING_TOL:
                 return f"goal needs a {math.degrees(turn):.3g} degree turn in place"
         return replacement_rejection(
             agent.controller_params, current.position, current.orientation, velocity, path[0].position, now
@@ -432,10 +432,11 @@ class BatchDifferentialController(BatchKinematicController):
 
         self._fwd_target_quat[idx] = target_quat
 
-        # Compute rotation angle and TPI; if negligible, snap heading and skip
-        # to FORWARD immediately (matching DifferentialController behaviour).
+        # Compute rotation angle and TPI; if negligible -- or, continuing the
+        # motion, within HEADING_TOL -- snap heading and skip to FORWARD
+        # immediately (matching DifferentialController behaviour).
         angle = quat_angle_between(start_quat, target_quat)
-        if angle <= 1e-6:
+        if angle <= 1e-6 or (initial_velocity is not None and angle <= HEADING_TOL):
             v0 = 0.0
             if initial_velocity is not None and total_distance > 1e-6:
                 # Signed: negative is moving away from the goal, which the

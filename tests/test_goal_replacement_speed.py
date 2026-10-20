@@ -519,7 +519,8 @@ class TestPermanentRefusalsAreNotRetried:
         rejection = moving.path_rejection([_goal(x, y + 1.0)])
         assert rejection.temporary is True and "off the line" in rejection.reason
 
-    def test_a_move_action_on_a_fixed_base_completes(self, sim):
+    def test_a_move_action_on_a_fixed_base_fails(self, sim):
+        """Refused for good: the move fails at once rather than being retried."""
         from pybullet_fleet.action import MoveAction
         from pybullet_fleet.geometry import Path
         from pybullet_fleet.types import ActionStatus
@@ -529,7 +530,7 @@ class TestPermanentRefusalsAreNotRetried:
         agent.add_action(action)
         for _ in range(3):
             sim.step_once()
-        assert action.status == ActionStatus.COMPLETED
+        assert action.status == ActionStatus.FAILED
 
     def test_navigate_to_on_a_fixed_base_counts_as_started(self, sim):
         from pybullet_fleet.agent_behavior_tree import PyBulletFleetNavigationAdapter

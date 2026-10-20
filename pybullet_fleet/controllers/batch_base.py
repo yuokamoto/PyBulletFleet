@@ -328,7 +328,14 @@ class BatchKinematicController(Controller):
             braking = braking_request(
                 agent.controller_params, pose.position, pose.orientation, self.continuation_velocity(agent)
             )
-            if braking is None:
+            infeasible = None if braking is None else self._replacement_obstacle(agent, braking.path, braking.direction)
+            if infeasible is not None:
+                logger.warning(
+                    f"Braking path for {name} cannot continue the motion ({infeasible}); starting the new path from rest"
+                )
+            if braking is None or infeasible is not None:
+                # Nothing left to brake, or no way to brake along the motion:
+                # start from rest.
                 self._drop_pending(agent, "a newer path started at once")
                 self._start_row_path(agent, request, continue_motion=False)
                 return True

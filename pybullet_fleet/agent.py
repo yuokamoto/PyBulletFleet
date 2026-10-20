@@ -1176,8 +1176,9 @@ class Agent(SimObject):
         an earlier ``brake`` or ``wait_complete`` replacement is dropped.
 
         The action queue is left alone. A :class:`~pybullet_fleet.action.MoveAction`
-        still executing completes once the agent is at rest; to abandon it
-        instead, call :meth:`clear_actions` first.
+        still executing ends ``CANCELLED`` once the agent is at rest, short of
+        its path's end, and the queue moves on; call :meth:`clear_actions`
+        first to drop the queued actions too.
 
         Returns:
             ``True`` when a braking trajectory was set. ``False`` at rest and

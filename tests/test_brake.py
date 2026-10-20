@@ -273,9 +273,10 @@ class TestAfterBraking:
         _assert_braked(*_brake_and_track(sim, agent))
         assert action.status == ActionStatus.CANCELLED
 
-    def test_a_move_still_running_completes_at_rest(self, sim):
-        """Documented: brake() leaves the action queue alone."""
-        agent = _agent(sim)
+    def test_a_move_still_running_is_cancelled_at_rest(self, sim, batch):
+        """Documented: brake() leaves the action queue alone; the move it cut
+        short ends CANCELLED, not COMPLETED, once the agent is at rest."""
+        agent = _agent(sim, batch)
         action = MoveAction(path=Path.from_positions([[100.0, 0.0, 0.1]]), auto_approach=False)
         agent.add_action(action)
         for _ in range(int(2 * VMAX / ACCEL / DT) + 5):
@@ -283,7 +284,7 @@ class TestAfterBraking:
         assert agent.brake() is True
         for _ in range(60):
             sim.step_once()
-        assert action.status == ActionStatus.COMPLETED
+        assert action.status == ActionStatus.CANCELLED
         assert _xy(agent)[0] < 100.0
 
 

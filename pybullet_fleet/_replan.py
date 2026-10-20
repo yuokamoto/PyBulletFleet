@@ -138,6 +138,13 @@ REST_SPEED = 1e-6
 CROSS_SPEED_ABS = 1e-6
 CROSS_SPEED_REL = 1e-3
 
+#: Turn (rad) between a differential-drive agent's heading and the line to its
+#: new goal that still counts as straight on while it moves: the sideways speed
+#: such a heading leaves is ``speed * sin(turn)``, within the omni cross-track
+#: tolerance (:data:`CROSS_SPEED_REL`). A moving agent continues into such a
+#: goal, snapping its heading onto the line; a larger turn needs a turn in place.
+HEADING_TOL = CROSS_SPEED_REL
+
 
 def limits_along(
     params: "ControllerParams", orientation: Sequence[float], direction_unit: np.ndarray

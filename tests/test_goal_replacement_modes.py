@@ -175,6 +175,30 @@ class TestModes:
         assert track[-1] == pytest.approx(OFF_LINE, abs=1e-6)
         assert _pending(agent) is None
 
+    def test_brake_with_an_infeasible_braking_path_starts_from_rest(self, sim, batch, motion, monkeypatch, caplog):
+        """A braking path that cannot continue the motion (it stops short of
+        the braking distance) is not started blindly: a warning, then the new
+        goal from rest at once."""
+        import pybullet_fleet.controller as controller_module
+        from pybullet_fleet._replan import PathRequest
+        from pybullet_fleet.controllers import batch_base
+        from pybullet_fleet.types import MovementDirection
+
+        def short_stop(params, position, orientation, velocity):
+            ahead = np.asarray(position, dtype=float) + [0.1 * BRAKING_DISTANCE, 0.0, 0.0]
+            goal = Pose(position=ahead.tolist(), orientation=list(orientation))
+            return PathRequest(path=[goal], final_orientation_align=False, direction=MovementDirection.AUTO)
+
+        monkeypatch.setattr(controller_module, "braking_request", short_stop)
+        monkeypatch.setattr(batch_base, "braking_request", short_stop)
+        with caplog.at_level(logging.WARNING):
+            agent, _, accepted = _replace(sim, batch, motion, "brake")
+        assert accepted is True
+        assert "cannot continue the motion" in caplog.text
+        assert _pending(agent) is None  # started at once, nothing held
+        track = _run(sim, agent)
+        assert track[-1] == pytest.approx(OFF_LINE, abs=1e-6)
+
     def test_wait_complete_finishes_the_current_path_first(self, sim, batch, motion):
         agent, _, accepted = _replace(sim, batch, motion, "wait_complete")
         assert accepted is True
@@ -406,3 +430,77 @@ class TestCheckpoint:
             change(broken["replacement"])
             with pytest.raises(ValueError, match=message):
                 _validate_navigation(broken, differential=False)
+
+
+class TestDifferentialHeadingTolerance:
+    """A moving differential agent takes a goal whose line is within
+    HEADING_TOL of its heading as straight on, as omni does for its cross-track
+    tolerance; a larger turn is a turn in place, braked for in brake mode."""
+
+    @pytest.mark.parametrize("turn, continues", [(1e-4, True), (1e-2, False)], ids=["within", "beyond"])
+    def test_a_slightly_off_goal(self, sim, batch, turn, continues):
+        agent = _agent(sim, batch, MotionMode.DIFFERENTIAL)  # brake, the default
+        x, y = _cruise(sim, agent)
+        ahead = 6.0
+        # Facing along the line to it, so the heading the agent needs is the line's.
+        goal = Pose.from_yaw(x + ahead, y + ahead * np.tan(turn), 0.1, turn)
+        agent.set_path([goal], auto_approach=False, final_orientation_align=False)
+        assert (_pending(agent) is None) is continues  # nothing held: continued at once
+        track = [_xy(agent)]
+        for _ in range(5):
+            sim.step_once()
+            track.append(_xy(agent))
+        speeds = _speeds(np.array(track))
+        if continues:
+            assert speeds == pytest.approx([VMAX] * 5, rel=1e-3)
+        else:
+            assert speeds[-1] < VMAX - DECEL * DT * 4 + 1e-6  # braking
+
+
+class TestMoveActionOutcome:
+    """A MoveAction ends COMPLETED only at its own path's end; stopped elsewhere
+    -- its held goal replaced by a newer one -- it ends CANCELLED."""
+
+    @staticmethod
+    def _move(agent, xy):
+        from pybullet_fleet.action import MoveAction
+        from pybullet_fleet.geometry import Path
+
+        action = MoveAction(
+            path=Path.from_positions([[xy[0], xy[1], 0.1]]), auto_approach=False, final_orientation_align=False
+        )
+        agent.add_action(action)
+        return action
+
+    @staticmethod
+    def _until_done(sim, action, steps=800):
+        from pybullet_fleet.types import ActionStatus
+
+        for _ in range(steps):
+            sim.step_once()
+            if action.status not in (ActionStatus.NOT_STARTED, ActionStatus.IN_PROGRESS):
+                return
+        raise AssertionError(f"action still {action.status}")
+
+    def test_completes_at_its_end(self, sim, batch, motion):
+        from pybullet_fleet.types import ActionStatus
+
+        agent = _agent(sim, batch, motion)
+        action = self._move(agent, (3.0, 0.0))
+        self._until_done(sim, action)
+        assert action.status == ActionStatus.COMPLETED
+        assert _xy(agent) == pytest.approx([3.0, 0.0], abs=1e-6)
+
+    def test_a_held_goal_replaced_by_a_newer_one_is_cancelled(self, sim, batch, motion):
+        from pybullet_fleet.types import ActionStatus
+
+        agent = _agent(sim, batch, motion)  # brake, the default
+        _cruise(sim, agent)
+        action = self._move(agent, OFF_LINE)
+        sim.step_once()
+        assert action.status == ActionStatus.IN_PROGRESS and _pending(agent) is not None  # held while braking
+        newer = (0.0, -5.0)
+        agent.set_path(_goal(newer), auto_approach=False, final_orientation_align=False)  # drops the held one
+        self._until_done(sim, action)
+        assert action.status == ActionStatus.CANCELLED
+        assert _xy(agent) == pytest.approx(newer, abs=1e-6)

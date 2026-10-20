@@ -43,6 +43,28 @@ are not recommended for production use yet.
 
 ### Changed
 
+- A goal or path set on a moving agent that it cannot continue into within
+  its limits now brakes first by default (`goal_replacement="brake"`): the
+  agent stops along its current motion at `max_linear_decel`, then starts the
+  goal from rest. The last release started such a goal from rest at once,
+  dropping the current speed in one step; set `goal_replacement="immediate"`
+  (per agent, per manager's `fleet_controller`, or globally through
+  `PBF_CONTROLLER_GOAL_REPLACEMENT`) for that behaviour.
+
+- `MoveAction` ends `COMPLETED` only when the agent comes to rest at the
+  path's last waypoint. Stopped elsewhere -- the path was braked
+  (`Agent.brake()`) or replaced by a newer one, held goals included -- it ends
+  `CANCELLED`, and a path the agent refuses for good (a fixed base, an empty
+  path) ends `FAILED`; both used to end `COMPLETED`. The check no longer reads
+  `Agent.path`, which a batch-owned agent always reports empty.
+
+- A moving differential-drive agent takes a goal whose line is within
+  `_replan.HEADING_TOL` (1e-3 rad) of its heading as straight on: it snaps its
+  heading onto the line and continues at its speed, as an omnidirectional
+  agent does within its cross-track tolerance. A larger turn still needs a
+  turn in place (braked for under `brake`). From rest the agent still turns
+  for any heading error above 1e-6 rad.
+
 - `step_once()` advances `sim_time`, the elapsed time and `step_count` right
   after the `pre_step` event, before the object update, instead of after the
   `post_step` event. `sim_time` is now the time of the state you see everywhere

@@ -58,7 +58,7 @@ from pybullet_fleet.types import ControllerMode, GoalReplacement, MovementDirect
 from two_point_interpolation import TwoPointInterpolation
 
 from pybullet_fleet._tpi import build_tpi, build_tpi_from_speed, extract_phase_params
-from pybullet_fleet._replan import REST_SPEED, PathRequest, braking_request, replacement_rejection
+from pybullet_fleet._replan import HEADING_TOL, REST_SPEED, PathRequest, braking_request, replacement_rejection
 from pybullet_fleet._tpi_state import capture_tpi_state, restore_tpi_state
 from pybullet_fleet._motion_planning import align_x_axis_quat
 from pybullet_fleet.controller_params import ControllerParams
@@ -554,9 +554,17 @@ class KinematicController(Controller):
         if not self._braking:
             pose = agent.get_pose()
             braking = braking_request(self.params, pose.position, pose.orientation, self.continuation_velocity(agent))
-            if braking is None:
-                # Nothing left to brake: start from rest.
+            infeasible = None if braking is None else self._replacement_obstacle(agent, braking.path, braking.direction)
+            if infeasible is not None:
+                logger.warning(
+                    f"Braking path for {name} cannot continue the motion ({infeasible}); starting the new path from rest"
+                )
+            if braking is None or infeasible is not None:
+                # Nothing left to brake, or no way to brake along the motion:
+                # start from rest.
                 self._clear_replacement("a newer path started at once")
+                agent._current_velocity[:] = 0.0
+                agent._current_angular_velocity = 0.0
                 self._start_path(agent, request, continue_motion=False)
                 return True
             self._start_path(agent, braking, continue_motion=True)
@@ -1397,7 +1405,7 @@ class DifferentialController(KinematicController):
         pose = agent.get_pose()
         if distance > 1e-6:
             turn = quat_angle_between(tuple(pose.orientation), tuple(target_quat))
-            if turn > 1e-6:
+            if turn > HEADING_TOL:
                 return f"goal needs a {math.degrees(turn):.3g} degree turn in place"
         t0 = agent.sim_core.sim_time if agent.sim_core is not None else 0.0
         return replacement_rejection(self.params, pose.position, pose.orientation, velocity, path[0].position, t0)
@@ -1442,7 +1450,13 @@ class DifferentialController(KinematicController):
         self._pose_phase = PosePhase.ROTATE
 
         start_quat = np.array(current_pose.orientation)
-        if not self._init_rotation_tpi(agent, start_quat, target_quat, t0):
+        # Continuing the motion, a turn within HEADING_TOL is straight on (see
+        # _replacement_obstacle): snap the heading rather than stop to turn.
+        straight_on = (
+            kwargs.get("initial_velocity") is not None
+            and quat_angle_between(tuple(start_quat), tuple(target_quat)) <= HEADING_TOL
+        )
+        if straight_on or not self._init_rotation_tpi(agent, start_quat, target_quat, t0):
             # Negligible or failed rotation — snap heading and skip to forward.
             # A path continuing the motion keeps its speed along the line
             # (signed: negative is moving away, which the trajectory reverses).
