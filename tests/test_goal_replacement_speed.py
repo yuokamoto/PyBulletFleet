@@ -418,6 +418,33 @@ def test_an_initial_speed_over_vmax_is_reported(caplog):
     assert caplog.text == ""  # cruising at the cap is not an excess
 
 
+def test_trapezoid_speed_matches_the_trajectory():
+    """The batched speed lookup is the trajectory's own velocity, from rest,
+    from speed and reversing, and the derivative of trapezoid_distance."""
+    from pybullet_fleet._tpi import build_tpi_from_speed, extract_phase_params, trapezoid_distance, trapezoid_speed
+
+    for v0 in (0.0, 0.5, 0.999 * VMAX, -0.75 * VMAX, -VMAX):
+        for distance in (0.3, 1.0, 3.0, 10.0):
+            for accel, decel in ((ACCEL, DECEL), (1.0, 3.0), (3.0, 1.0)):
+                try:
+                    tpi = build_tpi_from_speed(p0=0.0, pe=distance, vmax=VMAX, accel=accel, t0=0.0, v0=v0, decel=decel)
+                except ValueError:
+                    continue  # inside the braking distance
+                t_accel, t_const, t_total, accel_eff, decel_eff = extract_phase_params(tpi)
+                tau = np.linspace(-0.1, 1.05 * t_total, 400)
+                ta, tc, tt, a, d, v0s, dist_total = (
+                    np.full_like(tau, value)
+                    for value in (t_accel, t_const, t_total, accel_eff, decel_eff, float(tpi.v0), distance)
+                )
+                speed = trapezoid_speed(tau, ta, tc, tt, a, decel=d, v0=v0s)
+                expected = [tpi.get_point(max(t, 0.0))[1] for t in tau]
+                assert speed == pytest.approx(expected, abs=1e-9)
+                h = 1e-6
+                dist = [trapezoid_distance(tau + s, ta, tc, tt, a, dist_total, decel=d, v0=v0s) for s in (-h, h)]
+                inner = (tau > h) & (tau < t_total - h)
+                assert speed[inner] == pytest.approx(((dist[1] - dist[0]) / (2 * h))[inner], abs=1e-4)
+
+
 def test_a_reversal_trajectory_ends_at_its_target():
     """A body starting away from the target: the solver's smaller first-phase
     root does not end there; the trajectory must."""

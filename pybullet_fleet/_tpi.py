@@ -13,7 +13,8 @@ infeasible request apart from a trajectory that simply finishes early.
 ``(N,)`` arrays for vectorised evaluation.
 
 :func:`trapezoid_distance` evaluates the distance traveled at time ``tau``
-for ``(N,)`` arrays of such trajectories — the batched eval hot path.
+for ``(N,)`` arrays of such trajectories — the batched eval hot path — and
+:func:`trapezoid_speed` the speed, its time derivative.
 
 :func:`build_tpi_from_speed` starts a trajectory from a body already moving
 along the travel axis, for a goal replaced mid-motion, and
@@ -266,4 +267,42 @@ def trapezoid_distance(
         out[in_decel] = total_distance[in_decel] - 0.5 * d * t_left * t_left
     if done.any():
         out[done] = total_distance[done]
+    return out
+
+
+def trapezoid_speed(
+    tau: np.ndarray,
+    t_accel: np.ndarray,
+    t_const: np.ndarray,
+    t_total: np.ndarray,
+    accel: np.ndarray,
+    decel: Optional[np.ndarray] = None,
+    v0: Optional[np.ndarray] = None,
+) -> np.ndarray:
+    """Vectorised speed lookup for the profiles of :func:`trapezoid_distance`.
+
+    Takes the same ``(N,)`` arrays (without ``total_distance``) and returns
+    the speed along the travel axis at ``tau``, the time derivative of
+    :func:`trapezoid_distance`: signed, so a trajectory that starts moving
+    away from its target (negative ``v0``) is negative until it turns. ``v0``
+    at ``tau <= 0``, ``0`` from ``t_total`` on.
+    """
+    if decel is None:
+        decel = accel
+    if v0 is None:
+        v0 = np.zeros_like(tau)
+    out = np.zeros_like(tau)
+    in_const = (tau > t_accel) & (tau <= t_accel + t_const)
+    in_decel = (tau > t_accel + t_const) & (tau < t_total)
+    done = tau >= t_total
+    in_accel = ~in_const & ~in_decel & ~done
+    # accel phase: v0 + a * t (t clipped at 0: before the start it is v0)
+    if in_accel.any():
+        out[in_accel] = v0[in_accel] + accel[in_accel] * np.maximum(tau[in_accel], 0.0)
+    # const phase: v_peak = v0 + a * t_accel
+    if in_const.any():
+        out[in_const] = v0[in_const] + accel[in_const] * t_accel[in_const]
+    # decel phase: d * (t_total - t)
+    if in_decel.any():
+        out[in_decel] = decel[in_decel] * (t_total[in_decel] - tau[in_decel])
     return out

@@ -26,7 +26,13 @@ from typing import TYPE_CHECKING, List, Optional
 import numpy as np
 
 from pybullet_fleet._replan import replacement_rejection
-from pybullet_fleet._tpi import build_tpi, build_tpi_from_speed, extract_phase_params, trapezoid_distance
+from pybullet_fleet._tpi import (
+    build_tpi,
+    build_tpi_from_speed,
+    extract_phase_params,
+    trapezoid_distance,
+    trapezoid_speed,
+)
 from pybullet_fleet.controllers.batch_base import BatchKinematicController
 from pybullet_fleet.geometry import Pose, quat_angle_between, quat_slerp_batch, rotate_vector
 from pybullet_fleet.logging_utils import get_lazy_logger
@@ -268,21 +274,17 @@ class BatchOmniController(BatchKinematicController):
         total = float(self._total_distance[idx])
         if total <= 1e-9:
             return np.zeros(3)
-        tau = max(now - float(self._t_start[idx]), 0.0)
-        t_accel = float(self._t_accel[idx])
-        t_const = float(self._t_const[idx])
-        t_total = float(self._t_total[idx])
-        v0 = float(self._v0_buf[idx])
-        accel = float(self._accel_buf[idx])
-        if tau >= t_total:
-            speed = 0.0
-        elif tau <= t_accel:
-            speed = v0 + accel * tau
-        elif tau <= t_accel + t_const:
-            speed = v0 + accel * t_accel
-        else:
-            speed = float(self._decel_buf[idx]) * (t_total - tau)
-        return self._displacement[idx] / total * speed
+        row = slice(idx, idx + 1)
+        speed = trapezoid_speed(
+            np.maximum(now - self._t_start[row], 0.0),
+            self._t_accel[row],
+            self._t_const[row],
+            self._t_total[row],
+            self._accel_buf[row],
+            decel=self._decel_buf[row],
+            v0=self._v0_buf[row],
+        )[0]
+        return self._displacement[idx] / total * float(speed)
 
     def _begin_waypoint(
         self,
