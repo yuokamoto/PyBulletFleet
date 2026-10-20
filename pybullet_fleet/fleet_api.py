@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from collections import Counter
 from numbers import Real
-from typing import TYPE_CHECKING, Any, Iterable, Mapping, Sequence
+from typing import Any, Iterable, Mapping, Sequence
 from uuid import uuid4
 
 from pybullet_fleet.commands import (
@@ -28,10 +28,6 @@ from pybullet_fleet.commands import (
 )
 from pybullet_fleet.states import RobotState2D, RobotState3D
 from pybullet_fleet.logging_utils import get_lazy_logger
-
-if TYPE_CHECKING:
-    from pybullet_fleet._replan import PathRejection
-    from pybullet_fleet.geometry import Pose
 
 logger = get_lazy_logger(__name__)
 
@@ -130,7 +126,11 @@ class FleetCommandDispatcher:
         source: str = "python",
         command_id: str | None = None,
     ) -> CommandAck:
-        """Apply one or more navigation goals by robot name."""
+        """Apply one or more navigation goals by robot name.
+
+        A target robot provides ``get_pose()``, ``set_goal_pose()`` and
+        ``path_rejection()``, as :class:`~pybullet_fleet.agent.Agent` does.
+        """
         commands = tuple(goals)
         resolved_id = _resolve_command_id(command_id, commands)
         accepted, rejected = self._resolve_targets(command.name for command in commands)
@@ -140,7 +140,7 @@ class FleetCommandDispatcher:
         # A moving robot only takes a goal it can reach within its limits (see
         # Agent.set_path); report the others as rejected before acting.
         for name in list(accepted):
-            rejection = _path_rejection(accepted[name], goal_poses[name])
+            rejection = accepted[name].path_rejection([goal_poses[name]])
             if rejection is not None:
                 rejected[name] = rejection.reason
                 del accepted[name]
@@ -153,7 +153,7 @@ class FleetCommandDispatcher:
         for name in ack.accepted_names:
             agent = accepted[name]
             if agent.set_goal_pose(goal_poses[name]) is False:
-                rejection = _path_rejection(agent, goal_poses[name])
+                rejection = agent.path_rejection([goal_poses[name]])
                 refused[name] = rejection.reason if rejection is not None else "goal refused"
         if refused:
             logger.warning(
@@ -510,22 +510,9 @@ def _new_command_id() -> str:
     return uuid4().hex
 
 
-def _path_rejection(agent: Any, goal: Pose) -> PathRejection | None:
-    """Why ``agent`` would refuse ``goal`` now, or ``None``.
-
-    An agent-like object without ``path_rejection`` never refuses.
-    """
-    check = getattr(agent, "path_rejection", None)
-    return check([goal]) if callable(check) else None
-
-
 def _current_z(agent: Any) -> float:
     """The robot's present height, for a planar goal that does not name one."""
-    get_pose = getattr(agent, "get_pose", None)
-    if not callable(get_pose):
-        return 0.0
-    pose: Any = get_pose()
-    return float(pose.position[2])
+    return float(agent.get_pose().position[2])
 
 
 def _first_command_by_name(commands: Iterable[Any]) -> dict[str, Any]:

@@ -253,10 +253,6 @@ class BatchKinematicController(Controller):
             agent._is_moving = True
             return True
 
-    def path_rejection(self, agent: "Agent", path) -> Optional[str]:
-        """Why ``path`` cannot be taken now, or ``None``. The base accepts every path."""
-        return None
-
     def synchronized_cancel_path(self, agent: "Agent") -> None:
         """Cancel one path without racing a concurrent simulation step."""
         with self._state_lock:

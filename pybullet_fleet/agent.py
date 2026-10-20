@@ -1442,10 +1442,12 @@ class Agent(SimObject):
         # the reported velocity: a batch controller reports the arrival step's
         # average speed until its next flush, after the agent has stopped) or a
         # velocity command still moving it.
+        from pybullet_fleet.controller import KinematicController
+
         base = self._controllers[0] if self._batch_controller is None and self._controllers else None
         under_velocity_command = (
-            base is not None
-            and getattr(base, "_mode", None) is ControllerMode.VELOCITY
+            isinstance(base, KinematicController)
+            and base.mode is ControllerMode.VELOCITY
             and bool(np.any(self._current_velocity))
         )
         under_way = self.is_moving or under_velocity_command

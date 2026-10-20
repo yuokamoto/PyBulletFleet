@@ -157,6 +157,15 @@ class Controller(ABC):
 
         self.params: ControllerParams = params if params is not None else ControllerParams()
 
+    def path_rejection(self, agent: "Agent", path: List[Pose]) -> Optional[str]:
+        """Why ``path`` cannot be taken now, or ``None`` if it can.
+
+        The default accepts every path. A controller that continues the
+        current motion into the new path (``OmniController``) refuses one it
+        cannot reach within its limits.
+        """
+        return None
+
     def _construction_config(self) -> Optional[dict]:
         """Registered type and shared settings, separate from execution state.
 
@@ -419,15 +428,6 @@ class KinematicController(Controller):
         if self._mode == ControllerMode.VELOCITY:
             return True
         return agent.is_moving and self._pose_phase == PosePhase.FORWARD
-
-    def path_rejection(self, agent: "Agent", path: List[Pose]) -> Optional[str]:
-        """Why ``path`` cannot be taken now, or ``None`` if it can.
-
-        The base controller accepts every path. A controller that continues
-        the current motion into the new path (``OmniController``) refuses one
-        it cannot reach within its limits.
-        """
-        return None
 
     def set_path(
         self,
