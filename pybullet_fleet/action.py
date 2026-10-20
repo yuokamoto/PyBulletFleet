@@ -19,7 +19,7 @@ import logging
 import numpy as np
 import pybullet as p
 
-from ._replan import refused_for_now
+from ._replan import refused_until_stopped
 from .geometry import Pose, Path
 from .types import ActionStatus, MovementDirection
 from . import tools
@@ -280,7 +280,7 @@ class MoveAction(Action):
                 final_orientation_align=self.final_orientation_align,
                 direction=self.direction,  # Pass direction parameter (enum or string)
             )
-            if accepted is False and refused_for_now(agent, self.path):
+            if accepted is False and refused_until_stopped(agent, self.path):
                 # The agent is still moving and cannot take this path from
                 # where it is (see Agent.set_path); the motion it has runs on.
                 # Start again on the next update -- once that motion ends, the

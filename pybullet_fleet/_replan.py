@@ -51,10 +51,12 @@ class RefusesPaths(Protocol):
     def path_rejection(self, path: List["Pose"]) -> Optional[PathRejection]: ...
 
 
-def refused_for_now(agent: RefusesPaths, path: Sequence["Pose"]) -> bool:
+def refused_until_stopped(agent: RefusesPaths, path: Sequence["Pose"]) -> bool:
     """Whether ``agent`` refuses ``path`` only until its current motion ends.
 
-    For callers that retry: a permanent refusal must not be retried forever.
+    ``True`` means the same path is taken once the agent stops, so a caller
+    retries it then. ``False`` when the path is taken now or refused for good
+    (a fixed base, an empty path), which must not be retried forever.
     """
     rejection = agent.path_rejection(list(path))
     return rejection is not None and rejection.temporary
