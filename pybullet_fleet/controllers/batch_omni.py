@@ -253,15 +253,10 @@ class BatchOmniController(BatchKinematicController):
             preempt=bool(kwargs.get("preempt", False)),
         )
 
-    def _start_row_path(self, agent: "Agent", request: PathRequest, continue_motion: bool) -> None:
-        idx = self._agent_index[id(agent)]
+    def _begin_row_path(
+        self, idx: int, agent: "Agent", request: PathRequest, now: float, initial_velocity: Optional[np.ndarray]
+    ) -> None:
         path = request.path
-        # Continue from the agent's velocity state, as OmniController does --
-        # but only while a translation is under way.
-        assert self._sim_core is not None
-        now = float(self._sim_core.sim_time)
-        initial_velocity = self.continuation_velocity(agent) if continue_motion else None
-
         self._paths[idx] = list(path)
         self._wp_index[idx] = 0
         if request.final_orientation_align:
@@ -270,16 +265,12 @@ class BatchOmniController(BatchKinematicController):
         else:
             self._align_final_orient[idx] = False
         self._begin_waypoint(idx, agent, path[0], now, initial_velocity)
-        # The velocity state is the new trajectory's from now on, not the
-        # motion it replaced: a path started from rest is at rest, so a
-        # replacement later in this step (brake(), another goal) continues
-        # from the right speed.
+
+    def _row_start_velocity(self, idx: int) -> np.ndarray:
         total = float(self._total_distance[idx])
-        if self._phase[idx] == _PHASE_FORWARD and total > 1e-9:
-            agent._current_velocity[:] = self._displacement[idx] / total * float(self._v0_buf[idx])
-        else:
-            agent._current_velocity[:] = 0.0
-        agent._current_angular_velocity = 0.0
+        if self._phase[idx] != _PHASE_FORWARD or total <= 1e-9:
+            return np.zeros(3)
+        return self._displacement[idx] / total * float(self._v0_buf[idx])
 
     def _begin_waypoint(
         self,

@@ -259,12 +259,10 @@ class BatchDifferentialController(BatchKinematicController):
             preempt=bool(kwargs.get("preempt", False)),
         )
 
-    def _start_row_path(self, agent: "Agent", request: PathRequest, continue_motion: bool) -> None:
-        idx = self._agent_index[id(agent)]
+    def _begin_row_path(
+        self, idx: int, agent: "Agent", request: PathRequest, now: float, initial_velocity: Optional[np.ndarray]
+    ) -> None:
         path = request.path
-        assert self._sim_core is not None
-        now = float(self._sim_core.sim_time)
-        initial_velocity = self.continuation_velocity(agent) if continue_motion else None
         self._paths[idx] = list(path)
         self._wp_index[idx] = 0
         # Unset means the agent's default_direction, as the per-agent
@@ -277,14 +275,13 @@ class BatchDifferentialController(BatchKinematicController):
         else:
             self._align_final_orient[idx] = False
         self._begin_waypoint(idx, agent, path[0], now, direction=direction, initial_velocity=initial_velocity)
-        # The velocity state is the new trajectory's from now on (see
-        # BatchOmniController._start_row_path); a turn in place starts at rest.
+
+    def _row_start_velocity(self, idx: int) -> np.ndarray:
+        # A turn in place starts at rest.
         total = float(self._fwd_total_distance[idx])
-        if self._phase[idx] == _PHASE_FORWARD and total > 1e-9:
-            agent._current_velocity[:] = self._fwd_displacement[idx] / total * float(self._fwd_v0[idx])
-        else:
-            agent._current_velocity[:] = 0.0
-        agent._current_angular_velocity = 0.0
+        if self._phase[idx] != _PHASE_FORWARD or total <= 1e-9:
+            return np.zeros(3)
+        return self._fwd_displacement[idx] / total * float(self._fwd_v0[idx])
 
     def _translating(self, idx: int) -> bool:
         # Driving straight; a turn in place has no linear velocity to continue.

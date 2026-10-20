@@ -345,8 +345,35 @@ class BatchKinematicController(GoalReplacementPolicy, Controller):
             _log_dropped(str(agent.name or agent.object_id), previous, reason)
 
     def _start_row_path(self, agent: "Agent", request: PathRequest, continue_motion: bool) -> None:
-        """Make ``request`` the agent's active path. Subclasses implement it."""
+        """Make ``request`` the agent's active path.
+
+        With ``continue_motion`` the new trajectory starts from the agent's
+        velocity state (:meth:`continuation_velocity`), else from rest. The
+        velocity state is then the new trajectory's start, not the motion it
+        replaced, so a replacement later in this step (``brake()``, another
+        goal) continues from the right speed.
+        """
+        if self._sim_core is None:
+            raise RuntimeError(f"{type(self).__name__} must be attached to a sim_core before set_path.")
+        idx = self._agent_index[id(agent)]
+        initial_velocity = self.continuation_velocity(agent) if continue_motion else None
+        self._begin_row_path(idx, agent, request, float(self._sim_core.sim_time), initial_velocity)
+        agent._current_velocity[:] = self._row_start_velocity(idx)
+        agent._current_angular_velocity = 0.0
+
+    def _begin_row_path(
+        self, idx: int, agent: "Agent", request: PathRequest, now: float, initial_velocity: Optional[np.ndarray]
+    ) -> None:
+        """Set row ``idx``'s path and start its first trajectory at ``now`` from
+        ``initial_velocity`` (``None``: from rest). Subclasses implement it."""
         raise NotImplementedError
+
+    def _row_start_velocity(self, idx: int) -> np.ndarray:
+        """World-frame velocity row ``idx``'s trajectory starts with.
+
+        The base never moves a row; subclasses that do override this.
+        """
+        return np.zeros(3)
 
     def _row_finished(self, idx: int) -> None:
         """The row's path has ended (the agent is at rest): start its pending path, if any.
