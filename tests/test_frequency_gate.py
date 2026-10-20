@@ -172,14 +172,20 @@ class TestTheCoreUsesIt:
         # Not at once at 1.8 s for the missed beats: on the grid again at 2.0 s.
         assert checks == [0.5, 2.0]
 
-    def test_a_timestep_change_keeps_the_schedule(self, sim):
+    @pytest.mark.parametrize("via", ["pacing", "params"])
+    def test_a_timestep_change_keeps_the_schedule(self, sim, via):
         seen = []
         sim.register_callback(lambda sc, dt: seen.append((round(sc.sim_time, 9), dt)), frequency=2.0)
         for _ in range(5):  # 0.1 .. 0.5 s
             sim.step_once()
-        sim._set_simulation_pacing(None, 0.05, source="test")
+        if via == "pacing":
+            sim._set_simulation_pacing(None, 0.05, source="test")
+        else:
+            sim.params.timestep = 0.05
+        assert sim._schedule_time() == pytest.approx(0.5)  # the past steps keep their timestep
         for _ in range(10):  # 0.55 .. 1.0 s
             sim.step_once()
+        assert sim._schedule_time() == pytest.approx(sim.sim_time)
         assert [t for t, _ in seen] == [0.5, 1.0]
         assert seen[-1][1] == pytest.approx(0.5)
 

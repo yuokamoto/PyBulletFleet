@@ -453,8 +453,8 @@ class MultiRobotSimulationCore:
         self._step_count: int = 0
         # The simulation clock: the one source of time; ``sim_time`` reads it.
         self._elapsed_sim_time: float = 0.0
-        # The step and time _schedule_time() counts whole timesteps from.
-        self._schedule_origin: Tuple[int, float] = (0, 0.0)
+        # The step, time and timestep _schedule_time() counts whole timesteps from.
+        self._schedule_origin: Tuple[int, float, float] = (0, 0.0, params.timestep)
         self._enable_time_profiling: bool = params.enable_time_profiling
 
         # --- Fully private (no external access) ---
@@ -762,7 +762,6 @@ class MultiRobotSimulationCore:
         if target_rtf is not None:
             self._params.target_rtf = target_rtf
         if timestep is not None:
-            self._schedule_origin = (self._step_count, self._schedule_time())
             self._params.timestep = timestep
             p.setTimeStep(timestep, physicsClientId=self._client)
         self._pacing_rebase_requested = True
@@ -1027,12 +1026,13 @@ class MultiRobotSimulationCore:
         ``sim_time`` adds one timestep per step, so its error grows with the
         run: at a 1 ms timestep it passes a millionth of a timestep within
         minutes, enough to move a due time by a step. This counts whole
-        timesteps from an origin that moves whenever the timestep changes or
-        the clock is restored, so its error stays at the rounding of one
-        product.
+        timesteps from an origin that moves when the clock is restored and,
+        at the next step, when the timestep has changed -- through pacing or
+        by assigning ``params.timestep`` -- so its error stays at the rounding
+        of one product.
         """
-        step, time_at_step = self._schedule_origin
-        return time_at_step + (self._step_count - step) * self._params.timestep
+        step, time_at_step, timestep = self._schedule_origin
+        return time_at_step + (self._step_count - step) * timestep
 
     def get_completed_step_boundary(self) -> tuple[int, float]:
         """Return the completed step and canonical elapsed time outside a step."""
@@ -1099,7 +1099,7 @@ class MultiRobotSimulationCore:
             raise ValueError("Completed-step time does not match the fixed timestep")
         self._step_count = step
         self._elapsed_sim_time = elapsed_time
-        self._schedule_origin = (step, elapsed_time)
+        self._schedule_origin = (step, elapsed_time, self._params.timestep)
         self._resume_ready = True
 
     @property
@@ -3818,7 +3818,7 @@ class MultiRobotSimulationCore:
         self._step_count = 0
         self._collision_count = 0
         self._elapsed_sim_time = 0.0
-        self._schedule_origin = (0, 0.0)
+        self._schedule_origin = (0, 0.0, self._params.timestep)
         self._resume_ready = False
         self._collision_check_gate.reset()
         self._monitor_update_gate.reset()
@@ -4715,6 +4715,9 @@ class MultiRobotSimulationCore:
             # of this step, so the clock and counter move first: sim_time is the
             # time of the state any later code sees (object update, callbacks,
             # plugins, collision check, POST_STEP, and outside the step).
+            if self._params.timestep != self._schedule_origin[2]:
+                # A new timestep: the schedule counts its steps from here.
+                self._schedule_origin = (self._step_count, self._schedule_time(), self._params.timestep)
             self._elapsed_sim_time += self._params.timestep
             self._step_count += 1
             # Poses written from pre_step are still pending (buffered).
