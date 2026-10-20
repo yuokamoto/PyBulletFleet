@@ -182,8 +182,10 @@ velocity command there is no path to wait for, so `wait_complete` brakes like
 Set the mode for one agent, for every agent of a manager, or globally:
 
 ```python
-# One agent.
-agent.controller_params.goal_replacement = "reject"
+from pybullet_fleet.types import GoalReplacement
+
+# One agent (the string value "reject" works too).
+agent.controller_params.goal_replacement = GoalReplacement.REJECT
 
 # Every agent of a manager that does not set its own.
 manager = AgentManager(sim_core=sim, fleet_controller={"type": "batch_omni", "goal_replacement": "wait_complete"})
