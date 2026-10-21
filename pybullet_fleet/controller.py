@@ -59,7 +59,7 @@ from two_point_interpolation import TwoPointInterpolation
 
 from pybullet_fleet._tpi import build_tpi, build_tpi_from_speed, extract_phase_params
 from pybullet_fleet._replacement import GoalReplacementPolicy
-from pybullet_fleet._replan import HEADING_TOL, REST_SPEED, PathRequest, replacement_rejection
+from pybullet_fleet._replan import HEADING_TOL, PathRequest
 from pybullet_fleet._tpi_state import capture_tpi_state, restore_tpi_state
 from pybullet_fleet._motion_planning import heading_toward
 from pybullet_fleet.controller_params import ControllerParams
@@ -1067,13 +1067,7 @@ class OmniController(KinematicController):
         motion. At rest every path can be taken. See
         :mod:`pybullet_fleet._replan`.
         """
-        if not path or not self._under_way(agent):
-            return None
-        pose = agent.get_pose()
-        t0 = agent.sim_core.sim_time if agent.sim_core is not None else 0.0
-        return replacement_rejection(
-            self.params, pose.position, pose.orientation, agent._current_velocity, path[0].position, t0
-        )
+        return self._omni_obstacle(agent, path)
 
     # -- Velocity kinematics -------------------------------------------
 
@@ -1325,21 +1319,7 @@ class DifferentialController(KinematicController):
         ``BACKWARD`` or ``AUTO`` for a goal behind), the rule is the omni one
         (see :mod:`pybullet_fleet._replan`) with the forward-axis limits.
         """
-        if not path or not self._under_way(agent):
-            return None
-        velocity = np.array(agent._current_velocity, dtype=float)
-        speed = float(np.linalg.norm(velocity))
-        if speed < REST_SPEED:
-            return None
-        requested = direction if direction is not None else self.params.default_direction
-        _, target_quat, _, distance = heading_toward(agent.get_pose(), path[0], requested, self.params.navigation_2d)
-        pose = agent.get_pose()
-        if distance > 1e-6:
-            turn = quat_angle_between(tuple(pose.orientation), tuple(target_quat))
-            if turn > HEADING_TOL:
-                return f"goal needs a {math.degrees(turn):.3g} degree turn in place"
-        t0 = agent.sim_core.sim_time if agent.sim_core is not None else 0.0
-        return replacement_rejection(self.params, pose.position, pose.orientation, velocity, path[0].position, t0)
+        return self._differential_obstacle(agent, path, direction)
 
     def _init_pose_trajectory(self, agent: "Agent", goal: Pose, **kwargs) -> None:
         """Initialize rotation trajectory for differential drive (ROTATE phase).

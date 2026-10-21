@@ -29,7 +29,7 @@ from typing import TYPE_CHECKING, List, Optional
 
 import numpy as np
 
-from pybullet_fleet._replan import HEADING_TOL, REST_SPEED, PathRequest, replacement_rejection
+from pybullet_fleet._replan import HEADING_TOL, PathRequest
 from pybullet_fleet._motion_planning import heading_toward
 from pybullet_fleet._tpi import (
     build_tpi,
@@ -294,27 +294,7 @@ class BatchDifferentialController(BatchKinematicController):
         :meth:`DifferentialController._replacement_obstacle
         <pybullet_fleet.controller.DifferentialController._replacement_obstacle>`.
         """
-        idx = self._agent_index.get(id(agent))
-        velocity = self.continuation_velocity(agent)
-        if idx is None or velocity is None or not path or self._sim_core is None:
-            return None
-        now = float(self._sim_core.sim_time)
-        if float(np.linalg.norm(velocity)) < REST_SPEED:
-            return None
-        # The direction the new path will use (see _start_row_path), not the
-        # current path's.
-        requested = direction if direction is not None else agent.controller_params.default_direction
-        _, target_quat, _, distance = heading_toward(
-            agent.get_pose(), path[0], requested, agent.controller_params.navigation_2d
-        )
-        current = agent.get_pose()
-        if distance > 1e-6:
-            turn = quat_angle_between(np.asarray(current.orientation, dtype=np.float64), target_quat)
-            if turn > HEADING_TOL:
-                return f"goal needs a {math.degrees(turn):.3g} degree turn in place"
-        return replacement_rejection(
-            agent.controller_params, current.position, current.orientation, velocity, path[0].position, now
-        )
+        return self._differential_obstacle(agent, path, direction)
 
     # ------------------------------------------------------------------ #
     # Waypoint lifecycle (per-agent, called rarely)

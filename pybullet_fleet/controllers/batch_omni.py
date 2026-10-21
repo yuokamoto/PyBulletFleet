@@ -25,7 +25,7 @@ from typing import TYPE_CHECKING, List, Optional
 
 import numpy as np
 
-from pybullet_fleet._replan import PathRequest, replacement_rejection
+from pybullet_fleet._replan import PathRequest
 from pybullet_fleet._tpi import (
     build_tpi,
     build_tpi_from_speed,
@@ -217,14 +217,7 @@ class BatchOmniController(BatchKinematicController):
         The motion is :meth:`continuation_velocity`: the agent's velocity
         while a translation is under way.
         """
-        velocity = self.continuation_velocity(agent)
-        if velocity is None or not path or self._sim_core is None:
-            return None
-        now = float(self._sim_core.sim_time)
-        current = agent.get_pose()
-        return replacement_rejection(
-            agent.controller_params, current.position, current.orientation, velocity, path[0].position, now
-        )
+        return self._omni_obstacle(agent, path)
 
     def set_path(self, agent: "Agent", path: List[Pose], final_orientation_align: bool = True, **kwargs) -> bool:
         """Set a waypoint path.
