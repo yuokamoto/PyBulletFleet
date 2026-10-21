@@ -172,6 +172,18 @@ decides what happens then:
 | `"reject"` | Refused: `set_path()` / `set_goal_pose()` return `False` and the current motion and path continue unchanged. | Taken at once. |
 | `"wait_complete"` | Held until the current path is finished, then started from rest. | Also held: the current goal has priority. |
 
+In short: a goal the agent can continue into -- further along its line of
+motion, beyond the braking distance, such as an extended target -- is always
+taken at once and keeps the speed, whatever the mode (`reject` included); the
+mode decides only what happens to the other goals. The exception is
+`wait_complete`, which holds every goal while a path is in progress.
+
+To stop at a point further along the line, send that point as the goal: the
+agent continues into it and comes to rest there (if it is beyond the braking
+distance; a closer one is a goal it cannot continue into). To stop at points on
+the way and then go on, send them together as the waypoints of one path: every
+waypoint is reached at rest.
+
 At rest every goal is taken at once. A held goal (`brake`, `wait_complete`) is
 accepted: `set_path()` returns `True`. Only the latest one is kept; a newer
 request replaces it, and `stop()`, `brake()` or a velocity command drops it.
