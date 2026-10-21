@@ -60,7 +60,7 @@ from pybullet_fleet._tpi import build_tpi, build_tpi_from_speed, extract_phase_p
 from pybullet_fleet._replacement import GoalReplacementPolicy
 from pybullet_fleet._replan import HEADING_TOL, REST_SPEED, PathRequest, replacement_rejection
 from pybullet_fleet._tpi_state import capture_tpi_state, restore_tpi_state
-from pybullet_fleet._motion_planning import align_x_axis_quat
+from pybullet_fleet._motion_planning import heading_toward
 from pybullet_fleet.controller_params import ControllerParams
 
 if TYPE_CHECKING:
@@ -462,17 +462,6 @@ class KinematicController(GoalReplacementPolicy, Controller):
         override this (see :mod:`pybullet_fleet._replan`).
         """
         return None
-
-    def path_rejection(self, agent: "Agent", path: List[Pose], direction: Optional[MovementDirection] = None) -> Optional[str]:
-        """Why :meth:`set_path` would refuse ``path`` now, or ``None`` if it would take it.
-
-        Only ``goal_replacement="reject"`` refuses a path: one that cannot
-        continue the current motion (see :meth:`_replacement_obstacle`). The
-        other modes take every path.
-        """
-        if not path or self.params._eff_goal_replacement() is not GoalReplacement.REJECT:
-            return None
-        return self._replacement_obstacle(agent, path, direction)
 
     def pending_path(self) -> Optional[PathRequest]:
         """The accepted path waiting for the agent to stop, or ``None``."""
@@ -1322,44 +1311,6 @@ class DifferentialController(KinematicController):
 
     # -- Pose (TPI) kinematics ----------------------------------------
 
-    def _heading_for(self, agent: "Agent", goal: Pose, direction: Optional[MovementDirection]):
-        """``(direction, target_quat, displacement, distance)`` for driving to ``goal``.
-
-        ``direction`` is resolved (``AUTO`` picks ``BACKWARD`` when the goal is
-        more than 90 degrees behind the heading); ``target_quat`` points the
-        body x-axis along the travel (or against it, backing up).
-        """
-        if direction is None:
-            direction = MovementDirection.FORWARD
-        if isinstance(direction, str):
-            direction = MovementDirection(direction)
-
-        current_pose = agent.get_pose()
-        current_pos = np.array(current_pose.position)
-        goal_pos = np.array(goal.position)
-        if self.params.navigation_2d:
-            goal_pos[2] = current_pos[2]
-        displacement = goal_pos - current_pos
-        distance = float(np.linalg.norm(displacement))
-
-        if direction == MovementDirection.AUTO:
-            dist_2d = float(np.linalg.norm(displacement[:2]))
-            if dist_2d > 1e-6:
-                goal_heading = math.atan2(displacement[1], displacement[0])
-                delta = (goal_heading - current_pose.yaw + math.pi) % (2 * math.pi) - math.pi
-                direction = MovementDirection.BACKWARD if abs(delta) > math.pi / 2 else MovementDirection.FORWARD
-            else:
-                direction = MovementDirection.FORWARD
-
-        start_quat = np.array(current_pose.orientation)
-        if distance > 1e-6:
-            unit = displacement / distance
-            x_axis_target = -unit if direction == MovementDirection.BACKWARD else unit
-            target_quat = align_x_axis_quat(start_quat, np.array(goal.orientation), x_axis_target)
-        else:
-            target_quat = np.array(goal.orientation)
-        return direction, target_quat, displacement, distance
-
     def _replacement_obstacle(
         self, agent: "Agent", path: List[Pose], direction: Optional[MovementDirection] = None
     ) -> Optional[str]:
@@ -1378,7 +1329,7 @@ class DifferentialController(KinematicController):
         if speed < REST_SPEED:
             return None
         requested = direction if direction is not None else self.params.default_direction
-        _, target_quat, _, distance = self._heading_for(agent, path[0], requested)
+        _, target_quat, _, distance = heading_toward(agent.get_pose(), path[0], requested, self.params.navigation_2d)
         pose = agent.get_pose()
         if distance > 1e-6:
             turn = quat_angle_between(tuple(pose.orientation), tuple(target_quat))
@@ -1394,8 +1345,8 @@ class DifferentialController(KinematicController):
         continues the current motion), the forward trajectory starts from the
         speed along the line instead of from rest.
         """
-        direction, target_quat, direction_vec, distance = self._heading_for(
-            agent, goal, kwargs.get("direction", MovementDirection.FORWARD)
+        direction, target_quat, direction_vec, distance = heading_toward(
+            agent.get_pose(), goal, kwargs.get("direction", MovementDirection.FORWARD), self.params.navigation_2d
         )
         self._movement_direction = direction
 

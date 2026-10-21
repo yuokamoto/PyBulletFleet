@@ -195,6 +195,11 @@ The global default is `_defaults.CONTROLLER["goal_replacement"]`, which the
 `PBF_CONTROLLER_GOAL_REPLACEMENT` environment variable overrides (see
 [Defaults and environment overrides](../configuration/reference.md#defaults-and-environment-overrides)).
 
+The mode is read for each request, so a change applies to the paths requested
+after it, also while the agent moves. A path already held keeps the decision
+made when it was held: it starts once the agent stops (or the current path
+ends), whatever the mode is by then.
+
 Under `reject`, check the result:
 
 ```python

@@ -16,6 +16,10 @@ The rules (see :class:`~pybullet_fleet.types.GoalReplacement`):
   ``brake`` -- or ``wait_complete`` with nothing to wait for (a velocity
   command, or :meth:`Agent.brake <pybullet_fleet.agent.Agent.brake>`
   preempting) -- brakes along the motion and holds it until the agent stops.
+
+The mode is read for each request: changing it affects the paths requested
+afterwards. A held path keeps the decision made when it was held and starts
+once the agent stops (or the current path ends), whatever the mode is then.
 """
 
 from __future__ import annotations
@@ -96,6 +100,19 @@ class GoalReplacementPolicy:
             self._hold_request(agent, request)
             return True
         raise ValueError(f"Unknown goal_replacement {mode!r}")
+
+    def path_rejection(
+        self, agent: "Agent", path: "list[Pose]", direction: Optional[MovementDirection] = None
+    ) -> Optional[str]:
+        """Why :meth:`_replace_path` would refuse ``path`` now, or ``None`` if it would take it.
+
+        Only ``goal_replacement="reject"`` refuses a path: one that cannot
+        continue the current motion (see ``_replacement_obstacle``). The other
+        modes take every path.
+        """
+        if not path or self._replacement_params(agent)._eff_goal_replacement() is not GoalReplacement.REJECT:
+            return None
+        return self._replacement_obstacle(agent, path, direction)
 
     # -- hooks the controller implements ---------------------------------
 

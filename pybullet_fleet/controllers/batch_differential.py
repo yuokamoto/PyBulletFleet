@@ -28,9 +28,9 @@ import math
 from typing import TYPE_CHECKING, List, Optional
 
 import numpy as np
-from scipy.spatial.transform import Rotation as R
 
 from pybullet_fleet._replan import HEADING_TOL, REST_SPEED, PathRequest, replacement_rejection
+from pybullet_fleet._motion_planning import heading_toward
 from pybullet_fleet._tpi import (
     build_tpi,
     build_tpi_from_speed,
@@ -305,7 +305,9 @@ class BatchDifferentialController(BatchKinematicController):
         # The direction the new path will use (see _start_row_path), not the
         # current path's.
         requested = direction if direction is not None else agent.controller_params.default_direction
-        _, target_quat, _, distance = self._heading_target(agent, path[0], requested)
+        _, target_quat, _, distance = heading_toward(
+            agent.get_pose(), path[0], requested, agent.controller_params.navigation_2d
+        )
         current = agent.get_pose()
         if distance > 1e-6:
             turn = quat_angle_between(np.asarray(current.orientation, dtype=np.float64), target_quat)
@@ -336,77 +338,6 @@ class BatchDifferentialController(BatchKinematicController):
     # Waypoint lifecycle (per-agent, called rarely)
     # ------------------------------------------------------------------ #
 
-    def _heading_target(self, agent: "Agent", goal: Pose, direction: Optional[MovementDirection]):
-        """``(direction, target_quat, displacement, distance)`` for driving to ``goal``.
-
-        Mirrors ``DifferentialController._heading_for``: ``AUTO`` picks
-        ``BACKWARD`` for a goal more than 90 degrees behind the heading, and
-        ``target_quat`` points the body x-axis along the travel (or against it).
-        """
-        current = agent.get_pose()
-        start_pos = np.asarray(current.position, dtype=np.float64)
-        goal_pos = np.asarray(goal.position, dtype=np.float64)
-        if agent.controller_params.navigation_2d:
-            goal_pos = goal_pos.copy()
-            goal_pos[2] = start_pos[2]
-
-        direction_vec = goal_pos - start_pos
-        total_distance = float(np.linalg.norm(direction_vec))
-
-        if direction is None:
-            direction = MovementDirection.FORWARD
-        if isinstance(direction, str):
-            direction = MovementDirection(direction)
-
-        # AUTO: choose FORWARD or BACKWARD based on heading delta.
-        if direction == MovementDirection.AUTO:
-            if total_distance > 1e-6:
-                goal_heading = math.atan2(direction_vec[1], direction_vec[0])
-                qx, qy, qz, qw = (
-                    float(current.orientation[0]),
-                    float(current.orientation[1]),
-                    float(current.orientation[2]),
-                    float(current.orientation[3]),
-                )
-                current_yaw = math.atan2(2.0 * (qw * qz + qx * qy), 1.0 - 2.0 * (qy * qy + qz * qz))
-                delta = goal_heading - current_yaw
-                delta = (delta + math.pi) % (2.0 * math.pi) - math.pi
-                direction = MovementDirection.BACKWARD if abs(delta) > math.pi / 2.0 else MovementDirection.FORWARD
-            else:
-                direction = MovementDirection.FORWARD
-
-        # Target orientation: align x-axis toward or away from goal.
-        if total_distance > 1e-6:
-            direction_unit = direction_vec / total_distance
-            if direction == MovementDirection.BACKWARD:
-                x_axis_target = -direction_unit
-            else:
-                x_axis_target = direction_unit
-
-            goal_rot = R.from_quat(goal.orientation)
-            goal_mat = goal_rot.as_matrix()
-            x_axis_goal = goal_mat[:, 0]
-            z_axis_goal = goal_mat[:, 2]
-
-            alignment = float(np.dot(x_axis_goal, x_axis_target))
-            if alignment > 0.95:
-                target_quat = np.asarray(goal.orientation, dtype=np.float64)
-            else:
-                y_axis = np.cross(z_axis_goal, x_axis_target)
-                y_norm = float(np.linalg.norm(y_axis))
-                if y_norm < 1e-6:
-                    fallback_up = np.array([0.0, 0.0, 1.0]) if abs(x_axis_target[2]) < 0.9 else np.array([0.0, 1.0, 0.0])
-                    y_axis = np.cross(fallback_up, x_axis_target)
-                    y_axis = y_axis / np.linalg.norm(y_axis)
-                else:
-                    y_axis = y_axis / y_norm
-                z_axis_final = np.cross(x_axis_target, y_axis)
-                rot_mat = np.column_stack([x_axis_target, y_axis, z_axis_final])
-                target_quat = np.asarray(R.from_matrix(rot_mat).as_quat(), dtype=np.float64)
-        else:
-            target_quat = np.asarray(goal.orientation, dtype=np.float64)
-        return direction, target_quat, direction_vec, total_distance
-
     def _begin_waypoint(
         self,
         idx: int,
@@ -426,7 +357,9 @@ class BatchDifferentialController(BatchKinematicController):
         # Resolve direction: explicit arg > stored original > FORWARD
         if direction is None:
             direction = self._original_direction[idx]
-        direction, target_quat, direction_vec, total_distance = self._heading_target(agent, goal, direction)
+        direction, target_quat, direction_vec, total_distance = heading_toward(
+            agent.get_pose(), goal, direction, agent.controller_params.navigation_2d
+        )
         current = agent.get_pose()
         start_pos = np.asarray(current.position, dtype=np.float64)
         start_quat = np.asarray(current.orientation, dtype=np.float64)

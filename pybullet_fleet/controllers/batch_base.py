@@ -274,16 +274,6 @@ class BatchKinematicController(GoalReplacementPolicy, Controller):
         """
         return None
 
-    def path_rejection(self, agent: "Agent", path, direction: Optional[MovementDirection] = None) -> Optional[str]:
-        """Why ``path`` would be refused now, or ``None``.
-
-        Only ``goal_replacement="reject"`` refuses a path that cannot continue
-        the current motion; the other modes take every path.
-        """
-        if not path or agent.controller_params._eff_goal_replacement() is not GoalReplacement.REJECT:
-            return None
-        return self._replacement_obstacle(agent, path, direction)
-
     def continuation_velocity(self, agent: "Agent") -> Optional[np.ndarray]:
         """World-frame velocity a new path would continue from, or ``None``.
 

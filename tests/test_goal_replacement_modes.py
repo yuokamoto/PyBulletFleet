@@ -109,6 +109,11 @@ def _cruise(sim, agent, goal=CRUISE_GOAL):
     agent.set_path(_goal(goal), auto_approach=False, final_orientation_align=False)
     for _ in range(int(VMAX / ACCEL / DT) + 5):
         sim.step_once()
+    # Still on the way, at full speed: the profile speed, not a batch row's
+    # reported last-step average.
+    controller = agent._batch_controller or agent._controllers[0]
+    assert agent.is_moving
+    assert np.linalg.norm(controller.continuation_velocity(agent)) == pytest.approx(VMAX, rel=1e-6)
     return _xy(agent)
 
 
