@@ -85,6 +85,15 @@ def build_tpi(
     return tpi
 
 
+#: The last solve of :func:`try_build_tpi`: ``(inputs, result)``. A goal set on
+#: a moving agent is checked (:func:`pybullet_fleet._replan.replacement_rejection`)
+#: and then built with the very same solver inputs; the build reuses the check's
+#: solution instead of solving twice. Only an exact match of every input is
+#: reused, and a solved trajectory is never modified afterwards, so sharing it
+#: is safe. One entry, swapped as a whole (atomic under the GIL).
+_last_solve: Optional[Tuple[tuple, Optional[TwoPointInterpolation]]] = None
+
+
 def try_build_tpi(
     p0: float,
     pe: float,
@@ -118,16 +127,22 @@ def try_build_tpi(
         The calculated trajectory, or ``None`` when the solver rejects the
         request as infeasible.
     """
+    global _last_solve
     dec = accel if decel is None else decel
     if abs(v0) <= vmax * (1.0 + _V0_OVER_VMAX_TOL):
         # The solver treats v0 == vmax as exceeding it.
         v0 = max(-vmax * _V0_CAP, min(float(v0), vmax * _V0_CAP))
-    tpi = TwoPointInterpolation()
+    key = (p0, pe, vmax, accel, t0, v0, ve, dec)
+    last = _last_solve
+    if last is not None and last[0] == key:
+        return last[1]
+    tpi: Optional[TwoPointInterpolation] = TwoPointInterpolation()
     try:
         tpi.init(p0=p0, pe=pe, acc_max=accel, vmax=vmax, t0=t0, v0=v0, ve=ve, dec_max=dec)
         tpi.calc_trajectory()
     except ValueError:
-        return None
+        tpi = None
+    _last_solve = (key, tpi)
     return tpi
 
 
