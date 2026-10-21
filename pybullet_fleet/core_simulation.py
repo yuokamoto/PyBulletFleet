@@ -1935,7 +1935,8 @@ class MultiRobotSimulationCore:
         cell_size_set = self._cached_cell_size is not None
         for object_id in ids:
             if object_id in kinematic:
-                self._update_object_aabb(object_id)
+                # One grid update per object (the AABB update would do one too).
+                self._update_object_aabb(object_id, update_grid=False)
                 if cell_size_set:
                     self._update_object_spatial_grid(object_id)
 
@@ -2110,6 +2111,14 @@ class MultiRobotSimulationCore:
         self._moved_this_step.update(self._sim_objects_dict)
         self._recheck_stationary_pairs = True
 
+    def _fits_one_cell(self, object_id: int, margin: float) -> bool:
+        """Whether the object's AABB plus ``margin`` is no larger than a cell on any axis."""
+        aabb = self._cached_aabbs_dict.get(object_id)
+        if aabb is None or self._cached_cell_size is None:
+            return False
+        limit = self._cached_cell_size - margin
+        return aabb[1][0] - aabb[0][0] <= limit and aabb[1][1] - aabb[0][1] <= limit and aabb[1][2] - aabb[0][2] <= limit
+
     def _get_overlapping_cells(self, object_id: int, margin: float = 0.0) -> List[Tuple[int, int, int]]:
         """
         Get all grid cells that overlap with an object's AABB plus margin.
@@ -2139,11 +2148,18 @@ class MultiRobotSimulationCore:
 
         aabb = self._cached_aabbs_dict[object_id]
         aabb_min, aabb_max = aabb[0], aabb[1]
+        cell_size = cast(float, self._cached_cell_size)
+        floor = math.floor
 
-        # Calculate cell range for each dimension
-        x_range = range(self._coord_to_cell(aabb_min[0] - margin), self._coord_to_cell(aabb_max[0] + margin) + 1)
-        y_range = range(self._coord_to_cell(aabb_min[1] - margin), self._coord_to_cell(aabb_max[1] + margin) + 1)
-        z_range = range(self._coord_to_cell(aabb_min[2] - margin), self._coord_to_cell(aabb_max[2] + margin) + 1)
+        # Cell range for each dimension (same rounding as _coord_to_cell).
+        x0, x1 = int(floor((aabb_min[0] - margin) / cell_size)), int(floor((aabb_max[0] + margin) / cell_size))
+        y0, y1 = int(floor((aabb_min[1] - margin) / cell_size)), int(floor((aabb_max[1] + margin) / cell_size))
+        z0, z1 = int(floor((aabb_min[2] - margin) / cell_size)), int(floor((aabb_max[2] + margin) / cell_size))
+        if x0 == x1 and y0 == y1 and z0 == z1:
+            return [(x0, y0, z0)]  # the common case: a small body in one cell
+        x_range = range(x0, x1 + 1)
+        y_range = range(y0, y1 + 1)
+        z_range = range(z0, z1 + 1)
 
         # Generate all cell combinations
         return [(x, y, z) for x in x_range for y in y_range for z in z_range]
@@ -2202,10 +2218,17 @@ class MultiRobotSimulationCore:
 
         # Compute new cells
         margin = self._collision_broadphase_margin()
-        if margin > 0:
-            # Each object contributes half the pair clearance. This may still
-            # be a single cell when the enlarged AABB fits inside it.
+        if margin > 0 and not self._fits_one_cell(object_id, margin):
+            # Larger than a cell with the clearance: register every cell the
+            # AABB enlarged by half the pair clearance touches.
             cells = self._get_overlapping_cells(object_id, margin / 2)
+        elif margin > 0:
+            # No larger than a cell with the clearance: its centre cell is
+            # enough. Two such bodies within the clearance have centres less
+            # than a cell apart, so the 27-cell neighbour search finds them,
+            # and a multi-cell body is registered wherever it reaches.
+            aabb = self._cached_aabbs_dict[object_id]
+            cells = [tuple(self._coord_to_cell(0.5 * (aabb[0][d] + aabb[1][d])) for d in range(3))]
         elif self._should_use_multi_cell_registration(object_id):
             cells = self._get_overlapping_cells(object_id)
         else:
@@ -3240,6 +3263,8 @@ class MultiRobotSimulationCore:
 
         pairs = set()
         tested_pairs = set()  # Track already-tested (i, j) pairs to avoid duplicate AABB checks
+        hybrid = self._params.collision_detection_method == CollisionDetectionMethod.HYBRID
+        physics_objects = self._physics_objects
 
         # OPTIMIZATION: Only iterate through moved objects instead of all objects
         # This dramatically reduces computation when few objects move (e.g., 10 moved out of 1000 total)
@@ -3267,6 +3292,9 @@ class MultiRobotSimulationCore:
             aabb_i = self._cached_aabbs_dict.get(obj_id_i)
             if aabb_i is None:
                 continue
+            (i0x, i0y, i0z), (i1x, i1y, i1z) = aabb_i
+            i_2d = mode_i == CollisionMode.NORMAL_2D
+            i_physics = hybrid and obj_id_i in physics_objects
 
             # Choose appropriate neighbor offsets based on collision mode (2D: 9 neighbors, 3D: 27 neighbors)
             offsets = self._NEIGHBOR_OFFSETS_2D if mode_i == CollisionMode.NORMAL_2D else self._NEIGHBOR_OFFSETS_3D
@@ -3315,16 +3343,16 @@ class MultiRobotSimulationCore:
                         # Reject pairs separated beyond the margin on any axis.
                         # NORMAL_2D still requires actual Z overlap, even when
                         # both objects occupy the same spatial-grid Z cell.
-                        margin = broadphase_margin
-                        if self._params.collision_detection_method == CollisionDetectionMethod.HYBRID and (
-                            obj_id_i in self._physics_objects or obj_id_j in self._physics_objects
-                        ):
-                            margin = 0.0
-                        z_margin = 0.0 if CollisionMode.NORMAL_2D in (mode_i, mode_j) else margin
-                        margins = (margin, margin, z_margin)
-                        if any(
-                            aabb_i[1][d] + margins[d] < aabb_j[0][d] or aabb_i[0][d] - margins[d] > aabb_j[1][d]
-                            for d in range(3)
+                        margin = 0.0 if hybrid and (i_physics or obj_id_j in physics_objects) else broadphase_margin
+                        z_margin = 0.0 if i_2d or mode_j == CollisionMode.NORMAL_2D else margin
+                        (j0x, j0y, j0z), (j1x, j1y, j1z) = aabb_j
+                        if (
+                            i1x + margin < j0x
+                            or i0x - margin > j1x
+                            or i1y + margin < j0y
+                            or i0y - margin > j1y
+                            or i1z + z_margin < j0z
+                            or i0z - z_margin > j1z
                         ):
                             continue  # No overlap, skip this pair
 

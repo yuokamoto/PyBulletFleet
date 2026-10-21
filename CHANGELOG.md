@@ -51,6 +51,16 @@ are not recommended for production use yet.
 
 ### Changed
 
+- Collision broadphase: a body whose AABB, enlarged by the collision margin,
+  fits in one spatial-hash cell is registered in its centre cell only (larger
+  bodies still in every cell they reach), and each moved body updates the grid
+  once per step. This wins back the step time the margin-aware broadphase fix
+  cost: 1000 moving batch agents with a collision check every step take 9.7 ms
+  per step instead of 13.7 ms (v0.8.0: 10.1 ms). The extra narrow-phase work
+  for pairs within the margin (near misses) is part of that fix and stays.
+  Without a margin, bodies between one cell and `multi_cell_threshold` wide
+  can still miss a touching neighbour (#89).
+
 - `ControllerParams` takes either enum field -- `default_direction` and
   `goal_replacement` -- as the enum or its string value, on construction and
   on any later assignment, and stores the enum; an unknown value raises

@@ -627,8 +627,12 @@ def test_margin_registration_can_still_use_one_cell():
         sim.set_collision_spatial_hash_cell_size_mode()
         inside = create_test_box(sim, [0.5, 0.5, 0.5], size=0.05)
         edge = create_test_box(sim, [1.0, 0.5, 0.5], size=0.05)
+        large = create_test_box(sim, [1.0, 0.5, 0.5], size=1.5)
+        # A body no larger than a cell with the clearance needs only its centre
+        # cell, even on a cell boundary; a larger one every cell it reaches.
         assert len(sim._cached_object_to_cell[inside.object_id]) == 1
-        assert len(sim._cached_object_to_cell[edge.object_id]) == 2
+        assert len(sim._cached_object_to_cell[edge.object_id]) == 1
+        assert len(sim._cached_object_to_cell[large.object_id]) > 1
     finally:
         p.disconnect(sim.client)
 
@@ -1163,3 +1167,71 @@ class TestRuntimeModeChanges:
 if __name__ == "__main__":
     # Run with pytest
     pytest.main([__file__, "-v", "--tb=short"])
+
+
+def _broadphase_scene(seed, margin, widths):
+    """Random boxes on and off spatial-hash cell boundaries; returns (missed, checked).
+
+    ``widths`` are AABB widths in cells. A pair is missed when its AABBs,
+    enlarged by the collision margin, overlap but the broadphase does not
+    return it as a candidate.
+    """
+    import random
+
+    rng = random.Random(seed)
+    cell = rng.choice([0.2, 0.5, 1.0])
+    sim = MultiRobotSimulationCore(
+        SimulationParams(
+            gui=False,
+            physics=False,
+            monitor=False,
+            collision_margin=margin,
+            spatial_hash_cell_size_mode=SpatialHashCellSizeMode.CONSTANT,
+            spatial_hash_cell_size=cell,
+            ignore_static_collision=False,
+        )
+    )
+    try:
+        sim.set_collision_spatial_hash_cell_size_mode()
+        objects = []
+        for _ in range(30):
+            half = 0.5 * cell * rng.choice(widths)
+            # On a cell boundary, a hair off it, or anywhere.
+            offsets = [0.0, 0.001, -0.001, rng.uniform(-cell, cell)]
+            xy = [round(rng.uniform(0.0, 3.0) / cell) * cell + rng.choice(offsets) for _ in range(2)]
+            objects.append(create_test_box(sim, xy + [rng.uniform(0.0, 0.3)], size=half))
+        sim._moved_this_step = {obj.object_id for obj in objects}
+        candidates = set(sim.filter_aabb_pairs()[0])
+        aabbs = sim._cached_aabbs_dict
+        missed = checked = 0
+        for a, b in itertools.combinations([obj.object_id for obj in objects], 2):
+            box_a, box_b = aabbs[a], aabbs[b]
+            overlap = all(box_a[1][d] + margin >= box_b[0][d] and box_a[0][d] - margin <= box_b[1][d] for d in range(3))
+            checked += 1
+            if overlap and (min(a, b), max(a, b)) not in candidates:
+                missed += 1
+        return missed, checked
+    finally:
+        p.disconnect(sim.client)
+
+
+@pytest.mark.parametrize("seed", range(6))
+@pytest.mark.parametrize("margin", [0.02, 0.1, 0.25])
+def test_broadphase_returns_every_pair_within_the_margin(seed, margin):
+    """Against brute force: tiny to multi-cell bodies, on and off cell
+    boundaries; a body that fits one cell with the margin is registered in its
+    centre cell only, and the neighbour search still finds every pair."""
+    missed, checked = _broadphase_scene(seed, margin, widths=[0.04, 0.1, 0.2, 0.9, 1.0, 1.4, 2.8, 5.0])
+    assert checked > 0
+    assert missed == 0
+
+
+@pytest.mark.parametrize("seed", range(6))
+def test_broadphase_without_margin_returns_every_touching_pair(seed):
+    """margin == 0 (contact points): bodies up to one cell wide and those wider
+    than ``multi_cell_threshold`` cells. Bodies between one cell and the
+    threshold are registered in one cell and can miss a touching neighbour
+    (issue #89), so they are left out here."""
+    missed, checked = _broadphase_scene(seed, 0.0, widths=[0.04, 0.1, 0.2, 0.9, 1.0, 1.6, 2.8, 5.0])
+    assert checked > 0
+    assert missed == 0
