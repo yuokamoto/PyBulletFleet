@@ -236,10 +236,36 @@ when there is nothing to brake (at rest, fixed base). `agent.stop()` is the
 immediate stop: the velocity is zeroed at once.
 
 To change direction mid-motion, send the new goal: under the default `brake`
-mode the agent brakes and then heads for it. `brake()` leaves the action queue
-alone; a `MoveAction` still executing ends `CANCELLED` once the agent is at
-rest, short of its path's end, and the queue moves on to the next action, so
-call `clear_actions()` first to drop the queued actions too.
+mode the agent brakes and then heads for it. A running `MoveAction` whose path
+is braked or replaced this way ends `CANCELLED` (see below).
+
+### Path requests and the action queue
+
+`agent.set_path(...)` and `agent.set_goal_pose(...)` build a `PathRequest`
+(the waypoints, `final_orientation_align`, `direction`, `auto_approach`) and
+pass it to `agent.request_path(request)`; a controller's `set_path` does the
+same with its `request_path`. Build one yourself to keep it and ask what
+became of it:
+
+```python
+from pybullet_fleet import PathRequest, PathRequestState
+
+request = PathRequest(path=[goal], final_orientation_align=False)
+agent.request_path(request)
+...
+if agent.path_request_state(request) is PathRequestState.FINISHED:
+    ...  # followed to its end; GONE once replaced, dropped, braked or stopped
+```
+
+A `MoveAction` sends its own request and ends by what becomes of it:
+`COMPLETED` once the agent followed it to its end, `CANCELLED` as soon as it
+is no longer the agent's. A path requested from outside the queue while a
+`MoveAction` runs -- `set_path`, `set_goal_pose`, `request_path`, `brake()` or
+`stop()` -- therefore cancels that action at once (logged at INFO with the
+agent and the action) and is an interrupt: it runs to its end, and only then
+does the queue start its next action, so the next `MoveAction` does not
+overwrite it. To drop the rest of the queue instead, call
+`agent.clear_actions()` before sending the path.
 
 #### Custom braking
 

@@ -34,6 +34,7 @@ Registry
     ctrl = create_controller("differential", {"max_linear_vel": 1.5})
 """
 
+import dataclasses
 import inspect
 import math
 from abc import ABC, abstractmethod
@@ -60,7 +61,8 @@ from two_point_interpolation import TwoPointInterpolation
 from pybullet_fleet._tpi import build_tpi, build_tpi_from_speed, extract_phase_params
 from pybullet_fleet._replacement import GoalReplacementPolicy, _checked_braking_request
 import pybullet_fleet._replan as _replan
-from pybullet_fleet._replan import HEADING_TOL, PathRequest
+from pybullet_fleet._replan import HEADING_TOL
+from pybullet_fleet.path_request import PathRequest, PathRequestState, request_state
 from pybullet_fleet._tpi_state import capture_tpi_state, restore_tpi_state
 from pybullet_fleet._motion_planning import heading_toward
 from pybullet_fleet.controller_params import ControllerParams
@@ -178,6 +180,56 @@ class Controller(ABC):
         """
         return False
 
+    def request_path(self, agent: "Agent", request: PathRequest, preempt: bool = False) -> bool:
+        """Follow ``request``; ``False`` if refused. The core of :meth:`set_path`.
+
+        The kinematic controllers implement it. A controller written against
+        :meth:`set_path` alone keeps working: its ``set_path`` is called with
+        the request's fields.
+        """
+        if type(self).set_path is not Controller.set_path:
+            return self.set_path(
+                agent,
+                list(request.path),
+                final_orientation_align=request.final_orientation_align,
+                direction=request.direction,
+                preempt=preempt,
+            )
+        raise NotImplementedError(f"{type(self).__name__} implements neither request_path() nor set_path()")
+
+    def set_path(
+        self,
+        agent: "Agent",
+        path: List[Pose],
+        final_orientation_align: bool = True,
+        direction: Optional[MovementDirection] = None,
+        preempt: bool = False,
+    ) -> bool:
+        """Follow ``path``: :meth:`request_path` with a :class:`PathRequest` of these fields.
+
+        Args:
+            agent: Agent to navigate.
+            path: Non-empty list of waypoint Poses.
+            final_orientation_align: Rotate to match the last waypoint's
+                orientation after reaching its position.
+            direction: ``None`` (use ``default_direction``), ``FORWARD``,
+                ``AUTO``, or ``BACKWARD`` (differential only).
+            preempt: Do not hold the path for the current one under
+                ``wait_complete`` (:meth:`Agent.brake
+                <pybullet_fleet.agent.Agent.brake>` uses it).
+        """
+        request = PathRequest(
+            path=path, final_orientation_align=final_orientation_align, direction=direction, auto_approach=False
+        )
+        return self.request_path(agent, request, preempt=preempt)
+
+    def request_state(self, agent: "Agent", request: PathRequest) -> PathRequestState:
+        """What became of ``request`` (see :class:`PathRequestState`).
+
+        ``UNKNOWN`` by default: a controller that does not track requests.
+        """
+        return PathRequestState.UNKNOWN
+
     def _construction_config(self) -> Optional[dict]:
         """Registered type and shared settings, separate from execution state.
 
@@ -227,17 +279,17 @@ class Controller(ABC):
 
 
 def _set_braking_path(agent: "Agent", request: Optional[PathRequest]) -> bool:
-    """Set a braking path through ``agent.set_path``; ``False`` for ``None`` or a refusal."""
+    """Request a braking path through ``agent.request_path``; ``False`` for ``None`` or a refusal.
+
+    The request itself is followed, so its identity is tracked: a running
+    ``MoveAction`` sees that it was replaced.
+    """
     if request is None:
         return False
-    accepted = agent.set_path(
-        request.path,
-        auto_approach=False,
-        final_orientation_align=request.final_orientation_align,
-        direction=request.direction,
-        # Braking does not wait for the current path, whatever the mode.
-        _preempt=True,
-    )
+    if request.auto_approach:
+        request = dataclasses.replace(request, auto_approach=False)  # the braking point is the first waypoint
+    # Braking does not wait for the current path, whatever the mode.
+    accepted = agent.request_path(request, _preempt=True)
     if accepted is False:
         logger.warning(
             f"Braking path for {agent.name or agent.object_id} refused: "
@@ -314,6 +366,10 @@ class KinematicController(GoalReplacementPolicy, Controller):
         self._pending_owner: str = ""
         # True while the active path is the braking path set for _pending.
         self._braking: bool = False
+        # The request being followed, and the last one followed to its end
+        # (see request_state()).
+        self._active_request: Optional[PathRequest] = None
+        self._finished_request: Optional[PathRequest] = None
 
     @property
     def default_direction(self) -> MovementDirection:
@@ -372,6 +428,7 @@ class KinematicController(GoalReplacementPolicy, Controller):
         self._cancel_pose_internal()
         self._reset_path_state()
         self._clear_replacement("the agent was stopped")
+        self._active_request = None
 
     def reset(self) -> None:
         """Reset all internal state."""
@@ -382,6 +439,8 @@ class KinematicController(GoalReplacementPolicy, Controller):
         self._cancel_pose_internal()
         self._reset_path_state()
         self._clear_replacement("the controller was reset")
+        self._active_request = None
+        self._finished_request = None
 
     # -- Velocity interface --------------------------------------------
 
@@ -403,6 +462,7 @@ class KinematicController(GoalReplacementPolicy, Controller):
         if self._mode == ControllerMode.POSE:
             self._cancel_pose_internal()
         self._clear_replacement("a velocity command replaced it")
+        self._active_request = None
         self._mode = ControllerMode.VELOCITY
         self._linear_velocity[:] = [vx, vy, vz]
         self._angular_velocity[:] = [wx, wy, wz]
@@ -434,6 +494,7 @@ class KinematicController(GoalReplacementPolicy, Controller):
         self._cancel_pose_internal()
         self._mode = ControllerMode.IDLE
         self._clear_replacement("the path was cancelled")
+        self._active_request = None
 
     def _cancel_pose_internal(self) -> None:
         """Reset shared pose-mode TPI state (rotation + forward + phase).
@@ -500,15 +561,8 @@ class KinematicController(GoalReplacementPolicy, Controller):
         """The accepted path waiting for the agent to stop, or ``None``."""
         return self._pending
 
-    def set_path(
-        self,
-        agent: "Agent",
-        path: List[Pose],
-        final_orientation_align: bool = True,
-        direction: Optional[MovementDirection] = None,
-        preempt: bool = False,
-    ) -> bool:
-        """Set a waypoint path for the agent to follow.
+    def request_path(self, agent: "Agent", request: PathRequest, preempt: bool = False) -> bool:
+        """Follow ``request``'s waypoints (:meth:`set_path` builds one from its arguments).
 
         What happens depends on ``goal_replacement`` (see
         :class:`~pybullet_fleet.types.GoalReplacement`). ``wait_complete``
@@ -527,11 +581,9 @@ class KinematicController(GoalReplacementPolicy, Controller):
 
         Args:
             agent: Agent to navigate.
-            path: Non-empty list of waypoint Poses.
-            final_orientation_align: Rotate to match last waypoint orientation
-                after reaching its position.
-            direction: ``None`` (use ``default_direction``), ``FORWARD``, ``AUTO``,
-                or ``BACKWARD`` (differential only).
+            request: The waypoints (non-empty), whether to align to the last
+                one's orientation, and the direction (``None``:
+                ``default_direction``; differential only).
             preempt: Do not hold the path for the current one under
                 ``wait_complete`` (:meth:`Agent.brake
                 <pybullet_fleet.agent.Agent.brake>` uses it); the other rules
@@ -541,7 +593,6 @@ class KinematicController(GoalReplacementPolicy, Controller):
             ``False`` when the path is refused (``reject`` only); ``True`` once
             it is set or held to start later.
         """
-        request = PathRequest(path=list(path), final_orientation_align=final_orientation_align, direction=direction)
         return self._replace_path(agent, request, preempt)
 
     # -- GoalReplacementPolicy hooks -------------------------------------
@@ -602,6 +653,16 @@ class KinematicController(GoalReplacementPolicy, Controller):
         """
         return _set_braking_path(agent, _checked_braking_request(self, agent))
 
+    def request_state(self, agent: "Agent", request: PathRequest) -> PathRequestState:
+        """What became of ``request``: being followed, held, followed to its
+        end, or gone (replaced, dropped, stopped, braked or cancelled)."""
+        return request_state(request, self._active_request, self._pending, self._finished_request)
+
+    def _finish_request(self) -> None:
+        """The active request was followed to its end."""
+        self._finished_request = self._active_request
+        self._active_request = None
+
     def _path_in_progress(self, agent: "Agent") -> bool:
         """Whether a path (not a velocity command) is being followed."""
         return self._mode == ControllerMode.POSE and agent.is_moving
@@ -634,6 +695,7 @@ class KinematicController(GoalReplacementPolicy, Controller):
 
     def _start_path(self, agent: "Agent", request: PathRequest, continue_motion: bool) -> None:
         """Make ``request`` the active path, continuing the current motion if asked."""
+        self._active_request = request
         path = request.path
         effective_direction = request.direction if request.direction is not None else self.params.default_direction
         self._path = list(path)
@@ -900,6 +962,7 @@ class KinematicController(GoalReplacementPolicy, Controller):
             self._mode = ControllerMode.IDLE
             agent._reset_pybullet_velocity()
             logger.info("Final orientation alignment complete")
+            self._finish_request()
             self._start_pending(agent)
 
     def _start_final_orientation(self, agent: "Agent") -> None:
@@ -938,6 +1001,7 @@ class KinematicController(GoalReplacementPolicy, Controller):
         self._mode = ControllerMode.IDLE
         agent._reset_pybullet_velocity()
         logger.info("Path complete")
+        self._finish_request()
         self._start_pending(agent)
 
     def _reset_path_state(self) -> None:

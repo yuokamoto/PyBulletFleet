@@ -21,6 +21,7 @@ import pybullet as p
 
 from ._replan import refused_until_stopped
 from .geometry import Pose, Path
+from .path_request import PathRequest, PathRequestState
 from .types import ActionStatus, MovementDirection
 from . import tools
 from .logging_utils import get_named_lazy_logger
@@ -225,16 +226,6 @@ class Action(ABC):
             self._log.info("END")
 
 
-def _pending_path(agent):
-    """The path ``agent``'s controller holds to start later, or ``None``."""
-    from pybullet_fleet.controller import KinematicController
-
-    if agent._batch_controller is not None:
-        return agent._batch_controller.pending_path(agent)
-    base = agent._controllers[0] if agent._controllers else None
-    return base.pending_path() if isinstance(base, KinematicController) else None
-
-
 @dataclass
 class MoveAction(Action):
     """
@@ -242,13 +233,18 @@ class MoveAction(Action):
 
     Wraps the existing Agent path following functionality into the Action interface.
 
-    The action ends when the agent comes to rest with no path of its own held
-    for later: ``COMPLETED`` when it stands at the path's last waypoint,
-    ``CANCELLED`` when it stopped elsewhere -- the path was braked
-    (:meth:`Agent.brake <pybullet_fleet.agent.Agent.brake>`) or replaced by a
-    newer one. A path the agent refuses for good (a fixed base, an empty path)
-    ``FAILED``; one it refuses only while it is moving is tried again on the
-    next update.
+    The action sends one :class:`~pybullet_fleet.path_request.PathRequest`
+    (:attr:`request`) and follows what becomes of it
+    (:meth:`Agent.path_request_state
+    <pybullet_fleet.agent.Agent.path_request_state>`): ``COMPLETED`` once the
+    agent has followed it to its end, ``CANCELLED`` as soon as it is no longer
+    the agent's -- replaced by another request, dropped while held, braked
+    (:meth:`Agent.brake <pybullet_fleet.agent.Agent.brake>`), stopped or
+    cancelled -- without waiting for the newer motion to end. A path the agent
+    refuses for good (a fixed base, an empty path) ``FAILED``; one it refuses
+    only while it is moving is tried again on the next update. With a
+    controller that does not track requests, the action ends when the agent
+    rests: ``COMPLETED`` at the path's last waypoint, ``CANCELLED`` elsewhere.
 
     Args:
         path: Path object with waypoints to follow
@@ -280,6 +276,19 @@ class MoveAction(Action):
         # Normalize string to enum if needed
         if isinstance(self.direction, str):
             self.direction = MovementDirection(self.direction)
+        self._request: Optional[PathRequest] = None
+
+    @property
+    def request(self) -> PathRequest:
+        """The request this action sends: its fields, built once per run."""
+        if self._request is None:
+            self._request = PathRequest(
+                path=list(self.path),
+                final_orientation_align=self.final_orientation_align,
+                direction=self.direction,
+                auto_approach=self.auto_approach,
+            )
+        return self._request
 
     def execute(self, agent, dt: float) -> bool:
         """Execute move action."""
@@ -292,12 +301,7 @@ class MoveAction(Action):
 
             # Use agent's existing path following system
             # Path visualization is handled by agent based on agent.path_visualize setting
-            accepted = agent.set_path(
-                self.path,
-                auto_approach=self.auto_approach,
-                final_orientation_align=self.final_orientation_align,
-                direction=self.direction,  # Pass direction parameter (enum or string)
-            )
+            accepted = agent.request_path(self.request)
             if accepted is False:
                 if refused_until_stopped(agent, self.path):
                     # The agent is still moving and cannot take this path from
@@ -313,22 +317,28 @@ class MoveAction(Action):
                 self._log_failure(rejection.reason if rejection is not None else "path refused", agent)
                 return True
 
-        # The move ends when the agent is at rest with no path held for later
-        # (goal_replacement brake / wait_complete); it succeeded only if the
-        # agent stands at this path's end -- not if the path was braked or
-        # replaced. agent.path is not consulted: a batch-owned agent's base
-        # controller is idle, so it is always empty there.
-        if not agent.is_moving and _pending_path(agent) is None:
-            self.end_time = agent.sim_core.sim_time if agent.sim_core else 0.0
-            if self._reached_end(agent):
-                self.status = ActionStatus.COMPLETED
-                self._log_end()
-            else:
-                self.status = ActionStatus.CANCELLED
-                self._log.info("CANCELLED - the agent stopped short of the path's end (braked or replaced)")
-            return True
-
-        return False
+        state = agent.path_request_state(self.request)
+        if state in (PathRequestState.ACTIVE, PathRequestState.PENDING):
+            return False
+        if state is PathRequestState.UNKNOWN:
+            # A controller that does not track requests: judge by where the
+            # agent rests.
+            if agent.is_moving:
+                return False
+            state = PathRequestState.FINISHED if self._reached_end(agent) else PathRequestState.GONE
+        self.end_time = agent.sim_core.sim_time if agent.sim_core else 0.0
+        if state is PathRequestState.FINISHED:
+            self.status = ActionStatus.COMPLETED
+            self._log_end()
+        else:
+            self.status = ActionStatus.CANCELLED
+            self._log.info(
+                f"CANCELLED - {agent.name or agent.object_id}'s path was replaced, dropped, braked, stopped or cancelled"
+            )
+            # The replacement came from outside the queue: it runs to its end
+            # before the next action starts (see Agent._update_actions).
+            agent._interrupt_actions(self)
+        return True
 
     #: Distance (m) from the last waypoint that counts as having reached it.
     END_TOLERANCE = 1e-4
@@ -345,8 +355,9 @@ class MoveAction(Action):
         return float(np.linalg.norm(position - goal)) <= self.END_TOLERANCE
 
     def reset(self):
-        """Reset action state."""
+        """Reset action state; a rerun sends a new request."""
         super().reset()
+        self._request = None
 
 
 @dataclass

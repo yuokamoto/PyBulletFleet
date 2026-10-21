@@ -497,8 +497,10 @@ class TestDifferentialHeadingTolerance:
 
 
 class TestMoveActionOutcome:
-    """A MoveAction ends COMPLETED only at its own path's end; stopped elsewhere
-    -- its held goal replaced by a newer one -- it ends CANCELLED."""
+    """A MoveAction ends COMPLETED once its own request was followed to its
+    end, and CANCELLED as soon as its request is no longer the agent's --
+    replaced, dropped from the hold or braked -- without waiting for the newer
+    motion to end."""
 
     @staticmethod
     def _move(agent, xy):
@@ -540,9 +542,86 @@ class TestMoveActionOutcome:
         assert action.status == ActionStatus.IN_PROGRESS and _pending(agent) is not None  # held while braking
         newer = (0.0, -5.0)
         agent.set_path(_goal(newer), auto_approach=False, final_orientation_align=False)  # drops the held one
+        sim.step_once()
+        assert action.status == ActionStatus.CANCELLED  # at once, while the agent still brakes
+        assert agent.is_moving
+        for _ in range(800):
+            sim.step_once()
+        assert _xy(agent) == pytest.approx(newer, abs=1e-6)  # the newer path runs on
+
+    def test_a_path_replaced_by_one_ending_at_the_same_place_is_cancelled(self, sim, batch, motion):
+        """Same end position, different final orientation: not this action's path."""
+        from pybullet_fleet.action import MoveAction
+        from pybullet_fleet.geometry import Path
+        from pybullet_fleet.types import ActionStatus
+
+        agent = _agent(sim, batch, motion)
+        action = MoveAction(path=Path.from_positions([[3.0, 0.0, 0.1]]), auto_approach=False)
+        agent.add_action(action)
+        for _ in range(3):
+            sim.step_once()
+        assert action.status == ActionStatus.IN_PROGRESS
+        turned = Pose.from_yaw(3.0, 0.0, 0.1, 1.0)
+        assert agent.set_path([turned], auto_approach=False) is True  # on the line: continues at once
         self._until_done(sim, action)
         assert action.status == ActionStatus.CANCELLED
-        assert _xy(agent) == pytest.approx(newer, abs=1e-6)
+        for _ in range(400):
+            sim.step_once()
+        assert _xy(agent) == pytest.approx([3.0, 0.0], abs=1e-6)  # where the action's path ended too
+
+    def test_an_interrupting_path_runs_to_its_end_before_the_queue_resumes(self, sim, batch, motion):
+        """A path requested from outside the queue cancels the running move at
+        once, then runs to its end; the next queued move starts only after it."""
+        from pybullet_fleet.types import ActionStatus
+
+        agent = _agent(sim, batch, motion)
+        first = self._move(agent, (3.0, 0.0))
+        second = self._move(agent, (3.0, 3.0))
+        for _ in range(3):
+            sim.step_once()
+        interrupt = (8.0, 0.0)  # on the line: taken at once
+        assert agent.set_path(_goal(interrupt), auto_approach=False, final_orientation_align=False) is True
+        sim.step_once()
+        assert first.status == ActionStatus.CANCELLED
+        steps = 0
+        while _xy(agent) != pytest.approx(list(interrupt), abs=1e-6):
+            assert second.status == ActionStatus.NOT_STARTED  # held while the interrupting path runs
+            sim.step_once()
+            steps += 1
+            assert steps < 800
+        self._until_done(sim, second)
+        assert second.status == ActionStatus.COMPLETED
+        assert _xy(agent) == pytest.approx([3.0, 3.0], abs=1e-6)
+
+    def test_clear_actions_first_drops_the_rest_of_the_queue(self, sim, batch, motion):
+        from pybullet_fleet.types import ActionStatus
+
+        agent = _agent(sim, batch, motion)
+        first = self._move(agent, (3.0, 0.0))
+        second = self._move(agent, (3.0, 3.0))
+        for _ in range(3):
+            sim.step_once()
+        agent.clear_actions()
+        interrupt = (8.0, 0.0)
+        agent.set_path(_goal(interrupt), auto_approach=False, final_orientation_align=False)
+        for _ in range(800):
+            sim.step_once()
+        assert first.status == ActionStatus.CANCELLED
+        assert second.status == ActionStatus.NOT_STARTED  # dropped, never run
+        assert agent.is_action_queue_empty()
+        assert _xy(agent) == pytest.approx(list(interrupt), abs=1e-6)
+
+    def test_braking_cancels_it_at_once(self, sim, batch, motion):
+        from pybullet_fleet.types import ActionStatus
+
+        agent = _agent(sim, batch, motion)
+        action = self._move(agent, (30.0, 0.0))
+        for _ in range(int(VMAX / ACCEL / DT) + 3):
+            sim.step_once()
+        assert agent.brake() is True
+        sim.step_once()
+        assert action.status == ActionStatus.CANCELLED
+        assert agent.is_moving  # still braking
 
 
 class TestDefaultDirection:
