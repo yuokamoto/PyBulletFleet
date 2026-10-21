@@ -34,7 +34,6 @@ Registry
     ctrl = create_controller("differential", {"max_linear_vel": 1.5})
 """
 
-import inspect
 import math
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Type, TypeVar
@@ -63,6 +62,7 @@ import pybullet_fleet._replan as _replan
 from pybullet_fleet._replan import HEADING_TOL, PathRequest
 from pybullet_fleet._tpi_state import capture_tpi_state, restore_tpi_state
 from pybullet_fleet._motion_planning import heading_toward
+from pybullet_fleet.config_utils import _parameter_names
 from pybullet_fleet.controller_params import ControllerParams
 
 if TYPE_CHECKING:
@@ -207,8 +207,7 @@ class Controller(ABC):
         """
         from pybullet_fleet.controller_params import ControllerParams
 
-        sig = inspect.signature(cls.__init__)
-        param_names = {p for p in sig.parameters if p != "self"}
+        param_names = _parameter_names(cls.__init__)
         kwargs: dict = {"params": ControllerParams.from_dict(config)}
         extra_keys = param_names - {"params"}
         kwargs.update({k: v for k, v in config.items() if k in extra_keys})

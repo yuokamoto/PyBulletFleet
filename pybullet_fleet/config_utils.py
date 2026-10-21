@@ -5,6 +5,7 @@ Utility functions for loading and merging configuration files.
 
 import dataclasses
 import importlib
+import functools
 import inspect
 import os
 from collections.abc import Iterable, Mapping
@@ -292,6 +293,13 @@ def dataclass_from_dict(
     return cls(**kwargs)
 
 
+@functools.lru_cache(maxsize=None)
+def _parameter_names(function: Callable) -> frozenset:
+    """Parameter names of ``function`` (without cls/self), cached: one
+    signature introspection per factory instead of one per spawned object."""
+    return frozenset(p for p in inspect.signature(function).parameters if p not in ("cls", "self"))
+
+
 def forward_spawn_params(
     factory_method: Callable,
     spawn_params,
@@ -326,8 +334,7 @@ def forward_spawn_params(
     aliases = aliases or {}
     extra_kwargs = extra_kwargs or {}
 
-    sig = inspect.signature(factory_method)
-    valid_params = {p for p in sig.parameters if p not in ("cls", "self")}
+    valid_params = _parameter_names(factory_method)
 
     kwargs: Dict[str, Any] = {}
     for f in dataclasses.fields(spawn_params):

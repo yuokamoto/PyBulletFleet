@@ -1009,7 +1009,9 @@ class Agent(SimObject):
             user_data=dict(agent.user_data),
             motion_mode=agent._motion_mode,
             use_fixed_base=agent.use_fixed_base,
-            controller=copy.deepcopy(agent.controller._construction_config()),
+            # _construction_config() builds a fresh dict (dataclasses.asdict
+            # copies nested values): no second deep copy needed.
+            controller=agent.controller._construction_config(),
         )
 
         if notify_spawn:
@@ -1127,7 +1129,9 @@ class Agent(SimObject):
             user_data=dict(agent.user_data),
             motion_mode=agent._motion_mode,
             use_fixed_base=agent.use_fixed_base,
-            controller=copy.deepcopy(controller_config),
+            # _construction_config() builds a fresh dict (asdict copies nested
+            # values): no second deep copy needed.
+            controller=controller_config,
             ik_params=ik_params,
             global_scaling=global_scaling,
             joint_tolerance=joint_tolerance,

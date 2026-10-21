@@ -66,6 +66,12 @@ are not recommended for production use yet.
   no demo worlds or the worlds name no Fuel models (the latter can be allowed
   with `ALLOW_NO_FUEL_MODELS=1`).
 
+- Spawning an agent no longer copies the controller's construction config a
+  second time for its spawn descriptor, and the parameter names of spawn
+  factories and controller constructors are introspected once per callable
+  instead of once per object: spawning 1000 agents takes 0.30 s instead of
+  0.36 s, as in v0.8.0. Each agent still keeps its own descriptor.
+
 - `ControllerParams` takes either enum field -- `default_direction` and
   `goal_replacement` -- as the enum or its string value, on construction and
   on any later assignment, and stores the enum; an unknown value raises
