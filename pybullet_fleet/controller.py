@@ -57,7 +57,8 @@ from pybullet_fleet.types import ControllerMode, GoalReplacement, MovementDirect
 from two_point_interpolation import TwoPointInterpolation
 
 from pybullet_fleet._tpi import build_tpi, build_tpi_from_speed, extract_phase_params
-from pybullet_fleet._replan import HEADING_TOL, REST_SPEED, PathRequest, braking_request, replacement_rejection
+from pybullet_fleet._replacement import GoalReplacementPolicy
+from pybullet_fleet._replan import HEADING_TOL, REST_SPEED, PathRequest, replacement_rejection
 from pybullet_fleet._tpi_state import capture_tpi_state, restore_tpi_state
 from pybullet_fleet._motion_planning import align_x_axis_quat
 from pybullet_fleet.controller_params import ControllerParams
@@ -218,7 +219,7 @@ def _log_dropped(name: str, request: PathRequest, reason: str) -> None:
     logger.info(f"Pending path for {name} to {goal} dropped: {reason}")
 
 
-class KinematicController(Controller):
+class KinematicController(GoalReplacementPolicy, Controller):
     """Unified base for kinematic controllers handling both velocity and pose.
 
     Internal mode state machine:
@@ -519,52 +520,35 @@ class KinematicController(Controller):
             it is set or held to start later.
         """
         request = PathRequest(path=list(path), final_orientation_align=final_orientation_align, direction=direction)
-        name = str(agent.name or agent.object_id)
-        mode = self.params._eff_goal_replacement()
-        if mode is GoalReplacement.WAIT_COMPLETE and not preempt and self._path_in_progress(agent):
-            logger.info(f"Path for {name} starts once the current path is finished (wait_complete)")
-            self._hold(name, request)
-            return True
+        return self._replace_path(agent, request, preempt)
 
-        obstacle = self._replacement_obstacle(agent, request.path, direction)
-        if obstacle is None:
-            self._clear_replacement("a newer path started at once")
-            self._start_path(agent, request, continue_motion=True)
-            return True
+    # -- GoalReplacementPolicy hooks -------------------------------------
 
-        if mode is GoalReplacement.REJECT:
-            logger.debug(f"Path rejected for {name}: {obstacle}")
-            return False
-        if mode is GoalReplacement.IMMEDIATE:
-            logger.info(f"Path for {name} starts from rest at once: {obstacle}")
-            self._clear_replacement("a newer path started at once")
+    def _replacement_params(self, agent: "Agent") -> ControllerParams:
+        return self.params
+
+    def _following_path(self, agent: "Agent") -> bool:
+        return self._path_in_progress(agent)
+
+    def _hold_request(self, agent: "Agent", request: PathRequest) -> None:
+        self._hold(str(agent.name or agent.object_id), request)
+
+    def _drop_held(self, agent: "Agent", reason: str) -> None:
+        self._clear_replacement(reason)
+
+    def _start_request(self, agent: "Agent", request: PathRequest, continue_motion: bool) -> None:
+        if not continue_motion:
+            # From rest: the velocity state is rest from now on, so a
+            # replacement later in this step does not continue the old motion.
             agent._current_velocity[:] = 0.0
             agent._current_angular_velocity = 0.0
-            self._start_path(agent, request, continue_motion=False)
-            return True
-        # brake, or wait_complete with no path to wait for (a velocity
-        # command): brake along the motion, then start the path from rest.
-        if not self._braking:
-            pose = agent.get_pose()
-            braking = braking_request(self.params, pose.position, pose.orientation, self.continuation_velocity(agent))
-            infeasible = None if braking is None else self._replacement_obstacle(agent, braking.path, braking.direction)
-            if infeasible is not None:
-                logger.warning(
-                    f"Braking path for {name} cannot continue the motion ({infeasible}); starting the new path from rest"
-                )
-            if braking is None or infeasible is not None:
-                # Nothing left to brake, or no way to brake along the motion:
-                # start from rest.
-                self._clear_replacement("a newer path started at once")
-                agent._current_velocity[:] = 0.0
-                agent._current_angular_velocity = 0.0
-                self._start_path(agent, request, continue_motion=False)
-                return True
-            self._start_path(agent, braking, continue_motion=True)
-            self._braking = True
-        logger.info(f"Path for {name} starts once the agent stops (brake): {obstacle}")
-        self._hold(name, request)
-        return True
+        self._start_path(agent, request, continue_motion)
+
+    def _braking_for(self, agent: "Agent") -> bool:
+        return self._braking
+
+    def _mark_braking(self, agent: "Agent") -> None:
+        self._braking = True
 
     def _path_in_progress(self, agent: "Agent") -> bool:
         """Whether a path (not a velocity command) is being followed."""

@@ -35,7 +35,8 @@ from typing import TYPE_CHECKING, Dict, List, Optional, Type
 import numpy as np
 import pybullet as p
 
-from pybullet_fleet._replan import PathRequest, braking_request
+from pybullet_fleet._replacement import GoalReplacementPolicy
+from pybullet_fleet._replan import PathRequest
 from pybullet_fleet.controller import Controller, _log_dropped
 from pybullet_fleet.types import GoalReplacement, MovementDirection
 from pybullet_fleet.geometry import quat_angle_between, quat_slerp_batch
@@ -43,6 +44,7 @@ from pybullet_fleet.logging_utils import get_lazy_logger
 
 if TYPE_CHECKING:
     from pybullet_fleet.agent import Agent
+    from pybullet_fleet.controller_params import ControllerParams
     from pybullet_fleet.core_simulation import MultiRobotSimulationCore
 
 logger = get_lazy_logger(__name__)
@@ -54,7 +56,7 @@ logger = get_lazy_logger(__name__)
 BATCH_CONTROLLER_REGISTRY: Dict[str, Type["BatchKinematicController"]] = {}
 
 
-class BatchKinematicController(Controller):
+class BatchKinematicController(GoalReplacementPolicy, Controller):
     """Vectorized base for kinematic controllers that drive many agents at once.
 
     Inherits from :class:`Controller` directly (not ``KinematicController``):
@@ -295,55 +297,28 @@ class BatchKinematicController(Controller):
         """The accepted path waiting for ``agent`` to stop, or ``None``."""
         return self._pending.get(id(agent))
 
-    def _replace_path(self, agent: "Agent", request: PathRequest, preempt: bool = False) -> bool:
-        """Take ``request`` as ``goal_replacement`` says, as the per-agent controllers do.
+    # -- GoalReplacementPolicy hooks (the decision is _replace_path) ------
 
-        See :meth:`KinematicController.set_path
-        <pybullet_fleet.controller.KinematicController.set_path>`.
-        """
-        key = id(agent)
-        name = str(agent.name or agent.object_id)
-        mode = agent.controller_params._eff_goal_replacement()
-        if mode is GoalReplacement.WAIT_COMPLETE and not preempt and agent.is_moving:
-            logger.info(f"Path for {name} starts once the current path is finished (wait_complete)")
-            self._hold(agent, request)
-            return True
+    def _replacement_params(self, agent: "Agent") -> "ControllerParams":
+        return agent.controller_params
 
-        obstacle = self._replacement_obstacle(agent, request.path, request.direction)
-        if obstacle is None:
-            self._drop_pending(agent, "a newer path started at once")
-            self._start_row_path(agent, request, continue_motion=True)
-            return True
+    def _following_path(self, agent: "Agent") -> bool:
+        return agent.is_moving
 
-        if mode is GoalReplacement.REJECT:
-            logger.debug(f"Path rejected for {name}: {obstacle}")
-            return False
-        if mode is GoalReplacement.IMMEDIATE:
-            logger.info(f"Path for {name} starts from rest at once: {obstacle}")
-            self._drop_pending(agent, "a newer path started at once")
-            self._start_row_path(agent, request, continue_motion=False)
-            return True
-        if key not in self._braking:
-            pose = agent.get_pose()
-            braking = braking_request(
-                agent.controller_params, pose.position, pose.orientation, self.continuation_velocity(agent)
-            )
-            infeasible = None if braking is None else self._replacement_obstacle(agent, braking.path, braking.direction)
-            if infeasible is not None:
-                logger.warning(
-                    f"Braking path for {name} cannot continue the motion ({infeasible}); starting the new path from rest"
-                )
-            if braking is None or infeasible is not None:
-                # Nothing left to brake, or no way to brake along the motion:
-                # start from rest.
-                self._drop_pending(agent, "a newer path started at once")
-                self._start_row_path(agent, request, continue_motion=False)
-                return True
-            self._start_row_path(agent, braking, continue_motion=True)
-            self._braking.add(key)
-        logger.info(f"Path for {name} starts once the agent stops (brake): {obstacle}")
+    def _hold_request(self, agent: "Agent", request: PathRequest) -> None:
         self._hold(agent, request)
-        return True
+
+    def _drop_held(self, agent: "Agent", reason: str) -> None:
+        self._drop_pending(agent, reason)
+
+    def _start_request(self, agent: "Agent", request: PathRequest, continue_motion: bool) -> None:
+        self._start_row_path(agent, request, continue_motion)
+
+    def _braking_for(self, agent: "Agent") -> bool:
+        return id(agent) in self._braking
+
+    def _mark_braking(self, agent: "Agent") -> None:
+        self._braking.add(id(agent))
 
     def _hold(self, agent: "Agent", request: PathRequest) -> None:
         """Make ``request`` the agent's pending path, dropping (and logging) the one before."""
