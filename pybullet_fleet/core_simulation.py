@@ -306,6 +306,10 @@ class MultiRobotSimulationCore:
         (dx, dy, dz) for dx in (-1, 0, 1) for dy in (-1, 0, 1) for dz in (-1, 0, 1)
     )  # 27 neighbors for 3D collision detection
 
+    _NEIGHBOR_OFFSETS_XY = tuple(
+        (dx, dy) for dx in (-1, 0, 1) for dy in (-1, 0, 1)
+    )  # 9 neighbors in one z layer, for a NORMAL_2D body
+
     _EMPTY_SET: frozenset = frozenset()  # Reusable empty set for dict.get() default (avoids per-call allocation)
 
     @classmethod
@@ -565,6 +569,11 @@ class MultiRobotSimulationCore:
         self._cached_object_to_cell: Dict[int, List[Tuple[int, int, int]]] = (
             {}
         )  # object_id -> list of cells (supports multi-cell registration)
+        # z layer -> grid registrations of bodies that are not NORMAL_2D, and
+        # the layers each such body counted: a NORMAL_2D body looks into the
+        # layer next to its own only when this says something there can hit it.
+        self._cached_non_2d_layers: Dict[int, int] = {}
+        self._cached_object_non_2d_layers: Dict[int, Tuple[int, ...]] = {}
         self._aabb_cache_valid: bool = False  # Flag indicating if AABB cache is valid
         self._last_ignore_static: Optional[bool] = None  # Track last ignore_static value to detect mode changes
 
@@ -1719,6 +1728,8 @@ class MultiRobotSimulationCore:
         """Rebuild entire spatial grid using current cell_size and AABBs."""
         self._cached_spatial_grid.clear()
         self._cached_object_to_cell.clear()
+        self._cached_non_2d_layers.clear()
+        self._cached_object_non_2d_layers.clear()
 
         for object_id in self._cached_aabbs_dict.keys():
             self._update_object_spatial_grid(object_id)
@@ -2040,6 +2051,15 @@ class MultiRobotSimulationCore:
                 self._cached_spatial_grid[cell].discard(object_id)
                 if not self._cached_spatial_grid[cell]:
                     del self._cached_spatial_grid[cell]
+        counted = self._cached_object_non_2d_layers.pop(object_id, None)
+        if counted:
+            layers = self._cached_non_2d_layers
+            for z in counted:
+                remaining = layers[z] - 1
+                if remaining:
+                    layers[z] = remaining
+                else:
+                    del layers[z]
 
     def _coord_to_cell(self, coord: float) -> int:
         """Convert a world coordinate to a spatial grid cell index.
@@ -2246,8 +2266,11 @@ class MultiRobotSimulationCore:
         else:
             cells = self._get_overlapping_cells(object_id)
 
+        non_2d = self._cached_collision_modes.get(object_id) != CollisionMode.NORMAL_2D
+
         # Same-cell optimization: skip grid operations if cells haven't changed
-        if old_cells is not None and cells == old_cells:
+        # (nor whether they count as a non-NORMAL_2D body's, after a mode change)
+        if old_cells is not None and cells == old_cells and non_2d == (object_id in self._cached_object_non_2d_layers):
             return
 
         # Remove from old cells (if exists)
@@ -2258,6 +2281,12 @@ class MultiRobotSimulationCore:
         self._cached_object_to_cell[object_id] = cells
         for cell in cells:
             self._cached_spatial_grid.setdefault(cell, set()).add(object_id)
+        if non_2d:
+            counted = tuple(cell[2] for cell in cells)
+            self._cached_object_non_2d_layers[object_id] = counted
+            layers = self._cached_non_2d_layers
+            for z in counted:
+                layers[z] = layers.get(z, 0) + 1
 
         # Log
         if old_cells is None:
@@ -3311,71 +3340,85 @@ class MultiRobotSimulationCore:
             i_2d = mode_i == CollisionMode.NORMAL_2D
             i_physics = hybrid and obj_id_i in physics_objects
 
-            # All 27 neighbours: a NORMAL_2D body in its own z layer only
-            # (below), but a NORMAL_3D one registered in its centre cell can
-            # sit in the z layer next to a NORMAL_2D body it overlaps.
-            offsets = self._NEIGHBOR_OFFSETS_3D
+            # Cells to search, each with whether it is in another z layer.
+            # NORMAL_3D: all 27 neighbours. NORMAL_2D: its own z layers (two
+            # NORMAL_2D bodies that overlap share one, see _centre_cells), and
+            # the layer next to them only where a body that is not NORMAL_2D
+            # is registered -- one in its centre cell can overlap from there.
+            if i_2d:
+                layers_i = {c[2] for c in cells_i}
+                non_2d_layers = self._cached_non_2d_layers
+                neighbours = []
+                for cx, cy, cz in cells_i:
+                    for nz in (cz - 1, cz, cz + 1):
+                        cross = nz != cz
+                        if cross and (nz in layers_i or nz not in non_2d_layers):
+                            continue
+                        neighbours.extend(((cx + dx, cy + dy, nz), cross) for dx, dy in self._NEIGHBOR_OFFSETS_XY)
+            else:
+                neighbours = [
+                    ((cx + dx, cy + dy, cz + dz), dz != 0)
+                    for cx, cy, cz in cells_i
+                    for dx, dy, dz in self._NEIGHBOR_OFFSETS_3D
+                ]
 
             # Check neighbors in same and adjacent cells for all cells this object occupies
-            for cell_i in cells_i:
-                for offset in offsets:
-                    neighbor_cell = (cell_i[0] + offset[0], cell_i[1] + offset[1], cell_i[2] + offset[2])
+            for neighbor_cell, cross_layer in neighbours:
+                for obj_id_j in self._cached_spatial_grid.get(neighbor_cell, self._EMPTY_SET):
+                    # Skip self-pairs
+                    if obj_id_j == obj_id_i:
+                        continue
 
-                    for obj_id_j in self._cached_spatial_grid.get(neighbor_cell, self._EMPTY_SET):
-                        # Skip self-pairs
-                        if obj_id_j == obj_id_i:
-                            continue
+                    # Skip if j is static in ignore_static mode
+                    if ignore_static and obj_id_j in self._static_collision_objects:
+                        continue
 
-                        # Skip if j is static in ignore_static mode
-                        if ignore_static and obj_id_j in self._static_collision_objects:
-                            continue
+                    # Skip disabled collision objects
+                    if obj_id_j in self._disabled_collision_objects:
+                        continue
 
-                        # Skip disabled collision objects
-                        if obj_id_j in self._disabled_collision_objects:
-                            continue
+                    # Create sorted pair to avoid duplicates (i < j)
+                    pair_key = (obj_id_i, obj_id_j) if obj_id_i < obj_id_j else (obj_id_j, obj_id_i)
 
-                        # Create sorted pair to avoid duplicates (i < j)
-                        pair_key = (obj_id_i, obj_id_j) if obj_id_i < obj_id_j else (obj_id_j, obj_id_i)
+                    # Skip already tested pairs
+                    if pair_key in tested_pairs:
+                        continue
 
-                        # Skip already tested pairs
-                        if pair_key in tested_pairs:
-                            continue
+                    # Safeguard against stale spatial grid entries
+                    if obj_id_j not in self._sim_objects_dict:
+                        continue
 
-                        # Safeguard against stale spatial grid entries
-                        if obj_id_j not in self._sim_objects_dict:
-                            continue
+                    mode_j = self._cached_collision_modes.get(obj_id_j, CollisionMode.NORMAL_3D)
 
-                        mode_j = self._cached_collision_modes.get(obj_id_j, CollisionMode.NORMAL_3D)
+                    # Two NORMAL_2D bodies that overlap share a z cell (see
+                    # _centre_cells): only their own layer.
+                    if cross_layer and i_2d and mode_j == CollisionMode.NORMAL_2D:
+                        continue
+                    tested_pairs.add(pair_key)
 
-                        # Two NORMAL_2D bodies that overlap share a z cell (see
-                        # _centre_cells): only their own layer.
-                        if offset[2] != 0 and i_2d and mode_j == CollisionMode.NORMAL_2D:
-                            continue
-                        tested_pairs.add(pair_key)
+                    # AABB overlap test
+                    aabb_j = self._cached_aabbs_dict.get(obj_id_j)
+                    if aabb_j is None:
+                        continue
 
-                        # AABB overlap test
-                        aabb_j = self._cached_aabbs_dict.get(obj_id_j)
-                        if aabb_j is None:
-                            continue
+                    # Reject pairs separated beyond the margin on any axis.
+                    # NORMAL_2D still requires actual Z overlap, even when
+                    # both objects occupy the same spatial-grid Z cell.
+                    margin = 0.0 if hybrid and (i_physics or obj_id_j in physics_objects) else broadphase_margin
+                    z_margin = 0.0 if i_2d or mode_j == CollisionMode.NORMAL_2D else margin
+                    (j0x, j0y, j0z), (j1x, j1y, j1z) = aabb_j
+                    if (
+                        i1x + margin < j0x
+                        or i0x - margin > j1x
+                        or i1y + margin < j0y
+                        or i0y - margin > j1y
+                        or i1z + z_margin < j0z
+                        or i0z - z_margin > j1z
+                    ):
+                        continue  # No overlap, skip this pair
 
-                        # Reject pairs separated beyond the margin on any axis.
-                        # NORMAL_2D still requires actual Z overlap, even when
-                        # both objects occupy the same spatial-grid Z cell.
-                        margin = 0.0 if hybrid and (i_physics or obj_id_j in physics_objects) else broadphase_margin
-                        z_margin = 0.0 if i_2d or mode_j == CollisionMode.NORMAL_2D else margin
-                        (j0x, j0y, j0z), (j1x, j1y, j1z) = aabb_j
-                        if (
-                            i1x + margin < j0x
-                            or i0x - margin > j1x
-                            or i1y + margin < j0y
-                            or i0y - margin > j1y
-                            or i1z + z_margin < j0z
-                            or i0z - z_margin > j1z
-                        ):
-                            continue  # No overlap, skip this pair
-
-                        # AABBs overlap - add to candidate pairs
-                        pairs.add(pair_key)
+                    # AABBs overlap - add to candidate pairs
+                    pairs.add(pair_key)
 
         if return_profiling:
             timings["aabb_filtering"] = (time.perf_counter() - t0) * 1000  # ms
@@ -3974,6 +4017,8 @@ class MultiRobotSimulationCore:
         self._cached_aabbs_dict.clear()
         self._cached_spatial_grid.clear()
         self._cached_object_to_cell.clear()
+        self._cached_non_2d_layers.clear()
+        self._cached_object_non_2d_layers.clear()
         self._cached_cell_size = None
         self._aabb_cache_valid = False
         self._clear_active_collision_state()

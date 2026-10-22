@@ -159,8 +159,11 @@ Check only 9 cells in 3×3 grid on same Z layer
 A NORMAL_2D body is registered in every z cell its AABB touches, so two
 NORMAL_2D bodies that overlap in z always share a z layer. A NORMAL_3D body is
 registered in its centre cell and can sit in the layer next to a NORMAL_2D body
-it overlaps, so a pair with one NORMAL_3D body uses all 27 cells. Either way the
-pair needs real overlap in z.
+it overlaps. A NORMAL_3D body searches all 27 cells, so it finds that pair
+itself. A NORMAL_2D body searches 9 cells in each z layer it is registered in,
+plus the 9 in a neighbouring layer only while a body that is not NORMAL_2D is
+registered there (the simulation keeps a count per z layer), so a fleet of
+NORMAL_2D robots pays for 9 cells. Either way the pair needs real overlap in z.
 
 ---
 
