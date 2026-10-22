@@ -58,14 +58,6 @@ are not recommended for production use yet.
   across per-agent and batched, omnidirectional and differential controllers
   (`benchmark/experiments/goal_replacement_cost.py`).
 
-- The ROS 2 bridge Docker images build from the Open-RMF demos image pinned
-  by digest (`RMF_DEMOS_IMAGE` build argument) instead of the nightly
-  `jazzy-rmf-latest` tag, whose rebuilds changed the demo worlds' model URIs
-  and broke the Fuel model cache stage. The Fuel model download now always
-  creates the cache directory and fails with an explanation when the image has
-  no demo worlds or the worlds name no Fuel models (the latter can be allowed
-  with `ALLOW_NO_FUEL_MODELS=1`).
-
 - `ControllerParams` takes either enum field -- `default_direction` and
   `goal_replacement` -- as the enum or its string value, on construction and
   on any later assignment, and stores the enum; an unknown value raises
