@@ -70,7 +70,11 @@ are not recommended for production use yet.
   second time for its spawn descriptor, and the parameter names of spawn
   factories and controller constructors are introspected once per callable
   instead of once per object: spawning 1000 agents takes 0.30 s instead of
-  0.36 s, as in v0.8.0. Each agent still keeps its own descriptor.
+  0.36 s, as in v0.8.0. Each agent still keeps its own descriptor: a
+  controller that overrides `_construction_config()` should return a new dict
+  each call, and its result is still copied in case it does not. The
+  introspection cache holds its callables weakly and skips callables that
+  cannot be cached (an unhashable callable object, say).
 
 - `ControllerParams` takes either enum field -- `default_direction` and
   `goal_replacement` -- as the enum or its string value, on construction and

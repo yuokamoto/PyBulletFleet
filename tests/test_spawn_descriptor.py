@@ -3,11 +3,16 @@
 The descriptor keeps the controller's construction config as plain data, a
 fresh dict from ``ControllerParams.as_config()`` (``asdict`` copies nested
 values), so it needs no second deep copy. Parameter introspection for spawn
-factories and controller configs is cached per callable.
+factories and controller configs is cached per callable, without keeping a
+class alive and without failing on callables that cannot be cached.
 """
 
 from __future__ import annotations
 
+import functools
+import gc
+import inspect
+import weakref
 from typing import Any, Dict, cast
 
 import pybullet as p
@@ -15,6 +20,7 @@ import pytest
 
 from pybullet_fleet import Agent, AgentSpawnParams, MotionMode, MultiRobotSimulationCore, Pose, SimulationParams
 from pybullet_fleet import config_utils
+from pybullet_fleet.controller import OmniController
 
 
 @pytest.fixture
@@ -61,7 +67,9 @@ def test_a_stored_descriptor_is_independent(sim):
     assert first.controller.params.max_linear_accel == 2.0
 
 
-def test_parameter_names_are_introspected_once_per_callable(monkeypatch):
+@pytest.fixture
+def signatures(monkeypatch):
+    """The callables inspect.signature is asked about, with a cold cache."""
     calls = []
     real = config_utils.inspect.signature
 
@@ -69,13 +77,102 @@ def test_parameter_names_are_introspected_once_per_callable(monkeypatch):
         calls.append(function)
         return real(function)
 
-    config_utils._parameter_names.cache_clear()
+    monkeypatch.setattr(config_utils, "_PARAMETER_CACHE", weakref.WeakKeyDictionary())
     monkeypatch.setattr(config_utils.inspect, "signature", counting)
+    return calls
 
+
+def test_parameter_names_are_introspected_once_per_callable(signatures):
     def factory(cls, name, pose=None, *, mass=0.0):  # a stand-in factory
         return None
 
     for _ in range(5):
         assert config_utils._parameter_names(factory) == frozenset({"name", "pose", "mass"})
-    assert calls == [factory]
-    config_utils._parameter_names.cache_clear()
+    assert signatures == [factory]
+
+
+def test_a_bound_classmethod_is_cached_under_its_function(signatures):
+    """``Factory.make`` is a new bound method on every access; it still costs
+    one introspection, and the bound first parameter is left out whatever its name."""
+
+    class Factory:
+        @classmethod
+        def make(klass, name, pose=None):  # pyright: ignore[reportSelfClsParameterName]
+            return None
+
+    for _ in range(5):
+        assert config_utils._parameter_names(Factory.make) == frozenset({"name", "pose"})
+    assert signatures == [Factory.make.__func__]
+
+
+def test_the_cache_does_not_keep_a_class_alive(monkeypatch):
+    monkeypatch.setattr(config_utils, "_PARAMETER_CACHE", weakref.WeakKeyDictionary())
+
+    def make_class():
+        class Throwaway:
+            def __init__(self, params, extra=None):
+                pass
+
+        return Throwaway
+
+    cls = make_class()
+    assert config_utils._parameter_names(cls.__init__) == frozenset({"params", "extra"})
+    gone = weakref.ref(cls)
+    del cls
+    gc.collect()
+    assert gone() is None
+    assert len(config_utils._PARAMETER_CACHE) == 0
+
+
+@pytest.mark.parametrize(
+    "make",
+    [
+        pytest.param(lambda: _Unhashable(), id="unhashable"),
+        pytest.param(lambda: functools.partial(_two, 1), id="partial"),
+        pytest.param(lambda: [].append, id="builtin-bound"),
+    ],
+)
+def test_any_callable_still_works(make):
+    """Callables that cannot be weak dictionary keys are introspected uncached."""
+    function = make()
+    expected = frozenset(inspect.signature(function).parameters) - {"cls", "self"}
+    for _ in range(2):
+        assert config_utils._parameter_names(function) == expected
+
+
+class _Unhashable:
+    __hash__ = None  # type: ignore[assignment]
+
+    def __call__(self, name, pose=None):
+        return None
+
+
+def _two(a, b, *, c=0):
+    return None
+
+
+class _HoldingController(OmniController):
+    """Breaks the _construction_config contract: hands back a dict it keeps."""
+
+    def __init__(self, params=None):
+        super().__init__(params)
+        self.held = {"type": "omni", "max_linear_vel": [1.0, 0.5, 0.0], "max_linear_accel": 2.0}
+
+    def _construction_config(self):
+        return self.held
+
+
+def test_an_override_returning_a_held_dict_is_still_copied():
+    controller = _HoldingController()
+    stored = controller._spawn_descriptor_config()
+    assert stored is not None and stored == controller.held
+    stored["max_linear_vel"][0] = 99.0
+    assert controller.held["max_linear_vel"][0] == 1.0
+
+
+def test_the_built_in_config_is_not_copied_twice(monkeypatch):
+    """The base implementation's fresh dict is kept as it is: no second copy."""
+    controller = OmniController()
+    fresh = controller._construction_config()
+    monkeypatch.setattr(controller, "_construction_config", lambda: fresh)
+    assert controller._spawn_descriptor_config() is fresh

@@ -34,6 +34,7 @@ Registry
     ctrl = create_controller("differential", {"max_linear_vel": 1.5})
 """
 
+import copy
 import math
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Type, TypeVar
@@ -183,6 +184,13 @@ class Controller(ABC):
 
         Subclass-specific constructor arguments are outside this descriptor;
         profiles must explicitly support and validate those controllers.
+
+        Contract for overrides: return a new dict on every call, sharing no
+        mutable value with the controller -- the caller keeps it and may
+        change it. This implementation does (``dataclasses.asdict`` copies
+        nested values); :meth:`_spawn_descriptor_config` still copies the
+        result of an override, so one that hands back a dict it holds cannot
+        tie a spawn descriptor to the live controller.
         """
         from pybullet_fleet.controller_params import ControllerParams
 
@@ -190,6 +198,18 @@ class Controller(ABC):
         if kind is None or not isinstance(self.params, ControllerParams):
             return None
         return {"type": kind, **self.params.as_config()}
+
+    def _spawn_descriptor_config(self) -> Optional[dict]:
+        """:meth:`_construction_config` for an agent's spawn descriptor, owned by it.
+
+        The base implementation already returns a fresh dict, so it is kept
+        as it is -- a second deep copy per spawned agent was measurable. An
+        override is copied, since it may break the contract above.
+        """
+        config = self._construction_config()
+        if config is not None and type(self)._construction_config is not Controller._construction_config:
+            return copy.deepcopy(config)
+        return config
 
     @classmethod
     def from_config(cls: Type[_ControllerT], config: dict) -> "_ControllerT":

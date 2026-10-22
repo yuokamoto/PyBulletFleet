@@ -1009,9 +1009,9 @@ class Agent(SimObject):
             user_data=dict(agent.user_data),
             motion_mode=agent._motion_mode,
             use_fixed_base=agent.use_fixed_base,
-            # _construction_config() builds a fresh dict (dataclasses.asdict
-            # copies nested values): no second deep copy needed.
-            controller=agent.controller._construction_config(),
+            # Owned by the descriptor without a second deep copy for the
+            # built-in controllers (see Controller._spawn_descriptor_config).
+            controller=agent.controller._spawn_descriptor_config(),
         )
 
         if notify_spawn:
@@ -1118,7 +1118,7 @@ class Agent(SimObject):
         # Keep a configuration descriptor, never the live controller (whose
         # execution state changes as the simulation runs). Controllers without
         # a registered name cannot be reconstructed by this descriptor.
-        controller_config = agent.controller._construction_config()
+        controller_config = agent.controller._spawn_descriptor_config()
         agent._checkpoint_spawn_params = AgentSpawnParams(
             name=agent.name,
             urdf_path=agent.urdf_path,
@@ -1129,8 +1129,6 @@ class Agent(SimObject):
             user_data=dict(agent.user_data),
             motion_mode=agent._motion_mode,
             use_fixed_base=agent.use_fixed_base,
-            # _construction_config() builds a fresh dict (asdict copies nested
-            # values): no second deep copy needed.
             controller=controller_config,
             ik_params=ik_params,
             global_scaling=global_scaling,

@@ -5,12 +5,12 @@ Utility functions for loading and merging configuration files.
 
 import dataclasses
 import importlib
-import functools
 import inspect
 import os
+import weakref
 from collections.abc import Iterable, Mapping
 from enum import Enum
-from typing import Any, Callable, Dict, List, Optional, Type, TypeVar, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Type, TypeVar, Union
 
 # Root for bundled assets (robots/, config/, mesh/), which ship inside the
 # package — so this is the package directory itself.
@@ -293,11 +293,41 @@ def dataclass_from_dict(
     return cls(**kwargs)
 
 
-@functools.lru_cache(maxsize=None)
+#: function -> its parameter names in order, from one inspect.signature call.
+#: Weak keys: a class created at run time (a test's, say) is not kept alive by
+#: having been spawned or configured once.
+_PARAMETER_CACHE: "weakref.WeakKeyDictionary[Any, Tuple[str, ...]]" = weakref.WeakKeyDictionary()
+
+
 def _parameter_names(function: Callable) -> frozenset:
     """Parameter names of ``function`` (without cls/self), cached: one
-    signature introspection per factory instead of one per spawned object."""
-    return frozenset(p for p in inspect.signature(function).parameters if p not in ("cls", "self"))
+    signature introspection per factory instead of one per spawned object.
+
+    A bound method (``Agent.from_urdf`` is a new one on every attribute
+    access) is cached under its underlying function, without the bound first
+    parameter. A callable that cannot be a weak dictionary key -- unhashable,
+    or not weak-referenceable -- is introspected every time instead.
+    """
+    underlying = getattr(function, "__func__", None)
+    bound = underlying is not None and getattr(function, "__self__", None) is not None
+    key = underlying if bound else function
+    try:
+        names = _PARAMETER_CACHE.get(key)
+    except TypeError:
+        names = None
+        cacheable = False
+    else:
+        cacheable = True
+    if names is None:
+        names = tuple(inspect.signature(key).parameters)
+        if cacheable:
+            try:
+                _PARAMETER_CACHE[key] = names
+            except TypeError:
+                pass
+    if bound:
+        names = names[1:]
+    return frozenset(n for n in names if n not in ("cls", "self"))
 
 
 def forward_spawn_params(
