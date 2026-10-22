@@ -67,8 +67,11 @@ are not recommended for production use yet.
   searched in the neighbouring z layers too. A pair with a NORMAL_2D body that
   overlaps in z but whose centres sit in different z cells was missed,
   including without a margin. A NORMAL_2D body looks into a neighbouring z
-  layer only while a body that is not NORMAL_2D is registered there, so an
-  all-NORMAL_2D fleet still searches 9 cells per layer it touches.
+  layer only while a NORMAL_3D body is registered there, or a STATIC one while
+  static collisions are not ignored, so an all-NORMAL_2D fleet still searches
+  9 cells per layer it touches, also beside ignored static scenery. A body
+  switched from NORMAL_2D or NORMAL_3D to STATIC is re-registered (it kept its
+  old cells), and a DISABLED body that moves is no longer put in the grid.
 
 - `ControllerParams` takes either enum field -- `default_direction` and
   `goal_replacement` -- as the enum or its string value, on construction and

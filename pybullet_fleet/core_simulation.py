@@ -569,11 +569,14 @@ class MultiRobotSimulationCore:
         self._cached_object_to_cell: Dict[int, List[Tuple[int, int, int]]] = (
             {}
         )  # object_id -> list of cells (supports multi-cell registration)
-        # z layer -> grid registrations of bodies that are not NORMAL_2D, and
-        # the layers each such body counted: a NORMAL_2D body looks into the
-        # layer next to its own only when this says something there can hit it.
-        self._cached_non_2d_layers: Dict[int, int] = {}
-        self._cached_object_non_2d_layers: Dict[int, Tuple[int, ...]] = {}
+        # z layer -> grid registrations of NORMAL_3D bodies, and of STATIC
+        # ones, plus what each such body counted (whether it was STATIC, and
+        # its layers): a NORMAL_2D body looks into the layer next to its own
+        # only when something there can hit it -- a NORMAL_3D body, or a
+        # STATIC one while static collisions are not ignored.
+        self._cached_3d_layers: Dict[int, int] = {}
+        self._cached_static_layers: Dict[int, int] = {}
+        self._cached_object_layer_counts: Dict[int, Tuple[bool, Tuple[int, ...]]] = {}
         self._aabb_cache_valid: bool = False  # Flag indicating if AABB cache is valid
         self._last_ignore_static: Optional[bool] = None  # Track last ignore_static value to detect mode changes
 
@@ -1728,8 +1731,9 @@ class MultiRobotSimulationCore:
         """Rebuild entire spatial grid using current cell_size and AABBs."""
         self._cached_spatial_grid.clear()
         self._cached_object_to_cell.clear()
-        self._cached_non_2d_layers.clear()
-        self._cached_object_non_2d_layers.clear()
+        self._cached_3d_layers.clear()
+        self._cached_static_layers.clear()
+        self._cached_object_layer_counts.clear()
 
         for object_id in self._cached_aabbs_dict.keys():
             self._update_object_spatial_grid(object_id)
@@ -2051,10 +2055,11 @@ class MultiRobotSimulationCore:
                 self._cached_spatial_grid[cell].discard(object_id)
                 if not self._cached_spatial_grid[cell]:
                     del self._cached_spatial_grid[cell]
-        counted = self._cached_object_non_2d_layers.pop(object_id, None)
+        counted = self._cached_object_layer_counts.pop(object_id, None)
         if counted:
-            layers = self._cached_non_2d_layers
-            for z in counted:
+            is_static, counted_layers = counted
+            layers = self._cached_static_layers if is_static else self._cached_3d_layers
+            for z in counted_layers:
                 remaining = layers[z] - 1
                 if remaining:
                     layers[z] = remaining
@@ -2227,6 +2232,12 @@ class MultiRobotSimulationCore:
         """
         old_cells = self._cached_object_to_cell.get(object_id)
 
+        # A DISABLED body is in no cell: moving one (set_pose updates the grid
+        # of any kinematic body) must not register it, or it would be counted
+        # as a body a NORMAL_2D one has to look for in the next layer.
+        if object_id in self._disabled_collision_objects:
+            remove_only = True
+
         # If remove_only, remove from old cells and return
         if remove_only:
             if old_cells is not None:
@@ -2266,11 +2277,19 @@ class MultiRobotSimulationCore:
         else:
             cells = self._get_overlapping_cells(object_id)
 
-        non_2d = self._cached_collision_modes.get(object_id) != CollisionMode.NORMAL_2D
+        mode = self._cached_collision_modes.get(object_id)
+        non_2d = mode != CollisionMode.NORMAL_2D
+        is_static = mode == CollisionMode.STATIC
+        counted = self._cached_object_layer_counts.get(object_id)
 
         # Same-cell optimization: skip grid operations if cells haven't changed
-        # (nor whether they count as a non-NORMAL_2D body's, after a mode change)
-        if old_cells is not None and cells == old_cells and non_2d == (object_id in self._cached_object_non_2d_layers):
+        # (nor how they are counted, after a mode change)
+        if (
+            old_cells is not None
+            and cells == old_cells
+            and non_2d == (counted is not None)
+            and (counted is None or counted[0] == is_static)
+        ):
             return
 
         # Remove from old cells (if exists)
@@ -2282,10 +2301,10 @@ class MultiRobotSimulationCore:
         for cell in cells:
             self._cached_spatial_grid.setdefault(cell, set()).add(object_id)
         if non_2d:
-            counted = tuple(cell[2] for cell in cells)
-            self._cached_object_non_2d_layers[object_id] = counted
-            layers = self._cached_non_2d_layers
-            for z in counted:
+            counted_layers = tuple(cell[2] for cell in cells)
+            self._cached_object_layer_counts[object_id] = (is_static, counted_layers)
+            layers = self._cached_static_layers if is_static else self._cached_3d_layers
+            for z in counted_layers:
                 layers[z] = layers.get(z, 0) + 1
 
         # Log
@@ -2395,9 +2414,14 @@ class MultiRobotSimulationCore:
                 self._dynamic_collision_objects.discard(object_id)
                 self._remove_object_from_collision_system(object_id)
             elif new_mode == CollisionMode.STATIC:
-                # NORMAL -> STATIC: Remove from dynamic set, add to static set, keep AABB/grid
+                # NORMAL -> STATIC: Remove from dynamic set, add to static set,
+                # keep the AABB. Re-register: a NORMAL_2D body registers
+                # different z cells, and STATIC registrations are counted per
+                # layer apart from NORMAL_3D ones.
                 self._dynamic_collision_objects.discard(object_id)
                 self._static_collision_objects.add(object_id)
+                if self._cached_cell_size is not None:
+                    self._update_object_spatial_grid(object_id)
             else:
                 # NORMAL_3D <-> NORMAL_2D: the two register different z cells
                 # (_update_object_spatial_grid), so re-register; mark as moved
@@ -3343,16 +3367,20 @@ class MultiRobotSimulationCore:
             # Cells to search, each with whether it is in another z layer.
             # NORMAL_3D: all 27 neighbours. NORMAL_2D: its own z layers (two
             # NORMAL_2D bodies that overlap share one, see _centre_cells), and
-            # the layer next to them only where a body that is not NORMAL_2D
-            # is registered -- one in its centre cell can overlap from there.
+            # the layer next to them only where a NORMAL_3D body is registered,
+            # or a STATIC one while static collisions count -- one in its
+            # centre cell can overlap from there. Static scenery next to the
+            # robots' layer then costs nothing while it is ignored.
             if i_2d:
                 layers_i = {c[2] for c in cells_i}
-                non_2d_layers = self._cached_non_2d_layers
+                layers_3d = self._cached_3d_layers
+                # Static scenery cannot hit anything while it is ignored.
+                layers_static = () if ignore_static else self._cached_static_layers
                 neighbours = []
                 for cx, cy, cz in cells_i:
                     for nz in (cz - 1, cz, cz + 1):
                         cross = nz != cz
-                        if cross and (nz in layers_i or nz not in non_2d_layers):
+                        if cross and (nz in layers_i or (nz not in layers_3d and nz not in layers_static)):
                             continue
                         neighbours.extend(((cx + dx, cy + dy, nz), cross) for dx, dy in self._NEIGHBOR_OFFSETS_XY)
             else:
@@ -4017,8 +4045,9 @@ class MultiRobotSimulationCore:
         self._cached_aabbs_dict.clear()
         self._cached_spatial_grid.clear()
         self._cached_object_to_cell.clear()
-        self._cached_non_2d_layers.clear()
-        self._cached_object_non_2d_layers.clear()
+        self._cached_3d_layers.clear()
+        self._cached_static_layers.clear()
+        self._cached_object_layer_counts.clear()
         self._cached_cell_size = None
         self._aabb_cache_valid = False
         self._clear_active_collision_state()

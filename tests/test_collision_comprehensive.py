@@ -1165,7 +1165,7 @@ class TestRuntimeModeChanges:
 # ============================================================================
 
 
-def _broadphase_scene(seed, margin, widths, modes=(CollisionMode.NORMAL_3D,), one_moved=False):
+def _broadphase_scene(seed, margin, widths, modes=(CollisionMode.NORMAL_3D,), one_moved=False, ignore_static=False):
     """Random boxes on and off spatial-hash cell boundaries; returns (missed, checked).
 
     ``widths`` are AABB widths in cells; each box takes a random mode from
@@ -1174,6 +1174,10 @@ def _broadphase_scene(seed, margin, widths, modes=(CollisionMode.NORMAL_3D,), on
     pair with a NORMAL_2D body needs actual overlap in z, as the broadphase
     requires. With ``one_moved``, each body is searched for alone, as when it
     is the only one that moved: its pairs must be found from its side.
+
+    STATIC bodies never move, so they are never searched from; a pair with
+    one must be found from the other body's side, unless ``ignore_static``.
+    Two STATIC bodies are never a pair.
     """
     import random
 
@@ -1187,7 +1191,7 @@ def _broadphase_scene(seed, margin, widths, modes=(CollisionMode.NORMAL_3D,), on
             collision_margin=margin,
             spatial_hash_cell_size_mode=SpatialHashCellSizeMode.CONSTANT,
             spatial_hash_cell_size=cell,
-            ignore_static_collision=False,
+            ignore_static_collision=ignore_static,
         )
     )
     try:
@@ -1199,19 +1203,25 @@ def _broadphase_scene(seed, margin, widths, modes=(CollisionMode.NORMAL_3D,), on
             offsets = [0.0, 0.001, -0.001, rng.uniform(-cell, cell)]
             xyz = [round(rng.uniform(0.0, 3.0) / cell) * cell + rng.choice(offsets) for _ in range(3)]
             objects.append(create_test_box(sim, xyz, size=half, collision_mode=rng.choice(modes)))
+        static = {obj.object_id for obj in objects if obj.collision_mode == CollisionMode.STATIC}
+        movers = [obj.object_id for obj in objects if obj.object_id not in static]
         if one_moved:
             found = {}
-            for obj in objects:
-                sim._moved_this_step = {obj.object_id}
-                found[obj.object_id] = set(sim.filter_aabb_pairs()[0])
+            for object_id in movers:
+                sim._moved_this_step = {object_id}
+                found[object_id] = set(sim.filter_aabb_pairs()[0])
         else:
-            sim._moved_this_step = {obj.object_id for obj in objects}
+            sim._moved_this_step = set(movers)
             everything = set(sim.filter_aabb_pairs()[0])
-            found = {obj.object_id: everything for obj in objects}
+            found = {object_id: everything for object_id in movers}
         aabbs = sim._cached_aabbs_dict
         two_d = {obj.object_id for obj in objects if obj.collision_mode == CollisionMode.NORMAL_2D}
         missed = checked = 0
         for a, b in itertools.combinations([obj.object_id for obj in objects], 2):
+            if a in static and b in static:
+                continue
+            if ignore_static and (a in static or b in static):
+                continue
             box_a, box_b = aabbs[a], aabbs[b]
             z_margin = 0.0 if a in two_d or b in two_d else margin
             margins = (margin, margin, z_margin)
@@ -1220,7 +1230,7 @@ def _broadphase_scene(seed, margin, widths, modes=(CollisionMode.NORMAL_3D,), on
             )
             checked += 1
             pair = (min(a, b), max(a, b))
-            if overlap and (pair not in found[a] or pair not in found[b]):
+            if overlap and any(pair not in found[s] for s in (a, b) if s not in static):
                 missed += 1
         return missed, checked
     finally:
@@ -1276,6 +1286,63 @@ def test_broadphase_finds_normal_2d_pairs_from_either_side(seed, margin):
     assert missed == 0
 
 
+@pytest.mark.parametrize("seed", range(4))
+@pytest.mark.parametrize("margin", [0.0, 0.02, 0.1])
+@pytest.mark.parametrize("ignore_static", [False, True], ids=["static_counts", "static_ignored"])
+@pytest.mark.parametrize("one_moved", [False, True], ids=["all_moved", "one_moved"])
+def test_broadphase_finds_pairs_with_static_bodies(seed, margin, ignore_static, one_moved):
+    """As above, with STATIC bodies among the 2D and 3D ones. A NORMAL_2D body
+    looks into the next z layer for a STATIC one only while static collisions
+    count; when they are ignored no pair with a STATIC body is required."""
+    widths = [0.04, 0.1, 0.2, 0.9, 1.0, 2.8, 5.0]
+    modes = (CollisionMode.NORMAL_2D, CollisionMode.NORMAL_3D, CollisionMode.STATIC)
+    missed, checked = _broadphase_scene(
+        seed, margin, widths=widths, modes=modes, one_moved=one_moved, ignore_static=ignore_static
+    )
+    assert checked > 0
+    assert missed == 0
+
+
+@pytest.mark.parametrize("ignore_static", [False, True], ids=["static_counts", "static_ignored"])
+def test_a_moved_normal_2d_body_and_a_static_one_centred_in_the_next_layer(ignore_static):
+    """Same geometry as the 3D case below, with a STATIC body: found when
+    static collisions count, and the next layer not searched at all (no pair)
+    while they are ignored."""
+    sim = MultiRobotSimulationCore(
+        SimulationParams(
+            gui=False,
+            physics=False,
+            monitor=False,
+            collision_margin=0.02,
+            spatial_hash_cell_size_mode=SpatialHashCellSizeMode.CONSTANT,
+            spatial_hash_cell_size=0.5,
+            ignore_static_collision=ignore_static,
+        )
+    )
+    try:
+        sim.set_collision_spatial_hash_cell_size_mode()
+        flat = create_test_box(sim, [0.2, 0.2, 0.60], size=0.10, collision_mode=CollisionMode.NORMAL_2D)
+        shelf = create_test_box(sim, [0.2, 0.2, 0.41], size=0.11, collision_mode=CollisionMode.STATIC)
+        assert {c[2] for c in sim._cached_object_to_cell[flat.object_id]} == {1}
+        assert {c[2] for c in sim._cached_object_to_cell[shelf.object_id]} == {0}
+        assert sim._cached_static_layers == {0: 1} and sim._cached_3d_layers == {}
+        looked_up = set()
+
+        class Grid(dict):
+            def get(self, key, default=None):
+                looked_up.add(key[2])
+                return super().get(key, default)
+
+        sim._cached_spatial_grid = Grid(sim._cached_spatial_grid)
+        sim._moved_this_step = {flat.object_id}
+        pair = tuple(sorted((flat.object_id, shelf.object_id)))
+        assert (pair in set(sim.filter_aabb_pairs()[0])) is not ignore_static
+        # Ignored static scenery next to the 2D body's layer is not searched.
+        assert looked_up == ({1} if ignore_static else {0, 1})
+    finally:
+        p.disconnect(sim.client)
+
+
 @pytest.mark.parametrize("margin", [0.0, 0.02])
 def test_a_moved_normal_2d_body_finds_a_3d_one_centred_in_the_next_layer(margin):
     """The 2D body touches z layer 1 only (z 0.50-0.70, cell 0.5); the 3D body
@@ -1306,9 +1373,9 @@ def test_a_moved_normal_2d_body_finds_a_3d_one_centred_in_the_next_layer(margin)
 
 
 def test_non_2d_layer_counts_follow_the_grid():
-    """The per-layer count of bodies that are not NORMAL_2D stays equal to what
-    the grid holds through moves, mode changes (also ones that keep the same
-    cells) and removals."""
+    """The per-layer counts of NORMAL_3D and of STATIC bodies stay equal to what
+    the grid holds through moves, mode changes between NORMAL_2D, NORMAL_3D,
+    STATIC and DISABLED (also ones that keep the same cells) and removals."""
     import random
 
     rng = random.Random(3)
@@ -1324,17 +1391,25 @@ def test_non_2d_layer_counts_follow_the_grid():
         )
     )
 
-    def recount():
+    def recount(kind):
         counts = {}
         for object_id, cells in sim._cached_object_to_cell.items():
-            if sim._cached_collision_modes.get(object_id) != CollisionMode.NORMAL_2D:
+            if sim._cached_collision_modes.get(object_id) == kind:
                 for cell in cells:
                     counts[cell[2]] = counts.get(cell[2], 0) + 1
         return counts
 
+    def consistent():
+        return (
+            sim._cached_3d_layers == recount(CollisionMode.NORMAL_3D)
+            and sim._cached_static_layers == recount(CollisionMode.STATIC)
+            # A DISABLED body, moved or not, is in no cell.
+            and not sim._disabled_collision_objects & set(sim._cached_object_to_cell)
+        )
+
     try:
         sim.set_collision_spatial_hash_cell_size_mode()
-        modes = (CollisionMode.NORMAL_2D, CollisionMode.NORMAL_3D)
+        modes = (CollisionMode.NORMAL_2D, CollisionMode.NORMAL_3D, CollisionMode.STATIC)
         objects = [
             create_test_box(
                 sim,
@@ -1344,21 +1419,21 @@ def test_non_2d_layer_counts_follow_the_grid():
             )
             for _ in range(20)
         ]
-        assert sim._cached_non_2d_layers == recount()
-        for _ in range(60):
+        assert consistent()
+        for _ in range(90):
             obj = rng.choice(objects)
             action = rng.random()
             if action < 0.5:
                 pos = [rng.uniform(0, 2), rng.uniform(0, 2), rng.uniform(0, 2)]
                 p.resetBasePositionAndOrientation(obj.body_id, pos, [0, 0, 0, 1], physicsClientId=sim.client)
                 sim._update_object_aabb(obj.object_id)
-            elif action < 0.9:
-                other = CollisionMode.NORMAL_3D if obj.collision_mode == CollisionMode.NORMAL_2D else CollisionMode.NORMAL_2D
-                obj.set_collision_mode(other)
+            elif action < 0.93:
+                others = [m for m in modes + (CollisionMode.DISABLED,) if m != obj.collision_mode]
+                obj.set_collision_mode(rng.choice(others))
             else:
                 sim.remove_object(obj)
                 objects.remove(obj)
-            assert sim._cached_non_2d_layers == recount()
+            assert consistent()
     finally:
         p.disconnect(sim.client)
 

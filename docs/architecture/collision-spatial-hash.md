@@ -161,9 +161,12 @@ NORMAL_2D bodies that overlap in z always share a z layer. A NORMAL_3D body is
 registered in its centre cell and can sit in the layer next to a NORMAL_2D body
 it overlaps. A NORMAL_3D body searches all 27 cells, so it finds that pair
 itself. A NORMAL_2D body searches 9 cells in each z layer it is registered in,
-plus the 9 in a neighbouring layer only while a body that is not NORMAL_2D is
-registered there (the simulation keeps a count per z layer), so a fleet of
-NORMAL_2D robots pays for 9 cells. Either way the pair needs real overlap in z.
+plus the 9 in a neighbouring layer only while a NORMAL_3D body is registered
+there, or a STATIC one while static collisions are not ignored (the simulation
+keeps both counts per z layer). A fleet of NORMAL_2D robots therefore pays for
+9 cells, also next to static scenery such as shelves when
+`ignore_static_collision` is on. Either way the pair needs real overlap in z.
+A DISABLED body is in no cell, even after it moves.
 
 ---
 
