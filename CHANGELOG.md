@@ -59,7 +59,14 @@ are not recommended for production use yet.
   per step instead of 13.7 ms (v0.8.0: 10.1 ms). The extra narrow-phase work
   for pairs within the margin (near misses) is part of that fix and stays.
   Without a margin, bodies between one cell and `multi_cell_threshold` wide
-  can still miss a touching neighbour (#89).
+  can still miss a touching neighbour (#89). `multi_cell_threshold` applies
+  only when the margin is 0.
+
+- Collision broadphase, NORMAL_2D: a NORMAL_2D body is registered in every z
+  cell its AABB touches, and a pair of a NORMAL_2D and a NORMAL_3D body is
+  searched in the neighbouring z layers too. A pair with a NORMAL_2D body that
+  overlaps in z but whose centres sit in different z cells was missed,
+  including without a margin.
 
 - `ControllerParams` takes either enum field -- `default_direction` and
   `goal_replacement` -- as the enum or its string value, on construction and

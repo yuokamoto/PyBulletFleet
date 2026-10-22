@@ -291,8 +291,15 @@ For the cell size calculation algorithm, see [Cell Size & Grid Mapping](cell-siz
 
 ## Multi-Cell Threshold
 
-Controls when large objects are registered in multiple spatial-hash cells.
-Objects larger than `cell_size × multi_cell_threshold` span multiple cells.
+Controls when large objects are registered in multiple spatial-hash cells
+**while `collision_margin` is 0**. Objects larger than
+`cell_size × multi_cell_threshold` span multiple cells.
+
+With a positive `collision_margin` (the default), the threshold is not used.
+A body whose AABB plus the margin fits in one cell on every axis is registered
+in its centre cell only; any larger body is registered in every cell its AABB,
+enlarged by half the margin, touches. That way every pair within the margin
+is found.
 
 ```yaml
 multi_cell_threshold: 1.5  # default
@@ -304,7 +311,7 @@ multi_cell_threshold: 1.5  # default
 | **1.5** | Default — objects >1.5× the cell size span multiple cells |
 | 2.0+ | Only very large objects are multi-registered |
 
-**Example**: With `cell_size=2.0` and `multi_cell_threshold=1.5`, objects larger than 3.0 m are multi-registered.
+**Example**: With `collision_margin=0`, `cell_size=2.0` and `multi_cell_threshold=1.5`, objects larger than 3.0 m are multi-registered.
 
 For implementation details, see [Multi-Cell Registration](multi-cell-registration).
 
@@ -356,7 +363,7 @@ simulation:
 entities:
   # collision_mode is per entity, not a simulation setting.
   - urdf_path: robots/mobile_robot.urdf
-    collision_mode: normal_2d  # 9 neighbors in the XY grid search
+    collision_mode: normal_2d  # other NORMAL_2D bodies: its own z layer only
 
   - urdf_path: robots/simple_cube.urdf
     collision_mode: static  # fixed; cannot be moved until its mode changes

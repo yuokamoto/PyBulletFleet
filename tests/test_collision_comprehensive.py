@@ -1164,17 +1164,15 @@ class TestRuntimeModeChanges:
 # Run Tests
 # ============================================================================
 
-if __name__ == "__main__":
-    # Run with pytest
-    pytest.main([__file__, "-v", "--tb=short"])
 
-
-def _broadphase_scene(seed, margin, widths):
+def _broadphase_scene(seed, margin, widths, modes=(CollisionMode.NORMAL_3D,)):
     """Random boxes on and off spatial-hash cell boundaries; returns (missed, checked).
 
-    ``widths`` are AABB widths in cells. A pair is missed when its AABBs,
-    enlarged by the collision margin, overlap but the broadphase does not
-    return it as a candidate.
+    ``widths`` are AABB widths in cells; each box takes a random mode from
+    ``modes``. A pair is missed when its AABBs, enlarged by the collision
+    margin, overlap but the broadphase does not return it as a candidate. A
+    pair with a NORMAL_2D body needs actual overlap in z, as the broadphase
+    requires.
     """
     import random
 
@@ -1198,15 +1196,20 @@ def _broadphase_scene(seed, margin, widths):
             half = 0.5 * cell * rng.choice(widths)
             # On a cell boundary, a hair off it, or anywhere.
             offsets = [0.0, 0.001, -0.001, rng.uniform(-cell, cell)]
-            xy = [round(rng.uniform(0.0, 3.0) / cell) * cell + rng.choice(offsets) for _ in range(2)]
-            objects.append(create_test_box(sim, xy + [rng.uniform(0.0, 0.3)], size=half))
+            xyz = [round(rng.uniform(0.0, 3.0) / cell) * cell + rng.choice(offsets) for _ in range(3)]
+            objects.append(create_test_box(sim, xyz, size=half, collision_mode=rng.choice(modes)))
         sim._moved_this_step = {obj.object_id for obj in objects}
         candidates = set(sim.filter_aabb_pairs()[0])
         aabbs = sim._cached_aabbs_dict
+        two_d = {obj.object_id for obj in objects if obj.collision_mode == CollisionMode.NORMAL_2D}
         missed = checked = 0
         for a, b in itertools.combinations([obj.object_id for obj in objects], 2):
             box_a, box_b = aabbs[a], aabbs[b]
-            overlap = all(box_a[1][d] + margin >= box_b[0][d] and box_a[0][d] - margin <= box_b[1][d] for d in range(3))
+            z_margin = 0.0 if a in two_d or b in two_d else margin
+            margins = (margin, margin, z_margin)
+            overlap = all(
+                box_a[1][d] + margins[d] >= box_b[0][d] and box_a[0][d] - margins[d] <= box_b[1][d] for d in range(3)
+            )
             checked += 1
             if overlap and (min(a, b), max(a, b)) not in candidates:
                 missed += 1
@@ -1235,3 +1238,49 @@ def test_broadphase_without_margin_returns_every_touching_pair(seed):
     missed, checked = _broadphase_scene(seed, 0.0, widths=[0.04, 0.1, 0.2, 0.9, 1.0, 1.6, 2.8, 5.0])
     assert checked > 0
     assert missed == 0
+
+
+@pytest.mark.parametrize("seed", range(6))
+@pytest.mark.parametrize("margin", [0.0, 0.02, 0.1])
+def test_broadphase_finds_pairs_with_normal_2d_bodies(seed, margin):
+    """NORMAL_2D bodies search their own z layer only, so a pair with one
+    must share a z cell. Against brute force, with 2D, 3D and mixed pairs
+    placed on and off z cell boundaries."""
+    # No widths between one cell and multi_cell_threshold: without a margin
+    # those can miss a touching neighbour in any mode (#89).
+    widths = [0.04, 0.1, 0.2, 0.9, 1.0, 2.8, 5.0]
+    missed, checked = _broadphase_scene(seed, margin, widths=widths, modes=(CollisionMode.NORMAL_2D, CollisionMode.NORMAL_3D))
+    assert checked > 0
+    assert missed == 0
+
+
+@pytest.mark.parametrize("modes", [(CollisionMode.NORMAL_2D,) * 2, (CollisionMode.NORMAL_2D, CollisionMode.NORMAL_3D)])
+def test_normal_2d_pair_across_a_z_cell_boundary(modes):
+    """Overlapping in z, with centres in different z cells (cell 0.5: z 0.40-0.60
+    and 0.30-0.45)."""
+    sim = MultiRobotSimulationCore(
+        SimulationParams(
+            gui=False,
+            physics=False,
+            monitor=False,
+            collision_margin=0.02,
+            spatial_hash_cell_size_mode=SpatialHashCellSizeMode.CONSTANT,
+            spatial_hash_cell_size=0.5,
+            ignore_static_collision=False,
+        )
+    )
+    try:
+        sim.set_collision_spatial_hash_cell_size_mode()
+        upper = create_test_box(sim, [0.2, 0.2, 0.50], size=0.10, collision_mode=modes[0])
+        lower = create_test_box(sim, [0.2, 0.2, 0.375], size=0.075, collision_mode=modes[1])
+        for moved in (upper, lower):
+            sim._moved_this_step = {moved.object_id}
+            pair = tuple(sorted((upper.object_id, lower.object_id)))
+            assert pair in set(sim.filter_aabb_pairs()[0]), f"missed when only {moved.collision_mode} moved"
+    finally:
+        p.disconnect(sim.client)
+
+
+if __name__ == "__main__":
+    # Run with pytest
+    pytest.main([__file__, "-v", "--tb=short"])

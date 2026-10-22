@@ -142,7 +142,7 @@ Check all 27 cells in 3×3×3 cube
                         Total: 27 cells
 
 
-2D Mode (9 neighbors):
+2D Mode (9 neighbors between two NORMAL_2D bodies):
 Check only 9 cells in 3×3 grid on same Z layer
 
     Z=0 layer (object's Z level only)
@@ -156,6 +156,12 @@ Check only 9 cells in 3×3 grid on same Z layer
     Total: 9 cells (Z±1 layers ignored)
 ```
 
+A NORMAL_2D body is registered in every z cell its AABB touches, so two
+NORMAL_2D bodies that overlap in z always share a z layer. A NORMAL_3D body is
+registered in its centre cell and can sit in the layer next to a NORMAL_2D body
+it overlaps, so a pair with one NORMAL_3D body uses all 27 cells. Either way the
+pair needs real overlap in z.
+
 ---
 
 (multi-cell-registration)=
@@ -165,7 +171,14 @@ Check only 9 cells in 3×3 grid on same Z layer
 
 **Solution**: Register to all overlapping cells
 
-**Detection**:
+With a positive `collision_margin` (the default), the rule below is not used. A
+body whose AABB plus the margin fits in one cell on every axis is registered in
+its centre cell only: two such bodies within the margin have centres less than a
+cell apart, so the neighbour search finds them. Any larger body is registered in
+every cell its AABB, enlarged by half the margin, touches. `multi_cell_threshold`
+applies only when the margin is 0.
+
+**Detection** (margin 0):
 ```python
 def _should_use_multi_cell_registration(self, object_id: int) -> bool:
     aabb = self._cached_aabbs_dict[object_id]

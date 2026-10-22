@@ -306,10 +306,6 @@ class MultiRobotSimulationCore:
         (dx, dy, dz) for dx in (-1, 0, 1) for dy in (-1, 0, 1) for dz in (-1, 0, 1)
     )  # 27 neighbors for 3D collision detection
 
-    _NEIGHBOR_OFFSETS_2D = tuple(
-        (dx, dy, 0) for dx in (-1, 0, 1) for dy in (-1, 0, 1)
-    )  # 9 neighbors for 2D collision detection (Z=0 only)
-
     _EMPTY_SET: frozenset = frozenset()  # Reusable empty set for dict.get() default (avoids per-call allocation)
 
     @classmethod
@@ -2057,6 +2053,7 @@ class MultiRobotSimulationCore:
         Returns:
             Integer cell index along the given axis
         """
+        # _get_overlapping_cells inlines this rounding on its hot path; change both together.
         return int(math.floor(coord / cast(float, self._cached_cell_size)))
 
     def set_collision_ignore_filter(self, ignore: Optional[CollisionIgnoreFilter]) -> None:
@@ -2119,6 +2116,22 @@ class MultiRobotSimulationCore:
         limit = self._cached_cell_size - margin
         return aabb[1][0] - aabb[0][0] <= limit and aabb[1][1] - aabb[0][1] <= limit and aabb[1][2] - aabb[0][2] <= limit
 
+    def _centre_cells(self, object_id: int) -> List[Tuple[int, int, int]]:
+        """The cell holding the object's AABB centre; for NORMAL_2D, that column's z cells the AABB touches.
+
+        Two NORMAL_2D bodies search their own z layer only and need real z
+        overlap, so each is registered in every z cell its AABB (without the
+        margin) touches: two that overlap share one. A NORMAL_3D body in the
+        z layer next to a NORMAL_2D one is found by the 27-cell search.
+        """
+        aabb = self._cached_aabbs_dict[object_id]
+        cx = self._coord_to_cell(0.5 * (aabb[0][0] + aabb[1][0]))
+        cy = self._coord_to_cell(0.5 * (aabb[0][1] + aabb[1][1]))
+        if self._cached_collision_modes.get(object_id) == CollisionMode.NORMAL_2D:
+            z0, z1 = self._coord_to_cell(aabb[0][2]), self._coord_to_cell(aabb[1][2])
+            return [(cx, cy, z) for z in range(z0, z1 + 1)]
+        return [(cx, cy, self._coord_to_cell(0.5 * (aabb[0][2] + aabb[1][2])))]
+
     def _get_overlapping_cells(self, object_id: int, margin: float = 0.0) -> List[Tuple[int, int, int]]:
         """
         Get all grid cells that overlap with an object's AABB plus margin.
@@ -2151,7 +2164,8 @@ class MultiRobotSimulationCore:
         cell_size = cast(float, self._cached_cell_size)
         floor = math.floor
 
-        # Cell range for each dimension (same rounding as _coord_to_cell).
+        # Cell range for each dimension: _coord_to_cell's rounding, inlined
+        # because this runs for every moved body each step; change both together.
         x0, x1 = int(floor((aabb_min[0] - margin) / cell_size)), int(floor((aabb_max[0] + margin) / cell_size))
         y0, y1 = int(floor((aabb_min[1] - margin) / cell_size)), int(floor((aabb_max[1] + margin) / cell_size))
         z0, z1 = int(floor((aabb_min[2] - margin) / cell_size)), int(floor((aabb_max[2] + margin) / cell_size))
@@ -2222,20 +2236,15 @@ class MultiRobotSimulationCore:
             # Larger than a cell with the clearance: register every cell the
             # AABB enlarged by half the pair clearance touches.
             cells = self._get_overlapping_cells(object_id, margin / 2)
-        elif margin > 0:
-            # No larger than a cell with the clearance: its centre cell is
-            # enough. Two such bodies within the clearance have centres less
-            # than a cell apart, so the 27-cell neighbour search finds them,
-            # and a multi-cell body is registered wherever it reaches.
-            aabb = self._cached_aabbs_dict[object_id]
-            cells = [tuple(self._coord_to_cell(0.5 * (aabb[0][d] + aabb[1][d])) for d in range(3))]
-        elif self._should_use_multi_cell_registration(object_id):
-            cells = self._get_overlapping_cells(object_id)
+        elif margin > 0 or not self._should_use_multi_cell_registration(object_id):
+            # No larger than a cell with the clearance (or, without a margin,
+            # below multi_cell_threshold): its centre cell is enough. Two such
+            # bodies within the clearance have centres less than a cell apart,
+            # so the neighbour search finds them, and a multi-cell body is
+            # registered wherever it reaches.
+            cells = self._centre_cells(object_id)
         else:
-            aabb = self._cached_aabbs_dict[object_id]
-            center = [0.5 * (aabb[0][d] + aabb[1][d]) for d in range(3)]
-            cell = tuple(self._coord_to_cell(center[d]) for d in range(3))
-            cells = [cell]
+            cells = self._get_overlapping_cells(object_id)
 
         # Same-cell optimization: skip grid operations if cells haven't changed
         if old_cells is not None and cells == old_cells:
@@ -2343,8 +2352,11 @@ class MultiRobotSimulationCore:
                 # STATIC -> DISABLED: Remove from collision system
                 self._remove_object_from_collision_system(object_id)
             else:
-                # STATIC -> NORMAL_3D/2D: Add to dynamic set, mark as moved
+                # STATIC -> NORMAL_3D/2D: Add to dynamic set, re-register (a
+                # NORMAL_2D body registers different z cells), mark as moved
                 self._dynamic_collision_objects.add(object_id)
+                if self._cached_cell_size is not None:
+                    self._update_object_spatial_grid(object_id)
                 self._moved_this_step.add(object_id)
 
         else:
@@ -2358,7 +2370,10 @@ class MultiRobotSimulationCore:
                 self._dynamic_collision_objects.discard(object_id)
                 self._static_collision_objects.add(object_id)
             else:
-                # NORMAL_3D <-> NORMAL_2D: mode cached in _cached_collision_modes, mark as moved
+                # NORMAL_3D <-> NORMAL_2D: the two register different z cells
+                # (_update_object_spatial_grid), so re-register; mark as moved
+                if self._cached_cell_size is not None:
+                    self._update_object_spatial_grid(object_id)
                 self._moved_this_step.add(object_id)
 
         logger.info(f"Updated collision mode for object {object_id}: {old_mode.value} -> {new_mode.value}")
@@ -3296,8 +3311,10 @@ class MultiRobotSimulationCore:
             i_2d = mode_i == CollisionMode.NORMAL_2D
             i_physics = hybrid and obj_id_i in physics_objects
 
-            # Choose appropriate neighbor offsets based on collision mode (2D: 9 neighbors, 3D: 27 neighbors)
-            offsets = self._NEIGHBOR_OFFSETS_2D if mode_i == CollisionMode.NORMAL_2D else self._NEIGHBOR_OFFSETS_3D
+            # All 27 neighbours: a NORMAL_2D body in its own z layer only
+            # (below), but a NORMAL_3D one registered in its centre cell can
+            # sit in the z layer next to a NORMAL_2D body it overlaps.
+            offsets = self._NEIGHBOR_OFFSETS_3D
 
             # Check neighbors in same and adjacent cells for all cells this object occupies
             for cell_i in cells_i:
@@ -3330,8 +3347,9 @@ class MultiRobotSimulationCore:
 
                         mode_j = self._cached_collision_modes.get(obj_id_j, CollisionMode.NORMAL_3D)
 
-                        # Skip this pair if object j uses 2D mode and offset has Z component
-                        if mode_j == CollisionMode.NORMAL_2D and offset[2] != 0:
+                        # Two NORMAL_2D bodies that overlap share a z cell (see
+                        # _centre_cells): only their own layer.
+                        if offset[2] != 0 and i_2d and mode_j == CollisionMode.NORMAL_2D:
                             continue
                         tested_pairs.add(pair_key)
 
@@ -4835,8 +4853,8 @@ class MultiRobotSimulationCore:
                 # Safeguard against stale _physics_objects entries
                 if obj_id not in self._sim_objects_dict:
                     continue
-                self._update_object_aabb(obj_id)
-                # Update spatial grid if cell_size is initialized
+                # One grid update per object (the AABB update would do one too).
+                self._update_object_aabb(obj_id, update_grid=False)
                 if self._cached_cell_size is not None:
                     self._update_object_spatial_grid(obj_id)
 
