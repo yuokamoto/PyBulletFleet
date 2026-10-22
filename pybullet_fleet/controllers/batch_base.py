@@ -285,8 +285,11 @@ class BatchKinematicController(GoalReplacementPolicy, Controller):
 
         See :meth:`synchronized_set_path` for why ``_is_moving`` is set here.
         """
+        from pybullet_fleet.controller import send_request
+
         with self._state_lock:
-            accepted = self.request_path(agent, request, preempt=preempt)
+            # Through an overridden set_path, if the subclass has one.
+            accepted = send_request(self, agent, request, preempt=preempt)
             if accepted is False:
                 return False
             agent._is_moving = True

@@ -22,7 +22,9 @@ are not recommended for production use yet.
   unchanged. A request keeps its identity on its way to the controller, and
   `Agent.path_request_state(request)` tells what became of it
   (`PathRequestState`: active, pending, finished or gone). A custom controller
-  written against `set_path` alone keeps working.
+  written against `set_path` alone keeps working, and a subclass of a
+  kinematic or batch controller that overrides `set_path` is still called for
+  every request; its `super().set_path()` keeps the request's identity.
 
 - `Agent.brake()`: come to rest at `max_linear_decel` along the current line of
   motion, keeping the heading and dropping the rest of the path, for
@@ -69,6 +71,8 @@ are not recommended for production use yet.
   from outside the action queue is an interrupt: the queue starts its next
   action only once that path has ended, so the next `MoveAction` does not
   overwrite it; `clear_actions()` first drops the rest of the queue instead.
+  Under `wait_complete` the outside path is held instead: the action
+  completes, and the held path runs before the next action.
 
 - `ControllerParams` takes either enum field -- `default_direction` and
   `goal_replacement` -- as the enum or its string value, on construction and

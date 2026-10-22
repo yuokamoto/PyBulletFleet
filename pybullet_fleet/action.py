@@ -240,7 +240,10 @@ class MoveAction(Action):
     agent has followed it to its end, ``CANCELLED`` as soon as it is no longer
     the agent's -- replaced by another request, dropped while held, braked
     (:meth:`Agent.brake <pybullet_fleet.agent.Agent.brake>`), stopped or
-    cancelled -- without waiting for the newer motion to end. A path the agent
+    cancelled -- without waiting for the newer motion to end. (Under
+    ``wait_complete`` a request from outside is held rather than replacing
+    this one: the action completes, and the held path runs before the next
+    action.) A path the agent
     refuses for good (a fixed base, an empty path) ``FAILED``; one it refuses
     only while it is moving is tried again on the next update. With a
     controller that does not track requests, the action ends when the agent
@@ -330,6 +333,12 @@ class MoveAction(Action):
         if state is PathRequestState.FINISHED:
             self.status = ActionStatus.COMPLETED
             self._log_end()
+            if agent._navigation_busy():
+                # A path requested from outside the queue while this one ran,
+                # held under wait_complete until it ended, now runs or waits
+                # to: it runs to its end before the next action, which would
+                # otherwise replace it.
+                agent._interrupt_actions(self)
         else:
             self.status = ActionStatus.CANCELLED
             self._log.info(

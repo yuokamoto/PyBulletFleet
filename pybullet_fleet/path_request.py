@@ -11,6 +11,9 @@ A request keeps its identity through the copies made along the way (the
 approach waypoint ``Agent.request_path`` adds is a copy with
 :func:`dataclasses.replace`), so a caller can ask a controller what became of
 the request it sent (:meth:`~pybullet_fleet.agent.Agent.path_request_state`).
+Identity is not equality: two requests with equal fields are different
+requests, and a ``replace()`` copy is the same one -- build a new
+:class:`PathRequest` to send a new request.
 """
 
 from __future__ import annotations
@@ -41,6 +44,12 @@ class PathRequest:
             <pybullet_fleet.agent.Agent.request_path>` put the current pose in
             front of the path when the agent is at rest and far from its first
             waypoint. Controllers ignore it.
+
+    A copy made with :func:`dataclasses.replace` is the same request (see
+    :meth:`same_request`); to send a new request, build a new one. Frozen, but
+    not hashable: the :class:`~pybullet_fleet.geometry.Pose` waypoints are
+    mutable. Identity does not survive :meth:`to_record` /
+    :meth:`from_record`, so a request restored from a checkpoint is a new one.
     """
 
     path: Sequence["Pose"]

@@ -117,3 +117,87 @@ def test_a_controller_written_against_set_path_still_works(sim):
     assert agent.request_path(PathRequest(path=[goal], final_orientation_align=False, auto_approach=False)) is True
     assert legacy.paths == [([goal], False)]
     assert agent.path_request_state(PathRequest(path=[goal])) is PathRequestState.UNKNOWN
+
+
+class _ShiftingOmni:
+    """A set_path override that edits the path, as a custom controller might."""
+
+    SHIFT_Y = 1.0
+
+    @staticmethod
+    def shifted(path):
+        return [Pose.from_xyz(p.position[0], p.position[1] + _ShiftingOmni.SHIFT_Y, p.position[2]) for p in path]
+
+
+def _shifting_per_agent():
+    from pybullet_fleet.controller import OmniController
+
+    class ShiftingOmniController(OmniController):
+        calls = 0
+
+        def set_path(self, agent, path, final_orientation_align=True, direction=None, preempt=False):
+            type(self).calls += 1
+            return super().set_path(agent, _ShiftingOmni.shifted(path), final_orientation_align, direction, preempt)
+
+    return ShiftingOmniController
+
+
+def _shifting_batch():
+    from pybullet_fleet.controllers.batch_omni import BatchOmniController
+
+    class ShiftingBatchOmni(BatchOmniController):
+        _registry_name = "test_shifting_batch_omni"
+        calls = 0
+
+        def set_path(self, agent, path, final_orientation_align=True, direction=None, preempt=False):
+            type(self).calls += 1
+            return super().set_path(agent, _ShiftingOmni.shifted(path), final_orientation_align, direction, preempt)
+
+    return ShiftingBatchOmni
+
+
+@pytest.mark.parametrize("batch", [False, True], ids=["per_agent", "batch"])
+def test_a_set_path_override_of_a_kinematic_controller_is_still_called(sim, batch):
+    """A subclass that overrides set_path (to edit the path, say) keeps being
+    called for every request, and the request it passes on is still tracked."""
+    from pybullet_fleet.action import MoveAction
+    from pybullet_fleet.geometry import Path
+    from pybullet_fleet.types import ActionStatus
+
+    agent = _agent(sim)
+    if batch:
+        from pybullet_fleet.agent_manager import AgentManager
+
+        cls = _shifting_batch()
+        AgentManager(sim_core=sim, fleet_controller={"type": "test_shifting_batch_omni"}).add_object(agent)
+    else:
+        cls = _shifting_per_agent()
+        agent.set_controller(cls(agent._controllers[0].params))
+
+    action = MoveAction(path=Path.from_positions([[3.0, 0.0, 0.1]]), auto_approach=False, final_orientation_align=False)
+    agent.add_action(action)
+    sim.step_once()
+    assert cls.calls == 1
+    assert agent.path_request_state(action.request) is PathRequestState.ACTIVE
+    for _ in range(400):
+        sim.step_once()
+        if action.status is not ActionStatus.IN_PROGRESS:
+            break
+    assert action.status is ActionStatus.COMPLETED
+    assert list(agent.get_pose().position[:2]) == pytest.approx([3.0, 1.0], abs=1e-6)
+
+
+def test_a_set_path_override_that_replaces_the_request_is_untracked(sim):
+    """An override that never passes the request on (it builds its own) cannot
+    be tracked: the state is UNKNOWN, so a MoveAction judges by where the agent rests."""
+    from pybullet_fleet.controller import OmniController
+
+    class OwnRequest(OmniController):
+        def set_path(self, agent, path, final_orientation_align=True, direction=None, preempt=False):
+            return self.request_path(agent, PathRequest(path=path, final_orientation_align=False, auto_approach=False))
+
+    agent = _agent(sim)
+    agent.set_controller(OwnRequest(agent._controllers[0].params))
+    request = PathRequest(path=[Pose.from_xyz(2.0, 0.0, 0.1)], auto_approach=False)
+    assert agent.request_path(request) is True
+    assert agent.path_request_state(request) is PathRequestState.UNKNOWN

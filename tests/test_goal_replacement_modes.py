@@ -593,6 +593,54 @@ class TestMoveActionOutcome:
         assert second.status == ActionStatus.COMPLETED
         assert _xy(agent) == pytest.approx([3.0, 3.0], abs=1e-6)
 
+    def test_under_wait_complete_a_held_outside_path_runs_before_the_next_action(self, sim, batch, motion):
+        """wait_complete holds a path requested from outside the queue until the
+        running move is over. The move then completes (its path did run to its
+        end), and the held path runs before the next queued move starts -- the
+        queue must not replace it."""
+        from pybullet_fleet.types import ActionStatus
+
+        agent = _agent(sim, batch, motion, "wait_complete")
+        first = self._move(agent, (3.0, 0.0))
+        second = self._move(agent, (3.0, 3.0))
+        for _ in range(3):
+            sim.step_once()
+        outside = (0.0, -3.0)  # off the line: held until the first move ends
+        assert agent.set_path(_goal(outside), auto_approach=False, final_orientation_align=False) is True
+        sim.step_once()
+        assert _pending(agent) is not None and first.status == ActionStatus.IN_PROGRESS
+        self._until_done(sim, first)
+        assert first.status == ActionStatus.COMPLETED
+        steps = 0
+        while _xy(agent) != pytest.approx(list(outside), abs=1e-6):
+            assert second.status == ActionStatus.NOT_STARTED  # waits for the held outside path
+            sim.step_once()
+            steps += 1
+            assert steps < 1200
+        self._until_done(sim, second)
+        assert second.status == ActionStatus.COMPLETED
+        assert _xy(agent) == pytest.approx([3.0, 3.0], abs=1e-6)
+
+    def test_the_queue_forgets_an_interruption_once_it_has_ended(self, sim, batch, motion):
+        """An interruption with nothing queued must not hold back an action
+        added later, after the interrupting path has ended."""
+        from pybullet_fleet.types import ActionStatus
+
+        agent = _agent(sim, batch, motion)
+        first = self._move(agent, (3.0, 0.0))
+        for _ in range(3):
+            sim.step_once()
+        assert agent.set_path(_goal((8.0, 0.0)), auto_approach=False, final_orientation_align=False) is True
+        _run(sim, agent)
+        assert first.status == ActionStatus.CANCELLED
+        # A later direct path, and an action queued while it runs: the action
+        # starts at once, as it would have without the earlier interruption.
+        agent.set_path(_goal((8.0, 5.0)), auto_approach=False, final_orientation_align=False)
+        sim.step_once()
+        later = self._move(agent, (8.0, 0.0))
+        sim.step_once()
+        assert later.status == ActionStatus.IN_PROGRESS
+
     def test_clear_actions_first_drops_the_rest_of_the_queue(self, sim, batch, motion):
         from pybullet_fleet.types import ActionStatus
 

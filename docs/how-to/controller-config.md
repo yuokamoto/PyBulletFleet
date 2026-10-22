@@ -265,7 +265,30 @@ is no longer the agent's. A path requested from outside the queue while a
 agent and the action) and is an interrupt: it runs to its end, and only then
 does the queue start its next action, so the next `MoveAction` does not
 overwrite it. To drop the rest of the queue instead, call
-`agent.clear_actions()` before sending the path.
+`agent.clear_actions()` before sending the path. Under `wait_complete` the
+outside path does not replace the action's: it is held, the action completes,
+and the held path still runs to its end before the next action starts.
+
+A few things to know about request identity:
+
+- A request is its own identity, not its fields: two `PathRequest`s with the
+  same waypoints are different requests. A copy made with
+  `dataclasses.replace(request, ...)` is the *same* request (that is how the
+  approach waypoint keeps it), so to send a new one, build a new
+  `PathRequest(...)` rather than a `replace()` of an old one.
+- `PathRequest` is frozen but not hashable (its `Pose`s are mutable); key a
+  dict by `id(request)` if you need one.
+- A held or running request is not kept by identity across a kinematic
+  checkpoint: after a restore the held path is a new request, and
+  `path_request_state` of a request sent before the checkpoint is `GONE`.
+  (The checkpoint profile refuses an agent with queued actions, so no
+  `MoveAction` spans one.)
+- A controller subclass that overrides `set_path` -- to edit the path, say --
+  is still called for every request, with the request's fields; its
+  `super().set_path(...)` passes the request on with its identity, so its
+  state is still followed. If the override sends a request of its own
+  instead, the state of the one sent is `UNKNOWN`, and a `MoveAction` then
+  ends when the agent rests (`COMPLETED` at the path's end).
 
 #### Custom braking
 

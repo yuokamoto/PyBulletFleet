@@ -132,6 +132,38 @@ def list_controllers() -> Dict[str, Type["Controller"]]:
 _ControllerT = TypeVar("_ControllerT", bound="Controller")
 
 
+def overrides_set_path(controller: "Controller") -> bool:
+    """Whether ``controller``'s class overrides :meth:`Controller.set_path`."""
+    return type(controller).set_path is not Controller.set_path
+
+
+def send_request(controller: "Controller", agent: "Agent", request: PathRequest, preempt: bool = False) -> bool:
+    """Give ``request`` to ``controller`` the way :meth:`Agent.request_path
+    <pybullet_fleet.agent.Agent.request_path>` does.
+
+    A controller whose class overrides :meth:`Controller.set_path` -- to edit
+    the path, say -- gets the request through that override, with the
+    request's fields as arguments. The override's call to ``super().set_path()``
+    passes on a request that keeps the identity of the one sent, so
+    :meth:`Agent.path_request_state
+    <pybullet_fleet.agent.Agent.path_request_state>` still follows it. Any
+    other controller gets it through ``request_path``.
+    """
+    if not overrides_set_path(controller):
+        return controller.request_path(agent, request, preempt=preempt)
+    controller._incoming_request = request
+    try:
+        return controller.set_path(
+            agent,
+            list(request.path),
+            final_orientation_align=request.final_orientation_align,
+            direction=request.direction,
+            preempt=preempt,
+        )
+    finally:
+        controller._incoming_request = None
+
+
 class Controller(ABC):
     """Agent movement control interface (Strategy pattern).
 
@@ -142,6 +174,10 @@ class Controller(ABC):
     Subclasses with a ``_registry_name`` class attribute are auto-registered
     via ``_registry_name`` class attribute (e.g. ``_registry_name = "omni"``).
     """
+
+    #: The request :func:`send_request` is passing through an overridden
+    #: :meth:`set_path`; :meth:`set_path` gives it to the request it builds.
+    _incoming_request: Optional[PathRequest] = None
 
     def __init_subclass__(cls, **kwargs):
         super().__init_subclass__(**kwargs)
@@ -185,9 +221,11 @@ class Controller(ABC):
 
         The kinematic controllers implement it. A controller written against
         :meth:`set_path` alone keeps working: its ``set_path`` is called with
-        the request's fields.
+        the request's fields. :meth:`Agent.request_path
+        <pybullet_fleet.agent.Agent.request_path>` goes through an overridden
+        ``set_path`` too, on any controller (see :func:`send_request`).
         """
-        if type(self).set_path is not Controller.set_path:
+        if overrides_set_path(self):
             return self.set_path(
                 agent,
                 list(request.path),
@@ -221,6 +259,12 @@ class Controller(ABC):
         request = PathRequest(
             path=path, final_orientation_align=final_orientation_align, direction=direction, auto_approach=False
         )
+        incoming, self._incoming_request = self._incoming_request, None
+        if incoming is not None:
+            # Sent by send_request() through an overridden set_path: the
+            # request passed on is still the one the caller sent, whatever the
+            # override did to its fields.
+            request = dataclasses.replace(request, _token=incoming._token)
         return self.request_path(agent, request, preempt=preempt)
 
     def request_state(self, agent: "Agent", request: PathRequest) -> PathRequestState:
