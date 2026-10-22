@@ -27,6 +27,7 @@ from typing import TYPE_CHECKING, Optional, Tuple
 import numpy as np
 from scipy.spatial.transform import Rotation as R
 
+from pybullet_fleet.geometry import cross3
 from pybullet_fleet.types import MovementDirection
 
 if TYPE_CHECKING:
@@ -72,12 +73,6 @@ def plan_translation_segment(
     )
 
 
-def _cross3(a: np.ndarray, b: np.ndarray) -> np.ndarray:
-    """``np.cross`` for two 3-vectors, with the same arithmetic, without its
-    generic-shape overhead (it dominated goal setting for differential drive)."""
-    return np.array([a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]])
-
-
 def align_x_axis_quat(
     start_quat: np.ndarray,
     goal_quat: np.ndarray,
@@ -116,17 +111,17 @@ def align_x_axis_quat(
     if alignment > 0.95:
         return goal_q
 
-    y_axis = _cross3(z_axis_goal, x_axis_target)
+    y_axis = cross3(z_axis_goal, x_axis_target)
     y_norm = float(np.linalg.norm(y_axis))
     if y_norm < 1e-6:
         # ``z_axis_goal`` is parallel to the desired X — fall back to a world
         # up vector (Z if target isn't near-vertical, else Y).
         fallback_up = np.array([0.0, 0.0, 1.0]) if abs(x_axis_target[2]) < 0.9 else np.array([0.0, 1.0, 0.0])
-        y_axis = _cross3(fallback_up, x_axis_target)
+        y_axis = cross3(fallback_up, x_axis_target)
         y_axis = y_axis / np.linalg.norm(y_axis)
     else:
         y_axis = y_axis / y_norm
-    z_axis_final = _cross3(x_axis_target, y_axis)
+    z_axis_final = cross3(x_axis_target, y_axis)
     rotation_matrix = np.column_stack([x_axis_target, y_axis, z_axis_final])
     return np.asarray(R.from_matrix(rotation_matrix).as_quat(), dtype=np.float64)
 
