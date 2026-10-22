@@ -212,6 +212,9 @@ class Controller(ABC):
     #: checked, once per class on its first spawn: if two calls return the same
     #: dict, a warning is logged and the class is copied as if undeclared. A
     #: nested value shared with the controller is not detected.
+    #: The flag is inherited: a subclass that overrides ``_construction_config``
+    #: below a class that declared it is trusted too. Reset it to ``False`` in
+    #: such a subclass unless its override keeps the contract as well.
     _construction_config_is_fresh: ClassVar[bool] = False
 
     def _spawn_descriptor_config(self) -> Optional[dict]:
