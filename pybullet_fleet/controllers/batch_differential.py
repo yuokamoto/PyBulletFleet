@@ -220,45 +220,6 @@ class BatchDifferentialController(BatchKinematicController):
     # Public API
     # ------------------------------------------------------------------ #
 
-    def set_path(
-        self,
-        agent: "Agent",
-        path: List[Pose],
-        direction: Optional[MovementDirection] = None,
-        final_orientation_align: bool = True,
-        **kwargs,
-    ) -> bool:
-        """Set a waypoint path.
-
-        Args:
-            agent: A registered agent.
-            path: Non-empty list of goal poses.
-            direction: ``FORWARD`` (default), ``BACKWARD``, or ``AUTO``
-                (re-evaluated per waypoint based on heading delta).
-                ``None`` uses the agent's ``controller_params.default_direction``
-                (``FORWARD`` unless configured), as the per-agent controller does.
-            final_orientation_align: If ``True`` (default), rotate to match
-                ``path[-1].orientation`` after reaching the last waypoint.
-
-        Returns:
-            ``False`` when the path is refused (``goal_replacement="reject"``
-            only); ``True`` once it is set or held to start later. See
-            :meth:`KinematicController.set_path <pybullet_fleet.controller.KinematicController.set_path>`.
-        """
-        if self._sim_core is None:
-            raise RuntimeError("BatchDifferentialController must be attached to a sim_core before set_path.")
-        if not path:
-            raise ValueError("path must be a non-empty list of Poses.")
-        if self._agent_index.get(id(agent)) is None:
-            raise KeyError(f"Agent {agent} is not registered with this batch controller.")
-        if isinstance(direction, str):
-            direction = MovementDirection(direction)
-        return self._replace_path(
-            agent,
-            PathRequest(path=list(path), final_orientation_align=final_orientation_align, direction=direction),
-            preempt=bool(kwargs.get("preempt", False)),
-        )
-
     def _begin_row_path(
         self, idx: int, agent: "Agent", request: PathRequest, now: float, initial_velocity: Optional[np.ndarray]
     ) -> None:

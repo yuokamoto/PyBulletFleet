@@ -14,6 +14,20 @@ are not recommended for production use yet.
 
 ### Added
 
+- `PathRequest` (`pybullet_fleet.path_request`): the waypoints and how to follow
+  them (`final_orientation_align`, `direction`, `auto_approach`) as one
+  object. `Agent.request_path(request)` and the controllers'
+  `request_path(agent, request)` take it; `Agent.set_path`, `set_goal_pose`
+  and the controllers' `set_path` build one from their arguments and are
+  unchanged. A request keeps its identity on its way to the controller, and
+  `Agent.path_request_state(request)` tells what became of it
+  (`PathRequestState`: active, pending, finished or gone). A custom controller
+  written against `set_path` alone keeps working, and a subclass of a
+  kinematic or batch controller that overrides `set_path` is still called for
+  every request; its `super().set_path()` keeps the request's identity. The
+  braking path of `brake()` is the controller's own and bypasses such an
+  override.
+
 - `Agent.brake()`: come to rest at `max_linear_decel` along the current line of
   motion, keeping the heading and dropping the rest of the path, for
   omnidirectional and differential-drive agents (per-agent and batched) under
@@ -50,6 +64,17 @@ are not recommended for production use yet.
   checkpoint proof's record version 3.
 
 ### Changed
+
+- A `MoveAction` ends by what becomes of its own `PathRequest`: `CANCELLED` as
+  soon as another request replaces it, drops it from the hold, brakes or stops
+  it -- not when the agent next comes to rest -- and `COMPLETED` only when its
+  own request was followed to its end (a replacement ending at the same place,
+  with another final orientation, used to count as completed). Such a request
+  from outside the action queue is an interrupt: the queue starts its next
+  action only once that path has ended, so the next `MoveAction` does not
+  overwrite it; `clear_actions()` first drops the rest of the queue instead.
+  Under `wait_complete` the outside path is held instead: the action
+  completes, and the held path runs before the next action.
 
 - `ControllerParams` takes either enum field -- `default_direction` and
   `goal_replacement` -- as the enum or its string value, on construction and

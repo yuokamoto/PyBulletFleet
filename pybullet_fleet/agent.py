@@ -29,6 +29,7 @@ from pybullet_fleet.agent_plugin import AgentPlugin
 
 if TYPE_CHECKING:
     from pybullet_fleet._replan import PathRejection
+    from pybullet_fleet.path_request import PathRequest, PathRequestState
     from pybullet_fleet.controller import Controller
     from pybullet_fleet.controller_params import ControllerParams
 
@@ -481,6 +482,12 @@ class Agent(SimObject):
         # Action queue system for high-level task execution
         self._action_queue: List[Action] = []
         self._current_action: Optional[Action] = None
+        # Set when a request from outside the queue replaced the running
+        # action's path: the queue waits until that motion ends.
+        self._actions_interrupted: bool = False
+        # The last request a set_path override passed on as a request of its
+        # own: its fate cannot be followed (path_request_state says UNKNOWN).
+        self._untracked_request: Optional["PathRequest"] = None
 
         #: Per-joint kinematic state, {joint_index: KinematicJoint}: where the
         #: joint is, where it was last told to go, how it is configured to get
@@ -1469,14 +1476,47 @@ class Agent(SimObject):
             ``False`` for a fixed-base robot, an empty path, or a path refused
             under ``goal_replacement="reject"``.
         """
+        from pybullet_fleet.path_request import PathRequest
+
+        return self.request_path(
+            PathRequest(
+                path=path,
+                final_orientation_align=final_orientation_align,
+                direction=direction,
+                auto_approach=auto_approach,
+            ),
+            _preempt=_preempt,
+        )
+
+    def request_path(self, request: "PathRequest", _preempt: bool = False, _internal: bool = False) -> bool:
+        """Follow ``request``: the core of :meth:`set_path`, which builds one from its arguments.
+
+        The same rules as :meth:`set_path`: a path set while moving continues
+        the motion when it can, and otherwise the controller's
+        ``goal_replacement`` decides. ``request.auto_approach`` puts the
+        current pose in front of the path when the agent is at rest and more
+        than 0.5 m from the first waypoint; the request reaches the controller
+        as a copy that keeps its identity, so :meth:`path_request_state` can
+        tell what became of it.
+
+        Args:
+            request: The waypoints and how to follow them.
+            _preempt: Internal; see :meth:`set_path`.
+            _internal: Internal; a request the controller made itself (a
+                braking path), which bypasses a ``set_path`` override.
+
+        Returns:
+            ``True`` when the path was taken (started or held to start later);
+            ``False`` for a fixed-base robot, an empty path, or a path refused
+            under ``goal_replacement="reject"``.
+        """
+        from dataclasses import replace
+
+        path = list(request.path)
         permanent = self._permanent_path_rejection(path)
         if permanent is not None:
             self._log.warning(f"Path refused: {permanent.reason}")
             return False
-
-        # Normalize direction string → enum (None passes through to controller)
-        if isinstance(direction, str):
-            direction = MovementDirection(direction)
 
         # Get current position
         current_pose = self.get_pose()
@@ -1503,7 +1543,7 @@ class Agent(SimObject):
             and bool(np.any(self._current_velocity))
         )
         under_way = self.is_moving or under_velocity_command
-        if auto_approach and distance_to_first > approach_threshold and not under_way:
+        if request.auto_approach and distance_to_first > approach_threshold and not under_way:
             # Add current position as approach waypoint
             # This creates a path: current_pose -> path[0] -> path[1] -> ...
             final_path.append(current_pose)
@@ -1520,35 +1560,57 @@ class Agent(SimObject):
         # validation rejects -- and setting the flag beforehand would leave an
         # idle agent reporting is_moving with no trajectory behind it, and the
         # previous path's visualization already cleared.
+        resolved = request if len(final_path) == len(path) else replace(request, path=final_path)
+        from pybullet_fleet.controller import overrides_set_path, send_request
+        from pybullet_fleet.path_request import PathRequestState
+
+        self._untracked_request = None
         if self._batch_controller is not None:
-            # synchronized_set_path() sets _is_moving itself, under the same
-            # lock as the array writes. Setting it here instead would race a
-            # concurrent step_once() that completes a zero-distance path and
+            # synchronized_request_path() sets _is_moving itself, under the
+            # same lock as the array writes. Setting it here instead would race
+            # a concurrent step_once() that completes a zero-distance path and
             # clears the flag between the lock releasing and this line.
-            accepted = self._batch_controller.synchronized_set_path(
-                self,
-                final_path,
-                final_orientation_align=final_orientation_align,
-                direction=direction,
-                preempt=_preempt,
-            )
+            controller = self._batch_controller
+            accepted = controller.synchronized_request_path(self, resolved, preempt=_preempt, internal=_internal)
         else:
-            accepted = self._controllers[0].set_path(
-                self,
-                final_path,
-                final_orientation_align=final_orientation_align,
-                direction=direction,
-                preempt=_preempt,
-            )
+            controller = self._controllers[0]
+            accepted = send_request(controller, self, resolved, preempt=_preempt, internal=_internal)
             if accepted is not False:
                 self._is_moving = True
         if accepted is False:
             return False
+        if (
+            not _internal
+            and overrides_set_path(controller)
+            and controller.request_state(self, resolved) is PathRequestState.GONE
+        ):
+            # The override did not pass this request on (it sent one of its
+            # own), so what becomes of it cannot be followed.
+            self._untracked_request = resolved
 
         # Clear previous path visualization and visualize new path
         self._clear_path_visualization()
         self._visualize_path(final_path)
         return True
+
+    def path_request_state(self, request: "PathRequest") -> "PathRequestState":
+        """What became of ``request`` (sent with :meth:`request_path`): being
+        followed, held, followed to its end, or gone -- replaced by another
+        request, dropped from the hold, stopped, braked or cancelled.
+
+        ``UNKNOWN`` for a controller that does not track requests, and for a
+        request a ``set_path`` override did not pass on (it sent one of its
+        own instead).
+        """
+        from pybullet_fleet.path_request import PathRequestState
+
+        if request.same_request(self._untracked_request):
+            return PathRequestState.UNKNOWN
+        if self._batch_controller is not None:
+            return self._batch_controller.request_state(self, request)
+        if not self._controllers:
+            return PathRequestState.GONE
+        return self._controllers[0].request_state(self, request)
 
     def _reset_pybullet_velocity(self) -> None:
         """Zero residual physics velocity (prevents drift in kinematic mode)."""
@@ -1602,6 +1664,7 @@ class Agent(SimObject):
         if self._current_action is not None:
             self._current_action.cancel()
             self._current_action = None
+        self._actions_interrupted = False
         self._log.info("Cleared all actions")
 
     def get_current_action(self) -> Optional[Action]:
@@ -1631,6 +1694,38 @@ class Agent(SimObject):
         """
         return len(self._action_queue) == 0 and self._current_action is None
 
+    def _interrupt_actions(self, action: Action) -> None:
+        """``action``'s path was replaced from outside the queue (a direct path
+        request, ``brake()`` or ``stop()``), or a path from outside is held to
+        follow it (``wait_complete``): hold the queue until that motion ends."""
+        self._actions_interrupted = True
+        self._log.info(
+            f"{action.__class__.__name__}'s path was replaced by a request from outside the action queue; "
+            "the queue waits until that motion ends"
+        )
+
+    def _end_interruption_if_over(self) -> bool:
+        """End an interruption (see :meth:`_interrupt_actions`) once its motion
+        has ended, queued actions or not. Returns whether the queue may run."""
+        if not self._actions_interrupted:
+            return True
+        if self._navigation_busy():
+            return False
+        self._actions_interrupted = False
+        self._log.info("The interrupting path has ended; the action queue resumes")
+        return True
+
+    def _navigation_busy(self) -> bool:
+        """Whether the agent is following a path or holds one to start later."""
+        if self.is_moving:
+            return True
+        from pybullet_fleet.controller import KinematicController
+
+        if self._batch_controller is not None:
+            return self._batch_controller.pending_path(self) is not None
+        base = self._controllers[0] if self._controllers else None
+        return isinstance(base, KinematicController) and base.pending_path() is not None
+
     def _update_actions(self, dt: float):
         """
         Update action execution system.
@@ -1642,6 +1737,11 @@ class Agent(SimObject):
         """
         # If no current action, try to get next one from queue
         if self._current_action is None:
+            # A path requested from outside the queue replaced the last
+            # action's: it runs to its end before the queue resumes, so the
+            # next action does not overwrite it.
+            if not self._end_interruption_if_over():
+                return
             if self._action_queue:
                 self._current_action = self._action_queue.pop(0)
                 self._log.info(
@@ -2053,6 +2153,9 @@ class Agent(SimObject):
             elif self._is_moving:
                 self._log.warning("No controller set — movement ignored. Use set_controller().")
                 moved = False
+        # The motion this step may have ended an interruption: end it now, so
+        # a path requested before the next step is not taken for part of it.
+        self._end_interruption_if_over()
 
         # Always update attached objects for URDF robots AFTER base motion
         # so that objects attached to links track correctly both when
