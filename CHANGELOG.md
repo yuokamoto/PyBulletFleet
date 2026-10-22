@@ -72,7 +72,10 @@ are not recommended for production use yet.
   instead of once per object: spawning 1000 agents takes 0.30 s instead of
   0.36 s, as in v0.8.0. Each agent still keeps its own descriptor: a
   controller that overrides `_construction_config()` should return a new dict
-  each call, and its result is still copied in case it does not. The
+  each call; its result is still deep-copied unless the class sets
+  `_construction_config_is_fresh = True`. That declaration is the class's
+  responsibility: the first spawn of each class only checks that two calls
+  return two dicts, and logs a warning and keeps copying if not. The
   introspection cache holds its callables weakly and skips callables that
   cannot be cached (an unhashable callable object, say).
 

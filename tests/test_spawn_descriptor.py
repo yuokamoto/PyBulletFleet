@@ -12,6 +12,8 @@ from __future__ import annotations
 import functools
 import gc
 import inspect
+import logging
+import types
 import weakref
 from typing import Any, Dict, cast
 
@@ -20,6 +22,7 @@ import pytest
 
 from pybullet_fleet import Agent, AgentSpawnParams, MotionMode, MultiRobotSimulationCore, Pose, SimulationParams
 from pybullet_fleet import config_utils
+from pybullet_fleet import controller as controller_module
 from pybullet_fleet.controller import OmniController
 
 
@@ -176,3 +179,51 @@ def test_the_built_in_config_is_not_copied_twice(monkeypatch):
     fresh = controller._construction_config()
     monkeypatch.setattr(controller, "_construction_config", lambda: fresh)
     assert controller._spawn_descriptor_config() is fresh
+
+
+class _DeclaredFreshController(OmniController):
+    """Keeps the contract and declares it: a new dict on every call."""
+
+    _construction_config_is_fresh = True
+    calls = 0
+
+    def _construction_config(self):
+        type(self).calls += 1
+        return {"type": "omni", "max_linear_vel": [1.0, 0.5, 0.0], "max_linear_accel": 2.0}
+
+
+class _DeclaredButHoldingController(_HoldingController):
+    """Declares the contract and breaks it: hands back a dict it keeps."""
+
+    _construction_config_is_fresh = True
+
+
+def test_a_declared_fresh_override_is_not_copied(monkeypatch):
+    def no_copy(_):
+        raise AssertionError("a declared fresh config was deep-copied")
+
+    monkeypatch.setattr(controller_module, "copy", types.SimpleNamespace(deepcopy=no_copy))
+    _DeclaredFreshController.calls = 0
+    first = _DeclaredFreshController()._spawn_descriptor_config()
+    second = _DeclaredFreshController()._spawn_descriptor_config()
+    assert first == second and first is not second
+    # Two calls on the first spawn of the class to check it, one afterwards.
+    assert _DeclaredFreshController.calls == 3
+
+
+def test_a_declared_override_that_holds_its_dict_warns_once_and_is_copied(caplog):
+    with caplog.at_level(logging.WARNING, logger="pybullet_fleet"):
+        controllers = [_DeclaredButHoldingController() for _ in range(3)]
+        stored = [c._spawn_descriptor_config() for c in controllers]
+    for controller, config in zip(controllers, stored):
+        assert config is not None and config == controller.held and config is not controller.held
+        config["max_linear_vel"][0] = 99.0
+        assert controller.held["max_linear_vel"][0] == 1.0
+    assert caplog.text.count("declares _construction_config_is_fresh") == 1
+
+
+def test_an_undeclared_override_is_copied_without_a_warning(caplog):
+    with caplog.at_level(logging.WARNING, logger="pybullet_fleet"):
+        controller = _HoldingController()
+        assert controller._spawn_descriptor_config() is not controller.held
+    assert "declares _construction_config_is_fresh" not in caplog.text
