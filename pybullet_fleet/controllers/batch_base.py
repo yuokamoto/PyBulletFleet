@@ -280,16 +280,19 @@ class BatchKinematicController(GoalReplacementPolicy, Controller):
         )
         return self.synchronized_request_path(agent, request, preempt=bool(kwargs.get("preempt", False)))
 
-    def synchronized_request_path(self, agent: "Agent", request: PathRequest, preempt: bool = False) -> bool:
+    def synchronized_request_path(
+        self, agent: "Agent", request: PathRequest, preempt: bool = False, internal: bool = False
+    ) -> bool:
         """:meth:`request_path` without racing a concurrent simulation step.
 
-        See :meth:`synchronized_set_path` for why ``_is_moving`` is set here.
+        See :meth:`synchronized_set_path` for why ``_is_moving`` is set here,
+        and :func:`~pybullet_fleet.controller.send_request` for ``internal``.
         """
         from pybullet_fleet.controller import send_request
 
         with self._state_lock:
             # Through an overridden set_path, if the subclass has one.
-            accepted = send_request(self, agent, request, preempt=preempt)
+            accepted = send_request(self, agent, request, preempt=preempt, internal=internal)
             if accepted is False:
                 return False
             agent._is_moving = True

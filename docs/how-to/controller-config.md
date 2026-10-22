@@ -288,7 +288,13 @@ A few things to know about request identity:
   `super().set_path(...)` passes the request on with its identity, so its
   state is still followed. If the override sends a request of its own
   instead, the state of the one sent is `UNKNOWN`, and a `MoveAction` then
-  ends when the agent rests (`COMPLETED` at the path's end).
+  ends when the agent rests: `COMPLETED` if it rests at the end of the
+  action's own path, `CANCELLED` otherwise. An override that sends an edited
+  path of its own (a shifted end, say) therefore ends the action
+  `CANCELLED` even when the agent reached the edited end; pass the request on
+  with `super().set_path(...)` to keep `COMPLETED`.
+- Paths a controller makes itself -- the braking path of `brake()` and of
+  `goal_replacement="brake"` -- do not go through a `set_path` override.
 
 #### Custom braking
 

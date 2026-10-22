@@ -324,8 +324,10 @@ class MoveAction(Action):
         if state in (PathRequestState.ACTIVE, PathRequestState.PENDING):
             return False
         if state is PathRequestState.UNKNOWN:
-            # A controller that does not track requests: judge by where the
-            # agent rests.
+            # A controller that does not track requests, or a set_path
+            # override that sent a request of its own: judge by where the
+            # agent rests. Against this action's own path end -- an override
+            # that edited the end therefore ends it CANCELLED.
             if agent.is_moving:
                 return False
             state = PathRequestState.FINISHED if self._reached_end(agent) else PathRequestState.GONE

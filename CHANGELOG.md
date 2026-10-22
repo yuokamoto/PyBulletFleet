@@ -24,7 +24,9 @@ are not recommended for production use yet.
   (`PathRequestState`: active, pending, finished or gone). A custom controller
   written against `set_path` alone keeps working, and a subclass of a
   kinematic or batch controller that overrides `set_path` is still called for
-  every request; its `super().set_path()` keeps the request's identity.
+  every request; its `super().set_path()` keeps the request's identity. The
+  braking path of `brake()` is the controller's own and bypasses such an
+  override.
 
 - `Agent.brake()`: come to rest at `max_linear_decel` along the current line of
   motion, keeping the heading and dropping the rest of the path, for

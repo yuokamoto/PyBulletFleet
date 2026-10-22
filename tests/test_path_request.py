@@ -187,6 +187,46 @@ def test_a_set_path_override_of_a_kinematic_controller_is_still_called(sim, batc
     assert list(agent.get_pose().position[:2]) == pytest.approx([3.0, 1.0], abs=1e-6)
 
 
+@pytest.mark.parametrize("batch", [False, True], ids=["per_agent", "batch"])
+def test_brake_does_not_go_through_a_set_path_override(sim, batch):
+    """The braking path is the controller's own, not a path the user sent: an
+    override that edits paths must not see it. brake() stops on the line of
+    motion and the agent stays there."""
+    import numpy as np
+
+    agent = _agent(sim)
+    if batch:
+        from pybullet_fleet.agent_manager import AgentManager
+
+        cls = _shifting_batch()
+        AgentManager(sim_core=sim, fleet_controller={"type": "test_shifting_batch_omni"}).add_object(agent)
+    else:
+        cls = _shifting_per_agent()
+        agent.set_controller(cls(agent._controllers[0].params))
+    # Shifted by the override to (20, 1): the agent heads there in a straight line.
+    agent.set_path([Pose.from_xyz(20.0, 0.0, 0.1)], auto_approach=False, final_orientation_align=False)
+    for _ in range(15):
+        sim.step_once()
+    assert agent.is_moving
+    calls = cls.calls
+    start = np.array(agent.get_pose().position[:2], dtype=float)
+    heading = np.array([20.0, 1.0]) - start
+    heading /= np.linalg.norm(heading)
+    assert agent.brake() is True
+    assert cls.calls == calls  # the braking path did not reach the override
+    track = []
+    for _ in range(200):
+        sim.step_once()
+        track.append(np.array(agent.get_pose().position[:2], dtype=float))
+    assert not agent.is_moving
+    rel = np.array(track) - start
+    along = rel @ heading
+    across = rel - np.outer(along, heading)
+    assert np.abs(across).max() < 1e-6  # never left the line of motion
+    assert np.all(np.diff(along) >= -1e-9)  # never turned back
+    assert track[-1] == pytest.approx(track[-100], abs=1e-9)  # and stayed where it stopped
+
+
 def test_a_set_path_override_that_replaces_the_request_is_untracked(sim):
     """An override that never passes the request on (it builds its own) cannot
     be tracked: the state is UNKNOWN, so a MoveAction judges by where the agent rests."""
@@ -201,3 +241,28 @@ def test_a_set_path_override_that_replaces_the_request_is_untracked(sim):
     request = PathRequest(path=[Pose.from_xyz(2.0, 0.0, 0.1)], auto_approach=False)
     assert agent.request_path(request) is True
     assert agent.path_request_state(request) is PathRequestState.UNKNOWN
+
+
+def test_an_override_that_sends_an_edited_path_of_its_own_ends_the_action_cancelled(sim):
+    """Documented: untracked, the action is judged against its own path's end,
+    which the agent never reaches when the override moved it."""
+    from pybullet_fleet.action import MoveAction
+    from pybullet_fleet.controller import OmniController
+    from pybullet_fleet.geometry import Path
+    from pybullet_fleet.types import ActionStatus
+
+    class OwnShiftedRequest(OmniController):
+        def set_path(self, agent, path, final_orientation_align=True, direction=None, preempt=False):
+            own = PathRequest(path=_ShiftingOmni.shifted(path), final_orientation_align=False, auto_approach=False)
+            return self.request_path(agent, own)
+
+    agent = _agent(sim)
+    agent.set_controller(OwnShiftedRequest(agent._controllers[0].params))
+    action = MoveAction(path=Path.from_positions([[3.0, 0.0, 0.1]]), auto_approach=False, final_orientation_align=False)
+    agent.add_action(action)
+    for _ in range(400):
+        sim.step_once()
+        if action.status not in (ActionStatus.NOT_STARTED, ActionStatus.IN_PROGRESS):
+            break
+    assert list(agent.get_pose().position[:2]) == pytest.approx([3.0, 1.0], abs=1e-6)
+    assert action.status is ActionStatus.CANCELLED

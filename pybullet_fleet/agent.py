@@ -1488,7 +1488,7 @@ class Agent(SimObject):
             _preempt=_preempt,
         )
 
-    def request_path(self, request: "PathRequest", _preempt: bool = False) -> bool:
+    def request_path(self, request: "PathRequest", _preempt: bool = False, _internal: bool = False) -> bool:
         """Follow ``request``: the core of :meth:`set_path`, which builds one from its arguments.
 
         The same rules as :meth:`set_path`: a path set while moving continues
@@ -1502,6 +1502,8 @@ class Agent(SimObject):
         Args:
             request: The waypoints and how to follow them.
             _preempt: Internal; see :meth:`set_path`.
+            _internal: Internal; a request the controller made itself (a
+                braking path), which bypasses a ``set_path`` override.
 
         Returns:
             ``True`` when the path was taken (started or held to start later);
@@ -1569,15 +1571,19 @@ class Agent(SimObject):
             # a concurrent step_once() that completes a zero-distance path and
             # clears the flag between the lock releasing and this line.
             controller = self._batch_controller
-            accepted = controller.synchronized_request_path(self, resolved, preempt=_preempt)
+            accepted = controller.synchronized_request_path(self, resolved, preempt=_preempt, internal=_internal)
         else:
             controller = self._controllers[0]
-            accepted = send_request(controller, self, resolved, preempt=_preempt)
+            accepted = send_request(controller, self, resolved, preempt=_preempt, internal=_internal)
             if accepted is not False:
                 self._is_moving = True
         if accepted is False:
             return False
-        if overrides_set_path(controller) and controller.request_state(self, resolved) is PathRequestState.GONE:
+        if (
+            not _internal
+            and overrides_set_path(controller)
+            and controller.request_state(self, resolved) is PathRequestState.GONE
+        ):
             # The override did not pass this request on (it sent one of its
             # own), so what becomes of it cannot be followed.
             self._untracked_request = resolved

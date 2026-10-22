@@ -137,7 +137,9 @@ def overrides_set_path(controller: "Controller") -> bool:
     return type(controller).set_path is not Controller.set_path
 
 
-def send_request(controller: "Controller", agent: "Agent", request: PathRequest, preempt: bool = False) -> bool:
+def send_request(
+    controller: "Controller", agent: "Agent", request: PathRequest, preempt: bool = False, internal: bool = False
+) -> bool:
     """Give ``request`` to ``controller`` the way :meth:`Agent.request_path
     <pybullet_fleet.agent.Agent.request_path>` does.
 
@@ -148,8 +150,13 @@ def send_request(controller: "Controller", agent: "Agent", request: PathRequest,
     :meth:`Agent.path_request_state
     <pybullet_fleet.agent.Agent.path_request_state>` still follows it. Any
     other controller gets it through ``request_path``.
+
+    ``internal`` marks a request the controller made itself -- a braking
+    path -- rather than one a user sent. It goes straight to
+    ``request_path``: an override that edits the user's paths must not edit
+    the controller's own, or braking would leave the line of motion.
     """
-    if not overrides_set_path(controller):
+    if internal or not overrides_set_path(controller):
         return controller.request_path(agent, request, preempt=preempt)
     controller._incoming_request = request
     try:
@@ -326,14 +333,15 @@ def _set_braking_path(agent: "Agent", request: Optional[PathRequest]) -> bool:
     """Request a braking path through ``agent.request_path``; ``False`` for ``None`` or a refusal.
 
     The request itself is followed, so its identity is tracked: a running
-    ``MoveAction`` sees that it was replaced.
+    ``MoveAction`` sees that it was replaced. It is the controller's own
+    request, so it bypasses a ``set_path`` override (see :func:`send_request`).
     """
     if request is None:
         return False
     if request.auto_approach:
         request = dataclasses.replace(request, auto_approach=False)  # the braking point is the first waypoint
     # Braking does not wait for the current path, whatever the mode.
-    accepted = agent.request_path(request, _preempt=True)
+    accepted = agent.request_path(request, _preempt=True, _internal=True)
     if accepted is False:
         logger.warning(
             f"Braking path for {agent.name or agent.object_id} refused: "
