@@ -13,8 +13,24 @@ import pytest
 from two_point_interpolation import constant_acc
 
 from pybullet_fleet import Agent, AgentSpawnParams, MotionMode, MultiRobotSimulationCore, Pose, SimulationParams
+from pybullet_fleet import _tpi
 from pybullet_fleet._tpi import try_build_tpi
 from pybullet_fleet.types import CollisionMode
+
+
+@pytest.fixture(autouse=True)
+def no_kept_solve():
+    """Start and end every test with no kept solve.
+
+    ``_tpi._kept_solve`` is one module-level slot: a check whose solve no build
+    takes leaves it filled for whatever runs next -- under ``reject`` or
+    ``immediate``, a goal the agent cannot continue into keeps the check's
+    (infeasible) result. Clearing it keeps these counts independent of test
+    order.
+    """
+    _tpi._kept_solve = None
+    yield
+    _tpi._kept_solve = None
 
 
 @pytest.fixture
