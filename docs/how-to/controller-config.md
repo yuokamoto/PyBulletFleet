@@ -242,24 +242,6 @@ alone; a `MoveAction` still executing ends `CANCELLED` once the agent is at
 rest, short of its path's end, and the queue moves on to the next action, so
 call `clear_actions()` first to drop the queued actions too.
 
-#### Stopping on a collision
-
-A vehicle that runs into something stays where it hit; it does not brake on to
-a point further along its path. Set `stop_on_collision` to have an agent do
-that: on the step a collision starts that involves the agent, or an object
-attached to it such as a load it carries, the agent is stopped as `stop()`
-does. Its velocity is zeroed and its path dropped; a `MoveAction` it was
-executing ends `CANCELLED`. A contact between an agent and its own attached
-object does not count, and the setting belongs to each agent: in a head-on
-contact only the agents that set it stop. Whatever comes next -- a new goal,
-an operator resetting the agent -- is up to the application, which can listen
-for `SimEvents.COLLISION_STARTED`.
-
-```python
-agent.controller_params.stop_on_collision = True
-# Or for every agent that does not set it: PBF_CONTROLLER_STOP_ON_COLLISION=1
-```
-
 #### Custom braking
 
 The controller does the braking: `agent.brake()` calls the controller's
@@ -289,6 +271,24 @@ the controller logs a warning naming the agent and brakes at the default
 braking point instead. A
 controller that does not override `brake()` from the base `Controller` cannot
 brake, and `agent.brake()` returns `False`.
+
+### Stopping on a collision
+
+A vehicle that runs into something stays where it hit; it does not brake on to
+a point further along its path. Set `stop_on_collision` to have an agent do
+that: on the step a collision starts that involves the agent, or an object
+attached to it such as a load it carries, the agent is stopped as `stop()`
+does. Its velocity is zeroed and its path dropped; a `MoveAction` it was
+executing ends `CANCELLED`. A contact between an agent and its own attached
+object does not count, and the setting belongs to each agent: in a head-on
+contact only the agents that set it stop. Whatever comes next -- a new goal,
+an operator resetting the agent -- is up to the application, which can listen
+for `SimEvents.COLLISION_STARTED`.
+
+```python
+agent.controller_params.stop_on_collision = True
+# Or for every agent that does not set it: PBF_CONTROLLER_STOP_ON_COLLISION=1
+```
 
 ## Batch controllers
 
