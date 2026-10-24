@@ -3350,6 +3350,28 @@ class MultiRobotSimulationCore:
         else:
             return list(pairs), None
 
+    @staticmethod
+    def _stop_on_collision(obj_a: SimObject, obj_b: SimObject) -> None:
+        """Stop the agents a new contact involves, when their ``stop_on_collision`` is set.
+
+        An object attached to an agent (a carried load) stands for that agent,
+        so a load running into something stops its carrier. A contact between
+        an agent and its own load is not a collision with anything else.
+        """
+
+        def carrier(obj: SimObject) -> SimObject:
+            while obj._attached_to is not None:
+                obj = obj._attached_to
+            return obj
+
+        root_a, root_b = carrier(obj_a), carrier(obj_b)
+        if root_a is root_b:
+            return
+        for root, other in ((root_a, obj_b), (root_b, obj_a)):
+            if isinstance(root, Agent) and root.controller_params._eff_stop_on_collision():
+                logger.info(f"{root.name or root.object_id} stopped on collision with {other.name or other.object_id}")
+                root.stop()
+
     def check_collisions(
         self,
         collision_color: Optional[List[float]] = None,
@@ -3612,6 +3634,8 @@ class MultiRobotSimulationCore:
                             obj_a.events.emit(SimEvents.COLLISION_STARTED, other=obj_b)
                         if obj_b._has_entity_events():
                             obj_b.events.emit(SimEvents.COLLISION_STARTED, other=obj_a)
+                        # After the events, so handlers see the motion that led to the contact.
+                        self._stop_on_collision(obj_a, obj_b)
 
                 for obj_id_i, obj_id_j in resolved_collisions:
                     obj_a = self._sim_objects_dict.get(obj_id_i)
