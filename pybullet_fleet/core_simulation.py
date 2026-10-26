@@ -219,10 +219,9 @@ class SimulationParams:
     enable_shadows: bool = _SIM_D["enable_shadows"]
     enable_gui_panel: bool = _SIM_D["enable_gui_panel"]
     ignore_static_collision: bool = _SIM_D["ignore_static_collision"]
-    #: Do not count contact between an object and the object it is attached
-    #: to (``attach_object``): a carried load touches its carrier by design.
-    #: Only the direct parent and child; contact with anything else the
-    #: carrier holds is still reported.
+    #: Do not count contact between objects on one attachment tree
+    #: (``attach_object``): a carrier, its loads and their loads touch one
+    #: another by design. Contact with anything outside the tree is reported.
     ignore_attached_collision: bool = _SIM_D["ignore_attached_collision"]
     enable_time_profiling: bool = _SIM_D["enable_time_profiling"]
     profiling_interval: int = _SIM_D["profiling_interval"]
@@ -2094,7 +2093,9 @@ class MultiRobotSimulationCore:
 
     def _is_ignored_collision(self, obj_a: SimObject, obj_b: SimObject) -> bool:
         """Whether two touching objects are excluded from collision results."""
-        if self._params.ignore_attached_collision and (obj_a._attached_to is obj_b or obj_b._attached_to is obj_a):
+        # Every object on one attachment tree -- an agent, its loads, a load's
+        # loads -- belongs to one body: no contact among them is a collision.
+        if self._params.ignore_attached_collision and obj_a._attachment_root() is obj_b._attachment_root():
             return True
         return self._collision_ignore_filter is not None and bool(self._collision_ignore_filter(obj_a, obj_b))
 
@@ -3359,13 +3360,10 @@ class MultiRobotSimulationCore:
         an agent and its own load is not a collision with anything else.
         """
 
-        def carrier(obj: SimObject) -> SimObject:
-            while obj._attached_to is not None:
-                obj = obj._attached_to
-            return obj
-
-        root_a, root_b = carrier(obj_a), carrier(obj_b)
+        root_a, root_b = obj_a._attachment_root(), obj_b._attachment_root()
         if root_a is root_b:
+            # Only reached with ignore_attached_collision off, where such a
+            # pair is still reported; it is never a reason to stop.
             return
         for root, other in ((root_a, obj_b), (root_b, obj_a)):
             if isinstance(root, Agent) and root.controller_params._eff_stop_on_collision():

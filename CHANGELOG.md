@@ -58,6 +58,10 @@ are not recommended for production use yet.
 
 ### Changed
 
+- `ignore_attached_collision` now covers every object on one attachment tree,
+  not only a direct parent and child: two loads on one carrier and a load on a
+  load no longer count as colliding, the same rule `stop_on_collision` uses.
+
 - Setting a goal on a moving agent is cheaper: the check whether the agent
   can continue into it and the trajectory it then follows share one solve
   instead of solving the same trajectory twice, and the differential heading
