@@ -173,44 +173,9 @@ def test_a_move_action_cut_short_is_cancelled(sim):
     assert action.status is ActionStatus.CANCELLED
 
 
-# --- One attachment tree is one body -------------------------------------
-# ignore_attached_collision covers every object on an attachment tree (a
-# carrier, its loads, a load's loads), the same rule stop_on_collision uses.
-
-
-def _events(sim):
-    from pybullet_fleet import SimEvents
-
-    started, ended = [], []
-    sim.events.on(SimEvents.COLLISION_STARTED, lambda obj_a=None, obj_b=None, **_: started.append({obj_a, obj_b}))
-    sim.events.on(SimEvents.COLLISION_ENDED, lambda obj_a=None, obj_b=None, **_: ended.append({obj_a, obj_b}))
-    return started, ended
-
-
-def _pair(a, b):
-    return tuple(sorted((a.object_id, b.object_id)))
-
-
-@pytest.fixture
-def sim_counting_attached():
-    """ignore_attached_collision off: contact within an attachment tree is reported."""
-    sc = MultiRobotSimulationCore(
-        SimulationParams(
-            gui=False,
-            monitor=False,
-            physics=False,
-            timestep=DT,
-            target_rtf=0,
-            collision_margin=0.0,
-            ignore_static_collision=False,
-            ignore_attached_collision=False,
-            monitor_log_interval=0,
-            log_level="warning",
-        )
-    )
-    sc.initialize_simulation()
-    yield sc
-    p.disconnect(sc.client)
+# --- Its own attachment tree never stops an agent ---------------------------
+# Whether such contact counts at all is ignore_attached_collision's business
+# (test_collision_ignore_filter.py); either way it is never a reason to stop.
 
 
 def _carrier_with_two_loads(sim):
@@ -231,32 +196,43 @@ def _carrier_with_a_chain(sim):
     return mover, first, second
 
 
-@pytest.mark.parametrize("build", [_carrier_with_two_loads, _carrier_with_a_chain], ids=["siblings", "chain"])
-def test_one_attachment_tree_never_collides_with_itself(sim, build):
-    started, _ = _events(sim)
-    mover, first, second = build(sim)
-    mover.set_goal_pose(Pose.from_xyz(1.0, 0.0, HALF))
-    for _ in range(200):
-        sim.step_once()
-    assert started == []
-    assert sim._active_collision_pairs == set()
-    assert _x(mover) == pytest.approx(1.0, abs=1e-3)  # never stopped
+@pytest.fixture(params=[True, False], ids=["ignored", "counted"])
+def sim_any_attached_rule(request):
+    """Both settings of ignore_attached_collision: the stop rule must not depend on it."""
+    sc = MultiRobotSimulationCore(
+        SimulationParams(
+            gui=False,
+            monitor=False,
+            physics=False,
+            timestep=DT,
+            target_rtf=0,
+            collision_margin=0.0,
+            ignore_static_collision=False,
+            ignore_attached_collision=request.param,
+            monitor_log_interval=0,
+            log_level="warning",
+        )
+    )
+    sc.initialize_simulation()
+    yield sc
+    p.disconnect(sc.client)
 
 
 @pytest.mark.parametrize("build", [_carrier_with_two_loads, _carrier_with_a_chain], ids=["siblings", "chain"])
-def test_counted_when_the_rule_is_off_but_never_a_reason_to_stop(sim_counting_attached, build):
-    sim = sim_counting_attached
-    started, _ = _events(sim)
-    mover, first, second = build(sim)
+def test_its_own_attachment_tree_never_stops_it(sim_any_attached_rule, build):
+    sim = sim_any_attached_rule
+    mover, _, _ = build(sim)
     mover.set_goal_pose(Pose.from_xyz(1.0, 0.0, HALF))
     for _ in range(200):
         sim.step_once()
-    assert {first, second} in started
     assert _x(mover) == pytest.approx(1.0, abs=1e-3)
 
 
+def _pair(a, b):
+    return tuple(sorted((a.object_id, b.object_id)))
+
+
 def test_a_carried_load_hitting_another_agent_is_counted_and_stops_the_carrier(sim):
-    started, _ = _events(sim)
     mover = _agent(sim, 0.0, stop_on_collision=True)
     load = _box(sim, 0.0, half=0.3)
     mover.attach_object(load, relative_pose=Pose.from_xyz(0.0, 0.0, 0.0))
@@ -268,33 +244,5 @@ def test_a_carried_load_hitting_another_agent_is_counted_and_stops_the_carrier(s
             break
     else:
         raise AssertionError("load never reached the other agent")
-    assert {load, other} in started
+    assert _pair(load, other) in sim._active_collision_pairs
     assert not mover.is_moving
-
-
-def test_attaching_ends_a_contact_that_is_now_within_one_tree(sim):
-    """Two touching loads become one carrier's: the contact ends on the next check, though nothing moved."""
-    started, ended = _events(sim)
-    carrier = _agent(sim, -1.0)
-    first, second = _box(sim, 0.0), _box(sim, 0.03)
-    sim.step_once()
-    assert _pair(first, second) in sim._active_collision_pairs
-    carrier.attach_object(first, keep_world_pose=True)
-    carrier.attach_object(second, keep_world_pose=True)
-    sim.step_once()
-    assert _pair(first, second) not in sim._active_collision_pairs
-    assert {first, second} in ended
-
-
-def test_detaching_makes_a_contact_count_again(sim):
-    """Two loads on one carrier touch unnoticed; once one is set down, the next check reports them."""
-    started, _ = _events(sim)
-    mover, first, second = _carrier_with_two_loads(sim)
-    mover.set_goal_pose(Pose.from_xyz(0.5, 0.0, HALF))
-    for _ in range(100):
-        sim.step_once()
-    assert started == []
-    mover.detach_object(second)
-    sim.step_once()
-    assert _pair(first, second) in sim._active_collision_pairs
-    assert {first, second} in started
