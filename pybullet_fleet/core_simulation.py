@@ -3357,7 +3357,9 @@ class MultiRobotSimulationCore:
 
         An object attached to an agent (a carried load) stands for that agent,
         so a load running into something stops its carrier. A contact between
-        an agent and its own load is not a collision with anything else.
+        an agent and its own load is not a collision with anything else. An
+        agent that is not moving, such as one struck while it stands, is left
+        alone: there is no motion to stop, and an action it is running goes on.
         """
 
         root_a, root_b = obj_a._attachment_root(), obj_b._attachment_root()
@@ -3366,7 +3368,7 @@ class MultiRobotSimulationCore:
             # pair is still reported; it is never a reason to stop.
             return
         for root, other in ((root_a, obj_b), (root_b, obj_a)):
-            if isinstance(root, Agent) and root.controller_params._eff_stop_on_collision():
+            if isinstance(root, Agent) and root.is_moving and root.controller_params._eff_stop_on_collision():
                 logger.info(f"{root.name or root.object_id} stopped on collision with {other.name or other.object_id}")
                 root.stop()
 

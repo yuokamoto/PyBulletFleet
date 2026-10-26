@@ -18,7 +18,8 @@ are not recommended for production use yet.
   `stop()` does, on the step a collision starts that involves it or an object
   attached to it (a carried load stops its carrier), instead of driving or
   braking on past the point of contact. A contact with its own attached
-  object does not count. Off by default; per agent, through a fleet's
+  object does not count, and an agent struck while it stands is left alone.
+  Off by default; per agent, through a fleet's
   controller config, or for every agent with `PBF_CONTROLLER_STOP_ON_COLLISION`.
 
 - `Agent.brake()`: come to rest at `max_linear_decel` along the current line of

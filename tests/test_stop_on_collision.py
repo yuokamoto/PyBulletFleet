@@ -129,6 +129,18 @@ def test_only_the_flagged_side_stops(sim):
     assert plain.is_moving
 
 
+def test_a_standing_agent_that_is_struck_is_left_alone(sim, monkeypatch):
+    """stop() is for motion: a flagged agent struck while it stands is not stopped,
+    so an action it runs in place (a pick, a joint move) goes on."""
+    mover = _agent(sim, 0.0)
+    standing = _agent(sim, 1.5, stop_on_collision=True)
+    stops = []
+    monkeypatch.setattr(standing, "stop", lambda: stops.append(sim.sim_time))
+    mover.set_goal_pose(Pose.from_xyz(3.0, 0.0, HALF))
+    _run_until_contact(sim, mover, standing)
+    assert stops == []
+
+
 def test_a_carried_load_stops_its_carrier(sim):
     """The load is wider than the agent: it touches the obstacle first and the carrier stops there."""
     mover = _agent(sim, 0.0, stop_on_collision=True)

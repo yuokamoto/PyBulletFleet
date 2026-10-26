@@ -536,6 +536,8 @@ class SimObject:
         root. A cycle cannot be built through ``attach_object``; the walk
         stops at the first repeated object anyway.
         """
+        if self._attached_to is None:
+            return self  # most objects; this runs for every candidate pair
         obj: SimObject = self
         seen = {id(obj)}
         while obj._attached_to is not None and id(obj._attached_to) not in seen:

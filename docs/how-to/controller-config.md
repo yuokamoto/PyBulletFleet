@@ -281,9 +281,24 @@ attached to it such as a load it carries, the agent is stopped as `stop()`
 does. Its velocity is zeroed and its path dropped; a `MoveAction` it was
 executing ends `CANCELLED`. A contact between an agent and its own attached
 object does not count, and the setting belongs to each agent: in a head-on
-contact only the agents that set it stop. Whatever comes next -- a new goal,
+contact only the agents that set it stop, and an agent that is not moving when
+it is struck is left as it is. Whatever comes next -- a new goal,
 an operator resetting the agent -- is up to the application, which can listen
 for `SimEvents.COLLISION_STARTED`.
+
+It acts only on the collisions the simulation reports:
+
+- **Static objects.** With `ignore_static_collision` at its default `true`,
+  contact with a `STATIC` object -- often walls, racks and pillars -- is never
+  reported, so it never stops an agent. Set `ignore_static_collision: false`
+  to stop on those too.
+- **When it stops.** The agent stops on the step the collision is detected,
+  not at the exact point of first contact. With `collision_check_frequency`
+  below the step rate, it can move into the other object for the steps between
+  checks first; with collision checking off, it never stops.
+- **Only when a collision starts.** While the contact goes on, a new goal is
+  followed as usual, even one that leads further into the other object. That
+  is what lets the application back an agent out of a collision.
 
 ```python
 agent.controller_params.stop_on_collision = True
