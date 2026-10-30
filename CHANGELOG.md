@@ -14,6 +14,19 @@ are not recommended for production use yet.
 
 ### Added
 
+- `Agent.set_joint_position(joint, position)`: put a joint at a position at
+  once, without moving it there, as `set_pose()` does for the base. The
+  position becomes the joint's target and any profile speed is dropped, so the
+  joint stays there; objects attached to the links follow, and the body counts
+  as moved for the next collision check.
+
+- `Elevator.request_floor(floor, instant=True)`: the cabin is at the floor at
+  once with its passengers aboard, instead of riding there; the next update
+  observes the arrival and releases them as after any trip. Accepted also
+  while the cabin is moving, which drops the pending requests.
+  `ElevatorMotionAdapter.begin_motion` takes the matching `instant` flag,
+  passed only when a request asks for it.
+
 - `ControllerParams.stop_on_collision`: an agent that sets it stops dead, as
   `stop()` does, on the step a collision starts that involves it or an object
   attached to it (a carried load stops its carrier), instead of driving or
