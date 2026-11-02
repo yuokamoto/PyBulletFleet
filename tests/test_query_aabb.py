@@ -236,3 +236,99 @@ class TestOriginOutsideItsAabb:
         sim.step_once()
         # Origin 0.2 m away, AABB 0.3 m away beyond the origin: outside a 0.25 m box.
         assert finder.find_nearest_pickable(search_radius=0.25) is shelf
+
+    @staticmethod
+    def _offset_shelf(sim, origin, offset, name="shelf", mode=CollisionMode.NORMAL_3D) -> SimObject:
+        shape = ShapeParams(shape_type="box", half_extents=[0.1, 0.1, 0.1], frame_pose=Pose.from_xyz(*offset))
+        shelf = SimObject.from_mesh(
+            visual_shape=shape,
+            collision_shape=shape,
+            pose=Pose.from_xyz(*origin),
+            sim_core=sim,
+            name=name,
+            collision_mode=mode,
+        )
+        shelf.pickable = True
+        return shelf
+
+    @staticmethod
+    def _full_scan(sim, finder, radius):
+        from pybullet_fleet import tools
+
+        return tools.find_nearest(
+            sim.sim_objects,
+            position=finder.get_pose().position,
+            search_radius=radius,
+            predicate=lambda o: o.pickable and not o.is_attached(),
+            exclude=finder,
+        )
+
+    def test_a_shape_many_cells_off_its_origin_is_found(self, sim):
+        """The origin is 0.2 m away, the shape 5 m beyond it: far more than a
+        spatial-hash cell, so widening the query box cannot cover it."""
+        scatter(sim, count=200)
+        shelf = self._offset_shelf(sim, (0.2, 0.0, 0.0), (5.0, 0.0, 0.0))
+        finder = box(sim, 0.0, 0.0, 0.0, half=0.05, name="finder")
+        sim.step_once()
+        assert sim._cached_cell_size is not None and sim._cached_cell_size < 5.0
+        assert self._full_scan(sim, finder, 0.25) is shelf
+        assert finder.find_nearest_pickable(search_radius=0.25) is shelf
+
+    def test_found_before_the_first_step(self, sim):
+        shelf = self._offset_shelf(sim, (0.2, 0.0, 0.0), (5.0, 0.0, 0.0))
+        finder = box(sim, 0.0, 0.0, 0.0, half=0.05, name="finder")
+        assert finder.find_nearest_pickable(search_radius=0.25) is shelf
+
+    def test_found_after_it_is_moved(self, sim):
+        scatter(sim, count=200)
+        shelf = self._offset_shelf(sim, (30.0, 30.0, 0.0), (5.0, 0.0, 0.0))
+        finder = box(sim, 0.0, 0.0, 0.0, half=0.05, name="finder")
+        sim.step_once()
+        assert finder.find_nearest_pickable(search_radius=0.25) is None
+        shelf.set_pose(Pose.from_xyz(0.2, 0.0, 0.0))
+        assert finder.find_nearest_pickable(search_radius=0.25) is shelf
+        sim.step_once()
+        assert finder.find_nearest_pickable(search_radius=0.25) is shelf
+
+    def test_found_with_collision_disabled(self, sim):
+        scatter(sim, count=200)
+        shelf = self._offset_shelf(sim, (0.2, 0.0, 0.0), (5.0, 0.0, 0.0), mode=CollisionMode.DISABLED)
+        finder = box(sim, 0.0, 0.0, 0.0, half=0.05, name="finder")
+        sim.step_once()
+        assert finder.find_nearest_pickable(search_radius=0.25) is shelf
+
+    def test_a_removed_object_is_not_found(self, sim):
+        scatter(sim, count=200)
+        shelf = self._offset_shelf(sim, (0.2, 0.0, 0.0), (5.0, 0.0, 0.0))
+        finder = box(sim, 0.0, 0.0, 0.0, half=0.05, name="finder")
+        sim.step_once()
+        sim.remove_object(shelf)
+        sim.step_once()
+        assert finder.find_nearest_pickable(search_radius=0.25) is None
+
+    @pytest.mark.parametrize("radius", [0.25, 1.0, 3.0])
+    def test_same_answer_as_a_full_scan_with_offset_shapes(self, sim, radius):
+        rng = random.Random(11)
+        scatter(sim, count=150)
+        for i in range(40):
+            offset = (rng.uniform(-6, 6), rng.uniform(-6, 6), 0.0)
+            self._offset_shelf(sim, (rng.uniform(-8, 8), rng.uniform(-8, 8), 0.0), offset, name=f"shelf{i}")
+        finders = [box(sim, rng.uniform(-8, 8), rng.uniform(-8, 8), 0.0, half=0.05, name=f"f{i}") for i in range(20)]
+        sim.step_once()
+        for finder in finders:
+            assert finder.find_nearest_pickable(search_radius=radius) is self._full_scan(sim, finder, radius)
+
+    def test_found_after_it_is_turned_around(self, sim):
+        """Turning the body moves its shape to the other side of its origin;
+        the origin itself stays put and is still found."""
+        import math
+
+        scatter(sim, count=200)
+        shelf = self._offset_shelf(sim, (0.2, 0.0, 0.0), (5.0, 0.0, 0.0))
+        finder = box(sim, 0.0, 0.0, 0.0, half=0.05, name="finder")
+        sim.step_once()
+        shelf.set_pose(Pose.from_euler(0.2, 0.0, 0.0, 0.0, 0.0, math.pi))
+        sim.step_once()
+        (x0, _, _), _ = p.getAABB(shelf.body_id, physicsClientId=sim.client)
+        assert x0 < -4.0  # the shape is now on the far side
+        assert finder.find_nearest_pickable(search_radius=0.25) is shelf

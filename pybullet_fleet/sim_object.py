@@ -1719,9 +1719,11 @@ class SimObject:
         searches from this object's current position with the standard
         ``pickable and not attached`` filter.
 
-        Candidates come from :meth:`MultiRobotSimulationCore.query_aabb`, so an
-        object whose base origin lies more than one spatial-hash cell outside
-        its own AABB can be missed.
+        Distance is measured from each object's base origin, as before. The
+        candidates come through the collision spatial hash, so the cost follows
+        how crowded the search area is rather than how many objects the
+        simulation holds; objects whose shape sits far off their origin are
+        tracked separately and are still found.
 
         Args:
             search_radius: Maximum search distance in metres (default: 1.0)
@@ -1734,19 +1736,11 @@ class SimObject:
         if self.sim_core is None:
             return None
 
-        # Only the objects near enough to qualify. Distance is measured from
-        # each object's base origin, which normally lies inside its AABB; the
-        # box is widened by one spatial-hash cell so that an origin a little
-        # outside its AABB (a mesh whose origin is at a corner, say) is still
-        # found. A core without query_aabb (a stand-in in tests) gets the
-        # full scan.
+        # Only the objects whose origin may be near enough to qualify. A core
+        # without the lookup (a stand-in in tests) gets the full scan.
         position = self.get_pose().position
-        query = getattr(self.sim_core, "query_aabb", None)
-        if query is None:
-            nearby = self.sim_core.sim_objects
-        else:
-            reach = search_radius + (getattr(self.sim_core, "_cached_cell_size", None) or 0.0)
-            nearby = query([c - reach for c in position], [c + reach for c in position])
+        near = getattr(self.sim_core, "_objects_with_origin_near", None)
+        nearby = near(position, search_radius) if near is not None else self.sim_core.sim_objects
         return tools.find_nearest(
             nearby,
             position=position,
