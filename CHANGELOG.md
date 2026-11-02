@@ -28,6 +28,14 @@ are not recommended for production use yet.
   braking path of `brake()` is the controller's own and bypasses such an
   override.
 
+- `ControllerParams.stop_on_collision`: an agent that sets it stops dead, as
+  `stop()` does, on the step a collision starts that involves it or an object
+  attached to it (a carried load stops its carrier), instead of driving or
+  braking on past the point of contact. A contact with its own attached
+  object does not count, and an agent struck while it stands is left alone.
+  Off by default; per agent, through a fleet's
+  controller config, or for every agent with `PBF_CONTROLLER_STOP_ON_COLLISION`.
+
 - `Agent.brake()`: come to rest at `max_linear_decel` along the current line of
   motion, keeping the heading and dropping the rest of the path, for
   omnidirectional and differential-drive agents (per-agent and batched) under
@@ -75,6 +83,58 @@ are not recommended for production use yet.
   overwrite it; `clear_actions()` first drops the rest of the queue instead.
   Under `wait_complete` the outside path is held instead: the action
   completes, and the held path runs before the next action.
+
+- `ignore_attached_collision` now covers every object on one attachment tree,
+  not only a direct parent and child: two loads on one carrier and a load on a
+  load no longer count as colliding, the same rule `stop_on_collision` uses.
+
+- Setting a goal on a moving agent is cheaper: the check whether the agent
+  can continue into it and the trajectory it then follows share one solve
+  instead of solving the same trajectory twice, and the differential heading
+  computation avoids a generic cross product. Per goal, 5-45% less time
+  across per-agent and batched, omnidirectional and differential controllers
+  (`benchmark/experiments/goal_replacement_cost.py`).
+
+- The ROS 2 bridge Docker images build from the Open-RMF demos image pinned
+  by digest (`RMF_DEMOS_IMAGE` build argument) instead of the nightly
+  `jazzy-rmf-latest` tag, whose rebuilds changed the demo worlds' model URIs
+  and broke the Fuel model cache stage. The Fuel model download now always
+  creates the cache directory and fails with an explanation when the image has
+  no demo worlds or the worlds name no Fuel models (the latter can be allowed
+  with `ALLOW_NO_FUEL_MODELS=1`).
+
+- Spawning an agent no longer copies the controller's construction config a
+  second time for its spawn descriptor, and the parameter names of spawn
+  factories and controller constructors are introspected once per callable
+  instead of once per object: spawning 1000 agents takes 0.30 s instead of
+  0.36 s, as in v0.8.0. Each agent still keeps its own descriptor: a
+  controller that overrides `_construction_config()` should return a new dict
+  each call; its result is still deep-copied unless the class sets
+  `_construction_config_is_fresh = True`. That declaration is the class's
+  responsibility: the first spawn of each class only checks that two calls
+  return two dicts, and logs a warning and keeps copying if not. The
+  introspection cache holds its callables weakly and skips callables that
+  cannot be cached (an unhashable callable object, say).
+
+- The DataMonitor no longer costs more than the step in a large scene. Its
+  entity list is rebuilt only when an object is added, removed or renamed
+  (`SimObject.name` is now a property that tells the simulation), the list's
+  JSON is serialized once per change, and the file is written from its parts
+  without joining them into a new string. With the monitor window open,
+  `monitor_update_interval=None` now refreshes every 0.25 simulated seconds
+  instead of every step (the window reads the file every 0.5 s); without the
+  window it is still 1 s, and `0` is still every step. Each refresh builds
+  `last_monitor_frame` and writes the file.
+  While paused, a selection, follow or pause change and a single step
+  refresh at once; the final frame of a run is written, `close()` writes the
+  last state, and the new `flush_monitor()` does so on demand. `reset()`
+  empties the entity list. The JSON a reader sees is unchanged.
+  Median step time with 5000 static boxes and 20 moving agents (headless,
+  `target_rtf=0`, timestep 0.1, a 312 KB monitor file): 25.9 ms before with
+  the window flag on (a refresh every step), 0.84 ms now with the window
+  flag on (default, every 0.25 s), and 0.63 ms with the monitor off. A
+  refresh every step (`monitor_update_interval=0`) still writes the whole
+  file each step: 0.95 ms per step, about 0.3 ms per write on that scene.
 
 - `ControllerParams` takes either enum field -- `default_direction` and
   `goal_replacement` -- as the enum or its string value, on construction and
