@@ -659,6 +659,30 @@ class TestMoveActionOutcome:
         assert agent.is_action_queue_empty()
         assert _xy(agent) == pytest.approx(list(interrupt), abs=1e-6)
 
+    @pytest.mark.parametrize("command", ["cancel_pose", "set_velocity"])
+    def test_a_controller_command_that_ends_the_path_does_not_hold_the_queue(self, sim, motion, command):
+        """cancel_pose() and set_velocity() end the running move's path but
+        leave no path to wait for: the next queued move starts."""
+        from pybullet_fleet.types import ActionStatus
+
+        agent = _agent(sim, False, motion)
+        first = self._move(agent, (3.0, 0.0))
+        second = self._move(agent, (3.0, 3.0))
+        for _ in range(3):
+            sim.step_once()
+        assert first.status == ActionStatus.IN_PROGRESS
+        controller = agent._controllers[0]
+        if command == "cancel_pose":
+            controller.cancel_pose()
+        else:
+            controller.set_velocity()  # a zero velocity command
+        sim.step_once()
+        assert first.status == ActionStatus.CANCELLED
+        sim.step_once()
+        assert second.status == ActionStatus.IN_PROGRESS
+        self._until_done(sim, second)
+        assert second.status == ActionStatus.COMPLETED
+
     def test_braking_cancels_it_at_once(self, sim, batch, motion):
         from pybullet_fleet.types import ActionStatus
 

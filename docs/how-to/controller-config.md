@@ -264,7 +264,9 @@ is no longer the agent's. A path requested from outside the queue while a
 `stop()` -- therefore cancels that action at once (logged at INFO with the
 agent and the action) and is an interrupt: it runs to its end, and only then
 does the queue start its next action, so the next `MoveAction` does not
-overwrite it. To drop the rest of the queue instead, call
+overwrite it. A per-agent controller's `cancel_pose()` or `set_velocity()`
+also cancels the action, but leaves no path to wait for, so the queue goes
+on with its next action. To drop the rest of the queue instead, call
 `agent.clear_actions()` before sending the path. Under `wait_complete` the
 outside path does not replace the action's: it is held, the action completes,
 and the held path still runs to its end before the next action starts.

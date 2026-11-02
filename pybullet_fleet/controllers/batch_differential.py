@@ -220,6 +220,32 @@ class BatchDifferentialController(BatchKinematicController):
     # Public API
     # ------------------------------------------------------------------ #
 
+    def set_path(
+        self,
+        agent: "Agent",
+        path: List[Pose],
+        direction: Optional[MovementDirection] = None,
+        final_orientation_align: bool = True,
+        preempt: bool = False,
+    ) -> bool:
+        """:meth:`Controller.set_path <pybullet_fleet.controller.Controller.set_path>`
+        with ``direction`` kept as the third positional argument, as this
+        controller has always taken it.
+
+        Args:
+            agent: A registered agent.
+            path: Non-empty list of goal poses.
+            direction: ``FORWARD``, ``BACKWARD`` or ``AUTO``; ``None`` uses the
+                agent's ``controller_params.default_direction``.
+            final_orientation_align: Rotate to match ``path[-1].orientation``
+                after reaching the last waypoint.
+            preempt: Do not hold the path for the current one under
+                ``wait_complete``.
+        """
+        return super().set_path(
+            agent, path, final_orientation_align=final_orientation_align, direction=direction, preempt=preempt
+        )
+
     def _begin_row_path(
         self, idx: int, agent: "Agent", request: PathRequest, now: float, initial_velocity: Optional[np.ndarray]
     ) -> None:

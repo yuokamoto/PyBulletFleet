@@ -1717,14 +1717,16 @@ class Agent(SimObject):
 
     def _navigation_busy(self) -> bool:
         """Whether the agent is following a path or holds one to start later."""
-        if self.is_moving:
-            return True
         from pybullet_fleet.controller import KinematicController
 
         if self._batch_controller is not None:
-            return self._batch_controller.pending_path(self) is not None
+            return self.is_moving or self._batch_controller.pending_path(self) is not None
         base = self._controllers[0] if self._controllers else None
-        return isinstance(base, KinematicController) and base.pending_path() is not None
+        if isinstance(base, KinematicController):
+            # Asked of the controller, not is_moving: cancel_pose() and
+            # set_velocity() end the path but leave that flag set.
+            return base._path_in_progress(self) or base.pending_path() is not None
+        return self.is_moving
 
     def _update_actions(self, dt: float):
         """
