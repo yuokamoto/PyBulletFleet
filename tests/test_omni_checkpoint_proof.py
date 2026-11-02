@@ -91,11 +91,11 @@ def test_gui_rtf_is_checked_before_opening_window():
 @pytest.mark.parametrize(
     ("mutate", "message"),
     [
-        (lambda c: c.update(version=2), "profile or version"),
+        (lambda c: c.update(version=4), "profile or version"),
         (lambda c: c["conditions"].update(timestep=0.2), "conditions differ"),
         (lambda c: c["state"].update(elapsed_time=0.4), "clock is inconsistent"),
-        (lambda c: c["state"]["controller"].update(vmax=float("nan")), "finite number"),
-        (lambda c: c["state"]["controller"].pop("origin"), "missing or unsupported"),
+        (lambda c: c["state"]["controller"]["forward"].update(vmax=float("nan")), "finite number"),
+        (lambda c: c["state"]["controller"]["forward"].pop("origin"), "missing or unsupported"),
         (lambda c: c["state"].update(position=[0.2, 0, 0.1]), "does not match"),
     ],
 )
@@ -115,7 +115,6 @@ def test_reissue_goal_from_checkpoint_pose_changes_trajectory(tmp_path):
         state = checkpoint["state"]
         robot.set_pose(proof.Pose(position=state["position"], orientation=state["orientation"]))
         sim.restore_completed_step_boundary(state["step"], state["elapsed_time"])
-        sim.sim_time = state["elapsed_time"]
         proof._issue_goal(robot)
         sim.step_once()
         assert math.dist(robot.get_pose().position, reference[proof.CHECKPOINT_STEP + 1]["position"]) > 0.01
@@ -139,7 +138,7 @@ def test_capture_rejected_inside_post_step_and_resume_requires_restore():
 
         sim.events.on(SimEvents.POST_STEP, after_step)
         sim.step_once()
-        assert errors == [0]
+        assert errors == [1]  # POST_STEP sees the counter of the step it completes
         assert sim.get_completed_step_boundary() == (1, proof.DT)
     finally:
         if p.isConnected(sim.client):

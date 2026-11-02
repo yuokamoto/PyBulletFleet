@@ -5,6 +5,7 @@ Supports both mobile (use_fixed_base=False) and fixed (use_fixed_base=True) robo
 Supports both Mesh and URDF loading.
 """
 
+import copy
 import logging
 import math
 from dataclasses import dataclass, fields
@@ -15,8 +16,10 @@ import pybullet as p
 from .geometry import Pose, as_axes
 from .sim_object import ShapeParams, SimObject, SimObjectSpawnParams, load_urdf_body
 from .action import Action
-from .types import MotionMode, MovementDirection, ActionStatus, CollisionMode
+from .types import ControllerMode, MotionMode, MovementDirection, ActionStatus, CollisionMode
 from .tools import normalize_vector_param  # noqa: F401  (re-exported for legacy callers)
+from pybullet_fleet._tpi import try_build_tpi
+from pybullet_fleet.joint import KinematicJoint
 from pybullet_fleet.tools import resolve_joint_index, resolve_link_index
 from .logging_utils import get_lazy_logger
 from pybullet_fleet.events import SimEvents
@@ -25,6 +28,7 @@ from pybullet_fleet.config_utils import forward_spawn_params as _forward_spawn_p
 from pybullet_fleet.agent_plugin import AgentPlugin
 
 if TYPE_CHECKING:
+    from pybullet_fleet._replan import PathRejection
     from pybullet_fleet.controller import Controller
     from pybullet_fleet.controller_params import ControllerParams
 
@@ -81,11 +85,19 @@ class AgentSpawnParams(SimObjectSpawnParams):
         AgentManager.spawn_agents_grid() calculates positions automatically and may override initial_pose.
     """
 
+    #: Agents are not pickable by default -- a robot is usually the one doing
+    #: the picking -- which narrows SimObjectSpawnParams' default of True.
+    #: Redeclared rather than set elsewhere so the value a caller passes is
+    #: the value the agent gets; Agent.__init__ used to overwrite it
+    #: unconditionally, which made the field inert.
+    pickable: bool = False
     motion_mode: Union[MotionMode, str] = MotionMode(_AGT_D["motion_mode"])
     use_fixed_base: bool = _AGT_D["use_fixed_base"]
     ik_params: Optional["IKParams"] = None
     controller: Optional[Union[str, Dict[str, Any], List[Dict[str, Any]], "ControllerParams", "Controller"]] = None
     plugins: Optional[List[Dict[str, Any]]] = None
+    global_scaling: float = _AGT_D["global_scaling"]
+    joint_tolerance: Optional[Union[float, list, dict]] = _AGT_D["joint_tolerance"]
 
     def __post_init__(self):
         """Validate agent spawn parameters."""
@@ -151,6 +163,14 @@ class AgentSpawnParams(SimObjectSpawnParams):
         base = SimObjectSpawnParams.from_dict(config)
         base_kwargs = {f.name: getattr(base, f.name) for f in fields(base)}
 
+        # ...except pickable, where this class narrows the parent's default to
+        # False. SimObjectSpawnParams.from_dict() has already resolved an
+        # absent key to its own True, and splatting that in would reinstate it
+        # for every config-driven agent -- the common path -- while the direct
+        # constructor said False.
+        if "pickable" not in config:
+            base_kwargs.pop("pickable", None)
+
         # Get motion_mode and convert string to enum if needed
         motion_mode_value = config.get("motion_mode", _AGT_D["motion_mode"])
         if isinstance(motion_mode_value, str):
@@ -178,6 +198,8 @@ class AgentSpawnParams(SimObjectSpawnParams):
             ik_params=ik_params_value,
             controller=controller_value,
             plugins=plugins_value or None,
+            global_scaling=config.get("global_scaling", 1.0),
+            joint_tolerance=config.get("joint_tolerance"),
         )
 
 
@@ -227,6 +249,51 @@ class IKParams:
     reachability_tolerance: float = _IK_D["reachability_tolerance"]
     seed_quartiles: Tuple[float, ...] = (0.25, 0.5, 0.75)
     ik_joint_names: Optional[Tuple[str, ...]] = None
+
+
+def validate_joint_motion_profile(
+    max_velocity: Optional[float] = None,
+    max_accel: Optional[float] = None,
+    max_decel: Optional[float] = None,
+    current_accel: Optional[float] = None,
+) -> None:
+    """Refuse an unusable joint motion profile from the values alone.
+
+    :meth:`Agent.set_joint_motion_profile` needs a body to resolve the joint
+    against, which is too late for a caller that spawns the body and then
+    configures it: a profile refused at that point leaves the half-configured
+    object registered with the simulation. This checks everything that does
+    not need the body, so such a caller can refuse before spawning.
+
+    Args:
+        max_velocity: Speed cap, or ``None``.
+        max_accel: Acceleration, or ``None``.
+        max_decel: Deceleration, or ``None``.
+        current_accel: Acceleration the joint already has, for a profile being
+            changed rather than set. ``max_decel`` on its own is valid when
+            there is one.
+
+    Raises:
+        ValueError: If a value given is not a finite number above zero, or if
+            ``max_decel`` is given for a joint that has no acceleration.
+    """
+    for label, value in (("max_velocity", max_velocity), ("max_accel", max_accel), ("max_decel", max_decel)):
+        if value is None:
+            continue
+        # isfinite before the comparison: NaN and inf both slip past
+        # `value <= 0.0`, and would then be stored and produce a nan or
+        # infinite step.
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value <= 0.0:
+            raise ValueError(f"{label} must be a finite number > 0, got {value!r}")
+    if max_decel is not None and max_accel is None and current_accel is None:
+        # Braking is the second half of a ramp; without an acceleration there
+        # is no ramp to brake out of, and the joint would take the
+        # constant-speed path and ignore this entirely. Refused rather than
+        # accepted as a setting that does nothing.
+        raise ValueError(
+            "max_decel needs max_accel: a joint with no acceleration runs at "
+            "constant speed, so there is no braking phase for it to apply to."
+        )
 
 
 class Agent(SimObject):
@@ -295,6 +362,11 @@ class Agent(SimObject):
         joint_tolerance: Optional[Union[float, list, dict]] = None,
         controller: Optional[Union[str, Dict[str, Any], "ControllerParams", "Controller"]] = None,
         notify_spawn: bool = True,
+        # Agents default to not pickable -- a robot is usually the thing doing
+        # the picking -- but an agent can be cargo too: a lift car's platform,
+        # or a pallet with a joint. attach_object() refuses a non-pickable
+        # body, so it has to be settable at the spawn rather than only after.
+        pickable: bool = False,
     ):
         """
         Initialize Agent.
@@ -355,7 +427,19 @@ class Agent(SimObject):
         """
         # Initialize SimObject base class (collision_mode is forwarded so
         # add_object receives the correct mode directly – no post-hoc transition)
-        super().__init__(body_id, sim_core=sim_core, collision_mode=collision_mode, name=name, user_data=user_data, mass=mass)
+        # pickable goes in through super(), not assigned afterwards: SimObject
+        # registers the body and emits OBJECT_SPAWNED from there, so a late
+        # overwrite let every listener see the default rather than what the
+        # agent was configured with.
+        super().__init__(
+            body_id,
+            sim_core=sim_core,
+            collision_mode=collision_mode,
+            name=name,
+            user_data=user_data,
+            mass=mass,
+            pickable=pickable,
+        )
 
         self.urdf_path = urdf_path
 
@@ -398,27 +482,35 @@ class Agent(SimObject):
         self._action_queue: List[Action] = []
         self._current_action: Optional[Action] = None
 
-        # Last commanded joint targets — persists after arrival.
-        # Written by set_joint_target() in both kinematic and physics modes.
-        # Used by are_joints_at_targets(None) and _update_kinematic_joints().
-        self._last_joint_targets: Dict[int, float] = {}
+        #: Per-joint kinematic state, {joint_index: KinematicJoint}: where the
+        #: joint is, where it was last told to go, how it is configured to get
+        #: there, and how that is going. Created on first use, and seeded
+        #: below for every joint of a kinematic URDF body so that a position
+        #: can be read without a PyBullet call. A target persists after
+        #: arrival, for are_joints_at_targets() to be asked about later.
+        self._joints: Dict[int, KinematicJoint] = {}
+        #: The subset of _joints that has a target, which is what the step
+        #: loop has to visit. An index into _joints rather than a copy of it:
+        #: the entries are the same objects. Worth keeping because a jointed
+        #: body usually has one joint under command and six not, and because
+        #: an agent that has never commanded one leaves the loop at once.
+        self._active_joints: List[KinematicJoint] = []
+        #: Time base for joint trajectories. Kept here rather than read from
+        #: sim_core so an agent without one still ramps.
+        self._joint_clock: float = 0.0
 
         # Cached flag: True when joints must use kinematic interpolation
         # (mass=0 OR sim_core has physics disabled).  Computed once to avoid
         # per-step property overhead.
         self._use_kinematic_joints: bool = self._compute_use_kinematic_joints()
 
-        # Kinematic joint position cache — avoids per-step p.getJointState() calls.
-        # Only seeded when kinematic joints are actually used (skip for physics mode).
+        # Seeding the positions here avoids a per-step p.getJointState() call.
+        # Only for kinematic joints; in physics mode PyBullet owns them, and
+        # an entry is created on demand for a target instead.
         if self._use_kinematic_joints and self.joint_info:
             indices = list(range(len(self.joint_info)))
             states = p.getJointStates(body_id, indices, physicsClientId=self._pid)
-            self._kinematic_joint_positions: Dict[int, float] = {i: states[i][0] for i in indices}
-        else:
-            self._kinematic_joint_positions: Dict[int, float] = {}
-
-        # Override pickable default for Agent (robots are not pickable by default)
-        self.pickable = False
+            self._joints = {i: KinematicJoint(index=i, position=states[i][0]) for i in indices}
 
         # Per-agent plugin system (e.g. BatteryPlugin)
         self._plugins: List[AgentPlugin] = []
@@ -804,10 +896,19 @@ class Agent(SimObject):
 
             for entry in spawn_params.plugins:
                 agent.add_plugin(create_agent_plugin_from_entry(entry, agent))
+            if isinstance(agent._checkpoint_spawn_params, AgentSpawnParams):
+                agent._checkpoint_spawn_params.plugins = list(spawn_params.plugins)
 
         # Agent is now fully constructed (controllers + plugins) — notify observers.
         agent._emit_agent_spawned()
+        agent._record_checkpoint_spawn(sim_core)
         return agent
+
+    def _record_checkpoint_spawn(self, sim_core) -> None:
+        """Report runtime Agent creation after its effective owner state exists."""
+        record_spawn = getattr(sim_core, "_record_state_spawn", None) if sim_core is not None else None
+        if record_spawn is not None:
+            record_spawn(self, self._checkpoint_spawn_params)
 
     @classmethod
     def from_dict(cls, config: Dict[str, Any], sim_core=None) -> "Agent":
@@ -842,6 +943,7 @@ class Agent(SimObject):
         user_data: Optional[Dict[str, Any]] = None,
         controller: Optional[Union[str, Dict[str, Any], "ControllerParams", "Controller"]] = None,
         notify_spawn: bool = True,
+        pickable: bool = False,
     ) -> "Agent":
         """
         Create a mesh-based Agent with flexible shape control.
@@ -893,7 +995,27 @@ class Agent(SimObject):
             mass=mass,
             controller=controller,
             notify_spawn=notify_spawn,
+            pickable=pickable,
         )
+
+        agent._checkpoint_spawn_params = AgentSpawnParams(
+            name=agent.name,
+            visual_shape=copy.deepcopy(visual_shape),
+            collision_shape=copy.deepcopy(collision_shape),
+            initial_pose=copy.deepcopy(pose),
+            mass=agent.mass,
+            pickable=agent.pickable,
+            collision_mode=agent.collision_mode,
+            user_data=dict(agent.user_data),
+            motion_mode=agent._motion_mode,
+            use_fixed_base=agent.use_fixed_base,
+            # Owned by the descriptor without a second deep copy for the
+            # built-in controllers (see Controller._spawn_descriptor_config).
+            controller=agent.controller._spawn_descriptor_config(),
+        )
+
+        if notify_spawn:
+            agent._record_checkpoint_spawn(sim_core)
 
         return agent
 
@@ -914,6 +1036,7 @@ class Agent(SimObject):
         controller: Optional[Union[str, Dict[str, Any], "ControllerParams", "Controller"]] = None,
         notify_spawn: bool = True,
         global_scaling: float = 1.0,
+        pickable: bool = False,
     ) -> "Agent":
         """
         Create a URDF-based Agent (with joints).
@@ -928,6 +1051,9 @@ class Agent(SimObject):
             motion_mode: MotionMode.OMNIDIRECTIONAL or MotionMode.DIFFERENTIAL
             use_fixed_base: If True, robot base is fixed in space
             global_scaling: Uniform scale factor applied when loading.
+            pickable: Whether the agent may be attached to another body
+                (default: False -- a robot is usually the one doing the
+                picking). ``attach_object()`` refuses a non-pickable body.
             sim_core: Reference to simulation core
             ik_params: IK solver configuration (default: ``IKParams()``).
             joint_tolerance: Default joint tolerance for convergence.
@@ -983,7 +1109,34 @@ class Agent(SimObject):
             joint_tolerance=joint_tolerance,
             controller=controller,
             notify_spawn=notify_spawn,
+            pickable=pickable,
         )
+
+        # Retain effective construction parameters regardless of whether a
+        # particular checkpoint profile supports them. Profile-specific
+        # validation belongs to that profile, not to normal Agent creation.
+        # Keep a configuration descriptor, never the live controller (whose
+        # execution state changes as the simulation runs). Controllers without
+        # a registered name cannot be reconstructed by this descriptor.
+        controller_config = agent.controller._spawn_descriptor_config()
+        agent._checkpoint_spawn_params = AgentSpawnParams(
+            name=agent.name,
+            urdf_path=agent.urdf_path,
+            initial_pose=copy.deepcopy(pose) if pose is not None else Pose.from_xyz(0.0, 0.0, 0.0),
+            mass=agent.mass,
+            pickable=agent.pickable,
+            collision_mode=agent.collision_mode,
+            user_data=dict(agent.user_data),
+            motion_mode=agent._motion_mode,
+            use_fixed_base=agent.use_fixed_base,
+            controller=controller_config,
+            ik_params=ik_params,
+            global_scaling=global_scaling,
+            joint_tolerance=joint_tolerance,
+        )
+
+        if notify_spawn:
+            agent._record_checkpoint_spawn(sim_core)
 
         return agent
 
@@ -991,7 +1144,7 @@ class Agent(SimObject):
         self,
         goal: Pose,
         direction: Union[MovementDirection, str, None] = None,
-    ):
+    ) -> bool:
         """
         Set goal pose for the robot to move to.
 
@@ -1001,9 +1154,88 @@ class Agent(SimObject):
             goal: Target Pose (compatible with ROS2 geometry_msgs/Pose)
             direction: Movement direction override, or ``None`` to use
                 the controller's ``default_direction``.
+
+        Returns:
+            Whether the goal was taken; see :meth:`set_path`.
         """
         # Single goal is just a path with one waypoint
-        self.set_path([goal], direction=direction)
+        return self.set_path([goal], direction=direction)
+
+    def brake(self) -> bool:
+        """Come to rest along the current direction of travel at the configured deceleration.
+
+        A deceleration-limited counterpart of :meth:`stop`, which zeroes the
+        velocity at once (an emergency stop). The agent keeps its heading and
+        its line of motion and stops at the braking point,
+        ``|v|^2 / (2 * decel)`` ahead, decelerating at exactly the configured
+        rate along that direction (the same projected limits a trajectory
+        uses). The remaining path and any queued waypoints are dropped; a
+        velocity command (the controller's ``set_velocity``) is ended the same way.
+
+        A differential-drive agent brakes straight along its heading (backing
+        up, it brakes backwards). A path set while it brakes is handled like
+        any path set while moving (see :meth:`set_path`); a pending path from
+        an earlier ``brake`` or ``wait_complete`` replacement is dropped.
+
+        The action queue is left alone. A :class:`~pybullet_fleet.action.MoveAction`
+        still executing ends ``CANCELLED`` once the agent is at rest, short of
+        its path's end, and the queue moves on; call :meth:`clear_actions`
+        first to drop the queued actions too.
+
+        The agent's controller does the braking (its ``brake()``); a custom
+        controller changes how the agent brakes by overriding
+        :meth:`KinematicController.braking_request
+        <pybullet_fleet.controller.KinematicController.braking_request>`, which
+        ``goal_replacement="brake"`` uses too.
+
+        Returns:
+            ``True`` when a braking trajectory was set. ``False`` at rest, for
+            a fixed-base robot, and for a controller that cannot brake.
+        """
+        if self.use_fixed_base:
+            return False
+        controller = self._batch_controller
+        if controller is None:
+            controller = self._controllers[0] if self._controllers else None
+        return controller is not None and controller.brake(self)
+
+    def path_rejection(
+        self, path: List[Pose], direction: Union[MovementDirection, str, None] = None
+    ) -> "Optional[PathRejection]":
+        """Why :meth:`set_path` would refuse ``path`` right now, or ``None``.
+
+        A :class:`~pybullet_fleet._replan.PathRejection`: ``reason`` says why,
+        ``temporary`` whether it lasts only until the current motion ends (a
+        fixed-base robot and an empty path are permanent).
+
+        Only ``goal_replacement="reject"`` refuses a path that cannot
+        continue the current motion (see :meth:`set_path`); the other modes
+        take every path. Asking first lets a caller report a refusal before
+        acting. ``direction`` is the one :meth:`set_path` would be given.
+        """
+        from pybullet_fleet._replan import PathRejection
+
+        permanent = self._permanent_path_rejection(path)
+        if permanent is not None:
+            return permanent
+        if isinstance(direction, str):
+            direction = MovementDirection(direction)
+        reason = None
+        if self._batch_controller is not None:
+            reason = self._batch_controller.path_rejection(self, path, direction)
+        elif self._controllers:
+            reason = self._controllers[0].path_rejection(self, path, direction)
+        return PathRejection(reason, temporary=True) if reason is not None else None
+
+    def _permanent_path_rejection(self, path: List[Pose]) -> "Optional[PathRejection]":
+        """The refusals that do not depend on the motion: a fixed base, an empty path."""
+        from pybullet_fleet._replan import PathRejection
+
+        if self.use_fixed_base:
+            return PathRejection("fixed-base robot", temporary=False)
+        if len(path) == 0:
+            return PathRejection("empty path", temporary=False)
+        return None
 
     def _make_default_controller(self):
         """Build the default Omni/Diff controller from ``self._motion_mode``.
@@ -1197,9 +1429,26 @@ class Agent(SimObject):
         auto_approach: bool = True,
         final_orientation_align: bool = True,
         direction: Union[MovementDirection, str, None] = None,
-    ):
+        _preempt: bool = False,
+    ) -> bool:
         """
         Set a path (list of waypoints) for the robot to follow.
+
+        A path set while the agent is moving continues the motion when it can:
+        the straight-line trajectory to the first waypoint starts from the
+        agent's current velocity (signed along the line, so a goal behind is
+        reached by slowing and reversing). It cannot for a goal inside the
+        braking distance, where the agent is, off the line of motion, or --
+        differential drive -- one that needs a turn in place. Such a path is
+        handled as the controller's ``goal_replacement`` setting says
+        (:class:`~pybullet_fleet.types.GoalReplacement`): ``brake`` (the
+        default) brakes at the configured deceleration and then starts it,
+        ``wait_complete`` finishes the current path first (it holds every path
+        set while one is in progress, reachable or not), ``immediate``
+        starts it from rest at once, and ``reject`` refuses it -- nothing
+        changes, the current motion continues, and this returns ``False`` (the
+        reason is logged and available from :meth:`path_rejection`). At rest
+        every path is taken.
 
         Args:
             path: List of Pose waypoints to follow in sequence
@@ -1212,14 +1461,20 @@ class Agent(SimObject):
                       ("auto", "forward", "backward").
                       Only used in differential drive mode (MotionMode.DIFFERENTIAL).
                       In omnidirectional mode, this parameter is ignored.
-        """
-        if self.use_fixed_base:
-            self._log.warning("Cannot set path for fixed-base robot")
-            return
+            _preempt: Internal: start without waiting for the current path
+                      under ``wait_complete`` (used by :meth:`brake`), for
+                      every kinematic controller, omnidirectional or
+                      differential, per-agent or batched.
 
-        if len(path) == 0:
-            self._log.warning("Empty path provided")
-            return
+        Returns:
+            ``True`` when the path was taken (started or held to start later);
+            ``False`` for a fixed-base robot, an empty path, or a path refused
+            under ``goal_replacement="reject"``.
+        """
+        permanent = self._permanent_path_rejection(path)
+        if permanent is not None:
+            self._log.warning(f"Path refused: {permanent.reason}")
+            return False
 
         # Normalize direction string → enum (None passes through to controller)
         if isinstance(direction, str):
@@ -1236,8 +1491,21 @@ class Agent(SimObject):
 
         final_path = []
 
-        # Add approach waypoint if needed
-        if auto_approach and distance_to_first > approach_threshold:
+        # Add approach waypoint if needed. Not while the agent is under way: it
+        # is the current pose, a zero-length first segment, and would stop the
+        # agent dead before the new path -- a new goal mid-motion continues the
+        # motion instead. Under way is a path in progress (navigation state) or
+        # a velocity command still moving it.
+        from pybullet_fleet.controller import KinematicController
+
+        base = self._controllers[0] if self._batch_controller is None and self._controllers else None
+        under_velocity_command = (
+            isinstance(base, KinematicController)
+            and base.mode is ControllerMode.VELOCITY
+            and bool(np.any(self._current_velocity))
+        )
+        under_way = self.is_moving or under_velocity_command
+        if auto_approach and distance_to_first > approach_threshold and not under_way:
             # Add current position as approach waypoint
             # This creates a path: current_pose -> path[0] -> path[1] -> ...
             final_path.append(current_pose)
@@ -1259,24 +1527,30 @@ class Agent(SimObject):
             # lock as the array writes. Setting it here instead would race a
             # concurrent step_once() that completes a zero-distance path and
             # clears the flag between the lock releasing and this line.
-            self._batch_controller.synchronized_set_path(
+            accepted = self._batch_controller.synchronized_set_path(
                 self,
                 final_path,
                 final_orientation_align=final_orientation_align,
                 direction=direction,
+                preempt=_preempt,
             )
         else:
-            self._controllers[0].set_path(
+            accepted = self._controllers[0].set_path(
                 self,
                 final_path,
                 final_orientation_align=final_orientation_align,
                 direction=direction,
+                preempt=_preempt,
             )
-            self._is_moving = True
+            if accepted is not False:
+                self._is_moving = True
+        if accepted is False:
+            return False
 
         # Clear previous path visualization and visualize new path
         self._clear_path_visualization()
         self._visualize_path(final_path)
+        return True
 
     def _reset_pybullet_velocity(self) -> None:
         """Zero residual physics velocity (prevents drift in kinematic mode)."""
@@ -1437,6 +1711,106 @@ class Agent(SimObject):
                 return True
         return False
 
+    def set_joint_motion_profile(
+        self,
+        joint: Union[int, str],
+        max_velocity: Optional[float] = None,
+        max_accel: Optional[float] = None,
+        max_decel: Optional[float] = None,
+    ) -> None:
+        """Override how fast a kinematic joint moves, and how it gets there.
+
+        Without this, a kinematic joint runs at the URDF's
+        ``<limit velocity="...">`` and reaches it instantly: the speed is a
+        property of the model file, so changing it means editing or
+        regenerating the URDF, and ``changeDynamics(maxJointVelocity=...)``
+        does not help because ``getJointInfo()`` keeps reporting the original.
+
+        Giving ``max_accel`` turns the motion into a trapezoid -- ramp up,
+        cruise, ramp down -- which is what a real lift, hoist or linear axis
+        does. A 0.6 m travel at 0.4 m/s takes 1.5 s at a constant speed and
+        1.9 s with 1.0 m/s ramps, so the difference is not cosmetic when
+        something downstream is timing the move.
+
+        Both are optional and independent. With neither, nothing changes; with
+        ``max_velocity`` alone the joint still steps instantly to that speed,
+        exactly as before.
+
+        Every argument left at ``None`` keeps what the joint already has, so
+        this can be called again to change one of them. A ramp cannot be
+        taken off a joint once it has one.
+
+        Can be called while the joint is moving. The speed it is carrying is
+        kept and the next step re-plans from it under the new limits, so the
+        change is continuous; if the new limits can no longer stop the joint
+        at its target it brakes and comes back, as for any other target it
+        cannot reach.
+
+        Args:
+            joint: Joint index, or joint name as spelled in the URDF.
+            max_velocity: Speed cap, replacing the URDF limit. ``None`` keeps
+                whatever the joint already uses.
+            max_accel: Acceleration, in units/s^2. ``None`` keeps the
+                acceleration the joint already has, and means no ramp only
+                when it has none.
+            max_decel: Deceleration. ``None`` keeps the current one, or
+                follows ``max_accel`` when that is given. On its own it
+                changes the braking rate of a joint that already ramps.
+
+        Raises:
+            KeyError: If *joint* names a joint this body does not have.
+            IndexError: If *joint* is an index this body does not have.
+            ValueError: If any value given is not positive, or if ``max_decel``
+                is given for a joint with no acceleration.
+        """
+        if isinstance(joint, int):
+            # Checked here rather than left to the first use: a negative index
+            # would be stored under a key _update_kinematic_joints() never
+            # visits, so the profile would be silently ignored, and an
+            # out-of-range one would fail much later inside
+            # _urdf_joint_velocity().
+            if not 0 <= joint < len(self.joint_info):
+                raise IndexError(
+                    f"joint index {joint} is out of range for body {self.body_id} " f"({len(self.joint_info)} joints)"
+                )
+            index = joint
+        else:
+            index = self._joint_index_by_name(joint)
+        state = self._joint(index)
+        validate_joint_motion_profile(max_velocity, max_accel, max_decel, current_accel=state.max_accel)
+
+        if max_velocity is not None:
+            state.max_velocity = float(max_velocity)
+        if max_accel is not None:
+            # A new acceleration resets the braking rate to match it, unless
+            # this call gives one of its own.
+            state.max_accel = float(max_accel)
+            state.max_decel = float(max_accel)
+        if max_decel is not None:
+            state.max_decel = float(max_decel)
+        # The trajectory goes, because it was solved against the old limits.
+        # The speed stays: it is where the joint actually is, not a plan, and
+        # dropping it would restart the next trajectory from zero and step
+        # straight back up to speed past the acceleration just configured.
+        # _update_kinematic_joints() re-plans from it under the new limits on
+        # the next step, and brakes if they no longer reach the target.
+        state.clear_trajectory()
+
+    def _joint_index_by_name(self, name: str) -> int:
+        for index, info in enumerate(self.joint_info):
+            if info[1].decode("utf-8") == name:
+                return index
+        raise KeyError(f"no joint named {name!r} on body {self.body_id}")
+
+    def _urdf_joint_velocity(self, joint_index: int) -> float:
+        """The joint's speed cap from the URDF, or the fallback for its type."""
+        max_vel = self.joint_info[joint_index][11]
+        if max_vel > 0:
+            return float(max_vel)
+        if self.joint_info[joint_index][2] == p.JOINT_PRISMATIC:
+            return self._KINEMATIC_PRISMATIC_FALLBACK_VELOCITY
+        return self._KINEMATIC_JOINT_FALLBACK_VELOCITY
+
     def _update_kinematic_joints(self, dt: float) -> bool:
         """Interpolate joints toward targets for kinematic robots (mass=0).
 
@@ -1447,40 +1821,193 @@ class Agent(SimObject):
         velocity_limit comes from the URDF ``<limit velocity="...">`` attribute.
         Falls back to 2.0 rad/s for revolute or 0.5 m/s for prismatic
         if the URDF limit is 0 or missing.
+        :meth:`set_joint_motion_profile` overrides either, and adds an
+        acceleration ramp when one is configured.
 
-        Iterates ``_last_joint_targets`` and skips joints that have already
-        reached their target (``abs(diff) < 1e-7``).  Entries are **never**
-        deleted so that ``are_joints_at_targets()`` can query them later.
+        Visits every joint and skips those with no target and those that have
+        already reached theirs (``abs(diff) < 1e-7``).  A target is **never**
+        deleted, so that ``are_joints_at_targets()`` can query it later.
 
         Returns:
             True if any joint position changed this step, False otherwise.
         """
-        if not self._last_joint_targets:
+        if not self._active_joints:
             return False
 
+        step_start, now = self._joint_clock, self._joint_clock + dt
+        self._joint_clock = now
+
         any_moved = False
-        for joint_index, target in self._last_joint_targets.items():
-            current_pos = self._kinematic_joint_positions.get(joint_index, 0.0)
-            diff = target - current_pos
-            if abs(diff) < 1e-7:
-                continue  # Already at target — skip
-            # URDF velocity limit: joint_info[joint_index][11] is maxVelocity
-            max_vel = self.joint_info[joint_index][11]
-            if max_vel <= 0:
-                joint_type = self.joint_info[joint_index][2]
-                if joint_type == p.JOINT_PRISMATIC:
-                    max_vel = self._KINEMATIC_PRISMATIC_FALLBACK_VELOCITY
-                else:
-                    max_vel = self._KINEMATIC_JOINT_FALLBACK_VELOCITY
-            max_step = max_vel * dt
-            if abs(diff) <= max_step:
-                new_pos = target
+        for state in self._active_joints:
+            target = state.target
+            if target is None:
+                raise RuntimeError(f"Active joint {state.index} has no target; _active_joints holds only joints with one")
+            diff = target - state.position
+            if abs(diff) < 1e-7 and not state.speed:
+                # Already at target with nothing to wind down -- skip. A
+                # ramped joint still carrying speed is not: a target set to
+                # where the joint happens to be is inside its braking
+                # distance like any other, so stopping it here would ignore
+                # the profile's deceleration and report the motion over while
+                # the joint was still moving. It takes the braking path below.
+                state.clear_motion()
+                continue
+            max_vel = state.max_velocity
+            if max_vel is None:
+                max_vel = self._urdf_joint_velocity(state.index)
+            if not state.is_ramped:
+                # Constant speed, reached instantly: what every kinematic
+                # joint did before motion profiles existed, and what a profile
+                # that sets only a speed still gets.
+                step = math.copysign(max_vel * dt, diff)
+                new_pos = target if abs(step) >= abs(diff) else state.position + step
             else:
-                new_pos = current_pos + math.copysign(max_step, diff)
-            p.resetJointState(self.body_id, joint_index, new_pos, physicsClientId=self._pid)
-            self._kinematic_joint_positions[joint_index] = new_pos
+                new_pos = self._ramped_joint_position(state, target, step_start, now, max_vel)
+            p.resetJointState(self.body_id, state.index, new_pos, physicsClientId=self._pid)
+            state.position = new_pos
             any_moved = True
         return any_moved
+
+    def is_joint_moving(self, joint: Union[int, str]) -> bool:
+        """Whether a ramped joint is still in motion.
+
+        An action reports complete once the joint is inside its tolerance,
+        which a ramped joint reaches while still braking through the last
+        fraction of a millimetre. Anything that has to know the joint has
+        actually stopped -- a lift releasing its passengers, say -- needs
+        this rather than the action's status.
+
+        True while the joint is following a trajectory, while it is braking
+        with none to follow, and while it is between the two: changing a
+        motion profile voids the trajectory it was solved against but not the
+        speed the joint is carrying, and the replacement is not planned until
+        the next step. A joint that is only carrying speed is as much in
+        motion as one with a plan, which is why this asks about the motion
+        rather than about the trajectory.
+        """
+        index = joint if isinstance(joint, int) else self._joint_index_by_name(joint)
+        state = self._joints.get(index)
+        return state is not None and state.is_moving
+
+    def _joint(self, index: int) -> KinematicJoint:
+        """The state for one joint, created on first use.
+
+        Seeded for every joint of a kinematic body, so this only creates one
+        in physics mode, where a target is recorded but no position is
+        cached.
+        """
+        state = self._joints.get(index)
+        if state is None:
+            state = self._joints[index] = KinematicJoint(index=index)
+        return state
+
+    def _refresh_active_joints(self) -> None:
+        """Re-index the joints the step loop visits, after a target changed."""
+        self._active_joints = [state for state in self._joints.values() if state.target is not None]
+
+    def _ramped_joint_position(
+        self,
+        state: KinematicJoint,
+        target: float,
+        step_start: float,
+        now: float,
+        max_vel: float,
+    ) -> float:
+        """Where a ramped joint is at ``now``, from a TwoPointInterpolation.
+
+        The same solver the linear controllers use, rather than a trapezoid
+        integrated by hand: it handles triangle, trapezoid and degenerate
+        exactly, and starts from the speed the joint is already carrying.
+
+        One trajectory is built per target change, not per step, and ``t0`` is
+        the start of the step so the first evaluation already covers ``dt`` of
+        travel.
+
+        What the solver will not plan -- a target the joint is moving away
+        from, or one closer than its braking distance -- goes to
+        :meth:`_braking_joint_step` until it will.
+        """
+        accel = state.max_accel
+        decel = state.decel
+        if accel is None or decel is None:
+            raise RuntimeError(f"Joint {state.index} is not ramped; the caller checks is_ramped first")
+
+        tpi = state.trajectory if state.trajectory_target == target else None
+        if tpi is None:
+            # A joint travelling away from its target is braked here rather
+            # than by the solver: asked to turn a joint around inside the
+            # distance it needs to stop, the solver returns a trajectory that
+            # runs away from the target at many times vmax and then jumps back
+            # onto it, instead of reporting the request as infeasible.
+            heading_away = state.speed * (target - state.position) < 0.0
+            tpi = (
+                None
+                if heading_away
+                else try_build_tpi(
+                    p0=state.position,
+                    pe=target,
+                    vmax=max_vel,
+                    accel=accel,
+                    t0=step_start,
+                    v0=state.speed,
+                    decel=decel,
+                )
+            )
+            if tpi is None:
+                return self._braking_joint_step(state, decel, now - step_start)
+            state.trajectory = tpi
+            state.trajectory_target = target
+            state.braking = False
+
+        if now >= tpi.get_end_time():
+            state.clear_motion()
+            return target
+
+        position, velocity, _ = tpi.get_point(now)
+        if abs(target - position) < 1e-9:
+            # Close enough that the remainder is float residue. Snapping here
+            # rather than waiting for get_end_time() keeps the invariant that
+            # a joint at its target carries no speed and no trajectory.
+            state.clear_motion()
+            return target
+        state.speed = float(velocity)
+        return float(position)
+
+    def _braking_joint_step(self, state: KinematicJoint, decel: float, dt: float) -> float:
+        """One step of braking for a joint with no trajectory to follow.
+
+        Covers the two states a trapezoid cannot be fitted to: a target that
+        has moved inside the distance the joint needs to stop, which the
+        solver refuses, and a joint travelling away from its target, which the
+        solver mis-solves. Both used to end with the joint at its target one
+        step later -- the first because an unplannable request comes back as a
+        zero-length trajectory that reads as "already arrived", the second
+        because the mis-solved trajectory ends on the target however far it
+        wandered first.
+
+        Instead the joint sheds speed at ``decel`` for this step and the
+        trajectory is planned again on the next one. Braking alone does not
+        close the gap on a target ahead -- the distance left and the distance
+        needed shrink at the same rate -- so the joint runs past it, and from
+        there every step is braking towards a target behind until the joint is
+        at rest, which the solver can plan from. It takes |v| / decel seconds,
+        and the joint never moves faster than ``decel`` allows.
+        """
+        # Only as much of the step as the joint is still moving for. Averaging
+        # the speeds over the whole dt when it comes to rest part-way through
+        # would carry it past the distance decel allows.
+        moving_for = min(dt, abs(state.speed) / decel)
+        slowed = state.speed - math.copysign(decel * moving_for, state.speed)
+        if slowed * state.speed <= 0.0:
+            slowed = 0.0  # braked through rest inside this step
+        position = state.position + 0.5 * (state.speed + slowed) * moving_for
+        state.speed = slowed
+        state.trajectory = None
+        state.trajectory_target = None
+        # Keeps is_moving true even on the final step, where the speed reaches
+        # exactly zero but the joint is not at its target.
+        state.braking = True
+        return float(position)
 
     def update(self, dt: float) -> bool:
         """
@@ -1726,8 +2253,8 @@ class Agent(SimObject):
             self._log.warning("get_joint_state() only works for URDF robots")
             return (0.0, 0.0)
 
-        if self._use_kinematic_joints and joint_index in self._kinematic_joint_positions:
-            return (self._kinematic_joint_positions[joint_index], 0.0)
+        if self._use_kinematic_joints and joint_index in self._joints:
+            return (self._joints[joint_index].position, 0.0)
 
         joint_state = p.getJointState(self.body_id, joint_index, physicsClientId=self._pid)
         return (joint_state[0], joint_state[1])  # position, velocity
@@ -1744,47 +2271,33 @@ class Agent(SimObject):
         return self.get_joint_state(idx)
 
     def capture_kinematic_joint_execution(self) -> list[dict]:
-        """Capture every URDF joint position and its last kinematic target."""
+        """Capture every joint's position, command, motion limits and execution.
+
+        A solved trajectory is represented by its primitive inputs and start
+        time relative to the joint clock. Rebuilding it preserves the phase
+        reached at this completed-step boundary without serializing the TPI
+        instance itself.
+        """
         if not self._use_kinematic_joints or not self.joint_info:
             raise ValueError("Kinematic joint checkpoint requires a jointed kinematic URDF robot")
-        joints = []
-        for index, info in enumerate(self.joint_info):
-            joints.append(
-                {
-                    "name": info[1].decode("utf-8"),
-                    "position": float(self._kinematic_joint_positions[index]),
-                    "target": self._last_joint_targets.get(index),
-                }
-            )
-        return joints
+        return [
+            self._joints[index].capture_execution(info[1].decode("utf-8"), self._joint_clock)
+            for index, info in enumerate(self.joint_info)
+        ]
 
     def restore_kinematic_joint_execution(self, states: list[dict]) -> None:
-        """Restore all joint positions and targets without issuing commands."""
+        """Restore joint commands and execution at a completed-step boundary."""
         if not self._use_kinematic_joints or not isinstance(states, list) or len(states) != len(self.joint_info):
             raise ValueError("Joint checkpoint does not match the kinematic URDF robot")
-        targets = {}
+        parsed = []
         for index, (state, info) in enumerate(zip(states, self.joint_info)):
             if not isinstance(state, dict) or state.get("name") != info[1].decode("utf-8"):
                 raise ValueError("Joint checkpoint names or order differ from the kinematic URDF")
-            position = state.get("position")
-            target = state.get("target")
-            if (
-                isinstance(position, bool)
-                or not isinstance(position, (int, float))
-                or not math.isfinite(position)
-                or (
-                    target is not None
-                    and (isinstance(target, bool) or not isinstance(target, (int, float)) or not math.isfinite(target))
-                )
-            ):
-                raise ValueError("Joint checkpoint contains a nonfinite or invalid value")
-            if target is not None:
-                targets[index] = float(target)
-        for index, state in enumerate(states):
-            position = float(state["position"])
-            p.resetJointState(self.body_id, index, position, physicsClientId=self._pid)
-            self._kinematic_joint_positions[index] = position
-        self._last_joint_targets = targets
+            parsed.append(KinematicJoint.from_execution(index, state, self._joint_clock))
+        for joint in parsed:
+            p.resetJointState(self.body_id, joint.index, joint.position, physicsClientId=self._pid)
+            self._joints[joint.index] = joint
+        self._refresh_active_joints()
 
     def get_all_joints_state(self) -> list:
         """
@@ -1850,7 +2363,11 @@ class Agent(SimObject):
             return
 
         # Always record for are_joints_at_targets() / PoseAction completion
-        self._last_joint_targets[joint_index] = target_position
+        state = self._joint(joint_index)
+        newly_targeted = state.target is None
+        state.target = target_position
+        if newly_targeted:
+            self._refresh_active_joints()
 
         if not self._use_kinematic_joints:
             # Physics mode (mass>0 with stepSimulation): motor control
@@ -1972,7 +2489,7 @@ class Agent(SimObject):
     @property
     def last_joint_targets(self) -> Dict[int, float]:
         """Read-only copy of last commanded joint targets."""
-        return dict(self._last_joint_targets)
+        return {i: s.target for i, s in self._joints.items() if s.target is not None}
 
     def are_all_joints_at_targets(
         self, target_positions: Optional[list] = None, tolerance: Optional[Union[float, list, dict]] = None
@@ -1981,7 +2498,7 @@ class Agent(SimObject):
 
         Args:
             target_positions: List of target positions for each joint.
-                If None, uses ``_last_joint_targets`` (last commanded targets).
+                If None, uses the last commanded targets.
             tolerance: ``float``, ``list``, ``dict``, or ``None``.
                 If None, uses ``self.joint_tolerance``.
                 Passed through to ``_resolve_joint_tolerance()`` per joint.
@@ -2001,7 +2518,7 @@ class Agent(SimObject):
             return False
 
         if target_positions is None:
-            targets = self._last_joint_targets
+            targets = self.last_joint_targets
         else:
             targets = {i: t for i, t in enumerate(target_positions)}
 
@@ -2054,7 +2571,7 @@ class Agent(SimObject):
         Args:
             targets: List of target positions for all joints,
                 dict ``{joint_name: position}``, or **None** to use the
-                last commanded targets (``_last_joint_targets``).
+                last commanded targets.
             tolerance: Tolerance value(s) — ``float``, ``list``, ``dict``,
                 or **None** (→ ``self.joint_tolerance``).
 

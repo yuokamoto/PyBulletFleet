@@ -31,7 +31,14 @@ _DEFAULTS: Dict[str, Dict[str, Any]] = {
         "gui": True,
         "physics": False,
         "monitor": True,
-        "enable_monitor_gui": True,
+        # None: follow `gui`, so a headless run opens no window.
+        "enable_monitor_gui": None,
+        # Simulated seconds between DataMonitor refreshes (build and write a
+        # frame). None: MONITOR_REFRESH_WITH_WINDOW with the monitor window,
+        # MONITOR_REFRESH_HEADLESS without it.
+        "monitor_update_interval": None,
+        # Wall seconds between INFO-level [MONITOR] lines; 0 keeps them off.
+        "monitor_log_interval": 1.0,
         "log_level": "warn",
         "max_steps_per_frame": 10,
         "max_sleep_frames": 4.0,  # real-time sleep clamp: at most this many normal frame intervals
@@ -42,6 +49,7 @@ _DEFAULTS: Dict[str, Dict[str, Any]] = {
         "enable_shadows": True,
         "enable_gui_panel": False,
         "ignore_static_collision": True,
+        "ignore_attached_collision": True,
         "enable_time_profiling": False,
         "profiling_interval": 100,
         "enable_memory_profiling": False,
@@ -81,6 +89,8 @@ _DEFAULTS: Dict[str, Dict[str, Any]] = {
     "agent": {
         "motion_mode": "differential",
         "use_fixed_base": False,
+        "global_scaling": 1.0,
+        "joint_tolerance": None,
         # Not centralized (complex / per-instance):
         #   urdf_path   — str, per-robot URDF path
         #   ik_params   — IKParams dataclass (see "ik" section for scalars)
@@ -97,6 +107,13 @@ _DEFAULTS: Dict[str, Dict[str, Any]] = {
         "max_angular_accel": 10.0,
         "cmd_vel_timeout": 0.0,
         "navigation_2d": False,
+        # What a moving agent does with a goal it cannot reach from its current
+        # motion within its limits: "brake", "reject", "wait_complete" or
+        # "immediate". See ControllerParams.goal_replacement.
+        "goal_replacement": "brake",
+        # Whether an agent stops dead when a collision starts. See
+        # ControllerParams.stop_on_collision.
+        "stop_on_collision": False,
         # Not centralized (complex enum):
         #   default_direction — MovementDirection enum (forward / backward / …)
     },
@@ -211,6 +228,15 @@ CONTROLLER: Dict[str, Any] = _DEFAULTS["controller"]
 SIM_OBJECT: Dict[str, Any] = _DEFAULTS["sim_object"]
 SHAPE: Dict[str, Any] = _DEFAULTS["shape"]
 IK: Dict[str, Any] = _DEFAULTS["ik"]
+
+#: Simulated seconds between DataMonitor refreshes when
+#: ``monitor_update_interval`` is ``None``. With the monitor window open: the
+#: window reads the file every 0.5 wall seconds, so 0.25 s keeps it current at
+#: a real-time factor of 1. Without it: a frame a second is enough for
+#: ``last_monitor_frame``. Internal defaults, not parameters; set
+#: ``monitor_update_interval`` to choose another refresh.
+MONITOR_REFRESH_WITH_WINDOW: float = 0.25
+MONITOR_REFRESH_HEADLESS: float = 1.0
 
 #: Keys in ``simulation`` whose default is ``None`` (not env-overridable).
 NONE_SENTINEL_KEYS = frozenset(k for k, v in _DEFAULTS["simulation"].items() if v is None)

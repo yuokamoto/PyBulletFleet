@@ -31,11 +31,16 @@ simulation:
 
   # Enable external data monitor (true/false)
   monitor: true
+  # Simulated seconds between monitor refreshes (build and write a frame).
+  # null: 0.25 s with the monitor window open, 1 s without it. 0: every step.
+  monitor_update_interval: null
 
   # Collision check frequency (times per second)
   # collision_check_frequency: 0.1
   # Ignore collisions with structure (True/False)
   ignore_static_collision: true
+  # Ignore contact between an attached object and its carrier (True/False)
+  ignore_attached_collision: true
 
   # Enable profiling output (True/False)
   enable_time_profiling: false
@@ -148,8 +153,9 @@ simulation:
 
   # Enable monitor GUI (visualization)
   # Recommended: false for headless performance testing
-  # Default: true (GUI enabled when monitor=true)
-  enable_monitor_gui: true
+  # Default: null -- follow `gui`, so a headless run opens no monitor window.
+  #          true/false forces it either way.
+  enable_monitor_gui: null
 
   # ========================================
   # Logging Settings

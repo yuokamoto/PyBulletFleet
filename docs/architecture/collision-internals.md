@@ -409,6 +409,38 @@ ignore_static_collision: false
 - Default: `NORMAL_3D` if not specified
 - Recommended: Explicitly set for clarity
 
+### Ignoring Expected Contact
+
+Some touching pairs are meant to touch and should not count as collisions.
+
+- `ignore_attached_collision` (default `true`) drops contact between objects
+  on one attachment tree built with `attach_object()`: a parent and child, two
+  loads on one carrier, and a load on a load. Contact with anything outside
+  the tree is still reported. Attaching or detaching takes effect on the next
+  collision check: an active pair that becomes excluded ends
+  (`COLLISION_ENDED`), and an excluded pair is checked again once it is not.
+- `set_collision_ignore_filter(fn)` drops every touching pair for which
+  `fn(obj_a, obj_b)` returns `True`, for rules only the application knows:
+
+```python
+def is_expected_contact(obj_a, obj_b):
+    # e.g. a vehicle and the platform it is riding on
+    return obj_b in platform_riders.get(obj_a, ()) or obj_a in platform_riders.get(obj_b, ())
+
+sim.set_collision_ignore_filter(is_expected_contact)
+```
+
+An ignored pair is excluded everywhere: it is not an active pair, is not
+counted in `collision_count`, raises no `COLLISION_STARTED` and is absent from
+`get_collision_observation()`. Filtering in a `COLLISION_STARTED` handler
+instead would leave those figures counting the contact. A pair that becomes
+ignored while active resolves on the next check with `COLLISION_ENDED`, and
+an ignored pair that stops being ignored -- an in-place `detach_object()`, a
+filter whose answer changes -- is checked again on the next one, even if
+neither body moved. Ignored pairs skip the narrow phase, so the filter runs
+once per candidate, active or previously ignored pair on each check and
+should be cheap.
+
 ### Collision Margin Recommendations
 
 | Use Case | Margin | Rationale |

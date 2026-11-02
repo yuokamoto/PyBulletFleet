@@ -4,7 +4,7 @@ Covers:
 - Agent._solve_ik() — IK solver wrapper
 - Agent._get_end_effector_link_index() — EE link auto-detection
 - Agent.move_end_effector() — direct EE position command
-- Agent._last_joint_targets / are_joints_at_targets() unification
+- Agent joint targets / are_joints_at_targets() unification
 - IKParams dataclass
 """
 
@@ -391,7 +391,7 @@ class TestMoveEndEffector:
         result = agent.move_end_effector([100.0, 100.0, 100.0])
         assert result is False
         # Targets still set (best-effort)
-        assert len(agent._last_joint_targets) > 0
+        assert len(agent.last_joint_targets) > 0
 
     def test_returns_true_for_y_positive_target(self, arm_agent):
         """move_end_effector should reach Y+ target (requires large J0 rotation)."""
@@ -404,7 +404,7 @@ class TestMoveEndEffector:
         agent, _ = arm_agent
         agent.move_end_effector([0.0, 0.0, 0.75])
         # Targets should be populated
-        assert len(agent._last_joint_targets) > 0
+        assert len(agent.last_joint_targets) > 0
 
     def test_ee_reaches_target_after_steps(self, arm_agent):
         """After enough update steps, EE should be near target."""
@@ -461,12 +461,12 @@ class TestMoveEndEffector:
 
 
 # ============================================================
-# T3: _last_joint_targets unification
+# T3: joint target unification
 # ============================================================
 
 
 class TestLastJointTargets:
-    """Tests for _last_joint_targets and are_joints_at_targets(None)."""
+    """Tests for last_joint_targets and are_joints_at_targets(None)."""
 
     def test_are_joints_at_targets_no_args_returns_true_when_settled(self, arm_agent):
         """are_joints_at_targets() returns True when settled; targets persist."""
@@ -477,8 +477,8 @@ class TestLastJointTargets:
             agent.update(sim_core._dt)
         assert agent.are_joints_at_targets()
         # Targets persist after arrival (not deleted)
-        assert 0 in agent._last_joint_targets
-        assert agent._last_joint_targets[0] == 0.1
+        assert 0 in agent.last_joint_targets
+        assert agent.last_joint_targets[0] == 0.1
 
     def test_are_joints_at_targets_no_args_returns_false_before_settled(self, arm_agent):
         """are_joints_at_targets() returns False while joints are still moving."""
@@ -765,7 +765,7 @@ class TestMobileManipulatorIK:
         # Move wheels to a non-zero position (sync both PyBullet and kinematic cache)
         wheel_pos = 1.5
         for idx in (0, 1):
-            agent._kinematic_joint_positions[idx] = wheel_pos
+            agent._joints[idx].position = wheel_pos
             p.resetJointState(agent.body_id, idx, wheel_pos, physicsClientId=agent._pid)
 
         target = [0.5, 0.0, 0.6]
@@ -865,7 +865,7 @@ class TestIKJointNames:
         agent, _ = mobile_manip_agent_explicit
         wheel_pos = 1.5
         for idx in (0, 1):
-            agent._kinematic_joint_positions[idx] = wheel_pos
+            agent._joints[idx].position = wheel_pos
             p.resetJointState(agent.body_id, idx, wheel_pos, physicsClientId=agent._pid)
 
         target = [0.5, 0.0, 0.6]

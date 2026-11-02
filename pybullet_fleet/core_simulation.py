@@ -43,6 +43,8 @@ import pybullet_data
 
 import yaml
 
+from pybullet_fleet._frequency import FrequencyGate
+from pybullet_fleet._monitor_frames import MonitorFrames
 from pybullet_fleet._platform import IS_MACOS
 from pybullet_fleet.camera_controller import CameraController
 from pybullet_fleet.collision_visualizer import CollisionVisualizer  # deprecated, unused
@@ -61,11 +63,16 @@ from pybullet_fleet.sim_object import SimObject
 from pybullet_fleet.agent import Agent
 from pybullet_fleet.agent_manager import SimObjectManager
 from pybullet_fleet.behavior_tree_core import BehaviorTree
-from pybullet_fleet.types import SpatialHashCellSizeMode, CollisionDetectionMethod, CollisionMode
+from pybullet_fleet.types import CallbackPhase, SpatialHashCellSizeMode, CollisionDetectionMethod, CollisionMode
+from pybullet_fleet._defaults import MONITOR_REFRESH_HEADLESS, MONITOR_REFRESH_WITH_WINDOW
 from pybullet_fleet._defaults import SIMULATION as _SIM_D
 
 if TYPE_CHECKING:
     from pybullet_fleet.sim_plugin import SimPlugin
+
+#: ``fn(obj_a, obj_b) -> bool for :meth:`MultiRobotSimulationCore.set_collision_ignore_filter`:
+#: ``True`` when the two touching objects are meant to touch and should not count as a collision.
+CollisionIgnoreFilter = Callable[[SimObject, SimObject], bool]
 
 # Generic plugin type so register_plugin() returns the concrete subclass type.
 _SimPluginT = TypeVar("_SimPluginT", bound="SimPlugin")
@@ -75,7 +82,43 @@ GLOBAL_LOG_LEVEL = "INFO"
 if "PYBULLET_LOG_LEVEL" in os.environ:
     GLOBAL_LOG_LEVEL = os.environ["PYBULLET_LOG_LEVEL"].upper()
 
-logging.basicConfig(level=logging.getLevelName(GLOBAL_LOG_LEVEL), format="%(asctime)s %(levelname)s %(message)s")
+
+#: The package's own logger. Everything below configures this rather than the
+#: root logger: importing a library must not decide how the application that
+#: imported it formats or filters its logs. A program that wants
+#: PyBulletFleet's output on screen and has configured nothing of its own gets
+#: it from the handler installed here; one that has called basicConfig() keeps
+#: its own, because the handler is only added when this logger has none.
+def _install_default_handler(package_logger: logging.Logger, root_logger: logging.Logger) -> bool:
+    """Give the package a handler only when nothing else is handling records.
+
+    Records propagate to the root logger, so installing one here while the
+    host application has its own would print every PyBulletFleet line twice.
+    A program that has configured nothing still gets the output it used to get
+    from ``basicConfig()``.
+
+    Returns whether a handler was added, which is what makes this testable
+    without re-importing the package.
+    """
+    if package_logger.handlers or root_logger.handlers:
+        return False
+    handler = logging.StreamHandler()
+    handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
+    package_logger.addHandler(handler)
+    # Propagation is left on. Turning it off would stop the one case this
+    # cannot catch -- a host that imports PyBulletFleet before configuring
+    # logging, then adds a root handler, and sees each line twice -- but it
+    # also cuts these records off from every handler the host adds later,
+    # pytest's caplog among them. Measured: 17 tests in this suite capture
+    # PyBulletFleet's own records through the root logger. The duplicate is
+    # cosmetic and the host can remove this handler; losing the records is
+    # not recoverable from the outside.
+    return True
+
+
+_PACKAGE_LOGGER = logging.getLogger(__name__.split(".")[0])
+_PACKAGE_LOGGER.setLevel(logging.getLevelName(GLOBAL_LOG_LEVEL))
+_install_default_handler(_PACKAGE_LOGGER, logging.getLogger())
 
 # Create module logger (LazyLogger: avoids expensive f-string evaluation when log level is disabled)
 logger = get_lazy_logger(__name__)
@@ -85,6 +128,13 @@ logger = get_lazy_logger(__name__)
 # Wall-vs-monotonic divergence (seconds) worth flagging as a clock jump. WARNING
 # log only; does not affect pacing.
 _CLOCK_JUMP_LOG_THRESHOLD_S = 0.5
+
+# Real seconds between consecutive run_simulation() loop iterations worth
+# flagging as a stall (host overloaded, GUI event processing stuck, etc.).
+# WARNING log only. Unlike the clock-jump diagnostic above, this fires in
+# every pacing mode including target_rtf<=0 (run-as-fast-as-possible), which
+# otherwise has no loop-timing instrumentation at all.
+_STEP_STALL_LOG_THRESHOLD_S = 2.0
 
 # PyBullet does not expose these mouse constants in every wheel build.  Keep
 # them aligned with CameraController's documented event tuple values.
@@ -131,7 +181,29 @@ class SimulationParams:
     gui: bool = _SIM_D["gui"]
     physics: bool = _SIM_D["physics"]
     monitor: bool = _SIM_D["monitor"]
-    enable_monitor_gui: bool = _SIM_D["enable_monitor_gui"]
+    #: Whether the DataMonitor opens a window. ``None`` (the default) follows
+    #: ``gui``: a headless simulation collects monitor data without putting a
+    #: Tk window on screen. ``True`` or ``False`` is honoured as given, so a
+    #: monitor window without the PyBullet viewer is still available.
+    enable_monitor_gui: Optional[bool] = _SIM_D["enable_monitor_gui"]
+    #: Simulated seconds between DataMonitor refreshes while ``monitor`` is
+    #: on. A refresh builds :attr:`last_monitor_frame` and writes the file the
+    #: monitor window reads (every 0.5 wall seconds). ``None`` (the default)
+    #: is 0.25 s while the monitor window is open (``enable_monitor_gui``, or
+    #: ``gui`` when that is ``None``) and 1 s otherwise; ``0`` is every step.
+    #: Simulated time: at a real-time factor above 1 a short interval means
+    #: more writes per wall second. While paused, a selection, follow or pause
+    #: change, and a single step, refresh at once. Read once, when the
+    #: simulation is created.
+    monitor_update_interval: Optional[float] = _SIM_D["monitor_update_interval"]
+    #: Wall-clock seconds between ``[MONITOR]`` lines logged at INFO -- RTF,
+    #: collision totals, step count -- independent of ``monitor``, ``gui`` and
+    #: ``monitor_update_interval``. ``monitor`` drives the DataMonitor, whose
+    #: line is logged at DEBUG; this keeps those figures in the log whether or
+    #: not anything is on screen. Default 1 s; ``0`` logs none. Wall clock
+    #: rather than simulated time, so the log's volume does not scale with the
+    #: real-time factor.
+    monitor_log_interval: float = _SIM_D["monitor_log_interval"]
     collision_check_frequency: Optional[float] = None
     log_level: str = _SIM_D["log_level"]
     max_steps_per_frame: int = _SIM_D["max_steps_per_frame"]
@@ -147,6 +219,10 @@ class SimulationParams:
     enable_shadows: bool = _SIM_D["enable_shadows"]
     enable_gui_panel: bool = _SIM_D["enable_gui_panel"]
     ignore_static_collision: bool = _SIM_D["ignore_static_collision"]
+    #: Do not count contact between objects on one attachment tree
+    #: (``attach_object``): a carrier, its loads and their loads touch one
+    #: another by design. Contact with anything outside the tree is reported.
+    ignore_attached_collision: bool = _SIM_D["ignore_attached_collision"]
     enable_time_profiling: bool = _SIM_D["enable_time_profiling"]
     profiling_interval: int = _SIM_D["profiling_interval"]
     enable_memory_profiling: bool = _SIM_D["enable_memory_profiling"]
@@ -362,21 +438,28 @@ class MultiRobotSimulationCore:
         return sim
 
     def __init__(self, params: SimulationParams, collision_color: Optional[List[float]] = None) -> None:
-        # Initialize log level from params
+        # Initialize log level from params, on this package's logger only.
+        # Setting it on the root logger silenced the host application's own
+        # output: log_level defaults to "warn", so merely constructing a
+        # simulation turned off every INFO line in the process.
         level_str = getattr(params, "log_level", GLOBAL_LOG_LEVEL)
         level_name = str(level_str).upper()
-        logging.getLogger().setLevel(logging.getLevelName(level_name))
+        _PACKAGE_LOGGER.setLevel(logging.getLevelName(level_name))
 
         # --- Public (read-only via @property, internal via self._X) ---
         self._client: Optional[int] = None
+        #: Set by close(), so its shutdown callbacks run at most once.
+        self._closed: bool = False
         self._sim_objects: List[SimObject] = []  # List of all simulation objects (Agent, SimObject, etc.)
         self._sim_objects_dict: Dict[int, SimObject] = {}  # Dict for O(1) lookup: object_id -> SimObject
         self._agents: List[Agent] = []  # List of Agent instances only for O(M) iteration in step_once()
         self._robot_original_colors: Dict[int, List[float]] = {}  # body_id: rgbaColor
         self._collision_count: int = 0
         self._step_count: int = 0
-        self.sim_time: float = 0.0  # Simulation time (kept public for hot-path access)
-        self._elapsed_sim_time: float = 0.0  # Canonical accumulated simulation time
+        # The simulation clock: the one source of time; ``sim_time`` reads it.
+        self._elapsed_sim_time: float = 0.0
+        # The step, time and timestep _schedule_time() counts whole timesteps from.
+        self._schedule_origin: Tuple[int, float, float] = (0, 0.0, params.timestep)
         self._enable_time_profiling: bool = params.enable_time_profiling
 
         # --- Fully private (no external access) ---
@@ -384,13 +467,15 @@ class MultiRobotSimulationCore:
         self._next_object_id: int = 0  # Counter for unique object IDs (read/incremented by SimObject.__init__)
         self._last_logged_collision_count: int = 0  # Track last logged collision count
         self._monitor_enabled: bool = params.monitor
-        self._last_monitor_update: float = 0
+        self._last_monitor_log: Optional[float] = None  # time.monotonic() of the last INFO [MONITOR] line
         self._callbacks: List[Dict[str, Any]] = []  # List of callback functions
         self._behavior_tree_callbacks: List[Tuple[BehaviorTree, Callable]] = []
         self._data_monitor: Optional[DataMonitor] = None
         self._gui_commands: Queue[GuiCommand] = Queue(maxsize=32)
         self._single_step_requested: bool = False
-        self._last_monitor_frame: Optional[MonitorFrame] = None
+        # Entity-list cache and "window is behind" state of the DataMonitor
+        # (see pybullet_fleet._monitor_frames).
+        self._monitor_frames = MonitorFrames()
         self._selected_entity_id: Optional[int] = None
         self._gui_follow_enabled: bool = False
         self._pacing_rebase_requested: bool = False
@@ -399,7 +484,7 @@ class MultiRobotSimulationCore:
         self._viewport_left_click_start: Optional[Tuple[int, int]] = None
         self._viewport_drag_entity_id: Optional[int] = None
         self._collision_check_frequency: Optional[float] = params.collision_check_frequency  # If None, check every step
-        self._last_collision_check: float = 0.0
+        self._collision_check_gate = FrequencyGate()  # follows _collision_check_frequency while enabled
         self._log_level: str = params.log_level
         self._params: SimulationParams = params
         self._collision_color: List[float] = collision_color if collision_color is not None else [0, 0, 1, 1]
@@ -441,6 +526,7 @@ class MultiRobotSimulationCore:
             "collision_check": [],
             "events_pre_step": [],
             "events_post_step": [],
+            "callbacks_post_step": [],
             "events_collision": [],
             "monitor_update": [],
             "total": [],
@@ -498,7 +584,14 @@ class MultiRobotSimulationCore:
         self._active_pairs_by_object: Dict[int, Set[Tuple[int, int]]] = {}
         self._collision_pair_observations: Dict[Tuple[int, int], CollisionPairObservation] = {}
         self._last_collision_check_metadata: Optional[Tuple[int, float, CollisionDetectionMethod, float]] = None
-        self._collision_margin_changed = False
+        self._recheck_stationary_pairs = False
+        self._collision_ignore_filter: Optional[CollisionIgnoreFilter] = None
+        # Broad-phase candidate pairs the ignore rules excluded last time they
+        # were checked. Their narrow phase was skipped, so whether they touch
+        # is unknown; they are re-evaluated on every check, so a pair that
+        # stops being ignored without either body moving (an in-place detach,
+        # a filter reading run-time state) is still found.
+        self._ignored_collision_pairs: Set[Tuple[int, int]] = set()
 
         # --- Recording ---
         self._recorder: Optional[Any] = None  # Optional[SimulationRecorder] (lazy import to avoid circular)
@@ -513,7 +606,10 @@ class MultiRobotSimulationCore:
         # _pending_pose_ids holds object_ids whose _pending_pose buffer is non-empty.
         # See docs/design/two-phase-step/spec.md.
         self._in_step: bool = False
-        self._in_post_step: bool = False  # Counters advance after POST_STEP callbacks.
+        self._in_post_step: bool = False
+        # True only while PRE_STEP is emitted: the one point of a step where the
+        # clock and step counter still hold the previous step (see step_once()).
+        self._in_pre_step: bool = False
         self._resume_ready: bool = False  # Set only by a validated completed-step restore.
         self._pending_pose_ids: Set[int] = set()
         # Parent object ids that have link-level kinematic attachments.
@@ -525,15 +621,32 @@ class MultiRobotSimulationCore:
         self._plugins: List["SimPlugin"] = []
 
         self.setup_pybullet()
+        # DataMonitor refresh: monitor_update_interval, else
+        # MONITOR_REFRESH_WITH_WINDOW while its window is open
+        # (enable_monitor_gui, or gui when that is None; the window reads every
+        # 0.5 wall seconds) and MONITOR_REFRESH_HEADLESS otherwise.
+        # Set after setup_pybullet(): RECORD may turn the GUI off.
+        interval = params.monitor_update_interval
+        if interval is None:
+            window = params.enable_monitor_gui if params.enable_monitor_gui is not None else params.gui
+            interval = MONITOR_REFRESH_WITH_WINDOW if window else MONITOR_REFRESH_HEADLESS
+        self._monitor_update_gate = FrequencyGate(1.0 / interval if interval > 0 else None)
         self.setup_monitor()
 
     def setup_monitor(self) -> None:
         # If monitor: true and console_monitor: false, start DataMonitor
 
         if self._params.monitor:
+            # None means "follow gui": a headless run should not open a
+            # window. It used to open one regardless, so a program that
+            # builds several simulations -- a test suite, a sweep -- got a Tk
+            # window per simulation on a machine with no viewer in sight.
+            enable_gui = self._params.enable_monitor_gui
+            if enable_gui is None:
+                enable_gui = self._params.gui
             self._data_monitor = DataMonitor(
                 "PyBullet Simulation Monitor",
-                enable_gui=self._params.enable_monitor_gui,
+                enable_gui=enable_gui,
                 width=self._params.monitor_width,
                 height=self._params.monitor_height,
                 x=self._params.monitor_x,
@@ -561,7 +674,7 @@ class MultiRobotSimulationCore:
     @property
     def last_monitor_frame(self) -> Optional[MonitorFrame]:
         """Return the most recently published toolkit-neutral monitor frame."""
-        return self._last_monitor_frame
+        return self._monitor_frames.last_frame
 
     @property
     def selected_entity_id(self) -> Optional[int]:
@@ -719,6 +832,7 @@ class MultiRobotSimulationCore:
         if self._selected_entity_id == entity_id:
             return
         self._selected_entity_id = entity_id
+        self._monitor_frames.view_changed()
         if entity_id is None:
             self._gui_follow_enabled = False
         self._update_selected_nameplate(force=True)
@@ -729,6 +843,7 @@ class MultiRobotSimulationCore:
         if self._gui_follow_enabled == enabled:
             return
         self._gui_follow_enabled = enabled
+        self._monitor_frames.view_changed()
         self.events.emit("gui.follow_changed", entity_id=self._selected_entity_id, enabled=enabled)
 
     def _clear_selected_nameplate(self) -> None:
@@ -901,6 +1016,34 @@ class MultiRobotSimulationCore:
         """Current simulation step count."""
         return self._step_count
 
+    @property
+    def sim_time(self) -> float:
+        """Simulated time of the state you see (read-only).
+
+        Outside a step it is the completed step's time, the same as
+        :meth:`get_completed_step_boundary`. Inside :meth:`step_once` the clock
+        advances right after the ``pre_step`` event, so from the object update
+        on -- callbacks, plugins, the collision check, ``post_step`` -- it is the
+        time of the state that step computes. A ``pre_step`` subscriber sees the
+        previous step's time. To move the clock (resuming from a checkpoint),
+        use :meth:`restore_completed_step_boundary`.
+        """
+        return self._elapsed_sim_time
+
+    def _schedule_time(self) -> float:
+        """:attr:`sim_time` without its accumulated float error, for frequency gates.
+
+        ``sim_time`` adds one timestep per step, so its error grows with the
+        run: at a 1 ms timestep it passes a millionth of a timestep within
+        minutes, enough to move a due time by a step. This counts whole
+        timesteps from an origin that moves when the clock is restored and,
+        at the next step, when the timestep has changed -- through pacing or
+        by assigning ``params.timestep`` -- so its error stays at the rounding
+        of one product.
+        """
+        step, time_at_step, timestep = self._schedule_origin
+        return time_at_step + (self._step_count - step) * timestep
+
     def get_completed_step_boundary(self) -> tuple[int, float]:
         """Return the completed step and canonical elapsed time outside a step."""
         if self._in_step or self._in_post_step:
@@ -966,9 +1109,7 @@ class MultiRobotSimulationCore:
             raise ValueError("Completed-step time does not match the fixed timestep")
         self._step_count = step
         self._elapsed_sim_time = elapsed_time
-        # Match the post-step field value; step_once() sets it to elapsed_time
-        # before evaluating the next step.
-        self.sim_time = (step - 1) * self._params.timestep
+        self._schedule_origin = (step, elapsed_time, self._params.timestep)
         self._resume_ready = True
 
     @property
@@ -1030,8 +1171,8 @@ class MultiRobotSimulationCore:
         else:
             raise TypeError(f"Expected SimPlugin instance or subclass, got {plugin_or_cls!r}")
 
+        plugin.frequency = frequency  # validates before the plugin is registered
         self._plugins.append(plugin)
-        plugin.frequency = frequency
         return plugin
 
     @property
@@ -1060,21 +1201,15 @@ class MultiRobotSimulationCore:
     def _step_plugins(self, dt: float) -> None:
         """Dispatch ``on_step()`` to plugins respecting frequency control."""
         for plugin in self._plugins:
-            freq = plugin.frequency
-            if freq is None:
-                try:
-                    plugin.on_step(dt)
-                except Exception:
-                    logger.error("Plugin %s.on_step() failed", type(plugin).__name__, exc_info=True)
-            else:
-                plugin._accumulator += dt
-                interval = 1.0 / freq
-                if plugin._accumulator >= interval:
-                    try:
-                        plugin.on_step(plugin._accumulator)
-                    except Exception:
-                        logger.error("Plugin %s.on_step() failed", type(plugin).__name__, exc_info=True)
-                    plugin._accumulator = 0.0
+            # The same schedule as callbacks: every step without a frequency,
+            # else the fixed grid; None when the plugin is not due this step.
+            dt_since_last_run = plugin._frequency_gate.due(self._schedule_time(), dt)
+            if dt_since_last_run is None:
+                continue
+            try:
+                plugin.on_step(dt_since_last_run)
+            except Exception:
+                logger.error("Plugin %s.on_step() failed", type(plugin).__name__, exc_info=True)
 
     def _shutdown_plugins(self) -> None:
         """Call ``on_shutdown()`` on all plugins."""
@@ -1084,15 +1219,50 @@ class MultiRobotSimulationCore:
             except Exception:
                 logger.error("Plugin %s.on_shutdown() failed", type(plugin).__name__, exc_info=True)
 
-    def register_callback(self, callback: Callable, frequency: Optional[float] = None) -> None:
+    def register_callback(
+        self,
+        callback: Callable,
+        frequency: Optional[float] = None,
+        phase: Union[CallbackPhase, str] = CallbackPhase.STEP,
+    ) -> None:
         """
         Register a callback function to be called during simulation.
 
         Args:
             callback: Function with signature callback(sim_core, dt) -> None
                      - sim_core: Reference to MultiRobotSimulationCore instance
-                     - dt: Time elapsed since last callback execution (seconds)
-            frequency: Callback frequency in Hz. If None, called every simulation step.
+                     - dt: Simulated time since this callback last ran (seconds)
+            frequency: Callback frequency in Hz. If None (or 0), called every
+                simulation step. Due times are a fixed grid of ``k / frequency``
+                seconds of simulated time, so a callback neither skips beats nor
+                drifts; it runs at most once per step, and the first time one
+                interval into the run.
+            phase: When in the step the callback runs, a :class:`CallbackPhase`
+                or its value as a string.
+
+                - ``CallbackPhase.STEP`` / ``"step"`` (default): after the objects have been updated, before
+                  their new poses are written to PyBullet and before the collision
+                  check.
+                - ``CallbackPhase.POST_STEP`` / ``"post_step"``: at the end of the step, right after the
+                  ``post_step`` event: poses are written, and when the step ran
+                  a collision check (see ``collision_check_frequency``) the
+                  active pairs are those of the new poses. Use it to publish or
+                  record the step's outcome.
+
+                In both phases ``sim_core.sim_time`` is the time of the state the
+                callback sees, the end of the step; stamp anything read from the
+                bodies with it. Both schedule their ``frequency`` on it.
+
+        Raises:
+            ValueError: ``frequency`` is negative or not finite, or ``phase`` is
+                not a :class:`CallbackPhase`.
+
+        A callback's exception is not caught (unlike a plugin's): it propagates
+        out of :meth:`step_once` with the clock already advanced, and the rest
+        of the step is skipped -- later callbacks, and for a ``STEP`` callback
+        the collision check, the ``post_step`` event and ``POST_STEP``
+        callbacks; for either phase the state recorder's completed step and the
+        DataMonitor refresh.
 
         Example::
 
@@ -1103,8 +1273,33 @@ class MultiRobotSimulationCore:
                         pass
 
             sim_core.register_callback(my_callback, frequency=10.0)  # 10 Hz
+
+            def publish(sim_core, dt):
+                stamp = sim_core.sim_time
+                ...
+
+            sim_core.register_callback(publish, frequency=10.0, phase=CallbackPhase.POST_STEP)
         """
-        self._callbacks.append({"func": callback, "frequency": frequency, "last_exec": 0.0})
+        try:
+            phase = CallbackPhase(phase)
+        except ValueError:
+            raise ValueError("phase must be one of {}, got {!r}".format([p.value for p in CallbackPhase], phase)) from None
+        self._callbacks.append({"func": callback, "phase": phase, "gate": FrequencyGate(frequency or None)})
+
+    def _run_callbacks(self, phase: CallbackPhase) -> None:
+        """Run the callbacks registered for ``phase`` that are due this step.
+
+        Both phases schedule on the time of the state they see
+        (:meth:`_schedule_time`), so a ``frequency`` handler runs when that
+        state reaches ``k / frequency``.
+        """
+        now = self._schedule_time()
+        for cbinfo in list(self._callbacks):
+            if cbinfo["phase"] != phase:
+                continue
+            dt_since_last_run = cbinfo["gate"].due(now, self._params.timestep)
+            if dt_since_last_run is not None:
+                cbinfo["func"](self, dt_since_last_run)
 
     def register_behavior_tree(self, tree: BehaviorTree) -> BehaviorTree:
         """Register a behavior tree to tick once per simulation step.
@@ -1873,6 +2068,37 @@ class MultiRobotSimulationCore:
         """
         return int(math.floor(coord / cast(float, self._cached_cell_size)))
 
+    def set_collision_ignore_filter(self, ignore: Optional[CollisionIgnoreFilter]) -> None:
+        """Exclude the touching pairs ``ignore(obj_a, obj_b)`` returns ``True`` for from collision results.
+
+        An ignored pair is treated as not touching everywhere a collision
+        shows up: it is not an active pair, not counted, not recoloured, not
+        in the collision observation and raises no ``COLLISION_STARTED``. A
+        pair that becomes ignored while active is resolved (``COLLISION_ENDED``)
+        on the next collision check, and an ignored pair that stops being
+        ignored is checked again on the next one, whether or not either body
+        moved. So the filter may depend on state that changes at run time --
+        which object carries which, say. It is applied on top of
+        ``ignore_attached_collision``. ``None`` removes it.
+
+        Ignored pairs skip the narrow phase, so the filter is called, on each
+        collision check, for every broad-phase candidate pair involving a
+        moved object, every active pair and every pair it ignored last time
+        until they move apart; keep it cheap.
+        """
+        self._collision_ignore_filter = ignore
+        # Stationary pairs are otherwise not rechecked until one of them moves.
+        self._moved_this_step.update(self._sim_objects_dict)
+        self._recheck_stationary_pairs = True
+
+    def _is_ignored_collision(self, obj_a: SimObject, obj_b: SimObject) -> bool:
+        """Whether two touching objects are excluded from collision results."""
+        # Every object on one attachment tree -- an agent, its loads, a load's
+        # loads -- belongs to one body: no contact among them is a collision.
+        if self._params.ignore_attached_collision and obj_a._attachment_root() is obj_b._attachment_root():
+            return True
+        return self._collision_ignore_filter is not None and bool(self._collision_ignore_filter(obj_a, obj_b))
+
     def _collision_broadphase_margin(self) -> float:
         """Match the clearance used by the configured narrow phase."""
         if self._params.collision_detection_method in (
@@ -1894,7 +2120,7 @@ class MultiRobotSimulationCore:
             return
         self._rebuild_spatial_grid()
         self._moved_this_step.update(self._sim_objects_dict)
-        self._collision_margin_changed = True
+        self._recheck_stationary_pairs = True
 
     def _get_overlapping_cells(self, object_id: int, margin: float = 0.0) -> List[Tuple[int, int, int]]:
         """
@@ -2214,6 +2440,7 @@ class MultiRobotSimulationCore:
         self._active_collision_pairs.clear()
         self._active_pairs_by_object.clear()
         self._collision_pair_observations.clear()
+        self._ignored_collision_pairs.clear()
         self._last_collision_check_metadata = None
 
     def set_collision_spatial_hash_cell_size_mode(
@@ -2334,6 +2561,7 @@ class MultiRobotSimulationCore:
 
         self._sim_objects.append(obj)
         self._sim_objects_dict[obj.object_id] = obj
+        self._note_monitor_entities_changed()
 
         # Add to agents list if this is an Agent instance (for O(M) iteration)
         if isinstance(obj, Agent):
@@ -2402,6 +2630,7 @@ class MultiRobotSimulationCore:
             return
 
         self._sim_objects_dict.pop(obj_id, None)
+        self._note_monitor_entities_changed()
         if self._selected_entity_id == obj_id:
             self._set_selected_entity(None, source="system")
 
@@ -2598,7 +2827,10 @@ class MultiRobotSimulationCore:
             position = [float(value) for value in position]
 
         def positive_integer(key: str, default: int | None) -> int | None:
-            value = config.get(key, default)
+            # An explicit null takes the default too, as light_position does.
+            value = config.get(key)
+            if value is None:
+                value = default
             if value is None:
                 return None
             try:
@@ -2615,13 +2847,14 @@ class MultiRobotSimulationCore:
             positive_integer("shadow_map_resolution", 2048 if defaults else None),
         )
 
-    def _install_gui_lighting_controls(self) -> None:
-        """Create the optional built-in-panel sliders once per PyBullet world."""
+    def _install_gui_lighting_controls(self) -> Dict[str, int]:
+        """Create the optional built-in-panel sliders once per PyBullet world; return their ids."""
         if self._lighting_control_ids is not None:
-            return
+            return self._lighting_control_ids
         config = self._params.lighting_config
         position, world_size, resolution = self._validated_gui_lighting_values(config, defaults=True)
-        assert position is not None and world_size is not None and resolution is not None
+        if position is None or world_size is None or resolution is None:
+            raise ValueError("GUI lighting controls need a light position and shadow map size and resolution")
         self._lighting_control_ids = {
             "x": p.addUserDebugParameter("Light X", -30.0, 30.0, float(position[0]), physicsClientId=self._client),
             "y": p.addUserDebugParameter("Light Y", -30.0, 30.0, float(position[1]), physicsClientId=self._client),
@@ -2634,16 +2867,15 @@ class MultiRobotSimulationCore:
             ),
         }
         self._lighting_control_values = None
+        return self._lighting_control_ids
 
     def _update_gui_lighting_controls(self) -> None:
         """Apply changed native lighting sliders on the simulation thread."""
         if not self._params.gui or not self._lighting_controls_enabled:
             return
-        self._install_gui_lighting_controls()
-        assert self._lighting_control_ids is not None
+        control_ids = self._install_gui_lighting_controls()
         values = tuple(
-            p.readUserDebugParameter(control_id, physicsClientId=self._client)
-            for control_id in self._lighting_control_ids.values()
+            p.readUserDebugParameter(control_id, physicsClientId=self._client) for control_id in control_ids.values()
         )
         if values == self._lighting_control_values:
             return
@@ -3174,6 +3406,27 @@ class MultiRobotSimulationCore:
         else:
             return list(pairs), None
 
+    @staticmethod
+    def _stop_on_collision(obj_a: SimObject, obj_b: SimObject) -> None:
+        """Stop the agents a new contact involves, when their ``stop_on_collision`` is set.
+
+        An object attached to an agent (a carried load) stands for that agent,
+        so a load running into something stops its carrier. A contact between
+        an agent and its own load is not a collision with anything else. An
+        agent that is not moving, such as one struck while it stands, is left
+        alone: there is no motion to stop, and an action it is running goes on.
+        """
+
+        root_a, root_b = obj_a._attachment_root(), obj_b._attachment_root()
+        if root_a is root_b:
+            # Only reached with ignore_attached_collision off, where such a
+            # pair is still reported; it is never a reason to stop.
+            return
+        for root, other in ((root_a, obj_b), (root_b, obj_a)):
+            if isinstance(root, Agent) and root.is_moving and root.controller_params._eff_stop_on_collision():
+                logger.info(f"{root.name or root.object_id} stopped on collision with {other.name or other.object_id}")
+                root.stop()
+
     def check_collisions(
         self,
         collision_color: Optional[List[float]] = None,
@@ -3254,9 +3507,18 @@ class MultiRobotSimulationCore:
             # (to detect when collisions are resolved)
             # Skip static-static pairs (they never change after initial check)
             for obj_id_i, obj_id_j in list(self._active_collision_pairs):
+                # Re-check a pair that is now ignored, so that it resolves even
+                # when neither object moved (e.g. one was just attached). Ahead
+                # of the static shortcut: the rule can change for any pair.
+                obj_i = self._sim_objects_dict.get(obj_id_i)
+                obj_j = self._sim_objects_dict.get(obj_id_j)
+                if obj_i is not None and obj_j is not None and self._is_ignored_collision(obj_i, obj_j):
+                    pairs_to_check.add((obj_id_i, obj_id_j))
+                    continue
+
                 # Skip if both objects are static (no need to re-check)
                 if (
-                    not self._collision_margin_changed
+                    not self._recheck_stationary_pairs
                     and obj_id_i in self._static_collision_objects
                     and obj_id_j in self._static_collision_objects
                 ):
@@ -3266,13 +3528,25 @@ class MultiRobotSimulationCore:
                 if obj_id_i in moved_since_last_check or obj_id_j in moved_since_last_check:
                     pairs_to_check.add((obj_id_i, obj_id_j))
 
+            # And the pairs the ignore rules excluded last time. A moved pair
+            # the broad phase no longer offers is apart and is dropped; the
+            # rest are checked again, ignored or not.
+            for pair in list(self._ignored_collision_pairs):
+                obj_id_i, obj_id_j = pair
+                moved = obj_id_i in moved_since_last_check or obj_id_j in moved_since_last_check
+                if moved and pair not in pairs_to_check:
+                    self._ignored_collision_pairs.discard(pair)
+                else:
+                    pairs_to_check.add(pair)
+
             # Check contact points for all pairs
             new_collisions = set()
             resolved_collisions = set()
 
-            completing_step = self._in_step or self._in_post_step
-            sample_step = self._step_count + int(completing_step)
-            sample_time = self._elapsed_sim_time + (self._params.timestep if completing_step else 0.0)
+            # The clock advances before a step's update, so the counters are the
+            # sampled state's step and time whether or not a step is under way.
+            sample_step = self._step_count
+            sample_time = self._elapsed_sim_time
 
             for obj_id_i, obj_id_j in pairs_to_check:
                 obj_i = self._sim_objects_dict.get(obj_id_i)
@@ -3280,6 +3554,7 @@ class MultiRobotSimulationCore:
                 if obj_i is None or obj_j is None:
                     # Object was removed — clean up stale pair
                     self._discard_active_collision_pair((obj_id_i, obj_id_j))
+                    self._ignored_collision_pairs.discard((obj_id_i, obj_id_j))
                     continue
 
                 # Select collision detection method based on configuration
@@ -3287,7 +3562,13 @@ class MultiRobotSimulationCore:
                 signed_distance: Optional[float] = None
                 pair_method = detection_method
 
-                if detection_method == CollisionDetectionMethod.CONTACT_POINTS:
+                self._ignored_collision_pairs.discard((obj_id_i, obj_id_j))
+                if self._is_ignored_collision(obj_i, obj_j):
+                    # Treated as not touching: resolves the pair if it was
+                    # active. Remembered, so it is re-evaluated next check.
+                    self._ignored_collision_pairs.add((obj_id_i, obj_id_j))
+
+                elif detection_method == CollisionDetectionMethod.CONTACT_POINTS:
                     # Method 1: getContactPoints (physics mode, actual contact manifold)
                     # Best for: physics simulation after a collision-detection pass.
                     # Note: Cache/solver-dependent for kinematic-kinematic pairs.
@@ -3408,6 +3689,8 @@ class MultiRobotSimulationCore:
                             obj_a.events.emit(SimEvents.COLLISION_STARTED, other=obj_b)
                         if obj_b._has_entity_events():
                             obj_b.events.emit(SimEvents.COLLISION_STARTED, other=obj_a)
+                        # After the events, so handlers see the motion that led to the contact.
+                        self._stop_on_collision(obj_a, obj_b)
 
                 for obj_id_i, obj_id_j in resolved_collisions:
                     obj_a = self._sim_objects_dict.get(obj_id_i)
@@ -3428,7 +3711,7 @@ class MultiRobotSimulationCore:
             # PyBullet disconnected, skip collision checking
             pass
 
-        self._collision_margin_changed = False
+        self._recheck_stationary_pairs = False
 
         if return_profiling:
             timings["total"] = (time.perf_counter() - t0) * 1000  # ms
@@ -3476,6 +3759,59 @@ class MultiRobotSimulationCore:
             tuple(self._collision_pair_observations[pair] for pair in sorted(self._active_collision_pairs)),
         )
 
+    def _maybe_log_monitor_line(self) -> None:
+        """Log the monitor figures at INFO once every ``monitor_log_interval`` wall seconds.
+
+        Computes them afresh rather than reading the last monitor frame: with
+        ``monitor`` off there is none, and with it on it advances only every
+        ``monitor_update_interval``. It does not go through
+        ``update_monitor()``, which would also write a DataMonitor frame and
+        so tie the window's refresh to the log's.
+        """
+        if not logger.isEnabledFor(logging.INFO):
+            return
+        now = time.monotonic()
+        if self._last_monitor_log is not None and now - self._last_monitor_log < self._params.monitor_log_interval:
+            return
+        self._last_monitor_log = now
+        sim_time = self._elapsed_sim_time
+        num_agents = len(self._agents)
+        logger.info(
+            "[MONITOR] sim_time=%.2f, real_time=%.2f, rtf=%.2f, target_rtf=%g, agents=%d, objects=%d, "
+            "active_collisions=%d, total_collisions=%d, steps=%d",
+            sim_time,
+            now - self._start_time if self._start_time else 0,
+            self._sample_speed(now, sim_time),
+            self._params.target_rtf,
+            num_agents,
+            len(self._sim_objects) - num_agents,
+            len(self._active_collision_pairs),
+            self._collision_count,
+            self._step_count,
+        )
+
+    def _sample_speed(self, now: float, sim_time: float) -> float:
+        """Record a (real, simulated) time sample and return the real-time factor.
+
+        Measured over a 10-second sliding window, plus the newest sample older
+        than that as the baseline: when samples are sparser than the window (a
+        long monitor_log_interval with the monitor off), dropping it would
+        leave one sample and report 0.
+        """
+        self._speed_history.append((now, sim_time))
+        while len(self._speed_history) > 1 and now - self._speed_history[1][0] > 10.0:
+            self._speed_history.popleft()
+        if len(self._speed_history) < 2:
+            return 0.0
+        rt0, st0 = self._speed_history[0]
+        rt1, st1 = self._speed_history[-1]
+        elapsed = rt1 - rt0
+        return (st1 - st0) / elapsed if elapsed > 0 else 0.0
+
+    def _note_monitor_entities_changed(self) -> None:
+        """An object was added, removed or renamed: rebuild the monitor's entity list."""
+        self._monitor_frames.objects_changed()
+
     def update_monitor(self) -> None:
         """Update simulation monitor with current statistics.
 
@@ -3484,30 +3820,14 @@ class MultiRobotSimulationCore:
         """
         now = time.monotonic()  # monotonic: RTF/elapsed stay correct across wall-clock jumps
         sim_time = self._elapsed_sim_time
-        # --- Speed history buffer ---
-        self._speed_history.append((now, sim_time))
-        # Keep only history within 10 seconds (O(1) popleft with deque)
-        while self._speed_history and now - self._speed_history[0][0] > 10.0:
-            self._speed_history.popleft()
-        # Calculate actual RTF for the last 10 seconds
-        if len(self._speed_history) >= 2:
-            rt0, st0 = self._speed_history[0]
-            rt1, st1 = self._speed_history[-1]
-            elapsed = rt1 - rt0
-            sim_elapsed = st1 - st0
-            actual_rtf = sim_elapsed / elapsed if elapsed > 0 else 0
-        else:
-            actual_rtf = 0
+        actual_rtf = self._sample_speed(now, sim_time)
         elapsed_time = now - self._start_time if self._start_time else 0
 
         # Use len(self._agents) for O(1) agent count instead of O(N) iteration
         num_agents = len(self._agents)
         num_objects = len(self._sim_objects) - num_agents
 
-        entities = tuple(
-            MonitorEntity(object_id=obj.object_id, name=obj.name or f"entity-{obj.object_id}", kind=type(obj).__name__)
-            for obj in sorted(self._sim_objects, key=lambda item: item.object_id)
-        )
+        entities = self._monitor_frames.entities(self._sim_objects)
         selected_state = None
         selected = self._sim_objects_dict.get(self._selected_entity_id) if self._selected_entity_id is not None else None
         if selected is not None:
@@ -3545,7 +3865,6 @@ class MultiRobotSimulationCore:
             selected_entity=selected_state,
             follow_enabled=self._gui_follow_enabled,
         )
-        self._last_monitor_frame = frame
         logger.debug(
             "[MONITOR] sim_time=%.2f, real_time=%.2f, rtf=%.2f, agents=%d, objects=%d, "
             "active_collisions=%d, total_collisions=%d, steps=%d",
@@ -3563,8 +3882,23 @@ class MultiRobotSimulationCore:
             logger.info(f"NEW COLLISION: total={self._collision_count} at sim_time={sim_time:.2f}")
             self._last_logged_collision_count = self._collision_count
         # Also output to DataMonitor window
+        self._monitor_frames.built(frame)
         if self._data_monitor:
             self._data_monitor.write_frame(frame)
+
+    def flush_monitor(self) -> bool:
+        """Build and write a monitor frame now if the window is behind; return whether it did.
+
+        Running, the next refresh (``monitor_update_interval``) shows any
+        change, and :meth:`close` flushes, so only a program that stops
+        calling ``step_once()`` and keeps the simulation open needs this.
+        """
+        if not self._data_monitor:
+            return False
+        if self._monitor_frames.behind(self._step_count):
+            self.update_monitor()
+            return True
+        return False
 
     def initialize_simulation(self) -> None:
         """
@@ -3593,13 +3927,14 @@ class MultiRobotSimulationCore:
         self._start_time = time.monotonic()  # monotonic: elapsed/RTF immune to wall-clock jumps
         self._step_count = 0
         self._collision_count = 0
-        self.sim_time = 0.0
         self._elapsed_sim_time = 0.0
+        self._schedule_origin = (0, 0.0, self._params.timestep)
         self._resume_ready = False
-        self._last_collision_check = 0.0
-        self._last_monitor_update = 0.0
+        self._collision_check_gate.reset()
+        self._monitor_update_gate.reset()
+        self._last_monitor_log = None  # a fresh run logs its first step
         self._last_logged_collision_count = 0
-        self._last_monitor_frame = None
+        self._monitor_frames.reset()
         self._single_step_requested = False
         self._pacing_rebase_requested = False
         self._clear_selected_nameplate()
@@ -3617,14 +3952,16 @@ class MultiRobotSimulationCore:
 
         # Reset filter_aabb_pairs mode-change detection (#6: fresh start)
         self._last_ignore_static = None
-        self._collision_margin_changed = False
+        self._recheck_stationary_pairs = False
 
         # Clear speed history (#2: prevents stale data in update_monitor)
         self._speed_history.clear()
 
-        # Reset callback last_exec (#3: prevents stale dt on restart)
+        # Restart callback schedules (#3: prevents stale dt on restart)
         for cbinfo in self._callbacks:
-            cbinfo["last_exec"] = 0.0
+            cbinfo["gate"].reset()
+        for plugin in self._plugins:
+            plugin._frequency_gate.reset()
 
         # Clear profiling statistics (#4: prevents mixing data across runs)
         for key in self._profiling_stats:
@@ -3669,7 +4006,7 @@ class MultiRobotSimulationCore:
 
         After calling ``reset()`` the simulation is ready for new objects to be
         spawned.  Callbacks registered via :meth:`register_callback` are **preserved**
-        (their ``last_exec`` is zeroed by ``initialize_simulation``).
+        (their schedules restart in ``initialize_simulation``).
 
         Example::
 
@@ -3686,6 +4023,7 @@ class MultiRobotSimulationCore:
         self._sim_objects.clear()
         self._sim_objects_dict.clear()
         self._agents.clear()
+        self._note_monitor_entities_changed()
 
         # Movement / collision caches
         self._moved_this_step.clear()
@@ -3718,9 +4056,9 @@ class MultiRobotSimulationCore:
             except Exception:
                 logger.error("Plugin %s.on_reset() failed", type(plugin).__name__, exc_info=True)
 
-        # Reset plugin accumulators
+        # Restart plugin schedules
         for plugin in self._plugins:
-            plugin._accumulator = 0.0
+            plugin._frequency_gate.reset()
 
         # 2. Reset PyBullet world (removes all bodies including ground plane)
         p.resetSimulation(physicsClientId=self._client)
@@ -4033,7 +4371,8 @@ class MultiRobotSimulationCore:
             duration: Absolute simulation-time cutoff in seconds (not wall time).
                      If None, uses self._params.duration. If duration <= 0, runs indefinitely.
             resume: Continue an explicitly restored completed-step state without
-                    resetting its clock. Ordinary runs initialize as before.
+                    resetting its clock. A core returned by the supported
+                    recording loader resumes on its first plain call too.
 
         Example::
 
@@ -4063,6 +4402,11 @@ class MultiRobotSimulationCore:
                 time_base=record_time_base,
             )
 
+        # A completed-step restore has already initialized this core. Treat its
+        # first plain run as continuation; a fresh core still initializes as
+        # before. Explicit resume=True remains useful for lower-level callers.
+        resume = resume or self._resume_ready
+
         # Initialize simulation state (counters, visualizer, rendering)
         # Note: initialize_simulation() already starts tracemalloc if needed
         if resume:
@@ -4090,8 +4434,21 @@ class MultiRobotSimulationCore:
             # Resume rebases pacing, but clock-jump diagnostics start now.
             diag_prev_wall = time.time()
             diag_prev_mono = pacing_now
+            last_iter_mono = pacing_now
 
             while True:
+                iter_now = time.monotonic()
+                stall = iter_now - last_iter_mono
+                if stall > _STEP_STALL_LOG_THRESHOLD_S:
+                    logger.warning(
+                        "run_simulation: %.2fs since the previous loop iteration started (step %d) -- "
+                        "the host was likely overloaded, or GUI event processing stalled; this is real "
+                        "time elapsed between steps, not a jump in the simulation's own clock.",
+                        stall,
+                        self._step_count,
+                    )
+                last_iter_mono = iter_now
+
                 current_sim_time = self._elapsed_sim_time
 
                 # Check duration based on simulation time (not real time)
@@ -4226,29 +4583,93 @@ class MultiRobotSimulationCore:
         except p.error:
             logger.info("PyBullet connection lost (GUI window closed)")
         self.update_monitor()
+        self.close()
 
-        # Auto-save recording if active
-        if self._recorder is not None:
-            self.stop_recording()
-        if self._state_recorder is not None:
+    # ------------------------------------------------------------------
+    # Teardown
+    # ------------------------------------------------------------------
+
+    def close(self) -> None:
+        """Release everything this simulation owns, including its client.
+
+        ``run_simulation()`` has always done this on the way out, but a
+        program that drives ``step_once()`` itself, or a test that only builds
+        a scene, never reached that code -- and nothing else disconnected. An
+        undisconnected client leaks for the life of the process, and because
+        PyBullet's module-level calls resolve against a default client, the
+        *next* simulation in the same process then finds bodies and joints
+        "not found" rather than failing where the leak happened.
+
+        Safe to call more than once, and safe on a simulation that was never
+        run. A second call does nothing at all: shutdown callbacks run once,
+        so a plugin that closes a file or a socket in ``on_shutdown()`` is not
+        asked to do it twice by ``with sim:`` around a ``run_simulation()``
+        that already closed.
+
+        Releasing the client is unconditional. Finalising a recording can
+        raise -- saving an MP4 without ``imageio``, for one -- and letting
+        that escape before the disconnect would leak the very client this
+        exists to release.
+        """
+        if self._closed:
+            return
+        self._closed = True
+
+        def _finalise_recording() -> None:
+            if self._recorder is not None:
+                self.stop_recording()
+            if self._state_recorder is not None:
+                try:
+                    self._state_recorder.close()
+                except Exception as exc:
+                    self._abort_state_recording(exc)
+
+        def _stop_monitor() -> None:
+            # Kept as it was: on other platforms the monitor is not stopped
+            # here, which tests/test_monitor_macos.py pins.
+            if IS_MACOS and self._data_monitor:
+                self._data_monitor.stop()
+
+        # Each step runs even if an earlier one raised, so one failure cannot
+        # strand the resources the later steps own -- and since _closed is
+        # already set, a retry would be a no-op. The first exception is kept
+        # and re-raised once everything has been given its chance.
+        def _flush_monitor() -> None:
+            # A program driving step_once() itself may stop between refreshes;
+            # leave the file at the last state it reached.
+            if self._monitor_enabled:
+                try:
+                    self.flush_monitor()
+                except Exception:  # noqa: BLE001 - a stale monitor file must not fail close()
+                    logger.debug("Final DataMonitor flush failed", exc_info=True)
+
+        first_error: Optional[BaseException] = None
+        for step in (_flush_monitor, _finalise_recording, self._shutdown_plugins, _stop_monitor):
             try:
-                self._state_recorder.close()
-            except Exception as exc:
-                self._abort_state_recording(exc)
-
-        # Shutdown plugins before disconnecting
-        self._shutdown_plugins()
-
-        if IS_MACOS and self._data_monitor:
-            self._data_monitor.stop()
-
-        # Disconnect from PyBullet if still connected
+                step()
+            except BaseException as exc:  # noqa: BLE001 - re-raised below
+                if first_error is None:
+                    first_error = exc
         try:
-            p.getConnectionInfo(physicsClientId=self.client)
-            p.disconnect(self.client)
-        except p.error:
-            # Already disconnected
-            pass
+            # PyBullet reuses client ids, so disconnecting twice could name a
+            # later, unrelated simulation -- but the _closed guard above means
+            # the disconnect runs at most once, so `client` stays readable
+            # after close() as it always has. run_simulation() ends by calling
+            # this, and callers do read it afterwards.
+            if self._client is not None:
+                try:
+                    p.disconnect(self._client)
+                except p.error:
+                    pass  # already disconnected
+        finally:
+            if first_error is not None:
+                raise first_error
+
+    def __enter__(self) -> "MultiRobotSimulationCore":
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        self.close()
 
     # ------------------------------------------------------------------
     # Pause / Resume
@@ -4291,11 +4712,13 @@ class MultiRobotSimulationCore:
     def pause(self) -> None:
         """Pause the simulation. step_once will be skipped while paused."""
         self._simulation_paused = True
+        self._monitor_frames.view_changed()
         self.events.emit(SimEvents.PAUSED)
 
     def resume(self) -> None:
         """Resume the simulation after a pause."""
         self._simulation_paused = False
+        self._monitor_frames.view_changed()
         self.events.emit(SimEvents.RESUMED)
 
     @property
@@ -4334,6 +4757,7 @@ class MultiRobotSimulationCore:
                     },
                     'events_pre_step': float,
                     'events_post_step': float,
+                    'callbacks_post_step': float,  # CallbackPhase.POST_STEP callbacks
                     'events_collision': float,
                     'monitor_update': float,
                     'total': float,
@@ -4374,7 +4798,13 @@ class MultiRobotSimulationCore:
 
         # Skip physics simulation and callbacks if paused
         if self.is_paused and not self._single_step_requested:
+            if self._monitor_enabled and self._data_monitor and self._monitor_frames.due_while_paused():
+                # Nothing refreshes the monitor while paused: still show a
+                # selection, follow or pause change.
+                self.update_monitor()
             return
+        # A single step taken while paused is shown at once, refresh due or not.
+        single_step = self.is_paused
         self._single_step_requested = False
 
         # Initialize profiling accumulators for this step (append 0.0 slot for ALL fields)
@@ -4396,14 +4826,30 @@ class MultiRobotSimulationCore:
             # across multiple steps when collision_check_frequency < step_frequency
             self._moved_this_step.update(self._physics_objects)
 
-            self.sim_time = self._elapsed_sim_time
-
             # --- pre_step event ---
+            # The last point of the step that sees the previous state's time.
             if measure_timing:
                 t_ev0 = time.perf_counter()
-            self.events.emit(SimEvents.PRE_STEP, dt=self._params.timestep, sim_time=self.sim_time)
+            self._in_pre_step = True
+            try:
+                self.events.emit(SimEvents.PRE_STEP, dt=self._params.timestep, sim_time=self.sim_time)
+            finally:
+                self._in_pre_step = False
             if measure_timing:
                 self._profiling_stats["events_pre_step"][-1] = (time.perf_counter() - t_ev0) * 1000
+
+            # --- Advance the clock ---
+            # Everything from here on computes or observes the state at the end
+            # of this step, so the clock and counter move first: sim_time is the
+            # time of the state any later code sees (object update, callbacks,
+            # plugins, collision check, POST_STEP, and outside the step).
+            if self._params.timestep != self._schedule_origin[2]:
+                # A new timestep: the schedule counts its steps from here.
+                self._schedule_origin = (self._step_count, self._schedule_time(), self._params.timestep)
+            self._elapsed_sim_time += self._params.timestep
+            self._step_count += 1
+            # Poses written from pre_step are still pending (buffered).
+            self._restamp_pending_pose_cache()
 
             # Update all simulation objects that need per-step updates.
             # Agent and Device subclasses set _needs_update = True.
@@ -4438,15 +4884,7 @@ class MultiRobotSimulationCore:
             if measure_timing:
                 t_cb0 = time.perf_counter()
 
-            for cbinfo in list(self._callbacks):
-                freq = cbinfo.get("frequency", None)
-                last_exec = cbinfo.get("last_exec", 0.0)
-                interval = 1.0 / freq if freq else 0.0
-                # Judge based on self.sim_time
-                if freq is None or self.sim_time - last_exec >= interval:
-                    dt = self.sim_time - last_exec if last_exec > 0 else self._params.timestep
-                    cbinfo["func"](self, dt)
-                    cbinfo["last_exec"] = self.sim_time
+            self._run_callbacks(CallbackPhase.STEP)
 
             if measure_timing:
                 t_cb1 = time.perf_counter()
@@ -4519,21 +4957,14 @@ class MultiRobotSimulationCore:
                 t_col0 = time.perf_counter()
 
             collision_breakdown = None  # per-phase breakdown (only when return_profiling=True)
-            freq = self._collision_check_frequency
-            # freq = None: check every step
-            # freq = 0: disabled (never check)
-            # freq > 0: check at specified frequency (Hz)
-            if freq is None:
-                # Check every step
-                _, collision_breakdown = self.check_collisions(return_profiling=return_profiling)
-                self._last_collision_check = self.sim_time
-            elif freq > 0:
-                # Check at specified frequency
-                interval = 1.0 / freq
-                if self.sim_time - self._last_collision_check >= interval:
+            freq = self._collision_check_frequency  # None: every step, <= 0: disabled
+            if freq is None or freq > 0:
+                self._collision_check_gate.set_frequency(freq)  # no-op unless it changed
+                if self._collision_check_gate.due(self._schedule_time(), self._params.timestep) is not None:
                     _, collision_breakdown = self.check_collisions(return_profiling=return_profiling)
-                    self._last_collision_check = self.sim_time
-            # else: freq = 0, skip collision checks entirely
+            else:
+                # Re-enabled later, even at the same rate, it starts a fresh schedule.
+                self._collision_check_gate.reset()
 
             if measure_timing:
                 t_col1 = time.perf_counter()
@@ -4550,11 +4981,13 @@ class MultiRobotSimulationCore:
                 t_ev1 = time.perf_counter()
             self.events.emit(SimEvents.POST_STEP, dt=self._params.timestep, sim_time=self.sim_time)
             if measure_timing:
-                self._profiling_stats["events_post_step"][-1] = (time.perf_counter() - t_ev1) * 1000
+                t_cb2 = time.perf_counter()
+                self._profiling_stats["events_post_step"][-1] = (t_cb2 - t_ev1) * 1000
+            self._run_callbacks(CallbackPhase.POST_STEP)
+            if measure_timing:
+                self._profiling_stats["callbacks_post_step"][-1] = (time.perf_counter() - t_cb2) * 1000
 
             self._update_selected_nameplate()
-            self._elapsed_sim_time += self._params.timestep
-            self._step_count += 1
             self._in_post_step = False
             # A durable recorder must see the completed clock and propagate
             # failures; EventBus deliberately swallows subscriber exceptions.
@@ -4568,10 +5001,13 @@ class MultiRobotSimulationCore:
                 t_mon0 = time.perf_counter()
 
             if self._monitor_enabled:
-                interval = self._params.timestep if self._params.gui else 1.0
-                if self.sim_time - self._last_monitor_update > interval:
+                if self._monitor_update_gate.due(self._schedule_time(), self._params.timestep) is not None or (
+                    single_step and self._data_monitor
+                ):
                     self.update_monitor()
-                    self._last_monitor_update = self.sim_time
+
+            if self._params.monitor_log_interval > 0:
+                self._maybe_log_monitor_line()
 
             if measure_timing:
                 t_mon1 = time.perf_counter()
@@ -4631,6 +5067,21 @@ class MultiRobotSimulationCore:
         finally:
             self._in_step = False
             self._in_post_step = False
+            self._in_pre_step = False
+
+    def _restamp_pending_pose_cache(self) -> None:
+        """Keep buffered poses' cache valid across a change of ``sim_time``.
+
+        A dynamic body's cached pose is valid for one ``sim_time``. A pose
+        written but not yet flushed to PyBullet lives only in that cache, so
+        when the clock advances after ``pre_step`` the pending bodies are
+        restamped; otherwise ``get_pose()`` would reread the unflushed PyBullet
+        state.
+        """
+        for object_id in self._pending_pose_ids:
+            pending = self._sim_objects_dict.get(object_id)
+            if pending is not None:
+                pending._cached_pose_sim_time = self.sim_time
 
     def _print_profiling_summary(self) -> None:
         """Print profiling statistics summary (average over last N steps).

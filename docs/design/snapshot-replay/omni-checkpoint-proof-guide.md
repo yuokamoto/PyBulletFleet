@@ -1,5 +1,7 @@
 # Run the single-omni checkpoint proof
 
+**Note (2026-10-19):** these values were recorded with an earlier step timing; a rerun reaches each row one step earlier. The current timing is described in "Which time a pose belongs to" in [two-phase-step.md](../../architecture/two-phase-step.md).
+
 ```{warning}
 Development proof only. This checkpoint format and restore procedure validate
 one fixed scenario; they are not a supported general save/load facility and
@@ -13,6 +15,10 @@ loads the checkpoint in a new process, and resumes the normal
 `run_simulation(resume=True)` loop without reissuing the goal. It is not
 recorded-result playback or a checkpoint for arbitrary robots, Actions,
 attachments, plugins, physics or callbacks.
+
+This is a historical proof for a fixed scenario. The current development
+profile and its one-call loader are described in the
+[supported kinematic recording guide](../../how-to/supported-state-recording.md).
 
 From the repository root, run the three commands in order:
 
