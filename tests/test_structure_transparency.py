@@ -185,3 +185,47 @@ class TestCacheDoesNotGrow:
             sim_core.set_structure_transparency(True)
             sim_core.remove_object(obj)
         assert len(sim_core._original_visual_colors) == baseline
+
+
+class TestKeyToggle:
+    """Raised in review: the ``t`` key called the private setter directly, so
+    a static body added after the colour cache was built never went
+    transparent from the keyboard, though the public setter handled it."""
+
+    @pytest.fixture
+    def press_t(self, sim_core, monkeypatch):
+        """Drive the key handler in DIRECT mode with only the key input faked."""
+        sim_core._params.gui = True  # the handler is a no-op without a GUI
+        monkeypatch.setattr(p, "getKeyboardEvents", lambda **kw: {ord("t"): p.KEY_WAS_TRIGGERED})
+        return sim_core._handle_keyboard_events
+
+    def _late_box(self, sim_core, alpha):
+        return SimObject.from_params(
+            SimObjectSpawnParams(
+                visual_shape=ShapeParams(shape_type="box", half_extents=[0.2, 0.2, 0.2], rgba_color=[0.3, 0.3, 0.3, alpha]),
+                collision_shape=ShapeParams(shape_type="box", half_extents=[0.2, 0.2, 0.2]),
+                name="late",
+                initial_pose=Pose.from_xyz(3.0, 0.0, 0.0),
+                collision_mode=CollisionMode.STATIC,
+            ),
+            sim_core=sim_core,
+        )
+
+    def test_the_key_makes_a_late_added_body_transparent(self, sim_core, translucent, press_t):
+        sim_core.set_structure_transparency(False)
+        late = self._late_box(sim_core, 0.6)
+
+        press_t()
+
+        assert sim_core._structure_transparent is True
+        assert _alpha(sim_core, late) == pytest.approx(0.3)
+
+    def test_and_pressing_it_again_restores_its_own_alpha(self, sim_core, translucent, press_t):
+        sim_core.set_structure_transparency(False)
+        late = self._late_box(sim_core, 0.6)
+
+        press_t()
+        press_t()
+
+        assert sim_core._structure_transparent is False
+        assert _alpha(sim_core, late) == pytest.approx(0.6)

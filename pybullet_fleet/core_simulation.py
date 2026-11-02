@@ -2738,8 +2738,9 @@ class MultiRobotSimulationCore:
                 print("         This may take several seconds (not recommended for large scenes)")
                 print("         Consider setting 'enable_structure_transparency' in config.yaml instead")
 
-            self._structure_transparent = not self._structure_transparent
-            self._set_structure_transparency(self._structure_transparent)
+            # Go through the public setter so shapes added since the colour
+            # cache was built are captured here too.
+            self.set_structure_transparency(not self._structure_transparent)
             print(f"\n[TOGGLE] Structure transparency: {'ON' if self._structure_transparent else 'OFF'}")
 
     def set_structure_transparency(self, transparent: bool) -> None:
