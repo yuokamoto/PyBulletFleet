@@ -363,7 +363,7 @@ class TestElevatorInstantRide:
         sim_core.tick(10)
         assert elev.is_moving
 
-        assert elev.request_floor("L3", instant=True).value == "redirected"
+        assert elev.request_floor("L3", instant=True) is ElevatorRequestResult.REDIRECTED
         sim_core.tick(1)
 
         assert elev.current_floor == "L3"
