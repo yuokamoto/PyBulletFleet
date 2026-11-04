@@ -189,15 +189,16 @@ drone = SimObject(
 **Performance**:
 - Registered with its z extent enlarged by half the margin; a NORMAL_2D body's z extent is not enlarged
 - Candidates are the bodies sharing a cell, for both modes
-- Typical overhead: <10% vs NORMAL_2D
+- Same cost as NORMAL_2D: the two differ only in the z clearance
 
-### NORMAL_2D - 2D Collision (XY Plane)
+### NORMAL_2D - No Clearance in Z
 
 **Characteristics**:
 - **Candidates**: the bodies sharing one of its cells
 - **AABB Updates**: Every movement
 - **Grid Registration**: Updated on movement; z extent not enlarged by the margin
-- **Z-Axis**: AABB Z must actually overlap (no margin in z)
+- **Z-Axis**: AABB Z must actually overlap (no margin in z); Z is not ignored
+- **Differs from NORMAL_3D** only with a non-zero clearance (CLOSEST_POINTS / HYBRID): a body within the clearance above or below is not reported
 
 **Use Cases**:
 - Ground robots (AGVs, AMRs)
