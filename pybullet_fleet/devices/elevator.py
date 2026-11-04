@@ -108,6 +108,19 @@ class ElevatorParams(AgentSpawnParams):
         )
 
 
+def _warn_if_boarding_reaches_next_floor(boarding_height: float, floors: Dict[str, float]) -> None:
+    """Warn when ``boarding_height`` reaches the next floor: an object waiting there would board."""
+    heights = sorted(set(floors.values()))
+    gaps = [upper - lower for lower, upper in zip(heights, heights[1:])]
+    if gaps and boarding_height >= min(gaps):
+        logger.warning(
+            "Elevator boarding_height %.3f m reaches the closest floor spacing %.3f m: an object on the next "
+            "floor up would board the cabin. Set boarding_height below the floor spacing.",
+            boarding_height,
+            min(gaps),
+        )
+
+
 class Elevator(Agent):
     """Elevator with named floors and automatic passenger attachment.
 
@@ -135,7 +148,8 @@ class Elevator(Agent):
     _floors: Dict[str, float]
     _joint_name: str
     _platform_link: str
-    _boarding_height: float
+    # A class default, so an Elevator built without from_params still has one.
+    _boarding_height: float = 1.0
     _passengers: List["SimObject"]
     _state_machine: ElevatorStateMachine
 
@@ -167,6 +181,7 @@ class Elevator(Agent):
             agent._joint_name = spawn_params.joint_name
             agent._platform_link = spawn_params.platform_link
             agent._boarding_height = float(spawn_params.boarding_height)
+            _warn_if_boarding_reaches_next_floor(agent._boarding_height, spawn_params.floors)
             agent._passengers = []  # Currently attached passengers
             if has_profile:
                 # Only the joint name is left to go wrong here, the values

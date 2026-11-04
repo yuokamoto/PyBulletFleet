@@ -88,6 +88,8 @@ class ElevatorStateMachine:
 
         if self.state is ElevatorState.MOVING:
             if floor_name == self.target_floor:
+                # REDIRECT itself never leaves a pending floor, but request_policy is a public attribute: a cabin
+                # switched to REDIRECT mid-trip can still hold floors queued under QUEUE or REPLACE_NEXT.
                 if self.request_policy in (ElevatorRequestPolicy.REPLACE_NEXT, ElevatorRequestPolicy.REDIRECT) and (
                     self._pending_floors
                 ):
