@@ -111,12 +111,12 @@ Controls collision behavior **per object**. Set at spawn time via `AgentSpawnPar
 from pybullet_fleet.types import CollisionMode
 ```
 
-| Mode | Updates | Grid | Neighbors | Use Case |
-|------|---------|------|-----------|----------|
-| `NORMAL_3D` | Every move | Yes | 27 (3×3×3) | Drones, 3D robots |
-| `NORMAL_2D` | Every move | Yes | 9 (3×3×1) | Ground robots, AGVs |
-| `STATIC` | Once | Yes | — | Walls, shelves |
-| `DISABLED` | Never | No | 0 | Markers, visualization |
+| Mode | Updates | Grid | Clearance in z | Use Case |
+|------|---------|------|----------------|----------|
+| `NORMAL_3D` | Every move | Yes | Yes | Default for moving bodies |
+| `NORMAL_2D` | Every move | Yes | No (z must overlap) | Ground robots that pass close under or over things |
+| `STATIC` | Once | Yes | Yes | Walls, shelves |
+| `DISABLED` | Never | No | — | Markers, visualization |
 
 ### Setting via AgentSpawnParams
 

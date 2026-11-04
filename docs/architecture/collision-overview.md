@@ -275,7 +275,7 @@ python -m pytest tests/test_collision_comprehensive.py -v
 1. ✅ Use STATIC for fixed objects (walls, structures)
 2. ✅ Use DISABLED for visualization objects
 3. ✅ Set appropriate cell_size (~2× object size)
-4. ✅ Use NORMAL_2D instead of NORMAL_3D for ground robots
+4. ✅ Keep the collision clearance (`collision_margin`) as small as the scene allows
 5. ✅ Enable physics=False for kinematics (huge speedup!)
 
 **Benchmark**:
