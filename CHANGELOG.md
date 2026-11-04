@@ -539,6 +539,23 @@ are not recommended for production use yet.
 
 ### Fixed
 
+- A ramped kinematic joint restored from a checkpoint now follows the same
+  path as the run it was taken from in every state, not only while it follows
+  a trajectory (issue #71). A joint braking with no trajectory -- its target
+  inside its stopping distance, or behind it -- shed speed over
+  `now - step_start`, two joint-clock readings whose difference rounds
+  differently depending on how far the clock has run. Restored into an agent
+  whose clock had run further, it came to rest a step apart from the original
+  and took a different path back. The braking step now uses the step's `dt`.
+  The checkpoint itself is unchanged: since the kinematic profile's agent
+  state version 2, each joint entry already carries its motion limits
+  (`max_velocity`, `max_accel`, `max_decel`) alongside its signed `speed`,
+  `braking` flag and trajectory, and a restore builds each joint with its
+  limits before its execution state, so a freshly constructed agent with no
+  profile of its own resumes the same ramp. An agent entry at version 1, whose
+  joints had position and target only, is refused with a message naming the
+  version found and the one supported.
+
 - Batched controllers (`batch_omni`, `batch_differential`): a goal replaced
   while the agent moves faster than `max_linear_vel` -- the limit lowered
   during the motion -- now brakes down to the limit at the configured

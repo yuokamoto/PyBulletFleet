@@ -213,6 +213,31 @@ def test_required_custom_data_and_state_type_are_checked_before_restore(recorded
             load_supported_checkpoint(directory, at_or_before=2.5, profile=_profile(directory))
 
 
+def test_agent_state_without_joint_motion_profiles_is_refused(recorded_run: tuple[Path, dict]) -> None:
+    """Version 1 joint entries carry no motion limits, speed or plan.
+
+    Restoring one would put a ramped joint back at rest under no profile, so a
+    resumed run would take a different path; it is refused by version, naming
+    the version found and the one this build restores.
+    """
+    directory, _ = recorded_run
+    manifest_path = directory / "manifest.json"
+    checkpoint_path = directory / "checkpoints" / "000000025.json"
+    manifest = json.loads(manifest_path.read_text())
+    checkpoint = json.loads(checkpoint_path.read_text())
+    agent = checkpoint["agents"]["mobile-arm"]
+    agent["version"] = 1
+    agent["state"]["joints"] = [
+        {key: joint[key] for key in ("name", "position", "target")} for joint in agent["state"]["joints"]
+    ]
+    checkpoint_path.write_text(json.dumps(checkpoint))
+    manifest["checkpoint_sha256"]["25"] = hashlib.sha256(checkpoint_path.read_bytes()).hexdigest()
+    manifest_path.write_text(json.dumps(manifest))
+
+    with pytest.raises(ValueError, match=r"'mobile-arm'.*'kinematic_agent' version 1.*'kinematic_agent' version 2"):
+        load_supported_checkpoint(directory, at_or_before=2.5, profile=_profile(directory))
+
+
 @pytest.mark.parametrize("change", ["speed", "trajectory"])
 def test_invalid_joint_execution_is_rejected_before_restore(recorded_run: tuple[Path, dict], change: str) -> None:
     directory, _ = recorded_run

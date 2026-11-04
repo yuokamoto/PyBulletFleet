@@ -37,6 +37,11 @@ from .state_recording import (
 
 PROFILE_ID = "pbf.kinematic.v4"
 PROFILE_VERSION = 4
+#: Version 2: each joint entry carries its motion limits (``max_velocity``,
+#: ``max_accel``, ``max_decel``) with its execution (signed ``speed``,
+#: ``braking`` and the solved ``trajectory``), so a ramped joint restored into
+#: a fresh Agent resumes the same path. Version 1 had position and target only.
+AGENT_STATE_VERSION = 2
 _SUPPORTED_CONTROLLER_NAMES_BY_TYPE = {
     OmniController: OmniController._registry_name,
     DifferentialController: DifferentialController._registry_name,
@@ -248,8 +253,11 @@ def restore_attachment(sim: MultiRobotSimulationCore, obj: SimObject, value: dic
 
 def _validate_agent(name: str, construction: dict, entry: dict) -> None:
     _keys(entry, {"type", "version", "state"}, "Agent entry")
-    if entry["type"] != "kinematic_agent" or entry["version"] != 2:
-        raise ValueError(f"Unsupported Agent state type: {name!r}")
+    if entry["type"] != "kinematic_agent" or entry["version"] != AGENT_STATE_VERSION:
+        raise ValueError(
+            f"Unsupported Agent state type or version for {name!r}: {entry['type']!r} version {entry['version']!r}; "
+            f"this build restores 'kinematic_agent' version {AGENT_STATE_VERSION}"
+        )
     value = _keys(entry["state"], {"pose", "velocity", "angular_velocity", "moving", "controller", "joints"}, "Agent state")
     _vector(value["pose"]["position"], 3, "Agent position")
     _quaternion(value["pose"]["orientation"], "Agent orientation")
@@ -643,7 +651,11 @@ class KinematicProfile:
             ):
                 raise ValueError(f"Unsupported Agent metadata or controller change: {agent.name!r}")
             names.add(agent.name)
-            agents[agent.name] = {"type": "kinematic_agent", "version": 2, "state": capture_agent_state(agent)}
+            agents[agent.name] = {
+                "type": "kinematic_agent",
+                "version": AGENT_STATE_VERSION,
+                "state": capture_agent_state(agent),
+            }
         for obj in sim.sim_objects:
             if obj in sim.agents:
                 continue

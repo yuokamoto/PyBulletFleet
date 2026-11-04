@@ -10,6 +10,12 @@ Do not rely on these artifacts for production runs.
 The kinematic artifact profile is now `pbf.kinematic.v4` (version 4). Earlier
 development artifacts use older execution or object-construction schemas and
 are not accepted by this loader; record a new artifact before testing restore.
+Within it, each Agent entry is `kinematic_agent` version 2: every joint entry
+carries its motion limits (`max_velocity`, `max_accel`, `max_decel`) with its
+signed `speed`, `braking` flag and trajectory, and restore applies the limits
+before the execution state, so a ramped joint resumes the same path in a
+freshly constructed Agent. A version 1 entry, with joint position and target
+only, is refused rather than restored at rest.
 The table describes **execution checkpoints** for this declared profile. The
 last column uses row names from the [checkpoint capability
 checklist](https://github.com/yuokamoto/PyBulletFleet/blob/main/docs/design/snapshot-replay/product-goals.md#checkpoint-state-capability-checklist).
