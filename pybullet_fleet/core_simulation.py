@@ -2324,8 +2324,8 @@ class MultiRobotSimulationCore:
             elif new_mode == CollisionMode.STATIC:
                 # NORMAL -> STATIC: Remove from dynamic set, add to static set,
                 # keep the AABB. Re-register: a NORMAL_2D body registers
-                # different z cells, and STATIC registrations are counted per
-                # layer apart from NORMAL_3D ones.
+                # different z cells from a STATIC one. (A NORMAL_3D body's
+                # registration is the same, so for it this changes nothing.)
                 self._dynamic_collision_objects.discard(object_id)
                 self._static_collision_objects.add(object_id)
                 if self._cached_cell_size is not None:
