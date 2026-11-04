@@ -6,10 +6,11 @@ Supports both Mesh and URDF loading.
 """
 
 import copy
+import functools
 import logging
 import math
 from dataclasses import dataclass, fields
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Sequence, Tuple, Type, TypeVar, Union
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Sequence, Tuple, Type, TypeVar, Union, cast
 
 import numpy as np
 import pybullet as p
@@ -38,6 +39,26 @@ lazy_logger = get_lazy_logger(__name__)
 
 # Generic plugin type so get_plugin() returns the concrete subclass type.
 _PluginT = TypeVar("_PluginT", bound=AgentPlugin)
+
+_JointMethod = TypeVar("_JointMethod", bound=Callable[..., Any])
+
+
+def _also_takes_joint_index(method: _JointMethod) -> _JointMethod:
+    """Let a single-joint method still take its first argument by the old keyword ``joint_index``.
+
+    The parameter became ``joint`` when it started to accept a name as well;
+    ``method(joint_index=...)`` keeps working, as an alias of ``joint=``.
+    """
+
+    @functools.wraps(method)
+    def wrapper(*args: Any, **kwargs: Any) -> Any:
+        if "joint_index" in kwargs:
+            if "joint" in kwargs or len(args) > 1:  # args[0] is self
+                raise TypeError(f"{method.__name__}() got multiple values for argument 'joint'")
+            kwargs["joint"] = kwargs.pop("joint_index")
+        return method(*args, **kwargs)
+
+    return cast(_JointMethod, wrapper)
 
 
 @dataclass
@@ -2231,6 +2252,7 @@ class Agent(SimObject):
         """Get number of joints (0 for mesh robots)."""
         return len(self.joint_info)
 
+    @_also_takes_joint_index
     def get_joint_state(self, joint: Union[int, str]) -> Tuple[float, float]:
         """
         Get joint state (position and velocity).
@@ -2243,6 +2265,7 @@ class Agent(SimObject):
 
         Args:
             joint: Joint index (0-based), or joint name as spelled in the URDF.
+                The old keyword ``joint_index=`` is still accepted.
 
         Returns:
             (position, velocity) tuple; ``(0.0, 0.0)`` with a warning for a
@@ -2352,6 +2375,7 @@ class Agent(SimObject):
             result[name] = self.get_joint_state(idx)
         return result
 
+    @_also_takes_joint_index
     def set_joint_target(self, joint: Union[int, str], target_position: float, max_force: float = 500.0):
         """
         Set target position for a joint (for URDF robots only).
@@ -2361,6 +2385,7 @@ class Agent(SimObject):
 
         Args:
             joint: Joint index (0-based), or joint name as spelled in the URDF.
+                The old keyword ``joint_index=`` is still accepted.
             target_position: Target position (radians for revolute, meters for prismatic)
             max_force: Maximum force to apply
 
@@ -2600,6 +2625,7 @@ class Agent(SimObject):
         else:
             self.set_all_joints_targets(targets, max_force)
 
+    @_also_takes_joint_index
     def is_joint_at_target(
         self, joint: Union[int, str], target: float, tolerance: Optional[Union[float, list, dict]] = None
     ) -> bool:
@@ -2608,6 +2634,7 @@ class Agent(SimObject):
 
         Args:
             joint: Joint index (0-based), or joint name as spelled in the URDF.
+                The old keyword ``joint_index=`` is still accepted.
             target: Target position (radians for revolute, metres for prismatic).
             tolerance: Position tolerance — ``float``, ``list``, ``dict``,
                 or ``None`` (→ ``self.joint_tolerance``).  Resolved via

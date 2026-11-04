@@ -109,8 +109,8 @@ are not recommended for production use yet.
 - `Agent.set_joint_target()`, `get_joint_state()` and `is_joint_at_target()`
   take a joint by index or by name, as `set_joint_position()` and
   `is_joint_moving()` do: `set_joint_target("lift", 1.0)` now works. The first
-  parameter is renamed from `joint_index` to `joint`, so a call that passes it
-  by keyword must use the new name. `set_joint_target_by_name()`,
+  parameter is renamed from `joint_index` to `joint`; a call that passes it as
+  `joint_index=` still works. `set_joint_target_by_name()`,
   `get_joint_state_by_name()` and `is_joint_at_target_by_name()` remain as
   aliases. An unknown joint is handled as before: `set_joint_target()` ignores
   it with a warning, `get_joint_state()` returns `(0.0, 0.0)` with a warning

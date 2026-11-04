@@ -208,3 +208,41 @@ class TestByNameAliases:
 
         assert agent.is_joint_at_target_by_name(LIFT, 2.0)
         assert agent.is_joint_at_target_by_name("no_such_joint", 2.0) is False
+
+
+class TestTheOldKeyword:
+    """The first parameter used to be ``joint_index``; a call passing it by that keyword still works."""
+
+    def test_set_joint_target(self, sim_core):
+        agent = _lift(sim_core)
+        agent.set_joint_target(joint_index=0, target_position=1.0)  # pyright: ignore[reportCallIssue]
+        assert agent.last_joint_targets == {0: 1.0}
+
+    def test_get_joint_state(self, sim_core):
+        agent = _lift(sim_core)
+        agent.set_joint_position(LIFT, 2.0)
+        assert agent.get_joint_state(joint_index=0)[0] == pytest.approx(2.0)  # pyright: ignore[reportCallIssue]
+
+    def test_is_joint_at_target(self, sim_core):
+        agent = _lift(sim_core)
+        agent.set_joint_position(LIFT, 2.0)
+        assert agent.is_joint_at_target(joint_index=0, target=2.0)  # pyright: ignore[reportCallIssue]
+
+    def test_the_new_keyword(self, sim_core):
+        agent = _lift(sim_core)
+        agent.set_joint_target(joint=LIFT, target_position=1.0)
+        assert agent.last_joint_targets == {0: 1.0}
+
+    @pytest.mark.parametrize(
+        "call",
+        [
+            lambda agent: agent.set_joint_target(0, 1.0, joint_index=0),
+            lambda agent: agent.set_joint_target(joint=0, joint_index=0, target_position=1.0),
+            lambda agent: agent.get_joint_state(0, joint_index=0),
+        ],
+        ids=["positional", "keyword", "get_joint_state"],
+    )
+    def test_both_spellings_at_once_is_an_error(self, sim_core, call):
+        agent = _lift(sim_core)
+        with pytest.raises(TypeError, match="multiple values for argument 'joint'"):
+            call(agent)
