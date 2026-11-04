@@ -228,8 +228,9 @@ def print_results(results_list, num_agents):
         print(f"\nObserved 2D/3D ratio for this workload: {speedup:.2f}x ({reduction:.1f}% reduction)")
 
     print("\nInterpretation:")
-    print("  - Select NORMAL_2D only when ignoring Z-axis neighbours is correct.")
-    print("  - Select NORMAL_3D when the scene requires Z-axis neighbours.")
+    print("  - NORMAL_2D and NORMAL_3D search the same cells; any time difference is noise or the z clearance.")
+    print("  - Select NORMAL_2D only when a body within the clearance above or below must not count.")
+    print("  - Select NORMAL_3D otherwise; it is the default.")
     print("  - Select DISABLED only when collision detection is intentionally out of scope.")
     print("=" * 70)
 
