@@ -356,3 +356,46 @@ class TestElevatorInstantRide:
 
         assert elev.current_floor == "L3"
         assert elev.get_joint_state_by_name("lift")[0] == pytest.approx(8.0)
+
+
+class TestElevatorCarriedLoad:
+    """A robot that carries a load rides with it: the load stays the robot's, not the cabin's."""
+
+    def _robot_with_load(self, sim_core):
+        robot = Agent.from_params(
+            AgentSpawnParams(urdf_path="robots/simple_cube.urdf", initial_pose=Pose.from_xyz(0, 0, 0.2)),
+            sim_core,
+        )
+        load = SimObject.from_params(
+            SimObjectSpawnParams(
+                visual_shape=ShapeParams(shape_type="box", half_extents=[0.1, 0.1, 0.1]),
+                collision_shape=ShapeParams(shape_type="box", half_extents=[0.1, 0.1, 0.1]),
+                initial_pose=Pose.from_xyz(0, 0, 0.6),
+                mass=0.0,
+                pickable=True,
+                name="load",
+            ),
+            sim_core,
+        )
+        assert robot.attach_object(load, keep_world_pose=True)
+        return robot, load
+
+    @pytest.mark.parametrize("instant", [False, True])
+    def test_the_load_rides_with_its_robot_and_stays_on_it(self, sim_core, instant):
+        elev = _make_elevator(sim_core, floors={"L1": 0.0, "L2": 4.0})
+        robot, load = self._robot_with_load(sim_core)
+        robot_z, load_z = robot.get_pose().position[2], load.get_pose().position[2]
+
+        elev.request_floor("L2", instant=instant)
+
+        # The cabin takes the robot only: an attached load would be left behind on release.
+        assert elev.passengers == [robot]
+
+        sim_core.tick(2000)
+
+        assert elev.current_floor == "L2"
+        assert not elev.is_moving
+        assert robot.get_pose().position[2] == pytest.approx(robot_z + 4.0, abs=1e-3)
+        assert load.get_pose().position[2] == pytest.approx(load_z + 4.0, abs=1e-3)
+        assert not robot.is_attached()
+        assert load in robot.get_attached_objects()
