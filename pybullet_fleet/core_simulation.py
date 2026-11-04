@@ -573,10 +573,12 @@ class MultiRobotSimulationCore:
         self._cached_aabbs_dict: Dict[int, Tuple[Tuple[float, float, float], Tuple[float, float, float]]] = (
             {}
         )  # object_id -> AABB
-        # Objects whose base origin lies outside their cached AABB, with the
-        # largest per-axis distance from the origin to the box. Lets a search
-        # by base origin (find_nearest_pickable) go through the spatial hash,
-        # which holds AABBs, without missing a shape set far off its origin.
+        # Pickable objects whose base origin lies outside their cached AABB,
+        # with the largest per-axis distance from the origin to the box. Lets
+        # a search by base origin (pickable_candidates_near) go through the
+        # spatial hash, which holds AABBs, without missing a shape set far off
+        # its origin. Only pickable objects: nothing else is searched by origin,
+        # and the AABB update of every moved object stays free of it.
         self._origin_gaps: Dict[int, float] = {}
         self._cached_spatial_grid: Dict[Tuple[int, int, int], Set[int]] = {}  # Spatial hash grid: cell -> {object_ids}
         # The broadphase margin the grid's registrations were made with. A pair
@@ -1997,11 +1999,16 @@ class MultiRobotSimulationCore:
             logger.debug(f"Deferred AABB init for object {object_id} (body {obj.body_id})")
 
     def _record_origin_gap(self, obj: SimObject, aabb: Tuple[Sequence[float], Sequence[float]]) -> None:
-        """Note how far ``obj``'s base origin lies outside its AABB, if at all.
+        """Note how far a pickable ``obj``'s base origin lies outside its AABB, if at all.
 
         A kinematic object's pose is its cached one; a physics object's is read
         from PyBullet, as its cache may still hold the pose of the last step.
+        Objects that are not pickable are not tracked (see
+        :meth:`_on_pickable_changed` for one that becomes pickable).
         """
+        if not obj.pickable:
+            self._origin_gaps.pop(obj.object_id, None)
+            return
         if obj.is_kinematic:
             x, y, z = obj.get_pose().position
         else:
@@ -2012,6 +2019,22 @@ class MultiRobotSimulationCore:
             self._origin_gaps[obj.object_id] = gap
         else:
             self._origin_gaps.pop(obj.object_id, None)
+
+    def _on_pickable_changed(self, obj: SimObject) -> None:
+        """Start or stop tracking ``obj``'s origin gap when its ``pickable`` flag changes.
+
+        Called by the ``SimObject.pickable`` setter. An object that becomes
+        pickable while standing still would otherwise have no gap recorded
+        until it next moves.
+        """
+        object_id = getattr(obj, "object_id", None)
+        if object_id is None:
+            return
+        aabb = self._cached_aabbs_dict.get(object_id)
+        if aabb is None:
+            self._origin_gaps.pop(object_id, None)
+            return
+        self._record_origin_gap(obj, aabb)
 
     def _remove_object_aabb(self, object_id: int, update_grid: bool = True) -> None:
         """
@@ -3174,10 +3197,12 @@ class MultiRobotSimulationCore:
         exists, or when the box spans more cells than there are objects, every
         object is tested instead.
 
-        The broadphase does not track every object, so these are always tested
-        directly against their current PyBullet AABB as well: objects with
-        collision ``DISABLED``, and objects with a pose written since the last
-        step that the hash has not seen yet.
+        Objects with collision ``DISABLED`` are not in the hash; they are
+        tested directly against their PyBullet AABB. A pose written outside a
+        step is applied at once and answered for. Inside a step (from a
+        callback or a controller), a written pose is buffered and reaches
+        PyBullet only when the step flushes it: until then such an object is
+        tested against the AABB of the pose it had when the step began.
 
         Args:
             aabb_min: ``(x, y, z)`` lower corner of the box, world frame.
@@ -3233,14 +3258,25 @@ class MultiRobotSimulationCore:
                 found.append(obj)
         return found
 
-    def _objects_with_origin_near(self, position: Sequence[float], radius: float) -> List[SimObject]:
-        """The objects whose base origin may be within ``radius`` of ``position``.
+    def pickable_candidates_near(self, position: Sequence[float], radius: float) -> List[SimObject]:
+        """Every pickable object whose base origin may be within ``radius`` of ``position``.
 
-        A superset: the caller measures the distance. Through the spatial hash,
-        as :meth:`query_aabb` does, plus the objects the hash cannot place by
-        their origin: a shape set more than a cell off its origin, collision
-        ``DISABLED``, or a pose written since the last step. Before the hash
-        exists, every object.
+        A superset, for a search by base origin such as
+        :meth:`SimObject.find_nearest_pickable`: it may also hold objects
+        farther away or not pickable, so the caller measures the distance and
+        checks ``pickable`` itself. The objects come through the spatial hash,
+        as for :meth:`query_aabb`, plus those the hash cannot place by their
+        origin: a pickable shape set more than a cell off its origin, objects
+        with collision ``DISABLED``, and objects with a pose written in the
+        current step and not yet flushed (their cached pose is already the new
+        one). Before the hash exists, every object.
+
+        Args:
+            position: ``(x, y, z)`` to search around, world frame.
+            radius: Search radius in metres.
+
+        Returns:
+            The candidate objects, in no particular order.
         """
         cell = self._cached_cell_size
         if cell is None:

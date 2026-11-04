@@ -400,7 +400,7 @@ class SimObject:
 
         self.attached_objects: List["SimObject"] = []
         self.callbacks: List[dict] = []
-        self.pickable = pickable
+        self._pickable = pickable
         self.collision_mode = collision_mode  # Collision detection mode
 
         # User-extensible data storage (custom metadata)
@@ -1703,6 +1703,20 @@ class SimObject:
             "relative_orientation": list(self._attach_offset.orientation),
         }
 
+    @property
+    def pickable(self) -> bool:
+        """Whether another object may attach this one (pick it up)."""
+        return self._pickable
+
+    @pickable.setter
+    def pickable(self, value: bool) -> None:
+        self._pickable = value
+        # The core tracks where pickable objects' origins lie off their shape
+        # (for find_nearest_pickable); a change of the flag starts or ends that.
+        on_change = getattr(self.sim_core, "_on_pickable_changed", None)
+        if on_change is not None:
+            on_change(self)
+
     def is_attached(self) -> bool:
         """
         Check if this object is attached to another object.
@@ -1739,7 +1753,7 @@ class SimObject:
         # Only the objects whose origin may be near enough to qualify. A core
         # without the lookup (a stand-in in tests) gets the full scan.
         position = self.get_pose().position
-        near = getattr(self.sim_core, "_objects_with_origin_near", None)
+        near = getattr(self.sim_core, "pickable_candidates_near", None)
         nearby = near(position, search_radius) if near is not None else self.sim_core.sim_objects
         return tools.find_nearest(
             nearby,

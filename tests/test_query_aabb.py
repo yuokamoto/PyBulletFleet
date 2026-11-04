@@ -332,3 +332,26 @@ class TestOriginOutsideItsAabb:
         (x0, _, _), _ = p.getAABB(shelf.body_id, physicsClientId=sim.client)
         assert x0 < -4.0  # the shape is now on the far side
         assert finder.find_nearest_pickable(search_radius=0.25) is shelf
+
+    def test_an_object_made_pickable_while_standing_still_is_found(self, sim):
+        """Only pickable objects have their origin gap tracked; one that
+        becomes pickable without moving is tracked from that moment."""
+        scatter(sim, count=200)
+        shelf = self._offset_shelf(sim, (0.2, 0.0, 0.0), (5.0, 0.0, 0.0))
+        shelf.pickable = False
+        finder = box(sim, 0.0, 0.0, 0.0, half=0.05, name="finder")
+        sim.step_once()
+        assert shelf.object_id not in sim._origin_gaps
+        assert finder.find_nearest_pickable(search_radius=0.25) is None
+
+        shelf.pickable = True
+
+        assert finder.find_nearest_pickable(search_radius=0.25) is shelf
+        shelf.pickable = False
+        assert shelf.object_id not in sim._origin_gaps
+
+    def test_the_candidates_are_a_public_lookup(self, sim):
+        scatter(sim, count=200)
+        shelf = self._offset_shelf(sim, (0.2, 0.0, 0.0), (5.0, 0.0, 0.0))
+        sim.step_once()
+        assert shelf in sim.pickable_candidates_near((0.0, 0.0, 0.0), 0.25)
