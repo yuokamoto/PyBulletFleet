@@ -587,6 +587,11 @@ class Agent(SimObject):
         return as_axes(self.controller_params._eff_angular_accel())
 
     @property
+    def max_angular_decel(self) -> np.ndarray:
+        """Effective angular deceleration limit; mirrors :attr:`max_angular_accel` when unset."""
+        return as_axes(self.controller_params._eff_angular_decel())
+
+    @property
     def joint_tolerance(self) -> Union[float, list, dict]:
         """Default joint tolerance used by convergence checks.
 

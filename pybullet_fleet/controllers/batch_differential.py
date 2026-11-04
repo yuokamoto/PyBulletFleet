@@ -83,6 +83,8 @@ class BatchDifferentialController(BatchKinematicController):
         self._rot_t_const: np.ndarray = np.zeros((0,), dtype=np.float64)
         self._rot_t_total: np.ndarray = np.zeros((0,), dtype=np.float64)
         self._rot_accel: np.ndarray = np.zeros((0,), dtype=np.float64)
+        #: Braking scalar of each row's rotation (max_angular_decel).
+        self._rot_decel: np.ndarray = np.zeros((0,), dtype=np.float64)
         # Un-flipped target for snap-to at rotation end (stores original sign).
         self._rot_snap_quat: np.ndarray = np.zeros((0, 4), dtype=np.float64)
 
@@ -131,6 +133,7 @@ class BatchDifferentialController(BatchKinematicController):
         self._rot_t_const = self._resize_rows(self._rot_t_const, n)
         self._rot_t_total = self._resize_rows(self._rot_t_total, n)
         self._rot_accel = self._resize_rows(self._rot_accel, n)
+        self._rot_decel = self._resize_rows(self._rot_decel, n)
         # FORWARD
         self._fwd_t_start = self._resize_rows(self._fwd_t_start, n)
         self._fwd_p_start = self._resize_rows(self._fwd_p_start, n)
@@ -188,6 +191,7 @@ class BatchDifferentialController(BatchKinematicController):
             self._rot_t_const,
             self._rot_t_total,
             self._rot_accel,
+            self._rot_decel,
             self._fwd_t_start,
             self._fwd_total_distance,
             self._fwd_t_accel,
@@ -359,10 +363,9 @@ class BatchDifferentialController(BatchKinematicController):
 
         ang_vel = float(agent.max_angular_vel[0])
         ang_accel = float(agent.max_angular_accel[0])
-        tpi = build_tpi(p0=0.0, pe=angle, vmax=ang_vel, accel=ang_accel, t0=sim_time)
-        # Rotation is symmetric: angular limits carry no separate decel.
-        # See #67.
-        t_acc, t_cst, t_tot, accel_eff, _ = extract_phase_params(tpi)
+        ang_decel = float(agent.max_angular_decel[0])
+        tpi = build_tpi(p0=0.0, pe=angle, vmax=ang_vel, accel=ang_accel, t0=sim_time, decel=ang_decel)
+        t_acc, t_cst, t_tot, accel_eff, decel_eff = extract_phase_params(tpi)
 
         self._phase[idx] = _PHASE_ROTATE
         self._rot_t_start[idx] = sim_time
@@ -378,6 +381,7 @@ class BatchDifferentialController(BatchKinematicController):
         self._rot_t_const[idx] = t_cst
         self._rot_t_total[idx] = t_tot
         self._rot_accel[idx] = accel_eff
+        self._rot_decel[idx] = decel_eff
 
     def _begin_forward(self, idx: int, agent: "Agent", target_quat: np.ndarray, sim_time: float, v0: float = 0.0) -> None:
         """Switch to FORWARD phase: snap heading, init distance TPI from speed ``v0`` (0 from rest)."""
@@ -433,10 +437,9 @@ class BatchDifferentialController(BatchKinematicController):
 
         ang_vel = float(agent.max_angular_vel[0])
         ang_accel = float(agent.max_angular_accel[0])
-        tpi = build_tpi(p0=0.0, pe=angle, vmax=ang_vel, accel=ang_accel, t0=sim_time)
-        # Rotation is symmetric: angular limits carry no separate decel.
-        # See #67.
-        t_acc, t_cst, t_tot, accel_eff, _ = extract_phase_params(tpi)
+        ang_decel = float(agent.max_angular_decel[0])
+        tpi = build_tpi(p0=0.0, pe=angle, vmax=ang_vel, accel=ang_accel, t0=sim_time, decel=ang_decel)
+        t_acc, t_cst, t_tot, accel_eff, decel_eff = extract_phase_params(tpi)
 
         # Reuse the ROTATE state arrays (same slerp logic; different exit action).
         self._phase[idx] = _PHASE_FINAL_ROTATE
@@ -454,6 +457,7 @@ class BatchDifferentialController(BatchKinematicController):
         self._rot_t_const[idx] = t_cst
         self._rot_t_total[idx] = t_tot
         self._rot_accel[idx] = accel_eff
+        self._rot_decel[idx] = decel_eff
         # Hold position at current location.
         self._fwd_p_start[idx] = np.asarray(agent.get_pose().position, dtype=np.float64)
         self._paths[idx] = []
@@ -524,6 +528,7 @@ class BatchDifferentialController(BatchKinematicController):
                 self._rot_t_total[rm],
                 self._rot_accel[rm],
                 self._rot_total_angle[rm],
+                self._rot_decel[rm],
             )
             total_angle_safe = np.where(self._rot_total_angle[rm] > 1e-9, self._rot_total_angle[rm], 1.0)
             t_frac = np.clip(angle_traveled / total_angle_safe, 0.0, 1.0)
@@ -539,7 +544,12 @@ class BatchDifferentialController(BatchKinematicController):
             # Hold position during rotation.
             self._pos_buf[rm] = self._fwd_p_start[rm]
             angular_speed = trapezoid_speed(
-                tau, self._rot_t_accel[rm], self._rot_t_const[rm], self._rot_t_total[rm], self._rot_accel[rm]
+                tau,
+                self._rot_t_accel[rm],
+                self._rot_t_const[rm],
+                self._rot_t_total[rm],
+                self._rot_accel[rm],
+                self._rot_decel[rm],
             )
             self._lin_vel_buf[rm] = 0.0
             self._ang_vel_buf[rm] = angular_speed * self._rot_axis_z[rm]

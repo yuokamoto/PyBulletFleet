@@ -68,7 +68,14 @@ def _controller_spec(agent: Agent) -> dict:
 def _validate_controller_parameters(parameters: dict) -> None:
     if not isinstance(parameters, dict) or set(parameters) != {field.name for field in fields(ControllerParams)}:
         raise ValueError("Unsupported controller parameters")
-    for name in ("max_linear_vel", "max_angular_vel", "max_linear_accel", "max_linear_decel", "max_angular_accel"):
+    for name in (
+        "max_linear_vel",
+        "max_angular_vel",
+        "max_linear_accel",
+        "max_linear_decel",
+        "max_angular_accel",
+        "max_angular_decel",
+    ):
         value = parameters[name]
         if value is None:
             continue

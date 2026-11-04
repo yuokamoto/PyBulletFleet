@@ -71,6 +71,12 @@ class ControllerParams:
             accelerate.
         max_angular_accel: Maximum angular acceleration in rad/s² (used by TPI).
             ``None`` → framework default.
+        max_angular_decel: Maximum angular deceleration in rad/s² (used by TPI).
+            Same scalar/per-axis semantics as ``max_angular_accel``.
+            ``None`` → mirror ``max_angular_accel`` (symmetric trapezoid),
+            which is the behaviour of every release before this field
+            existed. Set it for vehicles whose turns brake at a different
+            rate than they start.
         cmd_vel_timeout: Watchdog timeout in seconds; ``0.0`` or ``None``
             disables the watchdog. ``None`` → framework default (``0.0``).
         navigation_2d: When ``True``, pose-control trajectories preserve the
@@ -100,6 +106,7 @@ class ControllerParams:
     max_linear_accel: Optional[ScalarOrAxes] = None
     max_linear_decel: Optional[ScalarOrAxes] = None
     max_angular_accel: Optional[ScalarOrAxes] = None
+    max_angular_decel: Optional[ScalarOrAxes] = None
     cmd_vel_timeout: Optional[float] = None
     navigation_2d: Optional[bool] = None
     default_direction: MovementDirection = MovementDirection.FORWARD
@@ -160,6 +167,10 @@ class ControllerParams:
     def _eff_angular_accel(self) -> ScalarOrAxes:
         return self.max_angular_accel if self.max_angular_accel is not None else _CTRL_D["max_angular_accel"]
 
+    def _eff_angular_decel(self) -> ScalarOrAxes:
+        # Unset mirrors the effective angular acceleration, as the linear one does.
+        return self.max_angular_decel if self.max_angular_decel is not None else self._eff_angular_accel()
+
     def _eff_goal_replacement(self) -> GoalReplacement:
         if self.goal_replacement is not None:
             return self.goal_replacement
@@ -217,6 +228,11 @@ class ControllerParams:
         """Yaw-axis scalar ``max_angular_accel`` (for differential drive)."""
         a = self._eff_angular_accel()
         return float(a) if is_scalar(a) else float(as_axes(a)[2])  # type: ignore[arg-type]
+
+    def scalar_max_angular_decel(self) -> float:
+        """Yaw-axis scalar ``max_angular_decel`` (for differential drive)."""
+        d = self._eff_angular_decel()
+        return float(d) if is_scalar(d) else float(as_axes(d)[2])  # type: ignore[arg-type]
 
 
 _EnumT = TypeVar("_EnumT", bound=Enum)

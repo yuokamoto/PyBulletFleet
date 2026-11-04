@@ -14,6 +14,16 @@ are not recommended for production use yet.
 
 ### Added
 
+- `ControllerParams.max_angular_decel`: the braking rate of a turn, so a
+  rotation can stop at a different rate than it starts, as `max_linear_decel`
+  already allows for translation. Same scalar or per-axis form as
+  `max_angular_accel`; unset mirrors it, so every existing configuration keeps
+  the same symmetric rotation profile, bit for bit. Every rotation honours it:
+  per-agent and batched, omnidirectional final rotation and differential-drive
+  turns, with `Agent.max_angular_decel` as the read-only view. The batched
+  controllers carry the braking scalar per row, and their closed form agrees
+  with the per-agent trajectory to floating-point noise.
+
 - `MultiRobotSimulationCore.query_aabb(aabb_min, aabb_max)`: the objects whose
   AABB overlaps a box, looked up through the collision spatial hash, so the
   cost follows how crowded the box is rather than how many objects the

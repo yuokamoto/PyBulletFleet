@@ -90,6 +90,8 @@ class BatchOmniController(BatchKinematicController):
         self._rot_t_const: np.ndarray = np.zeros((0,), dtype=np.float64)
         self._rot_t_total: np.ndarray = np.zeros((0,), dtype=np.float64)
         self._rot_accel: np.ndarray = np.zeros((0,), dtype=np.float64)
+        #: Braking scalar of each row's rotation (max_angular_decel).
+        self._rot_decel: np.ndarray = np.zeros((0,), dtype=np.float64)
         self._rot_p_hold: np.ndarray = np.zeros((0, 3), dtype=np.float64)
 
         # Per-agent final-orientation state.
@@ -132,6 +134,7 @@ class BatchOmniController(BatchKinematicController):
         self._rot_t_const = self._resize_rows(self._rot_t_const, n)
         self._rot_t_total = self._resize_rows(self._rot_t_total, n)
         self._rot_accel = self._resize_rows(self._rot_accel, n)
+        self._rot_decel = self._resize_rows(self._rot_decel, n)
         self._rot_p_hold = self._resize_rows(self._rot_p_hold, n)
         # Final-orientation
         self._align_final_orient = self._resize_rows(self._align_final_orient, n)
@@ -185,6 +188,7 @@ class BatchOmniController(BatchKinematicController):
             self._rot_t_const,
             self._rot_t_total,
             self._rot_accel,
+            self._rot_decel,
         ):
             arr[[i, j]] = arr[[j, i]]
         for arr2d in (
@@ -353,10 +357,9 @@ class BatchOmniController(BatchKinematicController):
 
         ang_vel = float(agent.max_angular_vel[0])
         ang_accel = float(agent.max_angular_accel[0])
-        tpi = build_tpi(p0=0.0, pe=angle, vmax=ang_vel, accel=ang_accel, t0=sim_time)
-        # Angular limits carry no separate deceleration, so rotation is
-        # symmetric and the fifth value equals the fourth. See #67.
-        t_acc, t_cst, t_tot, accel_eff, _ = extract_phase_params(tpi)
+        ang_decel = float(agent.max_angular_decel[0])
+        tpi = build_tpi(p0=0.0, pe=angle, vmax=ang_vel, accel=ang_accel, t0=sim_time, decel=ang_decel)
+        t_acc, t_cst, t_tot, accel_eff, decel_eff = extract_phase_params(tpi)
 
         self._phase[idx] = _PHASE_FINAL_ROTATE
         self._rot_t_start[idx] = sim_time
@@ -372,6 +375,7 @@ class BatchOmniController(BatchKinematicController):
         self._rot_t_const[idx] = t_cst
         self._rot_t_total[idx] = t_tot
         self._rot_accel[idx] = accel_eff
+        self._rot_decel[idx] = decel_eff
         self._rot_p_hold[idx] = np.asarray(agent.get_pose().position, dtype=np.float64)
 
     def _advance_waypoint(self, idx: int, sim_time: float) -> None:
@@ -478,6 +482,7 @@ class BatchOmniController(BatchKinematicController):
                 self._rot_t_total[rm],
                 self._rot_accel[rm],
                 self._rot_total_angle[rm],
+                self._rot_decel[rm],
             )
             total_angle_safe = np.where(self._rot_total_angle[rm] > 1e-9, self._rot_total_angle[rm], 1.0)
             t_frac = np.clip(angle_traveled / total_angle_safe, 0.0, 1.0)
@@ -492,7 +497,12 @@ class BatchOmniController(BatchKinematicController):
             self._orn_buf[rm] = new_quat
             self._pos_buf[rm] = self._rot_p_hold[rm]
             angular_speed = trapezoid_speed(
-                tau, self._rot_t_accel[rm], self._rot_t_const[rm], self._rot_t_total[rm], self._rot_accel[rm]
+                tau,
+                self._rot_t_accel[rm],
+                self._rot_t_const[rm],
+                self._rot_t_total[rm],
+                self._rot_accel[rm],
+                self._rot_decel[rm],
             )
             self._lin_vel_buf[rm] = 0.0
             self._ang_vel_buf[rm] = angular_speed * self._rot_axis_z[rm]
