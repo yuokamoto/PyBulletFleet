@@ -4,7 +4,7 @@ import pytest
 from pybullet_fleet import Agent, AgentSpawnParams, Pose, SimObject
 from pybullet_fleet.sim_object import SimObjectSpawnParams, ShapeParams
 from pybullet_fleet.devices.elevator import Elevator, ElevatorParams
-from pybullet_fleet.devices.elevator_state_machine import ElevatorRequestPolicy
+from pybullet_fleet.devices.elevator_state_machine import ElevatorRequestPolicy, ElevatorRequestResult
 
 
 @pytest.fixture
@@ -420,7 +420,7 @@ class TestElevatorRedirect:
         elev.request_floor("L3")
         sim_core.tick(100)
         assert elev.is_moving
-        assert elev.request_floor("L2").value == "redirected"
+        assert elev.request_floor("L2") is ElevatorRequestResult.REDIRECTED
         sim_core.tick(3000)
         assert elev.current_floor == "L2"
         assert not elev.is_moving
@@ -445,7 +445,7 @@ class TestElevatorRedirect:
 
         elev.request_floor("L3")
         run(int(3.0 / dt))  # up to full speed, 2.5 m up
-        assert elev.request_floor("L1").value == "redirected"
+        assert elev.request_floor("L1") is ElevatorRequestResult.REDIRECTED
         run(int(12.0 / dt))
 
         speeds = [(b - a) / dt for a, b in zip(heights, heights[1:])]
@@ -460,10 +460,10 @@ class TestElevatorRedirect:
         elev = _make_elevator(sim_core, floors={"L1": 0.0, "L2": 4.0, "L3": 8.0}, request_policy="queue")
         elev.request_floor("L3")
         sim_core.tick(10)
-        assert elev.request_floor("L2").value == "queued"
+        assert elev.request_floor("L2") is ElevatorRequestResult.QUEUED
         elev._state_machine.request_policy = ElevatorRequestPolicy.REDIRECT
 
-        assert elev.request_floor("L3").value == "replaced"
+        assert elev.request_floor("L3") is ElevatorRequestResult.REPLACED
         assert elev.pending_floors == ()
 
     def test_boarding_height_reaching_the_next_floor_warns(self, sim_core, caplog):
