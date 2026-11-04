@@ -835,6 +835,9 @@ class MultiRobotSimulationCore:
             orientation = list(p.getQuaternionFromEuler([roll, pitch, yaw_radians]))
         moved = entity.set_pose_raw(list(position), orientation, preserve_velocity=False)
         if moved:
+            # Paused, no step follows to refresh the window, and a flush goes
+            # by the step count, which an edit does not change.
+            self._monitor_frames.view_changed()
             self.events.emit("gui.entity_pose_changed", entity_id=entity_id, source=source)
         return moved
 
