@@ -584,8 +584,9 @@ class SimObject:
         """
         Create shared visual and collision shapes for fast object spawning.
 
-        This method caches mesh shapes by their parameters, so multiple objects with
-        identical mesh parameters will reuse the same PyBullet shape IDs.
+        This method caches mesh shapes by their parameters and physics client, so
+        multiple objects with identical mesh parameters on one client will reuse the
+        same PyBullet shape IDs.
 
         Note: Primitive shapes (box, sphere, cylinder) are NOT cached, as PyBullet
         handles them very efficiently and caching adds unnecessary overhead.
@@ -622,7 +623,8 @@ class SimObject:
         if visual_needs_cache or collision_needs_cache:
             visual_key = cls._shape_params_to_key(visual_shape) if visual_needs_cache else "none"
             collision_key = cls._shape_params_to_key(collision_shape) if collision_needs_cache else "none"
-            shape_key = f"v:{visual_key}_c:{collision_key}"
+            # A shape id is only valid on the client that created it.
+            shape_key = f"client:{physics_client_id}_v:{visual_key}_c:{collision_key}"
 
             # Check cache
             if shape_key in cls._shared_shapes:

@@ -532,6 +532,13 @@ are not recommended for production use yet.
 
 ### Fixed
 
+- `Agent.from_mesh()` creates its shapes and body on the simulation's physics
+  client, as `SimObject.from_mesh()` does; it used PyBullet's default client,
+  so with a second client connected (two simulations in one process, or a
+  client left open) the agent's body landed on the wrong one. The mesh-shape
+  cache behind `create_shared_shapes()` is now kept per physics client, so it
+  no longer hands a shape created on one client to another.
+
 - `REPLACE_NEXT` elevators: a request for the floor the moving cabin is
   already heading to now drops the pending floor (`REPLACED`) instead of being
   rejected and leaving it queued. A controller that changed its target and then
