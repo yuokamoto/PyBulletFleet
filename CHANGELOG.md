@@ -532,6 +532,13 @@ are not recommended for production use yet.
 
 ### Fixed
 
+- `import pybullet_fleet` works where the `tkinter` package is present but the
+  Tk library is not (for example a `python:*-slim` container image without
+  `tk`): importing `tkinter` there raises `ImportError`, which was not caught,
+  so the package failed to import even with the monitor off. Without Tk, a
+  headless simulation no longer logs anything about it; asking for the monitor
+  window logs why it is unavailable and falls back to writing the monitor file.
+
 - `REPLACE_NEXT` elevators: a request for the floor the moving cabin is
   already heading to now drops the pending floor (`REPLACED`) instead of being
   rejected and leaving it queued. A controller that changed its target and then

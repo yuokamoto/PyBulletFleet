@@ -24,17 +24,20 @@ from pybullet_fleet.logging_utils import get_lazy_logger
 
 logger = get_lazy_logger(__name__)
 
+# Tk is needed only for the window. Without it the package still imports and
+# the monitor still writes its file; DataMonitor says so when the window is
+# asked for. ImportError, not only ModuleNotFoundError: where the tkinter
+# package is present but the Tk library is not (a slim container image),
+# importing it fails to load libtk instead.
 try:
     import tkinter as tk
     from tkinter import ttk
-except ModuleNotFoundError:
+
+    _TK_IMPORT_ERROR: Optional[str] = None
+except ImportError as error:
     tk = None
     ttk = None
-    logger.warning(
-        "tkinter is not installed; DataMonitor GUI will be disabled. "
-        "Install it (Debian/Ubuntu: `sudo apt-get install python3-tk`, "
-        "or the matching `python3.X-tk` package for your interpreter) to enable the monitor window."
-    )
+    _TK_IMPORT_ERROR = str(error)
 
 
 class DataMonitor:
@@ -77,8 +80,11 @@ class DataMonitor:
         self.initial_timestep: Optional[float] = initial_timestep
         if tk is None and self.enable_gui:
             logger.warning(
-                "DataMonitor GUI was requested but tkinter is unavailable; "
-                "falling back to file-only mode (data still written to %s).",
+                "DataMonitor GUI was requested but tkinter is unavailable (%s); "
+                "falling back to file-only mode (data still written to %s). "
+                "Install it (Debian/Ubuntu: `sudo apt-get install python3-tk`, "
+                "or the matching `python3.X-tk` package for your interpreter) to enable the monitor window.",
+                _TK_IMPORT_ERROR,
                 self.data_file,
             )
             self.enable_gui = False
