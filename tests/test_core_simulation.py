@@ -2138,9 +2138,9 @@ class TestFilterAabbPairs:
         """Two NORMAL_2D bodies in different Z-cells are never a candidate.
 
         Z=0 → cell 0, Z=3.0 → cell 1 (floor(3.0/2.0)=1). A NORMAL_2D body is
-        registered in every z cell it touches, so two that overlap share one;
-        the search may look at the next layer (for NORMAL_3D bodies there)
-        but skips NORMAL_2D bodies outside its own layer."""
+        registered in the z cells its AABB touches, without the margin, and
+        the search reads only a body's own cells, so two NORMAL_2D bodies in
+        different z cells share no cell and are never paired."""
         obj1 = make_box(sim_core, [0, 0, 0], collision_mode=CollisionMode.NORMAL_2D)
         obj2 = make_box(sim_core, [0, 0, 3.0], collision_mode=CollisionMode.NORMAL_2D)
         assert {c[2] for c in sim_core._cached_object_to_cell[obj1.object_id]}.isdisjoint(
