@@ -1,0 +1,151 @@
+"""CollisionMode.NORMAL_2D is deprecated (#104).
+
+Every public way to give an object NORMAL_2D warns once, attributed to the
+caller's line, and the mode keeps working. NORMAL_3D and the other modes do
+not warn.
+"""
+
+import warnings
+
+import pybullet as p
+import pytest
+
+from pybullet_fleet.agent import Agent, AgentSpawnParams
+from pybullet_fleet.devices.door import DoorParams
+from pybullet_fleet.devices.elevator import ElevatorParams
+from pybullet_fleet.geometry import Pose
+from pybullet_fleet.sim_object import ShapeParams, SimObject, SimObjectSpawnParams
+from pybullet_fleet.types import CollisionMode
+
+BOX = ShapeParams(shape_type="box", half_extents=[0.1, 0.1, 0.1])
+
+
+def _normal_2d_warnings(record):
+    return [w for w in record if issubclass(w.category, DeprecationWarning) and "NORMAL_2D" in str(w.message)]
+
+
+def _assert_one_warning_from_this_file(record):
+    found = _normal_2d_warnings(record)
+    assert len(found) == 1, [str(w.message) for w in found]
+    assert found[0].filename == __file__
+    return found[0]
+
+
+def test_message_says_what_it_does_and_what_to_use():
+    with pytest.warns(DeprecationWarning) as record:
+        SimObjectSpawnParams(collision_mode=CollisionMode.NORMAL_2D)
+    message = str(_assert_one_warning_from_this_file(record).message)
+    assert "z" in message and "clearance" in message
+    assert "NORMAL_3D" in message
+
+
+def test_spawn_params_constructor_warns():
+    with pytest.warns(DeprecationWarning) as record:
+        params = SimObjectSpawnParams(name="a", collision_mode=CollisionMode.NORMAL_2D)
+    _assert_one_warning_from_this_file(record)
+    assert params.collision_mode is CollisionMode.NORMAL_2D
+
+
+def test_agent_spawn_params_constructor_warns():
+    with pytest.warns(DeprecationWarning) as record:
+        AgentSpawnParams(name="a", visual_shape=BOX, collision_mode=CollisionMode.NORMAL_2D)
+    _assert_one_warning_from_this_file(record)
+
+
+@pytest.mark.parametrize("cls", [SimObjectSpawnParams, AgentSpawnParams, DoorParams, ElevatorParams])
+def test_parsing_the_string_from_a_config_warns(cls):
+    config = {"name": "a", "urdf_path": "x.urdf", "open_positions": {"j": 1.0}, "floors": {"1F": 0.0}}
+    with pytest.warns(DeprecationWarning) as record:
+        params = cls.from_dict({**config, "collision_mode": "normal_2d"})
+    _assert_one_warning_from_this_file(record)
+    assert params.collision_mode is CollisionMode.NORMAL_2D
+
+
+def test_object_constructors_warn_once(pybullet_env):
+    with pytest.warns(DeprecationWarning) as record:
+        obj = SimObject.from_mesh(collision_shape=BOX, pose=Pose.from_xyz(0, 0, 1), collision_mode=CollisionMode.NORMAL_2D)
+    _assert_one_warning_from_this_file(record)
+    assert obj.collision_mode is CollisionMode.NORMAL_2D
+
+
+def test_agent_constructor_warns_once(pybullet_env):
+    with pytest.warns(DeprecationWarning) as record:
+        agent = Agent.from_mesh(visual_shape=BOX, collision_shape=BOX, collision_mode=CollisionMode.NORMAL_2D)
+    _assert_one_warning_from_this_file(record)
+    assert agent.collision_mode is CollisionMode.NORMAL_2D
+
+
+@pytest.mark.parametrize("spawn", [SimObject.from_params, Agent.from_params])
+def test_spawning_from_params_does_not_warn_a_second_time(pybullet_env, spawn):
+    with pytest.warns(DeprecationWarning):
+        params = AgentSpawnParams(name="a", visual_shape=BOX, collision_shape=BOX, collision_mode=CollisionMode.NORMAL_2D)
+    with warnings.catch_warnings(record=True) as record:
+        warnings.simplefilter("always")
+        obj = spawn(params)
+    assert _normal_2d_warnings(record) == []
+    assert obj.collision_mode is CollisionMode.NORMAL_2D
+
+
+def test_set_collision_mode_warns(pybullet_env):
+    obj = SimObject.from_mesh(collision_shape=BOX, pose=Pose.from_xyz(0, 0, 1))
+    with pytest.warns(DeprecationWarning) as record:
+        obj.set_collision_mode(CollisionMode.NORMAL_2D)
+    _assert_one_warning_from_this_file(record)
+    assert obj.collision_mode is CollisionMode.NORMAL_2D
+
+
+@pytest.mark.parametrize("mode", [CollisionMode.NORMAL_3D, CollisionMode.STATIC, CollisionMode.DISABLED])
+def test_other_modes_do_not_warn(pybullet_env, mode):
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", DeprecationWarning)
+        SimObjectSpawnParams.from_dict({"name": "a", "collision_mode": mode.value})
+        AgentSpawnParams(name="a", visual_shape=BOX, collision_mode=mode)
+        obj = SimObject.from_mesh(collision_shape=BOX, collision_mode=mode)
+        Agent.from_mesh(visual_shape=BOX, collision_shape=BOX, collision_mode=mode)
+        obj.set_collision_mode(CollisionMode.NORMAL_3D)
+
+
+def test_a_spawn_loop_warns_once_under_the_default_filter(pybullet_env):
+    """Python's default filter shows a warning once per call site, so a loop
+    spawning many objects from one line does not flood the output."""
+    with warnings.catch_warnings(record=True) as record:
+        warnings.simplefilter("default")
+        for _ in range(20):
+            SimObject.from_mesh(collision_shape=BOX, collision_mode=CollisionMode.NORMAL_2D)
+    _assert_one_warning_from_this_file(record)
+
+
+def test_a_config_warns_once_per_spawn_call():
+    """Config-driven spawning attributes the warning to the spawn call, and the
+    default filter shows it once however many entities the config lists."""
+    from pybullet_fleet.core_simulation import MultiRobotSimulationCore, SimulationParams
+
+    sim = MultiRobotSimulationCore(SimulationParams(gui=False, physics=False, monitor=False, log_level="warning"))
+    entities = [
+        {
+            # sim_object: Agent.from_mesh builds its body on the default physics client.
+            "type": "sim_object",
+            "name": f"r{i}",
+            "collision_shape": {"shape_type": "box", "half_extents": [0.1, 0.1, 0.1]},
+            "collision_mode": "normal_2d",
+            "pose": [float(i), 0.0, 0.1],
+        }
+        for i in range(10)
+    ]
+    try:
+        with warnings.catch_warnings(record=True) as record:
+            warnings.simplefilter("default")
+            spawned = sim.spawn_robots_from_config(entities)
+    finally:
+        p.disconnect(sim.client)
+    assert len(spawned) == 10
+    assert all(obj.collision_mode is CollisionMode.NORMAL_2D for obj in spawned)
+    _assert_one_warning_from_this_file(record)
+
+
+def test_dataclasses_replace_in_user_code_is_attributed_to_the_caller():
+    from dataclasses import replace
+
+    with pytest.warns(DeprecationWarning) as record:
+        replace(SimObjectSpawnParams(name="a"), collision_mode=CollisionMode.NORMAL_2D)
+    _assert_one_warning_from_this_file(record)

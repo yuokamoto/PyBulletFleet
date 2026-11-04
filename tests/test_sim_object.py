@@ -341,12 +341,15 @@ class TestSimObjectSpawnParamsFromDict:
         """All collision mode strings correctly converted to enum."""
         for mode_str, expected in [
             ("normal_3d", CollisionMode.NORMAL_3D),
-            ("normal_2d", CollisionMode.NORMAL_2D),
             ("static", CollisionMode.STATIC),
             ("disabled", CollisionMode.DISABLED),
         ]:
             result = SimObjectSpawnParams.from_dict({"name": "obj", "collision_mode": mode_str})
             assert result.collision_mode == expected
+        # Deprecated, but still parsed.
+        with pytest.warns(DeprecationWarning, match="NORMAL_2D is deprecated"):
+            result = SimObjectSpawnParams.from_dict({"name": "obj", "collision_mode": "normal_2d"})
+        assert result.collision_mode == CollisionMode.NORMAL_2D
 
     def test_initial_pose_takes_precedence(self):
         """initial_pose Pose object takes precedence over pose list."""
@@ -1254,7 +1257,8 @@ class TestCollisionMode:
         obj.set_collision_mode(CollisionMode.DISABLED)
         assert_object_properties(obj, mass=1.0, collision_mode=CollisionMode.DISABLED, position=(0, 0, 1), is_kinematic=False)
 
-        obj.set_collision_mode(CollisionMode.NORMAL_2D)
+        with pytest.warns(DeprecationWarning, match="NORMAL_2D is deprecated"):
+            obj.set_collision_mode(CollisionMode.NORMAL_2D)
         assert_object_properties(obj, mass=1.0, collision_mode=CollisionMode.NORMAL_2D, position=(0, 0, 1), is_kinematic=False)
 
 

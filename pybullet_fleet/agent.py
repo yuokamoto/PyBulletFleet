@@ -17,6 +17,7 @@ from .geometry import Pose, as_axes
 from .sim_object import ShapeParams, SimObject, SimObjectSpawnParams, load_urdf_body
 from .action import Action
 from .types import ControllerMode, MotionMode, MovementDirection, ActionStatus, CollisionMode
+from .types import _normal_2d_warning_already_given
 from .tools import normalize_vector_param  # noqa: F401  (re-exported for legacy callers)
 from pybullet_fleet._tpi import try_build_tpi
 from pybullet_fleet.joint import KinematicJoint
@@ -101,6 +102,7 @@ class AgentSpawnParams(SimObjectSpawnParams):
 
     def __post_init__(self):
         """Validate agent spawn parameters."""
+        super().__post_init__()
         has_visual = self.visual_shape is not None
         has_urdf = self.urdf_path is not None
 
@@ -159,8 +161,9 @@ class AgentSpawnParams(SimObjectSpawnParams):
             }
             params = AgentSpawnParams.from_dict(config)
         """
-        # Get base fields from parent
-        base = SimObjectSpawnParams.from_dict(config)
+        # Get base fields from parent (the cls(...) below warns about a deprecated collision mode)
+        with _normal_2d_warning_already_given():
+            base = SimObjectSpawnParams.from_dict(config)
         base_kwargs = {f.name: getattr(base, f.name) for f in fields(base)}
 
         # ...except pickable, where this class narrows the parent's default to
@@ -871,19 +874,12 @@ class Agent(SimObject):
         # notify_spawn=False: defer AGENT_SPAWNED until plugins are attached below,
         # so observers (e.g. the ROS bridge) never see a plugin-less agent.
         extra: Dict[str, Any] = {"sim_core": sim_core, "controller": spawn_params.controller, "notify_spawn": False}
-        if spawn_params.urdf_path is not None:
-            agent = cls.from_urdf(
+        factory = cls.from_urdf if spawn_params.urdf_path is not None else cls.from_mesh
+        # Building spawn_params already warned about a deprecated collision mode.
+        with _normal_2d_warning_already_given():
+            agent = factory(
                 **_forward_spawn_params(
-                    cls.from_urdf,
-                    spawn_params,
-                    aliases={"initial_pose": "pose"},
-                    extra_kwargs=extra,
-                )
-            )
-        else:
-            agent = cls.from_mesh(
-                **_forward_spawn_params(
-                    cls.from_mesh,
+                    factory,
                     spawn_params,
                     aliases={"initial_pose": "pose"},
                     extra_kwargs=extra,
@@ -998,21 +994,22 @@ class Agent(SimObject):
             pickable=pickable,
         )
 
-        agent._checkpoint_spawn_params = AgentSpawnParams(
-            name=agent.name,
-            visual_shape=copy.deepcopy(visual_shape),
-            collision_shape=copy.deepcopy(collision_shape),
-            initial_pose=copy.deepcopy(pose),
-            mass=agent.mass,
-            pickable=agent.pickable,
-            collision_mode=agent.collision_mode,
-            user_data=dict(agent.user_data),
-            motion_mode=agent._motion_mode,
-            use_fixed_base=agent.use_fixed_base,
-            # Owned by the descriptor without a second deep copy for the
-            # built-in controllers (see Controller._spawn_descriptor_config).
-            controller=agent.controller._spawn_descriptor_config(),
-        )
+        with _normal_2d_warning_already_given():  # __init__ above already warned
+            agent._checkpoint_spawn_params = AgentSpawnParams(
+                name=agent.name,
+                visual_shape=copy.deepcopy(visual_shape),
+                collision_shape=copy.deepcopy(collision_shape),
+                initial_pose=copy.deepcopy(pose),
+                mass=agent.mass,
+                pickable=agent.pickable,
+                collision_mode=agent.collision_mode,
+                user_data=dict(agent.user_data),
+                motion_mode=agent._motion_mode,
+                use_fixed_base=agent.use_fixed_base,
+                # Owned by the descriptor without a second deep copy for the
+                # built-in controllers (see Controller._spawn_descriptor_config).
+                controller=agent.controller._spawn_descriptor_config(),
+            )
 
         if notify_spawn:
             agent._record_checkpoint_spawn(sim_core)
@@ -1119,21 +1116,22 @@ class Agent(SimObject):
         # execution state changes as the simulation runs). Controllers without
         # a registered name cannot be reconstructed by this descriptor.
         controller_config = agent.controller._spawn_descriptor_config()
-        agent._checkpoint_spawn_params = AgentSpawnParams(
-            name=agent.name,
-            urdf_path=agent.urdf_path,
-            initial_pose=copy.deepcopy(pose) if pose is not None else Pose.from_xyz(0.0, 0.0, 0.0),
-            mass=agent.mass,
-            pickable=agent.pickable,
-            collision_mode=agent.collision_mode,
-            user_data=dict(agent.user_data),
-            motion_mode=agent._motion_mode,
-            use_fixed_base=agent.use_fixed_base,
-            controller=controller_config,
-            ik_params=ik_params,
-            global_scaling=global_scaling,
-            joint_tolerance=joint_tolerance,
-        )
+        with _normal_2d_warning_already_given():  # __init__ above already warned
+            agent._checkpoint_spawn_params = AgentSpawnParams(
+                name=agent.name,
+                urdf_path=agent.urdf_path,
+                initial_pose=copy.deepcopy(pose) if pose is not None else Pose.from_xyz(0.0, 0.0, 0.0),
+                mass=agent.mass,
+                pickable=agent.pickable,
+                collision_mode=agent.collision_mode,
+                user_data=dict(agent.user_data),
+                motion_mode=agent._motion_mode,
+                use_fixed_base=agent.use_fixed_base,
+                controller=controller_config,
+                ik_params=ik_params,
+                global_scaling=global_scaling,
+                joint_tolerance=joint_tolerance,
+            )
 
         if notify_spawn:
             agent._record_checkpoint_spawn(sim_core)

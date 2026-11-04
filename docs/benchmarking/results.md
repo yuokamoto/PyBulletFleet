@@ -237,8 +237,8 @@ Collision check breakdown (both modes): AABB Filtering accounts for ~97–99% of
 Spatial Hashing and Contact Points together are <3%.
 
 **→ Design decision:** NORMAL_2D yields only modest speedup (7%) over NORMAL_3D at this scale
-because AABB filtering dominates in both. Use NORMAL_2D for ground robots where Z-axis neighbors
-are irrelevant for correctness, not for dramatic performance gains.
+because AABB filtering dominates in both. These numbers predate the same-cell broadphase, after
+which both modes search the same cells. NORMAL_2D is now deprecated; use NORMAL_3D.
 
 ---
 

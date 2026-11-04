@@ -15,6 +15,7 @@ from typing import Any, Callable, Dict, Generic, List, Optional, Tuple, TypeVar,
 from .agent import Agent, AgentSpawnParams, Pose
 from .sim_object import SimObject, SimObjectSpawnParams
 from .tools import grid_to_world
+from .types import _normal_2d_warning_already_given
 
 logger = logging.getLogger(__name__)
 
@@ -411,7 +412,8 @@ class SimObjectManager(Generic[T]):
                     spawn_pose = self._make_spawn_pose(selected_params, spawn_pos)
 
                     # Create a copy of spawn_params with the calculated pose
-                    grid_spawn_params = replace(selected_params, initial_pose=spawn_pose)
+                    with _normal_2d_warning_already_given():  # the caller's params already warned
+                        grid_spawn_params = replace(selected_params, initial_pose=spawn_pose)
 
                     # Spawn object using from_params()
                     obj = cls.from_params(spawn_params=grid_spawn_params, sim_core=self.sim_core)
@@ -531,7 +533,8 @@ class SimObjectManager(Generic[T]):
             for params, coord in zip(flat_params, grid_coords):
                 spawn_pos = grid_to_world(coord, grid_params.spacing, grid_params.offset)
                 spawn_pose = self._make_spawn_pose(params, spawn_pos)
-                grid_spawn_params = replace(params, initial_pose=spawn_pose)
+                with _normal_2d_warning_already_given():  # the caller's params already warned
+                    grid_spawn_params = replace(params, initial_pose=spawn_pose)
                 obj = cls.from_params(spawn_params=grid_spawn_params, sim_core=self.sim_core)
                 self._assign_grid_name(obj, name_prefix, len(spawned_objects))
                 self.add_object(obj)

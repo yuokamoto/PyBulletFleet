@@ -6,7 +6,14 @@ This module contains shared type definitions to avoid circular imports
 and provide a single source of truth for common types.
 """
 
+import dataclasses
+import os
+import sys
+import warnings
+from contextlib import contextmanager
+from contextvars import ContextVar
 from enum import Enum
+from typing import Iterator
 
 
 class MotionMode(str, Enum):
@@ -184,10 +191,10 @@ class CollisionMode(Enum):
                    - A pair is a candidate when its AABBs are within the collision clearance on every axis
                    - For dynamic/kinematic objects
 
-        NORMAL_2D: As NORMAL_3D, without the clearance on the z axis (z is not ignored)
+        NORMAL_2D: Deprecated, use NORMAL_3D. As NORMAL_3D, without the clearance on the z axis (z is not ignored)
                    - A pair involving one needs real z overlap; x and y get the clearance as for NORMAL_3D
                    - Differs from NORMAL_3D only with a non-zero clearance (CLOSEST_POINTS / HYBRID)
-                   - For ground vehicles that pass close under or over things
+                   - Setting it emits a DeprecationWarning; it still works and will be removed in a future release
 
         STATIC: Static object mode (never moves, but has collision)
                 - Registered in collision system during spawn
@@ -208,9 +215,6 @@ class CollisionMode(Enum):
         # Normal 3D robot
         robot = SimObject(..., collision_mode=CollisionMode.NORMAL_3D)
 
-        # 2D ground vehicle
-        vehicle = SimObject(..., collision_mode=CollisionMode.NORMAL_2D)
-
         # Static structure
         wall = SimObject(..., collision_mode=CollisionMode.STATIC)
 
@@ -222,6 +226,57 @@ class CollisionMode(Enum):
     NORMAL_2D = "normal_2d"
     STATIC = "static"
     DISABLED = "disabled"
+
+
+_NORMAL_2D_DEPRECATION_MESSAGE = (
+    "CollisionMode.NORMAL_2D is deprecated and will be removed in a future release. "
+    "It only removes the collision clearance (collision_margin) on the z axis: a pair with a NORMAL_2D body "
+    "must really overlap in z. Use CollisionMode.NORMAL_3D instead; the only difference is that near misses "
+    "within the clearance above or below are reported too (none with CONTACT_POINTS or a zero margin)."
+)
+
+_PACKAGE_DIR = os.path.dirname(os.path.abspath(__file__)) + os.sep
+_EXAMPLES_DIR = os.path.join(_PACKAGE_DIR, "examples") + os.sep
+_normal_2d_warning_suppressed: ContextVar[bool] = ContextVar("_normal_2d_warning_suppressed", default=False)
+
+
+def _is_internal_frame(filename: str) -> bool:
+    # "<string>" is the __init__ that dataclasses generates; dataclasses.replace() calls it.
+    if filename in ("<string>", dataclasses.__file__):
+        return True
+    return filename.startswith(_PACKAGE_DIR) and not filename.startswith(_EXAMPLES_DIR)
+
+
+def _warn_if_normal_2d(mode: object) -> None:
+    """Emit the NORMAL_2D ``DeprecationWarning`` if *mode* is NORMAL_2D.
+
+    The warning is attributed to the first caller outside the package (the
+    bundled examples count as outside). The default filter keeps one warning
+    per line of that code, so a line spawning thousands of objects warns once;
+    a per-process flag would hide other lines and break ``pytest.warns``.
+    """
+    if mode is not CollisionMode.NORMAL_2D or _normal_2d_warning_suppressed.get():
+        return
+    frame = sys._getframe(1)
+    level = 2
+    while frame is not None and _is_internal_frame(frame.f_code.co_filename):
+        frame = frame.f_back
+        level += 1
+    warnings.warn(_NORMAL_2D_DEPRECATION_MESSAGE, DeprecationWarning, stacklevel=level if frame is not None else 2)
+
+
+@contextmanager
+def _normal_2d_warning_already_given() -> Iterator[None]:
+    """Do not warn about NORMAL_2D inside this block.
+
+    For internal steps that pass on a mode the user has already been warned
+    about (spawning from spawn params) or that must keep NORMAL_2D themselves.
+    """
+    token = _normal_2d_warning_suppressed.set(True)
+    try:
+        yield
+    finally:
+        _normal_2d_warning_suppressed.reset(token)
 
 
 class CollisionDetectionMethod(Enum):

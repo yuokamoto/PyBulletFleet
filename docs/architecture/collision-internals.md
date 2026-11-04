@@ -171,10 +171,7 @@ This section provides comprehensive details for each collision mode.
 - **PyBullet Collision**: Enabled
 
 **Use Cases**:
-- Flying drones (need Z-axis collision)
-- 3D manipulators
-- Multi-level warehouses
-- Any object that moves in 3D space
+- Any moving object: ground robots (AGVs, AMRs), drones, manipulators
 
 **Configuration**:
 ```python
@@ -191,7 +188,11 @@ drone = SimObject(
 - Candidates are the bodies sharing a cell, for both modes
 - Same cost as NORMAL_2D: the two differ only in the z clearance
 
-### NORMAL_2D - No Clearance in Z
+### NORMAL_2D - No Clearance in Z (Deprecated)
+
+NORMAL_2D is deprecated: setting it emits a `DeprecationWarning`, and it will
+be removed in a future release. Use NORMAL_3D; the only difference is that a
+body within the clearance above or below is reported.
 
 **Characteristics**:
 - **Candidates**: the bodies sharing one of its cells
@@ -200,21 +201,6 @@ drone = SimObject(
 - **Z-Axis**: AABB Z must actually overlap (no margin in z); Z is not ignored
 - **Differs from NORMAL_3D** only with a non-zero clearance (CLOSEST_POINTS / HYBRID): a body within the clearance above or below is not reported
 
-**Use Cases**:
-- Ground robots (AGVs, AMRs)
-- Warehouse robots (single floor)
-- 2D path planning
-- Most typical use cases
-
-**Configuration**:
-```python
-agv = SimObject(
-    body_id=body_id,
-    sim_core=sim_core,
-    collision_mode=CollisionMode.NORMAL_2D,
-    mass=0.0
-)
-```
 
 ### STATIC - Fixed Objects
 
@@ -362,11 +348,11 @@ robot_3d = SimObject(
     mass=0.0,  # Kinematic
 )
 
-# Moving 2D AGV
+# Moving ground AGV
 agv = SimObject(
     body_id=body_id,
     sim_core=sim_core,
-    collision_mode=CollisionMode.NORMAL_2D,
+    collision_mode=CollisionMode.NORMAL_3D,
     mass=0.0,
 )
 

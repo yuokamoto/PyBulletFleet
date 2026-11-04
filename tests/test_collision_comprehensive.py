@@ -43,6 +43,10 @@ logger = logging.getLogger(__name__)
 # ============================================================================
 
 
+# These tests cover the deprecated CollisionMode.NORMAL_2D on purpose.
+allow_normal_2d = pytest.mark.filterwarnings("ignore:CollisionMode.NORMAL_2D is deprecated:DeprecationWarning")
+
+
 @pytest.fixture
 def sim_core_kinematics():
     """Simulation with physics=False, CLOSEST_POINTS (recommended default)"""
@@ -302,6 +306,7 @@ class TestBasicCollisionDetection:
     """Test basic collision detection for all mode combinations"""
 
     @pytest.mark.parametrize("mode1,mode2,distance,should_collide", list(generate_collision_test_cases()))
+    @allow_normal_2d
     def test_collision_mode_combinations(self, sim_core_kinematics, mode1, mode2, distance, should_collide):
         """
         Test all collision mode combinations with overlapping and separated objects.
@@ -370,6 +375,7 @@ class TestCollisionDetectionMethod:
         assert expected in pairs, f"CONTACT_POINTS should detect overlapping objects. pairs={pairs}"
 
 
+@allow_normal_2d
 @pytest.mark.parametrize("axis", [0, 1, 2])
 @pytest.mark.parametrize("mode", [CollisionMode.NORMAL_2D, CollisionMode.NORMAL_3D])
 @pytest.mark.parametrize("method", [CollisionDetectionMethod.CLOSEST_POINTS, CollisionDetectionMethod.HYBRID])
@@ -403,6 +409,7 @@ def test_margin_pair_across_nonadjacent_cells(axis, mode, method):
         p.disconnect(sim.client)
 
 
+@allow_normal_2d
 def test_normal_2d_pair_requires_actual_z_overlap(sim_core_kinematics):
     first = create_test_box(sim_core_kinematics, [0, 0, 0], size=0.05, collision_mode=CollisionMode.NORMAL_2D)
     second = create_test_box(sim_core_kinematics, [0, 0, 0.11], size=0.05, collision_mode=CollisionMode.NORMAL_3D)
@@ -612,6 +619,7 @@ def test_set_collision_margin_rechecks_stationary_pair():
         p.disconnect(sim.client)
 
 
+@allow_normal_2d
 def test_registration_covers_the_aabb_enlarged_by_half_the_margin():
     sim = MultiRobotSimulationCore(
         SimulationParams(
@@ -1282,6 +1290,7 @@ def test_broadphase_without_margin_returns_every_touching_pair(seed):
     assert missed == 0
 
 
+@allow_normal_2d
 @pytest.mark.parametrize("seed", range(6))
 @pytest.mark.parametrize("margin", [0.0, 0.02, 0.1])
 def test_broadphase_finds_pairs_with_normal_2d_bodies(seed, margin):
@@ -1294,6 +1303,7 @@ def test_broadphase_finds_pairs_with_normal_2d_bodies(seed, margin):
     assert missed == 0
 
 
+@allow_normal_2d
 @pytest.mark.parametrize("seed", range(4))
 @pytest.mark.parametrize("margin", [0.0, 0.02, 0.1])
 def test_broadphase_finds_normal_2d_pairs_from_either_side(seed, margin):
@@ -1307,6 +1317,7 @@ def test_broadphase_finds_normal_2d_pairs_from_either_side(seed, margin):
     assert missed == 0
 
 
+@allow_normal_2d
 @pytest.mark.parametrize("seed", range(4))
 @pytest.mark.parametrize("margin", [0.0, 0.02, 0.1])
 @pytest.mark.parametrize("ignore_static", [False, True], ids=["static_counts", "static_ignored"])
@@ -1324,6 +1335,7 @@ def test_broadphase_finds_pairs_with_static_bodies(seed, margin, ignore_static, 
     assert missed == 0
 
 
+@allow_normal_2d
 @pytest.mark.parametrize("seed", range(3))
 @pytest.mark.parametrize("margin", [0.02, 0.1])
 @pytest.mark.parametrize("change", ["setter", "params_margin", "params_method"])
@@ -1382,6 +1394,7 @@ def test_a_margin_change_reregisters_bodies_registered_with_the_old_one(change, 
         p.disconnect(sim.client)
 
 
+@allow_normal_2d
 @pytest.mark.parametrize("kind", [CollisionMode.NORMAL_3D, CollisionMode.STATIC])
 @pytest.mark.parametrize("ignore_static", [False, True], ids=["static_counts", "static_ignored"])
 @pytest.mark.parametrize("margin", [0.0, 0.02])
@@ -1425,6 +1438,7 @@ def test_a_moved_normal_2d_body_and_one_centred_in_the_next_layer(kind, ignore_s
         p.disconnect(sim.client)
 
 
+@allow_normal_2d
 def test_the_grid_follows_every_body():
     """Each body is in exactly the cells its AABB, enlarged by margin/2 (not in
     z for NORMAL_2D), touches, through moves, mode changes between NORMAL_2D,
@@ -1514,6 +1528,7 @@ def test_issue_89_bodies_one_to_one_and_a_half_cells_wide_touching_without_margi
         p.disconnect(sim.client)
 
 
+@allow_normal_2d
 @pytest.mark.parametrize("modes", [(CollisionMode.NORMAL_2D,) * 2, (CollisionMode.NORMAL_2D, CollisionMode.NORMAL_3D)])
 def test_normal_2d_pair_across_a_z_cell_boundary(modes):
     """Overlapping in z, with centres in different z cells (cell 0.5: z 0.40-0.60
@@ -1578,6 +1593,7 @@ def test_shrinking_params_margin_resolves_a_stationary_pair_in_the_same_check():
         p.disconnect(sim.client)
 
 
+@allow_normal_2d
 def test_a_normal_2d_body_switched_to_static_pairs_with_a_body_just_above():
     """NORMAL_2D gets no z clearance; as STATIC it does, and the pair is found without a move."""
     sim = _closest_points_sim(0.05)

@@ -158,9 +158,10 @@ Common keys are `name`, `pose`, `mass`, `user_data`, `visual_shape`,
 `collision_shape`, and `collision_mode`. Agents also accept `urdf_path`,
 `sdf_path`, `use_fixed_base`, `controller`, and agent `plugins`.
 
-`collision_mode` is per entity: `normal_3d`, `normal_2d`, `static`, or
-`disabled`. `static` is for fixed structures; `ignore_static_collision` skips
-all pairs involving that object.
+`collision_mode` is per entity: `normal_3d`, `static`, or `disabled`.
+`static` is for fixed structures; `ignore_static_collision` skips all pairs
+involving that object. `normal_2d` (no collision clearance in z) is deprecated:
+it still works but emits a `DeprecationWarning`; use `normal_3d`.
 
 ### Grid entities
 
