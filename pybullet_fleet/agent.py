@@ -1862,7 +1862,7 @@ class Agent(SimObject):
                 step = math.copysign(max_vel * dt, diff)
                 new_pos = target if abs(step) >= abs(diff) else state.position + step
             else:
-                new_pos = self._ramped_joint_position(state, target, step_start, now, max_vel)
+                new_pos = self._ramped_joint_position(state, target, step_start, now, max_vel, dt)
             p.resetJointState(self.body_id, state.index, new_pos, physicsClientId=self._pid)
             state.position = new_pos
             any_moved = True
@@ -1912,6 +1912,7 @@ class Agent(SimObject):
         step_start: float,
         now: float,
         max_vel: float,
+        dt: float,
     ) -> float:
         """Where a ramped joint is at ``now``, from a TwoPointInterpolation.
 
@@ -1927,7 +1928,11 @@ class Agent(SimObject):
 
         What the solver will not plan -- a target the joint is moving away
         from, or one closer than its braking distance -- goes to
-        :meth:`_braking_joint_step` until it will.
+        :meth:`_braking_joint_step` until it will. That step is given ``dt``
+        itself rather than ``now - step_start``: the difference of two clock
+        readings rounds differently depending on how far the clock has run, so
+        an agent restored from a checkpoint into a different clock reading
+        would brake to rest a step apart from the run it was taken from.
         """
         accel = state.max_accel
         decel = state.decel
@@ -1956,7 +1961,7 @@ class Agent(SimObject):
                 )
             )
             if tpi is None:
-                return self._braking_joint_step(state, decel, now - step_start)
+                return self._braking_joint_step(state, decel, dt)
             state.trajectory = tpi
             state.trajectory_target = target
             state.braking = False
