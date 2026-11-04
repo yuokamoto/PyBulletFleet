@@ -24,7 +24,8 @@ are not recommended for production use yet.
   how far above the platform's top an object may be and still be attached
   when the cabin starts moving. Keep it below the floor spacing; with 1.0 and
   floors 0.6 m apart, a robot waiting on the floor above the cabin was taken
-  along and arrived 0.6 m above the floor it was carried to.
+  along and arrived 0.6 m above the floor it was carried to. `Elevator.from_params`
+  warns when it reaches the smallest floor spacing.
 
 - `ControllerParams.stop_on_collision`: an agent that sets it stops dead, as
   `stop()` does, on the step a collision starts that involves it or an object
