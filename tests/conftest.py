@@ -62,6 +62,9 @@ class MockSimCore:
     def _mark_object_moved(self, object_id):
         pass
 
+    def notify_geometry_changed(self, obj):
+        pass
+
     def _register_link_attachment_parent(self, object_id: int) -> None:
         self._link_attachment_parent_ids.add(object_id)
 

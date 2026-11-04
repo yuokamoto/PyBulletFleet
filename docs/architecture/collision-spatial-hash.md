@@ -109,15 +109,22 @@ def _update_object_aabb(self, object_id: int):
     """Called when object moves"""
     obj = self._sim_objects_dict[object_id]
 
-    # Query PyBullet (expensive!)
-    self._cached_aabbs_dict[object_id] = p.getAABB(
-        obj.body_id,
-        physicsClientId=self.client
-    )
+    # The box of every link: p.getAABB(body) alone is the base link's.
+    # One getAABB() call for a body without child links, one per link
+    # (unioned) for an articulated body.
+    self._cached_aabbs_dict[object_id] = self._body_aabb(obj)
 
     # Update grid registration
     self._update_object_spatial_grid(object_id)
 ```
+
+An articulated body's box covers every link, so it changes when a joint
+moves. `notify_geometry_changed(obj)` marks the body moved and refreshes its
+box and grid cells: at once outside a step, with the flushed poses (Phase 3)
+inside one. `Agent.set_joint_position()`, `set_joints_positions()`, the
+kinematic joint interpolation and a joint checkpoint restore call it; physics
+bodies are re-read after every `stepSimulation()`. Call it after moving a
+body's joints directly with `p.resetJointState()`.
 
 **Invalidation**: Cache invalidated on movement, mode change, or removal
 

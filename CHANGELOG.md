@@ -532,6 +532,29 @@ are not recommended for production use yet.
 
 ### Fixed
 
+- The collision broadphase AABB of an articulated body covers all of its
+  links, not only the base link (issue #68). `p.getAABB(body)` returns the base
+  link's box, so a child link touching another object (an arm's wrist, a
+  wheel below a mobile base) never reached the narrow phase, and `query_aabb()`
+  could not find a body by its upper links. The cached box is now the union of
+  the link boxes, and it follows the joints: `Agent.set_joint_position()`,
+  `set_joints_positions()`, kinematic joint interpolation and a joint
+  checkpoint restore refresh it (at once outside a step, before the collision
+  check inside one) and mark the body moved; physics bodies are re-read after
+  every `stepSimulation()` as before. The new
+  `MultiRobotSimulationCore.notify_geometry_changed(obj)` does the same for
+  joints moved directly with `p.resetJointState()`.
+  A body without child links still costs one `getAABB()` call per update:
+  refreshing the AABB and grid cells of 1,000 single-link agents took 2.48 ms
+  before and 2.55 ms after. An articulated body costs one call per link: one
+  AABB and grid refresh went from 2.6 to 4.6 µs for the bundled `mobile_robot`
+  and `arm_robot` (4 joints each) and from 2.6 to 6.0 µs for a 7-joint
+  `kuka_iiwa`. Scenes of articulated robots also get larger boxes, so more
+  broadphase candidates, and now find the contacts of their child links: with
+  1,000 `mobile_robot` agents in a 40 m square, about 10% more pairs were in
+  collision, the AABB refresh took 11.1 ms instead of 7.8 ms per step and the
+  collision check 69.6 ms instead of 62.4 ms.
+
 - `REPLACE_NEXT` elevators: a request for the floor the moving cabin is
   already heading to now drops the pending floor (`REPLACED`) instead of being
   rejected and leaving it queued. A controller that changed its target and then
