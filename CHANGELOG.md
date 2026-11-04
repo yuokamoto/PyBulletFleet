@@ -536,12 +536,13 @@ are not recommended for production use yet.
   release (#104). It differs from `NORMAL_3D` only in giving a pair with a
   `NORMAL_2D` body no collision clearance on the z axis, which matters only
   with `CLOSEST_POINTS` or `HYBRID` and a non-zero `collision_margin`. Setting
-  it still works but emits a `DeprecationWarning`, from spawn parameters
+  it still works but emits a `FutureWarning`, from spawn parameters
   (including `from_dict()` and config `collision_mode: normal_2d`), object
-  constructors and `set_collision_mode()`. The warning points at the calling
-  line outside the package, so Python's default filter (which shows a
-  `DeprecationWarning` raised from the script being run) shows it once per
-  line however many objects that line spawns. Use `NORMAL_3D`; the only difference is that near misses
+  constructors and `set_collision_mode()`. A `FutureWarning`, not a
+  `DeprecationWarning`, so that it is shown by default wherever the call is,
+  not only in the script being run. The warning points at the calling line
+  outside the package, so Python's default filter shows it once per line
+  however many objects that line spawns. Use `NORMAL_3D`; the only difference is that near misses
   within the clearance above or below are reported. The replay v1 profile
   keeps its `NORMAL_2D` robots, without a warning, so recorded runs replay
   unchanged. Examples, configs and docs now use `NORMAL_3D`, apart from the

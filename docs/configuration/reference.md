@@ -161,7 +161,7 @@ Common keys are `name`, `pose`, `mass`, `user_data`, `visual_shape`,
 `collision_mode` is per entity: `normal_3d`, `static`, or `disabled`.
 `static` is for fixed structures; `ignore_static_collision` skips all pairs
 involving that object. `normal_2d` (no collision clearance in z) is deprecated:
-it still works but emits a `DeprecationWarning`; use `normal_3d`.
+it still works but emits a `FutureWarning`; use `normal_3d`.
 
 ### Grid entities
 

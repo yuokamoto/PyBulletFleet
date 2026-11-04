@@ -194,7 +194,7 @@ class CollisionMode(Enum):
         NORMAL_2D: Deprecated, use NORMAL_3D. As NORMAL_3D, without the clearance on the z axis (z is not ignored)
                    - A pair involving one needs real z overlap; x and y get the clearance as for NORMAL_3D
                    - Differs from NORMAL_3D only with a non-zero clearance (CLOSEST_POINTS / HYBRID)
-                   - Setting it emits a DeprecationWarning; it still works and will be removed in a future release
+                   - Setting it emits a FutureWarning; it still works and will be removed in a future release
 
         STATIC: Static object mode (never moves, but has collision)
                 - Registered in collision system during spawn
@@ -248,7 +248,7 @@ def _is_internal_frame(filename: str) -> bool:
 
 
 def _warn_if_normal_2d(mode: object) -> None:
-    """Emit the NORMAL_2D ``DeprecationWarning`` if *mode* is NORMAL_2D.
+    """Emit the NORMAL_2D ``FutureWarning`` if *mode* is NORMAL_2D.
 
     The warning is attributed to the first caller outside the package (the
     bundled examples count as outside). The default filter keeps one warning
@@ -262,7 +262,7 @@ def _warn_if_normal_2d(mode: object) -> None:
     while frame is not None and _is_internal_frame(frame.f_code.co_filename):
         frame = frame.f_back
         level += 1
-    warnings.warn(_NORMAL_2D_DEPRECATION_MESSAGE, DeprecationWarning, stacklevel=level if frame is not None else 2)
+    warnings.warn(_NORMAL_2D_DEPRECATION_MESSAGE, FutureWarning, stacklevel=level if frame is not None else 2)
 
 
 @contextmanager

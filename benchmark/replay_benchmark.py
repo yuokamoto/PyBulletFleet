@@ -77,7 +77,7 @@ def worker(args):
             )
             # Matches the replay session, whose v1 profile fixes NORMAL_2D robots (deprecated).
             with sim.batch_spawn(), warnings.catch_warnings():
-                warnings.filterwarnings("ignore", "CollisionMode.NORMAL_2D is deprecated", DeprecationWarning)
+                warnings.filterwarnings("ignore", "CollisionMode.NORMAL_2D is deprecated", FutureWarning)
                 for entity in definition["world"]["entities"]:
                     obj = Agent.from_params(
                         AgentSpawnParams(

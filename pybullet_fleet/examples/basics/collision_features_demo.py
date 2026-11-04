@@ -12,7 +12,7 @@ This demo showcases:
 Features demonstrated:
 - NORMAL_3D mode (Green, Orange, Cyan): full 3D collision detection
 - NORMAL_2D mode (Blue, Magenta): XY collision detection; z must actually overlap.
-  NORMAL_2D is deprecated (it emits a DeprecationWarning); use NORMAL_3D in new code.
+  NORMAL_2D is deprecated (it emits a FutureWarning); use NORMAL_3D in new code.
 - DISABLED mode (White): No collision detection at all
 - Multi-cell registration (Red center object): every object is registered in each grid cell it reaches
 - Collision color change: Objects change color when actively colliding

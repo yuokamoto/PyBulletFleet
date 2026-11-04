@@ -229,7 +229,7 @@ def print_results(results_list, num_agents):
 
     print("\nInterpretation:")
     print("  - NORMAL_2D and NORMAL_3D search the same cells; any time difference is noise or the z clearance.")
-    print("  - NORMAL_2D is deprecated and emits a DeprecationWarning; it is measured here for comparison only.")
+    print("  - NORMAL_2D is deprecated and emits a FutureWarning; it is measured here for comparison only.")
     print("  - Select NORMAL_3D otherwise; it is the default.")
     print("  - Select DISABLED only when collision detection is intentionally out of scope.")
     print("=" * 70)

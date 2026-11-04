@@ -28,7 +28,7 @@ from pybullet_fleet.types import (
 
 
 # These tests cover the deprecated CollisionMode.NORMAL_2D on purpose.
-allow_normal_2d = pytest.mark.filterwarnings("ignore:CollisionMode.NORMAL_2D is deprecated:DeprecationWarning")
+allow_normal_2d = pytest.mark.filterwarnings("ignore:CollisionMode.NORMAL_2D is deprecated:FutureWarning")
 
 
 @pytest.fixture

@@ -83,7 +83,7 @@ def scatter(sim: MultiRobotSimulationCore, count: int = 300, seed: int = 3) -> N
     # NORMAL_2D is deprecated but still registered differently (no z clearance), so keep it in the mix.
     modes = [CollisionMode.STATIC, CollisionMode.NORMAL_3D, CollisionMode.NORMAL_2D, CollisionMode.DISABLED]
     with warnings.catch_warnings():
-        warnings.filterwarnings("ignore", "CollisionMode.NORMAL_2D is deprecated", DeprecationWarning)
+        warnings.filterwarnings("ignore", "CollisionMode.NORMAL_2D is deprecated", FutureWarning)
         for i in range(count):
             box(
                 sim,

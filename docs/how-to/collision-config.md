@@ -138,10 +138,10 @@ overlap in z. That matters only with `CLOSEST_POINTS` or `HYBRID` and a
 non-zero `collision_margin`; with `CONTACT_POINTS` the two behave the same.
 Setting it (in spawn parameters, a constructor, `set_collision_mode()` or a
 config's `collision_mode: normal_2d`) still works but emits a
-`DeprecationWarning` that points at the calling line. Python shows it by
-default when that line is in the script being run (and pytest shows it in its
-warnings summary), once per line however many objects the line spawns. Switch to `NORMAL_3D`; the only change is that near misses within the
-clearance above or below are reported too.
+`FutureWarning` that points at the calling line. Python shows it by
+default, once per line however many objects the line spawns. Switch to
+`NORMAL_3D`; the only change is that near misses within the clearance above or
+below are reported too.
 
 ### Setting via SimObject
 

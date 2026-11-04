@@ -190,7 +190,7 @@ drone = SimObject(
 
 ### NORMAL_2D - No Clearance in Z (Deprecated)
 
-NORMAL_2D is deprecated: setting it emits a `DeprecationWarning`, and it will
+NORMAL_2D is deprecated: setting it emits a `FutureWarning`, and it will
 be removed in a future release. Use NORMAL_3D; the only difference is that a
 body within the clearance above or below is reported.
 

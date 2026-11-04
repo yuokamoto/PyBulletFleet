@@ -21,7 +21,7 @@ BOX = ShapeParams(shape_type="box", half_extents=[0.1, 0.1, 0.1])
 
 
 def _normal_2d_warnings(record):
-    return [w for w in record if issubclass(w.category, DeprecationWarning) and "NORMAL_2D" in str(w.message)]
+    return [w for w in record if issubclass(w.category, FutureWarning) and "NORMAL_2D" in str(w.message)]
 
 
 def _assert_one_warning_from_this_file(record):
@@ -32,7 +32,7 @@ def _assert_one_warning_from_this_file(record):
 
 
 def test_message_says_what_it_does_and_what_to_use():
-    with pytest.warns(DeprecationWarning) as record:
+    with pytest.warns(FutureWarning) as record:
         SimObjectSpawnParams(collision_mode=CollisionMode.NORMAL_2D)
     message = str(_assert_one_warning_from_this_file(record).message)
     assert "z" in message and "clearance" in message
@@ -40,14 +40,14 @@ def test_message_says_what_it_does_and_what_to_use():
 
 
 def test_spawn_params_constructor_warns():
-    with pytest.warns(DeprecationWarning) as record:
+    with pytest.warns(FutureWarning) as record:
         params = SimObjectSpawnParams(name="a", collision_mode=CollisionMode.NORMAL_2D)
     _assert_one_warning_from_this_file(record)
     assert params.collision_mode is CollisionMode.NORMAL_2D
 
 
 def test_agent_spawn_params_constructor_warns():
-    with pytest.warns(DeprecationWarning) as record:
+    with pytest.warns(FutureWarning) as record:
         AgentSpawnParams(name="a", visual_shape=BOX, collision_mode=CollisionMode.NORMAL_2D)
     _assert_one_warning_from_this_file(record)
 
@@ -55,21 +55,21 @@ def test_agent_spawn_params_constructor_warns():
 @pytest.mark.parametrize("cls", [SimObjectSpawnParams, AgentSpawnParams, DoorParams, ElevatorParams])
 def test_parsing_the_string_from_a_config_warns(cls):
     config = {"name": "a", "urdf_path": "x.urdf", "open_positions": {"j": 1.0}, "floors": {"1F": 0.0}}
-    with pytest.warns(DeprecationWarning) as record:
+    with pytest.warns(FutureWarning) as record:
         params = cls.from_dict({**config, "collision_mode": "normal_2d"})
     _assert_one_warning_from_this_file(record)
     assert params.collision_mode is CollisionMode.NORMAL_2D
 
 
 def test_object_constructors_warn_once(pybullet_env):
-    with pytest.warns(DeprecationWarning) as record:
+    with pytest.warns(FutureWarning) as record:
         obj = SimObject.from_mesh(collision_shape=BOX, pose=Pose.from_xyz(0, 0, 1), collision_mode=CollisionMode.NORMAL_2D)
     _assert_one_warning_from_this_file(record)
     assert obj.collision_mode is CollisionMode.NORMAL_2D
 
 
 def test_agent_constructor_warns_once(pybullet_env):
-    with pytest.warns(DeprecationWarning) as record:
+    with pytest.warns(FutureWarning) as record:
         agent = Agent.from_mesh(visual_shape=BOX, collision_shape=BOX, collision_mode=CollisionMode.NORMAL_2D)
     _assert_one_warning_from_this_file(record)
     assert agent.collision_mode is CollisionMode.NORMAL_2D
@@ -77,7 +77,7 @@ def test_agent_constructor_warns_once(pybullet_env):
 
 @pytest.mark.parametrize("spawn", [SimObject.from_params, Agent.from_params])
 def test_spawning_from_params_does_not_warn_a_second_time(pybullet_env, spawn):
-    with pytest.warns(DeprecationWarning):
+    with pytest.warns(FutureWarning):
         params = AgentSpawnParams(name="a", visual_shape=BOX, collision_shape=BOX, collision_mode=CollisionMode.NORMAL_2D)
     with warnings.catch_warnings(record=True) as record:
         warnings.simplefilter("always")
@@ -88,7 +88,7 @@ def test_spawning_from_params_does_not_warn_a_second_time(pybullet_env, spawn):
 
 def test_set_collision_mode_warns(pybullet_env):
     obj = SimObject.from_mesh(collision_shape=BOX, pose=Pose.from_xyz(0, 0, 1))
-    with pytest.warns(DeprecationWarning) as record:
+    with pytest.warns(FutureWarning) as record:
         obj.set_collision_mode(CollisionMode.NORMAL_2D)
     _assert_one_warning_from_this_file(record)
     assert obj.collision_mode is CollisionMode.NORMAL_2D
@@ -97,7 +97,7 @@ def test_set_collision_mode_warns(pybullet_env):
 @pytest.mark.parametrize("mode", [CollisionMode.NORMAL_3D, CollisionMode.STATIC, CollisionMode.DISABLED])
 def test_other_modes_do_not_warn(pybullet_env, mode):
     with warnings.catch_warnings():
-        warnings.simplefilter("error", DeprecationWarning)
+        warnings.simplefilter("error", FutureWarning)
         SimObjectSpawnParams.from_dict({"name": "a", "collision_mode": mode.value})
         AgentSpawnParams(name="a", visual_shape=BOX, collision_mode=mode)
         obj = SimObject.from_mesh(collision_shape=BOX, collision_mode=mode)
@@ -146,6 +146,33 @@ def test_a_config_warns_once_per_spawn_call():
 def test_dataclasses_replace_in_user_code_is_attributed_to_the_caller():
     from dataclasses import replace
 
-    with pytest.warns(DeprecationWarning) as record:
+    with pytest.warns(FutureWarning) as record:
         replace(SimObjectSpawnParams(name="a"), collision_mode=CollisionMode.NORMAL_2D)
     _assert_one_warning_from_this_file(record)
+
+
+def test_python_shows_it_by_default_for_a_call_in_an_imported_module(tmp_path):
+    """A DeprecationWarning would be hidden here: by default Python shows one only
+    for code in __main__. The spawn call sits in a module the script imports."""
+    import os
+    import subprocess
+    import sys
+
+    (tmp_path / "spawner.py").write_text(
+        "from pybullet_fleet.sim_object import SimObjectSpawnParams\n"
+        "from pybullet_fleet.types import CollisionMode\n"
+        "def spawn():\n"
+        "    SimObjectSpawnParams(name='a', collision_mode=CollisionMode.NORMAL_2D)\n"
+    )
+    repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    env = dict(os.environ, PYTHONPATH=os.pathsep.join([str(tmp_path), repo_root]))
+    env.pop("PYTHONWARNINGS", None)
+    result = subprocess.run(
+        [sys.executable, "-c", "import spawner; spawner.spawn()"],
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=120,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "spawner.py:4: FutureWarning: CollisionMode.NORMAL_2D is deprecated" in result.stderr

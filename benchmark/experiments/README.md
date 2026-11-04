@@ -105,7 +105,7 @@ python benchmark/experiments/collision_mode_comparison.py \
 
 `NORMAL_2D` and `NORMAL_3D` search the same cells; `NORMAL_2D` only drops the
 collision clearance on the z axis. `NORMAL_2D` is deprecated and emits a
-`DeprecationWarning`; the script measures it for comparison only. The reported
+`FutureWarning`; the script measures it for comparison only. The reported
 difference is specific to the grid density, cell size, object size, movement,
 and host used for the run.
 

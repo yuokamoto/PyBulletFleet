@@ -347,7 +347,7 @@ class TestSimObjectSpawnParamsFromDict:
             result = SimObjectSpawnParams.from_dict({"name": "obj", "collision_mode": mode_str})
             assert result.collision_mode == expected
         # Deprecated, but still parsed.
-        with pytest.warns(DeprecationWarning, match="NORMAL_2D is deprecated"):
+        with pytest.warns(FutureWarning, match="NORMAL_2D is deprecated"):
             result = SimObjectSpawnParams.from_dict({"name": "obj", "collision_mode": "normal_2d"})
         assert result.collision_mode == CollisionMode.NORMAL_2D
 
@@ -1257,7 +1257,7 @@ class TestCollisionMode:
         obj.set_collision_mode(CollisionMode.DISABLED)
         assert_object_properties(obj, mass=1.0, collision_mode=CollisionMode.DISABLED, position=(0, 0, 1), is_kinematic=False)
 
-        with pytest.warns(DeprecationWarning, match="NORMAL_2D is deprecated"):
+        with pytest.warns(FutureWarning, match="NORMAL_2D is deprecated"):
             obj.set_collision_mode(CollisionMode.NORMAL_2D)
         assert_object_properties(obj, mass=1.0, collision_mode=CollisionMode.NORMAL_2D, position=(0, 0, 1), is_kinematic=False)
 
