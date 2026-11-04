@@ -532,6 +532,16 @@ are not recommended for production use yet.
 
 ### Fixed
 
+- Batched controllers (`batch_omni`, `batch_differential`): a goal replaced
+  while the agent moves faster than `max_linear_vel` -- the limit lowered
+  during the motion -- now brakes down to the limit at the configured
+  deceleration, as the per-agent controllers do. The batched closed form used
+  to accelerate further in that first phase, so the agent ran ahead of its
+  trajectory until it cruised. The closed form (`trapezoid_distance()`,
+  `trapezoid_speed()`) also takes an end speed `ve` now, and is checked against
+  `TwoPointInterpolation.get_point()` for start speeds toward and away from the
+  target, above `vmax`, end speeds, asymmetric ramps and either direction.
+
 - `REPLACE_NEXT` elevators: a request for the floor the moving cabin is
   already heading to now drops the pending floor (`REPLACED`) instead of being
   rejected and leaving it queued. A controller that changed its target and then
