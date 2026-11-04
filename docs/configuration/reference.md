@@ -60,7 +60,7 @@ their periodic reports.
 |---|---:|---|
 | `collision_check_frequency` | `None` | `None`: every step; `0`: disabled; positive value: Hz. |
 | `collision_detection_method` | automatic | `closest_points`, `contact_points`, or `hybrid`. Automatic selection is closest-points without physics and contact-points with physics. |
-| `collision_margin` | `0.02` | Metres used by closest-points checks; ignored by contact-points checks. |
+| `collision_margin` | `0.02` | Metres used by closest-points checks; ignored by contact-points checks. A list `[x, y, z]` gives one clearance per world axis; see [Per-axis clearance](per-axis-clearance). |
 | `spatial_hash_cell_size_mode` | `auto_initial` | `auto_initial`, `auto_adaptive`, or `constant`. |
 | `spatial_hash_cell_size` | `None` | Fixed cell size in metres when mode is `constant`. |
 | `multi_cell_threshold` | `1.5` | Accepted for compatibility; not used. Every body is registered in each cell it reaches. |

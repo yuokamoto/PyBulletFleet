@@ -141,7 +141,13 @@ config's `collision_mode: normal_2d`) still works but emits a
 `FutureWarning` that points at the calling line. Python shows it by
 default, once per line however many objects the line spawns. Switch to
 `NORMAL_3D`; the only change is that near misses within the clearance above or
-below are reported too.
+below are reported too. To keep no clearance on the z axis, also set
+`collision_margin: [m, m, 0]` (see [Per-axis clearance](per-axis-clearance)).
+That applies to every pair, not only pairs with a former `NORMAL_2D` body, and
+reports a near miss only when it is level: between upright boxes or upright
+cylinders that overlap in height it reports what `NORMAL_2D` did, while a near
+miss whose closest points are at different heights (two spheres, a sloped
+mesh) that `NORMAL_2D` reported is no longer reported.
 
 ### Setting via SimObject
 
@@ -192,6 +198,45 @@ clearance requirements of the robot and its task.
 Use `sim.set_collision_margin(value)` to change the clearance during a run.
 It refreshes the spatial grid and rechecks stationary pairs at the next
 collision check. The value must be finite and non-negative.
+
+(per-axis-clearance)=
+### Per-axis clearance
+
+`collision_margin` also takes one clearance per world axis, `(x, y, z)` in
+Python or a three-item list in YAML:
+
+```yaml
+collision_margin: [0.05, 0.05, 0.0]  # side by side within 5 cm; nothing above or below
+```
+
+```python
+SimulationParams(collision_margin=(0.05, 0.05, 0.0))
+sim.set_collision_margin((0.05, 0.05, 0.0))
+```
+
+This reports ground vehicles that come within 5 cm of each other side by side,
+but not one passing close under a shelf or a carried load. Each component must
+be finite and non-negative.
+
+A pair that touches or penetrates is always reported. A pair that does not is
+reported when both hold:
+
+- **Broad phase**: their AABBs, each axis enlarged by that axis's clearance,
+  overlap.
+- **Narrow phase**: `getClosestPoints()` is queried with the largest
+  component, and the separation between the closest points (the vector from
+  the point on one body to the point on the other) is, along each world axis,
+  within that axis's clearance. So the gap is within the largest component in
+  straight-line distance and within each axis's clearance along that axis:
+  with `(0.05, 0.05, 0.0)`, a level gap of up to 5 cm. A slack of 10
+  micrometres per axis absorbs PyBullet's rounding, so closest points that are
+  level in exact geometry count as level.
+
+The axes are the world axes, as AABBs are, not a body's own axes. A scalar
+behaves exactly as before, and so does a triple with three equal components.
+`CONTACT_POINTS`, and the pairs with a physics body under `HYBRID`, ignore the
+clearance as they ignore a scalar one. The clearance is global; there is no
+per-object clearance. The replay profile records a scalar margin only.
 
 ---
 

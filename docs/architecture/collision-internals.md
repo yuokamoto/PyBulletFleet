@@ -155,6 +155,13 @@ In the current implementation, an object is physics-enabled when it has
 member is physics-enabled; only pairs where both members are kinematic use
 `getClosestPoints()` and `collision_margin`.
 
+With a per-axis `collision_margin` `(x, y, z)`, `getClosestPoints()` is queried
+with the largest component, and a returned point that does not touch
+(distance > 0) is kept only if the vector between its two positions is within
+each axis's clearance along that axis (with 10 micrometres of slack). The
+broad phase enlarges each AABB axis by that axis's clearance. See
+[Per-axis clearance](per-axis-clearance).
+
 ---
 
 (collision-mode-details)=
@@ -192,7 +199,10 @@ drone = SimObject(
 
 NORMAL_2D is deprecated: setting it emits a `FutureWarning`, and it will
 be removed in a future release. Use NORMAL_3D; the only difference is that a
-body within the clearance above or below is reported.
+body within the clearance above or below is reported. A
+`collision_margin` of `(m, m, 0)` removes the z clearance instead, for every
+pair, and also requires a near miss to be level (see
+[Per-axis clearance](per-axis-clearance)).
 
 **Characteristics**:
 - **Candidates**: the bodies sharing one of its cells

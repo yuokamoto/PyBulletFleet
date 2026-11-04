@@ -1460,7 +1460,7 @@ def test_the_grid_follows_every_body():
     )
 
     def consistent():
-        half = sim._collision_broadphase_margin() / 2
+        half = tuple(m / 2 for m in sim._collision_broadphase_margin())
         grid = {}
         for object_id, cells in sim._cached_object_to_cell.items():
             if sorted(cells) != sorted(sim._get_overlapping_cells(object_id, half)):

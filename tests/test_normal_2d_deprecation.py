@@ -37,6 +37,7 @@ def test_message_says_what_it_does_and_what_to_use():
     message = str(_assert_one_warning_from_this_file(record).message)
     assert "z" in message and "clearance" in message
     assert "NORMAL_3D" in message
+    assert "collision_margin=(m, m, 0)" in message
 
 
 def test_spawn_params_constructor_warns():

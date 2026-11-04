@@ -14,6 +14,18 @@ are not recommended for production use yet.
 
 ### Added
 
+- Per-axis collision clearance (#105): `collision_margin` (in
+  `SimulationParams`, YAML and `set_collision_margin()`) also takes an
+  `(x, y, z)` triple, one clearance per world axis, for example
+  `(0.05, 0.05, 0.0)` to report bodies within 5 cm side by side but not one
+  passing close under a shelf. The broad phase enlarges each AABB axis by that
+  axis's clearance; `CLOSEST_POINTS` and `HYBRID` query `getClosestPoints()`
+  with the largest component and keep a pair that does not touch only if the
+  vector between its closest points is within each axis's clearance along
+  that axis. A scalar margin behaves and costs as before; `CONTACT_POINTS`
+  ignores the clearance as before. A margin change, through the setter or
+  `params`, rechecks stationary pairs as a scalar change does.
+
 - `MultiRobotSimulationCore.query_aabb(aabb_min, aabb_max)`: the objects whose
   AABB overlaps a box, looked up through the collision spatial hash, so the
   cost follows how crowded the box is rather than how many objects the
@@ -543,7 +555,9 @@ are not recommended for production use yet.
   not only in the script being run. The warning points at the calling line
   outside the package, so Python's default filter shows it once per line
   however many objects that line spawns. Use `NORMAL_3D`; the only difference is that near misses
-  within the clearance above or below are reported. The replay v1 profile
+  within the clearance above or below are reported. To keep no z clearance,
+  also set `collision_margin=(m, m, 0)` (#105), which applies to every pair
+  and also requires a near miss to be level; the warning says so. The replay v1 profile
   keeps its `NORMAL_2D` robots, without a warning, so recorded runs replay
   unchanged. Examples, configs and docs now use `NORMAL_3D`, apart from the
   collision-mode demo and benchmark, which note the deprecation.

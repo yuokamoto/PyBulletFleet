@@ -53,7 +53,8 @@ Narrow Phase: PyBullet API — per-pair verification
 | Carried object (during pick) | `DISABLED` | Parent agent handles collision |
 | Conveyor belt surface | `STATIC` | Structure doesn't move |
 
-`NORMAL_2D` (no clearance in z) is deprecated and emits a `FutureWarning`; use `NORMAL_3D`.
+`NORMAL_2D` (no clearance in z) is deprecated and emits a `FutureWarning`; use `NORMAL_3D`, with
+`collision_margin: [m, m, 0]` if no pair should get z clearance (it also requires a near miss to be level).
 
 ```python
 from pybullet_fleet.types import CollisionMode
