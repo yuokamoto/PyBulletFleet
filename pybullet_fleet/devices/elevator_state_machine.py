@@ -76,8 +76,9 @@ class ElevatorStateMachine:
     def request_floor(self, floor_name: str, instant: bool = False) -> ElevatorRequestResult:
         """Accept, queue, replace, redirect, or reject a requested destination.
 
-        Only ``REDIRECT`` turns a moving cabin toward a new floor; it keeps its
-        passengers and drops any pending floor, so the latest request wins.
+        Apart from an ``instant`` request (below), only ``REDIRECT`` turns a
+        moving cabin toward a new floor; it keeps its passengers and drops any
+        pending floor, so the latest request wins.
         ``REPLACE_NEXT`` replaces the pending destination after the current
         trip, and a request for the floor the cabin is already heading to
         drops it -- the caller changed its mind back. ``QUEUE`` preserves
