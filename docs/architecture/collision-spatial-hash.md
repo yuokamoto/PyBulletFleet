@@ -158,10 +158,14 @@ or four near a cell boundary. A body larger than a cell, a wall say, is in
 every cell it covers. The pair search then reads only the body's own cells,
 not the 9 or 27 around it, and the margin-based AABB filter (with its NORMAL_2D
 z rule, the zero margin for a pair with a physics body, `ignore_static` and
-DISABLED) decides on each candidate.
+DISABLED) decides on each candidate. A *moving* body much larger than a cell
+pays for its size on every move: it is removed from and added to every cell it
+covers, O(cells covered), each time its cells change. A large static body pays
+this once.
 
 `multi_cell_threshold` is accepted for compatibility and no longer used: every
-body is registered wherever it reaches, whatever its size.
+body is registered wherever it reaches, whatever its size, so it is no longer a
+way to cap that cost for a large moving body. A larger `cell_size` is.
 
 ```
 Cell size: 2.0m
