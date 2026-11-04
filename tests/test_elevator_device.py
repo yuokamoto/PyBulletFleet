@@ -4,6 +4,7 @@ import pytest
 from pybullet_fleet import Agent, AgentSpawnParams, Pose, SimObject
 from pybullet_fleet.sim_object import SimObjectSpawnParams, ShapeParams
 from pybullet_fleet.devices.elevator import Elevator, ElevatorParams
+from pybullet_fleet.devices.elevator_state_machine import ElevatorRequestPolicy
 
 
 @pytest.fixture
@@ -15,7 +16,7 @@ def sim_core(pybullet_env):
     return sc
 
 
-def _make_elevator(sim_core, floors=None, initial_floor="L1"):
+def _make_elevator(sim_core, floors=None, initial_floor="L1", **extra):
     """Helper: create an Elevator with standard config."""
     if floors is None:
         floors = {"L1": 0.0, "L2": 8.0}
@@ -27,6 +28,7 @@ def _make_elevator(sim_core, floors=None, initial_floor="L1"):
         initial_floor=initial_floor,
         joint_name="lift",
         platform_link="platform",
+        **extra,
     )
     return Elevator.from_params(params, sim_core)
 
@@ -82,6 +84,16 @@ class TestElevatorAutoAttach:
         far_box = _make_box_on_platform(sim_core, x=20.0, y=20.0, z=0.2)
         found = elev._find_objects_on_platform()
         assert far_box not in found
+
+    def test_an_object_above_the_boarding_height_is_not_on_board(self, sim_core):
+        """An object waiting on the floor above the cabin does not ride along."""
+        elev = _make_elevator(sim_core, boarding_height=0.2)
+        on = _make_box_on_platform(sim_core, x=0.0, y=0.0, z=0.2)
+        above = _make_box_on_platform(sim_core, x=0.5, y=0.5, z=0.8)
+        found = elev._find_objects_on_platform()
+        assert on in found
+        assert above not in found
+        assert above in _make_elevator(sim_core)._find_objects_on_platform(), "the default reaches 1 m up"
 
     def test_find_objects_ignores_self(self, sim_core):
         """Elevator itself is never in the candidate list."""
@@ -351,7 +363,7 @@ class TestElevatorInstantRide:
         sim_core.tick(10)
         assert elev.is_moving
 
-        elev.request_floor("L3", instant=True)
+        assert elev.request_floor("L3", instant=True).value == "redirected"
         sim_core.tick(1)
 
         assert elev.current_floor == "L3"
@@ -399,3 +411,77 @@ class TestElevatorCarriedLoad:
         assert load.get_pose().position[2] == pytest.approx(load_z + 4.0, abs=1e-3)
         assert not robot.is_attached()
         assert load in robot.get_attached_objects()
+
+
+class TestElevatorRedirect:
+    def test_a_moving_cabin_turns_to_the_latest_floor_with_its_passengers(self, sim_core):
+        elev = _make_elevator(sim_core, floors={"L1": 0.0, "L2": 4.0, "L3": 8.0}, request_policy="redirect")
+        box = _make_box_on_platform(sim_core, x=0.0, y=0.0, z=0.2)
+        elev.request_floor("L3")
+        sim_core.tick(100)
+        assert elev.is_moving
+        assert elev.request_floor("L2").value == "redirected"
+        sim_core.tick(3000)
+        assert elev.current_floor == "L2"
+        assert not elev.is_moving
+        assert box.get_pose().position[2] == pytest.approx(4.2, abs=0.05)
+
+    def test_a_reversal_brakes_and_turns_within_the_profile(self, sim_core):
+        """Redirected against its motion, the cabin brakes at max_accel, turns, and stops on the floor."""
+        elev = _make_elevator(
+            sim_core,
+            floors={"L1": 0.0, "L2": 4.0, "L3": 8.0},
+            request_policy="redirect",
+            max_speed=1.0,
+            max_accel=1.0,
+        )
+        dt = sim_core._dt
+        heights = []
+
+        def run(steps):
+            for _ in range(steps):
+                sim_core.tick(1)
+                heights.append(elev.get_joint_state_by_name("lift")[0])
+
+        elev.request_floor("L3")
+        run(int(3.0 / dt))  # up to full speed, 2.5 m up
+        assert elev.request_floor("L1").value == "redirected"
+        run(int(12.0 / dt))
+
+        speeds = [(b - a) / dt for a, b in zip(heights, heights[1:])]
+        accels = [abs(b - a) / dt for a, b in zip(speeds, speeds[1:])]
+        assert max(accels) <= 1.0 + 1e-6  # no step change in speed, turning included
+        assert max(heights) == pytest.approx(2.5 + 1.0**2 / (2 * 1.0), abs=1e-3)  # braked to a stop first
+        assert min(heights) >= -1e-9  # no overshoot below L1
+        assert elev.current_floor == "L1"
+        assert heights[-1] == pytest.approx(0.0, abs=1e-6)
+
+    def test_a_cabin_switched_to_redirect_drops_floors_queued_before(self, sim_core):
+        elev = _make_elevator(sim_core, floors={"L1": 0.0, "L2": 4.0, "L3": 8.0}, request_policy="queue")
+        elev.request_floor("L3")
+        sim_core.tick(10)
+        assert elev.request_floor("L2").value == "queued"
+        elev._state_machine.request_policy = ElevatorRequestPolicy.REDIRECT
+
+        assert elev.request_floor("L3").value == "replaced"
+        assert elev.pending_floors == ()
+
+    def test_boarding_height_reaching_the_next_floor_warns(self, sim_core, caplog):
+        with caplog.at_level("WARNING", logger="pybullet_fleet.devices.elevator"):
+            _make_elevator(sim_core, floors={"L1": 0.0, "L2": 0.9, "L3": 4.0}, boarding_height=1.0)
+        assert "boarding_height" in caplog.text
+
+    def test_boarding_height_below_the_floor_spacing_does_not_warn(self, sim_core, caplog):
+        with caplog.at_level("WARNING", logger="pybullet_fleet.devices.elevator"):
+            _make_elevator(sim_core, floors={"L1": 0.0, "L2": 4.0}, boarding_height=1.0)
+        assert "boarding_height" not in caplog.text
+
+    def test_negative_boarding_height_is_refused(self, sim_core):
+        with pytest.raises(ValueError):
+            _make_elevator(sim_core, boarding_height=-0.1)
+
+    def test_boarding_height_from_dict(self):
+        params = ElevatorParams.from_dict(
+            {"name": "e1", "urdf_path": "robots/elevator.urdf", "floors": {"L1": 0.0}, "boarding_height": 0.25}
+        )
+        assert params.boarding_height == 0.25
