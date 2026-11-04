@@ -181,18 +181,12 @@ class CollisionMode(Enum):
 
     Attributes:
         NORMAL_3D: Normal collision detection (default)
-                   - A pair is a candidate when its AABBs are within the
-                     collision clearance of each other on every axis
+                   - A pair is a candidate when its AABBs are within the collision clearance on every axis
                    - For dynamic/kinematic objects
 
-        NORMAL_2D: As NORMAL_3D, without the clearance on the z axis
-                   - A pair involving one is a candidate only when the
-                     AABBs actually overlap in z; in x and y the clearance
-                     applies as for NORMAL_3D. Z is not ignored.
-                   - Differs from NORMAL_3D only when the clearance is
-                     non-zero (CLOSEST_POINTS / HYBRID with a
-                     ``collision_margin``): a body passing within the
-                     clearance above or below it is not reported
+        NORMAL_2D: As NORMAL_3D, without the clearance on the z axis (z is not ignored)
+                   - A pair involving one needs real z overlap; x and y get the clearance as for NORMAL_3D
+                   - Differs from NORMAL_3D only with a non-zero clearance (CLOSEST_POINTS / HYBRID)
                    - For ground vehicles that pass close under or over things
 
         STATIC: Static object mode (never moves, but has collision)

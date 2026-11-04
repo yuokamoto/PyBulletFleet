@@ -27,6 +27,48 @@ are not recommended for production use yet.
   use them: in a scene of 22,000 static tiles, `find_nearest_pickable()` went
   from about 55 ms to 0.02 ms, with the same result.
 
+- `Agent.set_joint_position(joint, position)`: put a joint at a position at
+  once, without moving it there, as `set_pose()` does for the base. The
+  position becomes the joint's target and any profile speed is dropped, so the
+  joint stays there; objects attached to the links follow, and the body counts
+  as moved for the next collision check. With physics on, `max_force` (default
+  500, as in `set_joint_target`) holds it there. A position outside the URDF
+  limits is applied with a warning; a fixed joint is refused with one.
+
+- `Agent.set_joints_positions(positions)`: the same for several joints, taking
+  a list for every joint or a dict by name or index, as `set_joints_targets`
+  does. Attached objects follow once, after all of them are placed.
+
+- `Elevator.request_floor(floor, instant=True)`: the cabin is at the floor at
+  once with its passengers aboard, instead of riding there; the next update
+  observes the arrival and releases them as after any trip. Accepted also
+  while the cabin is moving, whatever the request policy: the cabin is put at
+  the new floor with the passengers of its trip, the pending requests are
+  dropped, and the result is `REDIRECTED`.
+  `ElevatorMotionAdapter.begin_motion` takes the matching `instant` flag,
+  passed only when a request asks for it.
+
+- `ElevatorRequestPolicy.REDIRECT`: a request received while the cabin is
+  moving turns it toward the new floor at once, with its passengers, and drops
+  any pending floor, so the latest request wins (`ElevatorRequestResult.REDIRECTED`).
+  For controllers that retarget a car in motion instead of waiting for it to
+  arrive first.
+
+- `ElevatorParams.boarding_height` (default 1.0, the previous fixed value):
+  how far above the platform's top an object may be and still be attached
+  when the cabin starts moving. Keep it below the floor spacing; with 1.0 and
+  floors 0.6 m apart, a robot waiting on the floor above the cabin was taken
+  along and arrived 0.6 m above the floor it was carried to. `Elevator.from_params`
+  warns when it reaches the smallest floor spacing.
+
+- `ControllerParams.stop_on_collision`: an agent that sets it stops dead, as
+  `stop()` does, on the step a collision starts that involves it or an object
+  attached to it (a carried load stops its carrier), instead of driving or
+  braking on past the point of contact. A contact with its own attached
+  object does not count, and an agent struck while it stands is left alone.
+  Off by default; per agent, through a fleet's
+  controller config, or for every agent with `PBF_CONTROLLER_STOP_ON_COLLISION`.
+
 - `Agent.brake()`: come to rest at `max_linear_decel` along the current line of
   motion, keeping the heading and dropping the rest of the path, for
   omnidirectional and differential-drive agents (per-agent and batched) under
@@ -63,6 +105,10 @@ are not recommended for production use yet.
   checkpoint proof's record version 3.
 
 ### Changed
+
+- `ignore_attached_collision` now covers every object on one attachment tree,
+  not only a direct parent and child: two loads on one carrier and a load on a
+  load no longer count as colliding, the same rule `stop_on_collision` uses.
 
 - Setting a goal on a moving agent is cheaper: the check whether the agent
   can continue into it and the trajectory it then follows share one solve
@@ -485,6 +531,12 @@ are not recommended for production use yet.
 - Keep replay input application and result capture in `ReplaySession`, without replay-specific mutation guards in ordinary simulation and Fleet APIs. Direct core calls are outside the recorded-input contract.
 
 ### Fixed
+
+- `REPLACE_NEXT` elevators: a request for the floor the moving cabin is
+  already heading to now drops the pending floor (`REPLACED`) instead of being
+  rejected and leaving it queued. A controller that changed its target and then
+  changed it back had the cabin leave for the abandoned floor right after
+  arriving, under a robot that was boarding.
 
 - `BatchDifferentialController` uses the agent's
   `controller_params.default_direction` for a path set without a direction, as

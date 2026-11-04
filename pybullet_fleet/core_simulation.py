@@ -221,10 +221,9 @@ class SimulationParams:
     enable_shadows: bool = _SIM_D["enable_shadows"]
     enable_gui_panel: bool = _SIM_D["enable_gui_panel"]
     ignore_static_collision: bool = _SIM_D["ignore_static_collision"]
-    #: Do not count contact between an object and the object it is attached
-    #: to (``attach_object``): a carried load touches its carrier by design.
-    #: Only the direct parent and child; contact with anything else the
-    #: carrier holds is still reported.
+    #: Do not count contact between objects on one attachment tree
+    #: (``attach_object``): a carrier, its loads and their loads touch one
+    #: another by design. Contact with anything outside the tree is reported.
     ignore_attached_collision: bool = _SIM_D["ignore_attached_collision"]
     enable_time_profiling: bool = _SIM_D["enable_time_profiling"]
     profiling_interval: int = _SIM_D["profiling_interval"]
@@ -2110,7 +2109,9 @@ class MultiRobotSimulationCore:
 
     def _is_ignored_collision(self, obj_a: SimObject, obj_b: SimObject) -> bool:
         """Whether two touching objects are excluded from collision results."""
-        if self._params.ignore_attached_collision and (obj_a._attached_to is obj_b or obj_b._attached_to is obj_a):
+        # Every object on one attachment tree -- an agent, its loads, a load's
+        # loads -- belongs to one body: no contact among them is a collision.
+        if self._params.ignore_attached_collision and obj_a._attachment_root() is obj_b._attachment_root():
             return True
         return self._collision_ignore_filter is not None and bool(self._collision_ignore_filter(obj_a, obj_b))
 
@@ -2136,6 +2137,22 @@ class MultiRobotSimulationCore:
         self._rebuild_spatial_grid()
         self._moved_this_step.update(self._sim_objects_dict)
         self._recheck_stationary_pairs = True
+
+    def _sync_grid_margin(self) -> bool:
+        """Rebuild the grid if the effective margin changed without set_collision_margin().
+
+        A margin changed on ``params`` directly (collision_margin, or a
+        collision_detection_method with a different clearance) bypasses
+        set_collision_margin(): rebuild with it, as that does, and mark every
+        body moved so every pair -- stationary ones included -- is checked
+        again. Returns whether it rebuilt.
+        """
+        if self._grid_margin is None or self._collision_broadphase_margin() == self._grid_margin:
+            return False
+        self._rebuild_spatial_grid()
+        self._moved_this_step.update(self._sim_objects_dict)
+        self._recheck_stationary_pairs = True
+        return True
 
     def _get_overlapping_cells(self, object_id: int, margin: float = 0.0) -> List[Tuple[int, int, int]]:
         """
@@ -2375,10 +2392,14 @@ class MultiRobotSimulationCore:
                 # keep the AABB. Re-register: a NORMAL_2D body registers
                 # different z cells from a STATIC one. (A NORMAL_3D body's
                 # registration is the same, so for it this changes nothing.)
+                # Mark it moved, as STATIC -> NORMAL does: a NORMAL_2D body
+                # now gets the z clearance, so a body just above or below can
+                # become a pair without either of them moving.
                 self._dynamic_collision_objects.discard(object_id)
                 self._static_collision_objects.add(object_id)
                 if self._cached_cell_size is not None:
                     self._update_object_spatial_grid(object_id)
+                self._moved_this_step.add(object_id)
             else:
                 # NORMAL_3D <-> NORMAL_2D: the two register different z cells
                 # (_update_object_spatial_grid), so re-register; mark as moved
@@ -3334,15 +3355,11 @@ class MultiRobotSimulationCore:
             ignore_static = self._ignore_static_collision
         broadphase_margin = self._collision_broadphase_margin()
 
-        # 0. A margin changed on ``params`` directly (collision_margin, or a
-        # collision_detection_method with a different clearance) bypasses
-        # set_collision_margin(): rebuild with it, as that does, and check
-        # every body again -- stationary pairs included.
-        if self._grid_margin is not None and broadphase_margin != self._grid_margin:
-            self._rebuild_spatial_grid()
+        # 0. A margin changed on ``params`` directly: rebuild, and check every
+        # body. check_collisions() has already done this before taking its
+        # moved set; this covers a direct call.
+        if self._sync_grid_margin() and moved_objects is not None:
             moved_objects = set(self._sim_objects_dict.keys())
-            self._moved_this_step.update(self._sim_objects_dict)
-            self._recheck_stationary_pairs = True
 
         # 1. Handle mode changes
         # Check if ignore_static mode has changed (skip if this is the first call)
@@ -3511,6 +3528,27 @@ class MultiRobotSimulationCore:
         else:
             return list(pairs), None
 
+    @staticmethod
+    def _stop_on_collision(obj_a: SimObject, obj_b: SimObject) -> None:
+        """Stop the agents a new contact involves, when their ``stop_on_collision`` is set.
+
+        An object attached to an agent (a carried load) stands for that agent,
+        so a load running into something stops its carrier. A contact between
+        an agent and its own load is not a collision with anything else. An
+        agent that is not moving, such as one struck while it stands, is left
+        alone: there is no motion to stop, and an action it is running goes on.
+        """
+
+        root_a, root_b = obj_a._attachment_root(), obj_b._attachment_root()
+        if root_a is root_b:
+            # Only reached with ignore_attached_collision off, where such a
+            # pair is still reported; it is never a reason to stop.
+            return
+        for root, other in ((root_a, obj_b), (root_b, obj_a)):
+            if isinstance(root, Agent) and root.is_moving and root.controller_params._eff_stop_on_collision():
+                logger.info(f"{root.name or root.object_id} stopped on collision with {other.name or other.object_id}")
+                root.stop()
+
     def check_collisions(
         self,
         collision_color: Optional[List[float]] = None,
@@ -3551,6 +3589,11 @@ class MultiRobotSimulationCore:
 
         # Profiling timings (always create dict for consistent return type)
         timings: Dict[str, float] = {}
+
+        # A margin changed on ``params`` directly marks every body moved; done
+        # before the moved set is taken, so the active pairs below are checked
+        # again under the new margin in this call, not the next.
+        self._sync_grid_margin()
 
         # Clear movement tracking from previous collision check
         # This accumulates all movements since the last collision check,
@@ -3597,6 +3640,15 @@ class MultiRobotSimulationCore:
                 obj_i = self._sim_objects_dict.get(obj_id_i)
                 obj_j = self._sim_objects_dict.get(obj_id_j)
                 if obj_i is not None and obj_j is not None and self._is_ignored_collision(obj_i, obj_j):
+                    pairs_to_check.add((obj_id_i, obj_id_j))
+                    continue
+
+                # A pair with a body switched to STATIC while static
+                # collisions are ignored: the broad phase no longer offers it,
+                # so resolve it here, even if neither body moved.
+                if ignore_static and (
+                    obj_id_i in self._static_collision_objects or obj_id_j in self._static_collision_objects
+                ):
                     pairs_to_check.add((obj_id_i, obj_id_j))
                     continue
 
@@ -3651,6 +3703,13 @@ class MultiRobotSimulationCore:
                     # Treated as not touching: resolves the pair if it was
                     # active. Remembered, so it is re-evaluated next check.
                     self._ignored_collision_pairs.add((obj_id_i, obj_id_j))
+
+                elif ignore_static and (
+                    obj_id_i in self._static_collision_objects or obj_id_j in self._static_collision_objects
+                ):
+                    # Static collisions are ignored: not touching, which
+                    # resolves the pair if it was active.
+                    pass
 
                 elif detection_method == CollisionDetectionMethod.CONTACT_POINTS:
                     # Method 1: getContactPoints (physics mode, actual contact manifold)
@@ -3773,6 +3832,8 @@ class MultiRobotSimulationCore:
                             obj_a.events.emit(SimEvents.COLLISION_STARTED, other=obj_b)
                         if obj_b._has_entity_events():
                             obj_b.events.emit(SimEvents.COLLISION_STARTED, other=obj_a)
+                        # After the events, so handlers see the motion that led to the contact.
+                        self._stop_on_collision(obj_a, obj_b)
 
                 for obj_id_i, obj_id_j in resolved_collisions:
                     obj_a = self._sim_objects_dict.get(obj_id_i)

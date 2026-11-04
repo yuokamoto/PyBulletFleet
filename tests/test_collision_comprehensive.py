@@ -1544,3 +1544,68 @@ def test_normal_2d_pair_across_a_z_cell_boundary(modes):
 if __name__ == "__main__":
     # Run with pytest
     pytest.main([__file__, "-v", "--tb=short"])
+
+
+def _closest_points_sim(margin, ignore_static=False):
+    return MultiRobotSimulationCore(
+        SimulationParams(
+            gui=False,
+            physics=False,
+            monitor=False,
+            collision_detection_method=CollisionDetectionMethod.CLOSEST_POINTS,
+            collision_margin=margin,
+            spatial_hash_cell_size_mode=SpatialHashCellSizeMode.CONSTANT,
+            spatial_hash_cell_size=0.5,
+            ignore_static_collision=ignore_static,
+        )
+    )
+
+
+def test_shrinking_params_margin_resolves_a_stationary_pair_in_the_same_check():
+    """Assigning params.collision_margin directly is seen before the moved set is taken."""
+    sim = _closest_points_sim(0.25)
+    try:
+        first = create_test_box(sim, [0, 0, 0], size=0.05)
+        second = create_test_box(sim, [0.30, 0, 0], size=0.05)
+        sim.check_collisions()
+        assert sim.get_active_collision_pairs() == [(first.object_id, second.object_id)]
+
+        sim.params.collision_margin = 0.0
+        sim.check_collisions()  # neither body moved
+
+        assert not sim.get_active_collision_pairs()
+    finally:
+        p.disconnect(sim.client)
+
+
+def test_a_normal_2d_body_switched_to_static_pairs_with_a_body_just_above():
+    """NORMAL_2D gets no z clearance; as STATIC it does, and the pair is found without a move."""
+    sim = _closest_points_sim(0.05)
+    try:
+        below = create_test_box(sim, [0, 0, 0], size=0.05, collision_mode=CollisionMode.NORMAL_2D)
+        above = create_test_box(sim, [0, 0, 0.12], size=0.05)  # 2 cm above it
+        sim.check_collisions()
+        assert not sim.get_active_collision_pairs()
+
+        below.set_collision_mode(CollisionMode.STATIC)
+        sim.check_collisions()
+
+        assert sim.get_active_collision_pairs() == [(below.object_id, above.object_id)]
+    finally:
+        p.disconnect(sim.client)
+
+
+def test_a_body_switched_to_static_resolves_its_pair_when_static_collisions_are_ignored():
+    sim = _closest_points_sim(0.0, ignore_static=True)
+    try:
+        first = create_test_box(sim, [0, 0, 0], size=0.05)
+        second = create_test_box(sim, [0.05, 0, 0], size=0.05)
+        sim.check_collisions()
+        assert sim.get_active_collision_pairs() == [(first.object_id, second.object_id)]
+
+        second.set_collision_mode(CollisionMode.STATIC)
+        sim.check_collisions()
+
+        assert not sim.get_active_collision_pairs()
+    finally:
+        p.disconnect(sim.client)
