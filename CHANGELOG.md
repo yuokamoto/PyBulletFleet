@@ -14,6 +14,21 @@ are not recommended for production use yet.
 
 ### Added
 
+- `SimEvents.STEP` (`"step"`): an event at the point where `register_callback()`
+  callbacks run by default -- after the object update, before the new poses are
+  written to PyBullet and before the collision check -- with `dt` and
+  `sim_time` (the time of the new state). Its handlers run before the `STEP`
+  callbacks and plugin `on_step`; time profiling reports them as `events_step`
+  (issue #84).
+
+- `events.on(event, handler, priority=0, frequency=None)`: a handler of a step
+  event (`pre_step`, `step`, `post_step`) on `sim.events` can run at a fixed
+  rate, on the same fixed grid of simulated time as callbacks and plugins
+  (#80), with `dt` the simulated time since it last ran. `initialize_simulation()`
+  and `reset()` restart its schedule. A per-entity or bare `EventBus` has no
+  simulation clock and raises `ValueError` for `frequency`, as does any other
+  event (issue #84).
+
 - `MultiRobotSimulationCore.query_aabb(aabb_min, aabb_max)`: the objects whose
   AABB overlaps a box, looked up through the collision spatial hash, so the
   cost follows how crowded the box is rather than how many objects the
@@ -105,6 +120,20 @@ are not recommended for production use yet.
   checkpoint proof's record version 3.
 
 ### Changed
+
+- Per-step hooks share one mechanism: `register_callback()` callbacks and
+  `SimPlugin.on_step()` are subscriptions on `sim.events`, in tiers after the
+  event's own handlers (handlers by priority, then callbacks in registration
+  order, then plugins in load order). Their order, schedule, arguments and
+  exception handling are unchanged: a callback's exception still propagates
+  out of `step_once()`, a plugin's or a handler's is logged. `events.off()` and
+  `events.clear()` affect only handlers registered with `events.on()`;
+  `has_handlers()` also counts callbacks and plugins. An emit now calls the
+  handlers registered when it starts: a handler added by a handler of the same
+  event first runs on the next emit (it used to run in the same one). The
+  kinematic replay profile rejects a frequency-limited event handler, as it
+  does a frequency-limited callback. No change in step time without hooks
+  (issue #84).
 
 - `ignore_attached_collision` now covers every object on one attachment tree,
   not only a direct parent and child: two loads on one carrier and a load on a

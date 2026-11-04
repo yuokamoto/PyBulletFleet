@@ -251,3 +251,161 @@ class TestProfiling:
         profile = sim.step_once(return_profiling=True)
         assert profile["callbacks"] < 20.0
         assert profile["phase1_update"] >= 20.0
+
+
+# ---------------------------------------------------------------------------
+# What the event bus adds
+# ---------------------------------------------------------------------------
+
+
+def _agent(sim, x=0.0):
+    params = AgentSpawnParams(urdf_path="simple_cube", initial_pose=Pose.from_xyz(x, 0, 0.1), mass=0.0)
+    return Agent.from_params(params, sim)
+
+
+class TestStepEvent:
+    def test_the_step_event_is_named_like_the_callback_phase(self):
+        assert SimEvents.STEP == "step" == CallbackPhase.STEP.value
+
+    def test_it_runs_after_the_object_update_and_before_the_step_callbacks(self, sim):
+        log = []
+        sim.register_plugin(_Recorder(sim, "plugin", log))
+        sim.register_callback(lambda sc, dt: log.append("step_cb"))
+        sim.events.on(SimEvents.STEP, lambda **_: log.append("step_event"))
+        sim.events.on(SimEvents.PRE_STEP, lambda **_: log.append("pre_event"))
+        sim.events.on(SimEvents.POST_STEP, lambda **_: log.append("post_event"))
+        sim.step_once()
+        assert _names(log) == ["pre_event", "step_event", "step_cb", "plugin", "post_event"]
+
+    def test_it_sees_the_new_state_before_the_pose_flush(self, sim):
+        agent = _agent(sim)
+        agent.set_goal_pose(Pose.from_xyz(5.0, 0.0, 0.1))
+        seen = []
+
+        def on_step(dt, sim_time):
+            cached = agent.get_pose().position[0]
+            in_pybullet = p.getBasePositionAndOrientation(agent.body_id, physicsClientId=sim.client)[0][0]
+            seen.append((dt, sim_time, sim._in_step, cached, in_pybullet))
+
+        sim.events.on(SimEvents.STEP, on_step)
+        sim.step_once()
+        sim.step_once()
+        dt, sim_time, in_step, cached, in_pybullet = seen[-1]
+        assert dt == pytest.approx(0.1)
+        assert sim_time == pytest.approx(0.2)  # the time of the state it sees
+        assert in_step is True  # set_pose() here is buffered like in a STEP callback
+        assert cached > in_pybullet  # the flush has not happened yet
+
+    def test_it_runs_before_the_collision_check(self, sim, monkeypatch):
+        log = []
+        real = sim.check_collisions
+        monkeypatch.setattr(sim, "check_collisions", lambda **kw: (log.append("collision"), real(**kw))[1])
+        sim.events.on(SimEvents.STEP, lambda **_: log.append("step_event"))
+        sim.step_once()
+        assert log == ["step_event", "collision"]
+
+    def test_handlers_follow_their_priority(self, sim):
+        log = []
+        sim.events.on(SimEvents.STEP, lambda **_: log.append("b"), priority=5)
+        sim.events.on(SimEvents.STEP, lambda **_: log.append("a"), priority=-5)
+        sim.step_once()
+        assert log == ["a", "b"]
+
+    def test_its_exceptions_are_logged_like_any_event(self, sim, caplog):
+        log = []
+        sim.events.on(SimEvents.STEP, lambda **_: 1 / 0)
+        sim.register_callback(lambda sc, dt: log.append("cb"))
+        with caplog.at_level(logging.ERROR):
+            sim.step_once()
+        assert log == ["cb"]
+        assert "EventBus handler error for event 'step'" in caplog.text
+
+    def test_it_is_profiled_apart_from_callbacks(self, sim):
+        sim.events.on(SimEvents.STEP, lambda **_: time.sleep(0.02))
+        profile = sim.step_once(return_profiling=True)
+        assert profile["events_step"] >= 20.0
+        assert profile["callbacks"] < 20.0
+
+
+class TestFrequencyLimitedEvents:
+    @pytest.mark.parametrize("event", [SimEvents.STEP, SimEvents.POST_STEP])
+    def test_runs_on_the_fixed_grid_with_the_time_since_it_last_ran(self, sim, event):
+        seen = []
+        sim.events.on(event, lambda dt, sim_time: seen.append((round(sim_time, 9), dt)), frequency=5.0)
+        for _ in range(20):
+            sim.step_once()
+        assert [t for t, _ in seen] == [round(0.2 * k, 9) for k in range(1, 11)]
+        assert all(dt == pytest.approx(0.2) for _, dt in seen)
+
+    def test_matches_a_callback_at_the_same_rate_beat_for_beat(self, sim):
+        """3 Hz on a 0.1 s timestep is not a whole number of steps; both must still agree."""
+        from_event, from_callback = [], []
+        sim.events.on(SimEvents.STEP, lambda dt, sim_time: from_event.append((sim.step_count, dt)), frequency=3.0)
+        sim.register_callback(lambda sc, dt: from_callback.append((sc.step_count, dt)), frequency=3.0)
+        for _ in range(100):
+            sim.step_once()
+        assert from_event == from_callback
+        assert len(from_event) == 30
+
+    def test_pre_step_is_scheduled_on_the_time_it_observes(self, sim):
+        seen = []
+        sim.events.on(SimEvents.PRE_STEP, lambda dt, sim_time: seen.append(round(sim_time, 9)), frequency=5.0)
+        for _ in range(7):
+            sim.step_once()
+        assert seen == [0.2, 0.4, 0.6]
+
+    def test_a_handler_without_a_frequency_still_gets_every_step(self, sim):
+        every, limited = [], []
+        sim.events.on(SimEvents.STEP, lambda **kw: every.append(kw["dt"]))
+        sim.events.on(SimEvents.STEP, lambda **kw: limited.append(kw["dt"]), frequency=2.0)
+        for _ in range(10):
+            sim.step_once()
+        assert len(every) == 10 and all(dt == pytest.approx(0.1) for dt in every)
+        assert limited == [pytest.approx(0.5), pytest.approx(0.5)]
+
+    def test_off_removes_a_frequency_limited_handler(self, sim):
+        seen = []
+
+        def handler(**_):
+            seen.append(1)
+
+        sim.events.on(SimEvents.STEP, handler, frequency=10.0)
+        sim.step_once()
+        sim.events.off(SimEvents.STEP, handler)
+        sim.step_once()
+        assert seen == [1]
+
+    def test_a_restart_restarts_its_schedule(self, sim):
+        seen = []
+        sim.events.on(SimEvents.STEP, lambda dt, sim_time: seen.append((round(sim_time, 9), round(dt, 9))), frequency=10.0)
+        for _ in range(7):
+            sim.step_once()
+        seen.clear()
+        sim.initialize_simulation()
+        sim.step_once()
+        assert seen == [(0.1, 0.1)]
+
+    @pytest.mark.parametrize("frequency", [0.0, -1.0, float("inf"), float("nan")])
+    def test_rejects_a_bad_frequency(self, sim, frequency):
+        with pytest.raises(ValueError):
+            sim.events.on(SimEvents.STEP, lambda **_: None, frequency=frequency)
+        assert not sim.events.has_handlers(SimEvents.STEP)
+
+    def test_is_only_for_the_step_events(self, sim):
+        with pytest.raises(ValueError, match="step events"):
+            sim.events.on(SimEvents.COLLISION_STARTED, lambda **_: None, frequency=1.0)
+
+    def test_needs_a_bus_with_a_clock(self):
+        """A bare or per-entity bus has no simulation clock to schedule on."""
+        with pytest.raises(ValueError, match="clock"):
+            EventBus().on(SimEvents.POST_STEP, lambda **_: None, frequency=1.0)
+
+    def test_a_bus_with_a_clock_schedules_on_it(self):
+        now = [0.0]
+        bus = EventBus(clock=lambda: (now[0], 0.25))
+        seen = []
+        bus.on("post_step", lambda dt, sim_time: seen.append((sim_time, dt)), frequency=1.0)
+        for _ in range(9):
+            now[0] += 0.25
+            bus.emit("post_step", dt=0.25, sim_time=now[0])
+        assert seen == [(1.0, 1.0), (2.0, 1.0)]
