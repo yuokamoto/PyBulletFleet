@@ -2380,7 +2380,7 @@ class Agent(SimObject):
                 physicsClientId=self._pid,
             )
 
-    def set_joint_position(self, joint: Union[int, str], position: float) -> bool:
+    def set_joint_position(self, joint: Union[int, str], position: float, max_force: float = 500.0) -> bool:
         """Put a joint at ``position`` at once, without moving it there.
 
         The joint counterpart of :meth:`set_pose`: what a simulator's "set
@@ -2394,9 +2394,13 @@ class Agent(SimObject):
         next collision check. An action still driving this joint is not
         cancelled; cancel it first if it should not move the joint again.
 
+        A position outside the joint's URDF limits is applied, with a warning.
+
         Args:
             joint: Joint index or name.
             position: Radians for a revolute joint, metres for a prismatic one.
+            max_force: With physics on, the motor force that holds the joint
+                there afterwards, as in :meth:`set_joint_target`.
 
         Returns:
             True if the joint was set; False for a non-URDF body, an unknown or
@@ -2405,19 +2409,75 @@ class Agent(SimObject):
         if not self.is_urdf_robot():
             self._log.warning("set_joint_position() only works for URDF robots")
             return False
+        index = self._joint_index_for_placement(joint)
+        if index is None:
+            return False
+        self._place_joint(index, position, max_force)
+        self._after_joints_placed()
+        return True
+
+    def set_joints_positions(self, positions: Union[list, dict], max_force: float = 500.0) -> bool:
+        """Put several joints at their positions at once, as :meth:`set_joint_position` does for one.
+
+        Accepts what :meth:`set_joints_targets` accepts: a list with a position
+        for every joint, in joint-index order (a fixed joint's entry is
+        ignored), or a dict ``{joint name or index: position}`` for some of them.
+        Attached objects follow once, after every joint is placed.
+
+        Returns:
+            True if every given joint was set; False for a non-URDF body, a
+            list of the wrong length (nothing is set), or a dict naming an
+            unknown or fixed joint (the others are still set).
+        """
+        if not self.is_urdf_robot():
+            self._log.warning("set_joints_positions() only works for URDF robots")
+            return False
+        if isinstance(positions, dict):
+            placements = []
+            ok = True
+            for joint, position in positions.items():
+                index = self._joint_index_for_placement(joint)
+                if index is None:
+                    ok = False
+                else:
+                    placements.append((index, position))
+        else:
+            if len(positions) != len(self.joint_info):
+                self._log.warning(f"Expected {len(self.joint_info)} positions, got {len(positions)}")
+                return False
+            placements = [(i, q) for i, q in enumerate(positions) if self.joint_info[i][2] != p.JOINT_FIXED]
+            ok = True
+        for index, position in placements:
+            self._place_joint(index, position, max_force)
+        if placements:
+            self._after_joints_placed()
+        return ok
+
+    def _joint_index_for_placement(self, joint: Union[int, str]) -> Optional[int]:
+        """The index of a movable joint named by index or name, or None (logged) for any other."""
         if isinstance(joint, str):
             index = resolve_joint_index(self.body_id, joint)
             if index == -1:
                 self._log.warning(f"Joint name '{joint}' not found.")
-                return False
+                return None
         else:
             index = joint
             if not 0 <= index < len(self.joint_info):
                 self._log.warning(f"joint_index {index} out of range (max: {len(self.joint_info)-1})")
-                return False
+                return None
         if self.joint_info[index][2] == p.JOINT_FIXED:
-            return False
+            self._log.warning(f"Joint {joint!r} is fixed and cannot be placed.")
+            return None
+        return index
 
+    def _place_joint(self, index: int, position: float, max_force: float) -> None:
+        """Set one movable joint's position and target; attached objects and collision bookkeeping are left to the caller."""
+        lower, upper = self.joint_info[index][8], self.joint_info[index][9]
+        if upper > lower and not lower <= position <= upper:
+            self._log.warning(
+                f"Joint {self.joint_info[index][1].decode('utf-8')!r} placed at {position}, "
+                f"outside its limits [{lower}, {upper}]"
+            )
         state = self._joint(index)
         newly_targeted = state.target is None
         state.target = position
@@ -2433,20 +2493,23 @@ class Agent(SimObject):
                 jointIndex=index,
                 controlMode=p.POSITION_CONTROL,
                 targetPosition=position,
+                force=max_force,
                 physicsClientId=self._pid,
             )
 
+    def _after_joints_placed(self) -> None:
+        """Bring attached objects along and mark the body moved, once for any number of placed joints.
+
+        The step does not see a placed joint as motion: it is at its target and
+        not moving, so ``update()`` reports nothing, and without the mark the
+        next collision check would skip the body. The cached AABB is the base
+        link's, which a joint does not move, so it needs no refresh; attached
+        objects refresh their own through ``set_pose``.
+        """
         if self.attached_objects:
             self.update_attached_objects_kinematics()
-        sim_core = self.sim_core
-        if sim_core is not None:
-            # As SimObject._set_pose_internal does for a moved base.
-            sim_core._mark_object_moved(self.object_id)
-            if not sim_core._in_step and self.object_id in sim_core._kinematic_objects:
-                sim_core._update_object_aabb(self.object_id)
-                if getattr(sim_core, "_cached_cell_size", None) is not None:
-                    sim_core._update_object_spatial_grid(self.object_id)
-        return True
+        if self.sim_core is not None:
+            self.sim_core._mark_object_moved(self.object_id)
 
     def set_joint_target_by_name(self, joint_name: str, target_position: float, max_force: float = 500.0):
         """

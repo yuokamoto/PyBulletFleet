@@ -119,3 +119,115 @@ class TestSetJointPosition:
         assert not agent.set_joint_position("no_such_joint", 1.0)
 
         assert _position(agent) == pytest.approx(0.0)
+
+
+class TestSetJointPositionChecks:
+    def test_a_fixed_joint_is_refused_with_a_warning(self, sim_core, caplog):
+        agent = _manipulator(sim_core)
+
+        with caplog.at_level("WARNING"):
+            assert not agent.set_joint_position("base_to_mount", 0.5)
+
+        assert "fixed" in caplog.text
+
+    def test_a_position_outside_the_limits_is_applied_with_a_warning(self, sim_core, caplog):
+        agent = _lift(sim_core)
+
+        with caplog.at_level("WARNING"):
+            assert agent.set_joint_position(JOINT, 40.0)  # the URDF's upper limit is 30
+
+        assert _position(agent) == pytest.approx(40.0)
+        assert "outside its limits" in caplog.text
+
+    def test_with_physics_the_joint_is_held_with_the_given_force(self, monkeypatch):
+        import pybullet as p
+
+        sim = MultiRobotSimulationCore(
+            SimulationParams(gui=False, physics=True, timestep=DT, monitor=False, enable_monitor_gui=False)
+        )
+        sim.initialize_simulation()
+        try:
+            # mass=None keeps the URDF's masses: a dynamic arm, whose joints are motor-driven.
+            agent = Agent.from_params(
+                AgentSpawnParams(urdf_path="robots/arm_robot.urdf", name="arm", use_fixed_base=True, mass=None),
+                sim_core=sim,
+            )
+            assert not agent._use_kinematic_joints
+            calls = []
+            real = p.setJointMotorControl2
+            monkeypatch.setattr(p, "setJointMotorControl2", lambda *a, **k: (calls.append(k), real(*a, **k))[1])
+
+            assert agent.set_joint_position("shoulder_to_elbow", 3.0 / 4, max_force=123.0)
+
+            assert calls and calls[-1]["force"] == 123.0
+            assert calls[-1]["targetPosition"] == 0.75
+        finally:
+            p.disconnect(sim.client)
+
+
+MANIPULATOR = "robots/mobile_manipulator.urdf"  # wheels, a fixed mount, and four arm joints
+ARM = ["mount_to_shoulder", "shoulder_to_elbow", "elbow_to_wrist", "wrist_to_end"]
+
+
+def _manipulator(sim_core):
+    return Agent.from_params(
+        AgentSpawnParams(urdf_path=MANIPULATOR, name="manipulator", use_fixed_base=True), sim_core=sim_core
+    )
+
+
+class TestSetJointsPositions:
+    def test_a_dict_places_the_named_joints(self, sim_core):
+        agent = _manipulator(sim_core)
+        positions = {"mount_to_shoulder": 0.5, "shoulder_to_elbow": -0.4, "elbow_to_wrist": 0.3}
+
+        assert agent.set_joints_positions(positions)
+
+        for name, position in positions.items():
+            assert agent.get_joint_state_by_name(name)[0] == pytest.approx(position)
+        assert agent.get_joint_state_by_name("wrist_to_end")[0] == pytest.approx(0.0)
+
+    def test_a_list_places_every_joint_and_ignores_the_fixed_ones(self, sim_core):
+        agent = _manipulator(sim_core)
+        positions = [0.1 * (i + 1) for i in range(agent.get_num_joints())]
+
+        assert agent.set_joints_positions(positions)
+
+        for name in ARM:
+            index = agent._joint_index_by_name(name)
+            assert agent.get_joint_state(index)[0] == pytest.approx(positions[index])
+
+    def test_a_list_of_the_wrong_length_sets_nothing(self, sim_core):
+        agent = _manipulator(sim_core)
+
+        assert not agent.set_joints_positions([0.5])
+
+        assert agent.get_joint_state_by_name("mount_to_shoulder")[0] == pytest.approx(0.0)
+
+    def test_a_dict_naming_a_fixed_or_unknown_joint_still_sets_the_others(self, sim_core):
+        agent = _manipulator(sim_core)
+
+        assert not agent.set_joints_positions({"base_to_mount": 1.0, "no_such_joint": 1.0, "mount_to_shoulder": 0.5})
+
+        assert agent.get_joint_state_by_name("mount_to_shoulder")[0] == pytest.approx(0.5)
+
+    def test_attached_objects_follow_once_for_all_the_joints(self, sim_core, monkeypatch):
+        agent = _lift(sim_core)
+        box = _box(sim_core)
+        assert agent.attach_object(box, parent_link_index=agent._joint_index_by_name(JOINT), keep_world_pose=True)
+        z = box.get_pose().position[2]
+        follows = []
+        real = agent.update_attached_objects_kinematics
+        monkeypatch.setattr(agent, "update_attached_objects_kinematics", lambda: (follows.append(1), real())[1])
+
+        assert agent.set_joints_positions({JOINT: 3.0})
+
+        assert follows == [1]
+        assert box.get_pose().position[2] == pytest.approx(z + 3.0, abs=1e-6)
+
+    def test_the_body_counts_as_moved(self, sim_core):
+        agent = _manipulator(sim_core)
+        sim_core._moved_this_step.clear()
+
+        agent.set_joints_positions({"mount_to_shoulder": 0.5})
+
+        assert agent.object_id in sim_core._moved_this_step

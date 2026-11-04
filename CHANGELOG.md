@@ -18,7 +18,13 @@ are not recommended for production use yet.
   once, without moving it there, as `set_pose()` does for the base. The
   position becomes the joint's target and any profile speed is dropped, so the
   joint stays there; objects attached to the links follow, and the body counts
-  as moved for the next collision check.
+  as moved for the next collision check. With physics on, `max_force` (default
+  500, as in `set_joint_target`) holds it there. A position outside the URDF
+  limits is applied with a warning; a fixed joint is refused with one.
+
+- `Agent.set_joints_positions(positions)`: the same for several joints, taking
+  a list for every joint or a dict by name or index, as `set_joints_targets`
+  does. Attached objects follow once, after all of them are placed.
 
 - `Elevator.request_floor(floor, instant=True)`: the cabin is at the floor at
   once with its passengers aboard, instead of riding there; the next update
