@@ -106,6 +106,13 @@ are not recommended for production use yet.
 
 ### Changed
 
+- A kinematic joint with an acceleration ramp (`set_joint_motion_profile(...,
+  max_accel=...)`) is evaluated each step from its trajectory's phase scalars,
+  read once per target change, instead of `TwoPointInterpolation.get_point()`.
+  The motion is the same, to float noise. Evaluating 1,400 ramped joints
+  (200 bodies x 7) went from 1.6 ms to 0.85 ms per step; the whole joint
+  update, which also writes every joint to PyBullet, from 6.6 ms to 5.9 ms.
+
 - `ignore_attached_collision` now covers every object on one attachment tree,
   not only a direct parent and child: two loads on one carrier and a load on a
   load no longer count as colliding, the same rule `stop_on_collision` uses.

@@ -18,7 +18,7 @@ from .sim_object import ShapeParams, SimObject, SimObjectSpawnParams, load_urdf_
 from .action import Action
 from .types import ControllerMode, MotionMode, MovementDirection, ActionStatus, CollisionMode
 from .tools import normalize_vector_param  # noqa: F401  (re-exported for legacy callers)
-from pybullet_fleet._tpi import try_build_tpi
+from pybullet_fleet._tpi import trapezoid_point, try_build_tpi
 from pybullet_fleet.joint import KinematicJoint
 from pybullet_fleet.tools import resolve_joint_index, resolve_link_index
 from .logging_utils import get_lazy_logger
@@ -1917,7 +1917,9 @@ class Agent(SimObject):
 
         The same solver the linear controllers use, rather than a trapezoid
         integrated by hand: it handles triangle, trapezoid and degenerate
-        exactly, and starts from the speed the joint is already carrying.
+        exactly, and starts from the speed the joint is already carrying. Each
+        step evaluates the solved trajectory in closed form
+        (:func:`~pybullet_fleet._tpi.trapezoid_point`).
 
         One trajectory is built per target change, not per step, and ``t0`` is
         the start of the step so the first evaluation already covers ``dt`` of
@@ -1959,11 +1961,15 @@ class Agent(SimObject):
             state.trajectory_target = target
             state.braking = False
 
-        if now >= tpi.get_end_time():
+        # Evaluated from the trajectory's phase scalars rather than by
+        # tpi.get_point(): the same motion, without its per-call phase search,
+        # which was most of the cost of a joint step.
+        profile = state.trajectory_profile()
+        if now - profile.t0 >= profile.t_total:
             state.clear_motion()
             return target
 
-        position, velocity, _ = tpi.get_point(now)
+        position, velocity = trapezoid_point(profile, now)
         if abs(target - position) < 1e-9:
             # Close enough that the remainder is float residue. Snapping here
             # rather than waiting for get_end_time() keeps the invariant that
