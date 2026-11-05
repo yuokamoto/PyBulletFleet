@@ -326,13 +326,9 @@ They honour `max_linear_decel` and `max_angular_decel` like the per-agent
 controllers. The batched path evaluates a closed form rather than the
 `TwoPointInterpolation` itself, and that form takes the braking scalar as its
 own argument, so the two agree to floating-point noise on the same profile,
-for translation and rotation alike.
-
-One exception: for a per-axis angular limit (`max_angular_vel`,
-`max_angular_accel`, `max_angular_decel` given as `[x, y, z]`), the batched
-controllers read the first component while the per-agent controllers read the
-yaw (`z`) one. Give angular limits as scalars, or with equal components, when
-batched and per-agent motion must match.
+for translation and rotation alike. Both turn at the yaw (`z`) component of a
+per-axis angular limit (`max_angular_vel`, `max_angular_accel`,
+`max_angular_decel` given as `[x, y, z]`).
 
 ### Python API
 

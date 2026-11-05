@@ -197,6 +197,35 @@ class TestBatchMatchesPerAgent:
         assert _worst_quat_gap(a, b) < 1e-9
         assert abs(len(a) - len(b)) <= 1
 
+    @pytest.mark.parametrize(
+        "limits",
+        [
+            {"max_angular_accel": [1.0, 1.0, 4.0]},
+            {"max_angular_decel": [1.0, 1.0, 4.0]},
+            {"max_angular_vel": [0.5, 0.5, 2.0]},
+            # A zero x component is valid: only the yaw component drives a turn.
+            {"max_angular_vel": [0.0, 0.0, 2.0], "max_angular_accel": [0.0, 0.0, 4.0]},
+        ],
+        ids=["accel", "decel", "vel", "zero_x"],
+    )
+    def test_per_axis_limits_use_the_yaw_component(self, sim_core, mode, batch, limits):
+        """With per-axis ``[a, a, b]`` angular limits both paths turn at the yaw (``z``) limit."""
+        from pybullet_fleet import AgentManager
+
+        plain = AgentManager(sim_core=sim_core)
+        batched = AgentManager(sim_core=sim_core)
+        batched.enable_batch(batch)
+        single = _agent(sim_core, plain, "single", mode, None)
+        many = _agent(sim_core, batched, "batched", mode, None)
+        for agent in (single, many):
+            for key, value in limits.items():
+                setattr(agent.controller_params, key, value)
+            agent.set_path([_goal(mode)], auto_approach=False)
+
+        a, b = _drive(sim_core, [single, many])
+        assert _worst_quat_gap(a, b) < 1e-9
+        assert abs(len(a) - len(b)) <= 1
+
     def test_reported_yaw_rate_agrees_step_for_step(self, sim_core, mode, batch):
         """The batched yaw rate is the derivative of the same profile, braking included."""
         from pybullet_fleet import AgentManager

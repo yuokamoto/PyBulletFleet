@@ -22,8 +22,7 @@ are not recommended for production use yet.
   per-agent and batched, omnidirectional final rotation and differential-drive
   turns, with `Agent.max_angular_decel` as the read-only view. The batched
   controllers carry the braking scalar per row, and their closed form agrees
-  with the per-agent trajectory to floating-point noise for scalar angular
-  limits. The kinematic replay profile records it; a `pbf.kinematic.v4`
+  with the per-agent trajectory to floating-point noise. The kinematic replay profile records it; a `pbf.kinematic.v4`
   artifact recorded before it existed still loads, with the field unset.
 
 - `MultiRobotSimulationCore.query_aabb(aabb_min, aabb_max)`: the objects whose
@@ -543,6 +542,14 @@ are not recommended for production use yet.
 - Keep replay input application and result capture in `ReplaySession`, without replay-specific mutation guards in ordinary simulation and Fleet APIs. Direct core calls are outside the recorded-input contract.
 
 ### Fixed
+
+- `BatchOmniController` and `BatchDifferentialController` turn at the yaw
+  (`z`) component of a per-axis angular limit (`max_angular_vel`,
+  `max_angular_accel`, `max_angular_decel` given as `[x, y, z]`), as the
+  per-agent controllers do; they read the `x` component. A batched agent whose
+  `x` and `z` limits differ now turns at a different rate than before, the
+  same as its per-agent counterpart, and a limit such as `[0, 0, 2]` no longer
+  raises `ValueError` in the batched path only.
 
 - `REPLACE_NEXT` elevators: a request for the floor the moving cabin is
   already heading to now drops the pending floor (`REPLACED`) instead of being
