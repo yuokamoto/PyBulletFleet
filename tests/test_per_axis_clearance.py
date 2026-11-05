@@ -1,10 +1,10 @@
 """Per-axis collision clearance (#105).
 
 ``collision_margin`` takes a scalar, as before, or an ``(x, y, z)`` triple in
-world axes. With ``CLOSEST_POINTS`` (and the kinematic pairs of ``HYBRID``) a
-pair is reported when the bodies touch, or when the gap between their closest
-points is within the largest component and, along each world axis, within that
-axis's clearance.
+world axes. The triple acts in the broad phase only: each AABB axis is
+enlarged by that axis's clearance. The narrow phase (``CLOSEST_POINTS`` and the
+kinematic pairs of ``HYBRID``) then reports a pair whose straight-line gap is
+within the largest component, as for a scalar.
 """
 
 import itertools
@@ -21,6 +21,7 @@ from pybullet_fleet.sim_object import ShapeParams, SimObject
 from pybullet_fleet.types import CollisionDetectionMethod, CollisionMode, SpatialHashCellSizeMode
 
 XY_ONLY = (0.05, 0.05, 0.0)
+_PITCHED = (0.0, math.radians(0.5), 0.0)
 
 
 def _sim(margin, method=CollisionDetectionMethod.CLOSEST_POINTS, cell=1.0):
@@ -45,11 +46,11 @@ def _shape(kind, size):
     return ShapeParams(shape_type="box", half_extents=list(size))
 
 
-def _body(sim, xyz, size=(0.1, 0.1, 0.1), kind="box", mode=CollisionMode.NORMAL_3D):
+def _body(sim, xyz, size=(0.1, 0.1, 0.1), kind="box", mode=CollisionMode.NORMAL_3D, rpy=(0.0, 0.0, 0.0)):
     return SimObject.from_mesh(
         visual_shape=_shape(kind, size),
         collision_shape=_shape(kind, size),
-        pose=Pose.from_xyz(*xyz),
+        pose=Pose.from_euler(*xyz, *rpy),
         mass=0.0,
         sim_core=sim,
         collision_mode=mode,
@@ -160,27 +161,39 @@ def test_each_axis_has_its_own_clearance(make_sim):
     assert narrow_x.get_active_collision_pairs() == []
 
 
-def test_the_narrow_phase_filters_by_the_closest_points_separation(make_sim):
-    """Spheres whose AABBs overlap in z but whose closest points are 1.5 mm
-    apart in z: the broad phase passes them, the z clearance decides."""
-    for z_clearance, expected in [(0.0, False), (0.002, True)]:
-        sim = make_sim((0.05, 0.05, z_clearance))
-        a = _body(sim, (0.0, 0.0, 0.2), size=0.1, kind="sphere")
-        b = _body(sim, (0.2, 0.0, 0.25), size=0.1, kind="sphere")
-        sim._moved_this_step = {a.object_id, b.object_id}
-        assert sim.filter_aabb_pairs()[0] == [_pair(a, b)]
-        sim.check_collisions()
-        assert (sim.get_active_collision_pairs() == [_pair(a, b)]) is expected
-
-
-def test_upright_cylinders_side_by_side_are_level(make_sim):
-    """PyBullet puts a hair of z (about 1e-7 m) between the closest points of
-    two upright cylinders at different heights; a zero z clearance still
-    counts them as level."""
+def test_the_narrow_phase_judges_the_straight_line_gap(make_sim):
+    """Spheres whose AABBs overlap in z, with closest points 1.5 mm apart in z:
+    the broad phase passes them and, with no z clearance, the pair is still
+    reported, because the narrow phase judges the straight-line gap."""
     sim = make_sim(XY_ONLY)
-    shape = ShapeParams(shape_type="cylinder", radius=0.25, height=0.3)
-    a = SimObject.from_mesh(visual_shape=shape, collision_shape=shape, pose=Pose.from_xyz(0, 0, 0.15), sim_core=sim)
-    b = SimObject.from_mesh(visual_shape=shape, collision_shape=shape, pose=Pose.from_xyz(0.53, 0.1, 0.25), sim_core=sim)
+    a = _body(sim, (0.0, 0.0, 0.2), size=0.1, kind="sphere")
+    b = _body(sim, (0.2, 0.0, 0.25), size=0.1, kind="sphere")
+    sim._moved_this_step = {a.object_id, b.object_id}
+    assert sim.filter_aabb_pairs()[0] == [_pair(a, b)]
+    sim.check_collisions()
+    assert sim.get_active_collision_pairs() == [_pair(a, b)]
+
+
+def test_the_narrow_phase_queries_the_largest_component(make_sim):
+    """Boxes 0.04 apart in x and 0.008 in y pass the broad phase of
+    (0.05, 0.01, 0); their 0.041 gap is within 0.05, the largest component."""
+    sim = make_sim((0.05, 0.01, 0.0))
+    a = _body(sim, (0.0, 0.0, 0.1))
+    b = _body(sim, (0.24, 0.208, 0.1))
+    sim.check_collisions()
+    assert sim.get_active_collision_pairs() == [_pair(a, b)]
+    observation = sim.get_collision_observation()
+    assert observation is not None
+    assert observation.pairs[0].signed_distance == pytest.approx(math.hypot(0.04, 0.008), abs=1e-3)
+
+
+def test_a_near_miss_between_tilted_boxes_is_reported(make_sim):
+    """Boxes 3 cm apart, both pitched by 0.5 degree (as on a ramp): the closest
+    points are not level, but the AABBs overlap in z, so (0.05, 0.05, 0)
+    reports the pair."""
+    sim = make_sim(XY_ONLY)
+    a = _body(sim, (0.0, 0.0, 0.1), rpy=_PITCHED)
+    b = _body(sim, (0.23, 0.0, 0.1), rpy=_PITCHED)
     sim.check_collisions()
     assert sim.get_active_collision_pairs() == [_pair(a, b)]
 
@@ -369,15 +382,14 @@ def test_observation_holds_a_tuple_after_a_list_is_set_on_params(make_sim):
 # --- Against NORMAL_2D ------------------------------------------------------
 
 
-def _active_pairs_in_scene(seed, margin, mode):
-    """Active pairs among 40 random upright boxes, all of ``mode``, by spawn index."""
-    rng = random.Random(seed)
+def _active_pairs(margin, mode, bodies):
+    """Active pairs, by index in ``bodies``, with every body of ``mode``.
+
+    Each body is ``(xyz, size, kind, rpy)``.
+    """
     sim = _sim(margin, cell=0.5)
     try:
-        objects = [
-            _body(sim, [rng.uniform(0.0, 1.2) for _ in range(3)], size=[rng.uniform(0.03, 0.12) for _ in range(3)], mode=mode)
-            for _ in range(40)
-        ]
+        objects = [_body(sim, xyz, size=size, kind=kind, mode=mode, rpy=rpy) for xyz, size, kind, rpy in bodies]
         index = {o.object_id: k for k, o in enumerate(objects)}
         sim.check_collisions()
         return sorted(tuple(sorted((index[a], index[b]))) for a, b in sim.get_active_collision_pairs())
@@ -385,15 +397,75 @@ def _active_pairs_in_scene(seed, margin, mode):
         p.disconnect(sim.client)
 
 
+_BOX = (0.1, 0.1, 0.1)
+_LEVEL = (0.0, 0.0, 0.0)
+_SCENES = {
+    "side by side": [((0.0, 0.0, 0.1), _BOX, "box", _LEVEL), ((0.23, 0.0, 0.1), _BOX, "box", _LEVEL)],
+    "under a shelf": [((0.0, 0.0, 0.1), _BOX, "box", _LEVEL), ((0.05, 0.0, 0.33), (0.3, 0.3, 0.1), "box", _LEVEL)],
+    "diagonal": [((0.0, 0.0, 0.1), _BOX, "box", _LEVEL), ((0.22, 0.22, 0.1), _BOX, "box", _LEVEL)],
+    "diagonal above": [((0.0, 0.0, 0.1), _BOX, "box", _LEVEL), ((0.22, 0.0, 0.32), _BOX, "box", _LEVEL)],
+    "spheres at different heights": [
+        ((0.0, 0.0, 0.2), 0.1, "sphere", _LEVEL),
+        ((0.2, 0.0, 0.25), 0.1, "sphere", _LEVEL),
+    ],
+    "tilted boxes": [
+        ((0.0, 0.0, 0.1), _BOX, "box", _PITCHED),
+        ((0.23, 0.0, 0.1), _BOX, "box", _PITCHED),
+    ],
+}
+
+
+def _random_scene(seed):
+    """40 boxes and spheres, some boxes tilted."""
+    rng = random.Random(seed)
+    bodies = []
+    for _ in range(40):
+        xyz = tuple(rng.uniform(0.0, 1.2) for _ in range(3))
+        if rng.random() < 0.3:
+            bodies.append((xyz, rng.uniform(0.03, 0.12), "sphere", _LEVEL))
+        else:
+            rpy = tuple(rng.choice([0.0, rng.uniform(-0.3, 0.3)]) for _ in range(3))
+            bodies.append((xyz, tuple(rng.uniform(0.03, 0.12) for _ in range(3)), "box", rpy))
+    return bodies
+
+
 @pytest.mark.filterwarnings("ignore:CollisionMode.NORMAL_2D is deprecated:FutureWarning")
+@pytest.mark.parametrize(
+    "bodies",
+    list(_SCENES.values()) + [_random_scene(seed) for seed in range(3)],
+    ids=list(_SCENES) + ["random 0", "random 1", "random 2"],
+)
+def test_a_zero_z_clearance_matches_normal_2d(bodies):
+    """Every body NORMAL_2D with margin m reports exactly what every body
+    NORMAL_3D with (m, m, 0) does."""
+    assert _active_pairs(0.05, CollisionMode.NORMAL_2D, bodies) == _active_pairs(
+        (0.05, 0.05, 0.0), CollisionMode.NORMAL_3D, bodies
+    )
+
+
+@pytest.mark.filterwarnings("ignore:CollisionMode.NORMAL_2D is deprecated:FutureWarning")
+@pytest.mark.parametrize(
+    "margin, mode",
+    [(0.05, CollisionMode.NORMAL_2D), ((0.05, 0.05, 0.0), CollisionMode.NORMAL_3D)],
+    ids=["normal_2d", "per_axis"],
+)
+def test_an_active_pair_that_moves_out_of_the_axis_clearance_resolves(make_sim, margin, mode):
+    """Side by side, then one body lifted 3 cm clear in z (gap about 0.042):
+    the pair resolves, as it would not be reported in a fresh scene."""
+    sim = make_sim(margin)
+    a = _body(sim, (0.0, 0.0, 0.1), mode=mode)
+    b = _body(sim, (0.23, 0.0, 0.1), mode=mode)
+    sim.check_collisions()
+    assert sim.get_active_collision_pairs() == [_pair(a, b)]
+    b.set_pose(Pose.from_xyz(0.23, 0.0, 0.33))
+    sim.check_collisions()
+    assert sim.get_active_collision_pairs() == []
+
+
 @pytest.mark.parametrize("seed", range(3))
-def test_a_zero_z_clearance_matches_normal_2d_for_upright_boxes(seed):
-    """Every body NORMAL_2D with margin m reports what every body NORMAL_3D
-    with (m, m, 0) does when the near misses are level, as between upright
-    boxes; and fewer pairs than NORMAL_3D with m, which also reports the ones
-    above or below."""
-    normal_2d = _active_pairs_in_scene(seed, 0.05, CollisionMode.NORMAL_2D)
-    per_axis = _active_pairs_in_scene(seed, (0.05, 0.05, 0.0), CollisionMode.NORMAL_3D)
-    normal_3d = _active_pairs_in_scene(seed, 0.05, CollisionMode.NORMAL_3D)
-    assert normal_2d == per_axis
+def test_a_zero_z_clearance_reports_fewer_pairs_than_the_scalar(seed):
+    """NORMAL_3D with m also reports the near misses above or below."""
+    bodies = _random_scene(seed)
+    per_axis = _active_pairs((0.05, 0.05, 0.0), CollisionMode.NORMAL_3D, bodies)
+    normal_3d = _active_pairs(0.05, CollisionMode.NORMAL_3D, bodies)
     assert set(per_axis) < set(normal_3d)

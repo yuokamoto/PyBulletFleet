@@ -150,12 +150,6 @@ _VIEWPORT_CLICK_MAX_DISTANCE_PX = 8
 #: A collision clearance: one distance for every axis, or one per world axis (x, y, z).
 CollisionMargin = Union[float, Tuple[float, float, float]]
 
-#: Slack, in metres, on each axis of a per-axis clearance. PyBullet puts a
-#: hair of offset (about 1e-7 m) between closest points that are level in
-#: exact geometry, such as those of two upright cylinders side by side; a zero
-#: z clearance must still count them as level.
-_CLEARANCE_AXIS_TOLERANCE = 1e-5
-
 
 def _is_scalar_margin(value: Any) -> bool:
     """A real number (numpy scalars included), not a bool."""
@@ -280,10 +274,12 @@ class SimulationParams:
     #: ignores it. A number applies to every direction; an ``(x, y, z)``
     #: triple (a list in YAML) gives one clearance per world axis, for
     #: example ``(0.05, 0.05, 0.0)`` to report bodies side by side but not one
-    #: passing close above or below another. With a triple, a pair that does
-    #: not touch is reported when its closest points are within the largest
-    #: component of each other and, along each world axis, within that axis's
-    #: clearance.
+    #: passing close above or below another. A triple acts in the broad phase:
+    #: each AABB axis is enlarged by that axis's clearance, so two bodies whose
+    #: AABBs are farther apart than that on any axis are never reported. The
+    #: narrow phase judges the straight-line gap against the largest
+    #: component, so ``(m, m, m)`` is the same as ``m``, and ``(m, m, 0)``
+    #: reports what ``CollisionMode.NORMAL_2D`` with ``m`` did, for every pair.
     collision_margin: CollisionMargin = _SIM_D["collision_margin"]
     multi_cell_threshold: float = _SIM_D["multi_cell_threshold"]  # Accepted for compatibility; not used
     enable_floor: bool = _SIM_D["enable_floor"]
@@ -2194,50 +2190,49 @@ class MultiRobotSimulationCore:
             return _clearance_triple(margin)
         return (0.0, 0.0, 0.0)
 
-    def _narrow_phase_clearance(self) -> Tuple[float, Optional[Tuple[float, float, float]]]:
-        """The getClosestPoints query distance, and the per-axis limits its points must meet.
+    def _narrow_phase_clearance(self) -> float:
+        """The getClosestPoints query distance: the margin, or the largest component of a per-axis one.
 
-        The limits are ``None`` when every axis has the same clearance: a gap
-        within the query distance is then within it along every axis, and the
-        points need no filtering.
+        A per-axis clearance acts in the broad phase only (each AABB axis is
+        enlarged by that axis's clearance); the narrow phase judges the
+        straight-line gap, so ``(m, m, m)`` behaves as ``m``.
         """
         margin = self._params.collision_margin
         if _is_scalar_margin(margin):
-            return float(margin), None
-        margin = _clearance_triple(margin)
-        if margin[0] == margin[1] == margin[2]:
-            return margin[0], None
-        return max(margin), margin
+            return float(margin)
+        return max(_clearance_triple(margin))
 
-    @staticmethod
-    def _points_within_axis_clearance(closest_points: Sequence[Any], limits: Tuple[float, float, float]) -> List[Any]:
-        """The getClosestPoints results that touch, or whose separation is within ``limits`` on each world axis.
+    def _aabbs_within_clearance(self, obj_id_a: int, obj_id_b: int, clearance: Tuple[float, float, float]) -> bool:
+        """Whether two kinematic bodies' AABBs are within ``clearance`` of each other on every axis.
 
-        The separation of a point is the vector from its position on A to
-        its position on B. A point with a distance of 0 or less is touching
-        or penetrating and is kept whatever the clearance.
+        The pair test of filter_aabb_pairs(), for a pair the narrow phase
+        checks again without the broad phase offering it (an active pair, or
+        any pair after a margin change). No z clearance with a NORMAL_2D body.
         """
-        lx, ly, lz = (limit + _CLEARANCE_AXIS_TOLERANCE for limit in limits)
-        kept = []
-        for point in closest_points:
-            if point[8] > 0:
-                (ax, ay, az), (bx, by, bz) = point[5], point[6]
-                if abs(bx - ax) > lx or abs(by - ay) > ly or abs(bz - az) > lz:
-                    continue
-            kept.append(point)
-        return kept
+        aabb_a = self._cached_aabbs_dict.get(obj_id_a)
+        aabb_b = self._cached_aabbs_dict.get(obj_id_b)
+        if aabb_a is None or aabb_b is None:
+            return True  # nothing to judge by: leave it to the narrow phase
+        modes = self._cached_collision_modes
+        two_d = modes.get(obj_id_a) == CollisionMode.NORMAL_2D or modes.get(obj_id_b) == CollisionMode.NORMAL_2D
+        for axis in range(3):
+            margin = 0.0 if two_d and axis == 2 else clearance[axis]
+            if aabb_a[1][axis] + margin < aabb_b[0][axis] or aabb_a[0][axis] - margin > aabb_b[1][axis]:
+                return False
+        return True
 
     def _closest_points_within_clearance(
-        self,
-        body_a: int,
-        body_b: int,
-        query_distance: float,
-        axis_limits: Optional[Tuple[float, float, float]],
+        self, obj_id_a: int, obj_id_b: int, clearance: Tuple[float, float, float], query_distance: float
     ) -> Tuple[bool, Optional[float]]:
-        """Whether two bodies touch or are within the clearance, and the smallest signed distance found."""
+        """Whether two bodies touch or are within the clearance, and the smallest signed distance found.
+
+        The AABBs must be within the clearance on every axis, as the broad
+        phase requires; the closest points then within ``query_distance``.
+        """
+        if not self._aabbs_within_clearance(obj_id_a, obj_id_b, clearance):
+            return False, None
+        body_a, body_b = self._sim_objects_dict[obj_id_a].body_id, self._sim_objects_dict[obj_id_b].body_id
         closest_points = p.getClosestPoints(body_a, body_b, distance=query_distance, physicsClientId=self._client)
-        if axis_limits is not None and closest_points:
-            closest_points = self._points_within_axis_clearance(closest_points, axis_limits)
         if not closest_points:
             return False, None
         distances = (float(point[8]) for point in closest_points)
@@ -3821,9 +3816,12 @@ class MultiRobotSimulationCore:
                 else:
                     pairs_to_check.add(pair)
 
-            # Check contact points for all pairs. A per-axis clearance queries
-            # the largest component and filters the points by axis.
-            query_distance, axis_limits = self._narrow_phase_clearance()
+            # Check contact points for all pairs. A pair checked again without
+            # the broad phase (an active one) must still have its AABBs within
+            # each axis's clearance; the closest points are then queried at the
+            # largest component.
+            query_distance = self._narrow_phase_clearance()
+            clearance = self._collision_broadphase_margin()
             new_collisions = set()
             resolved_collisions = set()
 
@@ -3871,7 +3869,7 @@ class MultiRobotSimulationCore:
                     # Best for: kinematics motion, safety margin detection
                     # Works with: Physics ON/OFF, stable with resetBasePositionAndOrientation
                     has_collision, signed_distance = self._closest_points_within_clearance(
-                        obj_i.body_id, obj_j.body_id, query_distance, axis_limits
+                        obj_id_i, obj_id_j, clearance, query_distance
                     )
 
                 elif detection_method == CollisionDetectionMethod.HYBRID:
@@ -3889,7 +3887,7 @@ class MultiRobotSimulationCore:
                         pair_method = CollisionDetectionMethod.CLOSEST_POINTS
                         # Both are kinematic - use getClosestPoints with safety margin
                         has_collision, signed_distance = self._closest_points_within_clearance(
-                            obj_i.body_id, obj_j.body_id, query_distance, axis_limits
+                            obj_id_i, obj_id_j, clearance, query_distance
                         )
 
                 pair = (obj_id_i, obj_id_j)

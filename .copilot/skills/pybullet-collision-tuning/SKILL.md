@@ -54,7 +54,7 @@ Narrow Phase: PyBullet API — per-pair verification
 | Conveyor belt surface | `STATIC` | Structure doesn't move |
 
 `NORMAL_2D` (no clearance in z) is deprecated and emits a `FutureWarning`; use `NORMAL_3D`, with
-`collision_margin: [m, m, 0]` if no pair should get z clearance (it also requires a near miss to be level).
+`collision_margin: [m, m, 0]` if no pair should get z clearance (it reports what `NORMAL_2D` did, for every pair).
 
 ```python
 from pybullet_fleet.types import CollisionMode

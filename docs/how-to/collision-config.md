@@ -143,11 +143,8 @@ default, once per line however many objects the line spawns. Switch to
 `NORMAL_3D`; the only change is that near misses within the clearance above or
 below are reported too. To keep no clearance on the z axis, also set
 `collision_margin: [m, m, 0]` (see [Per-axis clearance](per-axis-clearance)).
-That applies to every pair, not only pairs with a former `NORMAL_2D` body, and
-reports a near miss only when it is level: between upright boxes or upright
-cylinders that overlap in height it reports what `NORMAL_2D` did, while a near
-miss whose closest points are at different heights (two spheres, a sloped
-mesh) that `NORMAL_2D` reported is no longer reported.
+It reports exactly what `NORMAL_2D` with margin `m` did, for every pair
+rather than only pairs with a former `NORMAL_2D` body.
 
 ### Setting via SimObject
 
@@ -218,39 +215,28 @@ This reports ground vehicles that come within 5 cm of each other side by side,
 but not one passing close under a shelf or a carried load. Each component must
 be finite and non-negative.
 
-A pair that touches or penetrates is always reported. A pair that does not is
-reported when both hold:
+The per-axis clearance acts on axis-aligned bounding boxes (AABBs), not on
+the shapes themselves. A pair that touches or penetrates is always reported.
+A pair that does not is reported when both hold:
 
-- **Broad phase**: their AABBs, each axis enlarged by that axis's clearance,
-  overlap.
-- **Narrow phase**: `getClosestPoints()` is queried with the largest
-  component, and the separation between the closest points (the vector from
-  the point on one body to the point on the other) is, along each world axis,
-  within that axis's clearance. So the gap is within the largest component in
-  straight-line distance and within each axis's clearance along that axis:
-  with `(0.05, 0.05, 0.0)`, a level gap of up to 5 cm. A slack of 10
-  micrometres per axis absorbs PyBullet's rounding, so closest points that are
-  level in exact geometry count as level.
+- **AABBs**: their AABBs, each axis enlarged by that axis's clearance,
+  overlap. With `(0.05, 0.05, 0.0)`, two bodies whose AABBs do not overlap in
+  z are never reported, however close they are.
+- **Gap**: the straight-line gap between the bodies, from
+  `getClosestPoints()`, is within the largest component (5 cm here), as for a
+  scalar margin of that size.
 
-Only the closest points are judged, one pair of points per pair of shapes.
-The question the clearance asks is whether *some* pair of points on the two
-bodies is within every axis's clearance; the closest pair is one such pair
-but not always the one that is. So on any axis whose clearance is smaller
-than the largest component, a near miss whose closest points are offset along
-that axis by more than its clearance is not reported, even when another part
-of the two bodies is within all three clearances. This is not specific to z;
-z is just where it usually shows, because `(m, m, 0)` is the common setting
-and a zero clearance is exceeded by any offset at all. Examples with a zero z
-clearance: a sphere or a rounded mesh beside a box, a chamfered edge, or two
-boxes side by side that are tilted by a fraction of a degree (3 cm apart and
-tilted 0.5 degrees, the closest points are about 0.3 mm apart in z). A small
-clearance on the smaller axis, a few millimetres rather than 0, makes this
-rarer (the offset must then exceed it) but does not remove it. If bodies may
-tilt or are not box-shaped, use such a clearance, or a scalar margin when the
-difference between axes does not matter.
+So `(m, m, m)` behaves exactly as the scalar `m`, and `(m, m, 0)` behaves
+exactly as `CollisionMode.NORMAL_2D` with `m` did, for every pair. The
+smaller clearance restricts the pair at AABB level only. Two bodies whose
+AABBs overlap on that axis are judged by the straight-line gap, so a near
+miss whose gap runs mostly along that axis can still be reported, for example
+two spheres at different heights whose AABBs overlap in z, or a rounded or
+tilted shape beside a box. Two boxes side by side, both tilted by a fraction
+of a degree, are reported like upright ones.
 
 The axes are the world axes, as AABBs are, not a body's own axes. A scalar
-behaves exactly as before, and so does a triple with three equal components.
+behaves exactly as before.
 `CONTACT_POINTS`, and the pairs with a physics body under `HYBRID`, ignore the
 clearance as they ignore a scalar one. The clearance is global; there is no
 per-object clearance. The replay profile records a scalar margin only.
