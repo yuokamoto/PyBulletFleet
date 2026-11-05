@@ -63,7 +63,8 @@ class KinematicJoint:
     #: that step counted as motion.
     braking: bool = False
     #: :attr:`trajectory` as closed-form phase scalars, and the trajectory
-    #: they were read from. Derived, so neither is compared or captured.
+    #: they were read from. Derived, so neither is compared or captured;
+    #: :meth:`clear_trajectory` drops both with the trajectory.
     _profile: Optional[PhaseProfile] = field(default=None, repr=False, compare=False)
     _profile_of: Optional[Any] = field(default=None, repr=False, compare=False)
 
@@ -164,7 +165,7 @@ class KinematicJoint:
         trajectory = self.trajectory
         if trajectory is None:
             raise RuntimeError(f"Joint {self.index} has no trajectory")
-        if self._profile_of is not trajectory or self._profile is None:
+        if self._profile_of is not trajectory:
             self._profile = extract_profile(trajectory)
             self._profile_of = trajectory
         return self._profile
@@ -177,8 +178,7 @@ class KinematicJoint:
     def clear_motion(self) -> None:
         """Put the joint at rest: no speed, no plan, not braking."""
         self.speed = 0.0
-        self.trajectory = None
-        self.trajectory_target = None
+        self.clear_trajectory()
         self.braking = False
 
     def clear_trajectory(self) -> None:
@@ -192,3 +192,6 @@ class KinematicJoint:
         """
         self.trajectory = None
         self.trajectory_target = None
+        # The cached profile would otherwise keep the dropped solver alive.
+        self._profile = None
+        self._profile_of = None

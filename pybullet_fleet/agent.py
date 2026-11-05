@@ -2013,8 +2013,7 @@ class Agent(SimObject):
             slowed = 0.0  # braked through rest inside this step
         position = state.position + 0.5 * (state.speed + slowed) * moving_for
         state.speed = slowed
-        state.trajectory = None
-        state.trajectory_target = None
+        state.clear_trajectory()
         # Keeps is_moving true even on the final step, where the speed reaches
         # exactly zero but the joint is not at its target.
         state.braking = True
