@@ -163,9 +163,12 @@ def _is_scalar_margin(value: Any) -> bool:
 
 
 def _normalize_margin(value: Any) -> CollisionMargin:
-    """A ``collision_margin`` as a float, or as a validated per-axis tuple of floats."""
+    """A ``collision_margin`` as a validated float, or as a validated per-axis tuple of floats."""
     if _is_scalar_margin(value):
-        return float(value)
+        margin = float(value)
+        if not math.isfinite(margin) or margin < 0:
+            raise ValueError(f"collision_margin must be finite and non-negative, got {value!r}")
+        return margin
     return _clearance_triple(value)
 
 
@@ -2243,8 +2246,6 @@ class MultiRobotSimulationCore:
                 finite, or a sequence does not have three components.
         """
         margin = _normalize_margin(margin)
-        if isinstance(margin, float) and (not math.isfinite(margin) or margin < 0):
-            raise ValueError("collision_margin must be finite and non-negative")
         if margin == self._params.collision_margin:
             return
         old_effective_margin = self._collision_broadphase_margin()

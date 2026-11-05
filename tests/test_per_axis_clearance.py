@@ -95,6 +95,14 @@ def test_params_reject_a_bad_triple(value):
         SimulationParams(gui=False, monitor=False, collision_margin=value)
 
 
+@pytest.mark.parametrize("value", [-0.01, np.float64(-0.01), math.inf, math.nan])
+def test_params_reject_a_bad_scalar(value):
+    """As set_collision_margin() does: the broad phase would clamp it to 0 while
+    getClosestPoints got the negative distance."""
+    with pytest.raises(ValueError, match="collision_margin"):
+        SimulationParams(gui=False, monitor=False, collision_margin=value)
+
+
 def test_from_dict_reads_a_list(tmp_path):
     assert SimulationParams.from_dict({"collision_margin": [0.05, 0.05, 0.0]}).collision_margin == XY_ONLY
     config = tmp_path / "sim.yaml"
