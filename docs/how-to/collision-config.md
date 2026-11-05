@@ -233,13 +233,21 @@ reported when both hold:
   level in exact geometry count as level.
 
 Only the closest points are judged, one pair of points per pair of shapes.
-With a zero z clearance, a near miss whose closest points are at different
-heights is not reported, even when another part of the two bodies is level
-and within the x and y clearance: a sphere or a rounded mesh beside a box, a
-chamfered edge, or two boxes side by side that are tilted by a fraction of a
-degree (3 cm apart and tilted 0.5 degrees, the closest points are about
-0.3 mm apart in z). If bodies may tilt or are not box-shaped, give z a small
-clearance, a few millimetres, rather than 0.
+The question the clearance asks is whether *some* pair of points on the two
+bodies is within every axis's clearance; the closest pair is one such pair
+but not always the one that is. So on any axis whose clearance is smaller
+than the largest component, a near miss whose closest points are offset along
+that axis by more than its clearance is not reported, even when another part
+of the two bodies is within all three clearances. This is not specific to z;
+z is just where it usually shows, because `(m, m, 0)` is the common setting
+and a zero clearance is exceeded by any offset at all. Examples with a zero z
+clearance: a sphere or a rounded mesh beside a box, a chamfered edge, or two
+boxes side by side that are tilted by a fraction of a degree (3 cm apart and
+tilted 0.5 degrees, the closest points are about 0.3 mm apart in z). A small
+clearance on the smaller axis, a few millimetres rather than 0, makes this
+rarer (the offset must then exceed it) but does not remove it. If bodies may
+tilt or are not box-shaped, use such a clearance, or a scalar margin when the
+difference between axes does not matter.
 
 The axes are the world axes, as AABBs are, not a body's own axes. A scalar
 behaves exactly as before, and so does a triple with three equal components.
