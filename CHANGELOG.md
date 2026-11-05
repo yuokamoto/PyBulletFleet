@@ -545,6 +545,12 @@ are not recommended for production use yet.
 
 ### Fixed
 
+- A joint name given to `set_joint_target()`, `get_joint_state()`,
+  `is_joint_at_target()`, `set_joint_position()` or the `*_by_name` aliases is
+  looked up on the agent's own physics client. With a second simulation
+  running, it was looked up on PyBullet's default client: a valid name was
+  reported missing, or resolved to a joint of another body.
+
 - `REPLACE_NEXT` elevators: a request for the floor the moving cabin is
   already heading to now drops the pending floor (`REPLACED`) instead of being
   rejected and leaving it queued. A controller that changed its target and then

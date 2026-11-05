@@ -246,3 +246,54 @@ class TestTheOldKeyword:
         agent = _lift(sim_core)
         with pytest.raises(TypeError, match="multiple values for argument 'joint'"):
             call(agent)
+
+
+class TestANonDefaultClient:
+    """A joint name resolves on the agent's own physics client.
+
+    PyBullet's module-level calls default to the first client. With a second
+    simulation running, a name looked up without the agent's client would be
+    searched for on whatever body has the same id in the first one.
+    """
+
+    @pytest.fixture
+    def two_sims(self):
+        first = _sim()
+        _manipulator(first)  # body 0 on the default client: no joint named "lift"
+        second = _sim()
+        assert second.client != first.client
+        yield first, second
+        for sim in (second, first):
+            try:
+                p.disconnect(sim.client)
+            except p.error:
+                pass
+
+    def test_set_joint_target(self, two_sims):
+        _, second = two_sims
+        agent = _lift(second)
+
+        agent.set_joint_target(LIFT, 1.0)
+
+        assert agent.last_joint_targets == {0: 1.0}
+
+    def test_get_joint_state(self, two_sims):
+        _, second = two_sims
+        agent = _lift(second)
+        agent.set_joint_position(0, 2.0)
+
+        assert agent.get_joint_state(LIFT)[0] == pytest.approx(2.0)
+
+    def test_is_joint_at_target(self, two_sims):
+        _, second = two_sims
+        agent = _lift(second)
+        agent.set_joint_position(0, 2.0)
+
+        assert agent.is_joint_at_target(LIFT, 2.0)
+
+    def test_set_joint_position(self, two_sims):
+        _, second = two_sims
+        agent = _lift(second)
+
+        assert agent.set_joint_position(LIFT, 2.0)
+        assert agent.get_joint_state(0)[0] == pytest.approx(2.0)

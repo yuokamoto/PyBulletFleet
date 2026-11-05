@@ -2500,8 +2500,11 @@ class Agent(SimObject):
     def _resolve_joint(self, joint: Union[int, str]) -> Optional[int]:
         """The index of a joint named by index or name, or None (logged) for one this body does not have."""
         if isinstance(joint, str):
-            index = resolve_joint_index(self.body_id, joint)
-            if index == -1:
+            # Looked up in this body's own joint_info, which was read on its
+            # own client: resolve_joint_index() would ask PyBullet's default one.
+            try:
+                index = self._joint_index_by_name(joint)
+            except KeyError:
                 self._log.warning(f"Joint name '{joint}' not found.")
                 return None
         else:
