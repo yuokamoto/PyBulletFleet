@@ -69,3 +69,5 @@ def test_asking_for_the_window_falls_back_to_the_file_and_says_why(error):
     assert result.returncode == 0, result.stderr
     assert "ok" in result.stdout.splitlines()  # PyBullet prints its own lines too
     assert "tkinter is unavailable" in result.stderr
+    assert "libtk8.6.so: cannot open shared object file" in result.stderr  # the reason
+    assert "python3-tk" in result.stderr  # how to fix it
