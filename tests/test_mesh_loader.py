@@ -13,18 +13,6 @@ from pybullet_fleet.types import CollisionMode
 from pybullet_fleet.sdf_loader import load_mesh_directory, load_rmf_world
 
 
-@pytest.fixture
-def sim_core():
-    """Headless sim_core for world loader tests."""
-    sim = MultiRobotSimulationCore(SimulationParams(gui=False, monitor=False))
-    sim.initialize_simulation()
-    yield sim
-    try:
-        p.disconnect(sim.client)
-    except p.error:
-        pass
-
-
 class TestLoadMeshDirectory:
     """Tests for load_mesh_directory() OBJ directory loader."""
 

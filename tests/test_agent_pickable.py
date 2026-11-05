@@ -16,19 +16,6 @@ from pybullet_fleet.sim_object import ShapeParams
 URDF = "cube_small.urdf"
 
 
-@pytest.fixture
-def sim_core():
-    import pybullet as p
-
-    sim = MultiRobotSimulationCore(SimulationParams(gui=False, monitor=False, enable_monitor_gui=False))
-    sim.initialize_simulation()
-    yield sim
-    try:
-        p.disconnect(sim.client)
-    except p.error:
-        pass
-
-
 class TestAgentPickable:
     def test_default_is_still_not_pickable(self, sim_core):
         agent = Agent.from_params(AgentSpawnParams(urdf_path=URDF, name="bot"), sim_core=sim_core)

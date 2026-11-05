@@ -210,18 +210,6 @@ class TestPerEntityEventBus:
 # === core_simulation integration tests ===
 
 
-@pytest.fixture
-def sim_core():
-    """Headless sim_core for integration tests."""
-    sim = MultiRobotSimulationCore(SimulationParams(gui=False, monitor=False))
-    sim.initialize_simulation()
-    yield sim
-    try:
-        p.disconnect(sim.client)
-    except p.error:
-        pass
-
-
 class TestGlobalEventBus:
     """Tests for Global EventBus on MultiRobotSimulationCore."""
 

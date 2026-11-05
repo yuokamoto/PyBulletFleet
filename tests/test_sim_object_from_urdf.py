@@ -17,17 +17,6 @@ from pybullet_fleet.types import CollisionMode
 URDF = "cube_small.urdf"  # ships with pybullet_data
 
 
-@pytest.fixture
-def sim_core():
-    sim = MultiRobotSimulationCore(SimulationParams(gui=False, monitor=False, enable_monitor_gui=False))
-    sim.initialize_simulation()
-    yield sim
-    try:
-        p.disconnect(sim.client)
-    except p.error:
-        pass
-
-
 class TestFromUrdf:
     def test_loads_and_registers(self, sim_core):
         obj = SimObject.from_urdf(URDF, sim_core=sim_core)

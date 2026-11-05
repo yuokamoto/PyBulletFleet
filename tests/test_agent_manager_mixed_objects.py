@@ -26,19 +26,6 @@ OBJECT_DEF = {
 }
 
 
-@pytest.fixture
-def sim_core():
-    import pybullet as p
-
-    sim = MultiRobotSimulationCore(SimulationParams(gui=False, monitor=False, enable_monitor_gui=False))
-    sim.initialize_simulation()
-    yield sim
-    try:
-        p.disconnect(sim.client)
-    except p.error:
-        pass
-
-
 def _sim_object(sim_core, name):
     return SimObject.from_params(
         SimObjectSpawnParams(

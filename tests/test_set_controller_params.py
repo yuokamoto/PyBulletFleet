@@ -16,19 +16,6 @@ from pybullet_fleet import OmniController
 LIMITS = dict(max_linear_vel=[2.5, 1.2, 0.0], max_linear_accel=[1.5, 0.8, 0.0], navigation_2d=True)
 
 
-@pytest.fixture
-def sim_core():
-    import pybullet as p
-
-    sim = MultiRobotSimulationCore(SimulationParams(gui=False, monitor=False, enable_monitor_gui=False))
-    sim.initialize_simulation()
-    yield sim
-    try:
-        p.disconnect(sim.client)
-    except p.error:
-        pass
-
-
 def _agent(sim_core, **kwargs):
     return Agent.from_params(AgentSpawnParams(urdf_path="cube_small.urdf", **kwargs), sim_core=sim_core)
 
