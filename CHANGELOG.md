@@ -70,6 +70,12 @@ are not recommended for production use yet.
   along and arrived 0.6 m above the floor it was carried to. `Elevator.from_params`
   warns when it reaches the smallest floor spacing.
 
+- `ElevatorParams.report_platform_contacts` (default `false`; YAML
+  `report_platform_contacts`, a boolean or `"true"` / `"false"`): report a
+  body standing on the elevator's platform as a collision with the elevator.
+  Off by default, so a robot waiting on the platform is not a collision (see
+  the articulated-AABB entry under Fixed for when the rule applies).
+
 - `ControllerParams.stop_on_collision`: an agent that sets it stops dead, as
   `stop()` does, on the step a collision starts that involves it or an object
   attached to it (a carried load stops its carrier), instead of driving or
@@ -602,7 +608,7 @@ are not recommended for production use yet.
   An elevator's box now includes its platform, so a robot resting on the
   platform (waiting before departure, or after arrival) would be in
   collision with the elevator; the elevator leaves such pairs out, as before.
-  `ElevatorParams.report_platform_contacts` (default `false`) reports them.
+  `ElevatorParams.report_platform_contacts` (see Added) reports them.
   The rule applies only when the platform is the elevator's one collider:
   an elevator URDF with other collider links (walls, a ceiling, doors)
   reports bodies on the platform and logs a warning at spawn.
