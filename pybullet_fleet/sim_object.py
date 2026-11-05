@@ -1422,6 +1422,10 @@ class SimObject:
         # Notify sim_core if movement detected
         if moved and self.sim_core is not None:
             self.sim_core._mark_object_moved(self.object_id)
+            # Outside a step (paused, or a program that stopped stepping) no
+            # step follows to refresh the monitor window. Read only while
+            # paused and on flush; collision state stays as of the last step.
+            self.sim_core._monitor_frames.pose_edited()
 
             # Update AABB and spatial grid immediately for kinematic objects (optimization)
             # Physics objects are updated in step_once() to batch PyBullet calls

@@ -10,7 +10,7 @@ rest of the monitor's state:
   :class:`~pybullet_fleet.data_monitor.DataMonitor` keys its JSON cache on that
   tuple's identity, so a new tuple is also what renews the JSON;
 * whether something the window shows changed since the last frame was built
-  (selection, follow, pause, a pose edited while paused, the entity list),
+  (selection, follow, pause, a pose set outside a step, the entity list),
   and with it the decisions that bypass the periodic refresh: a frame while
   paused, and a flush.
 """
@@ -47,7 +47,7 @@ class MonitorFrames:
         self.stale = True
 
     def pose_edited(self) -> None:
-        """An entity was moved outside a step (a paused GUI edit): the window is behind.
+        """An entity was moved outside a step (paused, from the GUI or user code): the window is behind.
 
         No step follows to refresh the window, and :meth:`behind` would
         otherwise go by the step count alone, which the edit does not change.
