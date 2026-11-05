@@ -10,7 +10,7 @@ regardless, raising AttributeError as soon as either controller was attached.
 
 import pytest
 
-from pybullet_fleet import Agent, AgentManager, AgentSpawnParams, MultiRobotSimulationCore, SimulationParams
+from pybullet_fleet import Agent, AgentManager, AgentSpawnParams
 from pybullet_fleet.geometry import Pose
 from pybullet_fleet.sim_object import ShapeParams, SimObject, SimObjectSpawnParams
 

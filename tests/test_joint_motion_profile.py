@@ -12,7 +12,7 @@ import math
 
 import pytest
 
-from pybullet_fleet import Agent, AgentSpawnParams, MultiRobotSimulationCore, SimulationParams
+from pybullet_fleet import Agent, AgentSpawnParams
 from pybullet_fleet.action import JointAction
 from pybullet_fleet.devices.elevator import Elevator, ElevatorParams
 from pybullet_fleet.types import ActionStatus

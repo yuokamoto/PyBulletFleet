@@ -8,7 +8,7 @@ import pybullet_data
 import pytest
 
 from pybullet_fleet.events import EventBus, SimEvents
-from pybullet_fleet import MultiRobotSimulationCore, SimulationParams, Agent, AgentSpawnParams, Pose
+from pybullet_fleet import Agent, AgentSpawnParams, Pose
 from pybullet_fleet.sim_object import SimObject, ShapeParams
 from pybullet_fleet.types import MotionMode, CollisionMode
 

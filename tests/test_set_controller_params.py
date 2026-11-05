@@ -9,7 +9,7 @@ one set of limits while everything that asked reported another.
 
 import pytest
 
-from pybullet_fleet import Agent, AgentSpawnParams, MultiRobotSimulationCore, SimulationParams
+from pybullet_fleet import Agent, AgentSpawnParams
 from pybullet_fleet.controller_params import ControllerParams
 from pybullet_fleet import OmniController
 

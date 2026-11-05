@@ -7,7 +7,6 @@ Functions live in sdf_loader.py; world_loader.py re-exports for compatibility.
 import pybullet as p
 import pytest
 
-from pybullet_fleet import MultiRobotSimulationCore, SimulationParams
 from pybullet_fleet.sim_object import SimObject
 from pybullet_fleet.types import CollisionMode
 from pybullet_fleet.sdf_loader import load_mesh_directory, load_rmf_world

@@ -6,10 +6,9 @@ had to be created as an ``Agent`` and then visited by the per-step update
 loop for the life of the process.
 """
 
-import pybullet as p
 import pytest
 
-from pybullet_fleet import Agent, AgentSpawnParams, MultiRobotSimulationCore, SimulationParams
+from pybullet_fleet import Agent, AgentSpawnParams
 from pybullet_fleet.geometry import Pose
 from pybullet_fleet.sim_object import ShapeParams, SimObject, SimObjectSpawnParams
 from pybullet_fleet.types import CollisionMode
