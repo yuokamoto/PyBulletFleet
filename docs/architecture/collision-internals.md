@@ -165,16 +165,13 @@ This section provides comprehensive details for each collision mode.
 ### NORMAL_3D - Full 3D Collision
 
 **Characteristics**:
-- **Neighbor Check**: 27 cells (3×3×3 cube)
+- **Candidates**: the bodies sharing one of its cells
 - **AABB Updates**: Every movement
 - **Grid Registration**: Updated on movement
 - **PyBullet Collision**: Enabled
 
 **Use Cases**:
-- Flying drones (need Z-axis collision)
-- 3D manipulators
-- Multi-level warehouses
-- Any object that moves in 3D space
+- Any moving object: ground robots (AGVs, AMRs), drones, manipulators
 
 **Configuration**:
 ```python
@@ -187,40 +184,30 @@ drone = SimObject(
 ```
 
 **Performance**:
-- Checks 27 neighbor cells vs 9 for 2D
-- ~3x more cells, but filtered by AABB
-- Typical overhead: <10% vs NORMAL_2D
+- Registered with its z extent enlarged by half the margin; a NORMAL_2D body's z extent is not enlarged
+- Candidates are the bodies sharing a cell, for both modes
+- Same cost as NORMAL_2D: the two differ only in the z clearance
 
-### NORMAL_2D - 2D Collision (XY Plane)
+### NORMAL_2D - No Clearance in Z (Deprecated)
+
+NORMAL_2D is deprecated: setting it emits a `FutureWarning`, and it will
+be removed in a future release. Use NORMAL_3D; the only difference is that a
+body within the clearance above or below is reported.
 
 **Characteristics**:
-- **Neighbor Check**: 9 cells (3×3×1, XY plane only)
+- **Candidates**: the bodies sharing one of its cells
 - **AABB Updates**: Every movement
-- **Grid Registration**: Updated on movement
-- **Z-Axis**: Ignored for neighbor search (but AABB Z must still overlap!)
+- **Grid Registration**: Updated on movement; z extent not enlarged by the margin
+- **Z-Axis**: AABB Z must actually overlap (no margin in z); Z is not ignored
+- **Differs from NORMAL_3D** only with a non-zero clearance (CLOSEST_POINTS / HYBRID): a body within the clearance above or below is not reported
 
-**Use Cases**:
-- Ground robots (AGVs, AMRs)
-- Warehouse robots (single floor)
-- 2D path planning
-- Most typical use cases
-
-**Configuration**:
-```python
-agv = SimObject(
-    body_id=body_id,
-    sim_core=sim_core,
-    collision_mode=CollisionMode.NORMAL_2D,
-    mass=0.0
-)
-```
 
 ### STATIC - Fixed Objects
 
 **Characteristics**:
-- **Neighbor Check**: 27 cells (when checked by moving objects)
+- **Candidates**: found from a moving body's side, through a cell both are registered in
 - **AABB Updates**: NEVER (calculated once at spawn)
-- **Grid Registration**: Once at spawn, never updated
+- **Grid Registration**: At spawn, and again whenever the grid is rebuilt (cell size or margin change)
 - **Movement**: Assumed to never move
 
 **Use Cases**:
@@ -331,7 +318,6 @@ params = SimulationParams(
     collision_detection_method=CollisionDetectionMethod.CLOSEST_POINTS,
     collision_margin=0.02,  # 2cm safety buffer
     spatial_hash_cell_size=2.0,  # 2m cells
-    multi_cell_threshold=1.5,  # Large object threshold
 )
 
 # Physics Mode
@@ -362,11 +348,11 @@ robot_3d = SimObject(
     mass=0.0,  # Kinematic
 )
 
-# Moving 2D AGV
+# Moving ground AGV
 agv = SimObject(
     body_id=body_id,
     sim_core=sim_core,
-    collision_mode=CollisionMode.NORMAL_2D,
+    collision_mode=CollisionMode.NORMAL_3D,
     mass=0.0,
 )
 
@@ -394,7 +380,6 @@ physics: false
 collision_detection_method: "closest_points"
 collision_margin: 0.02
 spatial_hash_cell_size: 2.0
-multi_cell_threshold: 1.5
 ignore_static_collision: false
 ```
 

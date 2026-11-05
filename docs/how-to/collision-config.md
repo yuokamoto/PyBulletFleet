@@ -46,8 +46,8 @@ mode, each pair's `detection_method` identifies the branch actually used.
 ## Try the visual collision demo
 
 Run `pybullet_fleet/examples/basics/collision_features_demo.py` to observe
-`NORMAL_3D`, `NORMAL_2D`, and `DISABLED` objects, collision highlighting, and
-large-object multi-cell registration in one scene:
+`NORMAL_3D`, `NORMAL_2D` (deprecated), and `DISABLED` objects, collision
+highlighting, and large-object multi-cell registration in one scene:
 
 ```bash
 python3 pybullet_fleet/examples/basics/collision_features_demo.py --duration 30
@@ -111,12 +111,12 @@ Controls collision behavior **per object**. Set at spawn time via `AgentSpawnPar
 from pybullet_fleet.types import CollisionMode
 ```
 
-| Mode | Updates | Grid | Neighbors | Use Case |
-|------|---------|------|-----------|----------|
-| `NORMAL_3D` | Every move | Yes | 27 (3×3×3) | Drones, 3D robots |
-| `NORMAL_2D` | Every move | Yes | 9 (3×3×1) | Ground robots, AGVs |
-| `STATIC` | Once | Yes | — | Walls, shelves |
-| `DISABLED` | Never | No | 0 | Markers, visualization |
+| Mode | Updates | Grid | Clearance in z | Use Case |
+|------|---------|------|----------------|----------|
+| `NORMAL_3D` | Every move | Yes | Yes | Default for moving bodies |
+| `NORMAL_2D` | Every move | Yes | No (z must overlap) | Deprecated; use `NORMAL_3D` |
+| `STATIC` | Once | Yes | Yes | Walls, shelves |
+| `DISABLED` | Never | No | — | Markers, visualization |
 
 ### Setting via AgentSpawnParams
 
@@ -124,13 +124,24 @@ from pybullet_fleet.types import CollisionMode
 from pybullet_fleet.types import CollisionMode
 from pybullet_fleet.agent import Agent, AgentSpawnParams
 
-# Ground robot (2D collision)
+# Moving robot (NORMAL_3D is the default and may be omitted)
 params = AgentSpawnParams(
     urdf_path="robot.urdf",
-    collision_mode=CollisionMode.NORMAL_2D,
+    collision_mode=CollisionMode.NORMAL_3D,
 )
 agent = Agent.from_params(params, sim_core)
 ```
+
+`NORMAL_2D` is deprecated. It differs from `NORMAL_3D` only in having no
+collision clearance on the z axis: a pair with a `NORMAL_2D` body must really
+overlap in z. That matters only with `CLOSEST_POINTS` or `HYBRID` and a
+non-zero `collision_margin`; with `CONTACT_POINTS` the two behave the same.
+Setting it (in spawn parameters, a constructor, `set_collision_mode()` or a
+config's `collision_mode: normal_2d`) still works but emits a
+`FutureWarning` that points at the calling line. Python shows it by
+default, once per line however many objects the line spawns. Switch to
+`NORMAL_3D`; the only change is that near misses within the clearance above or
+below are reported too.
 
 ### Setting via SimObject
 
@@ -291,20 +302,11 @@ For the cell size calculation algorithm, see [Cell Size & Grid Mapping](cell-siz
 
 ## Multi-Cell Threshold
 
-Controls when large objects are registered in multiple spatial-hash cells.
-Objects larger than `cell_size × multi_cell_threshold` span multiple cells.
-
-```yaml
-multi_cell_threshold: 1.5  # default
-```
-
-| Value | Meaning |
-|-------|---------|
-| 1.0 | Every object exceeding one cell is multi-registered |
-| **1.5** | Default — objects >1.5× the cell size span multiple cells |
-| 2.0+ | Only very large objects are multi-registered |
-
-**Example**: With `cell_size=2.0` and `multi_cell_threshold=1.5`, objects larger than 3.0 m are multi-registered.
+`multi_cell_threshold` is accepted for compatibility and no longer used. Every
+body is registered in every spatial-hash cell its AABB, enlarged by half the
+collision margin (not in z for a deprecated NORMAL_2D body), touches, and a moved body is
+checked against the bodies sharing one of its cells. Every pair within the
+margin is found whatever the bodies' sizes.
 
 For implementation details, see [Multi-Cell Registration](multi-cell-registration).
 
@@ -347,16 +349,13 @@ simulation:
   spatial_hash_cell_size_mode: "auto_initial"  # "constant" or "auto_adaptive"
   # spatial_hash_cell_size: 2.0  # required only for "constant" mode
 
-  # Large object threshold
-  multi_cell_threshold: 1.5
-
   # Whether pairs containing STATIC objects are checked (default: true)
   ignore_static_collision: true
 
 entities:
   # collision_mode is per entity, not a simulation setting.
   - urdf_path: robots/mobile_robot.urdf
-    collision_mode: normal_2d  # 9 neighbors in the XY grid search
+    collision_mode: normal_3d  # the default for moving bodies
 
   - urdf_path: robots/simple_cube.urdf
     collision_mode: static  # fixed; cannot be moved until its mode changes
