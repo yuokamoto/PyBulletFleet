@@ -634,17 +634,18 @@ class MultiRobotSimulationCore:
         self._plugins: List["SimPlugin"] = []
 
         self.setup_pybullet()
+        self.setup_monitor()
         # DataMonitor refresh: monitor_update_interval, else
         # MONITOR_REFRESH_WITH_WINDOW while its window is open
         # (enable_monitor_gui, or gui when that is None; the window reads every
         # 0.5 wall seconds) and MONITOR_REFRESH_HEADLESS otherwise.
-        # Set after setup_pybullet(): RECORD may turn the GUI off.
+        # Set after setup_pybullet(), as RECORD may turn the GUI off, and
+        # after setup_monitor(), as the window stays shut without Tk.
         interval = params.monitor_update_interval
         if interval is None:
-            window = params.enable_monitor_gui if params.enable_monitor_gui is not None else params.gui
+            window = self._data_monitor is not None and self._data_monitor.enable_gui
             interval = MONITOR_REFRESH_WITH_WINDOW if window else MONITOR_REFRESH_HEADLESS
         self._monitor_update_gate = FrequencyGate(1.0 / interval if interval > 0 else None)
-        self.setup_monitor()
 
     def setup_monitor(self) -> None:
         # If monitor: true and console_monitor: false, start DataMonitor

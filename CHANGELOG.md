@@ -537,7 +537,10 @@ are not recommended for production use yet.
   `tk`): importing `tkinter` there raises `ImportError`, which was not caught,
   so the package failed to import even with the monitor off. Without Tk, a
   headless simulation no longer logs anything about it; asking for the monitor
-  window logs why it is unavailable and falls back to writing the monitor file.
+  window logs why it is unavailable and falls back to writing the monitor file,
+  at the refresh rate of a run without the window. The standalone
+  `python -m pybullet_fleet.data_monitor` exits with that warning instead of
+  waiting for a window that never opens.
 
 - `REPLACE_NEXT` elevators: a request for the floor the moving cabin is
   already heading to now drops the pending floor (`REPLACED`) instead of being

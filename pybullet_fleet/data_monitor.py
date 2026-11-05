@@ -37,7 +37,7 @@ try:
 except ImportError as error:
     tk = None
     ttk = None
-    _TK_IMPORT_ERROR = str(error)
+    _TK_IMPORT_ERROR = f"{type(error).__name__}: {error}"
 
 
 class DataMonitor:
@@ -579,6 +579,8 @@ def _process_main() -> None:
 def main():
     """Run standalone data monitor"""
     monitor = DataMonitor("PyBullet Simulation Monitor")
+    if not monitor.enable_gui:
+        sys.exit("The data monitor window needs Tk; see the warning above.")
     print("Starting data monitor window...")
     print("Press Ctrl+C to exit")
 
