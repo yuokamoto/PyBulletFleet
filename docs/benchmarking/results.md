@@ -227,11 +227,14 @@ directly or batching update calls.
 
 **Script:** `benchmark/experiments/collision_mode_comparison.py --agents 500 --iterations 200`
 
+Historical results, measured before the same-cell broadphase. The neighbor
+counts describe the broadphase of that time; both modes now search the same cells.
+
 | Mode | Step time (mean) | Collision time | vs Disabled |
 |------|-----------------|---------------|-------------|
 | DISABLED | 1.37 ms | — | baseline |
-| NORMAL_2D (9 neighbors) | 2.43 ms | 0.21 ms | +77% |
-| NORMAL_3D (27 neighbors) | 2.26 ms | 0.39 ms | +64% |
+| NORMAL_2D (9 neighbors, historical) | 2.43 ms | 0.21 ms | +77% |
+| NORMAL_3D (27 neighbors, historical) | 2.26 ms | 0.39 ms | +64% |
 
 Collision check breakdown (both modes): AABB Filtering accounts for ~97–99% of collision check time.
 Spatial Hashing and Contact Points together are <3%.
