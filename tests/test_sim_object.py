@@ -1421,8 +1421,12 @@ class TestSharedShapesCache:
         )
         col_params = ShapeParams(shape_type="box", half_extents=[0.1, 0.1, 0.1])
 
-        vid1, cid1 = SimObject.create_shared_shapes(visual_shape=mesh_params, collision_shape=col_params)
-        vid2, cid2 = SimObject.create_shared_shapes(visual_shape=mesh_params, collision_shape=col_params)
+        vid1, cid1 = SimObject.create_shared_shapes(
+            visual_shape=mesh_params, collision_shape=col_params, physics_client_id=pybullet_env
+        )
+        vid2, cid2 = SimObject.create_shared_shapes(
+            visual_shape=mesh_params, collision_shape=col_params, physics_client_id=pybullet_env
+        )
 
         # Same IDs → cache was hit
         assert vid1 == vid2
@@ -1436,8 +1440,8 @@ class TestSharedShapesCache:
         red = ShapeParams(**base, rgba_color=[1, 0, 0, 1])
         green = ShapeParams(**base, rgba_color=[0, 1, 0, 1])
 
-        vid_r, _ = SimObject.create_shared_shapes(visual_shape=red)
-        vid_g, _ = SimObject.create_shared_shapes(visual_shape=green)
+        vid_r, _ = SimObject.create_shared_shapes(visual_shape=red, physics_client_id=pybullet_env)
+        vid_g, _ = SimObject.create_shared_shapes(visual_shape=green, physics_client_id=pybullet_env)
 
         assert vid_r != vid_g
         assert len(SimObject._shared_shapes) == 2
@@ -1446,8 +1450,8 @@ class TestSharedShapesCache:
         """Box / sphere / cylinder shapes should not be cached."""
         box = ShapeParams(shape_type="box", half_extents=[0.5, 0.5, 0.5])
 
-        SimObject.create_shared_shapes(visual_shape=box, collision_shape=box)
-        SimObject.create_shared_shapes(visual_shape=box, collision_shape=box)
+        SimObject.create_shared_shapes(visual_shape=box, collision_shape=box, physics_client_id=pybullet_env)
+        SimObject.create_shared_shapes(visual_shape=box, collision_shape=box, physics_client_id=pybullet_env)
 
         # Cache should remain empty — primitives are never stored
         assert len(SimObject._shared_shapes) == 0
