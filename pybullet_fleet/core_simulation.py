@@ -835,9 +835,7 @@ class MultiRobotSimulationCore:
             orientation = list(p.getQuaternionFromEuler([roll, pitch, yaw_radians]))
         moved = entity.set_pose_raw(list(position), orientation, preserve_velocity=False)
         if moved:
-            # Paused, no step follows to refresh the window, and a flush goes
-            # by the step count, which an edit does not change.
-            self._monitor_frames.view_changed()
+            self._monitor_frames.pose_edited()
             self.events.emit("gui.entity_pose_changed", entity_id=entity_id, source=source)
         return moved
 
@@ -4947,7 +4945,7 @@ class MultiRobotSimulationCore:
         if self.is_paused and not self._single_step_requested:
             if self._monitor_enabled and self._data_monitor and self._monitor_frames.due_while_paused():
                 # Nothing refreshes the monitor while paused: still show a
-                # selection, follow or pause change.
+                # selection, follow or pause change, or a pose edited from the GUI.
                 self.update_monitor()
             return
         # A single step taken while paused is shown at once, refresh due or not.

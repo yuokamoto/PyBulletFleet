@@ -268,6 +268,26 @@ class TestTheWindowIsNeverLeftBehind:
         assert not core._set_entity_pose(box.object_id, (float("nan"), 0.0, 0.1), None, None, "test")
         assert not core.flush_monitor()
 
+    def test_a_pose_edit_to_the_same_pose_leaves_nothing_to_flush(self, sim):
+        core = sim(update_interval=10.0)
+        box = _box(core, 0.0, "picked", CollisionMode.NORMAL_3D)
+        core._set_selected_entity(box.object_id, "test")
+        core.step_once()
+        core.pause()
+        core.step_once()
+        assert not core._set_entity_pose(box.object_id, (0.0, 0.0, 0.1), None, None, "test")
+        assert not core.flush_monitor()
+
+    def test_a_pose_edit_of_a_static_entity_leaves_nothing_to_flush(self, sim):
+        core = sim(update_interval=10.0)
+        box = _box(core, 0.0, "picked")
+        core._set_selected_entity(box.object_id, "test")
+        core.step_once()
+        core.pause()
+        core.step_once()
+        assert not core._set_entity_pose(box.object_id, (2.0, 0.0, 0.1), None, None, "test")
+        assert not core.flush_monitor()
+
     def test_the_end_of_a_step_once_loop(self, sim):
         core = sim(update_interval=10.0)
         for _ in range(10):

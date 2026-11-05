@@ -148,9 +148,10 @@ are not recommended for production use yet.
   window it is still 1 s, and `0` is still every step. Each refresh builds
   `last_monitor_frame` and writes the file.
   While paused, a selection, follow or pause change, a pose edited from the
-  GUI, and a single step refresh at once; the final frame of a run is written, `close()` writes the
-  last state, and the new `flush_monitor()` does so on demand. `reset()`
-  empties the entity list. The JSON a reader sees is unchanged.
+  GUI, and a single step refresh at once; the final frame of a run is
+  written, `close()` writes the last state, and the new `flush_monitor()`
+  does so on demand. `reset()` empties the entity list. The JSON a reader
+  sees is unchanged.
   Median step time with 5000 static boxes and 20 moving agents (headless,
   `target_rtf=0`, timestep 0.1, a 312 KB monitor file): 25.9 ms before with
   the window flag on (a refresh every step), 0.84 ms now with the window
