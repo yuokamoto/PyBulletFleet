@@ -10,7 +10,7 @@ import os
 import pybullet as p
 import pytest
 
-from pybullet_fleet.agent import Agent
+from pybullet_fleet.agent import Agent, AgentSpawnParams
 from pybullet_fleet.core_simulation import MultiRobotSimulationCore, SimulationParams
 from pybullet_fleet.geometry import Pose
 from pybullet_fleet.sim_object import ShapeParams, SimObject
@@ -21,18 +21,14 @@ MESH_PATH = os.path.join(os.path.dirname(__file__), "..", "pybullet_fleet", "mes
 @pytest.fixture
 def two_clients():
     """A bystander client and a simulation on another one; the simulation's client is never 0."""
+    # PyBullet hands out the lowest free client id, so the bystander, connected
+    # first, takes 0 if it is free, and the simulation gets another id.
     bystander = p.connect(p.DIRECT)
     sim = MultiRobotSimulationCore(SimulationParams(gui=False, monitor=False, enable_floor=False, log_level="warning"))
-    if sim.client == 0:  # the bystander was not first; take 0 out of the way
-        extra = p.connect(p.DIRECT)
-        p.disconnect(sim.client)
-        sim = MultiRobotSimulationCore(SimulationParams(gui=False, monitor=False, enable_floor=False, log_level="warning"))
-        p.disconnect(extra)
     assert sim.client != 0
     yield sim
-    for client in (sim.client, bystander):
-        if p.isConnected(client):
-            p.disconnect(client)
+    sim.close()
+    p.disconnect(bystander)
 
 
 def _mesh():
@@ -65,14 +61,30 @@ class TestAgentFromMesh:
         position, _ = p.getBasePositionAndOrientation(agent.body_id, physicsClientId=sim.client)
         assert position == pytest.approx((1.0, 2.0, 0.5))
 
+    @pytest.mark.parametrize("shape", [_box, _mesh], ids=["box", "mesh"])
+    def test_from_params_creates_its_body_on_the_simulations_client(self, two_clients, shape):
+        sim = two_clients
+        default_before = _bodies(0)
+        before = _bodies(sim.client)
+        params = AgentSpawnParams(visual_shape=shape(), collision_shape=shape(), initial_pose=Pose.from_xyz(1.0, 2.0, 0.5))
+        agent = Agent.from_params(params, sim)
+        assert _bodies(sim.client) == before + 1
+        assert _bodies(0) == default_before
+        position, _ = p.getBasePositionAndOrientation(agent.body_id, physicsClientId=sim.client)
+        assert position == pytest.approx((1.0, 2.0, 0.5))
+
 
 class TestTheSharedShapeCache:
     def test_does_not_hand_one_clients_shapes_to_another(self, two_clients):
         sim = two_clients
         other = p.connect(p.DIRECT)
         try:
+            # One extra shape on the simulation's client, so the same mesh gets
+            # a different id on each client and a shared id would show.
+            p.createVisualShape(p.GEOM_SPHERE, radius=0.1, physicsClientId=sim.client)
             on_other = SimObject.create_shared_shapes(visual_shape=_mesh(), physics_client_id=other)
             on_sim = SimObject.create_shared_shapes(visual_shape=_mesh(), physics_client_id=sim.client)
+            assert on_sim != on_other
             # A shape id is only meaningful on the client that made it: the
             # second call must have built its own, which its client can draw.
             assert p.getVisualShapeData(
