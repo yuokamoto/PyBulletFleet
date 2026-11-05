@@ -551,6 +551,11 @@ are not recommended for production use yet.
   for the monitor thread to try to open the window, so `enable_gui` tells
   whether one opened when it returns. The standalone
   `python -m pybullet_fleet.data_monitor` exits with that warning.
+  `DataMonitor.stop()` called while the window is open no longer hangs: it
+  closed the window with Tk calls from the calling thread, which wait for the
+  Tk thread and never returned once its main loop had ended. It now asks the
+  Tk thread to close the window and waits up to 3 s for it to end, logging a
+  warning if it does not.
 
 - `REPLACE_NEXT` elevators: a request for the floor the moving cabin is
   already heading to now drops the pending floor (`REPLACED`) instead of being

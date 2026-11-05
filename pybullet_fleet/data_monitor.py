@@ -42,6 +42,10 @@ except ImportError as error:
 # How long start() waits for the monitor thread to open its window (or fail
 # to, as on a host without a display) before it returns.
 _WINDOW_OPEN_TIMEOUT = 5.0
+# How often the Tk thread checks whether stop() asked it to close the window,
+# and how long stop() waits for it to end.
+_STOP_POLL_MS = 100
+_STOP_JOIN_TIMEOUT = 3.0
 
 
 class DataMonitor:
@@ -72,6 +76,8 @@ class DataMonitor:
         self._entities_json: str = "[]"
         self.status_label: Optional[Any] = None
         self.monitor_thread: Optional[threading.Thread] = None
+        # The thread that runs the window's main loop; only it may call Tk.
+        self._tk_thread: Optional[threading.Thread] = None
         self._window_attempted: Optional[threading.Event] = None
         self._monitor_process: Optional[subprocess.Popen] = None
         self._command_pipe: Optional[Connection] = None
@@ -170,7 +176,12 @@ class DataMonitor:
             self.stop()
 
     def stop(self) -> None:
-        """Stop the monitor window"""
+        """Stop the monitor window.
+
+        Tk is not thread-safe, so from another thread this only asks the Tk
+        thread to close the window (it polls ``running``) and waits for it
+        to end, at most ``_STOP_JOIN_TIMEOUT`` seconds.
+        """
         self.running = False
         if IS_MACOS and self._command_pipe is not None:
             self._command_pipe.close()
@@ -183,14 +194,22 @@ class DataMonitor:
                 self._monitor_process.wait(timeout=3)
             self._monitor_process = None
             atexit.unregister(self.stop)
-        if self.window:
+        if self.window is not None and threading.current_thread() is self._tk_thread:
+            # Called from a Tk callback (as the macOS child process does): end
+            # the main loop; _serve_window() destroys the window after it.
             try:
                 self.window.quit()
-                self.window.destroy()
             except Exception:
                 pass
-            if IS_MACOS:
-                self.window = None
+            return
+        thread = self.monitor_thread
+        if thread is not None and thread is not threading.current_thread():
+            thread.join(timeout=_STOP_JOIN_TIMEOUT)
+            if thread.is_alive():
+                logger.warning(
+                    "DataMonitor window thread did not end within %.1f s of stop(); leaving it running",
+                    _STOP_JOIN_TIMEOUT,
+                )
 
     def _run_monitor(self) -> None:
         """Run the tkinter monitor window"""
@@ -330,13 +349,32 @@ class DataMonitor:
         if self._parent_poll is not None:
             self.window.after(100, self._parent_poll)
 
-        # Start the tkinter main loop
+        self._serve_window()
+
+    def _serve_window(self) -> None:
+        """Run the window's main loop in this thread until stop(), then destroy it."""
+        self._tk_thread = threading.current_thread()
+        self.window.after(_STOP_POLL_MS, self._poll_stop)
         try:
             self.window.mainloop()
         except Exception:
             pass
         finally:
             self.running = False
+            try:
+                self.window.destroy()
+            except Exception:
+                pass  # already destroyed, as when the user closed it
+            self.window = None
+
+    def _poll_stop(self) -> None:
+        """Tk thread: end the main loop once stop() has cleared ``running``."""
+        if self.window is None:
+            return
+        if self.running:
+            self.window.after(_STOP_POLL_MS, self._poll_stop)
+        else:
+            self.window.quit()
 
     def _update_display(self) -> None:
         """Update the display with latest data"""
