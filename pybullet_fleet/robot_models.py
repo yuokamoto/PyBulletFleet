@@ -1085,21 +1085,22 @@ def _introspect_body(body_id: int, urdf_path: str, physics_client: int) -> Robot
         configs.append([hi if k % 2 == 0 else lo for k, (lo, hi) in enumerate(zip(lower_limits, upper_limits))])
         configs.append([lo if k % 2 == 0 else hi for k, (lo, hi) in enumerate(zip(lower_limits, upper_limits))])
 
-        for cfg in configs:
-            for idx_in_mov, ji in enumerate(movable_indices):
-                if idx_in_mov < len(cfg):
-                    p.resetJointState(body_id, ji, cfg[idx_in_mov], physicsClientId=physics_client)
-            ee_pos = p.getLinkState(body_id, ee_link_idx, physicsClientId=physics_client)[0]
-            dist = math.sqrt(sum((a - b) ** 2 for a, b in zip(ee_pos, base_pos)))
-            if dist > max_dist:
-                max_dist = dist
+        try:
+            for cfg in configs:
+                for idx_in_mov, ji in enumerate(movable_indices):
+                    if idx_in_mov < len(cfg):
+                        p.resetJointState(body_id, ji, cfg[idx_in_mov], physicsClientId=physics_client)
+                ee_pos = p.getLinkState(body_id, ee_link_idx, physicsClientId=physics_client)[0]
+                dist = math.sqrt(sum((a - b) ** 2 for a, b in zip(ee_pos, base_pos)))
+                if dist > max_dist:
+                    max_dist = dist
+        finally:
+            # Restore the joint states found before probing, even if probing raised
+            for ji, (pos, vel) in zip(movable_indices, saved_states):
+                p.resetJointState(body_id, ji, pos, vel, physicsClientId=physics_client)
 
         if max_dist > 0.0:
             arm_reach = max_dist
-
-        # Restore the joint states found before probing
-        for ji, (pos, vel) in zip(movable_indices, saved_states):
-            p.resetJointState(body_id, ji, pos, vel, physicsClientId=physics_client)
 
     return RobotProfile(
         urdf_path=urdf_path,
