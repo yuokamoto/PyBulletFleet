@@ -71,7 +71,12 @@ class ElevatorParams(AgentSpawnParams):
             point is not below the platform's mid-height; a body touching the
             platform from below (the cabin coming down onto it) is still
             reported.  Passengers attached for a ride are not affected: they
-            follow ``SimulationParams.ignore_attached_collision``.
+            follow ``SimulationParams.ignore_attached_collision``.  The
+            rule leaves the body out of contact with the whole elevator, so
+            it only applies when the platform link is the elevator's one
+            collider: an elevator URDF with collider walls, a ceiling or
+            doors reports bodies on the platform as if this were on (and
+            logs a warning at spawn), so that driving into a wall is seen.
     """
 
     floors: Optional[Dict[str, float]] = None
@@ -196,7 +201,10 @@ class Elevator(Agent):
             agent._boarding_height = float(spawn_params.boarding_height)
             _warn_if_boarding_reaches_next_floor(agent._boarding_height, spawn_params.floors)
             # Bodies standing on the platform are not collisions unless asked.
-            agent._filters_own_contacts = not spawn_params.report_platform_contacts
+            # The rule covers the whole elevator body (it is decided before the
+            # narrow phase, which has no link to go by), so it only holds when
+            # the platform is the elevator's one collider.
+            agent._filters_own_contacts = not spawn_params.report_platform_contacts and not agent._warn_other_colliders()
             agent._passengers = []  # Currently attached passengers
             if has_profile:
                 # Only the joint name is left to go wrong here, the values
@@ -396,6 +404,31 @@ class Elevator(Agent):
         logger.warning("Platform link '%s' not found, using link 0", self._platform_link)
         return 0
 
+    def _warn_other_colliders(self) -> bool:
+        """Whether the elevator has colliders besides its platform; if so, say so once.
+
+        Bodies standing on the platform are then reported as collisions, so
+        that contact with a cabin wall, ceiling or door is not hidden.
+        """
+        platform = self._get_platform_link_index()
+        others = []
+        for link in range(-1, p.getNumJoints(self.body_id, physicsClientId=self._pid)):
+            if link != platform and p.getCollisionShapeData(self.body_id, link, physicsClientId=self._pid):
+                name = (
+                    "base" if link == -1 else p.getJointInfo(self.body_id, link, physicsClientId=self._pid)[12].decode("utf-8")
+                )
+                others.append(name)
+        if not others:
+            return False
+        logger.warning(
+            "Elevator '%s' has colliders besides its platform link '%s' (%s): bodies standing on the "
+            "platform are reported as collisions with it, as with report_platform_contacts=True",
+            self.name,
+            self._platform_link,
+            ", ".join(others),
+        )
+        return True
+
     def _get_platform_aabb(self) -> tuple:
         """Get the AABB of the platform link.
 
@@ -411,7 +444,8 @@ class Elevator(Agent):
         Standing on it: over the platform's footprint, with its lowest point
         not below the platform's mid-height. A passenger (attached to the
         elevator) is left to the attached-object rule. Only asked while
-        ``report_platform_contacts`` is off.
+        ``report_platform_contacts`` is off and the platform is the
+        elevator's only collider: the rule covers every link of the elevator.
         """
         if other._attachment_root() is self:
             return False

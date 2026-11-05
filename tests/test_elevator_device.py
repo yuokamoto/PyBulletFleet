@@ -597,6 +597,67 @@ class TestElevatorPlatformContacts:
         finally:
             sim.close()
 
+    _WALLED_URDF = """<?xml version="1.0"?>
+<robot name="walled_elevator">
+  <link name="shaft"><inertial><mass value="0.0"/><inertia ixx="0" ixy="0" ixz="0" iyy="0" iyz="0" izz="0"/></inertial></link>
+  <joint name="lift" type="prismatic">
+    <parent link="shaft"/><child link="platform"/>
+    <axis xyz="0 0 1"/><limit lower="0" upper="30.0" effort="100" velocity="2.0"/>
+  </joint>
+  <link name="platform">
+    <collision><geometry><box size="3.0 3.0 0.2"/></geometry></collision>
+    <inertial><mass value="0.0"/><inertia ixx="0" ixy="0" ixz="0" iyy="0" iyz="0" izz="0"/></inertial>
+  </link>
+  <joint name="wall_mount" type="fixed">
+    <parent link="platform"/><child link="wall"/><origin xyz="1.45 0 1.1"/>
+  </joint>
+  <link name="wall">
+    <collision><geometry><box size="0.1 3.0 2.0"/></geometry></collision>
+    <inertial><mass value="0.0"/><inertia ixx="0" ixy="0" ixz="0" iyy="0" iyz="0" izz="0"/></inertial>
+  </link>
+</robot>
+"""
+
+    def _walled_elevator(self, sim, tmp_path, **extra):
+        urdf = tmp_path / "walled_elevator.urdf"
+        urdf.write_text(self._WALLED_URDF)
+        return Elevator.from_params(
+            ElevatorParams(
+                urdf_path=str(urdf),
+                initial_pose=Pose.from_xyz(0, 0, 0),
+                use_fixed_base=True,
+                floors={"L1": 0.0, "L2": 8.0},
+                initial_floor="L1",
+                **extra,
+            ),
+            sim,
+        )
+
+    def test_a_robot_on_the_platform_driving_into_a_cabin_wall_is_reported(self, sim, tmp_path):
+        """The platform rule must not hide contact with the cabin's other colliders."""
+        elev = self._walled_elevator(sim, tmp_path)
+        robot = self._robot_on_platform(sim)
+        robot.set_pose(Pose.from_xyz(1.3, 0, 0.35))  # on the platform, against the wall at x = 1.4
+        sim.step_once()
+        assert self._pair(elev, robot) in sim.get_active_collision_pairs()
+
+    def test_an_elevator_with_other_colliders_warns_once_that_platform_contacts_are_reported(self, sim, tmp_path, caplog):
+        with caplog.at_level("WARNING", logger="pybullet_fleet.devices.elevator"):
+            self._walled_elevator(sim, tmp_path)
+        warnings = [r for r in caplog.records if "report_platform_contacts" in r.getMessage()]
+        assert len(warnings) == 1
+        assert "wall" in warnings[0].getMessage()
+
+    def test_report_platform_contacts_on_does_not_warn_for_other_colliders(self, sim, tmp_path, caplog):
+        with caplog.at_level("WARNING", logger="pybullet_fleet.devices.elevator"):
+            self._walled_elevator(sim, tmp_path, report_platform_contacts=True)
+        assert not [r for r in caplog.records if "report_platform_contacts" in r.getMessage()]
+
+    def test_the_bundled_elevator_does_not_warn(self, sim, caplog):
+        with caplog.at_level("WARNING", logger="pybullet_fleet.devices.elevator"):
+            self._elevator(sim)
+        assert not [r for r in caplog.records if "report_platform_contacts" in r.getMessage()]
+
     def test_report_platform_contacts_from_dict(self):
         params = ElevatorParams.from_dict(
             {"name": "e1", "urdf_path": "robots/elevator.urdf", "floors": {"L1": 0.0}, "report_platform_contacts": True}

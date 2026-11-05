@@ -425,7 +425,11 @@ Some touching pairs are meant to touch and should not count as collisions.
   platform from below, such as one under a cabin coming down, is still
   reported, and passengers attached for a ride follow
   `ignore_attached_collision`. Set `report_platform_contacts: true` on the
-  elevator to report bodies on the platform as well.
+  elevator to report bodies on the platform as well. The rule drops contact
+  with the whole elevator body, so it applies only when the platform link is
+  the elevator's one collider; an elevator URDF with collider walls, a
+  ceiling or doors reports bodies on the platform (with a warning at spawn),
+  so that a robot driving into a wall is not hidden.
 - `set_collision_ignore_filter(fn)` drops every touching pair for which
   `fn(obj_a, obj_b)` returns `True`, for rules only the application knows:
 

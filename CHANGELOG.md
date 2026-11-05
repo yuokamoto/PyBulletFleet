@@ -568,6 +568,9 @@ are not recommended for production use yet.
   platform (waiting before departure, or after arrival) would be in
   collision with the elevator; the elevator leaves such pairs out, as before.
   `ElevatorParams.report_platform_contacts` (default `false`) reports them.
+  The rule applies only when the platform is the elevator's one collider:
+  an elevator URDF with other collider links (walls, a ceiling, doors)
+  reports bodies on the platform and logs a warning at spawn.
   A body touching the platform from below is reported either way, and
   passengers attached for a ride follow `ignore_attached_collision`.
 
