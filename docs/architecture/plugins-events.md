@@ -57,8 +57,10 @@ the built-in names; custom string names are permitted for package-local events.
 Handlers run in ascending priority order; equal priorities preserve registration
 order. An exception is logged and does not prevent later handlers from running.
 Handlers should therefore keep work bounded and make externally visible side
-effects idempotent where practical. An emit calls the handlers registered when
-it starts; one added or removed by a handler takes effect from the next emit.
+effects idempotent where practical. An emit calls the subscriptions present when
+it starts -- handlers, and for the step events also callbacks and plugins; one
+added or removed by a handler, callback or plugin takes effect from the next
+emit.
 
 ## Per-step hooks
 

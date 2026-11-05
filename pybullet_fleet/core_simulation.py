@@ -1071,19 +1071,27 @@ class MultiRobotSimulationCore:
         """Emit a step event one tier at a time, timing each tier under its profiling key.
 
         One event on the bus; the tiers are emitted apart only so the time
-        profile keeps handlers, callbacks and plugins separate. With no
-        subscriber at all this is a single lookup.
+        profile keeps handlers, callbacks and plugins separate. Every tier is
+        taken from one snapshot read before any subscription runs, so, as for
+        any emit, a subscription added or removed by a subscription takes
+        effect from the next step. With no subscriber at all this is a single
+        lookup.
         """
-        if not self.events.has_handlers(event):
+        snapshot = self.events._tier_snapshot(event)
+        if snapshot is None:
             return
         kwargs = {"dt": self._params.timestep, "sim_time": self.sim_time}
+        dispatch = self.events._dispatch
         for tier, profiling_key in tiers:
+            subscriptions = snapshot[tier]
+            if not subscriptions:
+                continue
             if measure_timing and profiling_key is not None:
                 t0 = time.perf_counter()
-                self.events._emit_tier(event, tier, kwargs)
+                dispatch(event, subscriptions, kwargs)
                 self._profiling_stats[profiling_key][-1] = (time.perf_counter() - t0) * 1000
             else:
-                self.events._emit_tier(event, tier, kwargs)
+                dispatch(event, subscriptions, kwargs)
 
     def _hook_clock(self) -> Tuple[float, float]:
         """The time and timestep that frequency-limited step hooks schedule on (``events`` clock)."""

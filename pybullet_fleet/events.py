@@ -178,8 +178,8 @@ class EventBus:
     def __init__(self, clock: Optional[Clock] = None) -> None:
         # event -> every subscription, in call order; only non-empty entries.
         self._handlers: Dict[str, Tuple[_Subscription, ...]] = {}
-        # (event, tier) -> that tier's subscriptions, in call order.
-        self._tiers: Dict[Tuple[str, int], Tuple[_Subscription, ...]] = {}
+        # event -> one tuple per tier (indexed by tier), each in call order.
+        self._tiers: Dict[str, Tuple[Tuple[_Subscription, ...], ...]] = {}
         self._clock = clock
         self._seq = 0
 
@@ -280,14 +280,14 @@ class EventBus:
     def _store(self, event: str, subscriptions: Tuple[_Subscription, ...]) -> None:
         """Replace ``event``'s subscriptions with new tuples, so a running emit keeps its own."""
         ordered = tuple(sorted(subscriptions, key=_Subscription.sort_key))
-        for tier in (_TIER_HANDLER, _TIER_CALLBACK, _TIER_PLUGIN):
-            self._tiers.pop((event, tier), None)
         if not ordered:
             self._handlers.pop(event, None)
+            self._tiers.pop(event, None)
             return
         self._handlers[event] = ordered
-        for sub in ordered:
-            self._tiers[(event, sub.tier)] = self._tiers.get((event, sub.tier), ()) + (sub,)
+        self._tiers[event] = tuple(
+            tuple(sub for sub in ordered if sub.tier == tier) for tier in (_TIER_HANDLER, _TIER_CALLBACK, _TIER_PLUGIN)
+        )
 
     def _subscriptions(self, tier: Optional[int] = None) -> List[Tuple[str, _Subscription]]:
         """``(event, subscription)`` pairs, of ``tier`` when given, in registration order."""
@@ -295,11 +295,14 @@ class EventBus:
         pairs.sort(key=lambda pair: pair[1].seq)
         return pairs
 
-    def _emit_tier(self, event: str, tier: int, kwargs: Dict[str, Any]) -> None:
-        """Fire ``event`` for one tier only, so the simulation can time each tier."""
-        subscriptions = self._tiers.get((event, tier))
-        if subscriptions:
-            self._dispatch(event, subscriptions, kwargs)
+    def _tier_snapshot(self, event: str) -> Optional[Tuple[Tuple[_Subscription, ...], ...]]:
+        """``event``'s subscriptions split by tier (indexed by tier), or ``None`` when it has none.
+
+        The tuples are never mutated, so holding them for a whole emit keeps
+        the snapshot guarantee across tiers: a subscription added or removed
+        while the tiers run takes effect from the next emit.
+        """
+        return self._tiers.get(event)
 
     def _reset_schedules(self) -> None:
         """Restart every frequency-limited subscription's schedule, as at the start of a run."""

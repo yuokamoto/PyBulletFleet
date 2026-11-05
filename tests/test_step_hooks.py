@@ -117,6 +117,65 @@ class TestOrder:
         sim.step_once()
         assert log == ["first", "second", "first"]
 
+    def test_a_callback_registered_by_a_step_handler_first_runs_in_the_next_step(self, sim):
+        """The STEP event calls the subscriptions present when it starts, across its tiers too."""
+        log = []
+
+        def handler(**_):
+            if not log:
+                sim.register_callback(lambda sc, dt: log.append("added"))
+            log.append("handler")
+
+        sim.events.on(SimEvents.STEP, handler)
+        sim.step_once()
+        assert log == ["handler"]
+        sim.step_once()
+        assert log == ["handler", "handler", "added"]
+
+    def test_a_plugin_registered_by_a_step_callback_first_runs_in_the_next_step(self, sim):
+        log = []
+
+        def adder(sc, dt):
+            if not log:
+                sc.register_plugin(_Recorder(sim, "added", log))
+            log.append("adder")
+
+        sim.register_callback(adder)
+        sim.step_once()
+        assert _names(log) == ["adder"]
+        sim.step_once()
+        assert _names(log) == ["adder", "adder", "added"]
+
+    def test_a_callback_unregistered_by_a_step_handler_still_runs_in_that_step(self, sim):
+        log = []
+
+        def callback(sc, dt):
+            log.append("callback")
+
+        def handler(**_):
+            log.append("handler")
+            sim.unregister_callback(callback)
+
+        sim.register_callback(callback)
+        sim.events.on(SimEvents.STEP, handler)
+        sim.step_once()
+        sim.step_once()
+        assert log == ["handler", "callback", "handler"]
+
+    def test_a_post_step_callback_registered_by_a_post_step_handler_first_runs_in_the_next_step(self, sim):
+        log = []
+
+        def handler(**_):
+            if not log:
+                sim.register_callback(lambda sc, dt: log.append("added"), phase=CallbackPhase.POST_STEP)
+            log.append("handler")
+
+        sim.events.on(SimEvents.POST_STEP, handler)
+        sim.step_once()
+        assert log == ["handler"]
+        sim.step_once()
+        assert log == ["handler", "handler", "added"]
+
 
 class TestArguments:
     def test_a_callback_gets_the_core_and_the_time_since_it_last_ran(self, sim):

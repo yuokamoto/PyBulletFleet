@@ -129,8 +129,10 @@ are not recommended for production use yet.
   out of `step_once()`, a plugin's or a handler's is logged. `events.off()` and
   `events.clear()` affect only handlers registered with `events.on()`;
   `has_handlers()` also counts callbacks and plugins. An emit now calls the
-  handlers registered when it starts: a handler added by a handler of the same
-  event first runs on the next emit (it used to run in the same one). The
+  subscriptions present when it starts, in every tier: a handler, callback or
+  plugin added by one of the same event first runs on the next emit (a handler
+  added by a handler used to run in the same one), and one removed still runs
+  in the current emit. The
   kinematic replay profile rejects a frequency-limited event handler, as it
   does a frequency-limited callback. No change in step time without hooks
   (issue #84).
