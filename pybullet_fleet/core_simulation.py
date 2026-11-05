@@ -3717,6 +3717,9 @@ class MultiRobotSimulationCore:
         detection_method = self._params.collision_detection_method
         if detection_method is None:
             raise ValueError("collision_detection_method must be set before checking collisions")
+        # A margin set on ``params`` directly is validated only here: reject a
+        # bad one before anything below changes the collision state.
+        margin = _normalize_margin(self._params.collision_margin)
 
         t0 = time.perf_counter()
 
@@ -3909,7 +3912,7 @@ class MultiRobotSimulationCore:
                 sample_step,
                 sample_time,
                 detection_method,
-                _normalize_margin(self._params.collision_margin),
+                margin,
             )
 
             if return_profiling:

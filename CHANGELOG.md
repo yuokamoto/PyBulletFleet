@@ -574,7 +574,10 @@ are not recommended for production use yet.
 - `SimulationParams` rejects a negative or non-finite scalar
   `collision_margin` with `ValueError`, as `set_collision_margin()` and a
   per-axis triple already did. It was accepted, and the broad phase then
-  clamped it to 0 while `getClosestPoints` got the negative distance.
+  clamped it to 0 while `getClosestPoints` got the negative distance. A bad
+  margin assigned to `params.collision_margin` directly raises the same
+  `ValueError` when the next collision check starts, before it changes the
+  active pairs.
 
 - `REPLACE_NEXT` elevators: a request for the floor the moving cabin is
   already heading to now drops the pending floor (`REPLACED`) instead of being

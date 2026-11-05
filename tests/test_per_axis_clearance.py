@@ -287,6 +287,31 @@ def test_a_clearance_change_rechecks_a_stationary_pair(make_sim, change):
     assert sim.get_active_collision_pairs() == [_pair(a, shelf)]
 
 
+@pytest.mark.parametrize("value", [-0.01, math.nan, (0.05, -0.01, 0.0), "0.05"])
+def test_a_bad_margin_set_on_params_raises_before_the_check_changes_anything(make_sim, value):
+    """A bad margin set on params directly is rejected when the check starts:
+    the pair stays active and the grid and last observation are untouched."""
+    sim = make_sim(0.05)
+    a = _body(sim, (0.0, 0.0, 0.1), mode=CollisionMode.STATIC)
+    shelf = _body(sim, (0.05, 0.0, 0.33), size=(0.3, 0.3, 0.1), mode=CollisionMode.STATIC)
+    sim._moved_this_step = {a.object_id, shelf.object_id}
+    sim.check_collisions()
+    assert sim.get_active_collision_pairs() == [_pair(a, shelf)]
+    grid_margin = sim._grid_margin
+    observation = sim.get_collision_observation()
+
+    sim.params.collision_margin = value
+    with pytest.raises(ValueError, match="collision_margin"):
+        sim.check_collisions()
+    assert sim.get_active_collision_pairs() == [_pair(a, shelf)]
+    assert sim._grid_margin == grid_margin
+    assert sim.get_collision_observation() == observation
+
+    sim.params.collision_margin = XY_ONLY
+    sim.check_collisions()
+    assert sim.get_active_collision_pairs() == []
+
+
 def test_set_collision_margin_stores_a_tuple(make_sim):
     sim = make_sim(0.02)
     sim.set_collision_margin([0.05, 0.05, 0])
