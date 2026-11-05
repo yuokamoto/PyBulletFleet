@@ -104,9 +104,11 @@ new `step` event are timed as `events_step`.
 Subscriptions are kept as immutable tuples, pre-sorted and pre-split by tier,
 so an emit does no sorting or copying. A step event with no subscriber costs a
 single dict lookup (`has_handlers`), where the old step looped over the
-callback list twice and over the plugins once. Callbacks are called through
-`functools.partial(callback, sim_core)` with `dt` passed positionally, so the
-bus adds no Python frame or keyword dict for them.
+callback list twice and over the plugins once. A callback's `_Subscription`
+holds the callback itself as `call` and a weak reference to the simulation as
+`owner`; the dispatch calls `call(owner(), dt)` with both arguments positional,
+so no keyword-argument dict is built for a callback (other handlers get the
+event's keyword arguments).
 
 Step time (`step_once()` wall time, `p.DIRECT`, kinematic omni agents with far
 goals, collision check at 10 Hz, timestep 0.1 s; one process per run pinned to
