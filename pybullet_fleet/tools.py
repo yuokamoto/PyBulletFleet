@@ -107,13 +107,17 @@ def normalize_vector_param(value: Union[float, List[float]], param_name: str, di
         return arr
 
 
-def resolve_link_index(body_id: int, link: Union[int, str]) -> int:
+def resolve_link_index(body_id: int, link: Union[int, str], physics_client_id: int = 0) -> int:
     """
     Resolve link name to index.
 
     Args:
         body_id: PyBullet body ID
         link: Link index (int) or name (str). -1 or "base_link" for base link.
+        physics_client_id: PyBullet client the body lives on. Pass the
+            simulation's client (``sim_core.client``) when more than one
+            simulation runs in the process; the default is PyBullet's
+            first client.
 
     Returns:
         Link index (int). Returns -1 if link is "base_link" or if link name not found.
@@ -132,9 +136,9 @@ def resolve_link_index(body_id: int, link: Union[int, str]) -> int:
         return -1
 
     # Search for link by name
-    num_joints = p.getNumJoints(body_id)
+    num_joints = p.getNumJoints(body_id, physicsClientId=physics_client_id)
     for i in range(num_joints):
-        joint_info = p.getJointInfo(body_id, i)
+        joint_info = p.getJointInfo(body_id, i, physicsClientId=physics_client_id)
         link_name = joint_info[12].decode("utf-8")  # Link name is at index 12
         if link_name == link:
             return i

@@ -10,8 +10,10 @@ the body does not have is unchanged and checked here for both spellings.
 import pybullet as p
 import pytest
 
-from pybullet_fleet import Agent, AgentSpawnParams, MultiRobotSimulationCore, SimulationParams
-from pybullet_fleet.tools import resolve_joint_index
+from pybullet_fleet import Agent, AgentSpawnParams, MultiRobotSimulationCore, Pose, SimulationParams
+from pybullet_fleet.action import PickAction
+from pybullet_fleet.sim_object import ShapeParams, SimObject, SimObjectSpawnParams
+from pybullet_fleet.tools import resolve_joint_index, resolve_link_index
 
 ELEVATOR = "robots/elevator.urdf"  # one prismatic joint, "lift"
 LIFT = "lift"
@@ -379,3 +381,68 @@ class TestResolveJointIndexClient:
                     p.disconnect(sim.client)
                 except p.error:
                     pass
+
+
+class TestLinkNamesOnANonDefaultClient:
+    """Link names resolve on the owning object's client.
+
+    The first simulation holds an elevator at body 0, which has no arm links:
+    any arm link name looked up there is missing.
+    """
+
+    LINK = "wrist_link"  # child link of the "elbow_to_wrist" joint
+
+    @pytest.fixture
+    def two_sims(self):
+        first = _sim()
+        _lift(first)  # body 0 on the default client: no arm links
+        second = _sim()
+        assert second.client != first.client
+        yield first, second
+        for sim in (second, first):
+            try:
+                p.disconnect(sim.client)
+            except p.error:
+                pass
+
+    def test_resolve_link_index_looks_the_name_up_on_the_given_client(self, two_sims):
+        _, second = two_sims
+        agent = _manipulator(second)
+
+        index = resolve_link_index(agent.body_id, self.LINK, physics_client_id=second.client)
+
+        assert index == agent._joint_index_by_name("elbow_to_wrist")
+
+    def test_end_effector_link_name(self, two_sims):
+        _, second = two_sims
+        agent = _manipulator(second)
+
+        assert agent._get_end_effector_link_index(self.LINK) == agent._joint_index_by_name("elbow_to_wrist")
+
+    def test_attach_object_link_name(self, two_sims):
+        _, second = two_sims
+        agent = _manipulator(second)
+        box = SimObject.from_params(
+            SimObjectSpawnParams(
+                visual_shape=ShapeParams(shape_type="box", half_extents=[0.05, 0.05, 0.05]),
+                collision_shape=ShapeParams(shape_type="box", half_extents=[0.05, 0.05, 0.05]),
+                initial_pose=Pose.from_xyz(2.0, 0.0, 0.05),
+                mass=0.0,
+                pickable=True,
+                name="box",
+            ),
+            second,
+        )
+
+        assert agent.attach_object(box, parent_link_index=self.LINK)
+
+        assert box._attached_link_index == agent._joint_index_by_name("elbow_to_wrist")
+
+    def test_pick_action_attach_link_name(self, two_sims):
+        _, second = two_sims
+        agent = _manipulator(second)
+        action = PickAction(target_position=[5.0, 0.0, 0.1], attach_link=self.LINK)
+
+        action.execute(agent, DT)
+
+        assert action._attach_link_index == agent._joint_index_by_name("elbow_to_wrist")

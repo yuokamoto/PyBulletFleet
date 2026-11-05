@@ -559,6 +559,13 @@ are not recommended for production use yet.
   `tools.resolve_joint_index()` takes an optional `physics_client_id`
   (default `0`, as before).
 
+- Link names given as an end-effector link, as `attach_object()`'s
+  `parent_link_index` or as `PickAction.attach_link` are looked up on the
+  object's own physics client. With a second simulation running, a valid link
+  name was reported missing (falling back to the base link) or resolved to a
+  link of another body. `tools.resolve_link_index()` takes an optional
+  `physics_client_id` (default `0`, as before).
+
 - `REPLACE_NEXT` elevators: a request for the floor the moving cabin is
   already heading to now drops the pending floor (`REPLACED`) instead of being
   rejected and leaving it queued. A controller that changed its target and then

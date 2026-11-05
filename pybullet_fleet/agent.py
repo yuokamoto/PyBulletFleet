@@ -2812,7 +2812,7 @@ class Agent(SimObject):
             Link index (int). Returns -1 if robot has no joints.
         """
         if end_effector_link is not None:
-            return resolve_link_index(self.body_id, end_effector_link)
+            return resolve_link_index(self.body_id, end_effector_link, physics_client_id=self._pid)
         if not self.joint_info:
             self._log.warning("_get_end_effector_link_index: robot has no joints")
             return -1
