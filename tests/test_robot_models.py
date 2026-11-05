@@ -239,7 +239,7 @@ class TestAutoDetectProfile:
         p.removeBody(body_id, physicsClientId=self.client)
 
     def test_body_id_restores_joint_positions(self):
-        """Probing the arm reach must leave every movable joint where it was."""
+        """Probing the arm reach must leave every movable joint's position and velocity as they were."""
         path = resolve_model("panda")
         body_id = p.loadURDF(path, useFixedBase=True, physicsClientId=self.client)
         movable = [
@@ -250,17 +250,20 @@ class TestAutoDetectProfile:
         assert movable
         before = {}
         for k, j in enumerate(movable):
-            p.resetJointState(body_id, j, 0.1 * (k + 1), physicsClientId=self.client)
-            before[j] = p.getJointState(body_id, j, physicsClientId=self.client)[0]
+            # Non-zero velocity too: the restore must put back (position, velocity).
+            p.resetJointState(body_id, j, 0.1 * (k + 1), 0.05 * (k + 1), physicsClientId=self.client)
+            before[j] = p.getJointState(body_id, j, physicsClientId=self.client)[:2]
+            assert before[j][1] != 0.0
 
         auto_detect_profile(body_id, self.client)
 
-        after = {j: p.getJointState(body_id, j, physicsClientId=self.client)[0] for j in movable}
+        after = {j: p.getJointState(body_id, j, physicsClientId=self.client)[:2] for j in movable}
         p.removeBody(body_id, physicsClientId=self.client)
-        assert after == pytest.approx(before)
+        for j in movable:
+            assert after[j] == pytest.approx(before[j])
 
     def test_body_id_restores_joint_positions_when_probing_raises(self, monkeypatch):
-        """A probe that fails partway still leaves every movable joint where it was."""
+        """A probe that fails partway still restores every movable joint's position and velocity."""
         import pybullet_fleet.robot_models as robot_models
 
         path = resolve_model("panda")
@@ -273,8 +276,10 @@ class TestAutoDetectProfile:
         assert movable
         before = {}
         for k, j in enumerate(movable):
-            p.resetJointState(body_id, j, 0.1 * (k + 1), physicsClientId=self.client)
-            before[j] = p.getJointState(body_id, j, physicsClientId=self.client)[0]
+            # Non-zero velocity too: the restore must put back (position, velocity).
+            p.resetJointState(body_id, j, 0.1 * (k + 1), 0.05 * (k + 1), physicsClientId=self.client)
+            before[j] = p.getJointState(body_id, j, physicsClientId=self.client)[:2]
+            assert before[j][1] != 0.0
 
         real_get_link_state = robot_models.p.getLinkState
         calls = []
@@ -290,9 +295,10 @@ class TestAutoDetectProfile:
             auto_detect_profile(body_id, self.client)
         monkeypatch.undo()
 
-        after = {j: p.getJointState(body_id, j, physicsClientId=self.client)[0] for j in movable}
+        after = {j: p.getJointState(body_id, j, physicsClientId=self.client)[:2] for j in movable}
         p.removeBody(body_id, physicsClientId=self.client)
-        assert after == pytest.approx(before)
+        for j in movable:
+            assert after[j] == pytest.approx(before[j])
 
     def test_body_id_with_overrides(self):
         """Overrides work with body_id input too."""
