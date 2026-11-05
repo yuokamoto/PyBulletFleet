@@ -129,7 +129,8 @@ def _update_object_aabb(self, object_id: int):
 
 Every collision body (NORMAL_3D, NORMAL_2D and STATIC; not DISABLED) is
 registered in **every cell its AABB, enlarged by half the collision margin on
-every side, touches**. A NORMAL_2D body's z extent is not enlarged. A moved
+every side, touches**. A NORMAL_2D body's z extent is not enlarged (NORMAL_2D
+is deprecated). A moved
 body's candidates are the bodies registered in **its own cells**: there is no
 neighbour search.
 
