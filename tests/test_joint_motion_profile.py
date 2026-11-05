@@ -921,3 +921,39 @@ class TestRampedJointsUseTheClosedForm:
         monkeypatch.setattr(TwoPointInterpolation, "get_point", forbidden)
         self._drive(sim_core, agent, index, self.TARGETS)
         assert agent.get_joint_state_by_name(JOINT)[0] == pytest.approx(0.9, abs=1e-9)
+
+    def _released_once_dropped(self, sim_core, agent, index, then):
+        """Plan a trajectory, run ``then`` until the joint drops it, and say
+        whether the solved trajectory was freed with it."""
+        import gc
+        import weakref
+
+        state = agent._joints[index]
+        agent.set_joint_target_by_name(JOINT, 0.6)
+        sim_core.step_once()
+        planned = weakref.ref(state.trajectory)
+        then()
+        assert state.trajectory is None
+        gc.collect()
+        return planned() is None
+
+    def test_an_arrived_joint_keeps_no_trajectory_alive(self, sim_core):
+        agent, index = self._agent(sim_core)
+
+        def arrive():
+            for _ in range(200):
+                sim_core.step_once()
+
+        assert self._released_once_dropped(sim_core, agent, index, arrive)
+
+    def test_a_braking_joint_keeps_no_trajectory_alive(self, sim_core):
+        agent, index = self._agent(sim_core)
+
+        def turn_back():
+            for _ in range(10):
+                sim_core.step_once()
+            # Behind the joint while it moves ahead: braked, not planned.
+            agent.set_joint_target_by_name(JOINT, 0.0)
+            sim_core.step_once()
+
+        assert self._released_once_dropped(sim_core, agent, index, turn_back)

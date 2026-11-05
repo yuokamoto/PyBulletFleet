@@ -187,6 +187,19 @@ def test_a_degenerate_trajectory_stays_where_it_starts():
         assert trapezoid_point(profile, t) == (0.7, 0.0)
 
 
+def test_a_finished_trajectory_is_exactly_at_its_end():
+    """``get_point()`` returns ``pe`` itself once the trajectory is over; so
+    does the closed form, rather than ``p0`` plus the distance, which can miss
+    it in the last bit (2.5 - |0.92 - 2.5| is not 0.92)."""
+    starts = [-3.0, -0.1, 0.3, 2.5, 3.0]
+    ends = [-2.6, -0.21, 0.92, 1.4, 2.73]
+    for p0, pe in itertools.product(starts, ends):
+        tpi = build_tpi(p0=p0, pe=pe, vmax=0.5, accel=1.0, t0=0.0)
+        profile = extract_profile(tpi)
+        for t in (tpi.get_end_time(), tpi.get_end_time() + 1.0):
+            assert trapezoid_point(profile, t)[0] == tpi.get_point(t)[0] == pe
+
+
 def test_batch_and_per_agent_agree_when_a_goal_is_replaced_above_a_lowered_vmax():
     """The batched controller evaluates the closed form, the per-agent one the
     TPI. Lowering vmax while cruising and then replacing the goal starts the

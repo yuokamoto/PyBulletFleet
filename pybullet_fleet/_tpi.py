@@ -193,7 +193,8 @@ class PhaseProfile(NamedTuple):
     only ever runs forward: ``distance >= 0``, and ``v0``/``ve`` are signed
     with negative meaning away from the target. A world position is
     ``p0 + direction * s`` for the distance ``s`` the closed form returns, and
-    a world velocity ``direction * v``.
+    a world velocity ``direction * v``. ``pe`` is kept as given so a finished
+    trajectory is exactly at it, as ``get_point()`` puts it.
 
     ``accel`` is the first phase's acceleration, which is not always the ramp
     limit: from a start above ``vmax`` the solver brakes down to it at
@@ -202,6 +203,7 @@ class PhaseProfile(NamedTuple):
 
     t0: float
     p0: float
+    pe: float
     direction: float
     distance: float
     t_accel: float
@@ -243,6 +245,7 @@ def extract_profile(tpi: TwoPointInterpolation) -> PhaseProfile:
     return PhaseProfile(
         t0=float(tpi.t0),
         p0=float(tpi.p0),
+        pe=float(tpi.pe),
         direction=direction,
         distance=abs(span),
         t_accel=t_accel,
@@ -283,8 +286,8 @@ def trapezoid_point(profile: PhaseProfile, t: float) -> Tuple[float, float]:
     """
     tau = t - profile.t0
     if tau >= profile.t_total:
-        s, v = profile.distance, profile.ve
-    elif tau <= 0.0:
+        return profile.pe, profile.direction * profile.ve
+    if tau <= 0.0:
         s, v = 0.0, profile.v0
     elif tau <= profile.t_accel:
         s = profile.v0 * tau + 0.5 * profile.accel * tau * tau
