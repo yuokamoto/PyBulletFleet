@@ -809,6 +809,11 @@ class MultiRobotSimulationCore:
         an agent controller or physics integration.  Dynamic bodies also have
         their velocity cleared so a pre-edit velocity cannot move them away
         immediately after resume.
+
+        The monitor shows the new pose at once, but collision state is not
+        recomputed: the paused world is stopped, so contact counts (the
+        frame's ``active_collisions``) stay as of the last step until the
+        simulation steps again.
         """
         if not self.is_paused:
             logger.warning("Ignoring GUI pose edit while simulation is running")
@@ -835,6 +840,7 @@ class MultiRobotSimulationCore:
             orientation = list(p.getQuaternionFromEuler([roll, pitch, yaw_radians]))
         moved = entity.set_pose_raw(list(position), orientation, preserve_velocity=False)
         if moved:
+            # set_pose_raw() marked the monitor window behind.
             self.events.emit("gui.entity_pose_changed", entity_id=entity_id, source=source)
         return moved
 
@@ -4949,7 +4955,7 @@ class MultiRobotSimulationCore:
         if self.is_paused and not self._single_step_requested:
             if self._monitor_enabled and self._data_monitor and self._monitor_frames.due_while_paused():
                 # Nothing refreshes the monitor while paused: still show a
-                # selection, follow or pause change.
+                # selection, follow or pause change, or a pose set from the GUI or user code.
                 self.update_monitor()
             return
         # A single step taken while paused is shown at once, refresh due or not.
