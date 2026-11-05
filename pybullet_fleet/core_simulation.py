@@ -809,6 +809,11 @@ class MultiRobotSimulationCore:
         an agent controller or physics integration.  Dynamic bodies also have
         their velocity cleared so a pre-edit velocity cannot move them away
         immediately after resume.
+
+        The monitor shows the new pose at once, but collision state is not
+        recomputed: the paused world is stopped, so contact counts (the
+        frame's ``active_collisions``) stay as of the last step until the
+        simulation steps again.
         """
         if not self.is_paused:
             logger.warning("Ignoring GUI pose edit while simulation is running")

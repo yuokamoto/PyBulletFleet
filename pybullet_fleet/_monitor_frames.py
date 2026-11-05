@@ -51,6 +51,9 @@ class MonitorFrames:
 
         No step follows to refresh the window, and :meth:`behind` would
         otherwise go by the step count alone, which the edit does not change.
+        The refreshed frame has the new pose, while its collision figures
+        (``active_collisions``) stay as of the last step: no collision check
+        runs until the simulation steps again.
         """
         self.stale = True
 
