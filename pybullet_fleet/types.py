@@ -13,6 +13,7 @@ import warnings
 from contextlib import contextmanager
 from contextvars import ContextVar
 from enum import Enum
+from types import FrameType
 from typing import Iterator
 
 
@@ -242,9 +243,13 @@ _EXAMPLES_DIR = os.path.join(_PACKAGE_DIR, "examples") + os.sep
 _normal_2d_warning_suppressed: ContextVar[bool] = ContextVar("_normal_2d_warning_suppressed", default=False)
 
 
-def _is_internal_frame(filename: str) -> bool:
-    # "<string>" is the __init__ that dataclasses generates; dataclasses.replace() calls it.
-    if filename in ("<string>", dataclasses.__file__):
+def _is_internal_frame(frame: FrameType) -> bool:
+    filename = frame.f_code.co_filename
+    if filename == "<string>":
+        # The __init__ that dataclasses generates (dataclasses.replace() calls it) is
+        # compiled from a string; other code there (python -c, exec) is the caller's.
+        return frame.f_code.co_name == "__init__" and dataclasses.is_dataclass(frame.f_locals.get("self"))
+    if filename == dataclasses.__file__:
         return True
     return filename.startswith(_PACKAGE_DIR) and not filename.startswith(_EXAMPLES_DIR)
 
@@ -261,7 +266,7 @@ def _warn_if_normal_2d(mode: object) -> None:
         return
     frame = sys._getframe(1)
     level = 2
-    while frame is not None and _is_internal_frame(frame.f_code.co_filename):
+    while frame is not None and _is_internal_frame(frame):
         frame = frame.f_back
         level += 1
     warnings.warn(_NORMAL_2D_DEPRECATION_MESSAGE, FutureWarning, stacklevel=level if frame is not None else 2)

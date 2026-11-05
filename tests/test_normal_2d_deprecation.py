@@ -179,6 +179,33 @@ def test_python_shows_it_by_default_for_a_call_in_an_imported_module(tmp_path):
     assert "spawner.py:4: FutureWarning: CollisionMode.NORMAL_2D is deprecated" in result.stderr
 
 
+def test_code_run_from_a_string_is_attributed_to_that_code():
+    """python -c and exec() run user code from "<string>": that is the caller, not
+    the package file that emits the warning."""
+    import os
+    import subprocess
+    import sys
+
+    repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    env = dict(os.environ, PYTHONPATH=repo_root)
+    env.pop("PYTHONWARNINGS", None)
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "from pybullet_fleet.sim_object import SimObjectSpawnParams\n"
+            "from pybullet_fleet.types import CollisionMode\n"
+            "SimObjectSpawnParams(name='a', collision_mode=CollisionMode.NORMAL_2D)\n",
+        ],
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=120,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "<string>:3: FutureWarning: CollisionMode.NORMAL_2D is deprecated" in result.stderr
+
+
 _TWO_BOX_SDF = """<?xml version="1.0"?>
 <sdf version="1.6">
 {models}
@@ -222,3 +249,54 @@ def test_from_sdf_warns_once_under_the_default_filter(pybullet_env, tmp_path, bo
         objects = SimObject.from_sdf(str(sdf), collision_mode=CollisionMode.NORMAL_2D)
     assert len(objects) == bodies
     _assert_one_warning_from_this_file(record)
+
+
+def test_restoring_a_recorded_normal_2d_world_does_not_warn(tmp_path):
+    """The recording keeps the mode the user already chose (and was warned about)."""
+    from pathlib import Path
+
+    from pybullet_fleet.core_simulation import MultiRobotSimulationCore, SimulationParams
+    from pybullet_fleet.replay import load_supported_simulation
+    from pybullet_fleet.replay.kinematic_profile import KinematicProfile
+
+    path = tmp_path / "normal-2d"
+    sim = MultiRobotSimulationCore(
+        SimulationParams(gui=False, physics=False, collision_check_frequency=0, target_rtf=0, timestep=0.1)
+    )
+    try:
+        with pytest.warns(FutureWarning):
+            Agent.from_params(
+                AgentSpawnParams(
+                    name="robot",
+                    urdf_path=str(Path("pybullet_fleet/robots/mobile_robot.urdf").resolve()),
+                    initial_pose=Pose.from_xyz(-2, 0, 0.05),
+                    mass=0,
+                    collision_mode=CollisionMode.NORMAL_2D,
+                ),
+                sim,
+            )
+            SimObject.from_params(
+                SimObjectSpawnParams(
+                    name="box",
+                    mass=0,
+                    initial_pose=Pose.from_xyz(1, 2, 0.5),
+                    collision_shape=BOX,
+                    collision_mode=CollisionMode.NORMAL_2D,
+                ),
+                sim,
+            )
+        sim.configure_state_recording(profile=KinematicProfile(), output=str(path))
+        sim.run_simulation(duration=0.1)
+    finally:
+        if p.isConnected(sim.client):
+            p.disconnect(sim.client)
+
+    with warnings.catch_warnings(record=True) as record:
+        warnings.simplefilter("always")
+        restored = load_supported_simulation(path, at_or_before=0.1)
+    try:
+        assert _normal_2d_warnings(record) == []
+        assert restored.get_unique_agent_by_name("robot").collision_mode is CollisionMode.NORMAL_2D
+        assert restored.get_unique_object_by_name("box").collision_mode is CollisionMode.NORMAL_2D
+    finally:
+        p.disconnect(restored.client)
