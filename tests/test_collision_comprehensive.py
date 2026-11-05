@@ -1184,9 +1184,10 @@ def _broadphase_scene(
     """Random boxes on and off spatial-hash cell boundaries; returns (missed, checked).
 
     ``widths`` are AABB widths in cells; each box takes a random mode from
-    ``modes``. A pair is missed when its AABBs, enlarged by the collision
-    margin, overlap but the broadphase does not return it as a candidate. A
-    pair with a NORMAL_2D body needs actual overlap in z, as the broadphase
+    ``modes``. ``margin`` is a scalar or a per-axis ``(x, y, z)`` triple. A
+    pair is missed when its AABBs are within the margin of each other on
+    every axis but the broadphase does not return it as a candidate. A pair
+    with a NORMAL_2D body needs actual overlap in z, as the broadphase
     requires. With ``one_moved``, each body is searched for alone, as when it
     is the only one that moved: its pairs must be found from its side.
 
@@ -1249,6 +1250,7 @@ def _broadphase_scene(
             found = {object_id: everything for object_id in movers}
         aabbs = sim._cached_aabbs_dict
         two_d = {obj.object_id for obj in objects if obj.collision_mode == CollisionMode.NORMAL_2D}
+        mx, my, mz = (margin, margin, margin) if isinstance(margin, (int, float)) else margin
         missed = checked = 0
         for a, b in itertools.combinations([obj.object_id for obj in objects], 2):
             if a in static and b in static:
@@ -1256,8 +1258,7 @@ def _broadphase_scene(
             if ignore_static and (a in static or b in static):
                 continue
             box_a, box_b = aabbs[a], aabbs[b]
-            z_margin = 0.0 if a in two_d or b in two_d else margin
-            margins = (margin, margin, z_margin)
+            margins = (mx, my, 0.0 if a in two_d or b in two_d else mz)
             overlap = all(
                 box_a[1][d] + margins[d] >= box_b[0][d] and box_a[0][d] - margins[d] <= box_b[1][d] for d in range(3)
             )
@@ -1268,6 +1269,11 @@ def _broadphase_scene(
         return missed, checked
     finally:
         p.disconnect(sim.client)
+
+
+# Per-axis margins: x and y apart with no z, and z alone, so a body enlarged
+# on one axis only meets 2D, STATIC and margin-change registrations.
+_TRIPLES = [(0.1, 0.02, 0.0), (0.0, 0.0, 0.25)]
 
 
 @pytest.mark.parametrize("seed", range(6))
@@ -1292,7 +1298,7 @@ def test_broadphase_without_margin_returns_every_touching_pair(seed):
 
 @allow_normal_2d
 @pytest.mark.parametrize("seed", range(6))
-@pytest.mark.parametrize("margin", [0.0, 0.02, 0.1])
+@pytest.mark.parametrize("margin", [0.0, 0.02, 0.1, *_TRIPLES])
 def test_broadphase_finds_pairs_with_normal_2d_bodies(seed, margin):
     """A NORMAL_2D body is registered by its real z extent, so a pair with one
     that overlaps in z shares a cell. Against brute force, with 2D, 3D and
@@ -1305,7 +1311,7 @@ def test_broadphase_finds_pairs_with_normal_2d_bodies(seed, margin):
 
 @allow_normal_2d
 @pytest.mark.parametrize("seed", range(4))
-@pytest.mark.parametrize("margin", [0.0, 0.02, 0.1])
+@pytest.mark.parametrize("margin", [0.0, 0.02, 0.1, *_TRIPLES])
 def test_broadphase_finds_normal_2d_pairs_from_either_side(seed, margin):
     """As above, but each body searched alone, as when it is the only one that
     moved: a NORMAL_2D body must itself find the NORMAL_3D bodies it overlaps
@@ -1319,7 +1325,7 @@ def test_broadphase_finds_normal_2d_pairs_from_either_side(seed, margin):
 
 @allow_normal_2d
 @pytest.mark.parametrize("seed", range(4))
-@pytest.mark.parametrize("margin", [0.0, 0.02, 0.1])
+@pytest.mark.parametrize("margin", [0.0, 0.02, 0.1, *_TRIPLES])
 @pytest.mark.parametrize("ignore_static", [False, True], ids=["static_counts", "static_ignored"])
 @pytest.mark.parametrize("one_moved", [False, True], ids=["all_moved", "one_moved"])
 def test_broadphase_finds_pairs_with_static_bodies(seed, margin, ignore_static, one_moved):
@@ -1337,7 +1343,7 @@ def test_broadphase_finds_pairs_with_static_bodies(seed, margin, ignore_static, 
 
 @allow_normal_2d
 @pytest.mark.parametrize("seed", range(3))
-@pytest.mark.parametrize("margin", [0.02, 0.1])
+@pytest.mark.parametrize("margin", [0.02, 0.1, *_TRIPLES])
 @pytest.mark.parametrize("change", ["setter", "params_margin", "params_method"])
 @pytest.mark.parametrize("one_moved", [False, True], ids=["all_moved", "one_moved"])
 def test_broadphase_follows_a_margin_change(seed, margin, change, one_moved):

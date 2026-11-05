@@ -271,6 +271,25 @@ def test_broadphase_returns_every_pair_within_the_per_axis_clearance(seed, margi
         p.disconnect(sim.client)
 
 
+@pytest.mark.parametrize("axis", [0, 1, 2], ids=["x", "y", "z"])
+def test_each_axis_registers_with_its_own_clearance(axis):
+    """Two boxes 0.04 apart across a cell boundary (cell 1.0) on one axis, with
+    0.1 of clearance on that axis and 0.02 on the others: they share a cell
+    only if each is registered with that axis's clearance, not another's."""
+    margin = tuple(0.1 if d == axis else 0.02 for d in range(3))
+    sim = _sim(margin, cell=1.0)
+    try:
+        sim.set_collision_spatial_hash_cell_size_mode()
+        xyz_a, xyz_b = [0.5, 0.5, 0.5], [0.5, 0.5, 0.5]
+        xyz_a[axis], xyz_b[axis] = 0.74, 1.26
+        a = _body(sim, xyz_a, size=(0.24, 0.24, 0.24))
+        b = _body(sim, xyz_b, size=(0.24, 0.24, 0.24))
+        sim._moved_this_step = {a.object_id}
+        assert sim.filter_aabb_pairs()[0] == [_pair(a, b)]
+    finally:
+        p.disconnect(sim.client)
+
+
 # --- Changing the clearance -------------------------------------------------
 
 
