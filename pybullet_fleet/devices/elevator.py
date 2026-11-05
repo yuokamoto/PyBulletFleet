@@ -29,7 +29,7 @@ from pybullet_fleet.devices.elevator_state_machine import (
     ElevatorStateMachine,
 )
 from pybullet_fleet.logging_utils import get_lazy_logger
-from pybullet_fleet.types import ActionStatus
+from pybullet_fleet.types import ActionStatus, _normal_2d_warning_already_given
 
 if TYPE_CHECKING:
     from pybullet_fleet.sim_object import SimObject
@@ -108,7 +108,8 @@ class ElevatorParams(AgentSpawnParams):
         and adds elevator-specific fields (``floors``, ``initial_floor``,
         ``joint_name``, ``platform_link``, ...).
         """
-        base = AgentSpawnParams.from_dict(config)
+        with _normal_2d_warning_already_given():  # cls(...) below warns about a deprecated collision mode
+            base = AgentSpawnParams.from_dict(config)
         base_kwargs = {f.name: getattr(base, f.name) for f in fields(base)}
         return cls(
             **base_kwargs,
