@@ -232,6 +232,15 @@ reported when both hold:
   micrometres per axis absorbs PyBullet's rounding, so closest points that are
   level in exact geometry count as level.
 
+Only the closest points are judged, one pair of points per pair of shapes.
+With a zero z clearance, a near miss whose closest points are at different
+heights is not reported, even when another part of the two bodies is level
+and within the x and y clearance: a sphere or a rounded mesh beside a box, a
+chamfered edge, or two boxes side by side that are tilted by a fraction of a
+degree (3 cm apart and tilted 0.5 degrees, the closest points are about
+0.3 mm apart in z). If bodies may tilt or are not box-shaped, give z a small
+clearance, a few millimetres, rather than 0.
+
 The axes are the world axes, as AABBs are, not a body's own axes. A scalar
 behaves exactly as before, and so does a triple with three equal components.
 `CONTACT_POINTS`, and the pairs with a physics body under `HYBRID`, ignore the

@@ -9,6 +9,7 @@ monitoring, and log control for various robots, pallets, and meshes.
 import copy
 import logging
 import math
+import numbers
 import os
 import statistics
 import time
@@ -156,14 +157,31 @@ CollisionMargin = Union[float, Tuple[float, float, float]]
 _CLEARANCE_AXIS_TOLERANCE = 1e-5
 
 
+def _is_scalar_margin(value: Any) -> bool:
+    """A real number (numpy scalars included), not a bool."""
+    return isinstance(value, numbers.Real) and not isinstance(value, bool)
+
+
+def _normalize_margin(value: Any) -> CollisionMargin:
+    """A ``collision_margin`` as a float, or as a validated per-axis tuple of floats."""
+    if _is_scalar_margin(value):
+        return float(value)
+    return _clearance_triple(value)
+
+
 def _clearance_triple(value: Iterable[float]) -> Tuple[float, float, float]:
     """Validate a per-axis ``collision_margin`` and return it as a tuple of floats."""
+    shape_error = ValueError(f"collision_margin must be a number or an (x, y, z) triple, got {value!r}")
+    # A string is iterable ("005" would read as 0, 0, 5) and a bool is a number; neither is a clearance.
+    if isinstance(value, (str, bytes, bool)):
+        raise shape_error
     try:
-        triple = tuple(float(v) for v in value)
-    except (TypeError, ValueError):
-        raise ValueError(f"collision_margin must be a number or an (x, y, z) triple, got {value!r}") from None
-    if len(triple) != 3:
-        raise ValueError(f"collision_margin must be a number or an (x, y, z) triple, got {value!r}")
+        items = list(value)
+    except TypeError:
+        raise shape_error from None
+    if len(items) != 3 or not all(_is_scalar_margin(v) for v in items):
+        raise shape_error
+    triple = tuple(float(v) for v in items)
     if not all(math.isfinite(v) and v >= 0 for v in triple):
         raise ValueError(f"collision_margin components must be finite and non-negative, got {value!r}")
     return cast(Tuple[float, float, float], triple)
@@ -287,8 +305,7 @@ class SimulationParams:
                 stacklevel=3,
             )
         # A per-axis clearance (a list from YAML) is stored as a validated tuple.
-        if not isinstance(self.collision_margin, (int, float)):
-            self.collision_margin = _clearance_triple(self.collision_margin)
+        self.collision_margin = _normalize_margin(self.collision_margin)
         # Coerce a string (e.g. from YAML: collision_detection_method: "closest_points")
         # into the CollisionDetectionMethod enum. Without this the value stays a plain
         # str and the `== CollisionDetectionMethod.X` checks in check_collisions() never
@@ -2158,8 +2175,8 @@ class MultiRobotSimulationCore:
             CollisionDetectionMethod.HYBRID,
         ):
             margin = self._params.collision_margin
-            if isinstance(margin, (int, float)):
-                margin = max(0.0, margin)
+            if _is_scalar_margin(margin):
+                margin = max(0.0, float(margin))
                 return (margin, margin, margin)
             return _clearance_triple(margin)
         return (0.0, 0.0, 0.0)
@@ -2172,8 +2189,8 @@ class MultiRobotSimulationCore:
         points need no filtering.
         """
         margin = self._params.collision_margin
-        if isinstance(margin, (int, float)):
-            return margin, None
+        if _is_scalar_margin(margin):
+            return float(margin), None
         margin = _clearance_triple(margin)
         if margin[0] == margin[1] == margin[2]:
             return margin[0], None
@@ -2197,6 +2214,22 @@ class MultiRobotSimulationCore:
             kept.append(point)
         return kept
 
+    def _closest_points_within_clearance(
+        self,
+        body_a: int,
+        body_b: int,
+        query_distance: float,
+        axis_limits: Optional[Tuple[float, float, float]],
+    ) -> Tuple[bool, Optional[float]]:
+        """Whether two bodies touch or are within the clearance, and the smallest signed distance found."""
+        closest_points = p.getClosestPoints(body_a, body_b, distance=query_distance, physicsClientId=self._client)
+        if axis_limits is not None and closest_points:
+            closest_points = self._points_within_axis_clearance(closest_points, axis_limits)
+        if not closest_points:
+            return False, None
+        distances = (float(point[8]) for point in closest_points)
+        return True, min((d for d in distances if math.isfinite(d)), default=None)
+
     def set_collision_margin(self, margin: Union[float, Sequence[float]]) -> None:
         """Change the clearance and recheck stationary pairs on the next collision check.
 
@@ -2209,11 +2242,9 @@ class MultiRobotSimulationCore:
             ValueError: If the margin, or any component, is negative or not
                 finite, or a sequence does not have three components.
         """
-        if isinstance(margin, (int, float)):
-            if not math.isfinite(margin) or margin < 0:
-                raise ValueError("collision margin must be finite and non-negative")
-        else:
-            margin = _clearance_triple(margin)
+        margin = _normalize_margin(margin)
+        if isinstance(margin, float) and (not math.isfinite(margin) or margin < 0):
+            raise ValueError("collision_margin must be finite and non-negative")
         if margin == self._params.collision_margin:
             return
         old_effective_margin = self._collision_broadphase_margin()
@@ -3825,19 +3856,9 @@ class MultiRobotSimulationCore:
                     # Method 2: getClosestPoints (kinematics mode, distance-based)
                     # Best for: kinematics motion, safety margin detection
                     # Works with: Physics ON/OFF, stable with resetBasePositionAndOrientation
-                    closest_points = p.getClosestPoints(
-                        obj_i.body_id,
-                        obj_j.body_id,
-                        distance=query_distance,  # Safety clearance
-                        physicsClientId=self._client,
+                    has_collision, signed_distance = self._closest_points_within_clearance(
+                        obj_i.body_id, obj_j.body_id, query_distance, axis_limits
                     )
-                    if axis_limits is not None and closest_points:
-                        closest_points = self._points_within_axis_clearance(closest_points, axis_limits)
-                    has_collision = len(closest_points) > 0
-                    if closest_points:
-                        signed_distance = min(
-                            (float(point[8]) for point in closest_points if math.isfinite(float(point[8]))), default=None
-                        )
 
                 elif detection_method == CollisionDetectionMethod.HYBRID:
                     # Method 3: Hybrid (physics uses getContactPoints, kinematic uses getClosestPoints)
@@ -3853,16 +3874,9 @@ class MultiRobotSimulationCore:
                     else:
                         pair_method = CollisionDetectionMethod.CLOSEST_POINTS
                         # Both are kinematic - use getClosestPoints with safety margin
-                        closest_points = p.getClosestPoints(
-                            obj_i.body_id, obj_j.body_id, distance=query_distance, physicsClientId=self._client
+                        has_collision, signed_distance = self._closest_points_within_clearance(
+                            obj_i.body_id, obj_j.body_id, query_distance, axis_limits
                         )
-                        if axis_limits is not None and closest_points:
-                            closest_points = self._points_within_axis_clearance(closest_points, axis_limits)
-                        has_collision = len(closest_points) > 0
-                        if closest_points:
-                            signed_distance = min(
-                                (float(point[8]) for point in closest_points if math.isfinite(float(point[8]))), default=None
-                            )
 
                 pair = (obj_id_i, obj_id_j)
 
@@ -3890,7 +3904,12 @@ class MultiRobotSimulationCore:
                             f"<-> object {obj_id_j} (body {obj_j.body_id})"
                         )
 
-            self._last_collision_check_metadata = (sample_step, sample_time, detection_method, self._params.collision_margin)
+            self._last_collision_check_metadata = (
+                sample_step,
+                sample_time,
+                detection_method,
+                _normalize_margin(self._params.collision_margin),
+            )
 
             if return_profiling:
                 timings["contact_points"] = (time.perf_counter() - t_contact0) * 1000  # ms

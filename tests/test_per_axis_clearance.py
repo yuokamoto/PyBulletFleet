@@ -11,6 +11,7 @@ import itertools
 import math
 import random
 
+import numpy as np
 import pybullet as p
 import pytest
 
@@ -290,6 +291,46 @@ def test_set_collision_margin_rejects_a_bad_triple(make_sim, value):
     with pytest.raises(ValueError):
         sim.set_collision_margin(value)
     assert sim.params.collision_margin == 0.02
+
+
+@pytest.mark.parametrize("value", [np.float32(0.02), np.float64(0.02), np.int64(0)])
+def test_a_numpy_scalar_is_a_scalar(make_sim, value):
+    params = SimulationParams(gui=False, monitor=False, collision_margin=value)
+    assert params.collision_margin == pytest.approx(float(value))
+    assert type(params.collision_margin) is float
+    sim = make_sim(0.05)
+    sim.set_collision_margin(value)
+    assert sim.params.collision_margin == pytest.approx(float(value))
+    assert type(sim.params.collision_margin) is float
+
+
+@pytest.mark.parametrize("value", ["005", "0.05", True, (True, True, True)])
+def test_a_string_or_bool_is_rejected(make_sim, value):
+    with pytest.raises(ValueError, match="collision_margin"):
+        SimulationParams(gui=False, monitor=False, collision_margin=value)
+    sim = make_sim(0.02)
+    with pytest.raises(ValueError, match="collision_margin"):
+        sim.set_collision_margin(value)
+    assert sim.params.collision_margin == 0.02
+
+
+def test_set_collision_margin_stores_an_int_as_a_float(make_sim):
+    sim = make_sim(0.02)
+    sim.set_collision_margin(1)
+    assert type(sim.params.collision_margin) is float
+
+
+def test_observation_holds_a_tuple_after_a_list_is_set_on_params(make_sim):
+    sim = make_sim(0.05)
+    _body(sim, (0.0, 0.0, 0.1)), _body(sim, (0.23, 0.0, 0.1))
+    margin = [0.05, 0.05, 0.0]
+    sim.params.collision_margin = margin
+    sim.check_collisions()
+    margin[0] = 9.0
+    observation = sim.get_collision_observation()
+    assert observation is not None and observation.margin == XY_ONLY
+    assert isinstance(observation.margin, tuple)
+    hash(observation.margin)
 
 
 # --- Against NORMAL_2D ------------------------------------------------------
