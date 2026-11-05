@@ -236,3 +236,80 @@ class TestSingleLinkCost:
             cube.set_pose(Pose.from_xyz(0.1 * i, 0.0, 0.0))
 
         assert calls == {"getAABB": 10, "getNumJoints": 0}
+
+
+def reset_elbow(sim, obj, position=BENT):
+    """Move the elbow straight through PyBullet, behind the object's back."""
+    joint = next(
+        i
+        for i in range(p.getNumJoints(obj.body_id, physicsClientId=sim.client))
+        if p.getJointInfo(obj.body_id, i, physicsClientId=sim.client)[1].decode() == ELBOW
+    )
+    p.resetJointState(obj.body_id, joint, position, physicsClientId=sim.client)
+
+
+def plain_arm(sim):
+    """The arm as a plain SimObject: nothing but the caller moves its joints or refreshes its box."""
+    return SimObject.from_urdf(ARM, pose=Pose.from_xyz(0.0, 0.0, 0.0), sim_core=sim)
+
+
+@pytest.fixture(params=[arm, plain_arm], ids=["agent", "sim_object"])
+def make_arm(request):
+    return request.param
+
+
+class TestNotifyGeometryChanged:
+    """A joint reset directly with ``p.resetJointState`` is seen once the caller notifies it."""
+
+    def test_refreshes_the_box_and_grid_at_once(self, sim, make_arm):
+        robot = make_arm(sim)
+        sim.filter_aabb_pairs()  # build the spatial hash
+        reset_elbow(sim, robot)
+
+        sim.notify_geometry_changed(robot)
+
+        cached = sim._cached_aabbs_dict[robot.object_id]
+        assert cached[0][1] < -0.4
+        assert_box_equal(cached, whole_body_aabb(sim, robot))
+        assert robot in sim.query_aabb((-0.05, -0.45, 0.3), (0.05, -0.35, 0.4))
+
+    def test_collision_through_the_moved_link_is_found(self, sim, make_arm):
+        robot = make_arm(sim)
+        target = box(sim, 0.0, -0.42, 0.35)
+        sim.step_once()  # the first check rebuilds every AABB; later ones rely on the refresh
+        assert pair(robot, target) not in sim.get_active_collision_pairs()
+        reset_elbow(sim, robot)
+
+        sim.notify_geometry_changed(robot)
+        sim.step_once()
+
+        assert pair(robot, target) in sim.get_active_collision_pairs()
+
+    def test_from_a_step_callback_the_step_refreshes_the_box(self, sim, make_arm):
+        robot = make_arm(sim)
+        target = box(sim, 0.0, -0.42, 0.35)
+        sim.step_once()
+        seen = []
+
+        def callback(*_a, **_k):
+            reset_elbow(sim, robot)
+            sim.notify_geometry_changed(robot)
+            seen.append(robot in sim.query_aabb((-0.05, -0.45, 0.3), (0.05, -0.35, 0.4)))
+
+        sim.register_callback(callback, frequency=None)
+        sim.step_once()
+
+        assert seen == [True]
+        cached = sim._cached_aabbs_dict[robot.object_id]
+        assert_box_equal(cached, whole_body_aabb(sim, robot))
+        assert robot in sim.query_aabb((-0.05, -0.45, 0.3), (0.05, -0.35, 0.4))
+        assert pair(robot, target) in sim.get_active_collision_pairs()
+
+    def test_without_a_notification_the_box_stays_stale(self, sim, make_arm):
+        robot = make_arm(sim)
+        sim.step_once()
+        before = sim._cached_aabbs_dict[robot.object_id]
+
+        reset_elbow(sim, robot)
+
+        assert sim._cached_aabbs_dict[robot.object_id] == before

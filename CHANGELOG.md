@@ -39,6 +39,15 @@ are not recommended for production use yet.
   a list for every joint or a dict by name or index, as `set_joints_targets`
   does. Attached objects follow once, after all of them are placed.
 
+- `MultiRobotSimulationCore.notify_geometry_changed(obj)`: tell the simulation
+  that a body's links moved without its base pose being set, after moving its
+  joints directly with `p.resetJointState()`. The body counts as moved for the
+  next collision check, and its broadphase AABB (which covers every link) and
+  spatial-hash cells follow the links: at once outside a step, and before the
+  collision check when called inside one (from a step callback, for example).
+  `Agent.set_joint_position()`, `set_joints_positions()` and kinematic joint
+  motion call it already.
+
 - `Elevator.request_floor(floor, instant=True)`: the cabin is at the floor at
   once with its passengers aboard, instead of riding there; the next update
   observes the arrival and releases them as after any trip. Accepted also
@@ -541,9 +550,8 @@ are not recommended for production use yet.
   `set_joints_positions()`, kinematic joint interpolation and a joint
   checkpoint restore refresh it (at once outside a step, before the collision
   check inside one) and mark the body moved; physics bodies are re-read after
-  every `stepSimulation()` as before. The new
-  `MultiRobotSimulationCore.notify_geometry_changed(obj)` does the same for
-  joints moved directly with `p.resetJointState()`.
+  every `stepSimulation()` as before. For joints moved directly with
+  `p.resetJointState()`, call `notify_geometry_changed(obj)` (see Added).
   A body without child links still costs one `getAABB()` call per update:
   refreshing the AABB and grid cells of 1,000 single-link agents took 2.48 ms
   before and 2.55 ms after. An articulated body costs one call per link: one
