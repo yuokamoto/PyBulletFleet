@@ -20,9 +20,9 @@ BENT = 1.57
 DT = 0.02
 
 
-def make_sim(physics: bool = False) -> MultiRobotSimulationCore:
+def make_sim(physics: bool = False, **params) -> MultiRobotSimulationCore:
     sim = MultiRobotSimulationCore(
-        SimulationParams(gui=False, physics=physics, timestep=DT, monitor=False, log_level="warning")
+        SimulationParams(gui=False, physics=physics, timestep=DT, monitor=False, log_level="warning", **params)
     )
     sim.initialize_simulation()
     return sim
@@ -313,3 +313,103 @@ class TestNotifyGeometryChanged:
         reset_elbow(sim, robot)
 
         assert sim._cached_aabbs_dict[robot.object_id] == before
+
+
+def static_arm(sim):
+    params = AgentSpawnParams(
+        urdf_path=ARM,
+        initial_pose=Pose.from_xyz(0.0, 0.0, 0.0),
+        use_fixed_base=True,
+        mass=0.0,
+        collision_mode=CollisionMode.STATIC,
+    )
+    return Agent.from_params(params, sim_core=sim)
+
+
+class TestStaticArmFollowsItsJoints:
+    """A STATIC body whose joints move gets its box refreshed inside a step as outside one."""
+
+    def test_kinematic_joint_motion_refreshes_the_box(self):
+        # STATIC bodies take part in the collision check only with ignore_static_collision off.
+        sim = make_sim(ignore_static_collision=False)
+        robot = static_arm(sim)
+        assert robot.object_id in sim._static_collision_objects
+        target = box(sim, 0.0, -0.42, 0.35)
+        robot.set_joint_target_by_name(ELBOW, BENT)
+
+        for _ in range(60):
+            sim.step_once()
+
+        assert robot.get_joint_state_by_name(ELBOW)[0] == pytest.approx(BENT, abs=1e-3)
+        assert_box_equal(sim._cached_aabbs_dict[robot.object_id], whole_body_aabb(sim, robot))
+        assert pair(robot, target) in sim.get_active_collision_pairs()
+        p.disconnect(sim.client)
+
+    def test_joint_placed_from_a_step_callback_is_refreshed_by_the_step(self, sim):
+        robot = static_arm(sim)
+        sim.step_once()
+        sim.register_callback(lambda *a, **k: robot.set_joint_position(ELBOW, BENT), frequency=None)
+
+        sim.step_once()
+
+        assert_box_equal(sim._cached_aabbs_dict[robot.object_id], whole_body_aabb(sim, robot))
+        assert robot in sim.query_aabb((-0.05, -0.45, 0.3), (0.05, -0.35, 0.4))
+
+
+ELEVATOR = "robots/elevator.urdf"  # base "shaft" has no collision shape; the "platform" link (3x3x0.2 m) has one
+
+
+class TestLinksWithoutACollider:
+    """A link without a collision shape is a point at its frame for PyBullet; it does not widen the box."""
+
+    def elevator(self, sim):
+        params = AgentSpawnParams(urdf_path=ELEVATOR, initial_pose=Pose.from_xyz(0.0, 0.0, 0.0), use_fixed_base=True)
+        return Agent.from_params(params, sim_core=sim)
+
+    def test_box_is_the_platform_alone_at_an_upper_floor(self, sim):
+        elevator = self.elevator(sim)
+
+        elevator.set_joint_position("lift", 8.0)
+
+        cached = sim._cached_aabbs_dict[elevator.object_id]
+        assert tuple(cached[0]) == pytest.approx((-1.5, -1.5, 7.9), abs=1e-6)
+        assert tuple(cached[1]) == pytest.approx((1.5, 1.5, 8.1), abs=1e-6)
+
+    def test_query_below_the_raised_platform_does_not_find_it(self, sim):
+        elevator = self.elevator(sim)
+        sim.filter_aabb_pairs()
+
+        elevator.set_joint_position("lift", 8.0)
+
+        assert elevator not in sim.query_aabb((-0.5, -0.5, 0.0), (0.5, 0.5, 1.0))
+
+    def test_get_aabbs_skips_the_collision_less_base(self, sim):
+        elevator = self.elevator(sim)
+        elevator.set_joint_position("lift", 8.0)
+
+        (aabb,) = sim.get_aabbs()
+
+        assert aabb[0][2] == pytest.approx(7.9, abs=1e-6)
+
+    def test_body_without_any_collider_keeps_its_base_box(self, sim):
+        visual = p.createVisualShape(p.GEOM_SPHERE, radius=0.1, physicsClientId=sim.client)
+        body = p.createMultiBody(
+            baseMass=0,
+            baseCollisionShapeIndex=-1,
+            baseVisualShapeIndex=visual,
+            basePosition=[2.0, 0.0, 0.0],
+            linkMasses=[0],
+            linkCollisionShapeIndices=[-1],
+            linkVisualShapeIndices=[visual],
+            linkPositions=[[1.0, 0.0, 0.0]],
+            linkOrientations=[[0, 0, 0, 1]],
+            linkInertialFramePositions=[[0, 0, 0]],
+            linkInertialFrameOrientations=[[0, 0, 0, 1]],
+            linkParentIndices=[0],
+            linkJointTypes=[p.JOINT_FIXED],
+            linkJointAxis=[[0, 0, 1]],
+            physicsClientId=sim.client,
+        )
+        obj = SimObject(body_id=body, sim_core=sim)
+
+        assert_box_equal(sim._cached_aabbs_dict[obj.object_id], p.getAABB(body, physicsClientId=sim.client))

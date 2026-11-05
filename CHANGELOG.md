@@ -546,7 +546,9 @@ are not recommended for production use yet.
   link's box, so a child link touching another object (an arm's wrist, a
   wheel below a mobile base) never reached the narrow phase, and `query_aabb()`
   could not find a body by its upper links. The cached box is now the union of
-  the link boxes, and it follows the joints: `Agent.set_joint_position()`,
+  the boxes of the links that have a collision shape (a link without one, such
+  as the elevator's `shaft` base, is a point at its frame for PyBullet and is
+  left out), and it follows the joints: `Agent.set_joint_position()`,
   `set_joints_positions()`, kinematic joint interpolation and a joint
   checkpoint restore refresh it (at once outside a step, before the collision
   check inside one) and mark the body moved; physics bodies are re-read after

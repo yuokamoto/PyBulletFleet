@@ -109,7 +109,8 @@ def _update_object_aabb(self, object_id: int):
     """Called when object moves"""
     obj = self._sim_objects_dict[object_id]
 
-    # The box of every link: p.getAABB(body) alone is the base link's.
+    # The box of every link with a collision shape: p.getAABB(body) alone
+    # is the base link's.
     # One getAABB() call for a body without child links, one per link
     # (unioned) for an articulated body.
     self._cached_aabbs_dict[object_id] = self._body_aabb(obj)
