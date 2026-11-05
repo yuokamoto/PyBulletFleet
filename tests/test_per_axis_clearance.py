@@ -125,10 +125,10 @@ def test_side_by_side_within_the_xy_clearance_is_reported(make_sim, method):
 @pytest.mark.parametrize("method", [CollisionDetectionMethod.CLOSEST_POINTS, CollisionDetectionMethod.HYBRID])
 def test_under_a_shelf_within_the_scalar_clearance_is_not_reported_with_no_z_clearance(make_sim, method):
     scalar = make_sim(0.05, method=method)
-    _body(scalar, (0.0, 0.0, 0.1))
-    _body(scalar, (0.05, 0.0, 0.33), size=(0.3, 0.3, 0.1))  # 0.03 above
+    a0 = _body(scalar, (0.0, 0.0, 0.1))
+    shelf0 = _body(scalar, (0.05, 0.0, 0.33), size=(0.3, 0.3, 0.1))  # 0.03 above
     scalar.check_collisions()
-    assert len(scalar.get_active_collision_pairs()) == 1
+    assert scalar.get_active_collision_pairs() == [_pair(a0, shelf0)]
 
     sim = make_sim(XY_ONLY, method=method)
     a = _body(sim, (0.0, 0.0, 0.1))
