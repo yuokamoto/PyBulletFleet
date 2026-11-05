@@ -551,6 +551,14 @@ are not recommended for production use yet.
   running, it was looked up on PyBullet's default client: a valid name was
   reported missing, or resolved to a joint of another body.
 
+- `get_joints_state_by_name()`, `set_joints_targets_by_name()`,
+  `are_joints_at_targets_by_name()` and `IKParams.ik_joint_names` also look
+  joint names up on the agent's own physics client. With a second simulation
+  running, targets were dropped, states came back empty, at-target checks
+  returned `False` for a joint at its target, and IK locked the named joints.
+  `tools.resolve_joint_index()` takes an optional `physics_client_id`
+  (default `0`, as before).
+
 - `REPLACE_NEXT` elevators: a request for the floor the moving cabin is
   already heading to now drops the pending floor (`REPLACED`) instead of being
   rejected and leaving it queued. A controller that changed its target and then

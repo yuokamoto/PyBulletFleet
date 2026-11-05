@@ -21,7 +21,8 @@ from .types import ControllerMode, MotionMode, MovementDirection, ActionStatus, 
 from .tools import normalize_vector_param  # noqa: F401  (re-exported for legacy callers)
 from pybullet_fleet._tpi import try_build_tpi
 from pybullet_fleet.joint import KinematicJoint
-from pybullet_fleet.tools import resolve_joint_index, resolve_link_index
+from pybullet_fleet.tools import resolve_link_index
+from pybullet_fleet.tools import resolve_joint_index  # noqa: F401  (re-exported for legacy callers)
 from .logging_utils import get_lazy_logger
 from pybullet_fleet.events import SimEvents
 from pybullet_fleet._defaults import AGENT as _AGT_D, IK as _IK_D
@@ -2368,9 +2369,8 @@ class Agent(SimObject):
         """
         result = {}
         for name in joint_names:
-            idx = resolve_joint_index(self.body_id, name)
-            if idx == -1:
-                self._log.warning(f"Joint name '{name}' not found.")
+            idx = self._resolve_joint(name)
+            if idx is None:
                 continue
             result[name] = self.get_joint_state(idx)
         return result
@@ -2501,7 +2501,7 @@ class Agent(SimObject):
         """The index of a joint named by index or name, or None (logged) for one this body does not have."""
         if isinstance(joint, str):
             # Looked up in this body's own joint_info, which was read on its
-            # own client: resolve_joint_index() would ask PyBullet's default one.
+            # own client, so no PyBullet query is needed.
             try:
                 index = self._joint_index_by_name(joint)
             except KeyError:
@@ -2601,9 +2601,8 @@ class Agent(SimObject):
         Set multiple joint targets by dict {joint_name: target_position} (partial update allowed).
         """
         for joint_name, target in joint_targets.items():
-            joint_index = resolve_joint_index(self.body_id, joint_name)
-            if joint_index == -1:
-                self._log.warning(f"Joint name '{joint_name}' not found.")
+            joint_index = self._resolve_joint(joint_name)
+            if joint_index is None:
                 continue
             self.set_joint_target(joint_index, target, max_force)
 
@@ -2742,8 +2741,8 @@ class Agent(SimObject):
             True if all joints are within tolerance, False otherwise.
         """
         for joint_name, target in joint_targets.items():
-            joint_index = resolve_joint_index(self.body_id, joint_name)
-            if joint_index == -1:
+            joint_index = self._resolve_joint(joint_name)
+            if joint_index is None:
                 return False
             if not self.is_joint_at_target(joint_index, target, tolerance):
                 return False
@@ -2886,10 +2885,9 @@ class Agent(SimObject):
             # Resolve names to a set of joint indices for O(1) lookup.
             ik_free_indices: Optional[set] = set()
             for name in ik_names:
-                idx = resolve_joint_index(self.body_id, name)
-                if idx >= 0:
-                    ik_free_indices.add(idx)
-                else:
+                try:
+                    ik_free_indices.add(self._joint_index_by_name(name))
+                except KeyError:
                     self._log.warning("_solve_ik: ik_joint_names entry '%s' not found", name)
         else:
             ik_free_indices = None  # auto-detect mode

@@ -11,6 +11,7 @@ import pybullet as p
 import pytest
 
 from pybullet_fleet import Agent, AgentSpawnParams, MultiRobotSimulationCore, SimulationParams
+from pybullet_fleet.tools import resolve_joint_index
 
 ELEVATOR = "robots/elevator.urdf"  # one prismatic joint, "lift"
 LIFT = "lift"
@@ -297,3 +298,84 @@ class TestANonDefaultClient:
 
         assert agent.set_joint_position(LIFT, 2.0)
         assert agent.get_joint_state(0)[0] == pytest.approx(2.0)
+
+
+class TestMultiJointNamesOnANonDefaultClient:
+    """The multi-joint ``*_by_name`` helpers and IK joint names resolve on the agent's own client.
+
+    The first simulation holds an elevator at body 0, whose only joint is
+    "lift": any arm joint name looked up there is missing.
+    """
+
+    ARM_JOINTS = ("mount_to_shoulder", "shoulder_to_elbow", "elbow_to_wrist", "wrist_to_end")
+
+    @pytest.fixture
+    def two_sims(self):
+        first = _sim()
+        _lift(first)  # body 0 on the default client: only a joint named "lift"
+        second = _sim()
+        assert second.client != first.client
+        yield first, second
+        for sim in (second, first):
+            try:
+                p.disconnect(sim.client)
+            except p.error:
+                pass
+
+    def test_get_joints_state_by_name(self, two_sims):
+        _, second = two_sims
+        agent = _manipulator(second)
+        agent.set_joint_position("elbow_to_wrist", 0.5)
+
+        states = agent.get_joints_state_by_name(["elbow_to_wrist"])
+
+        assert states["elbow_to_wrist"][0] == pytest.approx(0.5)
+
+    def test_set_joints_targets_by_name(self, two_sims):
+        _, second = two_sims
+        agent = _manipulator(second)
+        index = agent._joint_index_by_name("elbow_to_wrist")
+
+        agent.set_joints_targets_by_name({"elbow_to_wrist": 0.5})
+
+        assert agent.last_joint_targets == {index: 0.5}
+
+    def test_are_joints_at_targets_by_name(self, two_sims):
+        _, second = two_sims
+        agent = _manipulator(second)
+        agent.set_joint_position("elbow_to_wrist", 0.5)
+
+        assert agent.are_joints_at_targets_by_name({"elbow_to_wrist": 0.5})
+
+    def test_ik_joint_names(self, two_sims, caplog):
+        from pybullet_fleet.agent import IKParams
+
+        _, second = two_sims
+        agent = Agent.from_params(
+            AgentSpawnParams(urdf_path=MANIPULATOR, name="arm", ik_params=IKParams(ik_joint_names=self.ARM_JOINTS)),
+            sim_core=second,
+        )
+
+        with caplog.at_level("WARNING"):
+            agent._solve_ik([0.5, 0.0, 0.6], ee_link_index=agent._joint_index_by_name("wrist_to_end"))
+
+        assert "not found" not in caplog.text
+
+
+class TestResolveJointIndexClient:
+    def test_looks_the_name_up_on_the_given_client(self):
+        first = _sim()
+        _lift(first)
+        second = _sim()
+        try:
+            agent = _manipulator(second)
+
+            index = resolve_joint_index(agent.body_id, "elbow_to_wrist", physics_client_id=second.client)
+
+            assert index == agent._joint_index_by_name("elbow_to_wrist")
+        finally:
+            for sim in (second, first):
+                try:
+                    p.disconnect(sim.client)
+                except p.error:
+                    pass
