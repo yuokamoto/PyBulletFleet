@@ -22,7 +22,9 @@ are not recommended for production use yet.
   per-agent and batched, omnidirectional final rotation and differential-drive
   turns, with `Agent.max_angular_decel` as the read-only view. The batched
   controllers carry the braking scalar per row, and their closed form agrees
-  with the per-agent trajectory to floating-point noise.
+  with the per-agent trajectory to floating-point noise. The kinematic replay
+  profile records it; a `pbf.kinematic.v4` artifact recorded before it existed
+  still loads, with the field unset.
 
 - `MultiRobotSimulationCore.query_aabb(aabb_min, aabb_max)`: the objects whose
   AABB overlaps a box, looked up through the collision spatial hash, so the

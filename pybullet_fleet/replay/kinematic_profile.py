@@ -43,6 +43,12 @@ _SUPPORTED_CONTROLLER_NAMES_BY_TYPE = {
 }
 _SUPPORTED_CONTROLLER_TYPES = frozenset(_SUPPORTED_CONTROLLER_NAMES_BY_TYPE)
 _SUPPORTED_CONTROLLER_NAMES = frozenset(_SUPPORTED_CONTROLLER_NAMES_BY_TYPE.values())
+_CONTROLLER_PARAMETER_NAMES = frozenset(field.name for field in fields(ControllerParams))
+# ``max_angular_decel`` joined ControllerParams after v4 artifacts were first
+# written. Without it, rotation braked at ``max_angular_accel``, which is what
+# leaving it unset (the ControllerParams default) still means, so an artifact
+# that lacks it restores the same rotation and stays loadable.
+_OPTIONAL_CONTROLLER_PARAMETER_NAMES = frozenset({"max_angular_decel"})
 
 
 def _asset_fingerprint(path: str) -> str:
@@ -66,7 +72,9 @@ def _controller_spec(agent: Agent) -> dict:
 
 
 def _validate_controller_parameters(parameters: dict) -> None:
-    if not isinstance(parameters, dict) or set(parameters) != {field.name for field in fields(ControllerParams)}:
+    if not isinstance(parameters, dict) or not (
+        _CONTROLLER_PARAMETER_NAMES - _OPTIONAL_CONTROLLER_PARAMETER_NAMES <= set(parameters) <= _CONTROLLER_PARAMETER_NAMES
+    ):
         raise ValueError("Unsupported controller parameters")
     for name in (
         "max_linear_vel",
@@ -76,7 +84,7 @@ def _validate_controller_parameters(parameters: dict) -> None:
         "max_angular_accel",
         "max_angular_decel",
     ):
-        value = parameters[name]
+        value = parameters.get(name)
         if value is None:
             continue
         if isinstance(value, list):
