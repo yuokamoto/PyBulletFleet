@@ -4268,10 +4268,6 @@ class MultiRobotSimulationCore:
             except Exception:
                 logger.error("Plugin %s.on_reset() failed", type(plugin).__name__, exc_info=True)
 
-        # Restart plugin schedules
-        for plugin in self._plugins:
-            plugin._frequency_gate.reset()
-
         # 2. Reset PyBullet world (removes all bodies including ground plane)
         p.resetSimulation(physicsClientId=self._client)
         self._lighting_control_ids = None
