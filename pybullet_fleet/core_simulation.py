@@ -2222,14 +2222,20 @@ class MultiRobotSimulationCore:
         return True
 
     def _closest_points_within_clearance(
-        self, obj_id_a: int, obj_id_b: int, clearance: Tuple[float, float, float], query_distance: float
+        self,
+        obj_id_a: int,
+        obj_id_b: int,
+        query_distance: float,
+        recheck_clearance: Optional[Tuple[float, float, float]] = None,
     ) -> Tuple[bool, Optional[float]]:
         """Whether two bodies touch or are within the clearance, and the smallest signed distance found.
 
-        The AABBs must be within the clearance on every axis, as the broad
-        phase requires; the closest points then within ``query_distance``.
+        ``recheck_clearance`` is given for a pair the broad phase did not
+        offer (an active pair checked again): its AABBs must then pass the
+        broad phase's per-axis test first, so a pair the broad phase would
+        drop resolves here too. A pair the broad phase offered passed it.
         """
-        if not self._aabbs_within_clearance(obj_id_a, obj_id_b, clearance):
+        if recheck_clearance is not None and not self._aabbs_within_clearance(obj_id_a, obj_id_b, recheck_clearance):
             return False, None
         body_a, body_b = self._sim_objects_dict[obj_id_a].body_id, self._sim_objects_dict[obj_id_b].body_id
         closest_points = p.getClosestPoints(body_a, body_b, distance=query_distance, physicsClientId=self._client)
@@ -3770,6 +3776,7 @@ class MultiRobotSimulationCore:
             # candidate_pairs already contains only pairs involving moved objects (filtered in filter_aabb_pairs)
             # We just need to add existing collision pairs for resolution detection
             pairs_to_check = set(candidate_pairs)
+            offered_pairs = frozenset(pairs_to_check)
 
             # Also re-check existing collision pairs involving moved objects
             # (to detect when collisions are resolved)
@@ -3816,10 +3823,10 @@ class MultiRobotSimulationCore:
                 else:
                     pairs_to_check.add(pair)
 
-            # Check contact points for all pairs. A pair checked again without
-            # the broad phase (an active one) must still have its AABBs within
-            # each axis's clearance; the closest points are then queried at the
-            # largest component.
+            # Check contact points for all pairs. A pair the broad phase did not
+            # offer (an active one checked again) first gets the broad phase's
+            # per-axis AABB test, so it is judged as the broad phase would judge
+            # it; the closest points are then queried at the largest component.
             query_distance = self._narrow_phase_clearance()
             clearance = self._collision_broadphase_margin()
             new_collisions = set()
@@ -3869,7 +3876,7 @@ class MultiRobotSimulationCore:
                     # Best for: kinematics motion, safety margin detection
                     # Works with: Physics ON/OFF, stable with resetBasePositionAndOrientation
                     has_collision, signed_distance = self._closest_points_within_clearance(
-                        obj_id_i, obj_id_j, clearance, query_distance
+                        obj_id_i, obj_id_j, query_distance, None if (obj_id_i, obj_id_j) in offered_pairs else clearance
                     )
 
                 elif detection_method == CollisionDetectionMethod.HYBRID:
@@ -3887,7 +3894,10 @@ class MultiRobotSimulationCore:
                         pair_method = CollisionDetectionMethod.CLOSEST_POINTS
                         # Both are kinematic - use getClosestPoints with safety margin
                         has_collision, signed_distance = self._closest_points_within_clearance(
-                            obj_id_i, obj_id_j, clearance, query_distance
+                            obj_id_i,
+                            obj_id_j,
+                            query_distance,
+                            None if (obj_id_i, obj_id_j) in offered_pairs else clearance,
                         )
 
                 pair = (obj_id_i, obj_id_j)
