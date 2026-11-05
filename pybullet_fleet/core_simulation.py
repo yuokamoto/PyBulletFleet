@@ -1597,6 +1597,9 @@ class MultiRobotSimulationCore:
         if self._params.gui and self._params.window_width > 0 and self._params.window_height > 0:
             options = f"--width={self._params.window_width} --height={self._params.window_height}"
         self._client = p.connect(p.GUI if self._params.gui else p.DIRECT, options=options)
+        # A reused client id may still have cache entries from a connection
+        # that was disconnected without close() (p.disconnect() by the caller).
+        SimObject._forget_shared_shapes(self._client)
 
         # Hide all debug UI panels immediately after connection
         if self._params.gui:
@@ -4206,6 +4209,7 @@ class MultiRobotSimulationCore:
 
         # 2. Reset PyBullet world (removes all bodies including ground plane)
         p.resetSimulation(physicsClientId=self._client)
+        SimObject._forget_shared_shapes(self._client)  # resetSimulation() removed the shapes too
         self._lighting_control_ids = None
         self._lighting_control_values = None
 
@@ -4805,6 +4809,7 @@ class MultiRobotSimulationCore:
                     p.disconnect(self._client)
                 except p.error:
                     pass  # already disconnected
+                SimObject._forget_shared_shapes(self._client)
         finally:
             if first_error is not None:
                 raise first_error

@@ -537,7 +537,10 @@ are not recommended for production use yet.
   so with a second client connected (two simulations in one process, or a
   client left open) the agent's body landed on the wrong one. The mesh-shape
   cache behind `create_shared_shapes()` is now kept per physics client, so it
-  no longer hands a shape created on one client to another.
+  no longer hands a shape created on one client to another. A client's entries
+  are dropped when its simulation connects, resets and closes, because PyBullet
+  reuses a client id after a disconnect and `resetSimulation()` removes the
+  shapes; a later simulation on the same id used to get bodies with no geometry.
 
 - `REPLACE_NEXT` elevators: a request for the floor the moving cabin is
   already heading to now drops the pending floor (`REPLACED`) instead of being

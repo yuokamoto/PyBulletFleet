@@ -624,7 +624,7 @@ class SimObject:
             visual_key = cls._shape_params_to_key(visual_shape) if visual_needs_cache else "none"
             collision_key = cls._shape_params_to_key(collision_shape) if collision_needs_cache else "none"
             # A shape id is only valid on the client that created it.
-            shape_key = f"client:{physics_client_id}_v:{visual_key}_c:{collision_key}"
+            shape_key = f"{cls._shared_shapes_prefix(physics_client_id)}v:{visual_key}_c:{collision_key}"
 
             # Check cache
             if shape_key in cls._shared_shapes:
@@ -652,6 +652,24 @@ class SimObject:
             cls._shared_shapes[shape_key] = (visual_id, collision_id)
 
         return visual_id, collision_id
+
+    @staticmethod
+    def _shared_shapes_prefix(physics_client_id: int) -> str:
+        return f"client:{physics_client_id}_"
+
+    @classmethod
+    def _forget_shared_shapes(cls, physics_client_id: int) -> None:
+        """Drop the cached shapes of one physics client.
+
+        The cache is keyed by client id, but PyBullet reuses an id after
+        ``p.disconnect()``, and ``p.resetSimulation()`` removes a client's
+        shapes while keeping its id. Either way the cached ids now name
+        nothing, or a different shape, on that client. The simulation calls
+        this when it connects, resets and closes its client.
+        """
+        prefix = cls._shared_shapes_prefix(physics_client_id)
+        for key in [key for key in cls._shared_shapes if key.startswith(prefix)]:
+            del cls._shared_shapes[key]
 
     @staticmethod
     def _shape_params_to_key(shape: ShapeParams) -> str:

@@ -83,3 +83,60 @@ class TestTheSharedShapeCache:
             assert len(SimObject._shared_shapes) == 2
         finally:
             p.disconnect(other)
+
+
+def _new_sim():
+    return MultiRobotSimulationCore(SimulationParams(gui=False, monitor=False, enable_floor=False, log_level="warning"))
+
+
+def _assert_builds_real_geometry(client):
+    """Shapes from the cache must exist on ``client``: a body built from them has visual and collision data."""
+    visual_id, collision_id = SimObject.create_shared_shapes(
+        visual_shape=_mesh(), collision_shape=_mesh(), physics_client_id=client
+    )
+    body = p.createMultiBody(
+        baseMass=1.0, baseVisualShapeIndex=visual_id, baseCollisionShapeIndex=collision_id, physicsClientId=client
+    )
+    assert p.getVisualShapeData(body, physicsClientId=client)
+    assert p.getCollisionShapeData(body, -1, physicsClientId=client)
+
+
+class TestTheSharedShapeCacheAcrossConnections:
+    """PyBullet reuses a client id after a disconnect, so a cache keyed by the id
+    alone would hand the next simulation shape ids from the old connection."""
+
+    @pytest.mark.parametrize("ending", ["close", "disconnect"])
+    def test_a_later_simulation_on_a_reused_client_id_gets_its_own_shapes(self, ending):
+        first = _new_sim()
+        SimObject.create_shared_shapes(visual_shape=_mesh(), collision_shape=_mesh(), physics_client_id=first.client)
+        if ending == "close":
+            first.close()
+        else:  # a caller disconnecting the client itself, outside close()
+            p.disconnect(first.client)
+        second = _new_sim()
+        try:
+            assert second.client == first.client  # the case under test: PyBullet reused the id
+            _assert_builds_real_geometry(second.client)
+        finally:
+            second.close()
+
+    def test_close_drops_only_its_own_clients_entries(self):
+        sim = _new_sim()
+        other = p.connect(p.DIRECT)
+        try:
+            kept = SimObject.create_shared_shapes(visual_shape=_mesh(), physics_client_id=other)
+            SimObject.create_shared_shapes(visual_shape=_mesh(), physics_client_id=sim.client)
+            sim.close()
+            assert len(SimObject._shared_shapes) == 1
+            assert SimObject.create_shared_shapes(visual_shape=_mesh(), physics_client_id=other) == kept
+        finally:
+            p.disconnect(other)
+
+    def test_reset_rebuilds_shapes_that_reset_simulation_removed(self):
+        sim = _new_sim()
+        try:
+            SimObject.create_shared_shapes(visual_shape=_mesh(), collision_shape=_mesh(), physics_client_id=sim.client)
+            sim.reset()
+            _assert_builds_real_geometry(sim.client)
+        finally:
+            sim.close()
