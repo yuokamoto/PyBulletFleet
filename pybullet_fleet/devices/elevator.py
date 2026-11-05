@@ -20,6 +20,7 @@ from pybullet_fleet.agent import (  # noqa: F401 - Agent/AgentSpawnParams/IKPara
     validate_joint_motion_profile,
 )
 from pybullet_fleet.controller import Controller  # noqa: F401 - resolves inherited API type hints
+from pybullet_fleet.config_utils import config_get_bool
 from pybullet_fleet.controller_params import ControllerParams  # noqa: F401 - resolves inherited API type hints
 from pybullet_fleet.devices.elevator_state_machine import (
     ElevatorRequestPolicy,
@@ -120,7 +121,7 @@ class ElevatorParams(AgentSpawnParams):
             platform_link=config.get("platform_link", "platform"),
             request_policy=config.get("request_policy", ElevatorRequestPolicy.REJECT),
             boarding_height=float(config.get("boarding_height", 1.0)),
-            report_platform_contacts=bool(config.get("report_platform_contacts", False)),
+            report_platform_contacts=config_get_bool(config, "report_platform_contacts", False),
         )
 
 

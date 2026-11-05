@@ -665,3 +665,14 @@ class TestElevatorPlatformContacts:
         assert params.report_platform_contacts is True
         default = ElevatorParams.from_dict({"name": "e1", "urdf_path": "robots/elevator.urdf", "floors": {"L1": 0.0}})
         assert default.report_platform_contacts is False
+
+    @pytest.mark.parametrize("value, expected", [("false", False), ("no", False), ("0", False), ("true", True), (1, True)])
+    def test_report_platform_contacts_from_dict_parses_quoted_booleans(self, value, expected):
+        config = {"name": "e1", "urdf_path": "robots/elevator.urdf", "floors": {"L1": 0.0}}
+        params = ElevatorParams.from_dict({**config, "report_platform_contacts": value})
+        assert params.report_platform_contacts is expected
+
+    def test_report_platform_contacts_from_dict_rejects_an_unknown_value(self):
+        config = {"name": "e1", "urdf_path": "robots/elevator.urdf", "floors": {"L1": 0.0}}
+        with pytest.raises(ValueError, match="report_platform_contacts"):
+            ElevatorParams.from_dict({**config, "report_platform_contacts": "maybe"})
