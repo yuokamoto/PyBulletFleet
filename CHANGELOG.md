@@ -542,7 +542,12 @@ are not recommended for production use yet.
   `DeprecationWarning`, so that it is shown by default wherever the call is,
   not only in the script being run. The warning points at the calling line
   outside the package, so Python's default filter shows it once per line
-  however many objects that line spawns. Use `NORMAL_3D`; the only difference is that near misses
+  however many objects that line spawns. Spawning from spawn parameters with
+  `from_params()` does not warn a second time for the spawned object, but it
+  warns when the parameters were changed to `NORMAL_2D` after they were
+  built, and `NORMAL_2D` objects spawned meanwhile by an overridden
+  `from_mesh()` / `from_urdf()`, a controller or a plugin warn as usual (#129).
+  Use `NORMAL_3D`; the only difference is that near misses
   within the clearance above or below are reported. The replay v1 profile
   keeps its `NORMAL_2D` robots, without a warning, so recorded runs replay
   unchanged, and restoring a state recording rebuilds its `NORMAL_2D` bodies

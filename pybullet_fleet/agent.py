@@ -17,7 +17,7 @@ from .geometry import Pose, as_axes
 from .sim_object import ShapeParams, SimObject, SimObjectSpawnParams, load_urdf_body
 from .action import Action
 from .types import ControllerMode, MotionMode, MovementDirection, ActionStatus, CollisionMode
-from .types import _normal_2d_warning_already_given
+from .types import _normal_2d_warning_already_given, _spawning_from_warned_params
 from .tools import normalize_vector_param  # noqa: F401  (re-exported for legacy callers)
 from pybullet_fleet._tpi import try_build_tpi
 from pybullet_fleet.joint import KinematicJoint
@@ -875,8 +875,7 @@ class Agent(SimObject):
         # so observers (e.g. the ROS bridge) never see a plugin-less agent.
         extra: Dict[str, Any] = {"sim_core": sim_core, "controller": spawn_params.controller, "notify_spawn": False}
         factory = cls.from_urdf if spawn_params.urdf_path is not None else cls.from_mesh
-        # Building spawn_params already warned about a deprecated collision mode.
-        with _normal_2d_warning_already_given():
+        with _spawning_from_warned_params(cls, spawn_params):
             agent = factory(
                 **_forward_spawn_params(
                     factory,

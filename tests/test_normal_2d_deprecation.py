@@ -86,6 +86,39 @@ def test_spawning_from_params_does_not_warn_a_second_time(pybullet_env, spawn):
     assert obj.collision_mode is CollisionMode.NORMAL_2D
 
 
+@pytest.mark.parametrize("spawn", [SimObject.from_params, Agent.from_params])
+def test_spawning_from_params_changed_to_normal_2d_after_construction_warns(pybullet_env, spawn):
+    params = AgentSpawnParams(name="a", visual_shape=BOX, collision_shape=BOX)
+    params.collision_mode = CollisionMode.NORMAL_2D
+    with pytest.warns(FutureWarning) as record:
+        obj = spawn(params)
+    _assert_one_warning_from_this_file(record)
+    assert obj.collision_mode is CollisionMode.NORMAL_2D
+
+
+class _SpawnsAHelperFirst(SimObject):
+    @classmethod
+    def from_mesh(cls, collision_shape=None, pose=None, collision_mode=CollisionMode.NORMAL_3D, sim_core=None):
+        SimObject.from_mesh(collision_shape=BOX, pose=Pose.from_xyz(5, 0, 1), collision_mode=CollisionMode.NORMAL_2D)
+        return super().from_mesh(collision_shape=collision_shape, pose=pose, collision_mode=collision_mode, sim_core=sim_core)
+
+
+class _SpawnsAHelperInInit(SimObject):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        SimObject.from_mesh(collision_shape=BOX, pose=Pose.from_xyz(5, 0, 1), collision_mode=CollisionMode.NORMAL_2D)
+
+
+@pytest.mark.parametrize("cls", [_SpawnsAHelperFirst, _SpawnsAHelperInInit])
+def test_spawning_from_params_still_warns_about_nested_spawns(pybullet_env, cls):
+    with pytest.warns(FutureWarning):
+        params = SimObjectSpawnParams(collision_shape=BOX, collision_mode=CollisionMode.NORMAL_2D)
+    with pytest.warns(FutureWarning) as record:
+        obj = cls.from_params(params)
+    _assert_one_warning_from_this_file(record)
+    assert obj.collision_mode is CollisionMode.NORMAL_2D
+
+
 def test_set_collision_mode_warns(pybullet_env):
     obj = SimObject.from_mesh(collision_shape=BOX, pose=Pose.from_xyz(0, 0, 1))
     with pytest.warns(FutureWarning) as record:
