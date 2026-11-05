@@ -564,6 +564,12 @@ are not recommended for production use yet.
   1,000 `mobile_robot` agents in a 40 m square, about 10% more pairs were in
   collision, the AABB refresh took 11.1 ms instead of 7.8 ms per step and the
   collision check 69.6 ms instead of 62.4 ms.
+  An elevator's box now includes its platform, so a robot resting on the
+  platform (waiting before departure, or after arrival) would be in
+  collision with the elevator; the elevator leaves such pairs out, as before.
+  `ElevatorParams.report_platform_contacts` (default `false`) reports them.
+  A body touching the platform from below is reported either way, and
+  passengers attached for a ride follow `ignore_attached_collision`.
 
 - `REPLACE_NEXT` elevators: a request for the floor the moving cabin is
   already heading to now drops the pending floor (`REPLACED`) instead of being

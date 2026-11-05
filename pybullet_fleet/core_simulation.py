@@ -2212,6 +2212,12 @@ class MultiRobotSimulationCore:
         # loads -- belongs to one body: no contact among them is a collision.
         if self._params.ignore_attached_collision and obj_a._attachment_root() is obj_b._attachment_root():
             return True
+        # An object's own rule for its contacts (an elevator ignores the
+        # bodies standing on its platform).
+        if obj_a._filters_own_contacts and obj_a._ignores_contact_with(obj_b):
+            return True
+        if obj_b._filters_own_contacts and obj_b._ignores_contact_with(obj_a):
+            return True
         return self._collision_ignore_filter is not None and bool(self._collision_ignore_filter(obj_a, obj_b))
 
     def _collision_broadphase_margin(self) -> float:

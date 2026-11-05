@@ -485,3 +485,122 @@ class TestElevatorRedirect:
             {"name": "e1", "urdf_path": "robots/elevator.urdf", "floors": {"L1": 0.0}, "boarding_height": 0.25}
         )
         assert params.boarding_height == 0.25
+
+
+class TestElevatorPlatformContacts:
+    """A body standing on the platform is not in collision with the elevator unless asked.
+
+    The broadphase AABB covers every link, so the elevator's box includes its
+    platform: without this a robot resting on the platform before departure
+    or after arrival would be reported as colliding with the cabin.
+    """
+
+    @pytest.fixture
+    def sim(self):
+        from pybullet_fleet import MultiRobotSimulationCore, SimulationParams
+
+        sim = MultiRobotSimulationCore(
+            SimulationParams(gui=False, physics=False, timestep=0.02, monitor=False, enable_floor=False)
+        )
+        sim.initialize_simulation()
+        yield sim
+        sim.close()
+
+    @staticmethod
+    def _elevator(sim, **extra):
+        return Elevator.from_params(
+            ElevatorParams(
+                urdf_path="robots/elevator.urdf",
+                initial_pose=Pose.from_xyz(0, 0, 0),
+                use_fixed_base=True,
+                floors={"L1": 0.0, "L2": 8.0},
+                initial_floor="L1",
+                **extra,
+            ),
+            sim,
+        )
+
+    @staticmethod
+    def _robot_on_platform(sim):
+        # mobile_robot's wheels reach 0.252 m below its origin; the platform top is at 0.1.
+        return Agent.from_params(
+            AgentSpawnParams(urdf_path="robots/mobile_robot.urdf", initial_pose=Pose.from_xyz(0, 0, 0.35)), sim_core=sim
+        )
+
+    @staticmethod
+    def _box_under_platform(sim):
+        # Touches the platform's underside (bottom at -0.1): a cabin coming down onto it.
+        return SimObject.from_params(
+            SimObjectSpawnParams(
+                visual_shape=ShapeParams(shape_type="box", half_extents=[0.2, 0.2, 0.2]),
+                collision_shape=ShapeParams(shape_type="box", half_extents=[0.2, 0.2, 0.2]),
+                initial_pose=Pose.from_xyz(1.0, 1.0, -0.29),
+                mass=0.0,
+            ),
+            sim,
+        )
+
+    @staticmethod
+    def _pair(a, b):
+        return tuple(sorted((a.object_id, b.object_id)))
+
+    def test_a_robot_resting_on_the_platform_is_not_reported_by_default(self, sim):
+        elev = self._elevator(sim)
+        robot = self._robot_on_platform(sim)
+        sim.step_once()
+        assert self._pair(elev, robot) not in sim.get_active_collision_pairs()
+
+    def test_report_platform_contacts_reports_a_robot_resting_on_the_platform(self, sim):
+        elev = self._elevator(sim, report_platform_contacts=True)
+        robot = self._robot_on_platform(sim)
+        sim.step_once()
+        assert self._pair(elev, robot) in sim.get_active_collision_pairs()
+
+    @pytest.mark.parametrize("report", [False, True])
+    def test_a_body_touching_the_platform_from_below_is_reported(self, sim, report):
+        elev = self._elevator(sim, report_platform_contacts=report)
+        box = self._box_under_platform(sim)
+        sim.step_once()
+        assert self._pair(elev, box) in sim.get_active_collision_pairs()
+
+    def test_a_robot_leaving_the_platform_area_downward_is_reported_again(self, sim):
+        """The rule follows the geometry: a body sunk through the platform is no longer standing on it."""
+        elev = self._elevator(sim)
+        robot = self._robot_on_platform(sim)
+        sim.step_once()
+        robot.set_pose(Pose.from_xyz(0, 0, 0.15))  # wheels at -0.10, below the platform's mid-plane
+        sim.step_once()
+        assert self._pair(elev, robot) in sim.get_active_collision_pairs()
+
+    def test_a_riding_passenger_keeps_the_attached_object_rule(self):
+        """The platform rule leaves passengers alone: with ignore_attached_collision off they are reported."""
+        from pybullet_fleet import MultiRobotSimulationCore, SimulationParams
+
+        sim = MultiRobotSimulationCore(
+            SimulationParams(
+                gui=False,
+                physics=False,
+                timestep=0.02,
+                monitor=False,
+                enable_floor=False,
+                ignore_attached_collision=False,
+            )
+        )
+        sim.initialize_simulation()
+        try:
+            elev = self._elevator(sim)
+            robot = self._robot_on_platform(sim)
+            elev.request_floor("L2")
+            assert robot.is_attached()
+            sim.step_once()
+            assert self._pair(elev, robot) in sim.get_active_collision_pairs()
+        finally:
+            sim.close()
+
+    def test_report_platform_contacts_from_dict(self):
+        params = ElevatorParams.from_dict(
+            {"name": "e1", "urdf_path": "robots/elevator.urdf", "floors": {"L1": 0.0}, "report_platform_contacts": True}
+        )
+        assert params.report_platform_contacts is True
+        default = ElevatorParams.from_dict({"name": "e1", "urdf_path": "robots/elevator.urdf", "floors": {"L1": 0.0}})
+        assert default.report_platform_contacts is False
