@@ -328,6 +328,12 @@ controllers. The batched path evaluates a closed form rather than the
 own argument, so the two agree to floating-point noise on the same profile,
 for translation and rotation alike.
 
+One exception: for a per-axis angular limit (`max_angular_vel`,
+`max_angular_accel`, `max_angular_decel` given as `[x, y, z]`), the batched
+controllers read the first component while the per-agent controllers read the
+yaw (`z`) one. Give angular limits as scalars, or with equal components, when
+batched and per-agent motion must match.
+
 ### Python API
 
 ```python
