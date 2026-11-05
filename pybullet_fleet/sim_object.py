@@ -7,6 +7,7 @@ import copy
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, NamedTuple, Optional, Tuple, Union
 import logging
+import warnings
 
 import pybullet as p
 
@@ -18,6 +19,7 @@ from pybullet_fleet._defaults import SIM_OBJECT as _OBJ_D, SHAPE as _SHP_D
 from pybullet_fleet.config_utils import forward_spawn_params as _forward_spawn_params
 
 if TYPE_CHECKING:
+    from pybullet_fleet.core_simulation import MultiRobotSimulationCore
     from pybullet_fleet.events import EventBus
 
 # Standard logger for info/warning/error
@@ -103,6 +105,11 @@ class ShapeParams:
         return dataclass_from_dict(cls, d)
 
 
+def _physics_client_of(sim_core: Optional["MultiRobotSimulationCore"]) -> int:
+    """The PyBullet client a body for ``sim_core`` belongs on: its own, or the default (0) with no simulation."""
+    return sim_core.client if sim_core is not None else 0
+
+
 class LoadedUrdf(NamedTuple):
     """What both ``from_urdf`` factories need out of a loaded URDF."""
 
@@ -119,7 +126,7 @@ def load_urdf_body(
     mass: Optional[float] = None,
     use_fixed_base: bool = True,
     global_scaling: float = 1.0,
-    physics_client_id: int = 0,
+    physics_client_id: int,
 ) -> LoadedUrdf:
     """Load a URDF and settle the three things both factories need from it.
 
@@ -579,7 +586,7 @@ class SimObject:
         cls,
         visual_shape: Optional[ShapeParams] = None,
         collision_shape: Optional[ShapeParams] = None,
-        physics_client_id: int = 0,
+        physics_client_id: Optional[int] = None,
     ) -> Tuple[int, int]:
         """
         Create shared visual and collision shapes for fast object spawning.
@@ -594,7 +601,11 @@ class SimObject:
         Args:
             visual_shape: ShapeParams for visual geometry
             collision_shape: ShapeParams for collision geometry
-            physics_client_id: PyBullet physics client ID
+            physics_client_id: PyBullet physics client the shapes are created
+                on; pass the simulation's ``sim_core.client``. Leaving it out
+                is deprecated: it falls back to PyBullet's default client (0)
+                with a ``DeprecationWarning``, which is the wrong client when
+                more than one simulation runs in the process.
 
         Returns:
             (visual_id, collision_id) tuple
@@ -615,6 +626,15 @@ class SimObject:
                 physics_client_id=sim_core.client
             )
         """
+        if physics_client_id is None:
+            warnings.warn(
+                "create_shared_shapes() without physics_client_id uses PyBullet's default client (0); "
+                "pass physics_client_id=sim_core.client. The default will be removed in a future release.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            physics_client_id = 0
+
         # Only cache mesh shapes (primitives are cheap to create)
         visual_needs_cache = visual_shape and visual_shape.shape_type == "mesh"
         collision_needs_cache = collision_shape and collision_shape.shape_type == "mesh"
@@ -799,7 +819,8 @@ class SimObject:
         collision_id: int,
         pose: Pose,
         mass: float = 0.0,
-        physics_client_id: int = 0,
+        *,
+        physics_client_id: int,
     ) -> int:
         """
         Create a PyBullet multibody from pre-created visual and collision shapes.
@@ -876,8 +897,7 @@ class SimObject:
         if pose is None:
             pose = Pose.from_xyz(0.0, 0.0, 0.0)
 
-        # Get physics client ID from sim_core
-        physics_client_id = sim_core.client if sim_core is not None else 0
+        physics_client_id = _physics_client_of(sim_core)
 
         # Use create_shared_shapes() to get or create cached shapes
         visual_id, collision_id = cls.create_shared_shapes(
@@ -989,7 +1009,7 @@ class SimObject:
             mass=mass,
             use_fixed_base=use_fixed_base,
             global_scaling=global_scaling,
-            physics_client_id=sim_core.client if sim_core is not None else 0,
+            physics_client_id=_physics_client_of(sim_core),
         )
         if name is None:
             name = loaded.name
@@ -1070,7 +1090,7 @@ class SimObject:
         from pybullet_fleet.robot_models import resolve_model
 
         resolved_path = resolve_model(sdf_path)
-        pid = sim_core._client if sim_core is not None else 0
+        pid = _physics_client_of(sim_core)
 
         # Determine name prefix from filename if not provided
         if name_prefix is None:

@@ -152,3 +152,38 @@ class TestTheSharedShapeCacheAcrossConnections:
             _assert_builds_real_geometry(sim.client)
         finally:
             sim.close()
+
+
+class TestTheClientIsExplicit:
+    """Shape and body helpers do not fall back to PyBullet's default client unnoticed."""
+
+    def test_physics_client_of_a_simulation_is_its_client(self, two_clients):
+        from pybullet_fleet.sim_object import _physics_client_of
+
+        assert _physics_client_of(two_clients) == two_clients.client
+
+    def test_physics_client_of_no_simulation_is_the_default_client(self):
+        from pybullet_fleet.sim_object import _physics_client_of
+
+        assert _physics_client_of(None) == 0
+
+    def test_create_shared_shapes_without_a_client_warns(self, two_clients):
+        with pytest.warns(DeprecationWarning, match="physics_client_id"):
+            SimObject.create_shared_shapes(visual_shape=_box())
+
+    def test_create_shared_shapes_with_a_client_does_not_warn(self, two_clients, recwarn):
+        SimObject.create_shared_shapes(visual_shape=_box(), physics_client_id=two_clients.client)
+
+        assert not [w for w in recwarn if issubclass(w.category, DeprecationWarning)]
+
+    def test_create_body_from_shapes_requires_a_client(self, two_clients):
+        with pytest.raises(TypeError, match="physics_client_id"):
+            SimObject._create_body_from_shapes(
+                visual_id=-1, collision_id=-1, pose=Pose.from_xyz(0, 0, 0)
+            )  # pyright: ignore[reportCallIssue]
+
+    def test_load_urdf_body_requires_a_client(self, two_clients):
+        from pybullet_fleet.sim_object import load_urdf_body
+
+        with pytest.raises(TypeError, match="physics_client_id"):
+            load_urdf_body("robots/elevator.urdf")  # pyright: ignore[reportCallIssue]

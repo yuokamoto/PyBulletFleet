@@ -529,6 +529,12 @@ are not recommended for production use yet.
 - Move the traffic-experiment GUI camera closer and allow arrow-key panning in
   PBF's interactive camera controller.
 - Keep replay input application and result capture in `ReplaySession`, without replay-specific mutation guards in ordinary simulation and Fleet APIs. Direct core calls are outside the recorded-input contract.
+- `SimObject.create_shared_shapes()` called without `physics_client_id` emits a
+  `DeprecationWarning`. It still falls back to PyBullet's default client (0),
+  which is the wrong client when more than one simulation runs in the process;
+  pass `physics_client_id=sim_core.client`. The fallback will be removed in a
+  future release. `load_urdf_body()` (unreleased) and the internal
+  `_create_body_from_shapes()` now require `physics_client_id`.
 
 ### Fixed
 
