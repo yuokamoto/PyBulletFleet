@@ -7,7 +7,6 @@ monitoring, and log control for various robots, pallets, and meshes.
 """
 
 import copy
-import functools
 import logging
 import math
 import os
@@ -15,6 +14,7 @@ import statistics
 import time
 import tracemalloc  # Memory profiling (imported once at module level)
 import warnings
+import weakref
 from collections import deque
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -321,6 +321,15 @@ _STEP_EVENT_TIERS = ((_TIER_HANDLER, "events_step"), (_TIER_CALLBACK, "callbacks
 _POST_STEP_EVENT_TIERS = ((_TIER_HANDLER, "events_post_step"), (_TIER_CALLBACK, "callbacks_post_step"))
 
 
+def _weak_hook_clock(sim_ref: "weakref.ref[MultiRobotSimulationCore]") -> Callable[[], Tuple[float, float]]:
+    """The ``events`` clock of the simulation ``sim_ref`` refers to, without a strong reference to it."""
+
+    def clock() -> Tuple[float, float]:
+        return sim_ref()._hook_clock()  # type: ignore[union-attr]  # the bus lives no longer than its simulation
+
+    return clock
+
+
 class MultiRobotSimulationCore:
     _EMPTY_SET: frozenset = frozenset()  # Reusable empty set for dict.get() default (avoids per-call allocation)
 
@@ -547,7 +556,10 @@ class MultiRobotSimulationCore:
         # The one hook mechanism of a step: event handlers, register_callback()
         # callbacks and plugin on_step() all subscribe here, and frequency-limited
         # ones are scheduled on the simulation clock.
-        self.events: EventBus = EventBus(clock=self._hook_clock)
+        # The bus holds the simulation weakly (clock, callbacks), so a dropped
+        # simulation is still freed by reference counting.
+        self._weak_self = weakref.ref(self)
+        self.events: EventBus = EventBus(clock=_weak_hook_clock(self._weak_self))
         self._prev_collision_pairs: Set[Tuple[int, int]] = set()
 
         # --- Memory profiling statistics (O(1) memory, aggregator-based) ---
@@ -1356,11 +1368,12 @@ class MultiRobotSimulationCore:
         self.events._subscribe(
             phase.value,
             callback,
-            functools.partial(callback, self),
+            callback,
             tier=_TIER_CALLBACK,
             gate=gate,
             propagate=True,
             takes_dt=True,
+            owner=self._weak_self,
         )
 
     @property

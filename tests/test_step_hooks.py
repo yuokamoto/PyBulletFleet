@@ -6,8 +6,10 @@ through the event bus changes none of it. The second group covers what the bus
 adds: an event at the ``STEP`` point and frequency-limited subscriptions.
 """
 
+import gc
 import logging
 import time
+import weakref
 
 import pybullet as p
 import pytest
@@ -298,6 +300,38 @@ class TestRegistry:
         sim.events.clear()
         sim.step_once()
         assert _names(log) == ["cb", "plugin"]
+
+    def test_a_dropped_simulation_is_freed_without_the_cycle_collector(self):
+        """The bus's clock and callbacks do not keep the simulation alive."""
+        gc.collect()
+        gc.disable()
+        try:
+            sim = MultiRobotSimulationCore(SimulationParams(gui=False, monitor=False, timestep=0.1, target_rtf=0))
+            client = sim.client
+            sim.register_callback(lambda sc, dt: None, frequency=5.0)
+            sim.register_callback(lambda sc, dt: None, phase="post_step")
+            sim.events.on(SimEvents.POST_STEP, lambda **_: None, frequency=2.0)
+            sim.initialize_simulation()
+            sim.step_once()
+            ref = weakref.ref(sim)
+            del sim
+            assert ref() is None
+        finally:
+            gc.enable()
+            if p.isConnected(client):
+                p.disconnect(client)
+
+    def test_subscriptions_keep_tier_priority_registration_order_however_they_were_added(self, sim):
+        log = []
+        sim.register_plugin(_Recorder(sim, "plugin", log))
+        sim.register_callback(lambda sc, dt: log.append("cb1"))
+        sim.events.on(SimEvents.STEP, lambda **_: log.append("h+5"), priority=5)
+        sim.register_callback(lambda sc, dt: log.append("cb2"))
+        sim.events.on(SimEvents.STEP, lambda **_: log.append("h0a"))
+        sim.events.on(SimEvents.STEP, lambda **_: log.append("h-5"), priority=-5)
+        sim.events.on(SimEvents.STEP, lambda **_: log.append("h0b"))
+        sim.step_once()
+        assert _names(log) == ["h-5", "h0a", "h0b", "h+5", "cb1", "cb2", "plugin"]
 
 
 class TestProfiling:

@@ -127,7 +127,7 @@ Clock = Callable[[], Tuple[float, float]]
 class _Subscription:
     """One handler on one event: how to call it, when, and what to do when it fails."""
 
-    __slots__ = ("handler", "call", "priority", "tier", "seq", "gate", "propagate", "takes_dt")
+    __slots__ = ("handler", "call", "priority", "tier", "seq", "gate", "propagate", "takes_dt", "owner")
 
     def __init__(
         self,
@@ -139,6 +139,7 @@ class _Subscription:
         gate: Optional[FrequencyGate],
         propagate: bool,
         takes_dt: bool,
+        owner: Optional[Callable[[], Any]] = None,
     ) -> None:
         self.handler = handler  # what the subscriber registered; matched by off()
         self.call = call  # what emit() calls: with the event's kwargs, or with dt alone (takes_dt)
@@ -148,6 +149,7 @@ class _Subscription:
         self.gate = gate
         self.propagate = propagate
         self.takes_dt = takes_dt
+        self.owner = owner  # with takes_dt: a weak reference whose target is passed before dt
 
     def sort_key(self) -> Tuple[int, int, int]:
         return (self.tier, self.priority, self.seq)
@@ -178,7 +180,7 @@ class EventBus:
     def __init__(self, clock: Optional[Clock] = None) -> None:
         # event -> every subscription, in call order; only non-empty entries.
         self._handlers: Dict[str, Tuple[_Subscription, ...]] = {}
-        # event -> one tuple per tier (indexed by tier), each in call order.
+        # step event -> one tuple per tier (indexed by tier), each in call order.
         self._tiers: Dict[str, Tuple[Tuple[_Subscription, ...], ...]] = {}
         self._clock = clock
         self._seq = 0
@@ -221,7 +223,14 @@ class EventBus:
         self._remove(event, lambda sub: sub.tier == _TIER_HANDLER and sub.handler is handler)
 
     def emit(self, event: str, **kwargs: Any) -> None:
-        """Fire event.  Handlers called in priority order, then callbacks, then plugins."""
+        """Fire event.  Handlers called in priority order, then callbacks, then plugins.
+
+        The simulation emits the step events (``pre_step``, ``step``,
+        ``post_step``) once per step.  Emitting one on ``sim.events`` yourself
+        runs everything subscribed to it, ``register_callback()`` callbacks and
+        plugin ``on_step()`` included, uses up the due beats of the
+        frequency-limited ones, and lets a callback's exception propagate.
+        """
         subscriptions = self._handlers.get(event)
         if subscriptions:
             self._dispatch(event, subscriptions, kwargs)
@@ -253,18 +262,30 @@ class EventBus:
         gate: Optional[FrequencyGate] = None,
         propagate: bool = False,
         takes_dt: bool = False,
+        owner: Optional[Callable[[], Any]] = None,
     ) -> _Subscription:
         """Add a subscription; ``gate`` needs a clock.
 
         ``propagate`` re-raises a handler's exception instead of logging it.
         ``takes_dt`` calls ``call(dt)`` positionally instead of with the
-        event's keyword arguments (for step events, which carry ``dt``).
+        event's keyword arguments (for step events, which carry ``dt``);
+        with ``owner``, a weak reference, ``call(owner(), dt)``.  The bus
+        holds the owner weakly so that a simulation is not kept alive by
+        the callbacks on its own bus.
         """
         if gate is not None and self._clock is None:
             raise ValueError("frequency needs a bus with a simulation clock, such as sim.events")
         self._seq += 1
-        subscription = _Subscription(handler, call, priority, tier, self._seq, gate, propagate, takes_dt)
-        self._store(event, self._handlers.get(event, ()) + (subscription,))
+        subscription = _Subscription(handler, call, priority, tier, self._seq, gate, propagate, takes_dt, owner)
+        # Insert in call order: after every subscription that sorts before it.
+        # It has the highest seq, so in the common case (same tier and
+        # priority as the last one, or later) that is the end.
+        subscriptions = self._handlers.get(event, ())
+        key = subscription.sort_key()
+        index = len(subscriptions)
+        while index and subscriptions[index - 1].sort_key() > key:
+            index -= 1
+        self._store(event, subscriptions[:index] + (subscription,) + subscriptions[index:])
         return subscription
 
     def _remove(self, event: str, match: Callable[[_Subscription], bool]) -> None:
@@ -277,17 +298,21 @@ class EventBus:
     def _unsubscribe(self, event: str, subscription: _Subscription) -> None:
         self._remove(event, lambda sub: sub is subscription)
 
-    def _store(self, event: str, subscriptions: Tuple[_Subscription, ...]) -> None:
-        """Replace ``event``'s subscriptions with new tuples, so a running emit keeps its own."""
-        ordered = tuple(sorted(subscriptions, key=_Subscription.sort_key))
+    def _store(self, event: str, ordered: Tuple[_Subscription, ...]) -> None:
+        """Replace ``event``'s subscriptions, already in call order, with new tuples, so a running emit keeps its own.
+
+        Only the step events, which the simulation emits tier by tier, keep
+        the split by tier.
+        """
         if not ordered:
             self._handlers.pop(event, None)
             self._tiers.pop(event, None)
             return
         self._handlers[event] = ordered
-        self._tiers[event] = tuple(
-            tuple(sub for sub in ordered if sub.tier == tier) for tier in (_TIER_HANDLER, _TIER_CALLBACK, _TIER_PLUGIN)
-        )
+        if event in STEP_EVENTS:
+            self._tiers[event] = tuple(
+                tuple(sub for sub in ordered if sub.tier == tier) for tier in (_TIER_HANDLER, _TIER_CALLBACK, _TIER_PLUGIN)
+            )
 
     def _subscriptions(self, tier: Optional[int] = None) -> List[Tuple[str, _Subscription]]:
         """``(event, subscription)`` pairs, of ``tier`` when given, in registration order."""
@@ -323,7 +348,12 @@ class EventBus:
                     continue
             try:
                 if sub.takes_dt:
-                    sub.call(kwargs["dt"] if dt is None else dt)
+                    if dt is None:
+                        dt = kwargs["dt"]
+                    if sub.owner is None:
+                        sub.call(dt)
+                    else:
+                        sub.call(sub.owner(), dt)
                 elif dt is None:
                     sub.call(**kwargs)
                 else:
