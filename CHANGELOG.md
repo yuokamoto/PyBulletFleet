@@ -581,10 +581,10 @@ are not recommended for production use yet.
 - `BatchOmniController` and `BatchDifferentialController` turn at the yaw
   (`z`) component of a per-axis angular limit (`max_angular_vel`,
   `max_angular_accel`, `max_angular_decel` given as `[x, y, z]`), as the
-  per-agent controllers do; they read the `x` component. A batched agent whose
-  `x` and `z` limits differ now turns at a different rate than before, the
-  same as its per-agent counterpart, and a limit such as `[0, 0, 2]` no longer
-  raises `ValueError` in the batched path only.
+  per-agent controllers do. Before this change they read the `x` component.
+  A batched agent whose `x` and `z` limits differ now turns at a different
+  rate than before, the same as its per-agent counterpart, and a limit such as
+  `[0, 0, 2]` no longer raises `ValueError` in the batched path only.
 
 - `import pybullet_fleet` works where the `tkinter` package is present but the
   Tk library is not (for example a `python:*-slim` container image without
