@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional, Sequence, Tuple, Ty
 import numpy as np
 import pybullet as p
 from .geometry import Pose, as_axes
-from .sim_object import ShapeParams, SimObject, SimObjectSpawnParams, load_urdf_body
+from .sim_object import ShapeParams, SimObject, SimObjectSpawnParams, _physics_client_of, load_urdf_body
 from .action import Action
 from .types import ControllerMode, MotionMode, MovementDirection, ActionStatus, CollisionMode
 from .tools import normalize_vector_param  # noqa: F401  (re-exported for legacy callers)
@@ -966,11 +966,14 @@ class Agent(SimObject):
         if pose is None:
             pose = Pose.from_xyz(0.0, 0.0, 0.0)
 
+        physics_client_id = _physics_client_of(sim_core)
+
         # Use parent class's create_shared_shapes() for optimization
         # This dramatically reduces OpenGL object count when spawning many robots
         visual_id, collision_id = cls.create_shared_shapes(
             visual_shape=visual_shape,
             collision_shape=collision_shape,
+            physics_client_id=physics_client_id,
         )
 
         # Create multibody using helper method
@@ -979,6 +982,7 @@ class Agent(SimObject):
             collision_id=collision_id,
             pose=pose,
             mass=mass,
+            physics_client_id=physics_client_id,
         )
 
         # Create agent instance with Agent-specific parameters
@@ -1085,7 +1089,7 @@ class Agent(SimObject):
             mass=mass,
             use_fixed_base=use_fixed_base,
             global_scaling=global_scaling,
-            physics_client_id=sim_core.client if sim_core is not None else 0,
+            physics_client_id=_physics_client_of(sim_core),
         )
         # The resolved path comes back with the body: resolving again would
         # repeat an uncached robot_descriptions scan for an auto-discovered
