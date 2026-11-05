@@ -542,6 +542,16 @@ are not recommended for production use yet.
   `python -m pybullet_fleet.data_monitor` exits with that warning instead of
   waiting for a window that never opens.
 
+- The monitor window on a host with Tk but no display (no `DISPLAY`, as on a
+  CI runner or an SSH session): `DataMonitor.start()` printed a `TclError`
+  traceback from the monitor thread and kept `enable_gui` and `running` set,
+  so the simulation refreshed the monitor file at the window rate. It now logs
+  why the window could not open and falls back to writing the monitor file, at
+  the refresh rate of a run without the window. `start()` waits (up to 5 s)
+  for the monitor thread to try to open the window, so `enable_gui` tells
+  whether one opened when it returns. The standalone
+  `python -m pybullet_fleet.data_monitor` exits with that warning.
+
 - `REPLACE_NEXT` elevators: a request for the floor the moving cabin is
   already heading to now drops the pending floor (`REPLACED`) instead of being
   rejected and leaving it queued. A controller that changed its target and then

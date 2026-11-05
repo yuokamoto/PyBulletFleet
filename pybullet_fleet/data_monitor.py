@@ -39,6 +39,10 @@ except ImportError as error:
     ttk = None
     _TK_IMPORT_ERROR = f"{type(error).__name__}: {error}"
 
+# How long start() waits for the monitor thread to open its window (or fail
+# to, as on a host without a display) before it returns.
+_WINDOW_OPEN_TIMEOUT = 5.0
+
 
 class DataMonitor:
     """Real-time data monitoring window"""
@@ -68,6 +72,7 @@ class DataMonitor:
         self._entities_json: str = "[]"
         self.status_label: Optional[Any] = None
         self.monitor_thread: Optional[threading.Thread] = None
+        self._window_attempted: Optional[threading.Event] = None
         self._monitor_process: Optional[subprocess.Popen] = None
         self._command_pipe: Optional[Connection] = None
         self._parent_poll: Optional[Callable[[], None]] = None
@@ -107,8 +112,13 @@ class DataMonitor:
             if IS_MACOS:
                 self._start_process()
             else:
+                # Wait until the thread has tried to open the window, so that
+                # enable_gui says whether one opened when start() returns (the
+                # simulation picks its monitor refresh rate from it).
+                self._window_attempted = threading.Event()
                 self.monitor_thread = threading.Thread(target=self._run_monitor, daemon=True)
                 self.monitor_thread.start()
+                self._window_attempted.wait(timeout=_WINDOW_OPEN_TIMEOUT)
 
     def _start_process(self) -> None:
         # PyBullet and Tk both own NSApplication on macOS. Even main-thread Tk
@@ -188,7 +198,23 @@ class DataMonitor:
             self.running = False
             return
 
-        self.window = tk.Tk()
+        try:
+            self.window = tk.Tk()
+        except tk.TclError as error:
+            # Tk is installed but cannot open a window, as on a host with no
+            # display: keep writing the file, as without Tk.
+            logger.warning(
+                "DataMonitor GUI was requested but Tk could not open the monitor window (%s); "
+                "falling back to file-only mode (data still written to %s).",
+                error,
+                self.data_file,
+            )
+            self.enable_gui = False
+            self.running = False
+            return
+        finally:
+            if self._window_attempted is not None:
+                self._window_attempted.set()
         self.window.title(self.title)
         self.window.geometry(self.geometry_string)
         self.window.configure(bg="black")
@@ -592,6 +618,8 @@ def main():
             monitor.start()
             while monitor.running:
                 time.sleep(1)
+        if not monitor.enable_gui:
+            sys.exit("The data monitor window could not open; see the warning above.")
     except KeyboardInterrupt:
         print("\nStopping monitor...")
         monitor.stop()
