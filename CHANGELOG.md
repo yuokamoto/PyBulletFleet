@@ -545,8 +545,9 @@ are not recommended for production use yet.
   however many objects that line spawns. Use `NORMAL_3D`; the only difference is that near misses
   within the clearance above or below are reported. The replay v1 profile
   keeps its `NORMAL_2D` robots, without a warning, so recorded runs replay
-  unchanged. Examples, configs and docs now use `NORMAL_3D`, apart from the
-  collision-mode demo and benchmark, which note the deprecation.
+  unchanged. User-facing examples, configs and guides now use `NORMAL_3D`;
+  the collision-mode demo and benchmark keep `NORMAL_2D` and note the
+  deprecation, and the design plans under `docs/design/` are left as written.
 
 ### Fixed
 

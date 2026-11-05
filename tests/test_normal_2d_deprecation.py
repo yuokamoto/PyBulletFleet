@@ -176,3 +176,48 @@ def test_python_shows_it_by_default_for_a_call_in_an_imported_module(tmp_path):
     )
     assert result.returncode == 0, result.stderr
     assert "spawner.py:4: FutureWarning: CollisionMode.NORMAL_2D is deprecated" in result.stderr
+
+
+_TWO_BOX_SDF = """<?xml version="1.0"?>
+<sdf version="1.6">
+{models}
+</sdf>
+"""
+_BOX_MODEL = """  <model name="box{i}">
+    <pose>{i} 0 0.5 0 0 0</pose>
+    <link name="link">
+      <collision name="c"><geometry><box><size>0.2 0.2 0.2</size></box></geometry></collision>
+      <visual name="v"><geometry><box><size>0.2 0.2 0.2</size></box></geometry></visual>
+    </link>
+  </model>"""
+
+
+@pytest.mark.parametrize("cls", [SimObject, Agent])
+def test_from_urdf_warns_once(pybullet_env, cls):
+    with pytest.warns(FutureWarning) as record:
+        obj = cls.from_urdf("cube_small.urdf", collision_mode=CollisionMode.NORMAL_2D)
+    _assert_one_warning_from_this_file(record)
+    assert obj.collision_mode is CollisionMode.NORMAL_2D
+
+
+def test_from_sdf_warns_once_per_body(pybullet_env, tmp_path):
+    """Under pytest.warns every warning is recorded: one per body the file holds."""
+    sdf = tmp_path / "two_boxes.sdf"
+    sdf.write_text(_TWO_BOX_SDF.format(models="\n".join(_BOX_MODEL.format(i=i) for i in range(2))))
+    with pytest.warns(FutureWarning) as record:
+        objects = SimObject.from_sdf(str(sdf), collision_mode=CollisionMode.NORMAL_2D)
+    assert len(objects) == 2
+    found = _normal_2d_warnings(record)
+    assert len(found) == 2 and all(w.filename == __file__ for w in found)
+    assert all(obj.collision_mode is CollisionMode.NORMAL_2D for obj in objects)
+
+
+@pytest.mark.parametrize("bodies", [1, 5])
+def test_from_sdf_warns_once_under_the_default_filter(pybullet_env, tmp_path, bodies):
+    sdf = tmp_path / "boxes.sdf"
+    sdf.write_text(_TWO_BOX_SDF.format(models="\n".join(_BOX_MODEL.format(i=i) for i in range(bodies))))
+    with warnings.catch_warnings(record=True) as record:
+        warnings.simplefilter("default")
+        objects = SimObject.from_sdf(str(sdf), collision_mode=CollisionMode.NORMAL_2D)
+    assert len(objects) == bodies
+    _assert_one_warning_from_this_file(record)
