@@ -11,10 +11,10 @@ import os
 import sys
 import warnings
 from contextlib import contextmanager
-from contextvars import ContextVar
+from contextvars import ContextVar, Token
 from enum import Enum
 from types import FrameType
-from typing import Iterator
+from typing import Iterator, Optional
 
 
 class MotionMode(str, Enum):
@@ -241,6 +241,9 @@ _NORMAL_2D_DEPRECATION_MESSAGE = (
 _PACKAGE_DIR = os.path.dirname(os.path.abspath(__file__)) + os.sep
 _EXAMPLES_DIR = os.path.join(_PACKAGE_DIR, "examples") + os.sep
 _normal_2d_warning_suppressed: ContextVar[bool] = ContextVar("_normal_2d_warning_suppressed", default=False)
+# The class whose next NORMAL_2D object construction is not to warn (see
+# _spawning_from_warned_params); objects spawned while building it still warn.
+_normal_2d_skip_next_object: ContextVar[Optional[type]] = ContextVar("_normal_2d_skip_next_object", default=None)
 
 
 def _is_internal_frame(frame: FrameType) -> bool:
@@ -270,6 +273,50 @@ def _warn_if_normal_2d(mode: object) -> None:
         frame = frame.f_back
         level += 1
     warnings.warn(_NORMAL_2D_DEPRECATION_MESSAGE, FutureWarning, stacklevel=level if frame is not None else 2)
+
+
+def _warn_if_new_object_is_normal_2d(obj: object, mode: object) -> None:
+    """:func:`_warn_if_normal_2d` for an object's ``__init__``.
+
+    Silent for the one object that :func:`_spawning_from_warned_params` is
+    building; later objects, including those it spawns, warn as usual.
+    """
+    if mode is CollisionMode.NORMAL_2D:
+        skip = _normal_2d_skip_next_object.get()
+        if skip is not None and isinstance(obj, skip):
+            _normal_2d_skip_next_object.set(None)
+            return
+    _warn_if_normal_2d(mode)
+
+
+class _spawning_from_warned_params:
+    """Warn once about NORMAL_2D spawn params, then spawn a *cls* from them.
+
+    Building the params warned already, unless their mode was set to NORMAL_2D
+    afterwards; then entering this warns, attributed to the caller. Inside the
+    block the first NORMAL_2D object of *cls* -- the one being spawned -- does
+    not warn again; anything else spawned there (by an overridden factory, a
+    controller or a plugin) does. A class, not a generator: contextlib's frame
+    would otherwise take the warning's attribution.
+    """
+
+    def __init__(self, cls: type, spawn_params: object) -> None:
+        self._cls = cls
+        self._spawn_params = spawn_params
+        self._token: Optional[Token] = None
+
+    def __enter__(self) -> None:
+        mode = getattr(self._spawn_params, "collision_mode", None)
+        if mode is not CollisionMode.NORMAL_2D:
+            return
+        if not getattr(self._spawn_params, "_normal_2d_warned", False):
+            _warn_if_normal_2d(mode)
+        self._token = _normal_2d_skip_next_object.set(self._cls)
+
+    def __exit__(self, *exc_info: object) -> None:
+        if self._token is not None:
+            _normal_2d_skip_next_object.reset(self._token)
+            self._token = None
 
 
 @contextmanager

@@ -12,7 +12,13 @@ import pybullet as p
 
 from .geometry import Pose
 from .logging_utils import get_lazy_logger, get_named_lazy_logger
-from .types import CollisionMode, _normal_2d_warning_already_given, _warn_if_normal_2d
+from .types import (
+    CollisionMode,
+    _normal_2d_warning_already_given,
+    _spawning_from_warned_params,
+    _warn_if_new_object_is_normal_2d,
+    _warn_if_normal_2d,
+)
 from .tools import resolve_link_index
 from pybullet_fleet._defaults import SIM_OBJECT as _OBJ_D, SHAPE as _SHP_D
 from pybullet_fleet.config_utils import forward_spawn_params as _forward_spawn_params
@@ -257,6 +263,9 @@ class SimObjectSpawnParams:
     def __post_init__(self):
         """Warn about a deprecated collision mode."""
         _warn_if_normal_2d(self.collision_mode)
+        # Not a field: from_params() reads it to tell whether NORMAL_2D was set
+        # here (warned, or deliberately silenced) or assigned afterwards.
+        self._normal_2d_warned = self.collision_mode is CollisionMode.NORMAL_2D
 
     @classmethod
     def from_dict(cls, config: Dict[str, Any]) -> "SimObjectSpawnParams":
@@ -405,7 +414,7 @@ class SimObject:
         self.attached_objects: List["SimObject"] = []
         self.callbacks: List[dict] = []
         self._pickable = pickable
-        _warn_if_normal_2d(collision_mode)
+        _warn_if_new_object_is_normal_2d(self, collision_mode)
         self.collision_mode = collision_mode  # Collision detection mode
 
         # User-extensible data storage (custom metadata)
@@ -1138,8 +1147,7 @@ class SimObject:
             obj = SimObject.from_params(params, sim_core)
         """
         factory = cls.from_urdf if spawn_params.urdf_path is not None else cls.from_mesh
-        # Building spawn_params already warned about a deprecated collision mode.
-        with _normal_2d_warning_already_given():
+        with _spawning_from_warned_params(cls, spawn_params):
             return factory(
                 **_forward_spawn_params(
                     factory,
