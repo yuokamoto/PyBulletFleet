@@ -532,6 +532,11 @@ are not recommended for production use yet.
 
 ### Fixed
 
+- `auto_detect_profile(body_id)` puts every movable joint back at the
+  position and velocity it had before probing the arm reach. It set them all
+  to zero, which changed the pose of a live body and left an agent's joint
+  state and cached AABB out of date.
+
 - `REPLACE_NEXT` elevators: a request for the floor the moving cabin is
   already heading to now drops the pending floor (`REPLACED`) instead of being
   rejected and leaving it queued. A controller that changed its target and then

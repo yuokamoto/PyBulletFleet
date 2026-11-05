@@ -1071,6 +1071,9 @@ def _introspect_body(body_id: int, urdf_path: str, physics_client: int) -> Robot
         base_pos = p.getBasePositionAndOrientation(body_id, physicsClientId=physics_client)[0]
         max_dist = 0.0
 
+        # Save joint states so probing does not change a live body's pose
+        saved_states = [p.getJointState(body_id, ji, physicsClientId=physics_client)[:2] for ji in movable_indices]
+
         # Sample configs: zeros, upper limits, lower limits, midpoints, alternating
         configs: list[list[float]] = []
         n_mov = len(movable_indices)
@@ -1094,9 +1097,9 @@ def _introspect_body(body_id: int, urdf_path: str, physics_client: int) -> Robot
         if max_dist > 0.0:
             arm_reach = max_dist
 
-        # Reset joints to zero
-        for ji in movable_indices:
-            p.resetJointState(body_id, ji, 0.0, physicsClientId=physics_client)
+        # Restore the joint states found before probing
+        for ji, (pos, vel) in zip(movable_indices, saved_states):
+            p.resetJointState(body_id, ji, pos, vel, physicsClientId=physics_client)
 
     return RobotProfile(
         urdf_path=urdf_path,

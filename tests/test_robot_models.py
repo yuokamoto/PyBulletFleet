@@ -238,6 +238,27 @@ class TestAutoDetectProfile:
         assert info is not None
         p.removeBody(body_id, physicsClientId=self.client)
 
+    def test_body_id_restores_joint_positions(self):
+        """Probing the arm reach must leave every movable joint where it was."""
+        path = resolve_model("panda")
+        body_id = p.loadURDF(path, useFixedBase=True, physicsClientId=self.client)
+        movable = [
+            j
+            for j in range(p.getNumJoints(body_id, physicsClientId=self.client))
+            if p.getJointInfo(body_id, j, physicsClientId=self.client)[2] != p.JOINT_FIXED
+        ]
+        assert movable
+        before = {}
+        for k, j in enumerate(movable):
+            p.resetJointState(body_id, j, 0.1 * (k + 1), physicsClientId=self.client)
+            before[j] = p.getJointState(body_id, j, physicsClientId=self.client)[0]
+
+        auto_detect_profile(body_id, self.client)
+
+        after = {j: p.getJointState(body_id, j, physicsClientId=self.client)[0] for j in movable}
+        p.removeBody(body_id, physicsClientId=self.client)
+        assert after == pytest.approx(before)
+
     def test_body_id_with_overrides(self):
         """Overrides work with body_id input too."""
         path = resolve_model("panda")
