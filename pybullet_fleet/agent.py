@@ -1862,7 +1862,7 @@ class Agent(SimObject):
                 step = math.copysign(max_vel * dt, diff)
                 new_pos = target if abs(step) >= abs(diff) else state.position + step
             else:
-                new_pos = self._ramped_joint_position(state, target, step_start, now, max_vel, dt)
+                new_pos = self._ramped_joint_position(state, target, step_start, dt, max_vel)
             p.resetJointState(self.body_id, state.index, new_pos, physicsClientId=self._pid)
             state.position = new_pos
             any_moved = True
@@ -1910,11 +1910,10 @@ class Agent(SimObject):
         state: KinematicJoint,
         target: float,
         step_start: float,
-        now: float,
-        max_vel: float,
         dt: float,
+        max_vel: float,
     ) -> float:
-        """Where a ramped joint is at ``now``, from a TwoPointInterpolation.
+        """Where a ramped joint is at the end of the step, from a TwoPointInterpolation.
 
         The same solver the linear controllers use, rather than a trapezoid
         integrated by hand: it handles triangle, trapezoid and degenerate
@@ -1929,15 +1928,16 @@ class Agent(SimObject):
         What the solver will not plan -- a target the joint is moving away
         from, or one closer than its braking distance -- goes to
         :meth:`_braking_joint_step` until it will. That step is given ``dt``
-        itself rather than ``now - step_start``: the difference of two clock
-        readings rounds differently depending on how far the clock has run, so
-        an agent restored from a checkpoint into a different clock reading
-        would brake to rest a step apart from the run it was taken from.
+        itself rather than the difference of two clock readings, which rounds
+        differently depending on how far the clock has run: an agent restored
+        from a checkpoint into a different clock reading would brake to rest a
+        step apart from the run it was taken from.
         """
         accel = state.max_accel
         decel = state.decel
         if accel is None or decel is None:
             raise RuntimeError(f"Joint {state.index} is not ramped; the caller checks is_ramped first")
+        now = step_start + dt
 
         tpi = state.trajectory if state.trajectory_target == target else None
         if tpi is None:

@@ -253,9 +253,13 @@ def restore_attachment(sim: MultiRobotSimulationCore, obj: SimObject, value: dic
 
 def _validate_agent(name: str, construction: dict, entry: dict) -> None:
     _keys(entry, {"type", "version", "state"}, "Agent entry")
-    if entry["type"] != "kinematic_agent" or entry["version"] != AGENT_STATE_VERSION:
+    if entry["type"] != "kinematic_agent":
         raise ValueError(
-            f"Unsupported Agent state type or version for {name!r}: {entry['type']!r} version {entry['version']!r}; "
+            f"Unsupported Agent state type for {name!r}: {entry['type']!r}; this build restores 'kinematic_agent'"
+        )
+    if entry["version"] != AGENT_STATE_VERSION:
+        raise ValueError(
+            f"Unsupported Agent state version for {name!r}: 'kinematic_agent' version {entry['version']!r}; "
             f"this build restores 'kinematic_agent' version {AGENT_STATE_VERSION}"
         )
     value = _keys(entry["state"], {"pose", "velocity", "angular_velocity", "moving", "controller", "joints"}, "Agent state")

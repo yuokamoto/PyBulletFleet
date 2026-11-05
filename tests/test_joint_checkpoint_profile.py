@@ -48,18 +48,21 @@ def _state(agent):
     return joint.position, joint.speed, joint.braking
 
 
+def _cruise(sim_core, agent, steps):
+    """Head for a target far enough to cruise, for ``steps`` steps."""
+    agent.set_joint_target_by_name(JOINT, 1.0)
+    for _ in range(steps):
+        sim_core.step_once()
+
+
 def _moving(sim_core, agent):
     """Accelerating towards a target far enough to cruise."""
-    agent.set_joint_target_by_name(JOINT, 1.0)
-    for _ in range(10):
-        sim_core.step_once()
+    _cruise(sim_core, agent, 10)
 
 
 def _braking(sim_core, agent):
     """Shedding speed with no trajectory: the new target is inside the stopping distance."""
-    agent.set_joint_target_by_name(JOINT, 1.0)
-    for _ in range(30):
-        sim_core.step_once()
+    _cruise(sim_core, agent, 30)
     position, speed, _ = _state(agent)
     agent.set_joint_target_by_name(JOINT, position + 0.25 * speed * speed / (2 * PROFILE["max_decel"]))
     for _ in range(3):
@@ -69,9 +72,7 @@ def _braking(sim_core, agent):
 
 def _reversing(sim_core, agent):
     """Turned round: braked to rest away from a target behind it and planned back."""
-    agent.set_joint_target_by_name(JOINT, 1.0)
-    for _ in range(30):
-        sim_core.step_once()
+    _cruise(sim_core, agent, 30)
     agent.set_joint_target_by_name(JOINT, -0.5)
     for _ in range(60):
         sim_core.step_once()
@@ -80,13 +81,11 @@ def _reversing(sim_core, agent):
 
 def _heading_away(sim_core, agent):
     """Still travelling away from a target behind it, braking before it turns."""
-    agent.set_joint_target_by_name(JOINT, 1.0)
-    for _ in range(30):
-        sim_core.step_once()
+    _cruise(sim_core, agent, 30)
     agent.set_joint_target_by_name(JOINT, -0.5)
     for _ in range(5):
         sim_core.step_once()
-    position, speed, braking = _state(agent)
+    _, speed, braking = _state(agent)
     assert speed > 0.0 and braking is True, "the joint is still heading away"
 
 
