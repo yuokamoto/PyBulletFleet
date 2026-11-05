@@ -97,6 +97,43 @@ def test_spawning_from_params_changed_to_normal_2d_after_construction_warns(pybu
     assert obj.collision_mode is CollisionMode.NORMAL_2D
 
 
+def _spawn_two_on_a_grid(manager_cls, params, how):
+    from pybullet_fleet.agent_manager import GridSpawnParams
+
+    grid = GridSpawnParams(x_min=0, x_max=1, y_min=0, y_max=0, spacing=[1.0, 1.0, 0.0], offset=[0.0, 0.0, 0.5])
+    manager = manager_cls()
+    if how == "counts":
+        return manager.spawn_objects_grid(2, grid, params)
+    return manager.spawn_grid_mixed(2, grid, [(params, 1.0)])
+
+
+@pytest.mark.parametrize("how", ["counts", "mixed"])
+@pytest.mark.parametrize("manager", ["SimObjectManager", "AgentManager"])
+def test_grid_spawning_from_params_changed_to_normal_2d_after_construction_warns_once(pybullet_env, manager, how):
+    import pybullet_fleet.agent_manager as agent_manager
+
+    params = AgentSpawnParams(name="a", visual_shape=BOX, collision_shape=BOX)
+    params.collision_mode = CollisionMode.NORMAL_2D
+    with warnings.catch_warnings(record=True) as record:
+        warnings.simplefilter("default")
+        objs = _spawn_two_on_a_grid(getattr(agent_manager, manager), params, how)
+    assert len(objs) == 2
+    assert all(obj.collision_mode is CollisionMode.NORMAL_2D for obj in objs)
+    _assert_one_warning_from_this_file(record)
+
+
+@pytest.mark.parametrize("how", ["counts", "mixed"])
+def test_grid_spawning_from_warned_params_does_not_warn_again(pybullet_env, how):
+    from pybullet_fleet.agent_manager import AgentManager
+
+    with pytest.warns(FutureWarning):
+        params = AgentSpawnParams(name="a", visual_shape=BOX, collision_shape=BOX, collision_mode=CollisionMode.NORMAL_2D)
+    with warnings.catch_warnings(record=True) as record:
+        warnings.simplefilter("always")
+        _spawn_two_on_a_grid(AgentManager, params, how)
+    assert _normal_2d_warnings(record) == []
+
+
 class _SpawnsAHelperFirst(SimObject):
     @classmethod
     def from_mesh(cls, collision_shape=None, pose=None, collision_mode=CollisionMode.NORMAL_3D, sim_core=None):
