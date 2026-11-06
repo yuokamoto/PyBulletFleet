@@ -146,6 +146,26 @@ class Action(ABC):
         """Check if action has completed (successfully or with failure)."""
         return self.status in [ActionStatus.COMPLETED, ActionStatus.FAILED, ActionStatus.CANCELLED]
 
+    def _end_unless_completed(self, step: "Action", what: str, agent) -> bool:
+        """After a nested ``step`` has ended: end this action the way ``step``
+        did unless it completed. Returns whether this action ended.
+
+        A nested move whose path was replaced, braked or stopped from outside
+        the queue ends ``CANCELLED`` (see :class:`MoveAction`); going on to the
+        next phase would pick or drop where the agent was left instead.
+        """
+        if step.status is ActionStatus.COMPLETED:
+            return False
+        self.status = ActionStatus.CANCELLED if step.status is ActionStatus.CANCELLED else ActionStatus.FAILED
+        self.end_time = agent.sim_core.sim_time if agent.sim_core else 0.0
+        reason = f"{what} ended {step.status.name}"
+        if self.status is ActionStatus.FAILED:
+            self._log_failure(reason, agent)
+        else:
+            self.error_message = reason
+            self._log.info(f"CANCELLED - {reason}")
+        return True
+
     def _update_log_prefix(self, agent=None):
         """Update log prefix using agent's identification.
 
@@ -755,6 +775,8 @@ class PickAction(Action):
         # Phase 2: Approach target (move forward to approach_pose)
         if self._phase == PickPhase.APPROACHING:
             if self._approach_action.execute(agent, dt):
+                if self._end_unless_completed(self._approach_action, "the move to the approach pose", agent):
+                    return True
                 self._phase = PickPhase.MOVING_TO_PICK
                 self._log_phase_transition(PickPhase.MOVING_TO_PICK, agent)
                 self._log.info("Reached approach pose, moving to pick position...")
@@ -792,6 +814,8 @@ class PickAction(Action):
                         self._log.info(f"Moving forward {distance:.3f}m to pick pose...")
 
                 if self._forward_action is not None and self._forward_action.execute(agent, dt):
+                    if self._end_unless_completed(self._forward_action, "the move to the pick pose", agent):
+                        return True
                     self._phase = PickPhase.PICKING
                     self._log_phase_transition(PickPhase.PICKING, agent)
                     self._log.info("Reached pick position, picking...")
@@ -873,6 +897,8 @@ class PickAction(Action):
         # Phase 5: Retreat to approach pose (move backward)
         if self._phase == PickPhase.RETREATING:
             if self._retreat_action.execute(agent, dt):
+                if self._end_unless_completed(self._retreat_action, "the retreat", agent):
+                    return True
                 self.status = ActionStatus.COMPLETED
                 self.end_time = agent.sim_core.sim_time if agent.sim_core else 0.0
                 self._log_end()
@@ -1090,6 +1116,8 @@ class DropAction(Action):
         # Phase 2: Approach drop position (move forward to approach_pose)
         if self._phase == DropPhase.APPROACHING:
             if self._approach_action.execute(agent, dt):
+                if self._end_unless_completed(self._approach_action, "the move to the approach pose", agent):
+                    return True
                 self._phase = DropPhase.MOVING_TO_DROP
                 self._log_phase_transition(DropPhase.MOVING_TO_DROP, agent)
                 self._log.info("Reached approach pose, moving to drop position...")
@@ -1126,6 +1154,8 @@ class DropAction(Action):
                         self._log.info(f"Moving forward {distance:.3f}m to drop pose...")
 
                 if self._forward_action is not None and self._forward_action.execute(agent, dt):
+                    if self._end_unless_completed(self._forward_action, "the move to the drop pose", agent):
+                        return True
                     self._phase = DropPhase.DROPPING
                     self._log_phase_transition(DropPhase.DROPPING, agent)
                     self._log.info("Reached drop position, dropping...")
@@ -1224,6 +1254,8 @@ class DropAction(Action):
         # Phase 5: Retreat to approach pose (move backward)
         if self._phase == DropPhase.RETREATING:
             if self._retreat_action.execute(agent, dt):
+                if self._end_unless_completed(self._retreat_action, "the retreat", agent):
+                    return True
                 self.status = ActionStatus.COMPLETED
                 self.end_time = agent.sim_core.sim_time if agent.sim_core else 0.0
                 self._log_end()

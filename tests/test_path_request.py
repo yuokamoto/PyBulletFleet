@@ -346,3 +346,39 @@ def test_the_interruption_message_says_whether_anything_is_left_to_wait_for(sim,
     with caplog.at_level(logging.INFO, logger="pybullet_fleet"):
         agent._interrupt_actions(action, "ended early: replaced")
     assert "waits until the path from outside it ends" in caplog.text
+
+
+def test_a_restored_path_is_an_active_request_that_finishes(sim):
+    """After restore_navigation_state the path followed is a request of its own:
+    ACTIVE while followed, FINISHED at its end. A request sent before is GONE."""
+    from pybullet_fleet.controller import OmniController
+
+    agent = _agent(sim)
+    before = PathRequest(path=[Pose.from_xyz(3.0, 0.0, 0.1)], auto_approach=False)
+    assert agent.request_path(before) is True
+    for _ in range(5):
+        sim.step_once()
+    controller = agent._controllers[0]
+    state = controller.capture_navigation_state()
+
+    restored = OmniController(controller.params)
+    restored.restore_navigation_state(state, list(agent.get_pose().orientation))
+    active = restored._active_request
+    assert active is not None
+    assert [list(p.position) for p in active.path] == [list(p.position) for p in controller._path]
+    assert restored.request_state(agent, active) is PathRequestState.ACTIVE
+    assert restored.request_state(agent, before) is PathRequestState.GONE
+
+
+def test_the_batch_differential_set_path_is_not_an_override():
+    """Its set_path only keeps direction third: requests go straight to request_path,
+    while a subclass overriding it again is an override as usual."""
+    from pybullet_fleet.controller import overrides_set_path
+    from pybullet_fleet.controllers.batch_differential import BatchDifferentialController
+
+    class Edited(BatchDifferentialController):
+        def set_path(self, agent, path, direction=None, final_orientation_align=True, preempt=False):
+            return super().set_path(agent, path, direction, final_orientation_align, preempt)
+
+    assert not overrides_set_path(BatchDifferentialController.__new__(BatchDifferentialController))
+    assert overrides_set_path(Edited.__new__(Edited))

@@ -1187,10 +1187,12 @@ class Agent(SimObject):
         any path set while moving (see :meth:`set_path`); a pending path from
         an earlier ``brake`` or ``wait_complete`` replacement is dropped.
 
-        The action queue is left alone. A :class:`~pybullet_fleet.action.MoveAction`
-        still executing ends ``CANCELLED`` once the agent is at rest, short of
-        its path's end, and the queue moves on; call :meth:`clear_actions`
-        first to drop the queued actions too.
+        The action queue is left alone, but does not run on while the agent
+        brakes. A :class:`~pybullet_fleet.action.MoveAction` still executing
+        ends ``CANCELLED`` on its next update -- its request is gone once the
+        braking path replaces it -- and the queue waits until the agent is at
+        rest before starting the next action; call :meth:`clear_actions` first
+        to drop the queued actions too.
 
         The agent's controller does the braking (its ``brake()``); a custom
         controller changes how the agent brakes by overriding

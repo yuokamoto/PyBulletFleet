@@ -144,6 +144,9 @@ are not recommended for production use yet.
   overwrite it; `clear_actions()` first drops the rest of the queue instead.
   Under `wait_complete` the outside path is held instead: the action
   completes, and the held path runs before the next action.
+  A `PickAction` or `DropAction` whose own approach, move to the pick or drop
+  pose, or retreat ends that way ends `CANCELLED` too (`FAILED` for a failed
+  move), and does not pick or drop where the agent was left.
 
 - `ignore_attached_collision` now covers every object on one attachment tree,
   not only a direct parent and child: two loads on one carrier and a load on a

@@ -140,8 +140,28 @@ _ControllerT = TypeVar("_ControllerT", bound="Controller")
 
 
 def overrides_set_path(controller: "Controller") -> bool:
-    """Whether ``controller``'s class overrides :meth:`Controller.set_path`."""
-    return type(controller).set_path is not Controller.set_path
+    """Whether ``controller``'s class overrides :meth:`Controller.set_path`.
+
+    An override marked ``_only_reorders_arguments`` (a built-in controller
+    keeping its historical positional order, see
+    :class:`~pybullet_fleet.controllers.batch_differential.BatchDifferentialController`)
+    does nothing but pass its arguments on, so it does not count: requests go
+    straight to :meth:`Controller.request_path`. A subclass that overrides it
+    again counts as usual.
+    """
+    impl = type(controller).set_path
+    return impl is not Controller.set_path and not getattr(impl, "_only_reorders_arguments", False)
+
+
+def _set_path_from(controller: "Controller", agent: "Agent", request: PathRequest, preempt: bool) -> bool:
+    """Call ``controller.set_path`` with ``request``'s fields: how a request reaches an override."""
+    return controller.set_path(
+        agent,
+        list(request.path),
+        final_orientation_align=request.final_orientation_align,
+        direction=request.direction,
+        preempt=preempt,
+    )
 
 
 def send_request(
@@ -167,13 +187,7 @@ def send_request(
         return controller.request_path(agent, request, preempt=preempt)
     controller._incoming_request = request
     try:
-        return controller.set_path(
-            agent,
-            list(request.path),
-            final_orientation_align=request.final_orientation_align,
-            direction=request.direction,
-            preempt=preempt,
-        )
+        return _set_path_from(controller, agent, request, preempt)
     finally:
         controller._incoming_request = None
 
@@ -240,13 +254,7 @@ class Controller(ABC):
         ``set_path`` too, on any controller (see :func:`send_request`).
         """
         if overrides_set_path(self):
-            return self.set_path(
-                agent,
-                list(request.path),
-                final_orientation_align=request.final_orientation_align,
-                direction=request.direction,
-                preempt=preempt,
-            )
+            return _set_path_from(self, agent, request, preempt)
         raise NotImplementedError(f"{type(self).__name__} implements neither request_path() nor set_path()")
 
     def set_path(
@@ -1211,6 +1219,12 @@ class KinematicController(GoalReplacementPolicy, Controller):
         self._is_final_orientation_aligning = state["final_alignment_in_progress"]
         self._mode = ControllerMode.POSE
         self._pose_phase = PosePhase(state["phase"])
+        # The path being followed is a request of its own: a new identity, as a
+        # checkpoint keeps none (a request sent before it is GONE), but ACTIVE
+        # while followed and FINISHED at its end, like any other.
+        self._active_request = PathRequest(
+            path=self._path, final_orientation_align=self._align_final_orientation, auto_approach=False
+        )
 
         if self._pose_phase is PosePhase.FORWARD:
             forward = state["forward"]
@@ -1486,6 +1500,7 @@ class DifferentialController(KinematicController):
         super().restore_navigation_state(state, orientation, owner)
         self._movement_direction = MovementDirection(state["movement_direction"])
         self._original_direction = MovementDirection(state["requested_direction"])
+        self._active_request = dataclasses.replace(self._active_request, direction=self._original_direction)
         if self._movement_direction is MovementDirection.AUTO:
             raise ValueError("Differential checkpoint direction must be resolved")
         origin = np.asarray(state["forward_origin"], dtype=float) if state["forward_origin"] is not None else None

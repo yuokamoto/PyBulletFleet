@@ -246,6 +246,10 @@ class BatchDifferentialController(BatchKinematicController):
             agent, path, final_orientation_align=final_orientation_align, direction=direction, preempt=preempt
         )
 
+    # Only the argument order differs from Controller.set_path: requests need not
+    # pass through it (see controller.overrides_set_path).
+    set_path._only_reorders_arguments = True  # type: ignore[attr-defined]
+
     def _begin_row_path(
         self, idx: int, agent: "Agent", request: PathRequest, now: float, initial_velocity: Optional[np.ndarray]
     ) -> None:
