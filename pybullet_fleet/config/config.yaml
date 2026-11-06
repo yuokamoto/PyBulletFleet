@@ -84,6 +84,8 @@ simulation:
   #   - 0.02-0.05: Normal operation (2-5cm safety buffer) [DEFAULT]
   #   - 0.05-0.10: Conservative (5-10cm extra safety for high-speed)
   #   - 0.0: Contact detection only (touching)
+  #   - [x, y, z]: One clearance per world axis, e.g. [0.05, 0.05, 0.0] to report
+  #     bodies side by side but not one passing close above or below
   #
   # Note: Only affects CLOSEST_POINTS and HYBRID modes
   #       CONTACT_POINTS always detects actual contact (margin=0)
