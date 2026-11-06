@@ -572,6 +572,37 @@ class TestElevatorPlatformContacts:
         sim.step_once()
         assert self._pair(elev, robot) in sim.get_active_collision_pairs()
 
+    _REACHING_URDF = """<?xml version="1.0"?>
+<robot name="reaching">
+  <link name="base">
+    <collision><geometry><box size="0.2 0.2 0.2"/></geometry></collision>
+    <inertial><mass value="0.0"/><inertia ixx="0" ixy="0" ixz="0" iyy="0" iyz="0" izz="0"/></inertial>
+  </link>
+  <joint name="reach" type="fixed">
+    <parent link="base"/><child link="tool"/><origin xyz="-0.3 0 0"/>
+  </joint>
+  <link name="tool">
+    <collision><geometry><box size="0.2 0.2 0.1"/></geometry></collision>
+    <inertial><mass value="0.0"/><inertia ixx="0" ixy="0" ixz="0" iyy="0" iyz="0" izz="0"/></inertial>
+  </link>
+</robot>
+"""
+
+    def test_a_link_reaching_over_the_platform_from_beside_the_cabin_is_reported(self, sim, tmp_path):
+        """Standing is judged by the base's footprint: a body beside the cabin whose
+        link reaches over the platform, into its floor, is not standing on it."""
+        elev = self._elevator(sim)
+        urdf = tmp_path / "reaching.urdf"
+        urdf.write_text(self._REACHING_URDF)
+        # Base x 1.55..1.75, beside the platform (x -1.5..1.5, top at z 0.1);
+        # the tool x 1.25..1.45 over it, its bottom 0.05 into the floor.
+        body = Agent.from_params(
+            AgentSpawnParams(urdf_path=str(urdf), initial_pose=Pose.from_xyz(1.65, 0, 0.15), use_fixed_base=True),
+            sim_core=sim,
+        )
+        sim.step_once()
+        assert self._pair(elev, body) in sim.get_active_collision_pairs()
+
     def test_a_riding_passenger_keeps_the_attached_object_rule(self):
         """The platform rule leaves passengers alone: with ignore_attached_collision off they are reported."""
         from pybullet_fleet import MultiRobotSimulationCore, SimulationParams

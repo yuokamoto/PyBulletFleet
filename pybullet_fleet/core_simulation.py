@@ -2141,9 +2141,9 @@ class MultiRobotSimulationCore:
         try:
             if self._aabb_links.get(object_id) == ():
                 # Hot path, one getAABB() call (no child links): _body_aabb() inlined
-                # on purpose, for the call it saves on every moved object (measured:
-                # 2.55 -> 2.48 ms per step for 1,000 single-link agents). Both read
-                # the same _aabb_links entry, so the two cannot disagree.
+                # on purpose, to save a method call for every moved object every
+                # step. Both read the same _aabb_links entry, so the two cannot
+                # disagree.
                 aabb = p.getAABB(obj.body_id, physicsClientId=self._client)
             else:
                 aabb = self._body_aabb(obj)

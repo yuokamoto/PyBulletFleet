@@ -443,30 +443,41 @@ class Elevator(Agent):
     def _ignores_contact_with(self, other: "SimObject") -> bool:
         """A body standing on the platform is not in collision with the elevator.
 
-        Standing on it: over the platform's footprint, with its lowest point
-        not below the platform's mid-height. A passenger (attached to the
-        elevator) is left to the attached-object rule. Only asked while
-        ``report_platform_contacts`` is off and the platform is the
-        elevator's only collider: the rule covers every link of the elevator.
+        Standing on it: its base over the platform's footprint, and no link
+        below the platform's mid-height. The footprint is the base link's, as
+        for boarding: an arm beside the cabin reaching over the platform is not
+        standing on it, and its contact is reported. The height is every
+        link's, so a robot whose wheels (child links) sink through the platform
+        is reported too. A passenger (attached to the elevator) is left to the
+        attached-object rule. Only asked while ``report_platform_contacts`` is
+        off and the platform is the elevator's only collider: the rule covers
+        every link of the elevator.
         """
         if other._attachment_root() is self:
             return False
+        core = self.sim_core
+        object_id = other.object_id
         # Only the collision check asks, so the cache holds every link of
         # ``other`` as of this step. Not cached (collision off, not initialised
         # yet): its base link from PyBullet.
-        box = self.sim_core._cached_aabbs_dict.get(other.object_id)
-        if box is None:
-            box = p.getAABB(other.body_id, physicsClientId=self._pid)
-        (o_min_x, o_min_y, o_min_z), (o_max_x, o_max_y, _) = box
+        whole = core._cached_aabbs_dict.get(object_id)
+        if whole is not None and core._aabb_links.get(object_id) == ():
+            base = whole  # no child link with a collider: the cached box is the base's
+        else:
+            base = p.getAABB(other.body_id, physicsClientId=self._pid)
+            if whole is None:
+                whole = base
+        (b_min_x, b_min_y, _), (b_max_x, b_max_y, _) = base
+        lowest = whole[0][2]
         (p_min_x, p_min_y, p_min_z), (p_max_x, p_max_y, p_max_z) = p.getAABB(
             self.body_id, self._get_platform_link_index(), physicsClientId=self._pid
         )
         return (
-            o_min_z >= 0.5 * (p_min_z + p_max_z)
-            and o_min_x <= p_max_x
-            and o_max_x >= p_min_x
-            and o_min_y <= p_max_y
-            and o_max_y >= p_min_y
+            lowest >= 0.5 * (p_min_z + p_max_z)
+            and b_min_x <= p_max_x
+            and b_max_x >= p_min_x
+            and b_min_y <= p_max_y
+            and b_max_y >= p_min_y
         )
 
     def _find_objects_on_platform(self) -> List["SimObject"]:
