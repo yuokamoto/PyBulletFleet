@@ -126,6 +126,10 @@ inside one. `Agent.set_joint_position()`, `set_joints_positions()`, the
 kinematic joint interpolation and a joint checkpoint restore call it; physics
 bodies are re-read after every `stepSimulation()`. Call it after moving a
 body's joints directly with `p.resetJointState()`.
+`examples/arm/link_collision_demo.py` shows all three cases: a fixed arm whose
+end effector sweeps through a box well outside its base, a mobile manipulator
+whose stretched-out arm hits a pillar its base clears, and a joint reset by hand
+followed by `notify_geometry_changed`.
 
 **Invalidation**: Cache invalidated on movement, mode change, or removal
 

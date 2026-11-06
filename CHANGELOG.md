@@ -61,6 +61,12 @@ are not recommended for production use yet.
   collision check when called inside one (from a step callback, for example).
   `Agent.set_joint_position()`, `set_joints_positions()` and kinematic joint
   motion call it already.
+- `examples/arm/link_collision_demo.py`: collision of an articulated body's
+  links, not only its base -- a fixed arm sweeping through a box outside its
+  base, a mobile manipulator whose arm hits a pillar its base clears, and a
+  joint reset by hand followed by `notify_geometry_changed`. It checks that
+  each obstacle was hit by a link and never by a base, and runs headless
+  (`--no-gui`) as a test.
 
 - `Elevator.request_floor(floor, instant=True)`: the cabin is at the floor at
   once with its passengers aboard, instead of riding there; the next update
