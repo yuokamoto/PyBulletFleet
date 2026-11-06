@@ -496,6 +496,9 @@ class Elevator(Agent):
                 continue
             if obj.is_attached():
                 continue
+            # The base link's box, not the whole-body box the collision cache
+            # holds: boarding asks where the body stands. With every link, an
+            # arm beside the cabin reaching over the platform would be boarded.
             try:
                 obj_min, obj_max = p.getAABB(obj.body_id, physicsClientId=self._pid)
             except Exception:
