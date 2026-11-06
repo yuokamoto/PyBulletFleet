@@ -29,6 +29,20 @@ are not recommended for production use yet.
   simulation clock and raises `ValueError` for `frequency`, as does any other
   event (issue #84).
 
+- Per-axis collision clearance (#105): `collision_margin` (in
+  `SimulationParams`, YAML and `set_collision_margin()`) also takes an
+  `(x, y, z)` triple, one clearance per world axis, for example
+  `(0.05, 0.05, 0.0)` to report bodies within 5 cm side by side but not one
+  passing close under a shelf. The triple acts on AABBs: a pair is a
+  candidate only if its AABBs, each axis enlarged by that axis's clearance,
+  overlap. `CLOSEST_POINTS` and `HYBRID` then judge the candidate by its
+  straight-line gap, querying `getClosestPoints()` with the largest component.
+  So `(m, m, m)` is the same as `m`, and `(m, m, 0)` reports exactly what
+  `CollisionMode.NORMAL_2D` with `m` did, for every pair. A scalar margin
+  behaves and costs as before; `CONTACT_POINTS` ignores the clearance as
+  before. A margin change, through the setter or `params`, rechecks
+  stationary pairs as a scalar change does.
+
 - `MultiRobotSimulationCore.query_aabb(aabb_min, aabb_max)`: the objects whose
   AABB overlaps a box, looked up through the collision spatial hash, so the
   cost follows how crowded the box is rather than how many objects the
@@ -178,10 +192,14 @@ are not recommended for production use yet.
   instead of every step (the window reads the file every 0.5 s); without the
   window it is still 1 s, and `0` is still every step. Each refresh builds
   `last_monitor_frame` and writes the file.
-  While paused, a selection, follow or pause change and a single step
+  While paused, a selection, follow or pause change, a pose edited from the
+  GUI or set by user code (`set_pose()` outside a step), and a single step
   refresh at once; the final frame of a run is written, `close()` writes the
-  last state, and the new `flush_monitor()` does so on demand. `reset()`
-  empties the entity list. The JSON a reader sees is unchanged.
+  last state, and the new `flush_monitor()` does so on demand, also after a
+  pose set outside a step. Such a pose does not recompute collisions: contact
+  counts (`active_collisions`) stay as of the last step until the simulation
+  steps again. `reset()` empties the entity list. The JSON a reader sees is
+  unchanged.
   Median step time with 5000 static boxes and 20 moving agents (headless,
   `target_rtf=0`, timestep 0.1, a 312 KB monitor file): 25.9 ms before with
   the window flag on (a refresh every step), 0.84 ms now with the window
@@ -560,8 +578,97 @@ are not recommended for production use yet.
 - Move the traffic-experiment GUI camera closer and allow arrow-key panning in
   PBF's interactive camera controller.
 - Keep replay input application and result capture in `ReplaySession`, without replay-specific mutation guards in ordinary simulation and Fleet APIs. Direct core calls are outside the recorded-input contract.
+- `SimObject.create_shared_shapes()` called without `physics_client_id` emits a
+  `DeprecationWarning`. It still falls back to PyBullet's default client (0),
+  which is the wrong client when more than one simulation runs in the process;
+  pass `physics_client_id=sim_core.client`. The fallback will be removed in a
+  future release. `load_urdf_body()` (unreleased) and the internal
+  `_create_body_from_shapes()` now require `physics_client_id`.
+
+### Deprecated
+
+- `CollisionMode.NORMAL_2D` is deprecated and will be removed in a future
+  release (#104). It differs from `NORMAL_3D` only in giving a pair with a
+  `NORMAL_2D` body no collision clearance on the z axis, which matters only
+  with `CLOSEST_POINTS` or `HYBRID` and a non-zero `collision_margin`. Setting
+  it still works but emits a `FutureWarning`, from spawn parameters
+  (including `from_dict()` and config `collision_mode: normal_2d`), object
+  constructors and `set_collision_mode()`. A `FutureWarning`, not a
+  `DeprecationWarning`, so that it is shown by default wherever the call is,
+  not only in the script being run. The warning points at the calling line
+  outside the package, so Python's default filter shows it once per line
+  however many objects that line spawns. Spawning from spawn parameters with
+  `from_params()` or the grid spawners does not warn a second time for the
+  spawned object, but it warns when the parameters were changed to
+  `NORMAL_2D` after they were built, and `NORMAL_2D` objects spawned meanwhile by an overridden
+  `from_mesh()` / `from_urdf()`, a controller or a plugin warn as usual (#129).
+  Use `NORMAL_3D`; the only difference is that near misses
+  within the clearance above or below are reported. To keep no z clearance,
+  also set `collision_margin=(m, m, 0)` (#105): it reports what `NORMAL_2D`
+  did, for every pair rather than only pairs with a `NORMAL_2D` body; the
+  warning says so. The replay v1 profile
+  keeps its `NORMAL_2D` robots, without a warning, so recorded runs replay
+  unchanged, and restoring a state recording rebuilds its `NORMAL_2D` bodies
+  without a warning. User-facing examples, configs and guides now use `NORMAL_3D`;
+  the collision-mode demo and benchmark keep `NORMAL_2D` and note the
+  deprecation, and the design plans under `docs/design/` are left as written.
 
 ### Fixed
+
+- `auto_detect_profile(body_id)` puts every movable joint back at the
+  position and velocity it had before probing the arm reach, also when
+  probing raises partway. It set them all to zero, which changed the pose of
+  a live body and left an agent's joint state and cached AABB out of date.
+
+- An active `CLOSEST_POINTS` (or kinematic `HYBRID`) pair with a `NORMAL_2D`
+  body now resolves once the bodies no longer overlap in z, as a pair in that
+  position is not reported in the first place. It stayed active while their
+  straight-line gap was within `collision_margin`. The same holds for an
+  axis with a smaller clearance in a per-axis `collision_margin` (#105). A
+  scalar margin with `NORMAL_3D` bodies is unaffected.
+
+- `SimulationParams` rejects a negative or non-finite scalar
+  `collision_margin` with `ValueError`, as `set_collision_margin()` and a
+  per-axis triple already did. It was accepted, and the broad phase then
+  clamped it to 0 while `getClosestPoints` got the negative distance. A bad
+  margin assigned to `params.collision_margin` directly raises the same
+  `ValueError` when the next collision check starts, before it changes the
+  active pairs.
+
+- `import pybullet_fleet` works where the `tkinter` package is present but the
+  Tk library is not (for example a `python:*-slim` container image without
+  `tk`): importing `tkinter` there raises `ImportError`, which was not caught,
+  so the package failed to import even with the monitor off. Without Tk, a
+  headless simulation no longer logs anything about it; asking for the monitor
+  window logs why it is unavailable and falls back to writing the monitor file,
+  at the refresh rate of a run without the window. The standalone
+  `python -m pybullet_fleet.data_monitor` exits with that warning instead of
+  waiting for a window that never opens.
+
+- The monitor window on a host with Tk but no display (no `DISPLAY`, as on a
+  CI runner or an SSH session): `DataMonitor.start()` printed a `TclError`
+  traceback from the monitor thread and kept `enable_gui` and `running` set,
+  so the simulation refreshed the monitor file at the window rate. It now logs
+  why the window could not open and falls back to writing the monitor file, at
+  the refresh rate of a run without the window. `start()` waits (up to 5 s)
+  for the monitor thread to try to open the window, so `enable_gui` tells
+  whether one opened when it returns. The standalone
+  `python -m pybullet_fleet.data_monitor` exits with that warning.
+  `DataMonitor.stop()` called while the window is open no longer hangs: it
+  closed the window with Tk calls from the calling thread, which wait for the
+  Tk thread and never returned once its main loop had ended. It now asks the
+  Tk thread to close the window and waits up to 3 s for it to end, logging a
+  warning if it does not.
+
+- `Agent.from_mesh()` creates its shapes and body on the simulation's physics
+  client, as `SimObject.from_mesh()` does; it used PyBullet's default client,
+  so with a second client connected (two simulations in one process, or a
+  client left open) the agent's body landed on the wrong one. The mesh-shape
+  cache behind `create_shared_shapes()` is now kept per physics client, so it
+  no longer hands a shape created on one client to another. A client's entries
+  are dropped when its simulation connects, resets and closes, because PyBullet
+  reuses a client id after a disconnect and `resetSimulation()` removes the
+  shapes; a later simulation on the same id used to get bodies with no geometry.
 
 - `REPLACE_NEXT` elevators: a request for the floor the moving cabin is
   already heading to now drops the pending floor (`REPLACED`) instead of being

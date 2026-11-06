@@ -23,6 +23,7 @@ from pybullet_fleet.events import _TIER_HANDLER
 from pybullet_fleet.geometry import Pose
 from pybullet_fleet.sim_object import PRIMITIVE_SHAPE_TYPES, ShapeParams, SimObject, SimObjectSpawnParams
 from pybullet_fleet.types import CollisionMode, ControllerMode, GoalReplacement, MotionMode, MovementDirection
+from pybullet_fleet.types import _normal_2d_warning_already_given
 
 from .state_recording import (
     ResultPlayback,
@@ -204,18 +205,20 @@ def capture_primitive_state(obj: SimObject) -> dict:
 def restore_primitive(sim: MultiRobotSimulationCore, name: str, value: dict) -> SimObject:
     """Construct a checkpoint primitive; attachments follow owner creation."""
     c = value["construction"]
-    return SimObject.from_params(
-        SimObjectSpawnParams(
-            name=name,
-            initial_pose=_pose_from_record(value["pose"]),
-            mass=0.0,
-            pickable=c["pickable"],
-            collision_mode=CollisionMode(c["collision_mode"]),
-            visual_shape=_restore_primitive_shape(c["visual_shape"]),
-            collision_shape=_restore_primitive_shape(c["collision_shape"]),
-        ),
-        sim,
-    )
+    # The recorded mode was chosen (and warned about) when the run was recorded.
+    with _normal_2d_warning_already_given():
+        return SimObject.from_params(
+            SimObjectSpawnParams(
+                name=name,
+                initial_pose=_pose_from_record(value["pose"]),
+                mass=0.0,
+                pickable=c["pickable"],
+                collision_mode=CollisionMode(c["collision_mode"]),
+                visual_shape=_restore_primitive_shape(c["visual_shape"]),
+                collision_shape=_restore_primitive_shape(c["collision_shape"]),
+            ),
+            sim,
+        )
 
 
 def _remove_playback_primitive(sim: MultiRobotSimulationCore, obj: SimObject) -> None:
@@ -741,22 +744,24 @@ class KinematicProfile:
         try:
             for name, construction in c["agents"].items():
                 controller = construction["controller"]
-                Agent.from_params(
-                    AgentSpawnParams(
-                        name=name,
-                        urdf_path=construction["asset"],
-                        initial_pose=_pose_from_record(construction["initial_pose"]),
-                        mass=construction["mass"],
-                        use_fixed_base=construction["fixed_base"],
-                        collision_mode=CollisionMode(construction["collision_mode"]),
-                        motion_mode=MotionMode(construction["motion_mode"]),
-                        controller={
-                            "type": controller["type"],
-                            **controller["parameters"],
-                        },
-                    ),
-                    sim,
-                )
+                # The recorded mode was chosen (and warned about) when the run was recorded.
+                with _normal_2d_warning_already_given():
+                    Agent.from_params(
+                        AgentSpawnParams(
+                            name=name,
+                            urdf_path=construction["asset"],
+                            initial_pose=_pose_from_record(construction["initial_pose"]),
+                            mass=construction["mass"],
+                            use_fixed_base=construction["fixed_base"],
+                            collision_mode=CollisionMode(construction["collision_mode"]),
+                            motion_mode=MotionMode(construction["motion_mode"]),
+                            controller={
+                                "type": controller["type"],
+                                **controller["parameters"],
+                            },
+                        ),
+                        sim,
+                    )
             sim.initialize_simulation()
             primitives = {}
             for name, entry in state["objects"].items():
