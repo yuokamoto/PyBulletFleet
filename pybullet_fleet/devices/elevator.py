@@ -451,9 +451,10 @@ class Elevator(Agent):
         """
         if other._attachment_root() is self:
             return False
-        sim_core = self.sim_core
-        cached = getattr(sim_core, "_cached_aabbs_dict", None)
-        box = cached.get(other.object_id) if cached is not None else None
+        # Only the collision check asks, so the cache holds every link of
+        # ``other`` as of this step. Not cached (collision off, not initialised
+        # yet): its base link from PyBullet.
+        box = self.sim_core._cached_aabbs_dict.get(other.object_id)
         if box is None:
             box = p.getAABB(other.body_id, physicsClientId=self._pid)
         (o_min_x, o_min_y, o_min_z), (o_max_x, o_max_y, _) = box
