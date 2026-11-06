@@ -141,7 +141,10 @@ config's `collision_mode: normal_2d`) still works but emits a
 `FutureWarning` that points at the calling line. Python shows it by
 default, once per line however many objects the line spawns. Switch to
 `NORMAL_3D`; the only change is that near misses within the clearance above or
-below are reported too.
+below are reported too. To keep no clearance on the z axis, also set
+`collision_margin: [m, m, 0]` (see [Per-axis clearance](per-axis-clearance)).
+It reports exactly what `NORMAL_2D` with margin `m` did, for every pair
+rather than only pairs with a former `NORMAL_2D` body.
 
 ### Setting via SimObject
 
@@ -192,6 +195,51 @@ clearance requirements of the robot and its task.
 Use `sim.set_collision_margin(value)` to change the clearance during a run.
 It refreshes the spatial grid and rechecks stationary pairs at the next
 collision check. The value must be finite and non-negative.
+
+(per-axis-clearance)=
+### Per-axis clearance
+
+`collision_margin` also takes one clearance per world axis, `(x, y, z)` in
+Python or a three-item list in YAML:
+
+```yaml
+collision_margin: [0.05, 0.05, 0.0]  # side by side within 5 cm; nothing above or below
+```
+
+```python
+SimulationParams(collision_margin=(0.05, 0.05, 0.0))
+sim.set_collision_margin((0.05, 0.05, 0.0))
+```
+
+This reports ground vehicles that come within 5 cm of each other side by side,
+but not one passing close under a shelf or a carried load. Each component must
+be finite and non-negative.
+
+The per-axis clearance acts on axis-aligned bounding boxes (AABBs), not on
+the shapes themselves. A pair that touches or penetrates is always reported.
+A pair that does not is reported when both hold:
+
+- **AABBs**: their AABBs, each axis enlarged by that axis's clearance,
+  overlap. With `(0.05, 0.05, 0.0)`, two bodies whose AABBs do not overlap in
+  z are never reported, however close they are.
+- **Gap**: the straight-line gap between the bodies, from
+  `getClosestPoints()`, is within the largest component (5 cm here), as for a
+  scalar margin of that size.
+
+So `(m, m, m)` behaves exactly as the scalar `m`, and `(m, m, 0)` behaves
+exactly as `CollisionMode.NORMAL_2D` with `m` did, for every pair. The
+smaller clearance restricts the pair at AABB level only. Two bodies whose
+AABBs overlap on that axis are judged by the straight-line gap, so a near
+miss whose gap runs mostly along that axis can still be reported, for example
+two spheres at different heights whose AABBs overlap in z, or a rounded or
+tilted shape beside a box. Two boxes side by side, both tilted by a fraction
+of a degree, are reported like upright ones.
+
+The axes are the world axes, as AABBs are, not a body's own axes. A scalar
+behaves exactly as before.
+`CONTACT_POINTS`, and the pairs with a physics body under `HYBRID`, ignore the
+clearance as they ignore a scalar one. The clearance is global; there is no
+per-object clearance. The replay profile records a scalar margin only.
 
 ---
 
