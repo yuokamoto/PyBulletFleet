@@ -23,7 +23,7 @@ the check and the motion cannot disagree.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, List, NamedTuple, Optional, Protocol, Sequence, Tuple
+from typing import TYPE_CHECKING, List, NamedTuple, Optional, Protocol, Sequence, Tuple
 
 
 import numpy as np

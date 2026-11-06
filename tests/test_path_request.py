@@ -266,3 +266,83 @@ def test_an_override_that_sends_an_edited_path_of_its_own_ends_the_action_cancel
             break
     assert list(agent.get_pose().position[:2]) == pytest.approx([3.0, 1.0], abs=1e-6)
     assert action.status is ActionStatus.CANCELLED
+
+
+def test_every_untracked_request_stays_unknown_after_later_requests(sim):
+    """Each request an override did not pass on stays UNKNOWN, also once later
+    requests -- untracked or tracked -- were accepted."""
+    from pybullet_fleet.controller import OmniController
+
+    class OwnRequestOnce(OmniController):
+        own = True
+
+        def set_path(self, agent, path, final_orientation_align=True, direction=None, preempt=False):
+            if self.own:
+                return self.request_path(agent, PathRequest(path=path, auto_approach=False))
+            return super().set_path(agent, path, final_orientation_align, direction, preempt)
+
+    agent = _agent(sim)
+    controller = OwnRequestOnce(agent._controllers[0].params)
+    agent.set_controller(controller)
+    first = PathRequest(path=[Pose.from_xyz(2.0, 0.0, 0.1)], auto_approach=False)
+    second = PathRequest(path=[Pose.from_xyz(3.0, 0.0, 0.1)], auto_approach=False)
+    assert agent.request_path(first) is True
+    assert agent.request_path(second) is True
+    controller.own = False
+    third = PathRequest(path=[Pose.from_xyz(4.0, 0.0, 0.1)], auto_approach=False)
+    assert agent.request_path(third) is True
+
+    assert agent.path_request_state(first) is PathRequestState.UNKNOWN
+    assert agent.path_request_state(second) is PathRequestState.UNKNOWN
+    assert agent.path_request_state(third) is PathRequestState.ACTIVE
+
+
+def test_an_untracked_request_nobody_holds_is_forgotten(sim):
+    import gc
+
+    from pybullet_fleet.controller import OmniController
+
+    class OwnRequest(OmniController):
+        def set_path(self, agent, path, final_orientation_align=True, direction=None, preempt=False):
+            return self.request_path(agent, PathRequest(path=path, auto_approach=False))
+
+    agent = _agent(sim)
+    agent.set_controller(OwnRequest(agent._controllers[0].params))
+    for x in range(2, 6):
+        assert agent.request_path(PathRequest(path=[Pose.from_xyz(float(x), 0.0, 0.1)], auto_approach=False))
+    gc.collect()
+    assert len(agent._untracked_requests) == 0
+
+
+def test_super_set_path_without_request_path_fails_fast():
+    """A direct Controller subclass whose set_path override calls super() but
+    implements no request_path() would recurse without end: it raises instead."""
+
+    class OnlySetPath(Controller):
+        def compute(self, agent, dt):
+            return False
+
+        def set_path(self, agent, path, final_orientation_align=True, direction=None, preempt=False):
+            return super().set_path(agent, path, final_orientation_align, direction, preempt)
+
+    with pytest.raises(NotImplementedError, match="implement request_path"):
+        OnlySetPath().set_path(None, [Pose.from_xyz(1.0, 0.0, 0.0)])
+
+
+def test_the_interruption_message_says_whether_anything_is_left_to_wait_for(sim, caplog):
+    import logging
+
+    from pybullet_fleet.action import MoveAction
+    from pybullet_fleet.geometry import Path
+
+    agent = _agent(sim)
+    action = MoveAction(path=Path.from_positions([[1.0, 0.0, 0.1]]), auto_approach=False)
+    with caplog.at_level(logging.INFO, logger="pybullet_fleet"):
+        agent._interrupt_actions(action, "ended early: stopped")
+    assert "MoveAction ended early: stopped; no other path is left" in caplog.text
+
+    agent.set_path([Pose.from_xyz(5.0, 0.0, 0.1)], auto_approach=False)
+    caplog.clear()
+    with caplog.at_level(logging.INFO, logger="pybullet_fleet"):
+        agent._interrupt_actions(action, "ended early: replaced")
+    assert "waits until the path from outside it ends" in caplog.text

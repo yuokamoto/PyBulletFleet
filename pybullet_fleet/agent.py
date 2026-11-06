@@ -8,6 +8,7 @@ Supports both Mesh and URDF loading.
 import copy
 import logging
 import math
+import weakref
 from dataclasses import dataclass, fields
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Sequence, Tuple, Type, TypeVar, Union
 
@@ -488,9 +489,10 @@ class Agent(SimObject):
         # Set when a request from outside the queue replaced the running
         # action's path: the queue waits until that motion ends.
         self._actions_interrupted: bool = False
-        # The last request a set_path override passed on as a request of its
-        # own: its fate cannot be followed (path_request_state says UNKNOWN).
-        self._untracked_request: Optional["PathRequest"] = None
+        # The requests a set_path override did not pass on (it sent one of its
+        # own): their fate cannot be followed (path_request_state says
+        # UNKNOWN). Weak: a request nobody holds any more drops out.
+        self._untracked_requests: "weakref.WeakSet" = weakref.WeakSet()
 
         #: Per-joint kinematic state, {joint_index: KinematicJoint}: where the
         #: joint is, where it was last told to go, how it is configured to get
@@ -1567,7 +1569,6 @@ class Agent(SimObject):
         from pybullet_fleet.controller import overrides_set_path, send_request
         from pybullet_fleet.path_request import PathRequestState
 
-        self._untracked_request = None
         if self._batch_controller is not None:
             # synchronized_request_path() sets _is_moving itself, under the
             # same lock as the array writes. Setting it here instead would race
@@ -1588,8 +1589,11 @@ class Agent(SimObject):
             and controller.request_state(self, resolved) is PathRequestState.GONE
         ):
             # The override did not pass this request on (it sent one of its
-            # own), so what becomes of it cannot be followed.
-            self._untracked_request = resolved
+            # own), so what becomes of it cannot be followed. Earlier untracked
+            # requests stay so: a later request says nothing about them.
+            self._untracked_requests.add(resolved._token)
+        else:
+            self._untracked_requests.discard(resolved._token)
 
         # Clear previous path visualization and visualize new path
         self._clear_path_visualization()
@@ -1607,7 +1611,7 @@ class Agent(SimObject):
         """
         from pybullet_fleet.path_request import PathRequestState
 
-        if request.same_request(self._untracked_request):
+        if request._token in self._untracked_requests:
             return PathRequestState.UNKNOWN
         if self._batch_controller is not None:
             return self._batch_controller.request_state(self, request)
@@ -1697,15 +1701,21 @@ class Agent(SimObject):
         """
         return len(self._action_queue) == 0 and self._current_action is None
 
-    def _interrupt_actions(self, action: Action) -> None:
+    def _interrupt_actions(self, action: Action, cause: str) -> None:
         """``action``'s path was replaced from outside the queue (a direct path
         request, ``brake()`` or ``stop()``), or a path from outside is held to
-        follow it (``wait_complete``): hold the queue until that motion ends."""
+        follow it (``wait_complete``): hold the queue until that motion ends.
+
+        ``cause`` says which, completing "<action> ...". The message says
+        whether a motion from outside is left to wait for: after ``stop()``
+        there is none, and the queue goes on at its next update.
+        """
         self._actions_interrupted = True
-        self._log.info(
-            f"{action.__class__.__name__}'s path was replaced by a request from outside the action queue; "
-            "the queue waits until that motion ends"
-        )
+        if self._navigation_busy():
+            after = "the action queue waits until the path from outside it ends"
+        else:
+            after = "no other path is left, so the action queue goes on"
+        self._log.info(f"{action.__class__.__name__} {cause}; {after}")
 
     def _end_interruption_if_over(self) -> bool:
         """End an interruption (see :meth:`_interrupt_actions`) once its motion

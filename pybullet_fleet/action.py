@@ -340,7 +340,9 @@ class MoveAction(Action):
                 # held under wait_complete until it ended, now runs or waits
                 # to: it runs to its end before the next action, which would
                 # otherwise replace it.
-                agent._interrupt_actions(self)
+                agent._interrupt_actions(
+                    self, "completed while a path requested from outside the action queue is held or followed"
+                )
         else:
             self.status = ActionStatus.CANCELLED
             self._log.info(
@@ -348,7 +350,9 @@ class MoveAction(Action):
             )
             # The replacement came from outside the queue: it runs to its end
             # before the next action starts (see Agent._update_actions).
-            agent._interrupt_actions(self)
+            agent._interrupt_actions(
+                self, "ended early: its path was replaced, dropped, braked, stopped or cancelled from outside the queue"
+            )
         return True
 
     #: Distance (m) from the last waypoint that counts as having reached it.

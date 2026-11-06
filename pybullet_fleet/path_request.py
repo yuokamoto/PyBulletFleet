@@ -28,6 +28,13 @@ if TYPE_CHECKING:
     from pybullet_fleet.geometry import Pose
 
 
+class _RequestToken:
+    """A request's identity (see :meth:`PathRequest.same_request`); weakly referenceable,
+    so a record of requests can forget the ones nobody holds any more."""
+
+    __slots__ = ("__weakref__",)
+
+
 @dataclass(frozen=True)
 class PathRequest:
     """Waypoints to follow and how to follow them.
@@ -57,7 +64,7 @@ class PathRequest:
     direction: Optional[MovementDirection] = None
     auto_approach: bool = True
     # Identity kept by dataclasses.replace() copies; see same_request().
-    _token: object = field(default_factory=object, compare=False, repr=False)
+    _token: object = field(default_factory=_RequestToken, compare=False, repr=False)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "path", tuple(self.path))

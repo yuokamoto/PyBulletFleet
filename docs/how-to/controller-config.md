@@ -295,7 +295,11 @@ A few things to know about request identity:
   action's own path, `CANCELLED` otherwise. An override that sends an edited
   path of its own (a shifted end, say) therefore ends the action
   `CANCELLED` even when the agent reached the edited end; pass the request on
-  with `super().set_path(...)` to keep `COMPLETED`.
+  with `super().set_path(...)` to keep `COMPLETED`. `super().set_path(...)`
+  hands the request to the controller's `request_path()`, which every
+  built-in controller implements; a direct `Controller` subclass that calls
+  it must implement `request_path()` as well, or the call raises
+  `NotImplementedError`.
 - Paths a controller makes itself -- the braking path of `brake()` and of
   `goal_replacement="brake"` -- do not go through a `set_path` override.
 

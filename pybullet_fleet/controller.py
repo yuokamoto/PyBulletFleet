@@ -270,6 +270,13 @@ class Controller(ABC):
                 ``wait_complete`` (:meth:`Agent.brake
                 <pybullet_fleet.agent.Agent.brake>` uses it).
         """
+        if type(self).request_path is Controller.request_path:
+            # Only reached from an override's super().set_path(): the base
+            # request_path() would call that override again, without end.
+            raise NotImplementedError(
+                f"{type(self).__name__}.set_path() calls super().set_path(), which needs "
+                f"{type(self).__name__} to implement request_path(); without it, follow the path in set_path() itself"
+            )
         request = PathRequest(
             path=path, final_orientation_align=final_orientation_align, direction=direction, auto_approach=False
         )
