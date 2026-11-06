@@ -232,8 +232,10 @@ class CollisionMode(Enum):
 _NORMAL_2D_DEPRECATION_MESSAGE = (
     "CollisionMode.NORMAL_2D is deprecated and will be removed in a future release. "
     "It only removes the collision clearance (collision_margin) on the z axis: a pair with a NORMAL_2D body "
-    "must really overlap in z. Use CollisionMode.NORMAL_3D instead; the only difference is that near misses "
-    "within the clearance above or below are reported too (none with CONTACT_POINTS or a zero margin)."
+    "must really overlap in z. Use CollisionMode.NORMAL_3D instead. To keep no clearance on the z axis, set "
+    "collision_margin=(m, m, 0) for your margin m; it reports what NORMAL_2D did, for every pair, not only those "
+    "with this body. Otherwise NORMAL_3D alone differs only in reporting near misses within the clearance above "
+    "or below too (none with CONTACT_POINTS or a zero margin)."
 )
 
 _PACKAGE_DIR = os.path.dirname(os.path.abspath(__file__)) + os.sep

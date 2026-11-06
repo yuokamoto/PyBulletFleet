@@ -14,6 +14,20 @@ are not recommended for production use yet.
 
 ### Added
 
+- Per-axis collision clearance (#105): `collision_margin` (in
+  `SimulationParams`, YAML and `set_collision_margin()`) also takes an
+  `(x, y, z)` triple, one clearance per world axis, for example
+  `(0.05, 0.05, 0.0)` to report bodies within 5 cm side by side but not one
+  passing close under a shelf. The triple acts on AABBs: a pair is a
+  candidate only if its AABBs, each axis enlarged by that axis's clearance,
+  overlap. `CLOSEST_POINTS` and `HYBRID` then judge the candidate by its
+  straight-line gap, querying `getClosestPoints()` with the largest component.
+  So `(m, m, m)` is the same as `m`, and `(m, m, 0)` reports exactly what
+  `CollisionMode.NORMAL_2D` with `m` did, for every pair. A scalar margin
+  behaves and costs as before; `CONTACT_POINTS` ignores the clearance as
+  before. A margin change, through the setter or `params`, rechecks
+  stationary pairs as a scalar change does.
+
 - `MultiRobotSimulationCore.query_aabb(aabb_min, aabb_max)`: the objects whose
   AABB overlaps a box, looked up through the collision spatial hash, so the
   cost follows how crowded the box is rather than how many objects the
@@ -573,7 +587,10 @@ are not recommended for production use yet.
   `NORMAL_2D` after they were built, and `NORMAL_2D` objects spawned meanwhile by an overridden
   `from_mesh()` / `from_urdf()`, a controller or a plugin warn as usual (#129).
   Use `NORMAL_3D`; the only difference is that near misses
-  within the clearance above or below are reported. The replay v1 profile
+  within the clearance above or below are reported. To keep no z clearance,
+  also set `collision_margin=(m, m, 0)` (#105): it reports what `NORMAL_2D`
+  did, for every pair rather than only pairs with a `NORMAL_2D` body; the
+  warning says so. The replay v1 profile
   keeps its `NORMAL_2D` robots, without a warning, so recorded runs replay
   unchanged, and restoring a state recording rebuilds its `NORMAL_2D` bodies
   without a warning. User-facing examples, configs and guides now use `NORMAL_3D`;
@@ -614,6 +631,26 @@ are not recommended for production use yet.
   reports bodies on the platform and logs a warning at spawn.
   A body touching the platform from below is reported either way, and
   passengers attached for a ride follow `ignore_attached_collision`.
+
+- `auto_detect_profile(body_id)` puts every movable joint back at the
+  position and velocity it had before probing the arm reach, also when
+  probing raises partway. It set them all to zero, which changed the pose of
+  a live body and left an agent's joint state and cached AABB out of date.
+
+- An active `CLOSEST_POINTS` (or kinematic `HYBRID`) pair with a `NORMAL_2D`
+  body now resolves once the bodies no longer overlap in z, as a pair in that
+  position is not reported in the first place. It stayed active while their
+  straight-line gap was within `collision_margin`. The same holds for an
+  axis with a smaller clearance in a per-axis `collision_margin` (#105). A
+  scalar margin with `NORMAL_3D` bodies is unaffected.
+
+- `SimulationParams` rejects a negative or non-finite scalar
+  `collision_margin` with `ValueError`, as `set_collision_margin()` and a
+  per-axis triple already did. It was accepted, and the broad phase then
+  clamped it to 0 while `getClosestPoints` got the negative distance. A bad
+  margin assigned to `params.collision_margin` directly raises the same
+  `ValueError` when the next collision check starts, before it changes the
+  active pairs.
 
 - `import pybullet_fleet` works where the `tkinter` package is present but the
   Tk library is not (for example a `python:*-slim` container image without
