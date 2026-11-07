@@ -2,11 +2,12 @@
 
 ``trapezoid_distance()`` is what the batched controllers evaluate each step
 instead of ``TwoPointInterpolation.get_point()``. It has to express everything
-the solver can build, or whatever it cannot express is silently substituted:
-a start speed ``v0`` -- including one pointing away from the target, which
-brakes through zero and reverses --, an end speed ``ve``, a start speed above
+the solver can build for a path leg, or whatever it cannot express is
+silently substituted: a start speed ``v0`` -- including one pointing away from
+the target, which brakes through zero and reverses --, a start speed above
 ``vmax`` (the first phase then brakes down to it), and a trajectory running
-toward a lower position than it starts from.
+toward a lower position than it starts from. Path legs end at rest; the scalar
+form ``trapezoid_point()``, which joints use, also covers an end speed ``ve``.
 
 Arrival time alone proves nothing here: it comes from ``t_total``, which is
 right either way. What differs is where the body is during each phase, so
@@ -22,7 +23,6 @@ import pytest
 
 from pybullet_fleet._tpi import (
     build_tpi,
-    extract_phase_params,
     extract_profile,
     trapezoid_distance,
     trapezoid_point,
@@ -73,11 +73,13 @@ def _cases():
 
 
 CASES = _cases()
+#: Trajectories ending at rest: what the batched closed form evaluates.
+AT_REST = [tpi for tpi in CASES if tpi.ve == 0.0]
 
 
-def _ids():
+def _ids(cases):
     return [
-        f"v0={tpi.v0:+.2g},ve={tpi.ve:+.2g},d={tpi.pe - tpi.p0:+.3g},a={tpi.amax_accel:g}/{tpi.amax_decel:g}" for tpi in CASES
+        f"v0={tpi.v0:+.2g},ve={tpi.ve:+.2g},d={tpi.pe - tpi.p0:+.3g},a={tpi.amax_accel:g}/{tpi.amax_decel:g}" for tpi in cases
     ]
 
 
@@ -89,7 +91,7 @@ def test_the_grid_covers_the_cases_that_matter():
     assert any(tpi.case == 0 for tpi in CASES) and any(tpi.case == 1 for tpi in CASES)
 
 
-@pytest.mark.parametrize("tpi", CASES, ids=_ids())
+@pytest.mark.parametrize("tpi", CASES, ids=_ids(CASES))
 def test_the_scalar_closed_form_matches_get_point(tpi):
     profile = extract_profile(tpi)
     for t in _grid(tpi):
@@ -99,7 +101,7 @@ def test_the_scalar_closed_form_matches_get_point(tpi):
         assert velocity == pytest.approx(expected_velocity, abs=1e-9)
 
 
-@pytest.mark.parametrize("tpi", CASES, ids=_ids())
+@pytest.mark.parametrize("tpi", AT_REST, ids=_ids(AT_REST))
 def test_the_batched_closed_form_matches_get_point(tpi):
     profile = extract_profile(tpi)
     t = _grid(tpi)
@@ -109,10 +111,8 @@ def test_the_batched_closed_form_matches_get_point(tpi):
         return np.full_like(tau, value)
 
     args = (col(profile.t_accel), col(profile.t_const), col(profile.t_total), col(profile.accel))
-    distance = trapezoid_distance(
-        tau, *args, col(profile.distance), decel=col(profile.decel), v0=col(profile.v0), ve=col(profile.ve)
-    )
-    speed = trapezoid_speed(tau, *args, decel=col(profile.decel), v0=col(profile.v0), ve=col(profile.ve))
+    distance = trapezoid_distance(tau, *args, col(profile.distance), decel=col(profile.decel), v0=col(profile.v0))
+    speed = trapezoid_speed(tau, *args, decel=col(profile.decel), v0=col(profile.v0))
     expected = np.array([tpi.get_point(float(x))[:2] for x in t])
     assert profile.p0 + profile.direction * distance == pytest.approx(expected[:, 0], abs=1e-9)
     assert profile.direction * speed == pytest.approx(expected[:, 1], abs=1e-9)
@@ -120,7 +120,7 @@ def test_the_batched_closed_form_matches_get_point(tpi):
 
 def test_the_batched_and_scalar_forms_agree_over_a_whole_fleet():
     """One call over every trajectory at once: the rows do not interfere."""
-    profiles = [extract_profile(tpi) for tpi in CASES]
+    profiles = [extract_profile(tpi) for tpi in AT_REST]
     fields = {name: np.array([getattr(pr, name) for pr in profiles]) for name in profiles[0]._fields}
     for frac in np.linspace(-0.05, 1.05, 23):
         tau = frac * fields["t_total"]
@@ -133,7 +133,6 @@ def test_the_batched_and_scalar_forms_agree_over_a_whole_fleet():
             fields["distance"],
             decel=fields["decel"],
             v0=fields["v0"],
-            ve=fields["ve"],
         )
         expected = [trapezoid_point(pr, pr.t0 + x)[0] for pr, x in zip(profiles, tau)]
         assert fields["p0"] + fields["direction"] * distance == pytest.approx(expected, abs=1e-12)
@@ -145,9 +144,9 @@ def test_a_start_above_vmax_brakes_down_to_it_in_the_first_phase():
     see the same trajectory instead of one accelerating further."""
     with pytest.warns(UserWarning, match="exceeds vmax"):
         tpi = try_build_tpi(p0=0.0, pe=10.0, vmax=VMAX, accel=1.0, t0=0.0, v0=1.5 * VMAX, decel=3.0)
-    _, _, _, accel, decel = extract_phase_params(tpi)
-    assert decel == 3.0
-    assert accel == -3.0
+    profile = extract_profile(tpi)
+    assert profile.decel == 3.0
+    assert profile.accel == -3.0
 
 
 class TestFromRestUnchanged:
@@ -157,15 +156,20 @@ class TestFromRestUnchanged:
     @pytest.mark.parametrize("distance", DISTANCES)
     def test_the_phase_params_are_the_amax_scalars(self, distance, accel, decel):
         tpi = build_tpi(p0=0.0, pe=distance, vmax=VMAX, accel=accel, t0=0.0, decel=decel)
-        params = extract_phase_params(tpi)
-        assert params[3] == accel and params[4] == decel
         profile = extract_profile(tpi)
-        assert tuple(params) == (profile.t_accel, profile.t_const, profile.t_total, profile.accel, profile.decel)
+        assert profile.accel == accel and profile.decel == decel
         assert profile.v0 == 0.0 and profile.ve == 0.0
 
-    def test_zero_v0_and_ve_are_bit_identical_to_omitting_them(self):
+    def test_zero_v0_is_bit_identical_to_omitting_it(self):
         tpi = build_tpi(p0=0.0, pe=3.0, vmax=VMAX, accel=1.0, t0=0.0, decel=2.5)
-        t_accel, t_const, t_total, accel, decel = extract_phase_params(tpi)
+        profile = extract_profile(tpi)
+        t_accel, t_const, t_total, accel, decel = (
+            profile.t_accel,
+            profile.t_const,
+            profile.t_total,
+            profile.accel,
+            profile.decel,
+        )
         tau = np.linspace(-0.1, t_total + 0.1, 997)
         ta, tc, tt, a = (np.full_like(tau, x) for x in (t_accel, t_const, t_total, accel))
         zeros = np.zeros_like(tau)
@@ -173,10 +177,10 @@ class TestFromRestUnchanged:
         d = np.full_like(tau, decel)
         assert np.array_equal(
             trapezoid_distance(tau, ta, tc, tt, a, dist, decel=d),
-            trapezoid_distance(tau, ta, tc, tt, a, dist, decel=d, v0=zeros, ve=zeros),
+            trapezoid_distance(tau, ta, tc, tt, a, dist, decel=d, v0=zeros),
         )
         assert np.array_equal(
-            trapezoid_speed(tau, ta, tc, tt, a, decel=d), trapezoid_speed(tau, ta, tc, tt, a, decel=d, v0=zeros, ve=zeros)
+            trapezoid_speed(tau, ta, tc, tt, a, decel=d), trapezoid_speed(tau, ta, tc, tt, a, decel=d, v0=zeros)
         )
 
 

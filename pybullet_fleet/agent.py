@@ -1970,16 +1970,15 @@ class Agent(SimObject):
         # Evaluated from the trajectory's phase scalars rather than by
         # tpi.get_point(): the same motion, without its per-call phase search,
         # which was most of the cost of a joint step.
+        # trapezoid_point() decides whether the trajectory has finished, and
+        # then returns its end position exactly.
         profile = state.trajectory_profile()
-        if now - profile.t0 >= profile.t_total:
-            state.clear_motion()
-            return target
-
         position, velocity = trapezoid_point(profile, now)
-        if abs(target - position) < 1e-9:
-            # Close enough that the remainder is float residue. Snapping here
-            # rather than waiting for get_end_time() keeps the invariant that
-            # a joint at its target carries no speed and no trajectory.
+        if position == profile.pe or abs(target - position) < 1e-9:
+            # Finished, or close enough that the remainder is float residue.
+            # Snapping here rather than waiting for get_end_time() keeps the
+            # invariant that a joint at its target carries no speed and no
+            # trajectory.
             state.clear_motion()
             return target
         state.speed = float(velocity)
@@ -2051,6 +2050,9 @@ class Agent(SimObject):
         joints_moved = False
         if self.is_urdf_robot() and self._use_kinematic_joints:
             joints_moved = self._update_kinematic_joints(dt)
+            if joints_moved and self.sim_core is not None:
+                # The links moved: the body's AABB covers them, so refresh it.
+                self.sim_core.notify_geometry_changed(self)
 
         moved = False
         if not self.use_fixed_base:
@@ -2309,6 +2311,8 @@ class Agent(SimObject):
             p.resetJointState(self.body_id, joint.index, joint.position, physicsClientId=self._pid)
             self._joints[joint.index] = joint
         self._refresh_active_joints()
+        if self.sim_core is not None:
+            self.sim_core.notify_geometry_changed(self)
 
     def get_all_joints_state(self) -> list:
         """
@@ -2509,18 +2513,18 @@ class Agent(SimObject):
             )
 
     def _after_joints_placed(self) -> None:
-        """Bring attached objects along and mark the body moved, once for any number of placed joints.
+        """Bring attached objects along and refresh the body's geometry, once for any number of placed joints.
 
         The step does not see a placed joint as motion: it is at its target and
-        not moving, so ``update()`` reports nothing, and without the mark the
-        next collision check would skip the body. The cached AABB is the base
-        link's, which a joint does not move, so it needs no refresh; attached
-        objects refresh their own through ``set_pose``.
+        not moving, so ``update()`` reports nothing. ``notify_geometry_changed``
+        marks the body moved for the next collision check and refreshes its
+        AABB, which covers every link; attached objects refresh their own
+        through ``set_pose``.
         """
         if self.attached_objects:
             self.update_attached_objects_kinematics()
         if self.sim_core is not None:
-            self.sim_core._mark_object_moved(self.object_id)
+            self.sim_core.notify_geometry_changed(self)
 
     def set_joint_target_by_name(self, joint_name: str, target_position: float, max_force: float = 500.0):
         """
