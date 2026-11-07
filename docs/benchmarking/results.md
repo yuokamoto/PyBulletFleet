@@ -23,19 +23,19 @@ see [Benchmark Suite](benchmark-suite) and [Profiling Guide](profiling-guide).
 **Base config:** `benchmark/configs/general.yaml` — headless `simple_cube`
 robots, `collision_check_frequency=null` (every step), `batch_omni` fleet
 controller, and the fleet command interface
-**Last measured:** 2026-09-01
+**Last measured:** 2026-11-07
 
 | Agents | Step Time (ms) | RTF   | Spawn Time | Memory Delta |
 |--------|----------------|-------|------------|--------------|
-| 100    | 0.74 ± 0.02    | 135.4× | 62 ms     | +2.6 MB      |
-| 250    | 1.82 ± 0.03    | 54.8×  | 160 ms    | +6.2 MB      |
-| 500    | 4.26 ± 0.16    | 23.5×  | 346 ms    | +12.4 MB     |
-| 1000   | 9.73 ± 0.03    | 10.3×  | 644 ms    | +24.9 MB     |
-| 2000   | 24.70 ± 1.30   | 4.0×   | 1468 ms   | +47.9 MB     |
+| 100    | 0.56 ± 0.05    | 177.4× | 51 ms     | +3.3 MB      |
+| 250    | 1.25 ± 0.06    | 79.9×  | 123 ms    | +7.7 MB      |
+| 500    | 2.76 ± 0.26    | 36.3×  | 238 ms    | +15.2 MB     |
+| 1000   | 5.61 ± 0.20    | 17.8×  | 476 ms    | +30.6 MB     |
+| 2000   | 16.30 ± 0.75   | 6.1×   | 1051 ms   | +57.5 MB     |
 
 **Source:** `benchmark/results/benchmark_sweep_10.0s.json`
 
-The 2026-09-01 sweep was collected on a WSL2 host using the lightweight
+The 2026-11-07 sweep was collected on a WSL2 host using the lightweight
 `simple_cube` model as the large-scale baseline. The worker currently gives
 goals to half of the spawned agents; this workload is defined in
 `mobile_benchmark.py`. Although `general.yaml` contains
@@ -59,12 +59,12 @@ must not be read as the elapsed time of a complete benchmark worker.
 
 Measured 2026-08-02 with Docker, headless `simple_cube` robots, physics off,
 `timestep=0.1`, `publish_rate=5 Hz`, and `target_rtf=0`; the `fleet` 1000-row
-was refreshed on 2026-09-01. These are diagnostic single-run values and are
+was refreshed on 2026-11-07. These are diagnostic single-run values and are
 not comparable to the core simulation table above.
 
 | Mode | Robots | Command result | Max RTF |
 |------|--------|----------------|---------|
-| `fleet` | 1000 | ack 0.550 s; all moved in 0.083 s | 10.98× |
+| `fleet` | 1000 | ack 0.526 s; all moved in 0.091 s | 13.45× |
 | `per_robot` | 1000 | publish 0.217 s; 0/1000 moved in 60 s | 0.64× |
 | `per_robot` | 100 | publish 0.056 s; all moved in 15.033 s | not measured |
 | `hybrid` | 1000 | fleet ack 7.998 s; per-robot publish 0.220 s | 0.30× |
@@ -128,12 +128,21 @@ useful when isolating one axis at a time.
 
 | Agents | Controller | Command Interface | Setup Time | Step Time | P95 Step |
 |--------|------------|-------------------|------------|-----------|----------|
-| 100    | per-agent  | per-agent         | 0.0022 s   | 0.114 ms  | 0.122 ms |
-| 100    | batch      | fleet             | 0.0017 s   | 0.109 ms  | 0.118 ms |
-| 500    | per-agent  | per-agent         | 0.0100 s   | 0.680 ms  | 0.397 ms |
-| 500    | batch      | fleet             | 0.0085 s   | 0.519 ms  | 0.288 ms |
-| 1000   | per-agent  | per-agent         | 0.0224 s   | 1.355 ms  | 1.084 ms |
-| 1000   | batch      | fleet             | 0.0162 s   | 1.156 ms  | 0.723 ms |
+| 100    | per-agent  | per-agent         | 0.0035 s   | 0.141 ms  | 0.140 ms |
+| 100    | batch      | fleet             | 0.0032 s   | 0.111 ms  | 0.142 ms |
+| 500    | per-agent  | per-agent         | 0.0180 s   | 0.731 ms  | 0.723 ms |
+| 500    | batch      | fleet             | 0.0186 s   | 0.479 ms  | 0.443 ms |
+| 1000   | per-agent  | per-agent         | 0.0392 s   | 1.599 ms  | 1.667 ms |
+| 1000   | batch      | fleet             | 0.0350 s   | 1.001 ms  | 1.114 ms |
+
+Measured on 2026-11-07. Setup takes about twice as long as in v0.8.0 (for
+1000 agents, 0.016-0.022 s then). A command now goes through a `PathRequest`
+that is tracked until it ends, and a new goal is checked against the current
+motion (`goal_replacement`): about 8-13 µs more per command. Most of the rest
+is Python's garbage collector, which these extra allocations trigger more often
+over a larger heap. Setup is paid once per command, not per step. Measured
+side by side with v0.8.0 in one session, the step time is not slower: the
+per-agent path is about the same, and the batch path is about 25% faster.
 
 **Memory note:** Memory delta is process RSS and should be treated as
 environment-dependent, especially on WSL2.
