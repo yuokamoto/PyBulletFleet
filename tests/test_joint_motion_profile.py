@@ -874,7 +874,7 @@ class TestRampedJointsUseTheClosedForm:
             agent.set_joint_target(JOINT, target)
             for _ in range(steps):
                 sim_core.step_once()
-                trace.append((agent.get_joint_state(JOINT)[0], state.trajectory, agent._joint_clock))
+                trace.append((agent.get_joint_state(JOINT)[0], state.trajectory, state.elapsed))
         return trace
 
     TARGETS = [(0.6, 20), (1.2, 25), (0.2, 120), (0.9, 150)]
@@ -882,7 +882,7 @@ class TestRampedJointsUseTheClosedForm:
     def test_the_trace_matches_get_point_step_by_step(self, sim_core):
         agent, index = self._agent(sim_core)
         trace = self._drive(sim_core, agent, index, self.TARGETS)
-        planned = [(position, tpi.get_point(clock)[0]) for position, tpi, clock in trace if tpi is not None]
+        planned = [(position, tpi.get_point(elapsed)[0]) for position, tpi, elapsed in trace if tpi is not None]
         assert len(planned) > 100
         for position, expected in planned:
             assert position == pytest.approx(expected, abs=1e-9)
