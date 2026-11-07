@@ -58,7 +58,7 @@ from pybullet_fleet.types import ControllerMode, GoalReplacement, MovementDirect
 
 from two_point_interpolation import TwoPointInterpolation
 
-from pybullet_fleet._tpi import build_tpi, build_tpi_from_speed, extract_phase_params
+from pybullet_fleet._tpi import build_tpi, build_tpi_from_speed, extract_profile
 from pybullet_fleet._replacement import GoalReplacementPolicy, _checked_braking_request
 import pybullet_fleet._replan as _replan
 from pybullet_fleet._replan import HEADING_TOL, PathRequest
@@ -779,8 +779,7 @@ class KinematicController(GoalReplacementPolicy, Controller):
         angular_accel = self.params.scalar_max_angular_accel()
 
         self._tpi_rotation_angle = build_tpi(p0=0.0, pe=rotation_angle, vmax=angular_vel, accel=angular_accel, t0=t0)
-        _, _, t_tot, _, _ = extract_phase_params(self._tpi_rotation_angle)
-        if t_tot <= 0.0:
+        if extract_profile(self._tpi_rotation_angle).t_total <= 0.0:
             # build_tpi produced a degenerate zero-duration trajectory (velocity or
             # accel limits are too small to plan the rotation). Treat as failure so
             # the caller can fall back gracefully instead of silently snapping.

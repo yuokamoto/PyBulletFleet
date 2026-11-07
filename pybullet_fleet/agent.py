@@ -1965,16 +1965,15 @@ class Agent(SimObject):
         # Evaluated from the trajectory's phase scalars rather than by
         # tpi.get_point(): the same motion, without its per-call phase search,
         # which was most of the cost of a joint step.
+        # trapezoid_point() decides whether the trajectory has finished, and
+        # then returns its end position exactly.
         profile = state.trajectory_profile()
-        if now - profile.t0 >= profile.t_total:
-            state.clear_motion()
-            return target
-
         position, velocity = trapezoid_point(profile, now)
-        if abs(target - position) < 1e-9:
-            # Close enough that the remainder is float residue. Snapping here
-            # rather than waiting for get_end_time() keeps the invariant that
-            # a joint at its target carries no speed and no trajectory.
+        if position == profile.pe or abs(target - position) < 1e-9:
+            # Finished, or close enough that the remainder is float residue.
+            # Snapping here rather than waiting for get_end_time() keeps the
+            # invariant that a joint at its target carries no speed and no
+            # trajectory.
             state.clear_motion()
             return target
         state.speed = float(velocity)

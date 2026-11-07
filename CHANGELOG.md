@@ -618,9 +618,14 @@ are not recommended for production use yet.
   deceleration, as the per-agent controllers do. The batched closed form used
   to accelerate further in that first phase, so the agent ran ahead of its
   trajectory until it cruised. The closed form (`trapezoid_distance()`,
-  `trapezoid_speed()`) also takes an end speed `ve` now, and is checked against
-  `TwoPointInterpolation.get_point()` for start speeds toward and away from the
-  target, above `vmax`, end speeds, asymmetric ramps and either direction.
+  `trapezoid_speed()`, and the scalar `trapezoid_point()` that ramped joints
+  use) takes each phase's formula from one set of helpers, and is checked
+  against `TwoPointInterpolation.get_point()` for start speeds toward and away
+  from the target, above `vmax`, asymmetric ramps and either direction (end
+  speeds too for the scalar form). Batched rotations evaluate their braking
+  phase with the trajectory's deceleration rather than its first-phase
+  acceleration; the two only differ for a rotation that does not start from
+  rest or has its own braking limit, which none has yet.
 
 - The collision broadphase AABB of an articulated body covers all of its
   links, not only the base link (issue #68). `p.getAABB(body)` returns the base
