@@ -28,7 +28,10 @@ construct -> on_init -> on_step (zero or more times) -> on_reset -> on_shutdown
 
 `on_init()` runs after the world and robots have been created. Use it to inspect
 agents, allocate resources, or subscribe to events. `on_step(dt)` runs at every
-simulation step by default; a configured `frequency` invokes it less often, on
+simulation step by default, at the `step` event; a `phase` (`pre_step`, `step`
+or `post_step`, set by the class's `default_phase`, by
+`register_plugin(phase=...)` or by the YAML `phase` field) moves it to another
+step event, as for callbacks. A configured `frequency` invokes it less often, on
 the fixed schedule described in [the two-phase step](two-phase-step.md), and
 passes the simulated time since its previous run. `on_reset()` must discard state that does
 not survive a reset, and `on_shutdown()` must release external resources before
@@ -74,16 +77,18 @@ emitted once per step, each with `dt` and `sim_time`:
 | `SimEvents.POST_STEP` | end of the step, after the collision check | new state |
 
 `register_callback(f, frequency, phase)` subscribes `f` to the `phase` event
-(`CallbackPhase.STEP` is the `step` event, `CallbackPhase.POST_STEP` the
-`post_step` event), and a plugin's `on_step` subscribes to `step`. They form
-tiers that keep a fixed order within an event:
+(`CallbackPhase.PRE_STEP`, `CallbackPhase.STEP` and `CallbackPhase.POST_STEP`
+are the `pre_step`, `step` and `post_step` events), and a plugin's `on_step`
+subscribes to its own `phase` event (`step` unless set). They form tiers that
+keep a fixed order within each event:
 
 1. handlers from `events.on()`, by `priority`, then registration order;
 2. `register_callback()` callbacks, in registration order;
 3. plugin `on_step`, in load order.
 
 So a `post_step` handler of any priority runs before every post-step callback,
-and every Phase-1 callback runs before any plugin. The three differ only in
+and every callback of an event runs before any plugin of it. Each of the three
+can run at any of the three events, with a `frequency`; they differ only in
 call shape and error handling:
 
 | Registered with | Called as | An exception |
@@ -129,8 +134,9 @@ Do not subscribe to `PRE_STEP` just to poll state that can be queried on demand.
 
 ## Step-order and pose rule
 
-Plugin `on_step`, callbacks, and `pre_step` and `step` handlers run in Phase 1 of
-`step_once()`. Kinematic `set_pose()` calls are buffered there. Framework
+Plugin `on_step`, callbacks and handlers at the `pre_step` and `step` events run
+in Phase 1 of `step_once()`; at `pre_step` nothing has moved yet and `sim_time`
+is still the previous state's. Kinematic `set_pose()` calls are buffered there. Framework
 getters, such as `agent.get_pose()`, see the new cached pose; direct PyBullet
 queries still see the previous pose until the pose flush completes.
 

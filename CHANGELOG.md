@@ -200,6 +200,16 @@ are not recommended for production use yet.
   does a frequency-limited callback. No change in step time without hooks
   (issue #84).
 
+- Callbacks and plugins can run at any of the three step events.
+  `CallbackPhase.PRE_STEP` (`"pre_step"`) joins `STEP` and `POST_STEP`: such a
+  callback runs at the start of the step, after the `pre_step` handlers, before
+  the clock advances and before anything moves. A plugin's `on_step()` takes a
+  `phase` too (`SimPlugin.phase`): set by the class (`default_phase =
+  "post_step"`), by `register_plugin(..., phase=...)` or by the YAML
+  `phase` field, with `step` as before by default. Plugins run after the
+  callbacks of their event, with their `frequency`; an unknown phase raises
+  `ValueError`. The time profile adds `callbacks_pre_step`.
+
 - A kinematic joint with an acceleration ramp (`set_joint_motion_profile(...,
   max_accel=...)`) is evaluated each step from its trajectory's phase scalars,
   read once per target change, instead of `TwoPointInterpolation.get_point()`.

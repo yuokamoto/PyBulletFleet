@@ -44,6 +44,15 @@ subscriptions on it; their public APIs stay and behave as before.
    `on()`/`off()`. An emit runs the subscriptions present when it starts, as
    `register_callback()` always did; before, a handler added by a handler of
    the same event ran in the same emit.
+5. **Every phase for every tier.** `CallbackPhase` gains `PRE_STEP`, so a
+   callback can run at any of the three step events, and a plugin's `on_step`
+   takes a `phase` the same way (class attribute, `register_plugin(phase=...)`
+   or the YAML `phase` field; `step` by default). The simulation emits all
+   three events tier by tier, so at each one handlers, callbacks and plugins
+   run in that order with their own frequency. Added in review: plugins could
+   otherwise only reach `pre_step` or `post_step` through `events.on()` in
+   `on_init()`, losing what `on_step` gives them (load order, the error log
+   naming the plugin, the YAML `frequency`, the schedule reset).
 
 ## Open questions from the issue
 

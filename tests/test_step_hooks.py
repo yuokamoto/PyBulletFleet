@@ -542,3 +542,126 @@ class TestFrequencyLimitedEvents:
             now[0] += 0.25
             bus.emit("post_step", dt=0.25, sim_time=now[0])
         assert seen == [(1.0, 1.0), (2.0, 1.0)]
+
+
+# ---------------------------------------------------------------------------
+# Every phase for callbacks and plugins
+# ---------------------------------------------------------------------------
+
+
+class TestPhases:
+    """Callbacks and plugin ``on_step()`` can run at any of the three step events,
+    after that event's handlers (callbacks, then plugins), with a frequency."""
+
+    def test_the_phases_are_the_step_events(self):
+        assert [phase.value for phase in CallbackPhase] == [
+            SimEvents.PRE_STEP,
+            SimEvents.STEP,
+            SimEvents.POST_STEP,
+        ]
+
+    def test_every_tier_in_every_phase_runs_in_order(self, sim):
+        log = []
+        for phase in ("post_step", "step", "pre_step"):  # registered in reverse
+            sim.register_plugin(_Recorder(sim, f"{phase}:plugin", log), phase=phase)
+            sim.register_callback(lambda sc, dt, phase=phase: log.append(f"{phase}:callback"), phase=phase)
+            sim.events.on(phase, lambda phase=phase, **_: log.append(f"{phase}:handler"))
+        sim.step_once()
+        assert _names(log) == [
+            f"{phase}:{tier}" for phase in ("pre_step", "step", "post_step") for tier in ("handler", "callback", "plugin")
+        ]
+
+    def test_pre_step_hooks_see_the_previous_state(self, sim):
+        """Before the clock advances and before anything moves."""
+        agent = Agent.from_params(
+            AgentSpawnParams(urdf_path="robots/simple_cube.urdf", initial_pose=Pose.from_xyz(0.0, 0.0, 0.1)),
+            sim_core=sim,
+        )
+        agent.set_path([Pose.from_xyz(5.0, 0.0, 0.1)], auto_approach=False, final_orientation_align=False)
+        for _ in range(5):
+            sim.step_once()
+        seen = []
+
+        class Watch(SimPlugin):
+            def on_step(self, dt):
+                seen.append(("plugin", round(self.sim_core.sim_time, 9), agent.get_pose().position[0]))
+
+        sim.register_plugin(Watch, phase="pre_step")
+        sim.register_callback(
+            lambda sc, dt: seen.append(("callback", round(sc.sim_time, 9), agent.get_pose().position[0])),
+            phase=CallbackPhase.PRE_STEP,
+        )
+        before = (round(sim.sim_time, 9), agent.get_pose().position[0])
+        sim.step_once()
+        assert [entry[1:] for entry in seen] == [before, before]
+        assert agent.get_pose().position[0] > before[1], "it moved after the pre_step hooks"
+
+    def test_a_post_step_plugin_runs_after_the_collision_check(self, sim, monkeypatch):
+        log = []
+        check = sim.check_collisions
+
+        def checked(*args, **kwargs):
+            log.append("collision_check")
+            return check(*args, **kwargs)
+
+        monkeypatch.setattr(sim, "check_collisions", checked)
+        sim.register_plugin(_Recorder(sim, "plugin", log), phase=CallbackPhase.POST_STEP)
+        sim.step_once()
+        assert _names(log) == ["collision_check", "plugin"]
+
+    @pytest.mark.parametrize("phase", ["pre_step", "step", "post_step"])
+    def test_a_plugin_at_any_phase_keeps_its_frequency_beat_for_beat_with_a_callback(self, sim, phase):
+        from_plugin, from_callback = [], []
+
+        class Beat(SimPlugin):
+            def on_step(self, dt):
+                from_plugin.append((self.sim_core.step_count, round(dt, 9)))
+
+        sim.register_plugin(Beat, frequency=3.0, phase=phase)
+        sim.register_callback(lambda sc, dt: from_callback.append((sc.step_count, round(dt, 9))), frequency=3.0, phase=phase)
+        for _ in range(100):
+            sim.step_once()
+        assert from_plugin == from_callback
+        # pre_step observes the times before each step, 0.0 to 9.9: one beat fewer.
+        assert len(from_plugin) == (29 if phase == "pre_step" else 30)
+
+    def test_a_plugin_class_can_choose_its_phase(self, sim):
+        class Late(SimPlugin):
+            phase = "post_step"  # pyright: ignore[reportAssignmentType]  # taken as default_phase at run time
+
+        class Early(SimPlugin):
+            default_phase = CallbackPhase.PRE_STEP
+
+        assert sim.register_plugin(Late).phase is CallbackPhase.POST_STEP
+        assert sim.register_plugin(Early).phase is CallbackPhase.PRE_STEP
+        assert sim.register_plugin(Early, phase="step").phase is CallbackPhase.STEP  # per instance
+        assert sim.register_plugin(_Recorder(sim)).phase is CallbackPhase.STEP  # the default
+
+    def test_the_yaml_entry_takes_a_phase(self, sim):
+        from pybullet_fleet.sim_plugin import create_sim_plugin_from_entry
+
+        plugin = create_sim_plugin_from_entry({"class": f"{__name__}._Recorder", "phase": "pre_step", "frequency": 2.0}, sim)
+        assert plugin.phase is CallbackPhase.PRE_STEP
+        assert plugin.frequency == 2.0
+
+    def test_an_unknown_phase_is_refused(self, sim):
+        from pybullet_fleet.sim_plugin import create_sim_plugin_from_entry
+
+        with pytest.raises(ValueError, match="phase must be one of"):
+            sim.register_plugin(_Recorder(sim), phase="later")
+        with pytest.raises(ValueError, match="phase must be one of"):
+            create_sim_plugin_from_entry({"class": f"{__name__}._Recorder", "phase": "later"}, sim)
+        with pytest.raises(ValueError, match="phase must be one of"):
+            sim.register_callback(lambda sc, dt: None, phase="later")
+        with pytest.raises(ValueError, match="phase must be one of"):
+
+            class Bad(SimPlugin):
+                default_phase = "later"
+
+        assert not sim.plugins
+
+    def test_pre_step_callbacks_are_profiled_apart_from_pre_step_handlers(self, sim):
+        sim.register_callback(lambda sc, dt: time.sleep(0.002), phase="pre_step")
+        breakdown = sim.step_once(return_profiling=True)
+        assert breakdown["callbacks_pre_step"] >= 2.0
+        assert breakdown["events_pre_step"] < 2.0
