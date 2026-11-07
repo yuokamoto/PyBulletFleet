@@ -10,6 +10,9 @@ Do not rely on these artifacts for production runs.
 The kinematic artifact profile is now `pbf.kinematic.v4` (version 4). Earlier
 development artifacts use older execution or object-construction schemas and
 are not accepted by this loader; record a new artifact before testing restore.
+A version 4 artifact recorded before `ControllerParams.max_angular_decel`
+existed still loads: its rotation braked at `max_angular_accel`, which is what
+an unset `max_angular_decel` means.
 The table describes **execution checkpoints** for this declared profile. The
 last column uses row names from the [checkpoint capability
 checklist](https://github.com/yuokamoto/PyBulletFleet/blob/main/docs/design/snapshot-replay/product-goals.md#checkpoint-state-capability-checklist).
