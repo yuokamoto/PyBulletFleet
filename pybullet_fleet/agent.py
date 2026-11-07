@@ -7,6 +7,7 @@ Supports both Mesh and URDF loading.
 
 import copy
 import functools
+import inspect
 import logging
 import math
 from dataclasses import dataclass, fields
@@ -49,15 +50,27 @@ def _also_takes_joint_index(method: _JointMethod) -> _JointMethod:
     """Let a single-joint method still take its first argument by the old keyword ``joint_index``.
 
     The parameter became ``joint`` when it started to accept a name as well;
-    ``method(joint_index=...)`` keeps working, as an alias of ``joint=``.
+    ``method(joint_index=...)`` keeps working, as an alias of ``joint=``. The
+    alias is left out of the method's signature on purpose, so that
+    ``inspect.signature`` and type checkers steer new code to ``joint``.
     """
+    signature = inspect.signature(method)
+    if "joint" not in signature.parameters:
+        raise TypeError(f"{method.__qualname__}() has no parameter named 'joint'")
 
     @functools.wraps(method)
     def wrapper(*args: Any, **kwargs: Any) -> Any:
         if "joint_index" in kwargs:
-            if "joint" in kwargs or len(args) > 1:  # args[0] is self
+            joint = kwargs.pop("joint_index")
+            # Bound against the real signature, so the check holds however the
+            # method is called (bound, or unbound with self passed explicitly).
+            try:
+                already_given = "joint" in signature.bind_partial(*args, **kwargs).arguments
+            except TypeError:
+                already_given = False  # let the call itself report the mistake
+            if already_given:
                 raise TypeError(f"{method.__name__}() got multiple values for argument 'joint'")
-            kwargs["joint"] = kwargs.pop("joint_index")
+            kwargs["joint"] = joint
         return method(*args, **kwargs)
 
     return cast(_JointMethod, wrapper)
@@ -1786,19 +1799,7 @@ class Agent(SimObject):
             ValueError: If any value given is not positive, or if ``max_decel``
                 is given for a joint with no acceleration.
         """
-        if isinstance(joint, int):
-            # Checked here rather than left to the first use: a negative index
-            # would be stored under a key _update_kinematic_joints() never
-            # visits, so the profile would be silently ignored, and an
-            # out-of-range one would fail much later inside
-            # _urdf_joint_velocity().
-            if not 0 <= joint < len(self.joint_info):
-                raise IndexError(
-                    f"joint index {joint} is out of range for body {self.body_id} " f"({len(self.joint_info)} joints)"
-                )
-            index = joint
-        else:
-            index = self._joint_index_by_name(joint)
+        index = self._joint_index_or_raise(joint)
         state = self._joint(index)
         validate_joint_motion_profile(max_velocity, max_accel, max_decel, current_accel=state.max_accel)
 
@@ -1824,6 +1825,26 @@ class Agent(SimObject):
             if info[1].decode("utf-8") == name:
                 return index
         raise KeyError(f"no joint named {name!r} on body {self.body_id}")
+
+    def _joint_index_or_raise(self, joint: Union[int, str]) -> int:
+        """The index of a joint named by index or name; raises for one this body does not have.
+
+        Used by the motion-profile APIs (:meth:`set_joint_motion_profile`,
+        :meth:`is_joint_moving`), which raise rather than warn: a profile set
+        on a joint that does not exist would be silently ignored, and
+        ``False`` from ``is_joint_moving()`` would read as "stopped". The
+        target and state APIs warn and degrade instead (see
+        :meth:`_resolve_joint`).
+        """
+        if isinstance(joint, str):
+            return self._joint_index_by_name(joint)
+        # Checked here rather than left to the first use: a negative index
+        # would be stored under a key _update_kinematic_joints() never visits,
+        # and an out-of-range one would fail much later inside
+        # _urdf_joint_velocity().
+        if not 0 <= joint < len(self.joint_info):
+            raise IndexError(f"joint index {joint} is out of range for body {self.body_id} ({len(self.joint_info)} joints)")
+        return joint
 
     def _urdf_joint_velocity(self, joint_index: int) -> float:
         """The joint's speed cap from the URDF, or the fallback for its type."""
@@ -1907,8 +1928,15 @@ class Agent(SimObject):
         the next step. A joint that is only carrying speed is as much in
         motion as one with a plan, which is why this asks about the motion
         rather than about the trajectory.
+
+        Args:
+            joint: Joint index, or joint name as spelled in the URDF.
+
+        Raises:
+            KeyError: If *joint* names a joint this body does not have.
+            IndexError: If *joint* is an index this body does not have.
         """
-        index = joint if isinstance(joint, int) else self._joint_index_by_name(joint)
+        index = self._joint_index_or_raise(joint)
         state = self._joints.get(index)
         return state is not None and state.is_moving
 
@@ -2297,7 +2325,10 @@ class Agent(SimObject):
             # An index is not range-checked: PyBullet raises for one the body
             # does not have, as it always has here.
             joint_index = joint
+        return self._joint_state(joint_index)
 
+    def _joint_state(self, joint_index: int) -> Tuple[float, float]:
+        """(position, velocity) of a joint already resolved to an index."""
         if self._use_kinematic_joints and joint_index in self._joints:
             return (self._joints[joint_index].position, 0.0)
 
@@ -2378,7 +2409,7 @@ class Agent(SimObject):
             idx = self._resolve_joint(name)
             if idx is None:
                 continue
-            result[name] = self.get_joint_state(idx)
+            result[name] = self._joint_state(idx)
         return result
 
     @_also_takes_joint_index
@@ -2407,7 +2438,10 @@ class Agent(SimObject):
         joint_index = self._resolve_joint(joint)
         if joint_index is None:
             return
+        self._set_joint_target_index(joint_index, target_position, max_force)
 
+    def _set_joint_target_index(self, joint_index: int, target_position: float, max_force: float) -> None:
+        """:meth:`set_joint_target` for a joint already resolved to an index."""
         # Skip fixed joints — they cannot be driven
         if self.joint_info[joint_index][2] == p.JOINT_FIXED:
             return
@@ -2610,7 +2644,7 @@ class Agent(SimObject):
             joint_index = self._resolve_joint(joint_name)
             if joint_index is None:
                 continue
-            self.set_joint_target(joint_index, target, max_force)
+            self._set_joint_target_index(joint_index, target, max_force)
 
     def set_joints_targets(self, targets: Union[list, dict], max_force: float = 500.0):
         """
@@ -2658,8 +2692,14 @@ class Agent(SimObject):
         joint_index = self._resolve_joint(joint)
         if joint_index is None:
             return False
+        return self._is_joint_index_at_target(joint_index, target, tolerance)
+
+    def _is_joint_index_at_target(
+        self, joint_index: int, target: float, tolerance: Optional[Union[float, list, dict]]
+    ) -> bool:
+        """:meth:`is_joint_at_target` for a joint already resolved to an index."""
         tol = self._resolve_joint_tolerance(tolerance, joint_index)
-        pos, _ = self.get_joint_state(joint_index)
+        pos, _ = self._joint_state(joint_index)
         return abs(pos - target) <= tol
 
     def is_joint_at_target_by_name(
@@ -2721,7 +2761,8 @@ class Agent(SimObject):
             return True  # Nothing to check → vacuously true
 
         for idx, target in targets.items():
-            if not self.is_joint_at_target(idx, target, tolerance):
+            joint_index = self._resolve_joint(idx)
+            if joint_index is None or not self._is_joint_index_at_target(joint_index, target, tolerance):
                 return False
         return True
 
@@ -2748,9 +2789,7 @@ class Agent(SimObject):
         """
         for joint_name, target in joint_targets.items():
             joint_index = self._resolve_joint(joint_name)
-            if joint_index is None:
-                return False
-            if not self.is_joint_at_target(joint_index, target, tolerance):
+            if joint_index is None or not self._is_joint_index_at_target(joint_index, target, tolerance):
                 return False
         return True
 

@@ -495,7 +495,11 @@ are not recommended for production use yet.
   it is carrying and re-plans from it under the new limits.
   `Agent.is_joint_moving()` reports whether a ramped joint is still in
   motion, which `Elevator` arrival now waits for instead of taking the
-  action's tolerance as arrival.
+  action's tolerance as arrival. Both raise for a joint the body does not
+  have: `KeyError` for an unknown name, `IndexError` for an index out of
+  range (unlike the target and state APIs, which warn): a profile on a
+  missing joint would be silently ignored, and `False` from
+  `is_joint_moving()` would read as "stopped".
 - Add a PBF-owned, versioned kinematic recording profile for supported URDF
   Agents, all kinematic joints, constructed primitives and attachments. A trusted
   registry and `load_supported_simulation()` reconstruct a complete artifact

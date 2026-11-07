@@ -250,6 +250,75 @@ class TestTheOldKeyword:
         with pytest.raises(TypeError, match="multiple values for argument 'joint'"):
             call(agent)
 
+    def test_an_unbound_call(self, sim_core):
+        agent = _lift(sim_core)
+        agent.set_joint_position(LIFT, 2.0)
+
+        assert Agent.get_joint_state(agent, joint_index=0)[0] == pytest.approx(2.0)  # pyright: ignore[reportCallIssue]
+        with pytest.raises(TypeError, match="multiple values for argument 'joint'"):
+            Agent.get_joint_state(agent, 0, joint_index=0)  # pyright: ignore[reportCallIssue]
+
+    def test_the_old_keyword_is_not_in_the_signature(self):
+        import inspect
+
+        for method in (Agent.set_joint_target, Agent.get_joint_state, Agent.is_joint_at_target):
+            params = inspect.signature(method).parameters
+            assert "joint" in params and "joint_index" not in params
+
+
+class TestResolvedOnce:
+    """A joint is resolved once per check, not again inside the public single-joint call."""
+
+    def _count_resolves(self, agent, monkeypatch):
+        calls = []
+        original = agent._resolve_joint
+
+        def counting(joint):
+            calls.append(joint)
+            return original(joint)
+
+        monkeypatch.setattr(agent, "_resolve_joint", counting)
+        return calls
+
+    def test_is_joint_at_target(self, sim_core, monkeypatch):
+        agent = _lift(sim_core)
+        agent.set_joint_position(LIFT, 2.0)
+        calls = self._count_resolves(agent, monkeypatch)
+
+        assert agent.is_joint_at_target(LIFT, 2.0)
+        assert calls == [LIFT]
+
+    def test_are_joints_at_targets_by_name(self, sim_core, monkeypatch):
+        agent = _manipulator(sim_core)
+        calls = self._count_resolves(agent, monkeypatch)
+
+        agent.are_joints_at_targets_by_name({"elbow_to_wrist": 0.0, "base_to_shoulder": 0.0})
+        assert calls == ["elbow_to_wrist", "base_to_shoulder"]
+
+    def test_set_joints_targets_by_name(self, sim_core, monkeypatch):
+        agent = _lift(sim_core)
+        calls = self._count_resolves(agent, monkeypatch)
+
+        agent.set_joints_targets_by_name({LIFT: 1.0})
+        assert calls == [LIFT]
+        assert agent.last_joint_targets == {0: 1.0}
+
+
+class TestMotionProfileApisRaise:
+    """``is_joint_moving`` and ``set_joint_motion_profile`` raise for a joint the body does not have."""
+
+    @pytest.mark.parametrize("joint, exc", [("no_such_joint", KeyError), (99, IndexError), (-1, IndexError)])
+    def test_is_joint_moving(self, sim_core, joint, exc):
+        agent = _lift(sim_core)
+        with pytest.raises(exc):
+            agent.is_joint_moving(joint)
+
+    @pytest.mark.parametrize("joint, exc", [("no_such_joint", KeyError), (99, IndexError), (-1, IndexError)])
+    def test_set_joint_motion_profile(self, sim_core, joint, exc):
+        agent = _lift(sim_core)
+        with pytest.raises(exc):
+            agent.set_joint_motion_profile(joint, max_velocity=0.4)
+
 
 class TestANonDefaultClient:
     """A joint name resolves on the agent's own physics client.
