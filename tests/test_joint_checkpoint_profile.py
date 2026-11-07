@@ -40,7 +40,7 @@ def _state(agent):
 
 def _cruise(sim_core, agent, steps):
     """Head for a target far enough to cruise, for ``steps`` steps."""
-    agent.set_joint_target_by_name(JOINT, 1.0)
+    agent.set_joint_target(JOINT, 1.0)
     for _ in range(steps):
         sim_core.step_once()
 
@@ -54,7 +54,7 @@ def _braking(sim_core, agent):
     """Shedding speed with no trajectory: the new target is inside the stopping distance."""
     _cruise(sim_core, agent, 30)
     position, speed, _ = _state(agent)
-    agent.set_joint_target_by_name(JOINT, position + 0.25 * speed * speed / (2 * PROFILE["max_decel"]))
+    agent.set_joint_target(JOINT, position + 0.25 * speed * speed / (2 * PROFILE["max_decel"]))
     for _ in range(3):
         sim_core.step_once()
     assert _state(agent)[2] is True, "the joint is braking"
@@ -63,7 +63,7 @@ def _braking(sim_core, agent):
 def _reversing(sim_core, agent):
     """Turned round: braked to rest away from a target behind it and planned back."""
     _cruise(sim_core, agent, 30)
-    agent.set_joint_target_by_name(JOINT, -0.5)
+    agent.set_joint_target(JOINT, -0.5)
     for _ in range(60):
         sim_core.step_once()
     assert _state(agent)[1] < 0.0, "the joint is travelling back"
@@ -72,7 +72,7 @@ def _reversing(sim_core, agent):
 def _heading_away(sim_core, agent):
     """Still travelling away from a target behind it, braking before it turns."""
     _cruise(sim_core, agent, 30)
-    agent.set_joint_target_by_name(JOINT, -0.5)
+    agent.set_joint_target(JOINT, -0.5)
     for _ in range(5):
         sim_core.step_once()
     _, speed, braking = _state(agent)
