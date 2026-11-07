@@ -627,6 +627,14 @@ class SimObject:
         Note: Primitive shapes (box, sphere, cylinder) are NOT cached, as PyBullet
         handles them very efficiently and caching adds unnecessary overhead.
 
+        A mesh collision shape PyBullet cannot build (a Gazebo ``.dae``, say) is
+        replaced by none, with a warning: the body is visual-only. That result
+        is cached like a success, so every later call with the same parameters
+        on the same client returns the visual-only pair at once, without another
+        attempt or warning. Building the same mesh again would fail the same way
+        and log once per spawn; to retry after fixing the file, start a new
+        simulation (a reset or reconnect forgets the client's shapes).
+
         Args:
             visual_shape: ShapeParams for visual geometry
             collision_shape: ShapeParams for collision geometry
@@ -691,7 +699,8 @@ class SimObject:
                 collision_id = cls._create_collision_shape(collision_shape, physics_client_id)
             except Exception:
                 logger.warning(
-                    "Failed to create collision shape for %s — using visual-only body",
+                    "Failed to create collision shape for %s — using a visual-only body; later spawns "
+                    "with the same shape on this client reuse it without another attempt",
                     collision_shape.mesh_path or collision_shape.shape_type,
                 )
                 collision_id = -1

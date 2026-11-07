@@ -184,6 +184,12 @@ are not recommended for production use yet.
 
 ### Changed
 
+- A mesh collision shape PyBullet cannot build (a Gazebo `.dae`, say) gives a
+  visual-only body as before, and the warning now says that later spawns with
+  the same shape on the same client reuse that result without another attempt
+  (#120). It stays cached on purpose: the same mesh fails the same way, and
+  retrying would log once per spawn.
+
 - Per-step hooks share one mechanism: `register_callback()` callbacks and
   `SimPlugin.on_step()` are subscriptions on `sim.events`, in tiers after the
   event's own handlers (handlers by priority, then callbacks in registration
