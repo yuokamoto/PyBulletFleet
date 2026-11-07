@@ -204,11 +204,14 @@ are not recommended for production use yet.
   `CallbackPhase.PRE_STEP` (`"pre_step"`) joins `STEP` and `POST_STEP`: such a
   callback runs at the start of the step, after the `pre_step` handlers, before
   the clock advances and before anything moves. A plugin's `on_step()` takes a
-  `phase` too (`SimPlugin.phase`): set by the class (`default_phase =
+  phase too (`SimPlugin.step_phase`): set by the class (`default_step_phase =
   "post_step"`), by `register_plugin(..., phase=...)` or by the YAML
-  `phase` field, with `step` as before by default. Plugins run after the
+  `phase` field, with `step` as before by default; it is fixed once the plugin
+  is registered (setting it then raises `RuntimeError`). Plugins run after the
   callbacks of their event, with their `frequency`; an unknown phase raises
-  `ValueError`. The time profile adds `callbacks_pre_step`.
+  `ValueError`. The time profile adds `callbacks_pre_step`. `SimPlugin` adds
+  the attribute names `step_phase` and `default_step_phase`; a plugin of your
+  own that already uses either for something else needs to rename it.
 
 - A kinematic joint with an acceleration ramp (`set_joint_motion_profile(...,
   max_accel=...)`) is evaluated each step from its trajectory's phase scalars,

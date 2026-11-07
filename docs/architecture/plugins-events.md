@@ -29,7 +29,7 @@ construct -> on_init -> on_step (zero or more times) -> on_reset -> on_shutdown
 `on_init()` runs after the world and robots have been created. Use it to inspect
 agents, allocate resources, or subscribe to events. `on_step(dt)` runs at every
 simulation step by default, at the `step` event; a `phase` (`pre_step`, `step`
-or `post_step`, set by the class's `default_phase`, by
+or `post_step`, set by the class's `default_step_phase`, by
 `register_plugin(phase=...)` or by the YAML `phase` field) moves it to another
 step event, as for callbacks. A configured `frequency` invokes it less often, on
 the fixed schedule described in [the two-phase step](two-phase-step.md), and
@@ -79,7 +79,7 @@ emitted once per step, each with `dt` and `sim_time`:
 `register_callback(f, frequency, phase)` subscribes `f` to the `phase` event
 (`CallbackPhase.PRE_STEP`, `CallbackPhase.STEP` and `CallbackPhase.POST_STEP`
 are the `pre_step`, `step` and `post_step` events), and a plugin's `on_step`
-subscribes to its own `phase` event (`step` unless set). They form tiers that
+subscribes to its `step_phase` event (`step` unless set). They form tiers that
 keep a fixed order within each event:
 
 1. handlers from `events.on()`, by `priority`, then registration order;

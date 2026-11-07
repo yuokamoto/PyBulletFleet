@@ -1302,7 +1302,7 @@ class MultiRobotSimulationCore:
             phase: When in the step :meth:`SimPlugin.on_step` runs, a
                 :class:`CallbackPhase` or its value (``"pre_step"``, ``"step"``,
                 ``"post_step"``), as for :meth:`register_callback`. ``None``
-                keeps the plugin's own :attr:`SimPlugin.phase` (``"step"``
+                keeps the plugin's own :attr:`SimPlugin.step_phase` (``"step"``
                 unless the class sets another).
 
         Returns:
@@ -1323,7 +1323,7 @@ class MultiRobotSimulationCore:
 
         plugin.frequency = frequency  # validates before the plugin is registered
         if phase is not None:
-            plugin.phase = phase  # validates too
+            plugin.step_phase = phase  # validates too
         self._add_plugin(plugin)
         return plugin
 
@@ -1354,7 +1354,7 @@ class MultiRobotSimulationCore:
     def _add_plugin(self, plugin: "SimPlugin") -> None:
         """Keep ``plugin`` and subscribe its ``on_step()`` to its phase's step event.
 
-        It runs on the event named by :attr:`SimPlugin.phase` (``step`` unless
+        It runs on the event named by :attr:`SimPlugin.step_phase` (``step`` unless
         set otherwise), in the plugin tier, after that event's handlers and
         callbacks, in load order, on the plugin's own schedule
         (:attr:`SimPlugin.frequency`). Its exceptions are logged, not raised.
@@ -1368,8 +1368,9 @@ class MultiRobotSimulationCore:
 
         self._plugins.append(plugin)
         self.events._subscribe(
-            plugin.phase.value, plugin, on_step, tier=_TIER_PLUGIN, gate=plugin._frequency_gate, takes_dt=True
+            plugin.step_phase.value, plugin, on_step, tier=_TIER_PLUGIN, gate=plugin._frequency_gate, takes_dt=True
         )
+        plugin._subscribed = True
 
     def _shutdown_plugins(self) -> None:
         """Call ``on_shutdown()`` on all plugins."""
@@ -1423,11 +1424,21 @@ class MultiRobotSimulationCore:
                 not a :class:`CallbackPhase`.
 
         A callback's exception is not caught (unlike a plugin's): it propagates
-        out of :meth:`step_once` with the clock already advanced, and the rest
-        of the step is skipped -- later callbacks, and for a ``STEP`` callback
-        plugin ``on_step``, the collision check, the ``post_step`` event and
-        ``POST_STEP`` callbacks; for either phase the state recorder's completed
-        step and the DataMonitor refresh.
+        out of :meth:`step_once`, and the rest of the step is skipped. What has
+        happened by then depends on the phase:
+
+        - ``PRE_STEP``: the clock has not advanced (``sim_time`` and
+          ``step_count`` stay at the previous state) and nothing has moved; the
+          later ``pre_step`` callbacks and plugins and the whole update are
+          skipped.
+        - ``STEP``: the clock has advanced and the objects have moved; later
+          callbacks, the step's plugins, the pose flush, the collision check,
+          the ``post_step`` event and the ``POST_STEP`` callbacks are skipped.
+        - ``POST_STEP``: the step is complete except for later callbacks, the
+          ``post_step`` plugins and what follows them.
+
+        In every phase the state recorder's completed step and the DataMonitor
+        refresh are skipped.
 
         A callback is a subscription to the ``phase`` event on :attr:`events`
         (the event of the same name, :attr:`SimEvents.PRE_STEP`,

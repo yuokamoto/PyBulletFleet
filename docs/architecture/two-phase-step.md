@@ -24,14 +24,18 @@ writes** lets the simulator:
 ```
 step_once()
 ├── PHASE 1 — UPDATE         (base-pose writes are buffered)
-│     ├── pre-step events
+│     ├── pre_step event             (before the clock advances; three tiers, in this order)
+│     │     ├── handlers                 (events.on(SimEvents.PRE_STEP, ...), by priority)
+│     │     ├── user callbacks           (register_callback(..., phase="pre_step"), registration order)
+│     │     └── plugin on_step hooks     (plugins with step_phase "pre_step", load order)
+│     ├── clock advances               (sim_time and step_count of the new state)
 │     ├── for manager with a batch controller:  batch_advance(dt)
 │     ├── for obj in sim_objects:  obj.update(dt)
 │     │       └── controller.compute → agent.set_pose(...)   ← buffered
 │     └── step event                   (one event, three tiers, in this order)
 │           ├── handlers                 (events.on(SimEvents.STEP, ...), by priority)
 │           ├── user callbacks           (register_callback(...), registration order)
-│           └── plugin on_step hooks     (load order)
+│           └── plugin on_step hooks     (plugins with step_phase "step", the default; load order)
 │
 ├── PHASE 2 — POSE FLUSH     (tight C-API loop)
 │     └── for obj_id in _pending_pose_ids:
@@ -47,8 +51,10 @@ step_once()
 │             update spatial-hash grid
 │
 ├── check_collisions         (frequency-gated; sees up-to-date AABBs/grid)
-├── post_step event          (handlers by priority, then
-│                             register_callback(..., phase="post_step") callbacks)
+├── post_step event          (three tiers, in this order)
+│     ├── handlers                 (events.on(SimEvents.POST_STEP, ...), by priority)
+│     ├── user callbacks           (register_callback(..., phase="post_step"), registration order)
+│     └── plugin on_step hooks     (plugins with step_phase "post_step", load order)
 └── monitor update
 ```
 

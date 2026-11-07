@@ -627,21 +627,44 @@ class TestPhases:
 
     def test_a_plugin_class_can_choose_its_phase(self, sim):
         class Late(SimPlugin):
-            phase = "post_step"  # pyright: ignore[reportAssignmentType]  # taken as default_phase at run time
+            default_step_phase = "post_step"
 
-        class Early(SimPlugin):
-            default_phase = CallbackPhase.PRE_STEP
+        assert sim.register_plugin(Late).step_phase is CallbackPhase.POST_STEP
+        assert sim.register_plugin(Late, phase="pre_step").step_phase is CallbackPhase.PRE_STEP  # per instance
+        assert sim.register_plugin(_Recorder(sim)).step_phase is CallbackPhase.STEP  # the default
 
-        assert sim.register_plugin(Late).phase is CallbackPhase.POST_STEP
-        assert sim.register_plugin(Early).phase is CallbackPhase.PRE_STEP
-        assert sim.register_plugin(Early, phase="step").phase is CallbackPhase.STEP  # per instance
-        assert sim.register_plugin(_Recorder(sim)).phase is CallbackPhase.STEP  # the default
+    def test_a_plugin_keeps_its_own_attribute_named_phase(self, sim):
+        """``phase`` is a common name for a plugin's own state; only step_phase is the hook's."""
+        log = []
+
+        class Loader(SimPlugin):
+            phase = None  # its own state
+
+            def __init__(self, sim_core):
+                super().__init__(sim_core)
+                self.phase = "loading"
+
+            def on_step(self, dt):
+                log.append(self.phase)
+                self.phase = "idle"
+
+        plugin = sim.register_plugin(Loader)
+        sim.step_once()
+        sim.step_once()
+        assert log == ["loading", "idle"]
+        assert plugin.step_phase is CallbackPhase.STEP
+
+    def test_the_phase_is_fixed_once_registered(self, sim):
+        plugin = sim.register_plugin(_Recorder(sim))
+        with pytest.raises(RuntimeError, match="fixed once the plugin is registered"):
+            plugin.step_phase = "post_step"
+        assert plugin.step_phase is CallbackPhase.STEP
 
     def test_the_yaml_entry_takes_a_phase(self, sim):
         from pybullet_fleet.sim_plugin import create_sim_plugin_from_entry
 
         plugin = create_sim_plugin_from_entry({"class": f"{__name__}._Recorder", "phase": "pre_step", "frequency": 2.0}, sim)
-        assert plugin.phase is CallbackPhase.PRE_STEP
+        assert plugin.step_phase is CallbackPhase.PRE_STEP
         assert plugin.frequency == 2.0
 
     def test_an_unknown_phase_is_refused(self, sim):
@@ -656,7 +679,7 @@ class TestPhases:
         with pytest.raises(ValueError, match="phase must be one of"):
 
             class Bad(SimPlugin):
-                default_phase = "later"
+                default_step_phase = "later"
 
         assert not sim.plugins
 
