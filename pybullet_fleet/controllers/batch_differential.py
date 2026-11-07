@@ -32,7 +32,6 @@ import numpy as np
 from pybullet_fleet._replan import HEADING_TOL, PathRequest
 from pybullet_fleet._motion_planning import heading_toward
 from pybullet_fleet._tpi import (
-    build_tpi,
     build_tpi_from_speed,
     extract_profile,
     trapezoid_distance,
@@ -83,6 +82,7 @@ class BatchDifferentialController(BatchKinematicController):
         self._rot_t_const: np.ndarray = np.zeros((0,), dtype=np.float64)
         self._rot_t_total: np.ndarray = np.zeros((0,), dtype=np.float64)
         self._rot_accel: np.ndarray = np.zeros((0,), dtype=np.float64)
+        #: Braking scalar of each row's rotation (max_angular_decel).
         self._rot_decel: np.ndarray = np.zeros((0,), dtype=np.float64)
         # Un-flipped target for snap-to at rotation end (stores original sign).
         self._rot_snap_quat: np.ndarray = np.zeros((0, 4), dtype=np.float64)
@@ -229,38 +229,29 @@ class BatchDifferentialController(BatchKinematicController):
         path: List[Pose],
         direction: Optional[MovementDirection] = None,
         final_orientation_align: bool = True,
-        **kwargs,
+        preempt: bool = False,
     ) -> bool:
-        """Set a waypoint path.
+        """:meth:`Controller.set_path <pybullet_fleet.controller.Controller.set_path>`
+        with ``direction`` kept as the third positional argument, as this
+        controller has always taken it.
 
         Args:
             agent: A registered agent.
             path: Non-empty list of goal poses.
-            direction: ``FORWARD`` (default), ``BACKWARD``, or ``AUTO``
-                (re-evaluated per waypoint based on heading delta).
-                ``None`` uses the agent's ``controller_params.default_direction``
-                (``FORWARD`` unless configured), as the per-agent controller does.
-            final_orientation_align: If ``True`` (default), rotate to match
-                ``path[-1].orientation`` after reaching the last waypoint.
-
-        Returns:
-            ``False`` when the path is refused (``goal_replacement="reject"``
-            only); ``True`` once it is set or held to start later. See
-            :meth:`KinematicController.set_path <pybullet_fleet.controller.KinematicController.set_path>`.
+            direction: ``FORWARD``, ``BACKWARD`` or ``AUTO``; ``None`` uses the
+                agent's ``controller_params.default_direction``.
+            final_orientation_align: Rotate to match ``path[-1].orientation``
+                after reaching the last waypoint.
+            preempt: Do not hold the path for the current one under
+                ``wait_complete``.
         """
-        if self._sim_core is None:
-            raise RuntimeError("BatchDifferentialController must be attached to a sim_core before set_path.")
-        if not path:
-            raise ValueError("path must be a non-empty list of Poses.")
-        if self._agent_index.get(id(agent)) is None:
-            raise KeyError(f"Agent {agent} is not registered with this batch controller.")
-        if isinstance(direction, str):
-            direction = MovementDirection(direction)
-        return self._replace_path(
-            agent,
-            PathRequest(path=list(path), final_orientation_align=final_orientation_align, direction=direction),
-            preempt=bool(kwargs.get("preempt", False)),
+        return super().set_path(
+            agent, path, final_orientation_align=final_orientation_align, direction=direction, preempt=preempt
         )
+
+    # Only the argument order differs from Controller.set_path: requests need not
+    # pass through it (see controller.overrides_set_path).
+    set_path._only_reorders_arguments = True  # type: ignore[attr-defined]
 
     def _begin_row_path(
         self, idx: int, agent: "Agent", request: PathRequest, now: float, initial_velocity: Optional[np.ndarray]
@@ -360,13 +351,7 @@ class BatchDifferentialController(BatchKinematicController):
         theta0 = math.acos(dot)
         sin_theta0 = math.sin(theta0)
 
-        ang_vel = float(agent.max_angular_vel[0])
-        ang_accel = float(agent.max_angular_accel[0])
-        tpi = build_tpi(p0=0.0, pe=angle, vmax=ang_vel, accel=ang_accel, t0=sim_time)
-        profile = extract_profile(tpi)
-
         self._phase[idx] = _PHASE_ROTATE
-        self._rot_t_start[idx] = sim_time
         self._rot_start_quat[idx] = start_quat
         self._rot_target_quat[idx] = target_for_slerp
         self._rot_snap_quat[idx] = target_quat  # un-flipped for snap
@@ -374,12 +359,7 @@ class BatchDifferentialController(BatchKinematicController):
         self._rot_theta0[idx] = theta0
         self._rot_axis_z[idx] = float(rotation_axis_z(start_quat, target_for_slerp))
         self._rot_sin_theta0[idx] = sin_theta0
-        self._rot_total_angle[idx] = angle
-        self._rot_t_accel[idx] = profile.t_accel
-        self._rot_t_const[idx] = profile.t_const
-        self._rot_t_total[idx] = profile.t_total
-        self._rot_accel[idx] = profile.accel
-        self._rot_decel[idx] = profile.decel
+        self._set_rotation_row(idx, agent, angle, sim_time)
 
     def _begin_forward(self, idx: int, agent: "Agent", target_quat: np.ndarray, sim_time: float, v0: float = 0.0) -> None:
         """Switch to FORWARD phase: snap heading, init distance TPI from speed ``v0`` (0 from rest)."""
@@ -432,14 +412,8 @@ class BatchDifferentialController(BatchKinematicController):
         theta0 = math.acos(dot)
         sin_theta0 = math.sin(theta0)
 
-        ang_vel = float(agent.max_angular_vel[0])
-        ang_accel = float(agent.max_angular_accel[0])
-        tpi = build_tpi(p0=0.0, pe=angle, vmax=ang_vel, accel=ang_accel, t0=sim_time)
-        profile = extract_profile(tpi)
-
         # Reuse the ROTATE state arrays (same slerp logic; different exit action).
         self._phase[idx] = _PHASE_FINAL_ROTATE
-        self._rot_t_start[idx] = sim_time
         self._rot_start_quat[idx] = start_quat
         self._rot_target_quat[idx] = target_for_slerp
         self._rot_snap_quat[idx] = target_quat  # un-flipped for snap
@@ -448,12 +422,7 @@ class BatchDifferentialController(BatchKinematicController):
         self._rot_theta0[idx] = theta0
         self._rot_axis_z[idx] = float(rotation_axis_z(start_quat, target_for_slerp))
         self._rot_sin_theta0[idx] = sin_theta0
-        self._rot_total_angle[idx] = angle
-        self._rot_t_accel[idx] = profile.t_accel
-        self._rot_t_const[idx] = profile.t_const
-        self._rot_t_total[idx] = profile.t_total
-        self._rot_accel[idx] = profile.accel
-        self._rot_decel[idx] = profile.decel
+        self._set_rotation_row(idx, agent, angle, sim_time)
         # Hold position at current location.
         self._fwd_p_start[idx] = np.asarray(agent.get_pose().position, dtype=np.float64)
         self._paths[idx] = []

@@ -10,6 +10,10 @@ Do not rely on these artifacts for production runs.
 The kinematic artifact profile is now `pbf.kinematic.v4` (version 4). Earlier
 development artifacts use older execution or object-construction schemas and
 are not accepted by this loader; record a new artifact before testing restore.
+A version 4 artifact recorded before `ControllerParams.max_angular_decel`
+existed still loads: its rotation braked at `max_angular_accel`, which is what
+an unset `max_angular_decel` means.
+
 Within it, each Agent entry is `kinematic_agent` version 2: every joint entry
 carries its motion limits (`max_velocity`, `max_accel`, `max_decel`) with its
 signed `speed`, `braking` flag and trajectory, and restore applies the limits

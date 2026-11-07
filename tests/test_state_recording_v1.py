@@ -184,6 +184,35 @@ def test_checkpoint_selection_and_rejection(recorded_run: tuple[Path, dict]) -> 
         load_supported_checkpoint(directory, at_or_before=2.5, profile=_profile(directory))
 
 
+def test_artifact_recorded_before_max_angular_decel_restores_symmetric_rotation(
+    recorded_run: tuple[Path, dict],
+) -> None:
+    import pybullet as p
+
+    from pybullet_fleet.replay.state_recording import restore_supported_simulation
+
+    directory, _ = recorded_run
+    manifest_path = directory / "manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    parameters = manifest["construction"]["agents"]["mobile-arm"]["controller"]["parameters"]
+    assert parameters.pop("max_angular_decel") is None
+    manifest_path.write_text(json.dumps(manifest))
+
+    manifest, checkpoint = load_supported_checkpoint(directory, at_or_before=2.5, profile=_profile(directory))
+    sim = restore_supported_simulation(manifest, checkpoint, profile=_profile(directory))
+    try:
+        agent = sim.get_unique_agent_by_name("mobile-arm")
+        assert agent.controller.params.max_angular_decel is None
+        assert list(agent.max_angular_decel) == list(agent.max_angular_accel)
+    finally:
+        if p.isConnected(sim.client):
+            p.disconnect(sim.client)
+
+    manifest["construction"]["agents"]["mobile-arm"]["controller"]["parameters"].pop("goal_replacement")
+    with pytest.raises(ValueError, match="Unsupported controller parameters"):
+        restore_supported_simulation(manifest, checkpoint, profile=_profile(directory))
+
+
 @pytest.mark.parametrize("stream", ["frames.jsonl", "inputs.jsonl"])
 def test_restore_rejects_corrupt_recording_stream(recorded_run: tuple[Path, dict], stream: str) -> None:
     directory, _ = recorded_run
