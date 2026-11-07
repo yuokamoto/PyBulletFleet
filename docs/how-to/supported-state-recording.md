@@ -44,7 +44,7 @@ trajectory-free `braking` behavior, see {doc}`../examples/arm-pick-drop`.
 
 Here “unobserved mutator” means a direct state-changing call whose **input is
 not written to the effective-input journal**. Examples include calling
-`agent.set_path(...)`, `agent.set_joint_target_by_name(...)`,
+`agent.set_path(...)`, `agent.set_joint_target(...)`,
 `agent.set_joint_motion_profile(...)`, `obj.set_pose(...)`, or
 `agent.attach_object(...)` directly instead of using an instrumented Fleet
 API command where one exists. A supported result of such a call may still
