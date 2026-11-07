@@ -105,7 +105,7 @@ roadmap
 
 ## Performance at a Glance
 
-> Single test environment (AMD Ryzen AI 7 PRO 350, 29 GB RAM, Linux WSL2). Results will vary by hardware.
+> Single test environment (AMD Ryzen AI 7 PRO 350, 27 GB RAM, Linux WSL2). Results will vary by hardware.
 
 | Agents | Real-Time Factor | Step Time |
 |--------|-----------------|-----------|

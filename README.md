@@ -130,7 +130,7 @@ See [Tutorial 6 — Robot Models](https://pybulletfleet.readthedocs.io/en/latest
 ## Performance
 
 <!-- sync with docs/benchmarking/results.md -->
-> Results from a single test environment (AMD Ryzen AI 7 PRO 350, 29 GB RAM, Linux WSL2). Your numbers will vary depending on hardware.
+> Results from a single test environment (AMD Ryzen AI 7 PRO 350, 27 GB RAM, Linux WSL2). Your numbers will vary depending on hardware.
 
 | Agents | Real-Time Factor | Step Time |
 |--------|-----------------|-----------|
@@ -139,7 +139,7 @@ See [Tutorial 6 — Robot Models](https://pybulletfleet.readthedocs.io/en/latest
 | 1000   | 17.8× | 5.6 ms |
 | 2000   | 6.1× | 16.3 ms |
 
-Kinematics mode (physics OFF), headless, `simple_cube` robots, batch controller + fleet command interface. Measured on 2026-11-07. See [Benchmark Results](benchmark/README.md#benchmark-results) for full data, component breakdown, and methodology.
+Kinematics mode (physics OFF), headless, `simple_cube` robots, batch controller + fleet command interface. Measured on 2026-11-07. See [Benchmark Results](docs/benchmarking/results.md) for full data, component breakdown, and methodology.
 
 For ROS 2, use the fleet-level interface as the scalable default. Manager-scoped
 endpoints support operational ownership and selective state subscriptions; they

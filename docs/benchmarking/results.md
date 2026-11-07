@@ -11,8 +11,8 @@ see [Benchmark Suite](benchmark-suite) and [Profiling Guide](profiling-guide).
 |------|-------|
 | OS | Ubuntu (Linux 6.6 microsoft-standard-WSL2) |
 | CPU | AMD Ryzen AI 7 PRO 350 w/ Radeon 860M (8 cores / 16 logical) |
-| RAM | 29 GB |
-| Python | 3.12.3 |
+| RAM | 27 GB (as reported inside WSL2) |
+| Python | 3.10.12 |
 | Conditions | Headless (`gui=false`), `physics=false`, `timestep=0.1`, 3 repetitions |
 
 ---
@@ -59,7 +59,7 @@ must not be read as the elapsed time of a complete benchmark worker.
 
 Measured 2026-08-02 with Docker, headless `simple_cube` robots, physics off,
 `timestep=0.1`, `publish_rate=5 Hz`, and `target_rtf=0`; the `fleet` 1000-row
-was refreshed on 2026-11-07. These are diagnostic single-run values and are
+and the 1 Hz `hybrid` row were refreshed on 2026-11-07. These are diagnostic single-run values and are
 not comparable to the core simulation table above.
 
 | Mode | Robots | Command result | Max RTF |
@@ -68,7 +68,7 @@ not comparable to the core simulation table above.
 | `per_robot` | 1000 | publish 0.217 s; 0/1000 moved in 60 s | 0.64× |
 | `per_robot` | 100 | publish 0.056 s; all moved in 15.033 s | not measured |
 | `hybrid` | 1000 | fleet ack 7.998 s; per-robot publish 0.220 s | 0.30× |
-| `hybrid` | 1000 | fleet ack 1.862 s; all moved in 0.412 s (1 Hz, target RTF 1.0) | target-rate check |
+| `hybrid` | 1000 | fleet ack 1.728 s; all moved in 0.297 s (1 Hz, target RTF 1.0) | target-rate check |
 
 The 1000-robot per-robot result shows why topic publication latency must not be
 treated as end-to-end command latency. See `ros2_bridge/PERFORMANCE.md` for

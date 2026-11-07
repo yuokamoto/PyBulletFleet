@@ -184,6 +184,18 @@ are not recommended for production use yet.
 
 ### Changed
 
+- Performance, measured against v0.8.0 on the same machine and Python:
+  the step time of the core benchmark is 24-42% shorter from 100 to 2000
+  agents (1000 agents: 9.7 ms to 5.6 ms, real-time factor 10.3x to 17.8x),
+  spawning is 20-30% faster, and memory per agent is about 20% higher.
+  Handing every mobile agent a path takes about twice as long (1000 agents:
+  about 25 ms to about 40 ms), mostly from tracking each command and the
+  garbage collection it triggers; the step time of the control path is not
+  slower (#150). The ROS 2 bridge reaches a 13.45x maximum real-time factor
+  with 1000 robots on the fleet interface (10.98x before). The tables in
+  `docs/benchmarking/results.md`, the README and
+  `ros2_bridge/PERFORMANCE.md` are refreshed.
+
 - A mesh collision shape PyBullet cannot build (a Gazebo `.dae`, say) gives a
   visual-only body as before, and the warning now says that later spawns with
   the same shape on the same client reuse that result without another attempt
