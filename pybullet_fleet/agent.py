@@ -6,11 +6,14 @@ Supports both Mesh and URDF loading.
 """
 
 import copy
+import functools
+import inspect
 import logging
 import math
+import warnings
 import weakref
 from dataclasses import dataclass, fields, replace
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Sequence, Tuple, Type, TypeVar, Union
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Sequence, Tuple, Type, TypeVar, Union, cast
 
 import numpy as np
 import pybullet as p
@@ -22,7 +25,8 @@ from .types import _normal_2d_warning_already_given, _spawning_from_warned_param
 from .tools import normalize_vector_param  # noqa: F401  (re-exported for legacy callers)
 from pybullet_fleet._tpi import trapezoid_point, try_build_tpi
 from pybullet_fleet.joint import KinematicJoint
-from pybullet_fleet.tools import resolve_joint_index, resolve_link_index
+from pybullet_fleet.tools import resolve_link_index
+from pybullet_fleet.tools import resolve_joint_index  # noqa: F401  (re-exported for legacy callers)
 from .logging_utils import get_lazy_logger
 from pybullet_fleet.events import SimEvents
 from pybullet_fleet._defaults import AGENT as _AGT_D, IK as _IK_D
@@ -41,6 +45,49 @@ lazy_logger = get_lazy_logger(__name__)
 
 # Generic plugin type so get_plugin() returns the concrete subclass type.
 _PluginT = TypeVar("_PluginT", bound=AgentPlugin)
+
+_JointMethod = TypeVar("_JointMethod", bound=Callable[..., Any])
+
+
+def _warn_deprecated(message: str, stacklevel: int) -> None:
+    """A ``FutureWarning`` for an API removed in 0.10.0, shown by default wherever the call is."""
+    warnings.warn(message + " It will be removed in 0.10.0.", FutureWarning, stacklevel=stacklevel + 1)
+
+
+def _also_takes_joint_index(method: _JointMethod) -> _JointMethod:
+    """Let a single-joint method still take its first argument by the old keyword ``joint_index``.
+
+    The parameter became ``joint`` when it started to accept a name as well;
+    ``method(joint_index=...)`` keeps working, as an alias of ``joint=``, with a
+    ``FutureWarning``: the alias goes in 0.10.0, and this decorator with it. The
+    alias is left out of the method's signature on purpose, so that
+    ``inspect.signature`` and type checkers steer new code to ``joint``.
+    """
+    signature = inspect.signature(method)
+    if "joint" not in signature.parameters:
+        raise TypeError(f"{method.__qualname__}() has no parameter named 'joint'")
+
+    @functools.wraps(method)
+    def wrapper(*args: Any, **kwargs: Any) -> Any:
+        if "joint_index" in kwargs:
+            joint = kwargs.pop("joint_index")
+            # Bound against the real signature, so the check holds however the
+            # method is called (bound, or unbound with self passed explicitly).
+            try:
+                already_given = "joint" in signature.bind_partial(*args, **kwargs).arguments
+            except TypeError:
+                already_given = False  # let the call itself report the mistake
+            if already_given:
+                raise TypeError(f"{method.__name__}() got multiple values for argument 'joint'")
+            _warn_deprecated(
+                f"The joint_index= keyword of Agent.{method.__name__}() is deprecated; use joint=, "
+                "which takes a joint index or name.",
+                stacklevel=2,
+            )
+            kwargs["joint"] = joint
+        return method(*args, **kwargs)
+
+    return cast(_JointMethod, wrapper)
 
 
 @dataclass
@@ -1876,19 +1923,7 @@ class Agent(SimObject):
             ValueError: If any value given is not positive, or if ``max_decel``
                 is given for a joint with no acceleration.
         """
-        if isinstance(joint, int):
-            # Checked here rather than left to the first use: a negative index
-            # would be stored under a key _update_kinematic_joints() never
-            # visits, so the profile would be silently ignored, and an
-            # out-of-range one would fail much later inside
-            # _urdf_joint_velocity().
-            if not 0 <= joint < len(self.joint_info):
-                raise IndexError(
-                    f"joint index {joint} is out of range for body {self.body_id} " f"({len(self.joint_info)} joints)"
-                )
-            index = joint
-        else:
-            index = self._joint_index_by_name(joint)
+        index = self._joint_index_or_raise(joint)
         state = self._joint(index)
         validate_joint_motion_profile(max_velocity, max_accel, max_decel, current_accel=state.max_accel)
 
@@ -1914,6 +1949,26 @@ class Agent(SimObject):
             if info[1].decode("utf-8") == name:
                 return index
         raise KeyError(f"no joint named {name!r} on body {self.body_id}")
+
+    def _joint_index_or_raise(self, joint: Union[int, str]) -> int:
+        """The index of a joint named by index or name; raises for one this body does not have.
+
+        Used by the motion-profile APIs (:meth:`set_joint_motion_profile`,
+        :meth:`is_joint_moving`), which raise rather than warn: a profile set
+        on a joint that does not exist would be silently ignored, and
+        ``False`` from ``is_joint_moving()`` would read as "stopped". The
+        target and state APIs warn and degrade instead (see
+        :meth:`_resolve_joint`).
+        """
+        if isinstance(joint, str):
+            return self._joint_index_by_name(joint)
+        # Checked here rather than left to the first use: a negative index
+        # would be stored under a key _update_kinematic_joints() never visits,
+        # and an out-of-range one would fail much later inside
+        # _urdf_joint_velocity().
+        if not 0 <= joint < len(self.joint_info):
+            raise IndexError(f"joint index {joint} is out of range for body {self.body_id} ({len(self.joint_info)} joints)")
+        return joint
 
     def _urdf_joint_velocity(self, joint_index: int) -> float:
         """The joint's speed cap from the URDF, or the fallback for its type."""
@@ -1994,8 +2049,15 @@ class Agent(SimObject):
         the next step. A joint that is only carrying speed is as much in
         motion as one with a plan, which is why this asks about the motion
         rather than about the trajectory.
+
+        Args:
+            joint: Joint index, or joint name as spelled in the URDF.
+
+        Raises:
+            KeyError: If *joint* names a joint this body does not have.
+            IndexError: If *joint* is an index this body does not have.
         """
-        index = joint if isinstance(joint, int) else self._joint_index_by_name(joint)
+        index = self._joint_index_or_raise(joint)
         state = self._joints.get(index)
         return state is not None and state.is_moving
 
@@ -2358,7 +2420,8 @@ class Agent(SimObject):
         """Get number of joints (0 for mesh robots)."""
         return len(self.joint_info)
 
-    def get_joint_state(self, joint_index: int) -> Tuple[float, float]:
+    @_also_takes_joint_index
+    def get_joint_state(self, joint: Union[int, str]) -> Tuple[float, float]:
         """
         Get joint state (position and velocity).
 
@@ -2366,20 +2429,41 @@ class Agent(SimObject):
         velocity=0.0, avoiding a PyBullet C call.  For physics robots
         the value is read from ``p.getJointState()``.
 
+        Works for a fixed joint as for any other.
+
         Args:
-            joint_index: Joint index (0-based)
+            joint: Joint index (0-based), or joint name as spelled in the URDF.
+                The old keyword ``joint_index=`` is still accepted.
 
         Returns:
-            (position, velocity) tuple
+            (position, velocity) tuple; ``(0.0, 0.0)`` with a warning for a
+            non-URDF body or an unknown joint name.
+
+        Raises:
+            pybullet.error: If *joint* is an index this body does not have.
 
         Example::
 
             pos, vel = robot.get_joint_state(0)
+            pos, vel = robot.get_joint_state("elbow_to_wrist")
         """
         if not self.is_urdf_robot():
             self._log.warning("get_joint_state() only works for URDF robots")
             return (0.0, 0.0)
 
+        if isinstance(joint, str):
+            resolved = self._resolve_joint(joint)
+            if resolved is None:
+                return (0.0, 0.0)
+            joint_index = resolved
+        else:
+            # An index is not range-checked: PyBullet raises for one the body
+            # does not have, as it always has here.
+            joint_index = joint
+        return self._joint_state(joint_index)
+
+    def _joint_state(self, joint_index: int) -> Tuple[float, float]:
+        """(position, velocity) of a joint already resolved to an index."""
         if self._use_kinematic_joints and joint_index in self._joints:
             return (self._joints[joint_index].position, 0.0)
 
@@ -2390,12 +2474,15 @@ class Agent(SimObject):
         """
         Get (position, velocity) for a single joint by name.
         Returns (position, velocity) or (0.0, 0.0) if not found.
+
+        Deprecated, removed in 0.10.0: use :meth:`get_joint_state`, which also
+        takes a name.
         """
-        idx = resolve_joint_index(self.body_id, joint_name)
-        if idx == -1:
-            self._log.warning(f"Joint name '{joint_name}' not found.")
-            return (0.0, 0.0)
-        return self.get_joint_state(idx)
+        _warn_deprecated(
+            "Agent.get_joint_state_by_name() is deprecated; use get_joint_state(), which takes a name too.",
+            stacklevel=2,
+        )
+        return self.get_joint_state(joint_name)
 
     def capture_kinematic_joint_execution(self) -> list[dict]:
         """Capture every joint's position, command, motion limits and execution.
@@ -2446,7 +2533,7 @@ class Agent(SimObject):
         joint_names = [self.joint_info[i][1].decode("utf-8") for i in range(self.get_num_joints())]
         result = {}
         for name in joint_names:
-            result[name] = self.get_joint_state_by_name(name)
+            result[name] = self.get_joint_state(name)
         return result
 
     def get_joints_state_by_name(self, joint_names: list) -> dict:
@@ -2456,34 +2543,42 @@ class Agent(SimObject):
         """
         result = {}
         for name in joint_names:
-            idx = resolve_joint_index(self.body_id, name)
-            if idx == -1:
-                self._log.warning(f"Joint name '{name}' not found.")
+            idx = self._resolve_joint(name)
+            if idx is None:
                 continue
-            result[name] = self.get_joint_state(idx)
+            result[name] = self._joint_state(idx)
         return result
 
-    def set_joint_target(self, joint_index: int, target_position: float, max_force: float = 500.0):
+    @_also_takes_joint_index
+    def set_joint_target(self, joint: Union[int, str], target_position: float, max_force: float = 500.0):
         """
         Set target position for a joint (for URDF robots only).
 
+        An unknown joint name or an index out of range is ignored with a
+        warning; a fixed joint is ignored silently.
+
         Args:
-            joint_index: Joint index (0-based)
+            joint: Joint index (0-based), or joint name as spelled in the URDF.
+                The old keyword ``joint_index=`` is still accepted.
             target_position: Target position (radians for revolute, meters for prismatic)
             max_force: Maximum force to apply
 
         Example::
 
             robot.set_joint_target(0, 1.57)  # Move first joint to 90 degrees
+            robot.set_joint_target("base_to_shoulder", 1.57)
         """
         if not self.is_urdf_robot():
             self._log.warning("set_joint_target() only works for URDF robots")
             return
 
-        if joint_index >= len(self.joint_info):
-            self._log.warning(f"joint_index {joint_index} out of range (max: {len(self.joint_info)-1})")
+        joint_index = self._resolve_joint(joint)
+        if joint_index is None:
             return
+        self._set_joint_target_index(joint_index, target_position, max_force)
 
+    def _set_joint_target_index(self, joint_index: int, target_position: float, max_force: float) -> None:
+        """:meth:`set_joint_target` for a joint already resolved to an index."""
         # Skip fixed joints — they cannot be driven
         if self.joint_info[joint_index][2] == p.JOINT_FIXED:
             return
@@ -2579,11 +2674,14 @@ class Agent(SimObject):
             self._after_joints_placed()
         return ok
 
-    def _joint_index_for_placement(self, joint: Union[int, str]) -> Optional[int]:
-        """The index of a movable joint named by index or name, or None (logged) for any other."""
+    def _resolve_joint(self, joint: Union[int, str]) -> Optional[int]:
+        """The index of a joint named by index or name, or None (logged) for one this body does not have."""
         if isinstance(joint, str):
-            index = resolve_joint_index(self.body_id, joint)
-            if index == -1:
+            # Looked up in this body's own joint_info, which was read on its
+            # own client, so no PyBullet query is needed.
+            try:
+                index = self._joint_index_by_name(joint)
+            except KeyError:
                 self._log.warning(f"Joint name '{joint}' not found.")
                 return None
         else:
@@ -2591,6 +2689,13 @@ class Agent(SimObject):
             if not 0 <= index < len(self.joint_info):
                 self._log.warning(f"joint_index {index} out of range (max: {len(self.joint_info)-1})")
                 return None
+        return index
+
+    def _joint_index_for_placement(self, joint: Union[int, str]) -> Optional[int]:
+        """The index of a movable joint named by index or name, or None (logged) for any other."""
+        index = self._resolve_joint(joint)
+        if index is None:
+            return None
         if self.joint_info[index][2] == p.JOINT_FIXED:
             self._log.warning(f"Joint {joint!r} is fixed and cannot be placed.")
             return None
@@ -2640,12 +2745,15 @@ class Agent(SimObject):
     def set_joint_target_by_name(self, joint_name: str, target_position: float, max_force: float = 500.0):
         """
         Set target position for a joint by joint name.
+
+        Deprecated, removed in 0.10.0: use :meth:`set_joint_target`, which also
+        takes a name.
         """
-        joint_index = resolve_joint_index(self.body_id, joint_name)
-        if joint_index == -1:
-            self._log.warning(f"Joint name '{joint_name}' not found.")
-            return
-        self.set_joint_target(joint_index, target_position, max_force)
+        _warn_deprecated(
+            "Agent.set_joint_target_by_name() is deprecated; use set_joint_target(), which takes a name too.",
+            stacklevel=2,
+        )
+        self.set_joint_target(joint_name, target_position, max_force)
 
     def set_all_joints_targets(self, target_positions: List[float], max_force: float = 500.0):
         """
@@ -2675,11 +2783,10 @@ class Agent(SimObject):
         Set multiple joint targets by dict {joint_name: target_position} (partial update allowed).
         """
         for joint_name, target in joint_targets.items():
-            joint_index = resolve_joint_index(self.body_id, joint_name)
-            if joint_index == -1:
-                self._log.warning(f"Joint name '{joint_name}' not found.")
+            joint_index = self._resolve_joint(joint_name)
+            if joint_index is None:
                 continue
-            self.set_joint_target(joint_index, target, max_force)
+            self._set_joint_target_index(joint_index, target, max_force)
 
     def set_joints_targets(self, targets: Union[list, dict], max_force: float = 500.0):
         """
@@ -2702,27 +2809,39 @@ class Agent(SimObject):
         else:
             self.set_all_joints_targets(targets, max_force)
 
+    @_also_takes_joint_index
     def is_joint_at_target(
-        self, joint_index: int, target: float, tolerance: Optional[Union[float, list, dict]] = None
+        self, joint: Union[int, str], target: float, tolerance: Optional[Union[float, list, dict]] = None
     ) -> bool:
         """
-        Check if a single joint (by index) is within tolerance of the target position.
+        Check if a single joint is within tolerance of the target position.
 
         Args:
-            joint_index: Joint index (0-based).
+            joint: Joint index (0-based), or joint name as spelled in the URDF.
+                The old keyword ``joint_index=`` is still accepted.
             target: Target position (radians for revolute, metres for prismatic).
             tolerance: Position tolerance — ``float``, ``list``, ``dict``,
                 or ``None`` (→ ``self.joint_tolerance``).  Resolved via
-                ``_resolve_joint_tolerance(tolerance, joint_index)``.
+                ``_resolve_joint_tolerance()`` using the joint's index.
+
+        Returns:
+            True if the joint is within tolerance; False, with a warning, for
+            a non-URDF body, an unknown joint name or an index out of range.
         """
         if not self.is_urdf_robot():
             self._log.warning("is_joint_at_target() only works for URDF robots")
             return False
-        if joint_index < 0 or joint_index >= len(self.joint_info):
-            self._log.warning(f"joint_index {joint_index} out of range (max: {len(self.joint_info)-1})")
+        joint_index = self._resolve_joint(joint)
+        if joint_index is None:
             return False
+        return self._is_joint_index_at_target(joint_index, target, tolerance)
+
+    def _is_joint_index_at_target(
+        self, joint_index: int, target: float, tolerance: Optional[Union[float, list, dict]]
+    ) -> bool:
+        """:meth:`is_joint_at_target` for a joint already resolved to an index."""
         tol = self._resolve_joint_tolerance(tolerance, joint_index)
-        pos, _ = self.get_joint_state(joint_index)
+        pos, _ = self._joint_state(joint_index)
         return abs(pos - target) <= tol
 
     def is_joint_at_target_by_name(
@@ -2737,11 +2856,15 @@ class Agent(SimObject):
             tolerance: Position tolerance — ``float``, ``list``, ``dict``,
                 or ``None`` (→ ``self.joint_tolerance``).  Resolved via
                 ``_resolve_joint_tolerance()`` using the joint's index.
+
+        Deprecated, removed in 0.10.0: use :meth:`is_joint_at_target`, which
+        also takes a name.
         """
-        joint_index = resolve_joint_index(self.body_id, joint_name)
-        if joint_index == -1:
-            return False
-        return self.is_joint_at_target(joint_index, target, tolerance)
+        _warn_deprecated(
+            "Agent.is_joint_at_target_by_name() is deprecated; use is_joint_at_target(), which takes a name too.",
+            stacklevel=2,
+        )
+        return self.is_joint_at_target(joint_name, target, tolerance)
 
     @property
     def last_joint_targets(self) -> Dict[int, float]:
@@ -2785,7 +2908,8 @@ class Agent(SimObject):
             return True  # Nothing to check → vacuously true
 
         for idx, target in targets.items():
-            if not self.is_joint_at_target(idx, target, tolerance):
+            joint_index = self._resolve_joint(idx)
+            if joint_index is None or not self._is_joint_index_at_target(joint_index, target, tolerance):
                 return False
         return True
 
@@ -2811,10 +2935,8 @@ class Agent(SimObject):
             True if all joints are within tolerance, False otherwise.
         """
         for joint_name, target in joint_targets.items():
-            joint_index = resolve_joint_index(self.body_id, joint_name)
-            if joint_index == -1:
-                return False
-            if not self.is_joint_at_target(joint_index, target, tolerance):
+            joint_index = self._resolve_joint(joint_name)
+            if joint_index is None or not self._is_joint_index_at_target(joint_index, target, tolerance):
                 return False
         return True
 
@@ -2882,7 +3004,7 @@ class Agent(SimObject):
             Link index (int). Returns -1 if robot has no joints.
         """
         if end_effector_link is not None:
-            return resolve_link_index(self.body_id, end_effector_link)
+            return resolve_link_index(self.body_id, end_effector_link, physics_client_id=self._pid)
         if not self.joint_info:
             self._log.warning("_get_end_effector_link_index: robot has no joints")
             return -1
@@ -2955,10 +3077,9 @@ class Agent(SimObject):
             # Resolve names to a set of joint indices for O(1) lookup.
             ik_free_indices: Optional[set] = set()
             for name in ik_names:
-                idx = resolve_joint_index(self.body_id, name)
-                if idx >= 0:
-                    ik_free_indices.add(idx)
-                else:
+                try:
+                    ik_free_indices.add(self._joint_index_by_name(name))
+                except KeyError:
                     self._log.warning("_solve_ik: ik_joint_names entry '%s' not found", name)
         else:
             ik_free_indices = None  # auto-detect mode
