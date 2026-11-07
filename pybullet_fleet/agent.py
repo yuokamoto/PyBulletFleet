@@ -9,7 +9,7 @@ import copy
 import logging
 import math
 import weakref
-from dataclasses import dataclass, fields
+from dataclasses import dataclass, fields, replace
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Sequence, Tuple, Type, TypeVar, Union
 
 import numpy as np
@@ -28,10 +28,10 @@ from pybullet_fleet.events import SimEvents
 from pybullet_fleet._defaults import AGENT as _AGT_D, IK as _IK_D
 from pybullet_fleet.config_utils import forward_spawn_params as _forward_spawn_params
 from pybullet_fleet.agent_plugin import AgentPlugin
+from pybullet_fleet.path_request import PathRequest, PathRequestState
 
 if TYPE_CHECKING:
     from pybullet_fleet._replan import PathRejection
-    from pybullet_fleet.path_request import PathRequest, PathRequestState
     from pybullet_fleet.controller import Controller
     from pybullet_fleet.controller_params import ControllerParams
 
@@ -1483,7 +1483,6 @@ class Agent(SimObject):
             ``False`` for a fixed-base robot, an empty path, or a path refused
             under ``goal_replacement="reject"``.
         """
-        from pybullet_fleet.path_request import PathRequest
 
         return self.request_path(
             PathRequest(
@@ -1517,7 +1516,6 @@ class Agent(SimObject):
             ``False`` for a fixed-base robot, an empty path, or a path refused
             under ``goal_replacement="reject"``.
         """
-        from dataclasses import replace
 
         path = list(request.path)
         permanent = self._permanent_path_rejection(path)
@@ -1569,7 +1567,6 @@ class Agent(SimObject):
         # previous path's visualization already cleared.
         resolved = request if len(final_path) == len(path) else replace(request, path=final_path)
         from pybullet_fleet.controller import overrides_set_path, send_request
-        from pybullet_fleet.path_request import PathRequestState
 
         if self._batch_controller is not None:
             # synchronized_request_path() sets _is_moving itself, under the
@@ -1611,7 +1608,6 @@ class Agent(SimObject):
         request a ``set_path`` override did not pass on (it sent one of its
         own instead).
         """
-        from pybullet_fleet.path_request import PathRequestState
 
         if request._token in self._untracked_requests:
             return PathRequestState.UNKNOWN

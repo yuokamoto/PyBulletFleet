@@ -20,12 +20,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import TYPE_CHECKING, List, Optional, Sequence
+from typing import List, Optional, Sequence
 
+from pybullet_fleet.geometry import Pose
 from pybullet_fleet.types import MovementDirection
-
-if TYPE_CHECKING:
-    from pybullet_fleet.geometry import Pose
 
 
 class _RequestToken:
@@ -87,8 +85,6 @@ class PathRequest:
     @classmethod
     def from_record(cls, record: dict) -> "PathRequest":
         """Inverse of :meth:`to_record`."""
-        from pybullet_fleet.geometry import Pose
-
         direction = record["direction"]
         return cls(
             path=[Pose(position=list(p["position"]), orientation=list(p["orientation"])) for p in record["path"]],

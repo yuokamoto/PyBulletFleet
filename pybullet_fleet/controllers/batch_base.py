@@ -36,7 +36,7 @@ import numpy as np
 from pybullet_fleet._replacement import GoalReplacementPolicy, _checked_braking_request
 import pybullet_fleet._replan as _replan
 from pybullet_fleet.path_request import PathRequest, PathRequestState, request_state
-from pybullet_fleet.controller import Controller, _log_dropped, _set_braking_path
+from pybullet_fleet.controller import Controller, _log_dropped, _set_braking_path, send_request
 from pybullet_fleet.types import GoalReplacement, MovementDirection
 from pybullet_fleet.geometry import quat_angle_between, quat_slerp_batch
 from pybullet_fleet.logging_utils import get_lazy_logger
@@ -288,8 +288,6 @@ class BatchKinematicController(GoalReplacementPolicy, Controller):
         See :meth:`synchronized_set_path` for why ``_is_moving`` is set here,
         and :func:`~pybullet_fleet.controller.send_request` for ``internal``.
         """
-        from pybullet_fleet.controller import send_request
-
         with self._state_lock:
             # Through an overridden set_path, if the subclass has one.
             accepted = send_request(self, agent, request, preempt=preempt, internal=internal)
