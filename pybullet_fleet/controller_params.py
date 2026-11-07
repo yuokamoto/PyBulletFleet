@@ -29,6 +29,8 @@ from dataclasses import asdict, dataclass, fields
 from enum import Enum
 from typing import Any, Dict, List, Optional, Type, TypeVar
 
+import math
+
 import numpy as np
 
 from pybullet_fleet._defaults import CONTROLLER as _CTRL_D
@@ -76,7 +78,10 @@ class ControllerParams:
             ``None`` → mirror ``max_angular_accel`` (symmetric trapezoid),
             which is the behaviour of every release before this field
             existed. Set it for vehicles whose turns brake at a different
-            rate than they start.
+            rate than they start. A scalar must be a finite number above
+            zero; a per-axis value needs finite components of zero or more
+            and a yaw (``z``) component above zero, since every turn brakes
+            at it. Anything else raises ``ValueError`` when it is set.
         cmd_vel_timeout: Watchdog timeout in seconds; ``0.0`` or ``None``
             disables the watchdog. ``None`` → framework default (``0.0``).
         navigation_2d: When ``True``, pose-control trajectories preserve the
@@ -123,6 +128,8 @@ class ControllerParams:
             value = _parse_enum(MovementDirection, value, name)
         elif name == "goal_replacement" and value is not None:
             value = parse_goal_replacement(value)
+        elif name == "max_angular_decel" and value is not None:
+            _check_angular_decel(value)
         super().__setattr__(name, value)
 
     def as_config(self) -> Dict[str, Any]:
@@ -233,6 +240,29 @@ class ControllerParams:
         """Yaw-axis scalar ``max_angular_decel`` (for differential drive)."""
         d = self._eff_angular_decel()
         return float(d) if is_scalar(d) else float(as_axes(d)[2])  # type: ignore[arg-type]
+
+
+def _check_angular_decel(value: Any) -> None:
+    """Refuse a ``max_angular_decel`` no turn can brake at.
+
+    Checked when the field is set, so a bad value fails there instead of at
+    the first rotation (or, in the batched path, as a turn that snaps to its
+    target in one step).
+    """
+    if isinstance(value, bool):
+        raise ValueError(f"max_angular_decel must be a finite number > 0, got {value!r}")
+    if is_scalar(value):
+        if not math.isfinite(float(value)) or float(value) <= 0.0:
+            raise ValueError(f"max_angular_decel must be a finite number > 0, got {value!r}")
+        return
+    try:
+        axes = as_axes(value)
+    except (TypeError, ValueError):
+        raise ValueError(f"max_angular_decel must be a number or [x, y, z], got {value!r}") from None
+    if not np.all(np.isfinite(axes)) or np.any(axes < 0.0) or axes[2] <= 0.0:
+        raise ValueError(
+            "max_angular_decel [x, y, z] needs finite components >= 0 and a yaw (z) " f"component > 0, got {value!r}"
+        )
 
 
 _EnumT = TypeVar("_EnumT", bound=Enum)

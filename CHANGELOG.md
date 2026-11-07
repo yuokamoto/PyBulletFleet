@@ -18,7 +18,9 @@ are not recommended for production use yet.
   rotation can stop at a different rate than it starts, as `max_linear_decel`
   already allows for translation. Same scalar or per-axis form as
   `max_angular_accel`; unset mirrors it, so every existing configuration keeps
-  the same symmetric rotation profile, bit for bit. Every rotation honours it:
+  the same symmetric rotation profile, bit for bit. A zero, negative or
+  non-finite value (or a per-axis value whose yaw component is not above
+  zero) raises `ValueError` when it is set, not at the first turn. Every rotation honours it:
   per-agent and batched, omnidirectional final rotation and differential-drive
   turns, with `Agent.max_angular_decel` as the read-only view. The batched
   controllers carry the braking scalar per row, and their closed form agrees

@@ -143,7 +143,7 @@ agent.controller_params.max_angular_decel = 1.0
 | `max_linear_accel` | Scalar acceleration cap, or `[ax, ay, az]` per-axis cap in the body frame, used to construct translation trajectories. Differential drive uses `ax`. |
 | `max_linear_decel` | Braking cap, same form and frame as `max_linear_accel`. Unset mirrors `max_linear_accel`, which is the symmetric trapezoid every configuration had before this field existed. |
 | `max_angular_accel` | Scalar acceleration cap, or `[αx, αy, αz]` per-axis cap, used to construct rotation trajectories. Differential drive uses `αz`. |
-| `max_angular_decel` | Braking cap for rotation, same form as `max_angular_accel`. Unset mirrors `max_angular_accel`, which is the symmetric trapezoid every configuration had before this field existed. |
+| `max_angular_decel` | Braking cap for rotation, same form as `max_angular_accel`. Unset mirrors `max_angular_accel`, which is the symmetric trapezoid every configuration had before this field existed. Must be above zero (per-axis: components of zero or more, yaw above zero); anything else raises `ValueError` when set. |
 | `cmd_vel_timeout` | Velocity-command watchdog in seconds; `0.0` disables it. |
 | `navigation_2d` | `True` preserves current Z for pose trajectories. `None` and `False` follow goal Z. |
 | `default_direction` | Default `set_path()` direction for differential drive. |

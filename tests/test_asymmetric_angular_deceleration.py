@@ -141,8 +141,30 @@ class TestControllerParamsAngularDecel:
         from pybullet_fleet.replay.kinematic_profile import _validate_controller_parameters
 
         _validate_controller_parameters(ControllerParams(max_angular_decel=0.5).as_config())
+        # ControllerParams refuses -1.0 itself, so write it into the record directly.
+        record = ControllerParams().as_config()
+        record["max_angular_decel"] = -1.0
         with pytest.raises(ValueError, match="max_angular_decel"):
-            _validate_controller_parameters(ControllerParams(max_angular_decel=-1.0).as_config())
+            _validate_controller_parameters(record)
+
+    @pytest.mark.parametrize(
+        "value",
+        [0.0, -1.0, math.inf, math.nan, True, [1.0, 1.0, 0.0], [-1.0, 1.0, 2.0], [1.0, 2.0], "fast"],
+        ids=["zero", "negative", "inf", "nan", "bool", "zero_yaw", "negative_x", "two_axes", "string"],
+    )
+    def test_invalid_value_is_refused_when_set(self, value):
+        with pytest.raises(ValueError, match="max_angular_decel"):
+            ControllerParams(max_angular_decel=value)
+        params = ControllerParams(max_angular_decel=0.5)
+        with pytest.raises(ValueError, match="max_angular_decel"):
+            params.max_angular_decel = value
+        assert params.max_angular_decel == 0.5
+
+    @pytest.mark.parametrize("value", [None, 2, 0.5, np.float32(0.5), [0.0, 0.0, 2.0], (1.0, 1.0, 4.0)])
+    def test_valid_value_is_accepted(self, value):
+        params = ControllerParams.from_dict({"max_angular_decel": value})
+        params.max_angular_decel = value
+        assert params.max_angular_decel is value
 
 
 class TestPerAgentRotationBrakesAtDecel:
