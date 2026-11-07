@@ -435,7 +435,8 @@ class TestIsMovingIsSetUnderTheBatchLock:
         """The race, made deterministic.
 
         ``synchronized_batch_advance()`` takes the same lock, so a step can
-        only interleave once ``synchronized_set_path()`` has released it. This
+        only interleave once ``synchronized_request_path()`` (what
+        ``Agent.set_path`` calls) has released it. This
         wraps that method to run exactly one step at that moment, with a
         zero-distance path the step completes immediately.
 
@@ -447,13 +448,14 @@ class TestIsMovingIsSetUnderTheBatchLock:
 
         manager, agent = self._managed(sim_core)
         controller = manager.batch_controller
-        original = controller.synchronized_set_path
+        original = controller.synchronized_request_path
 
-        def step_at_lock_release(a, path, **kwargs):
-            original(a, path, **kwargs)
+        def step_at_lock_release(a, request, **kwargs):
+            accepted = original(a, request, **kwargs)
             sim_core.step_once()
+            return accepted
 
-        controller.synchronized_set_path = step_at_lock_release
+        controller.synchronized_request_path = step_at_lock_release
 
         here = agent.get_pose().position
         agent.set_path([Pose.from_xyz(here[0], here[1], here[2])], auto_approach=False)
@@ -596,9 +598,11 @@ class TestBatchedRotationKeepsItsDecel:
     """A batched rotation evaluates its closed form with the trajectory's own
     deceleration, not with its first-phase acceleration.
 
-    Angular limits carry no separate deceleration today, so every rotation is
-    symmetric and from rest; the build is swapped for an asymmetric one here so
-    a dropped ``decel`` shows up as a wrong orientation in the braking phase.
+    ``max_angular_decel`` at a quarter of ``max_angular_accel`` makes the
+    rotation asymmetric, so a dropped ``decel`` shows up as a wrong orientation
+    in the braking phase. The rotation's trajectory is built in
+    ``BatchKinematicController._set_rotation_row``; it is recorded there to
+    compare against.
     """
 
     DT = 0.02
@@ -622,22 +626,22 @@ class TestBatchedRotationKeepsItsDecel:
         from pybullet_fleet.agent_manager import AgentManager
         from pybullet_fleet.geometry import Pose
 
-        controller_module = importlib.import_module(module)
+        importlib.import_module(module)  # registers the controller type
+        batch_base = importlib.import_module("pybullet_fleet.controllers.batch_base")
         built = []
 
-        def softer_brake(**kwargs):
-            kwargs["decel"] = 0.25 * kwargs["accel"]
+        def recorded(**kwargs):
             tpi = build_tpi(**kwargs)
             built.append(tpi)
             return tpi
 
-        monkeypatch.setattr(controller_module, "build_tpi", softer_brake)
+        monkeypatch.setattr(batch_base, "build_tpi", recorded)
         agent = Agent.from_params(
             AgentSpawnParams(
                 urdf_path="robots/simple_cube.urdf",
                 initial_pose=Pose.from_xyz(0.0, 0.0, 0.1),
                 motion_mode=MotionMode[motion_mode],
-                controller={"max_angular_vel": 1.0, "max_angular_accel": 2.0},
+                controller={"max_angular_vel": 1.0, "max_angular_accel": 2.0, "max_angular_decel": 0.5},
             ),
             sim_core=sim_core,
         )

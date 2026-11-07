@@ -14,6 +14,33 @@ are not recommended for production use yet.
 
 ### Added
 
+- `ControllerParams.max_angular_decel`: the braking rate of a turn, so a
+  rotation can stop at a different rate than it starts, as `max_linear_decel`
+  already allows for translation. Same scalar or per-axis form as
+  `max_angular_accel`; unset mirrors it, so every existing configuration keeps
+  the same symmetric rotation profile, bit for bit. A zero, negative or
+  non-finite value (or a per-axis value whose yaw component is not above
+  zero) raises `ValueError` when it is set, not at the first turn. Every rotation honours it:
+  per-agent and batched, omnidirectional final rotation and differential-drive
+  turns, with `Agent.max_angular_decel` as the read-only view. The batched
+  controllers carry the braking scalar per row, and their closed form agrees
+  with the per-agent trajectory to floating-point noise. The kinematic replay profile records it; a `pbf.kinematic.v4`
+  artifact recorded before it existed still loads, with the field unset.
+
+- `PathRequest` (`pybullet_fleet.path_request`): the waypoints and how to follow
+  them (`final_orientation_align`, `direction`, `auto_approach`) as one
+  object. `Agent.request_path(request)` and the controllers'
+  `request_path(agent, request)` take it; `Agent.set_path`, `set_goal_pose`
+  and the controllers' `set_path` build one from their arguments and are
+  unchanged. A request keeps its identity on its way to the controller, and
+  `Agent.path_request_state(request)` tells what became of it
+  (`PathRequestState`: active, pending, finished or gone). A custom controller
+  written against `set_path` alone keeps working, and a subclass of a
+  kinematic or batch controller that overrides `set_path` is still called for
+  every request; its `super().set_path()` keeps the request's identity. The
+  braking path of `brake()` is the controller's own and bypasses such an
+  override.
+
 - Per-axis collision clearance (#105): `collision_margin` (in
   `SimulationParams`, YAML and `set_collision_margin()`) also takes an
   `(x, y, z)` triple, one clearance per world axis, for example
@@ -147,6 +174,20 @@ are not recommended for production use yet.
   The motion is the same, to float noise. Evaluating 1,400 ramped joints
   (200 bodies x 7) went from 1.6 ms to 0.85 ms per step; the whole joint
   update, which also writes every joint to PyBullet, from 6.6 ms to 5.9 ms.
+
+- A `MoveAction` ends by what becomes of its own `PathRequest`: `CANCELLED` as
+  soon as another request replaces it, drops it from the hold, brakes or stops
+  it -- not when the agent next comes to rest -- and `COMPLETED` only when its
+  own request was followed to its end (a replacement ending at the same place,
+  with another final orientation, used to count as completed). Such a request
+  from outside the action queue is an interrupt: the queue starts its next
+  action only once that path has ended, so the next `MoveAction` does not
+  overwrite it; `clear_actions()` first drops the rest of the queue instead.
+  Under `wait_complete` the outside path is held instead: the action
+  completes, and the held path runs before the next action.
+  A `PickAction` or `DropAction` whose own approach, move to the pick or drop
+  pose, or retreat ends that way ends `CANCELLED` too (`FAILED` for a failed
+  move), and does not pick or drop where the agent was left.
 
 - `ignore_attached_collision` now covers every object on one attachment tree,
   not only a direct parent and child: two loads on one carrier and a load on a
@@ -584,6 +625,16 @@ are not recommended for production use yet.
 
 ### Deprecated
 
+- Overriding `Controller.set_path()` in a subclass is deprecated; override
+  `request_path()` instead, which receives the `PathRequest` itself. Defining
+  such a class gives a `FutureWarning` naming it (once, at class definition).
+  Until 0.10.0 the override is still called for every request, as described
+  under Changed; from then on it is no longer called for requests sent with
+  `Agent.request_path()` or by actions, and the compatibility path
+  (`send_request()`'s override dispatch, identity hand-over and `UNKNOWN` for
+  untracked requests) is removed. `BatchDifferentialController.set_path`,
+  which only keeps `direction` as the third positional argument, does not warn.
+
 - `CollisionMode.NORMAL_2D` is deprecated and will be removed in a future
   release (#104). It differs from `NORMAL_3D` only in giving a pair with a
   `NORMAL_2D` body no collision clearance on the z axis, which matters only
@@ -626,6 +677,14 @@ are not recommended for production use yet.
   phase with the trajectory's deceleration rather than its first-phase
   acceleration; the two only differ for a rotation that does not start from
   rest or has its own braking limit, which none has yet.
+
+- `BatchOmniController` and `BatchDifferentialController` turn at the yaw
+  (`z`) component of a per-axis angular limit (`max_angular_vel`,
+  `max_angular_accel`, `max_angular_decel` given as `[x, y, z]`), as the
+  per-agent controllers do. Before this change they read the `x` component.
+  A batched agent whose `x` and `z` limits differ now turns at a different
+  rate than before, the same as its per-agent counterpart, and a limit such as
+  `[0, 0, 2]` no longer raises `ValueError` in the batched path only.
 
 - The collision broadphase AABB of an articulated body covers all of its
   links, not only the base link (issue #68). `p.getAABB(body)` returns the base
