@@ -9,6 +9,7 @@ Usage::
         --ros-args -p config_yaml:=/path/to/config.yaml
 """
 
+import faulthandler
 import inspect
 import logging
 import threading
@@ -592,6 +593,9 @@ def main(args=None):
     # Enable Python logging so that logger.info() from WorkcellHandler,
     # DoorHandler, etc. is visible in docker logs.
     logging.basicConfig(level=logging.INFO, format="[%(name)s] %(levelname)s: %(message)s")
+    # On a fatal signal (a crash in PyBullet, rclpy or the RMF bindings), print
+    # the Python stack of every thread, so the log shows what each was doing.
+    faulthandler.enable(all_threads=True)
     rclpy.init(args=args)
     node = BridgeNode()
     # MultiThreadedExecutor allows action server execute callbacks

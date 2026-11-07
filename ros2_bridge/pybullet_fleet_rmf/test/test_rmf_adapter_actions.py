@@ -144,3 +144,88 @@ def test_non_charger_navigation_clears_pending_charger_command(monkeypatch):
     adapter.update(MagicMock(), data)
 
     api.start_charge.assert_not_called()
+
+
+def test_robots_are_added_to_rmf_one_at_a_time(monkeypatch):
+    """Concurrent first updates add one robot at a time, each to completion (#152)."""
+    import threading
+    import time
+
+    from pybullet_fleet_rmf import fleet_adapter
+    from pybullet_fleet_rmf.fleet_adapter import RobotAdapter
+
+    monkeypatch.setattr(fleet_adapter.rmf_easy, "RobotState", MagicMock())
+    lock = threading.Lock()
+    in_flight = []  # robots added whose registration RMF has not finished
+    overlaps = []
+
+    class Handle:
+        def __init__(self, name):
+            self.name = name
+            self.polls = 0
+
+        def more(self):
+            # RMF finishes the registration on the third poll.
+            self.polls += 1
+            if self.polls < 3:
+                return None
+            with lock:
+                if self.name in in_flight:
+                    in_flight.remove(self.name)
+            return MagicMock()
+
+    def add_robot(name, state, configuration, callbacks):
+        with lock:
+            if in_flight:
+                overlaps.append((name, list(in_flight)))
+            in_flight.append(name)
+        time.sleep(0.01)
+        return Handle(name)
+
+    fleet_handle = MagicMock()
+    fleet_handle.add_robot.side_effect = add_robot
+    robots = [
+        RobotAdapter(
+            name=f"robot{i}",
+            configuration=MagicMock(),
+            node=MagicMock(),
+            api=MagicMock(),
+            fleet_handle=fleet_handle,
+        )
+        for i in range(4)
+    ]
+
+    threads = [threading.Thread(target=fleet_adapter._update_robot_once, args=(robot,)) for robot in robots]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=5)
+
+    assert fleet_handle.add_robot.call_count == 4
+    assert overlaps == []
+    assert all(robot.update_handle is not None for robot in robots)
+    assert all(robot.update_handle.polls == 3 for robot in robots)
+
+
+def test_adding_a_robot_rmf_never_finishes_times_out_with_a_warning(monkeypatch):
+    from pybullet_fleet_rmf import fleet_adapter
+    from pybullet_fleet_rmf.fleet_adapter import RobotAdapter
+
+    monkeypatch.setattr(fleet_adapter.rmf_easy, "RobotState", MagicMock())
+    monkeypatch.setattr(fleet_adapter, "_REGISTRATION_TIMEOUT_S", 0.05)
+    handle = MagicMock()
+    handle.more.return_value = None
+    node = MagicMock()
+    robot = RobotAdapter(
+        name="robot0",
+        configuration=MagicMock(),
+        node=node,
+        api=MagicMock(),
+        fleet_handle=MagicMock(**{"add_robot.return_value": handle}),
+    )
+
+    fleet_adapter._update_robot_once(robot)
+
+    assert robot.update_handle is handle
+    node.get_logger.return_value.warning.assert_called_once()
+    assert "robot0" in node.get_logger.return_value.warning.call_args.args[0]
