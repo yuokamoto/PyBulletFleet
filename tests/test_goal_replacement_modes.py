@@ -695,6 +695,43 @@ class TestMoveActionOutcome:
         assert action.status == ActionStatus.CANCELLED
         assert agent.is_moving  # still braking
 
+    def test_after_braking_the_next_action_waits_until_the_agent_is_at_rest(self, sim, batch, motion):
+        """brake() cancels the running move at once, but the queue does not start
+        the next action until the braking path has ended: the next move must not
+        replace the braking path while the agent is still slowing down."""
+        from pybullet_fleet.types import ActionStatus
+
+        agent = _agent(sim, batch, motion)
+        first = self._move(agent, (30.0, 0.0))
+        second = self._move(agent, (0.0, 0.0))  # back where it started
+        for _ in range(int(VMAX / ACCEL / DT) + 3):  # at full speed
+            sim.step_once()
+        assert agent.brake() is True
+        sim.step_once()
+        assert first.status == ActionStatus.CANCELLED
+        # The next move may start on the very step the agent comes to rest, so
+        # watch the positions rather than is_moving. Until the next move starts
+        # the agent only moves on along +x, slowing down; the next move then
+        # sets off from where the braking ended, from rest.
+        track = [_xy(agent)[0]]
+        while second.status == ActionStatus.NOT_STARTED:
+            sim.step_once()
+            track.append(_xy(agent)[0])
+            assert len(track) < 400
+        braking = np.array(track)
+        assert len(braking) > 3, "the braking took time: the queue waited for it"
+        assert np.all(np.diff(braking) >= -1e-9), "no turn back while braking"
+        assert np.all(np.diff(np.diff(braking)) <= 1e-9), "slowing down all the way"
+        stopped_at = braking[-1]
+        assert stopped_at > 0.5  # it braked to rest ahead, not turned back early
+        sim.step_once()
+        # Omni moves back at once; differential first turns on the spot.
+        first_step_back = stopped_at - _xy(agent)[0]
+        assert -1e-9 <= first_step_back <= 0.5 * ACCEL * DT**2 + 1e-9, "the next move sets off from rest"
+        self._until_done(sim, second)
+        assert second.status == ActionStatus.COMPLETED
+        assert _xy(agent) == pytest.approx([0.0, 0.0], abs=1e-6)
+
 
 class TestDefaultDirection:
     """A path without a direction uses the agent's default_direction, per-agent
