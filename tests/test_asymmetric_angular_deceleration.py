@@ -22,6 +22,7 @@ ANG_ACCEL = 2.0
 
 
 def _new_core():
+    """A second simulation, for a test that restores into a fresh one (``sim_core`` is the first)."""
     from pybullet_fleet import MultiRobotSimulationCore, SimulationParams
 
     sim = MultiRobotSimulationCore(
@@ -39,10 +40,9 @@ def _close(sim):
 
 
 @pytest.fixture
-def sim_core():
-    sim = _new_core()
-    yield sim
-    _close(sim)
+def sim_core_params():
+    """The shared ``sim_core`` fixture (tests/conftest.py), at this module's timestep."""
+    return {"timestep": DT}
 
 
 def _agent(sim_core, manager, name, mode, decel, x=0.0, y=0.0):
