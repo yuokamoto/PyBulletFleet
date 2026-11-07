@@ -27,7 +27,6 @@ import numpy as np
 
 from pybullet_fleet._replan import PathRequest
 from pybullet_fleet._tpi import (
-    build_tpi,
     build_tpi_from_speed,
     extract_phase_params,
     trapezoid_distance,
@@ -90,6 +89,8 @@ class BatchOmniController(BatchKinematicController):
         self._rot_t_const: np.ndarray = np.zeros((0,), dtype=np.float64)
         self._rot_t_total: np.ndarray = np.zeros((0,), dtype=np.float64)
         self._rot_accel: np.ndarray = np.zeros((0,), dtype=np.float64)
+        #: Braking scalar of each row's rotation (max_angular_decel).
+        self._rot_decel: np.ndarray = np.zeros((0,), dtype=np.float64)
         self._rot_p_hold: np.ndarray = np.zeros((0, 3), dtype=np.float64)
 
         # Per-agent final-orientation state.
@@ -132,6 +133,7 @@ class BatchOmniController(BatchKinematicController):
         self._rot_t_const = self._resize_rows(self._rot_t_const, n)
         self._rot_t_total = self._resize_rows(self._rot_t_total, n)
         self._rot_accel = self._resize_rows(self._rot_accel, n)
+        self._rot_decel = self._resize_rows(self._rot_decel, n)
         self._rot_p_hold = self._resize_rows(self._rot_p_hold, n)
         # Final-orientation
         self._align_final_orient = self._resize_rows(self._align_final_orient, n)
@@ -185,6 +187,7 @@ class BatchOmniController(BatchKinematicController):
             self._rot_t_const,
             self._rot_t_total,
             self._rot_accel,
+            self._rot_decel,
         ):
             arr[[i, j]] = arr[[j, i]]
         for arr2d in (
@@ -218,33 +221,6 @@ class BatchOmniController(BatchKinematicController):
         while a translation is under way.
         """
         return self._omni_obstacle(agent, path)
-
-    def set_path(self, agent: "Agent", path: List[Pose], final_orientation_align: bool = True, **kwargs) -> bool:
-        """Set a waypoint path.
-
-        Args:
-            agent: A registered agent.
-            path: Non-empty list of goal poses.
-            final_orientation_align: If ``True`` (default), rotate to match
-                ``path[-1].orientation`` after reaching the last waypoint.
-
-        Returns:
-            ``False`` when the path is refused (``goal_replacement="reject"``
-            only), with the current motion and path untouched; ``True`` once it
-            is set or held to start later. See
-            :meth:`KinematicController.set_path <pybullet_fleet.controller.KinematicController.set_path>`.
-        """
-        if self._sim_core is None:
-            raise RuntimeError("BatchOmniController must be attached to a sim_core before set_path.")
-        if not path:
-            raise ValueError("path must be a non-empty list of Poses.")
-        if self._agent_index.get(id(agent)) is None:
-            raise KeyError(f"Agent {agent} is not registered with this batch controller.")
-        return self._replace_path(
-            agent,
-            PathRequest(path=list(path), final_orientation_align=final_orientation_align, direction=None),
-            preempt=bool(kwargs.get("preempt", False)),
-        )
 
     def _begin_row_path(
         self, idx: int, agent: "Agent", request: PathRequest, now: float, initial_velocity: Optional[np.ndarray]
@@ -351,15 +327,7 @@ class BatchOmniController(BatchKinematicController):
         theta0 = math.acos(dot)
         sin_theta0 = math.sin(theta0)
 
-        ang_vel = float(agent.max_angular_vel[0])
-        ang_accel = float(agent.max_angular_accel[0])
-        tpi = build_tpi(p0=0.0, pe=angle, vmax=ang_vel, accel=ang_accel, t0=sim_time)
-        # Angular limits carry no separate deceleration, so rotation is
-        # symmetric and the fifth value equals the fourth. See #67.
-        t_acc, t_cst, t_tot, accel_eff, _ = extract_phase_params(tpi)
-
         self._phase[idx] = _PHASE_FINAL_ROTATE
-        self._rot_t_start[idx] = sim_time
         self._rot_start_quat[idx] = start_quat
         self._rot_target_quat[idx] = target_for_slerp
         self._rot_snap_quat[idx] = target_quat  # un-flipped for snap
@@ -367,11 +335,7 @@ class BatchOmniController(BatchKinematicController):
         self._rot_theta0[idx] = theta0
         self._rot_axis_z[idx] = float(rotation_axis_z(start_quat, target_for_slerp))
         self._rot_sin_theta0[idx] = sin_theta0
-        self._rot_total_angle[idx] = angle
-        self._rot_t_accel[idx] = t_acc
-        self._rot_t_const[idx] = t_cst
-        self._rot_t_total[idx] = t_tot
-        self._rot_accel[idx] = accel_eff
+        self._set_rotation_row(idx, agent, angle, sim_time)
         self._rot_p_hold[idx] = np.asarray(agent.get_pose().position, dtype=np.float64)
 
     def _advance_waypoint(self, idx: int, sim_time: float) -> None:
@@ -478,6 +442,7 @@ class BatchOmniController(BatchKinematicController):
                 self._rot_t_total[rm],
                 self._rot_accel[rm],
                 self._rot_total_angle[rm],
+                self._rot_decel[rm],
             )
             total_angle_safe = np.where(self._rot_total_angle[rm] > 1e-9, self._rot_total_angle[rm], 1.0)
             t_frac = np.clip(angle_traveled / total_angle_safe, 0.0, 1.0)
@@ -492,7 +457,12 @@ class BatchOmniController(BatchKinematicController):
             self._orn_buf[rm] = new_quat
             self._pos_buf[rm] = self._rot_p_hold[rm]
             angular_speed = trapezoid_speed(
-                tau, self._rot_t_accel[rm], self._rot_t_const[rm], self._rot_t_total[rm], self._rot_accel[rm]
+                tau,
+                self._rot_t_accel[rm],
+                self._rot_t_const[rm],
+                self._rot_t_total[rm],
+                self._rot_accel[rm],
+                self._rot_decel[rm],
             )
             self._lin_vel_buf[rm] = 0.0
             self._ang_vel_buf[rm] = angular_speed * self._rot_axis_z[rm]
