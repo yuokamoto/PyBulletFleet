@@ -871,10 +871,10 @@ class TestRampedJointsUseTheClosedForm:
         state = agent._joints[index]
         trace = []
         for target, steps in targets:
-            agent.set_joint_target_by_name(JOINT, target)
+            agent.set_joint_target(JOINT, target)
             for _ in range(steps):
                 sim_core.step_once()
-                trace.append((agent.get_joint_state_by_name(JOINT)[0], state.trajectory, agent._joint_clock))
+                trace.append((agent.get_joint_state(JOINT)[0], state.trajectory, agent._joint_clock))
         return trace
 
     TARGETS = [(0.6, 20), (1.2, 25), (0.2, 120), (0.9, 150)]
@@ -886,7 +886,7 @@ class TestRampedJointsUseTheClosedForm:
         assert len(planned) > 100
         for position, expected in planned:
             assert position == pytest.approx(expected, abs=1e-9)
-        assert agent.get_joint_state_by_name(JOINT)[0] == pytest.approx(0.9, abs=1e-9)
+        assert agent.get_joint_state(JOINT)[0] == pytest.approx(0.9, abs=1e-9)
 
     def test_a_step_does_not_call_get_point(self, sim_core, monkeypatch):
         from two_point_interpolation import TwoPointInterpolation
@@ -898,7 +898,7 @@ class TestRampedJointsUseTheClosedForm:
 
         monkeypatch.setattr(TwoPointInterpolation, "get_point", forbidden)
         self._drive(sim_core, agent, index, self.TARGETS)
-        assert agent.get_joint_state_by_name(JOINT)[0] == pytest.approx(0.9, abs=1e-9)
+        assert agent.get_joint_state(JOINT)[0] == pytest.approx(0.9, abs=1e-9)
 
     def _released_once_dropped(self, sim_core, agent, index, then):
         """Plan a trajectory, run ``then`` until the joint drops it, and say
@@ -907,7 +907,7 @@ class TestRampedJointsUseTheClosedForm:
         import weakref
 
         state = agent._joints[index]
-        agent.set_joint_target_by_name(JOINT, 0.6)
+        agent.set_joint_target(JOINT, 0.6)
         sim_core.step_once()
         planned = weakref.ref(state.trajectory)
         then()
@@ -931,7 +931,7 @@ class TestRampedJointsUseTheClosedForm:
             for _ in range(10):
                 sim_core.step_once()
             # Behind the joint while it moves ahead: braked, not planned.
-            agent.set_joint_target_by_name(JOINT, 0.0)
+            agent.set_joint_target(JOINT, 0.0)
             sim_core.step_once()
 
         assert self._released_once_dropped(sim_core, agent, index, turn_back)
