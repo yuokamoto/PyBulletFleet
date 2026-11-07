@@ -507,9 +507,6 @@ class Agent(SimObject):
         #: body usually has one joint under command and six not, and because
         #: an agent that has never commanded one leaves the loop at once.
         self._active_joints: List[KinematicJoint] = []
-        #: Time base for joint trajectories. Kept here rather than read from
-        #: sim_core so an agent without one still ramps.
-        self._joint_clock: float = 0.0
 
         # Cached flag: True when joints must use kinematic interpolation
         # (mass=0 OR sim_core has physics disabled).  Computed once to avoid
@@ -1950,9 +1947,6 @@ class Agent(SimObject):
         if not self._active_joints:
             return False
 
-        step_start, now = self._joint_clock, self._joint_clock + dt
-        self._joint_clock = now
-
         any_moved = False
         for state in self._active_joints:
             target = state.target
@@ -1978,7 +1972,7 @@ class Agent(SimObject):
                 step = math.copysign(max_vel * dt, diff)
                 new_pos = target if abs(step) >= abs(diff) else state.position + step
             else:
-                new_pos = self._ramped_joint_position(state, target, step_start, now, max_vel)
+                new_pos = self._ramped_joint_position(state, target, dt, max_vel)
             p.resetJointState(self.body_id, state.index, new_pos, physicsClientId=self._pid)
             state.position = new_pos
             any_moved = True
@@ -2025,11 +2019,10 @@ class Agent(SimObject):
         self,
         state: KinematicJoint,
         target: float,
-        step_start: float,
-        now: float,
+        dt: float,
         max_vel: float,
     ) -> float:
-        """Where a ramped joint is at ``now``, from a TwoPointInterpolation.
+        """Where a ramped joint is at the end of the step, from a TwoPointInterpolation.
 
         The same solver the linear controllers use, rather than a trapezoid
         integrated by hand: it handles triangle, trapezoid and degenerate
@@ -2037,9 +2030,15 @@ class Agent(SimObject):
         step evaluates the solved trajectory in closed form
         (:func:`~pybullet_fleet._tpi.trapezoid_point`).
 
-        One trajectory is built per target change, not per step, and ``t0`` is
-        the start of the step so the first evaluation already covers ``dt`` of
-        travel.
+        One trajectory is built per target change, not per step, starting at
+        ``t0 = 0``, and the joint counts the time it has followed it
+        (:attr:`KinematicJoint.elapsed`) by adding ``dt`` each step; the first
+        evaluation already covers ``dt`` of travel. No absolute clock is read:
+        a clock subtraction rounds differently depending on how far the clock
+        has run, so a joint restored from a checkpoint into another clock
+        reading could finish, or brake to rest, a step apart from the run it
+        was taken from. The elapsed time is captured and restored as is, so a
+        restored joint repeats the same arithmetic step for step.
 
         What the solver will not plan -- a target the joint is moving away
         from, or one closer than its braking distance -- goes to
@@ -2066,16 +2065,18 @@ class Agent(SimObject):
                     pe=target,
                     vmax=max_vel,
                     accel=accel,
-                    t0=step_start,
+                    t0=0.0,
                     v0=state.speed,
                     decel=decel,
                 )
             )
             if tpi is None:
-                return self._braking_joint_step(state, decel, now - step_start)
+                return self._braking_joint_step(state, decel, dt)
             state.trajectory = tpi
             state.trajectory_target = target
+            state.elapsed = 0.0
             state.braking = False
+        state.elapsed += dt
 
         # Evaluated from the trajectory's phase scalars rather than by
         # tpi.get_point(): the same motion, without its per-call phase search,
@@ -2083,7 +2084,7 @@ class Agent(SimObject):
         # trapezoid_point() decides whether the trajectory has finished, and
         # then returns its end position exactly.
         profile = state.trajectory_profile()
-        position, velocity = trapezoid_point(profile, now)
+        position, velocity = trapezoid_point(profile, state.elapsed)
         if position == profile.pe or abs(target - position) < 1e-9:
             # Finished, or close enough that the remainder is float residue.
             # Snapping here rather than waiting for get_end_time() keeps the
@@ -2399,17 +2400,14 @@ class Agent(SimObject):
     def capture_kinematic_joint_execution(self) -> list[dict]:
         """Capture every joint's position, command, motion limits and execution.
 
-        A solved trajectory is represented by its primitive inputs and start
-        time relative to the joint clock. Rebuilding it preserves the phase
-        reached at this completed-step boundary without serializing the TPI
-        instance itself.
+        A solved trajectory is represented by its primitive inputs and how long
+        the joint has followed it (as ``t0_offset``, its negative). Rebuilding
+        it preserves the phase reached at this completed-step boundary without
+        serializing the TPI instance itself.
         """
         if not self._use_kinematic_joints or not self.joint_info:
             raise ValueError("Kinematic joint checkpoint requires a jointed kinematic URDF robot")
-        return [
-            self._joints[index].capture_execution(info[1].decode("utf-8"), self._joint_clock)
-            for index, info in enumerate(self.joint_info)
-        ]
+        return [self._joints[index].capture_execution(info[1].decode("utf-8")) for index, info in enumerate(self.joint_info)]
 
     def restore_kinematic_joint_execution(self, states: list[dict]) -> None:
         """Restore joint commands and execution at a completed-step boundary."""
@@ -2419,7 +2417,7 @@ class Agent(SimObject):
         for index, (state, info) in enumerate(zip(states, self.joint_info)):
             if not isinstance(state, dict) or state.get("name") != info[1].decode("utf-8"):
                 raise ValueError("Joint checkpoint names or order differ from the kinematic URDF")
-            parsed.append(KinematicJoint.from_execution(index, state, self._joint_clock))
+            parsed.append(KinematicJoint.from_execution(index, state))
         for joint in parsed:
             p.resetJointState(self.body_id, joint.index, joint.position, physicsClientId=self._pid)
             self._joints[joint.index] = joint
