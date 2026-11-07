@@ -280,6 +280,28 @@ class TestRegistry:
         assert info["phase"] == CallbackPhase.POST_STEP
         assert info["gate"].frequency == 4.0
 
+    def test_the_registry_keeps_registration_order_across_phases(self, sim):
+        def a(sc, dt):
+            pass
+
+        def b(sc, dt):
+            pass
+
+        def c(sc, dt):
+            pass
+
+        sim.events.on(SimEvents.COLLISION_STARTED, lambda **_: None)
+        sim.register_callback(a, phase="post_step")
+        sim.events.on(SimEvents.STEP, lambda **_: None)
+        sim.register_callback(b)
+        sim.register_callback(c, phase="post_step")
+        assert [info["func"] for info in sim._callbacks] == [a, b, c]
+        assert [info["phase"] for info in sim._callbacks] == [
+            CallbackPhase.POST_STEP,
+            CallbackPhase.STEP,
+            CallbackPhase.POST_STEP,
+        ]
+
     def test_frequency_zero_means_every_step(self, sim):
         log = []
         sim.register_callback(lambda sc, dt: log.append(dt), frequency=0)
@@ -478,11 +500,29 @@ class TestFrequencyLimitedEvents:
         sim.step_once()
         assert seen == [(0.1, 0.1)]
 
-    @pytest.mark.parametrize("frequency", [0.0, -1.0, float("inf"), float("nan")])
+    @pytest.mark.parametrize("frequency", [-1.0, float("inf"), float("nan")])
     def test_rejects_a_bad_frequency(self, sim, frequency):
         with pytest.raises(ValueError):
             sim.events.on(SimEvents.STEP, lambda **_: None, frequency=frequency)
         assert not sim.events.has_handlers(SimEvents.STEP)
+
+    @pytest.mark.parametrize("frequency", [0, 0.0])
+    def test_frequency_zero_means_every_step_as_for_register_callback(self, sim, frequency):
+        from_event, from_callback = [], []
+        sim.events.on(SimEvents.STEP, lambda dt, sim_time: from_event.append(dt), frequency=frequency)
+        sim.register_callback(lambda sc, dt: from_callback.append(dt), frequency=frequency)
+        for _ in range(3):
+            sim.step_once()
+        assert len(from_event) == 3
+        assert from_event == pytest.approx(from_callback)
+
+    def test_frequency_zero_needs_no_clock_or_step_event(self):
+        """``0`` is no limit at all, so it is accepted wherever ``None`` is."""
+        bus = EventBus()
+        seen = []
+        bus.on(SimEvents.COLLISION_STARTED, lambda **kw: seen.append(kw), frequency=0)
+        bus.emit(SimEvents.COLLISION_STARTED, obj_a=1, obj_b=2)
+        assert seen == [{"obj_a": 1, "obj_b": 2}]
 
     def test_is_only_for_the_step_events(self, sim):
         with pytest.raises(ValueError, match="step events"):

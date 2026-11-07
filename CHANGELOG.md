@@ -27,7 +27,8 @@ are not recommended for production use yet.
   (#80), with `dt` the simulated time since it last ran. `initialize_simulation()`
   and `reset()` restart its schedule. A per-entity or bare `EventBus` has no
   simulation clock and raises `ValueError` for `frequency`, as does any other
-  event (issue #84).
+  event (issue #84). `frequency=0` means every step, as it does for
+  `register_callback()`.
 
 - Per-axis collision clearance (#105): `collision_margin` (in
   `SimulationParams`, YAML and `set_collision_margin()`) also takes an

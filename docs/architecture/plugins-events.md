@@ -112,7 +112,8 @@ bus or a bare `EventBus()` raises `ValueError`. Each event is scheduled on the
 `sim_time` it carries, so a `pre_step` handler is due when the previous state
 reaches a grid point. `initialize_simulation()` and `reset()` restart every
 schedule. `events.off()` and `events.clear()` remove only handlers registered
-with `events.on()`; use `unregister_callback()` for callbacks.
+with `events.on()`; use `unregister_callback()` for callbacks. As for
+`register_callback()`, `frequency=None` or `frequency=0` means every step.
 
 ```python
 from pybullet_fleet.events import SimEvents

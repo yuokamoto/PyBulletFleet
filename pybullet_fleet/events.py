@@ -201,21 +201,20 @@ class EventBus:
                 a fixed grid of ``k / frequency`` seconds of simulated time (as
                 ``register_callback(frequency=...)`` does), scheduled on the
                 time it observes, and its ``dt`` is the simulated time since it
-                last ran.  ``None`` runs it on every emit.
+                last ran.  ``None`` or ``0`` runs it on every emit, as
+                ``0`` does for ``register_callback()``.
 
         Raises:
-            ValueError: ``frequency`` is not a positive finite number, is given
-                for an event other than a step event, or the bus has no clock.
+            ValueError: ``frequency`` is negative or not finite, is given for
+                an event other than a step event, or the bus has no clock.
         """
         gate = None
-        if frequency is not None:
+        if frequency:  # None or 0: every emit, as for register_callback()
             if event not in STEP_EVENTS:
                 raise ValueError(
                     "frequency is only supported for the step events {}, got {!r}".format(sorted(STEP_EVENTS), event)
                 )
-            if self._clock is None:
-                raise ValueError("frequency needs a bus with a simulation clock, such as sim.events")
-            gate = FrequencyGate(frequency)
+            gate = FrequencyGate(frequency)  # validates; _subscribe() checks for a clock
         self._subscribe(event, handler, handler, priority=priority, gate=gate)
 
     def off(self, event: str, handler: Callable) -> None:
@@ -316,7 +315,13 @@ class EventBus:
 
     def _subscriptions(self, tier: Optional[int] = None) -> List[Tuple[str, _Subscription]]:
         """``(event, subscription)`` pairs, of ``tier`` when given, in registration order."""
-        pairs = [(event, sub) for event, subs in self._handlers.items() for sub in subs if tier is None or sub.tier == tier]
+        if tier is None or tier == _TIER_HANDLER:
+            pairs = [
+                (event, sub) for event, subs in self._handlers.items() for sub in subs if tier is None or sub.tier == tier
+            ]
+        else:
+            # Callbacks and plugins only subscribe to the step events.
+            pairs = [(event, sub) for event, tiers in self._tiers.items() for sub in tiers[tier]]
         pairs.sort(key=lambda pair: pair[1].seq)
         return pairs
 

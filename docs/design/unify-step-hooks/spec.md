@@ -31,6 +31,8 @@ subscriptions on it; their public APIs stay and behave as before.
 2. **`events.on(event, handler, priority=0, frequency=None)`.** With a
    frequency the bus gives the subscription a `FrequencyGate` (the fixed grid
    of #80) and passes `dt` as the simulated time since the handler last ran.
+   `frequency=0` means every emit, as it does for `register_callback()`, so
+   moving a callback to `on()` keeps its schedule.
 3. **Tiers.** A subscription has a tier: handlers from `on()` (0), callbacks
    from `register_callback()` (1), plugin `on_step` (2). An emit calls them
    ordered by `(tier, priority, registration order)`. This keeps the old order
