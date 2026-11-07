@@ -152,13 +152,16 @@ SET_PATH_OVERRIDE_DEPRECATION = (
 def _class_statement_level() -> int:
     """``stacklevel`` for a warning from ``__init_subclass__`` that points at the class statement.
 
-    Class creation goes through the metaclass (``ABCMeta``, from abc.py) first.
+    Class creation goes through the metaclass (``ABCMeta.__new__``) first.
+    Its frames are recognised by the code's own file name, not ``abc.__file__``:
+    from Python 3.11 the module is frozen and its frames report ``<frozen abc>``.
     """
     import abc
     import sys
 
+    abc_file = abc.ABCMeta.__new__.__code__.co_filename
     frame, level = sys._getframe(2), 2  # stacklevel 1 is __init_subclass__ itself
-    while frame is not None and frame.f_code.co_filename == abc.__file__:
+    while frame is not None and frame.f_code.co_filename == abc_file:
         frame, level = frame.f_back, level + 1
     return level
 
