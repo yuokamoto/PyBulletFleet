@@ -20,6 +20,10 @@ from pybullet_fleet import (
 from pybullet_fleet.controller import Controller
 from pybullet_fleet.types import MovementDirection
 
+# The set_path overrides below exercise the deprecated compatibility path on
+# purpose; the warning itself is tested in test_overriding_set_path_warns_once.
+pytestmark = pytest.mark.filterwarnings("ignore:.*overrides set_path\\(\\), which is deprecated:FutureWarning")
+
 
 @pytest.fixture
 def sim():
@@ -382,3 +386,44 @@ def test_the_batch_differential_set_path_is_not_an_override():
 
     assert not overrides_set_path(BatchDifferentialController.__new__(BatchDifferentialController))
     assert overrides_set_path(Edited.__new__(Edited))
+
+
+def test_overriding_set_path_warns_once_at_class_definition():
+    """A subclass that overrides set_path is told to override request_path instead."""
+    import warnings
+
+    from pybullet_fleet.controller import OmniController
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+
+        class Edits(OmniController):
+            def set_path(self, agent, path, final_orientation_align=True, direction=None, preempt=False):
+                return super().set_path(agent, path, final_orientation_align, direction, preempt)
+
+        Edits(None)
+        Edits(None)
+    deprecations = [w for w in caught if issubclass(w.category, FutureWarning) and "set_path" in str(w.message)]
+    assert len(deprecations) == 1, "once, when the class is defined"
+    message = str(deprecations[0].message)
+    assert "Edits overrides set_path()" in message and "override request_path() instead" in message
+    assert deprecations[0].filename == __file__, "the warning points at the class statement"
+
+
+def test_built_in_controllers_and_request_path_overrides_do_not_warn():
+    import warnings
+
+    from pybullet_fleet.controller import OmniController
+    from pybullet_fleet.controllers.batch_differential import BatchDifferentialController
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+
+        class Requests(OmniController):
+            def request_path(self, agent, request, preempt=False):
+                return super().request_path(agent, request, preempt=preempt)
+
+        class Batch(BatchDifferentialController):
+            pass
+
+    assert not [w for w in caught if "set_path" in str(w.message)]

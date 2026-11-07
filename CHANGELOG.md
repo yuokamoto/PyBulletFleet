@@ -605,6 +605,16 @@ are not recommended for production use yet.
 
 ### Deprecated
 
+- Overriding `Controller.set_path()` in a subclass is deprecated; override
+  `request_path()` instead, which receives the `PathRequest` itself. Defining
+  such a class gives a `FutureWarning` naming it (once, at class definition).
+  Until 0.10.0 the override is still called for every request, as described
+  under Changed; from then on it is no longer called for requests sent with
+  `Agent.request_path()` or by actions, and the compatibility path
+  (`send_request()`'s override dispatch, identity hand-over and `UNKNOWN` for
+  untracked requests) is removed. `BatchDifferentialController.set_path`,
+  which only keeps `direction` as the third positional argument, does not warn.
+
 - `CollisionMode.NORMAL_2D` is deprecated and will be removed in a future
   release (#104). It differs from `NORMAL_3D` only in giving a pair with a
   `NORMAL_2D` body no collision clearance on the z axis, which matters only

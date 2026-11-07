@@ -286,8 +286,13 @@ A few things to know about request identity:
   `path_request_state` of a request sent before the checkpoint is `GONE`.
   (The checkpoint profile refuses an agent with queued actions, so no
   `MoveAction` spans one.)
-- A controller subclass that overrides `set_path` -- to edit the path, say --
-  is still called for every request, with the request's fields; its
+- Overriding `set_path` is deprecated: override `request_path(agent,
+  request, preempt=False)` instead, which receives the `PathRequest` itself
+  and needs no identity bookkeeping. Defining a class that overrides
+  `set_path` gives a `FutureWarning`; from 0.10.0 such an override is no
+  longer called for requests sent with `Agent.request_path()` or by actions.
+  Until then, a controller subclass that overrides `set_path` -- to edit the
+  path, say -- is still called for every request, with the request's fields; its
   `super().set_path(...)` passes the request on with its identity, so its
   state is still followed. If the override sends a request of its own
   instead, the state of the one sent is `UNKNOWN`, and a `MoveAction` then

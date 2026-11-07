@@ -37,6 +37,7 @@ Registry
 import copy
 import dataclasses
 import math
+import warnings
 import weakref
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Any, ClassVar, Dict, List, Optional, Type, TypeVar
@@ -139,6 +140,29 @@ def list_controllers() -> Dict[str, Type["Controller"]]:
 _ControllerT = TypeVar("_ControllerT", bound="Controller")
 
 
+#: Given once per class that overrides :meth:`Controller.set_path`; formatted
+#: with the class's module and qualified name.
+SET_PATH_OVERRIDE_DEPRECATION = (
+    "{}.{} overrides set_path(), which is deprecated: override request_path() instead. "
+    "From 0.10.0 an overridden set_path() is no longer called for requests sent with "
+    "Agent.request_path() or by actions."
+)
+
+
+def _class_statement_level() -> int:
+    """``stacklevel`` for a warning from ``__init_subclass__`` that points at the class statement.
+
+    Class creation goes through the metaclass (``ABCMeta``, from abc.py) first.
+    """
+    import abc
+    import sys
+
+    frame, level = sys._getframe(2), 2  # stacklevel 1 is __init_subclass__ itself
+    while frame is not None and frame.f_code.co_filename == abc.__file__:
+        frame, level = frame.f_back, level + 1
+    return level
+
+
 def overrides_set_path(controller: "Controller") -> bool:
     """Whether ``controller``'s class overrides :meth:`Controller.set_path`.
 
@@ -210,6 +234,13 @@ class Controller(ABC):
     def __init_subclass__(cls, **kwargs):
         super().__init_subclass__(**kwargs)
         _registry.auto_register_subclass(cls)
+        override = cls.__dict__.get("set_path")
+        if override is not None and not getattr(override, "_only_reorders_arguments", False):
+            warnings.warn(
+                SET_PATH_OVERRIDE_DEPRECATION.format(cls.__module__, cls.__qualname__),
+                FutureWarning,
+                stacklevel=_class_statement_level(),
+            )
 
     @abstractmethod
     def compute(self, agent: "Agent", dt: float) -> bool:
