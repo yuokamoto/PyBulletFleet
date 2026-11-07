@@ -120,6 +120,11 @@ class DoorState(str, Enum):
 class CallbackPhase(str, Enum):
     """When in a simulation step a ``register_callback()`` callback runs.
 
+    Each value is the name of the step event the callback subscribes to on
+    ``sim.events`` (:attr:`SimEvents.STEP <pybullet_fleet.events.SimEvents.STEP>`,
+    :attr:`SimEvents.POST_STEP <pybullet_fleet.events.SimEvents.POST_STEP>`);
+    callbacks run after that event's handlers.
+
     Attributes:
         STEP: After the objects have been updated, before their new poses are
             written to PyBullet and before the collision check.

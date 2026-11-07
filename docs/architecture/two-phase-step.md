@@ -28,8 +28,10 @@ step_once()
 │     ├── for manager with a batch controller:  batch_advance(dt)
 │     ├── for obj in sim_objects:  obj.update(dt)
 │     │       └── controller.compute → agent.set_pose(...)   ← buffered
-│     ├── user callbacks               (registered via register_callback)
-│     └── plugin on_step hooks
+│     └── step event                   (one event, three tiers, in this order)
+│           ├── handlers                 (events.on(SimEvents.STEP, ...), by priority)
+│           ├── user callbacks           (register_callback(...), registration order)
+│           └── plugin on_step hooks     (load order)
 │
 ├── PHASE 2 — POSE FLUSH     (tight C-API loop)
 │     └── for obj_id in _pending_pose_ids:
@@ -45,8 +47,8 @@ step_once()
 │             update spatial-hash grid
 │
 ├── check_collisions         (frequency-gated; sees up-to-date AABBs/grid)
-├── post-step events
-├── post-step callbacks      (register_callback(..., phase="post_step"))
+├── post_step event          (handlers by priority, then
+│                             register_callback(..., phase="post_step") callbacks)
 └── monitor update
 ```
 
@@ -117,7 +119,7 @@ right after the `pre_step` event, before anything computes the new state:
 | Where | `sim_time` / `step_count` | State it describes |
 |---|---|---|
 | `pre_step` subscriber (payload `sim_time` too) | previous step, `t` / `k` | the previous step's state |
-| object update, Phase-1 callbacks, plugin `on_step`, behavior trees | new step, `t + dt` / `k + 1` | being computed for `t + dt` |
+| object update, `step` subscriber (payload `sim_time` too), Phase-1 callbacks, plugin `on_step`, behavior trees | new step, `t + dt` / `k + 1` | being computed for `t + dt` |
 | collision check, `post_step` subscriber (payload `sim_time` too), post-step callbacks | `t + dt` / `k + 1` | the step's result |
 | outside a step | completed step, `t + dt` / `k + 1` | the completed step's result |
 

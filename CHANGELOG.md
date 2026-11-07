@@ -14,6 +14,22 @@ are not recommended for production use yet.
 
 ### Added
 
+- `SimEvents.STEP` (`"step"`): an event at the point where `register_callback()`
+  callbacks run by default -- after the object update, before the new poses are
+  written to PyBullet and before the collision check -- with `dt` and
+  `sim_time` (the time of the new state). Its handlers run before the `STEP`
+  callbacks and plugin `on_step`; time profiling reports them as `events_step`
+  (issue #84).
+
+- `events.on(event, handler, priority=0, frequency=None)`: a handler of a step
+  event (`pre_step`, `step`, `post_step`) on `sim.events` can run at a fixed
+  rate, on the same fixed grid of simulated time as callbacks and plugins
+  (#80), with `dt` the simulated time since it last ran. `initialize_simulation()`
+  and `reset()` restart its schedule. A per-entity or bare `EventBus` has no
+  simulation clock and raises `ValueError` for `frequency`, as does any other
+  event (issue #84). `frequency=0` means every step, as it does for
+  `register_callback()`.
+
 - `ControllerParams.max_angular_decel`: the braking rate of a turn, so a
   rotation can stop at a different rate than it starts, as `max_linear_decel`
   already allows for translation. Same scalar or per-axis form as
@@ -167,6 +183,22 @@ are not recommended for production use yet.
   checkpoint proof's record version 3.
 
 ### Changed
+
+- Per-step hooks share one mechanism: `register_callback()` callbacks and
+  `SimPlugin.on_step()` are subscriptions on `sim.events`, in tiers after the
+  event's own handlers (handlers by priority, then callbacks in registration
+  order, then plugins in load order). Their order, schedule, arguments and
+  exception handling are unchanged: a callback's exception still propagates
+  out of `step_once()`, a plugin's or a handler's is logged. `events.off()` and
+  `events.clear()` affect only handlers registered with `events.on()`;
+  `has_handlers()` also counts callbacks and plugins. An emit now calls the
+  subscriptions present when it starts, in every tier: a handler, callback or
+  plugin added by one of the same event first runs on the next emit (a handler
+  added by a handler used to run in the same one), and one removed still runs
+  in the current emit. The
+  kinematic replay profile rejects a frequency-limited event handler, as it
+  does a frequency-limited callback. No change in step time without hooks
+  (issue #84).
 
 - A `MoveAction` ends by what becomes of its own `PathRequest`: `CANCELLED` as
   soon as another request replaces it, drops it from the hold, brakes or stops

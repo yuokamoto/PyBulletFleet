@@ -19,6 +19,7 @@ from pybullet_fleet.agent import Agent, AgentSpawnParams
 from pybullet_fleet.controller import DifferentialController, OmniController
 from pybullet_fleet.controller_params import ControllerParams
 from pybullet_fleet.core_simulation import MultiRobotSimulationCore, SimulationParams
+from pybullet_fleet.events import _TIER_HANDLER
 from pybullet_fleet.geometry import Pose
 from pybullet_fleet.sim_object import PRIMITIVE_SHAPE_TYPES, ShapeParams, SimObject, SimObjectSpawnParams
 from pybullet_fleet.types import CollisionMode, ControllerMode, GoalReplacement, MotionMode, MovementDirection
@@ -569,7 +570,11 @@ class KinematicProfile:
         if any(id(info["func"]) not in allowed or info["gate"].frequency is not None for info in sim._callbacks):
             raise ValueError("Undeclared simulation callback is not checkpointable")
         event_allowed = {id(handler) for handler in self.allowed_event_handlers}
-        if any(id(handler) not in event_allowed for handlers in sim.events._handlers.values() for _, handler in handlers):
+        # Callbacks and plugins share the bus; they are checked above. A
+        # frequency-limited handler, like a callback, keeps a schedule that is not checkpointed.
+        if any(
+            id(sub.handler) not in event_allowed or sub.gate is not None for _, sub in sim.events._subscriptions(_TIER_HANDLER)
+        ):
             raise ValueError("Undeclared event handler is not checkpointable")
 
     def construction(self, sim: MultiRobotSimulationCore) -> dict:
