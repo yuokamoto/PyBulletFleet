@@ -168,6 +168,13 @@ are not recommended for production use yet.
 
 ### Changed
 
+- A kinematic joint with an acceleration ramp (`set_joint_motion_profile(...,
+  max_accel=...)`) is evaluated each step from its trajectory's phase scalars,
+  read once per target change, instead of `TwoPointInterpolation.get_point()`.
+  The motion is the same, to float noise. Evaluating 1,400 ramped joints
+  (200 bodies x 7) went from 1.6 ms to 0.85 ms per step; the whole joint
+  update, which also writes every joint to PyBullet, from 6.6 ms to 5.9 ms.
+
 - A `MoveAction` ends by what becomes of its own `PathRequest`: `CANCELLED` as
   soon as another request replaces it, drops it from the hold, brakes or stops
   it -- not when the agent next comes to rest -- and `COMPLETED` only when its
@@ -655,6 +662,21 @@ are not recommended for production use yet.
   deprecation, and the design plans under `docs/design/` are left as written.
 
 ### Fixed
+
+- Batched controllers (`batch_omni`, `batch_differential`): a goal replaced
+  while the agent moves faster than `max_linear_vel` -- the limit lowered
+  during the motion -- now brakes down to the limit at the configured
+  deceleration, as the per-agent controllers do. The batched closed form used
+  to accelerate further in that first phase, so the agent ran ahead of its
+  trajectory until it cruised. The closed form (`trapezoid_distance()`,
+  `trapezoid_speed()`, and the scalar `trapezoid_point()` that ramped joints
+  use) takes each phase's formula from one set of helpers, and is checked
+  against `TwoPointInterpolation.get_point()` for start speeds toward and away
+  from the target, above `vmax`, asymmetric ramps and either direction (end
+  speeds too for the scalar form). Batched rotations evaluate their braking
+  phase with the trajectory's deceleration rather than its first-phase
+  acceleration; the two only differ for a rotation that does not start from
+  rest or has its own braking limit, which none has yet.
 
 - `BatchOmniController` and `BatchDifferentialController` turn at the yaw
   (`z`) component of a per-axis angular limit (`max_angular_vel`,

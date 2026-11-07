@@ -20,7 +20,7 @@ from .action import Action
 from .types import ControllerMode, MotionMode, MovementDirection, ActionStatus, CollisionMode
 from .types import _normal_2d_warning_already_given, _spawning_from_warned_params
 from .tools import normalize_vector_param  # noqa: F401  (re-exported for legacy callers)
-from pybullet_fleet._tpi import try_build_tpi
+from pybullet_fleet._tpi import trapezoid_point, try_build_tpi
 from pybullet_fleet.joint import KinematicJoint
 from pybullet_fleet.tools import resolve_joint_index, resolve_link_index
 from .logging_utils import get_lazy_logger
@@ -2033,7 +2033,9 @@ class Agent(SimObject):
 
         The same solver the linear controllers use, rather than a trapezoid
         integrated by hand: it handles triangle, trapezoid and degenerate
-        exactly, and starts from the speed the joint is already carrying.
+        exactly, and starts from the speed the joint is already carrying. Each
+        step evaluates the solved trajectory in closed form
+        (:func:`~pybullet_fleet._tpi.trapezoid_point`).
 
         One trajectory is built per target change, not per step, and ``t0`` is
         the start of the step so the first evaluation already covers ``dt`` of
@@ -2075,15 +2077,18 @@ class Agent(SimObject):
             state.trajectory_target = target
             state.braking = False
 
-        if now >= tpi.get_end_time():
-            state.clear_motion()
-            return target
-
-        position, velocity, _ = tpi.get_point(now)
-        if abs(target - position) < 1e-9:
-            # Close enough that the remainder is float residue. Snapping here
-            # rather than waiting for get_end_time() keeps the invariant that
-            # a joint at its target carries no speed and no trajectory.
+        # Evaluated from the trajectory's phase scalars rather than by
+        # tpi.get_point(): the same motion, without its per-call phase search,
+        # which was most of the cost of a joint step.
+        # trapezoid_point() decides whether the trajectory has finished, and
+        # then returns its end position exactly.
+        profile = state.trajectory_profile()
+        position, velocity = trapezoid_point(profile, now)
+        if position == profile.pe or abs(target - position) < 1e-9:
+            # Finished, or close enough that the remainder is float residue.
+            # Snapping here rather than waiting for get_end_time() keeps the
+            # invariant that a joint at its target carries no speed and no
+            # trajectory.
             state.clear_motion()
             return target
         state.speed = float(velocity)
@@ -2118,8 +2123,7 @@ class Agent(SimObject):
             slowed = 0.0  # braked through rest inside this step
         position = state.position + 0.5 * (state.speed + slowed) * moving_for
         state.speed = slowed
-        state.trajectory = None
-        state.trajectory_target = None
+        state.clear_trajectory()
         # Keeps is_moving true even on the final step, where the speed reaches
         # exactly zero but the joint is not at its target.
         state.braking = True

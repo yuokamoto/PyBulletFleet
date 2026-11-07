@@ -10,10 +10,11 @@ was doing.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import math
 from typing import Any, Optional
 
+from pybullet_fleet._tpi import PhaseProfile, extract_profile
 from pybullet_fleet._tpi_state import capture_tpi_state, restore_tpi_state
 
 
@@ -61,6 +62,11 @@ class KinematicJoint:
     #: speed reaches exactly zero short of the target, which is what keeps
     #: that step counted as motion.
     braking: bool = False
+    #: :attr:`trajectory` as closed-form phase scalars, and the trajectory
+    #: they were read from. Derived, so neither is compared or captured;
+    #: :meth:`clear_trajectory` drops both with the trajectory.
+    _profile: Optional[PhaseProfile] = field(default=None, repr=False, compare=False)
+    _profile_of: Optional[Any] = field(default=None, repr=False, compare=False)
 
     def capture_execution(self, name: str, clock: float) -> dict:
         """Represent this joint's command and trajectory at a completed step."""
@@ -150,6 +156,20 @@ class KinematicJoint:
         """
         return self.trajectory is not None or self.braking or bool(self.speed)
 
+    def trajectory_profile(self) -> PhaseProfile:
+        """:attr:`trajectory` as the scalars :func:`trapezoid_point` evaluates.
+
+        Read once per trajectory, however it was set -- planned by the update
+        loop or rebuilt from a checkpoint -- and kept until it changes.
+        """
+        trajectory = self.trajectory
+        if trajectory is None:
+            raise RuntimeError(f"Joint {self.index} has no trajectory")
+        if self._profile_of is not trajectory:
+            self._profile = extract_profile(trajectory)
+            self._profile_of = trajectory
+        return self._profile
+
     @property
     def decel(self) -> Optional[float]:
         """The braking rate, which follows the acceleration when unset."""
@@ -158,8 +178,7 @@ class KinematicJoint:
     def clear_motion(self) -> None:
         """Put the joint at rest: no speed, no plan, not braking."""
         self.speed = 0.0
-        self.trajectory = None
-        self.trajectory_target = None
+        self.clear_trajectory()
         self.braking = False
 
     def clear_trajectory(self) -> None:
@@ -173,3 +192,6 @@ class KinematicJoint:
         """
         self.trajectory = None
         self.trajectory_target = None
+        # The cached profile would otherwise keep the dropped solver alive.
+        self._profile = None
+        self._profile_of = None

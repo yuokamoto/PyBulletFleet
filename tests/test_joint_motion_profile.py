@@ -853,3 +853,85 @@ class TestProfileChangedWhileTheCabinBrakes:
             raise AssertionError("the cabin never settled")
         assert car.get_joint_state_by_name(JOINT)[0] == pytest.approx(TRAVEL, abs=1e-6)
         assert car.current_floor == "1"
+
+
+class TestRampedJointsUseTheClosedForm:
+    """A ramped joint is evaluated from the phase scalars of its trajectory,
+    extracted once per target change, rather than by
+    ``TwoPointInterpolation.get_point()`` every step -- its per-call phase
+    search was most of the cost of a joint step. The motion is the same."""
+
+    def _agent(self, sim_core):
+        agent = Agent.from_params(AgentSpawnParams(urdf_path=URDF, name="a", use_fixed_base=True), sim_core=sim_core)
+        agent.set_joint_motion_profile(JOINT, max_velocity=0.4, max_accel=1.0, max_decel=2.5)
+        return agent, agent._joint_index_by_name(JOINT)
+
+    def _drive(self, sim_core, agent, index, targets):
+        """Step through targets set mid-travel: ahead from speed, behind, from rest."""
+        state = agent._joints[index]
+        trace = []
+        for target, steps in targets:
+            agent.set_joint_target_by_name(JOINT, target)
+            for _ in range(steps):
+                sim_core.step_once()
+                trace.append((agent.get_joint_state_by_name(JOINT)[0], state.trajectory, agent._joint_clock))
+        return trace
+
+    TARGETS = [(0.6, 20), (1.2, 25), (0.2, 120), (0.9, 150)]
+
+    def test_the_trace_matches_get_point_step_by_step(self, sim_core):
+        agent, index = self._agent(sim_core)
+        trace = self._drive(sim_core, agent, index, self.TARGETS)
+        planned = [(position, tpi.get_point(clock)[0]) for position, tpi, clock in trace if tpi is not None]
+        assert len(planned) > 100
+        for position, expected in planned:
+            assert position == pytest.approx(expected, abs=1e-9)
+        assert agent.get_joint_state_by_name(JOINT)[0] == pytest.approx(0.9, abs=1e-9)
+
+    def test_a_step_does_not_call_get_point(self, sim_core, monkeypatch):
+        from two_point_interpolation import TwoPointInterpolation
+
+        agent, index = self._agent(sim_core)
+
+        def forbidden(self, t):
+            raise AssertionError("get_point() called on the joint step path")
+
+        monkeypatch.setattr(TwoPointInterpolation, "get_point", forbidden)
+        self._drive(sim_core, agent, index, self.TARGETS)
+        assert agent.get_joint_state_by_name(JOINT)[0] == pytest.approx(0.9, abs=1e-9)
+
+    def _released_once_dropped(self, sim_core, agent, index, then):
+        """Plan a trajectory, run ``then`` until the joint drops it, and say
+        whether the solved trajectory was freed with it."""
+        import gc
+        import weakref
+
+        state = agent._joints[index]
+        agent.set_joint_target_by_name(JOINT, 0.6)
+        sim_core.step_once()
+        planned = weakref.ref(state.trajectory)
+        then()
+        assert state.trajectory is None
+        gc.collect()
+        return planned() is None
+
+    def test_an_arrived_joint_keeps_no_trajectory_alive(self, sim_core):
+        agent, index = self._agent(sim_core)
+
+        def arrive():
+            for _ in range(200):
+                sim_core.step_once()
+
+        assert self._released_once_dropped(sim_core, agent, index, arrive)
+
+    def test_a_braking_joint_keeps_no_trajectory_alive(self, sim_core):
+        agent, index = self._agent(sim_core)
+
+        def turn_back():
+            for _ in range(10):
+                sim_core.step_once()
+            # Behind the joint while it moves ahead: braked, not planned.
+            agent.set_joint_target_by_name(JOINT, 0.0)
+            sim_core.step_once()
+
+        assert self._released_once_dropped(sim_core, agent, index, turn_back)

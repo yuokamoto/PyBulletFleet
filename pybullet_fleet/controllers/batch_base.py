@@ -35,7 +35,7 @@ import numpy as np
 
 from pybullet_fleet._replacement import GoalReplacementPolicy, _checked_braking_request
 import pybullet_fleet._replan as _replan
-from pybullet_fleet._tpi import build_tpi, extract_phase_params
+from pybullet_fleet._tpi import build_tpi, extract_profile
 from pybullet_fleet.path_request import PathRequest, PathRequestState, request_state
 from pybullet_fleet.controller import Controller, _log_dropped, _set_braking_path, send_request
 from pybullet_fleet.types import GoalReplacement, MovementDirection
@@ -479,14 +479,14 @@ class BatchKinematicController(GoalReplacementPolicy, Controller):
             t0=t0,
             decel=params.scalar_max_angular_decel(),
         )
-        t_acc, t_cst, t_tot, accel_eff, decel_eff = extract_phase_params(tpi)
+        profile = extract_profile(tpi)
         self._rot_t_start[idx] = t0
         self._rot_total_angle[idx] = angle
-        self._rot_t_accel[idx] = t_acc
-        self._rot_t_const[idx] = t_cst
-        self._rot_t_total[idx] = t_tot
-        self._rot_accel[idx] = accel_eff
-        self._rot_decel[idx] = decel_eff
+        self._rot_t_accel[idx] = profile.t_accel
+        self._rot_t_const[idx] = profile.t_const
+        self._rot_t_total[idx] = profile.t_total
+        self._rot_accel[idx] = profile.accel
+        self._rot_decel[idx] = profile.decel
 
     def _row_start_velocity(self, idx: int) -> np.ndarray:
         """World-frame velocity row ``idx``'s trajectory starts with.

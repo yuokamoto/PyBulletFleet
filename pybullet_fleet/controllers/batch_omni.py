@@ -28,7 +28,7 @@ import numpy as np
 from pybullet_fleet._replan import PathRequest
 from pybullet_fleet._tpi import (
     build_tpi_from_speed,
-    extract_phase_params,
+    extract_profile,
     trapezoid_distance,
     trapezoid_speed,
 )
@@ -285,19 +285,19 @@ class BatchOmniController(BatchKinematicController):
             # Signed, as OmniController: negative is moving away from the goal.
             v0 = float(np.dot(initial_velocity, disp / total))
         tpi = build_tpi_from_speed(p0=0.0, pe=total, vmax=vmax, accel=amax, t0=sim_time, v0=v0, decel=dmax)
-        t_accel, t_const, t_total_rel, accel_eff, decel_eff = extract_phase_params(tpi)
+        profile = extract_profile(tpi)
 
         self._phase[idx] = _PHASE_FORWARD
         self._t_start[idx] = sim_time
         self._p_start[idx] = start
         self._displacement[idx] = disp
         self._total_distance[idx] = total
-        self._t_accel[idx] = t_accel
-        self._t_const[idx] = t_const
-        self._t_total[idx] = t_total_rel
-        self._accel_buf[idx] = accel_eff
-        self._decel_buf[idx] = decel_eff
-        self._v0_buf[idx] = float(tpi.v0)
+        self._t_accel[idx] = profile.t_accel
+        self._t_const[idx] = profile.t_const
+        self._t_total[idx] = profile.t_total
+        self._accel_buf[idx] = profile.accel
+        self._decel_buf[idx] = profile.decel
+        self._v0_buf[idx] = profile.v0
         # Omni does not rotate during translation: hold current orientation.
         self._target_orientation[idx] = current.orientation
 
