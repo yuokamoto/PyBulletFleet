@@ -33,7 +33,7 @@ from pybullet_fleet._replan import HEADING_TOL, PathRequest
 from pybullet_fleet._motion_planning import heading_toward
 from pybullet_fleet._tpi import (
     build_tpi_from_speed,
-    extract_phase_params,
+    extract_profile,
     trapezoid_distance,
     trapezoid_speed,
 )
@@ -373,17 +373,16 @@ class BatchDifferentialController(BatchKinematicController):
         amax = agent.controller_params.scalar_max_linear_accel()
         dmax = agent.controller_params.scalar_max_linear_decel()
         tpi = build_tpi_from_speed(p0=0.0, pe=distance, vmax=vmax, accel=amax, t0=sim_time, v0=v0, decel=dmax)
-        # The forward phase is the one with a configurable braking rate.
-        t_acc, t_cst, t_tot, accel_eff, decel_eff = extract_phase_params(tpi)
+        profile = extract_profile(tpi)
 
         self._phase[idx] = _PHASE_FORWARD
         self._fwd_t_start[idx] = sim_time
-        self._fwd_t_accel[idx] = t_acc
-        self._fwd_t_const[idx] = t_cst
-        self._fwd_t_total[idx] = t_tot
-        self._fwd_accel[idx] = accel_eff
-        self._fwd_decel[idx] = decel_eff
-        self._fwd_v0[idx] = float(tpi.v0)
+        self._fwd_t_accel[idx] = profile.t_accel
+        self._fwd_t_const[idx] = profile.t_const
+        self._fwd_t_total[idx] = profile.t_total
+        self._fwd_accel[idx] = profile.accel
+        self._fwd_decel[idx] = profile.decel
+        self._fwd_v0[idx] = profile.v0
 
     def _begin_final_rotate(self, idx: int, sim_time: float) -> None:
         """Start in-place rotation to ``_final_orient_target_quat[idx]``, then go IDLE."""

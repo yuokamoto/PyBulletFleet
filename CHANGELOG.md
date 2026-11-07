@@ -200,6 +200,26 @@ are not recommended for production use yet.
   does a frequency-limited callback. No change in step time without hooks
   (issue #84).
 
+- A kinematic joint with an acceleration ramp (`set_joint_motion_profile(...,
+  max_accel=...)`) is evaluated each step from its trajectory's phase scalars,
+  read once per target change, instead of `TwoPointInterpolation.get_point()`.
+  The motion is the same, to float noise. Evaluating 1,400 ramped joints
+  (200 bodies x 7) went from 1.6 ms to 0.85 ms per step; the whole joint
+  update, which also writes every joint to PyBullet, from 6.6 ms to 5.9 ms.
+
+- `Agent.set_joint_target()`, `get_joint_state()` and `is_joint_at_target()`
+  take a joint by index or by name, as `set_joint_position()` and
+  `is_joint_moving()` do: `set_joint_target("lift", 1.0)` now works. The first
+  parameter is renamed from `joint_index` to `joint`; a call that passes it as
+  `joint_index=` still works, and `set_joint_target_by_name()`,
+  `get_joint_state_by_name()` and `is_joint_at_target_by_name()` remain as
+  aliases, both deprecated (see Deprecated). An unknown joint is handled as before: `set_joint_target()` ignores
+  it with a warning, `get_joint_state()` returns `(0.0, 0.0)` with a warning
+  for a name and lets PyBullet raise for an index, and `is_joint_at_target()`
+  returns `False`. A negative index given to `set_joint_target()` is now also
+  ignored with a warning; before, it recorded a target for a joint that does
+  not exist, or failed inside PyBullet with physics on.
+
 - A `MoveAction` ends by what becomes of its own `PathRequest`: `CANCELLED` as
   soon as another request replaces it, drops it from the hold, brakes or stops
   it -- not when the agent next comes to rest -- and `COMPLETED` only when its
@@ -555,7 +575,11 @@ are not recommended for production use yet.
   it is carrying and re-plans from it under the new limits.
   `Agent.is_joint_moving()` reports whether a ramped joint is still in
   motion, which `Elevator` arrival now waits for instead of taking the
-  action's tolerance as arrival.
+  action's tolerance as arrival. Both raise for a joint the body does not
+  have: `KeyError` for an unknown name, `IndexError` for an index out of
+  range (unlike the target and state APIs, which warn): a profile on a
+  missing joint would be silently ignored, and `False` from
+  `is_joint_moving()` would read as "stopped".
 - Add a PBF-owned, versioned kinematic recording profile for supported URDF
   Agents, all kinematic joints, constructed primitives and attachments. A trusted
   registry and `load_supported_simulation()` reconstruct a complete artifact
@@ -650,6 +674,14 @@ are not recommended for production use yet.
 
 ### Deprecated
 
+- The `joint_index=` keyword of `Agent.set_joint_target()`,
+  `get_joint_state()` and `is_joint_at_target()`, and the single-joint aliases
+  `set_joint_target_by_name()`, `get_joint_state_by_name()` and
+  `is_joint_at_target_by_name()`, are deprecated and will be removed in
+  0.10.0. Each gives a `FutureWarning` pointing at the call. Pass the joint as
+  the first argument or as `joint=`, by index or by name. The multi-joint
+  `*_by_name` methods, which take a dict or list of names, are not affected.
+
 - Overriding `Controller.set_path()` in a subclass is deprecated; override
   `request_path()` instead, which receives the `PathRequest` itself. Defining
   such a class gives a `FutureWarning` naming it (once, at class definition).
@@ -687,6 +719,42 @@ are not recommended for production use yet.
   deprecation, and the design plans under `docs/design/` are left as written.
 
 ### Fixed
+
+- Batched controllers (`batch_omni`, `batch_differential`): a goal replaced
+  while the agent moves faster than `max_linear_vel` -- the limit lowered
+  during the motion -- now brakes down to the limit at the configured
+  deceleration, as the per-agent controllers do. The batched closed form used
+  to accelerate further in that first phase, so the agent ran ahead of its
+  trajectory until it cruised. The closed form (`trapezoid_distance()`,
+  `trapezoid_speed()`, and the scalar `trapezoid_point()` that ramped joints
+  use) takes each phase's formula from one set of helpers, and is checked
+  against `TwoPointInterpolation.get_point()` for start speeds toward and away
+  from the target, above `vmax`, asymmetric ramps and either direction (end
+  speeds too for the scalar form). Batched rotations evaluate their braking
+  phase with the trajectory's deceleration rather than its first-phase
+  acceleration, so a rotation with its own braking limit
+  (`max_angular_decel`) follows the same trajectory as per agent.
+
+- A joint name given to `set_joint_target()`, `get_joint_state()`,
+  `is_joint_at_target()`, `set_joint_position()` or the `*_by_name` aliases is
+  looked up on the agent's own physics client. With a second simulation
+  running, it was looked up on PyBullet's default client: a valid name was
+  reported missing, or resolved to a joint of another body.
+
+- `get_joints_state_by_name()`, `set_joints_targets_by_name()`,
+  `are_joints_at_targets_by_name()` and `IKParams.ik_joint_names` also look
+  joint names up on the agent's own physics client. With a second simulation
+  running, targets were dropped, states came back empty, at-target checks
+  returned `False` for a joint at its target, and IK locked the named joints.
+  `tools.resolve_joint_index()` takes an optional `physics_client_id`
+  (default `0`, as before).
+
+- Link names given as an end-effector link, as `attach_object()`'s
+  `parent_link_index` or as `PickAction.attach_link` are looked up on the
+  object's own physics client. With a second simulation running, a valid link
+  name was reported missing (falling back to the base link) or resolved to a
+  link of another body. `tools.resolve_link_index()` takes an optional
+  `physics_client_id` (default `0`, as before).
 
 - `BatchOmniController` and `BatchDifferentialController` turn at the yaw
   (`z`) component of a per-axis angular limit (`max_angular_vel`,
