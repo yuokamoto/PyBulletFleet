@@ -13,7 +13,7 @@ import math
 import warnings
 import weakref
 from dataclasses import dataclass, fields, replace
-from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Sequence, Tuple, Type, TypeVar, Union, cast
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Type, TypeVar, Union, cast
 
 import numpy as np
 import pybullet as p
@@ -31,13 +31,22 @@ from .logging_utils import get_lazy_logger
 from pybullet_fleet.events import SimEvents
 from pybullet_fleet._defaults import AGENT as _AGT_D, IK as _IK_D
 from pybullet_fleet.config_utils import forward_spawn_params as _forward_spawn_params
-from pybullet_fleet.agent_plugin import AgentPlugin
+from pybullet_fleet.agent_plugin import AgentPlugin, create_agent_plugin_from_entry
 from pybullet_fleet.path_request import PathRequest, PathRequestState
-
-if TYPE_CHECKING:
-    from pybullet_fleet._replan import PathRejection
-    from pybullet_fleet.controller import Controller
-    from pybullet_fleet.controller_params import ControllerParams
+from pybullet_fleet._replan import PathRejection
+from pybullet_fleet.controller import (
+    Controller,
+    DifferentialController,
+    KinematicController,
+    OmniController,
+    create_controller,
+    create_controller_from_entry,
+    overrides_set_path,
+    send_request,
+)
+from pybullet_fleet.controller_params import ControllerParams
+from pybullet_fleet.controllers.batch_base import BATCH_CONTROLLER_REGISTRY
+from pybullet_fleet.plugins.battery_plugin import BatteryPlugin
 
 # Create logger for this module
 logger = logging.getLogger(__name__)
@@ -579,9 +588,6 @@ class Agent(SimObject):
 
         self._motion_mode = motion_mode if isinstance(motion_mode, MotionMode) else MotionMode(motion_mode)
 
-        from pybullet_fleet.controller import Controller
-        from pybullet_fleet.controller_params import ControllerParams
-
         if isinstance(controller, Controller):
             preset_params = getattr(controller, "params", None)
             self.controller_params: ControllerParams = (
@@ -718,7 +724,6 @@ class Agent(SimObject):
 
     def _get_battery_plugin(self):
         """Return the BatteryPlugin instance, or None."""
-        from pybullet_fleet.plugins.battery_plugin import BatteryPlugin
 
         return self.get_plugin(BatteryPlugin)
 
@@ -945,7 +950,6 @@ class Agent(SimObject):
 
         # Load per-agent plugins from YAML config (if any)
         if spawn_params.plugins:
-            from pybullet_fleet.agent_plugin import create_agent_plugin_from_entry
 
             for entry in spawn_params.plugins:
                 agent.add_plugin(create_agent_plugin_from_entry(entry, agent))
@@ -1274,7 +1278,6 @@ class Agent(SimObject):
         take every path. Asking first lets a caller report a refusal before
         acting. ``direction`` is the one :meth:`set_path` would be given.
         """
-        from pybullet_fleet._replan import PathRejection
 
         permanent = self._permanent_path_rejection(path)
         if permanent is not None:
@@ -1290,7 +1293,6 @@ class Agent(SimObject):
 
     def _permanent_path_rejection(self, path: List[Pose]) -> "Optional[PathRejection]":
         """The refusals that do not depend on the motion: a fixed base, an empty path."""
-        from pybullet_fleet._replan import PathRejection
 
         if self.use_fixed_base:
             return PathRejection("fixed-base robot", temporary=False)
@@ -1304,7 +1306,6 @@ class Agent(SimObject):
         Used by ``__init__`` and ``set_motion_mode`` so the mapping
         ``motion_mode -> controller class`` lives in one place.
         """
-        from pybullet_fleet.controller import DifferentialController, OmniController
 
         if self._motion_mode == MotionMode.OMNIDIRECTIONAL:
             return OmniController(self.controller_params)
@@ -1331,8 +1332,6 @@ class Agent(SimObject):
         Every entry accepts both a registry name (``type:``) and a dotted import
         path (``class:``).
         """
-        from pybullet_fleet.controller import KinematicController
-        from pybullet_fleet.controller_params import ControllerParams
 
         # Normalize to a list of entries (each a str or dict).
         if controller is None:
@@ -1392,8 +1391,6 @@ class Agent(SimObject):
             ValueError: If ``type`` names a batch controller (those must be
                 driven through :class:`~pybullet_fleet.agent_manager.AgentManager`).
         """
-        from pybullet_fleet.controller import create_controller, create_controller_from_entry
-        from pybullet_fleet.controllers.batch_base import BATCH_CONTROLLER_REGISTRY
 
         if isinstance(entry, str):
             entry = {"type": entry}
@@ -1588,7 +1585,6 @@ class Agent(SimObject):
         # agent dead before the new path -- a new goal mid-motion continues the
         # motion instead. Under way is a path in progress (navigation state) or
         # a velocity command still moving it.
-        from pybullet_fleet.controller import KinematicController
 
         base = self._controllers[0] if self._batch_controller is None and self._controllers else None
         under_velocity_command = (
@@ -1615,7 +1611,6 @@ class Agent(SimObject):
         # idle agent reporting is_moving with no trajectory behind it, and the
         # previous path's visualization already cleared.
         resolved = request if len(final_path) == len(path) else replace(request, path=final_path)
-        from pybullet_fleet.controller import overrides_set_path, send_request
 
         if self._batch_controller is not None:
             # synchronized_request_path() sets _is_moving itself, under the
@@ -1777,7 +1772,6 @@ class Agent(SimObject):
 
     def _navigation_busy(self) -> bool:
         """Whether the agent is following a path or holds one to start later."""
-        from pybullet_fleet.controller import KinematicController
 
         if self._batch_controller is not None:
             return self.is_moving or self._batch_controller.pending_path(self) is not None
@@ -2312,7 +2306,6 @@ class Agent(SimObject):
             controller: A :class:`~pybullet_fleet.controller.Controller`
                 instance, or ``None`` to disable movement.
         """
-        from pybullet_fleet.controller_params import ControllerParams
 
         if controller is None:
             self._controllers.clear()
