@@ -172,9 +172,9 @@ are not recommended for production use yet.
   take a joint by index or by name, as `set_joint_position()` and
   `is_joint_moving()` do: `set_joint_target("lift", 1.0)` now works. The first
   parameter is renamed from `joint_index` to `joint`; a call that passes it as
-  `joint_index=` still works. `set_joint_target_by_name()`,
+  `joint_index=` still works, and `set_joint_target_by_name()`,
   `get_joint_state_by_name()` and `is_joint_at_target_by_name()` remain as
-  aliases. An unknown joint is handled as before: `set_joint_target()` ignores
+  aliases, both deprecated (see Deprecated). An unknown joint is handled as before: `set_joint_target()` ignores
   it with a warning, `get_joint_state()` returns `(0.0, 0.0)` with a warning
   for a name and lets PyBullet raise for an index, and `is_joint_at_target()`
   returns `False`. A negative index given to `set_joint_target()` is now also
@@ -634,6 +634,14 @@ are not recommended for production use yet.
   `_create_body_from_shapes()` now require `physics_client_id`.
 
 ### Deprecated
+
+- The `joint_index=` keyword of `Agent.set_joint_target()`,
+  `get_joint_state()` and `is_joint_at_target()`, and the single-joint aliases
+  `set_joint_target_by_name()`, `get_joint_state_by_name()` and
+  `is_joint_at_target_by_name()`, are deprecated and will be removed in
+  0.10.0. Each gives a `FutureWarning` pointing at the call. Pass the joint as
+  the first argument or as `joint=`, by index or by name. The multi-joint
+  `*_by_name` methods, which take a dict or list of names, are not affected.
 
 - Overriding `Controller.set_path()` in a subclass is deprecated; override
   `request_path()` instead, which receives the `PathRequest` itself. Defining

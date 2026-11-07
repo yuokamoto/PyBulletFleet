@@ -3,7 +3,7 @@
 ``set_joint_target``, ``get_joint_state`` and ``is_joint_at_target`` accept
 ``joint: Union[int, str]`` like ``set_joint_position`` and
 ``is_joint_moving`` do, so a joint is named the same way everywhere. The
-``*_by_name`` variants remain as aliases. What each method does with a joint
+``*_by_name`` variants remain as deprecated aliases (removed in 0.10.0). What each method does with a joint
 the body does not have is unchanged and checked here for both spellings.
 """
 
@@ -187,14 +187,16 @@ class TestByNameAliases:
     def test_set_joint_target_by_name(self, sim_core):
         agent = _lift(sim_core)
 
-        agent.set_joint_target_by_name(LIFT, 1.0)
+        with pytest.warns(FutureWarning, match="set_joint_target_by_name"):
+            agent.set_joint_target_by_name(LIFT, 1.0)
 
         assert agent.last_joint_targets == {0: 1.0}
 
     def test_set_joint_target_by_name_ignores_an_unknown_name(self, sim_core):
         agent = _lift(sim_core)
 
-        assert agent.set_joint_target_by_name("no_such_joint", 1.0) is None
+        with pytest.warns(FutureWarning, match="set_joint_target_by_name"):
+            assert agent.set_joint_target_by_name("no_such_joint", 1.0) is None
 
         assert agent.last_joint_targets == {}
 
@@ -202,34 +204,53 @@ class TestByNameAliases:
         agent = _lift(sim_core)
         agent.set_joint_position(LIFT, 2.0)
 
-        assert agent.get_joint_state_by_name(LIFT) == pytest.approx((2.0, 0.0))
-        assert agent.get_joint_state_by_name("no_such_joint") == (0.0, 0.0)
+        with pytest.warns(FutureWarning, match="get_joint_state_by_name"):
+            assert agent.get_joint_state_by_name(LIFT) == pytest.approx((2.0, 0.0))
+        with pytest.warns(FutureWarning, match="get_joint_state_by_name"):
+            assert agent.get_joint_state_by_name("no_such_joint") == (0.0, 0.0)
 
     def test_is_joint_at_target_by_name(self, sim_core):
         agent = _lift(sim_core)
         agent.set_joint_position(LIFT, 2.0)
 
-        assert agent.is_joint_at_target_by_name(LIFT, 2.0)
-        assert agent.is_joint_at_target_by_name("no_such_joint", 2.0) is False
+        with pytest.warns(FutureWarning, match="is_joint_at_target_by_name"):
+            assert agent.is_joint_at_target_by_name(LIFT, 2.0)
+        with pytest.warns(FutureWarning, match="is_joint_at_target_by_name"):
+            assert agent.is_joint_at_target_by_name("no_such_joint", 2.0) is False
 
 
 class TestTheOldKeyword:
-    """The first parameter used to be ``joint_index``; a call passing it by that keyword still works."""
+    """The first parameter used to be ``joint_index``; a call passing it by that
+    keyword still works, with a FutureWarning pointing at the call (removed in 0.10.0)."""
 
     def test_set_joint_target(self, sim_core):
         agent = _lift(sim_core)
-        agent.set_joint_target(joint_index=0, target_position=1.0)  # pyright: ignore[reportCallIssue]
+        with pytest.warns(FutureWarning, match=r"joint_index= keyword of Agent.set_joint_target\(\)") as caught:
+            agent.set_joint_target(joint_index=0, target_position=1.0)  # pyright: ignore[reportCallIssue]
+        assert caught[0].filename == __file__, "the warning points at the caller"
         assert agent.last_joint_targets == {0: 1.0}
 
     def test_get_joint_state(self, sim_core):
         agent = _lift(sim_core)
         agent.set_joint_position(LIFT, 2.0)
-        assert agent.get_joint_state(joint_index=0)[0] == pytest.approx(2.0)  # pyright: ignore[reportCallIssue]
+        with pytest.warns(FutureWarning, match="joint_index="):
+            assert agent.get_joint_state(joint_index=0)[0] == pytest.approx(2.0)  # pyright: ignore[reportCallIssue]
 
     def test_is_joint_at_target(self, sim_core):
         agent = _lift(sim_core)
         agent.set_joint_position(LIFT, 2.0)
-        assert agent.is_joint_at_target(joint_index=0, target=2.0)  # pyright: ignore[reportCallIssue]
+        with pytest.warns(FutureWarning, match="joint_index="):
+            assert agent.is_joint_at_target(joint_index=0, target=2.0)  # pyright: ignore[reportCallIssue]
+
+    def test_the_new_keyword_and_names_do_not_warn(self, sim_core):
+        import warnings
+
+        agent = _lift(sim_core)
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", FutureWarning)
+            agent.set_joint_target(joint=LIFT, target_position=1.0)
+            agent.get_joint_state(LIFT)
+            agent.is_joint_at_target(LIFT, 1.0)
 
     def test_the_new_keyword(self, sim_core):
         agent = _lift(sim_core)
@@ -254,7 +275,8 @@ class TestTheOldKeyword:
         agent = _lift(sim_core)
         agent.set_joint_position(LIFT, 2.0)
 
-        assert Agent.get_joint_state(agent, joint_index=0)[0] == pytest.approx(2.0)  # pyright: ignore[reportCallIssue]
+        with pytest.warns(FutureWarning, match="joint_index="):
+            assert Agent.get_joint_state(agent, joint_index=0)[0] == pytest.approx(2.0)  # pyright: ignore[reportCallIssue]
         with pytest.raises(TypeError, match="multiple values for argument 'joint'"):
             Agent.get_joint_state(agent, 0, joint_index=0)  # pyright: ignore[reportCallIssue]
 

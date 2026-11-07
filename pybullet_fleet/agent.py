@@ -10,6 +10,7 @@ import functools
 import inspect
 import logging
 import math
+import warnings
 import weakref
 from dataclasses import dataclass, fields, replace
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Sequence, Tuple, Type, TypeVar, Union, cast
@@ -48,11 +49,17 @@ _PluginT = TypeVar("_PluginT", bound=AgentPlugin)
 _JointMethod = TypeVar("_JointMethod", bound=Callable[..., Any])
 
 
+def _warn_deprecated(message: str, stacklevel: int) -> None:
+    """A ``FutureWarning`` for an API removed in 0.10.0, shown by default wherever the call is."""
+    warnings.warn(message + " It will be removed in 0.10.0.", FutureWarning, stacklevel=stacklevel + 1)
+
+
 def _also_takes_joint_index(method: _JointMethod) -> _JointMethod:
     """Let a single-joint method still take its first argument by the old keyword ``joint_index``.
 
     The parameter became ``joint`` when it started to accept a name as well;
-    ``method(joint_index=...)`` keeps working, as an alias of ``joint=``. The
+    ``method(joint_index=...)`` keeps working, as an alias of ``joint=``, with a
+    ``FutureWarning``: the alias goes in 0.10.0, and this decorator with it. The
     alias is left out of the method's signature on purpose, so that
     ``inspect.signature`` and type checkers steer new code to ``joint``.
     """
@@ -72,6 +79,11 @@ def _also_takes_joint_index(method: _JointMethod) -> _JointMethod:
                 already_given = False  # let the call itself report the mistake
             if already_given:
                 raise TypeError(f"{method.__name__}() got multiple values for argument 'joint'")
+            _warn_deprecated(
+                f"The joint_index= keyword of Agent.{method.__name__}() is deprecated; use joint=, "
+                "which takes a joint index or name.",
+                stacklevel=2,
+            )
             kwargs["joint"] = joint
         return method(*args, **kwargs)
 
@@ -2458,8 +2470,13 @@ class Agent(SimObject):
         Get (position, velocity) for a single joint by name.
         Returns (position, velocity) or (0.0, 0.0) if not found.
 
-        Same as :meth:`get_joint_state`, which also takes a name.
+        Deprecated, removed in 0.10.0: use :meth:`get_joint_state`, which also
+        takes a name.
         """
+        _warn_deprecated(
+            "Agent.get_joint_state_by_name() is deprecated; use get_joint_state(), which takes a name too.",
+            stacklevel=2,
+        )
         return self.get_joint_state(joint_name)
 
     def capture_kinematic_joint_execution(self) -> list[dict]:
@@ -2514,7 +2531,7 @@ class Agent(SimObject):
         joint_names = [self.joint_info[i][1].decode("utf-8") for i in range(self.get_num_joints())]
         result = {}
         for name in joint_names:
-            result[name] = self.get_joint_state_by_name(name)
+            result[name] = self.get_joint_state(name)
         return result
 
     def get_joints_state_by_name(self, joint_names: list) -> dict:
@@ -2727,8 +2744,13 @@ class Agent(SimObject):
         """
         Set target position for a joint by joint name.
 
-        Same as :meth:`set_joint_target`, which also takes a name.
+        Deprecated, removed in 0.10.0: use :meth:`set_joint_target`, which also
+        takes a name.
         """
+        _warn_deprecated(
+            "Agent.set_joint_target_by_name() is deprecated; use set_joint_target(), which takes a name too.",
+            stacklevel=2,
+        )
         self.set_joint_target(joint_name, target_position, max_force)
 
     def set_all_joints_targets(self, target_positions: List[float], max_force: float = 500.0):
@@ -2833,8 +2855,13 @@ class Agent(SimObject):
                 or ``None`` (→ ``self.joint_tolerance``).  Resolved via
                 ``_resolve_joint_tolerance()`` using the joint's index.
 
-        Same as :meth:`is_joint_at_target`, which also takes a name.
+        Deprecated, removed in 0.10.0: use :meth:`is_joint_at_target`, which
+        also takes a name.
         """
+        _warn_deprecated(
+            "Agent.is_joint_at_target_by_name() is deprecated; use is_joint_at_target(), which takes a name too.",
+            stacklevel=2,
+        )
         return self.is_joint_at_target(joint_name, target, tolerance)
 
     @property
