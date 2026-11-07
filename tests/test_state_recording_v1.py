@@ -270,6 +270,23 @@ def test_agent_state_type_and_version_are_refused_each_for_its_own_reason(record
             load_supported_checkpoint(directory, at_or_before=2.5, profile=_profile(directory))
 
 
+@pytest.mark.parametrize("version", [2.0, True], ids=["float", "bool"])
+def test_profile_validation_refuses_a_version_that_only_compares_equal(
+    recorded_run: tuple[Path, dict], version: object
+) -> None:
+    """``2.0 == 2``, but it is not the integer version this build restores.
+
+    The loader's envelope check refuses it first; the profile's own check is
+    what a caller of ``validate_checkpoint()`` gets.
+    """
+    directory, _ = recorded_run
+    manifest = json.loads((directory / "manifest.json").read_text())
+    checkpoint = json.loads((directory / "checkpoints" / "000000025.json").read_text())
+    checkpoint["agents"]["mobile-arm"]["version"] = version
+    with pytest.raises(ValueError, match=rf"Agent state version for 'mobile-arm': 'kinematic_agent' version {version!r};"):
+        _profile(directory).validate_checkpoint(manifest, checkpoint)
+
+
 @pytest.mark.parametrize("change", ["speed", "trajectory"])
 def test_invalid_joint_execution_is_rejected_before_restore(recorded_run: tuple[Path, dict], change: str) -> None:
     directory, _ = recorded_run

@@ -15,7 +15,7 @@ agent after it has moved on.
 
 import pytest
 
-from pybullet_fleet import Agent, AgentSpawnParams, MultiRobotSimulationCore, SimulationParams
+from pybullet_fleet import Agent, AgentSpawnParams
 
 URDF = "robots/elevator.urdf"  # prismatic "lift", <limit velocity="2.0">
 JOINT = "lift"
@@ -25,18 +25,8 @@ AFTER = 250  # steps compared after the checkpoint; every case is at rest by the
 
 
 @pytest.fixture
-def sim_core():
-    import pybullet as p
-
-    sim = MultiRobotSimulationCore(
-        SimulationParams(gui=False, physics=False, timestep=DT, monitor=False, enable_monitor_gui=False)
-    )
-    sim.initialize_simulation()
-    yield sim
-    try:
-        p.disconnect(sim.client)
-    except p.error:
-        pass
+def sim_core_params():
+    return {"timestep": DT}
 
 
 def _spawn(sim_core, name):
@@ -148,3 +138,54 @@ class TestRestoredRampFollowsTheOriginalPath:
         agent.restore_kinematic_joint_execution(captured)
 
         _assert_same_path(_path(sim_core, agent), expected)
+
+
+def _timeline(sim_core, agents, steps=AFTER):
+    """Every agent's exact joint state and motion flag, step by step."""
+    timelines = [[] for _ in agents]
+    for _ in range(steps):
+        sim_core.step_once()
+        for timeline, agent in zip(timelines, agents):
+            timeline.append((*_state(agent), agent.is_joint_moving(JOINT)))
+    return timelines
+
+
+def _finish_step(timeline):
+    return next(step for step, entry in enumerate(timeline) if not entry[3])
+
+
+@pytest.mark.parametrize("scenario", sorted(SCENARIOS))
+class TestRestoredRampIsStepExact:
+    """A restored joint repeats the original's arithmetic, not an approximation of it.
+
+    The joint counts the time it has followed its trajectory and the checkpoint
+    carries that count, so no clock reading is subtracted on either side: the
+    restored joint is bit-identical every step, and its motion ends on the same
+    step -- also after the original has run long enough for a clock to have
+    lost digits.
+    """
+
+    def test_into_a_fresh_agent_after_a_long_run(self, sim_core, scenario):
+        # Idle for a long while first, so an absolute time base would be far
+        # from the fresh agent's.
+        original = _spawn(sim_core, "original")
+        original.set_joint_motion_profile(JOINT, **PROFILE)
+        for _ in range(2000):
+            sim_core.step_once()
+        SCENARIOS[scenario](sim_core, original)
+        captured = original.capture_kinematic_joint_execution()
+        fresh = _spawn(sim_core, "fresh")
+        fresh.restore_kinematic_joint_execution(captured)
+
+        expected, restored = _timeline(sim_core, [original, fresh])
+        assert restored == expected
+        assert _finish_step(restored) == _finish_step(expected)
+
+    def test_back_into_the_same_agent(self, sim_core, scenario):
+        agent = _drive(sim_core, scenario)
+        captured = agent.capture_kinematic_joint_execution()
+        (expected,) = _timeline(sim_core, [agent])
+        agent.restore_kinematic_joint_execution(captured)
+        (restored,) = _timeline(sim_core, [agent])
+        assert restored == expected
+        assert _finish_step(restored) == _finish_step(expected)

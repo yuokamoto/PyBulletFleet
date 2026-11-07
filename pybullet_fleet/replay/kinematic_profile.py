@@ -260,7 +260,8 @@ def _validate_agent(name: str, construction: dict, entry: dict) -> None:
         raise ValueError(
             f"Unsupported Agent state type for {name!r}: {entry['type']!r}; this build restores 'kinematic_agent'"
         )
-    if entry["version"] != AGENT_STATE_VERSION:
+    # type() as well: 2.0 == 2 and True == 1, and neither is a version.
+    if type(entry["version"]) is not int or entry["version"] != AGENT_STATE_VERSION:
         raise ValueError(
             f"Unsupported Agent state version for {name!r}: 'kinematic_agent' version {entry['version']!r}; "
             f"this build restores 'kinematic_agent' version {AGENT_STATE_VERSION}"
