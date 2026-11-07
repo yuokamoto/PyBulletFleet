@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- ROS 2 bridge (RMF `python_fleet` mode): robots are added to the RMF fleet one
+  at a time, each waited for until RMF has finished adding it, instead of all
+  at once from the update thread pool. Adding them together overlapped RMF's
+  participant registration, and `bridge_node` now and then aborted with heap
+  corruption at startup (#152). `bridge_node` also prints every thread's
+  Python stack on a fatal signal.
+
 ## v0.9.0 (2026-11-08)
 
 ### Added

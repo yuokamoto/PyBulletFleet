@@ -857,9 +857,36 @@ def _parallel(f):
     return run_in_parallel
 
 
-@_parallel
-def _update_robot(robot: RobotAdapter):
-    """Fetch robot state and push update to RMF."""
+# Robots are added to RMF one at a time. ``add_robot`` returns at once and RMF
+# finishes the registration (traffic participant, robot context) on threads of
+# its own; two registrations in flight together overlap RMF's unsynchronised
+# participant bookkeeping, and the bridge aborted with heap corruption in that
+# window (issue #152). Each registration is therefore waited for, until the
+# handle reports the robot added (``more()`` is not ``None``), before the next
+# robot is added.
+_REGISTRATION_LOCK = threading.Lock()
+_REGISTRATION_TIMEOUT_S = 10.0
+_REGISTRATION_POLL_S = 0.005
+
+
+def _register_robot(robot: RobotAdapter, state) -> None:
+    """Add *robot* to its RMF fleet and wait until RMF has finished adding it."""
+    with _REGISTRATION_LOCK:
+        handle = robot.fleet_handle.add_robot(robot.name, state, robot.configuration, robot.make_callbacks())
+        deadline = time.monotonic() + _REGISTRATION_TIMEOUT_S
+        while handle is not None and handle.more() is None:
+            if time.monotonic() >= deadline:
+                robot.node.get_logger().warning(
+                    f"RMF has not finished adding robot [{robot.name}] after "
+                    f"{_REGISTRATION_TIMEOUT_S:.0f} s; adding the next robot anyway"
+                )
+                break
+            time.sleep(_REGISTRATION_POLL_S)
+    robot.update_handle = handle
+
+
+def _update_robot_once(robot: RobotAdapter) -> None:
+    """Fetch robot state and push update to RMF (adding the robot first)."""
     data = robot.api.get_data()
     if data is None:
         return
@@ -867,10 +894,13 @@ def _update_robot(robot: RobotAdapter):
     state = rmf_easy.RobotState(data.map, data.position, data.battery_soc)
 
     if robot.update_handle is None:
-        robot.update_handle = robot.fleet_handle.add_robot(robot.name, state, robot.configuration, robot.make_callbacks())
+        _register_robot(robot, state)
         return
 
     robot.update(state, data)
+
+
+_update_robot = _parallel(_update_robot_once)
 
 
 if __name__ == "__main__":

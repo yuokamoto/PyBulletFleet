@@ -1,0 +1,62 @@
+name: Bridge RMF Registration Soak
+
+# Temporary (issue #152): launches the office RMF demo many times on each runner
+# image, with main and with the change under test, and counts bridge_node
+# crashes while the fleet adapter adds its robots. Remove once the crash is
+# understood.
+on:
+  workflow_dispatch:
+    inputs:
+      launches:
+        description: Launches per matrix cell
+        default: '60'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - '.github/workflows/bridge-rmf-soak.yml'
+      - 'docker/rmf_registration_soak.sh'
+
+permissions:
+  contents: read
+
+jobs:
+  soak:
+    name: Soak (${{ matrix.os }}, ${{ matrix.code }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ ubuntu-24.04, ubuntu-26.04 ]
+        code: [ main, change ]
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Check out main's bridge code
+        if: matrix.code == 'main'
+        # Keep this branch's soak script; take everything the image builds from main.
+        run: |
+          git fetch --depth=1 origin main
+          cp docker/rmf_registration_soak.sh /tmp/rmf_registration_soak.sh
+          git checkout FETCH_HEAD -- ros2_bridge pybullet_fleet docker
+          cp /tmp/rmf_registration_soak.sh docker/rmf_registration_soak.sh
+
+      - name: Build bridge image
+        run: docker compose -f docker/docker-compose.yaml build bridge
+
+      - name: Soak
+        run: |
+          cd docker
+          mkdir -p soak_out
+          docker compose run --rm --no-deps \
+            -v "$(pwd)/rmf_registration_soak.sh:/rmf_registration_soak.sh:ro" \
+            -v "$(pwd)/soak_out:/soak_out" -e SOAK_OUT=/soak_out \
+            bridge bash /rmf_registration_soak.sh "${{ inputs.launches || '60' }}"
+
+      - name: Upload logs of failed launches
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: soak-${{ matrix.os }}-${{ matrix.code }}
+          path: docker/soak_out
+          if-no-files-found: ignore
