@@ -385,7 +385,7 @@ class SimObject:
     _spawn_params_cls = SimObjectSpawnParams
 
     # Subclasses override to True for per-step update() calls in step_once().
-    _needs_update: bool = False
+    _wants_update: bool = False  # class default of _needs_update (Agent: True)
 
     # True on an object that excludes some of its own contacts from collision
     # results through _ignores_contact_with() (an elevator and the bodies
@@ -410,6 +410,13 @@ class SimObject:
             from pybullet_fleet.entity_registry import register_entity_class
 
             register_entity_class(name, cls)
+        # A class body that says ``_needs_update = True`` (the old spelling)
+        # would hide the property: keep the value as ``_wants_update`` and
+        # let the property show through again.
+        wants = cls.__dict__.get("_needs_update")
+        if wants is not None and not isinstance(wants, property):
+            cls._wants_update = bool(wants)
+            delattr(cls, "_needs_update")
 
     def __init__(
         self,
@@ -421,10 +428,11 @@ class SimObject:
         name: Optional[str] = None,
         user_data: Optional[Dict[str, Any]] = None,
     ):
-        self.body_id = body_id
+        self._body_id = body_id
         self.sim_core = sim_core
 
         self.attached_objects: List["SimObject"] = []
+        self._link_attached_count: int = 0  # how many of them ride on a link, not the base
         self.callbacks: List[dict] = []
         self._pickable = pickable
         _warn_if_new_object_is_normal_2d(self, collision_mode)
@@ -501,10 +509,12 @@ class SimObject:
     # ------------------------------------------------------------------
 
     def update(self, dt: float) -> bool:
-        """Called every simulation step for objects with ``_needs_update = True``.
+        """Called every simulation step while ``_needs_update`` is true.
 
         Override in subclasses to implement per-step behavior (e.g. device
-        state machines, animated objects).
+        state machines, animated objects), and opt in with the class
+        attribute ``_wants_update = True`` (``_needs_update = True`` in a
+        class body means the same), or by assigning ``self._needs_update``.
 
         Args:
             dt: Time step in seconds.
@@ -1315,16 +1325,37 @@ class SimObject:
         for link_index in range(-1, p.getNumJoints(self.body_id, physicsClientId=self._pid)):
             p.setCollisionFilterGroupMask(self.body_id, link_index, group, mask, physicsClientId=self._pid)
 
+    @property
+    def _needs_update(self) -> bool:
+        """Whether the simulation calls :meth:`update` every step.
+
+        A subclass sets the class attribute ``_wants_update = True`` (as
+        :class:`Agent` does; ``_needs_update = True`` in a class body is
+        kept as that), or assigns ``self._needs_update`` at any time, also
+        after ``super().__init__()``: the simulation's update loop follows
+        the change at once.
+        """
+        return self._wants_update
+
+    @_needs_update.setter
+    def _needs_update(self, value: bool) -> None:
+        self._wants_update = bool(value)
+        note = getattr(self.sim_core, "_note_needs_update", None)
+        if note is not None:
+            note(self)
+
     def get_pose(self) -> Pose:
         """
         Return current position and orientation as Pose object.
 
-        Performance optimization:
-
-        - Kinematic objects (mass=0): Always returns cached pose since position
-          only changes via set_pose(), which updates the cache.
-        - Dynamic objects: Caches within the same simulation timestep to avoid
-          redundant PyBullet API calls. Cache is invalidated when sim_time advances.
+        - A kinematic object (mass=0) moves only through ``set_pose()``, which
+          updates its pose cache, so the cache itself is returned: a live view
+          of the object's row of the simulation's pose columns. Hold the
+          ``Pose``, not its arrays, across steps, and copy a value to keep it
+          (``list(pose.position)``).
+        - A physics object's pose is read from PyBullet once per simulation
+          step (the step reads it back after ``stepSimulation()``), and a
+          snapshot is returned: the pose at that time, as before.
         """
         # Kinematic objects never move on their own - cache is always valid
         # (position only changes via set_pose(), which updates the cache)
@@ -1334,15 +1365,54 @@ class SimObject:
         # Dynamic objects: check if cache is valid for current sim time
         current_sim_time = self.sim_core.sim_time if self.sim_core is not None else -1.0
 
-        if self._cached_pose is not None and current_sim_time >= 0 and self._cached_pose_sim_time == current_sim_time:
-            return self._cached_pose
+        if self._cached_pose is None or current_sim_time < 0 or self._cached_pose_sim_time != current_sim_time:
+            # Cache miss: Query PyBullet and update the cache in place (it may be
+            # a view into the simulation's pose columns).
+            position, orientation = p.getBasePositionAndOrientation(self.body_id, physicsClientId=self._pid)
+            self._cached_pose.position[:] = position
+            self._cached_pose.orientation[:] = orientation
+            self._cached_pose_sim_time = current_sim_time
 
-        # Cache miss: Query PyBullet and update cache
-        position, orientation = p.getBasePositionAndOrientation(self.body_id, physicsClientId=self._pid)
-        self._cached_pose = Pose.from_pybullet(position, orientation)
-        self._cached_pose_sim_time = current_sim_time
+        # A snapshot: a physics body moves between steps, a pose kept from
+        # an earlier call must not move with it.
+        return Pose(
+            position=[float(v) for v in self._cached_pose.position],
+            orientation=[float(v) for v in self._cached_pose.orientation],
+        )
 
-        return self._cached_pose
+    @property
+    def body_id(self) -> int:
+        """The PyBullet body, holding this object's pose.
+
+        With ``mirror: lazy`` a pose the last step left out of PyBullet is
+        written to it first. A pose set inside the current step is buffered
+        until the step's Phase 2 flush, as it always was: PyBullet holds the
+        pose the step began with until then.
+        """
+        core = self.sim_core
+        if core is not None:
+            sync = getattr(core, "_sync_object_mirror_if_dirty", None)
+            if sync is not None:
+                sync(self)
+        return self._body_id
+
+    @body_id.setter
+    def body_id(self, value: int) -> None:
+        self._body_id = value
+
+    def _bind_rows(self, store: Any, row: int) -> None:
+        """Make the object's cached state read and write its row of the simulation's columns."""
+        position = store.pos[row]
+        orientation = store.orn[row]
+        position[:] = self._cached_pose.position
+        orientation[:] = self._cached_pose.orientation
+        self._cached_pose.position = position
+        self._cached_pose.orientation = orientation
+
+    def _unbind_rows(self) -> None:
+        """Give the cached state its own storage again (the object left the simulation)."""
+        self._cached_pose.position = [float(v) for v in self._cached_pose.position]
+        self._cached_pose.orientation = [float(v) for v in self._cached_pose.orientation]
 
     def set_pose(self, pose: Pose, preserve_velocity: bool = True) -> bool:
         """
@@ -1481,6 +1551,7 @@ class SimObject:
         if self.sim_core is not None and self.sim_core._in_step:
             if moved:
                 self._pending_preserve_velocity = preserve_velocity
+                self.sim_core._note_preserve_velocity(self.object_id, preserve_velocity)
                 self.sim_core._pending_pose_ids.add(self.object_id)
                 self.sim_core._mark_object_moved(self.object_id)
                 # Attached-object propagation still recurses through _set_pose_internal,
@@ -1490,16 +1561,21 @@ class SimObject:
             return moved
 
         # ----- Immediate path (legacy / outside step_once) -----
-        # Use cached is_kinematic flag to avoid PyBullet API calls
+        # Written to PyBullet now, whatever it held: the body is current after this.
+        body_id = self._body_id
         if preserve_velocity and not self.is_kinematic:
             # Get current velocities to preserve them (for dynamic objects only)
-            linear_vel, angular_vel = p.getBaseVelocity(self.body_id, physicsClientId=self._pid)
-            p.resetBasePositionAndOrientation(self.body_id, position, orientation, physicsClientId=self._pid)
-            p.resetBaseVelocity(self.body_id, linear_vel, angular_vel, physicsClientId=self._pid)
+            linear_vel, angular_vel = p.getBaseVelocity(body_id, physicsClientId=self._pid)
+            p.resetBasePositionAndOrientation(body_id, position, orientation, physicsClientId=self._pid)
+            p.resetBaseVelocity(body_id, linear_vel, angular_vel, physicsClientId=self._pid)
         else:
             # Fast path: Just set position without velocity operations
             # (kinematic objects or explicitly requested to skip velocity preservation)
-            p.resetBasePositionAndOrientation(self.body_id, position, orientation, physicsClientId=self._pid)
+            p.resetBasePositionAndOrientation(body_id, position, orientation, physicsClientId=self._pid)
+        if self.sim_core is not None:
+            note_mirrored = getattr(self.sim_core, "_note_mirrored", None)
+            if note_mirrored is not None:
+                note_mirrored(self.object_id)
 
         # Notify sim_core if movement detected
         if moved and self.sim_core is not None:
@@ -1509,13 +1585,11 @@ class SimObject:
             # paused and on flush; collision state stays as of the last step.
             self.sim_core._monitor_frames.pose_edited()
 
-            # Update AABB and spatial grid immediately for kinematic objects (optimization)
-            # Physics objects are updated in step_once() to batch PyBullet calls
+            # Update the AABB immediately for kinematic objects (the spatial
+            # hash follows it on its next sync). Physics objects are updated
+            # in step_once() to batch PyBullet calls.
             if self.object_id in self.sim_core._kinematic_objects:
                 self.sim_core._update_object_aabb(self.object_id)
-                # Update spatial grid if cell_size is initialized
-                if self.sim_core._cached_cell_size is not None:
-                    self.sim_core._update_object_spatial_grid(self.object_id)
 
         # Recursively apply the same coordinates and velocity to attached_objects.
         # Skipped when the parent didn't move — children's relative pose is unchanged.
@@ -1656,6 +1730,14 @@ class SimObject:
         obj._attached_link_index = parent_link_index
         if parent_link_index >= 0 and self.sim_core is not None and hasattr(self, "update_attached_objects_kinematics"):
             self.sim_core._register_link_attachment_parent(self.object_id)
+        if parent_link_index >= 0:
+            self._link_attached_count += 1
+        note_attachment = getattr(self.sim_core, "_note_base_attachment", None)
+        if note_attachment is not None and parent_link_index == -1:
+            note_attachment(obj.object_id, self.object_id, relative_pose)
+        note_tree = getattr(self.sim_core, "_note_attachment_tree", None)
+        if note_tree is not None:
+            note_tree(self)
         self._log.debug(
             lambda: f"attach_object: obj={obj.body_id} _attach_offset.position={obj._attach_offset.position} "
             f"_attach_offset.orientation={obj._attach_offset.orientation}"
@@ -1759,9 +1841,19 @@ class SimObject:
             obj._constraint_id = None
 
         # Reset attachment state to default values
+        was_base_attachment = obj._attached_link_index == -1
+        if not was_base_attachment:
+            self._link_attached_count = max(0, self._link_attached_count - 1)
         obj._attach_offset = Pose(position=[0.0, 0.0, 0.0], orientation=[0.0, 0.0, 0.0, 1.0])
         obj._attached_to = None
         obj._attached_link_index = -1
+        note_attachment = getattr(self.sim_core, "_note_base_attachment", None)
+        if note_attachment is not None and was_base_attachment:
+            note_attachment(obj.object_id, None, None)
+        note_tree = getattr(self.sim_core, "_note_attachment_tree", None)
+        if note_tree is not None:
+            note_tree(self)
+            note_tree(obj, True)  # obj's tree left this one: its members are checked against it again
 
         # Teleport to final pose if requested
         if drop_relative_pose is not None:

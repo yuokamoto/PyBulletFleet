@@ -7,6 +7,175 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Breaking
+
+- `Pose` fields may be NumPy array views. What `get_pose()` returns for a
+  kinematic object in a simulation is the object's live row of the pose
+  columns: its `position` and `orientation` follow the object, and they are
+  arrays, not lists. `pose.position == [x, y, z]` raises (compare
+  `list(pose.position)` or the `Pose` objects, which compare by value),
+  `pos + [0, 0, 1]` adds element by element, and `json.dumps` needs
+  `list(...)`. Hold the `Pose`, not its arrays, across steps: an array taken
+  from it stops following the object once the object's row moves (after
+  another object's removal, or the columns growing) and it no longer follows
+  it after `remove_object()` or `reset()`. Copy a value to keep it. A
+  physics object's `get_pose()` still returns a snapshot.
+- `mirror: lazy` is the default: a kinematic body's pose reaches PyBullet
+  only when something reads it there. Code that calls PyBullet with a body
+  id kept from earlier reads the pose of the last sync; set `mirror: always`
+  or give the plugin or callback `needs_mirror = True`. With `physics` on,
+  every pose is written at every step whatever `mirror` says.
+
+### Changed
+
+- A rider that leaves its carrier counts as moved, and so does every
+  object that leaves with it: after `a.detach_object(b)` the riders of `b`
+  are checked against `a` on the next collision check too. A removed
+  object leaves its attachment tree: its riders are detached, in place,
+  each at the top of its own tree (two former riders are a pair for the
+  broad phase again), and its carrier no longer lists it; they used to
+  stay attached to a body that was gone. A change of
+  `ignore_attached_collision` at run time checks every pair again on the
+  next collision check, as a change of `ignore_static_collision` does.
+- With `physics` on, every body's AABB is read from PyBullet after the
+  step, as before. The local box a kinematic body's box is computed from
+  is read by putting the body at identity orientation and back, and the
+  orientation it comes back with is the one PyBullet reads back, about an
+  ulp from the one it was given; a contact with a dynamic body would
+  amplify that. The computed boxes serve kinematic simulations.
+- Agent plugins can be updated as a batch. `AgentPlugin.create_batch(sim_core)`
+  may return a `PluginBatch`; the simulation then adds every plugin of that
+  class to it as the agents join and calls the batch's `update(dt)` once
+  per step in place of each plugin's `on_update()`. `BatteryPlugin` does:
+  its state (rates, state of charge, charging flag) lives in the batch's
+  columns, its properties read and write its row, and the batch drains or
+  charges every battery in one array operation, reading whether each agent
+  moves from the simulation's column. A `BatteryPlugin` subclass stays
+  plugin by plugin whatever it overrides, as does a plain battery on an
+  agent whose class answers `is_moving` itself (`PluginBatch.add()` may
+  return `False` to leave a plugin to its agent), and a plugin on an agent
+  outside a simulation. A batched plugin is updated by the simulation's
+  step, not by `Agent.update()`: a loop that calls `agent.update(dt)` by
+  hand instead of `step_once()` no longer drains a plain `BatteryPlugin`
+  on an agent in a simulation (step the simulation, or use a subclass,
+  which stays per agent). An agent whose plugins are all in batches takes
+  the batch-driven fast path in `update()`.
+- A `MoveAction` on a batch-driven agent no longer polls its request every
+  step: once the batch controller follows (or holds) the request, the agent
+  sleeps, and the controller wakes it when the request's fate changes (the
+  row ends, a path from outside replaces or drops it, the agent is stopped
+  or leaves the controller). An agent whose joints have all settled, and
+  one whose action queue has an interruption to end, are treated the same
+  way as before. 1000 batch robots driven through `MoveAction` (the
+  behaviour-tree and ROS navigate path) step in about the same time as
+  through `set_path` (1.3 ms against 2.7 ms before).
+- With `ignore_attached_collision` (the default) the broad phase no longer
+  offers a pair of two bodies of one attachment tree (a carrier and its
+  load, two loads on one carrier): every row carries the id of its tree's
+  root and pairs with the same root are dropped as arrays, instead of
+  reaching the narrow phase and being set aside there one by one each
+  step. A rider that leaves its carrier counts as moved, so a pair the two
+  make is checked on the next collision check even if neither moves, as
+  before. The riders of the carriers a buffered `set_poses()` moved are
+  found through a `parent_row` column, level by level, with no Python loop
+  over the carriers, and a batch-driven agent whose only attachments ride
+  on its base takes the fast path (they ride along in the batch write).
+- The step's per-object update loop visits only the objects that have a
+  per-step `update()` (agents and devices), kept in a list as objects are
+  added and removed, instead of testing every body in the scene; a scene
+  of tens of thousands of static tiles no longer pays for them each step.
+  `_needs_update` is a property: a subclass may set it at any time, also
+  after `super().__init__()`, and the loop follows the change at once; a
+  removed object leaves the loop whatever its flag says. A class body that
+  says `_needs_update = True` (the old spelling) is kept as
+  `_wants_update = True`, so the property still works for its instances.
+  The loop runs over a snapshot: an `update()` that removes another object
+  or clears its flag does not make the loop skip the next object.
+  A batch-driven agent with nothing of its own to run this step (no action,
+  no joint on its way, nothing attached, no plugin, no entity event
+  handlers) is skipped: its motion is the batch controller's. An agent's
+  reported velocity and yaw rate are columns of the simulation (its
+  `velocity` / `angular_velocity` read its row), which the batch controller
+  writes as arrays instead of agent by agent, and the Phase 3 AABB flush
+  and `set_poses()` resolve their rows as arrays too.
+- The PyBullet mirror is lazy (`mirror: lazy`, the default). A kinematic
+  body's buffered pose is no longer written to PyBullet at every step: it
+  stays in the simulation's pose columns until something reads it in
+  PyBullet, and the simulation syncs by itself before anything of its own
+  does (the narrow phase of a collision pair, an AABB query, a recording,
+  the accessors `SimObject.body_id` and `sim.client`). Physics bodies,
+  articulated bodies and link-attachment parents are written at every
+  step, and with `physics` on every body is (PyBullet integrates against the
+  kinematic bodies and computes the contacts of `CONTACT_POINTS` and
+  `HYBRID` in `stepSimulation()`). `sim.sync_mirror()` writes every pending
+  pose on demand. Code that calls PyBullet with a body id kept from earlier
+  should run with `mirror: always` (in `SimulationParams` or YAML), or a
+  plugin or callback can set `needs_mirror = True` to ask for the same: the
+  poses earlier steps left pending are written when it is registered, and
+  `unregister_callback()` releases the request.
+- Poses are columns of the simulation. Every registered object's position
+  and orientation live in one array each (in the collision store), an
+  object's pose cache (what `get_pose()` returns for a kinematic object) is
+  a view into its row, and `sim.get_poses()` is a gather from the columns.
+  A buffered `sim.set_poses()` (inside a step) judges which rows moved and
+  writes them in one array operation instead of one `set_pose` per object,
+  and carries the objects attached to the moved ones' bases the same way,
+  level by level (their attachment offsets are columns too; the composed
+  pose is computed in double precision, where `p.multiplyTransforms` works
+  in single, so the two agree to about 1e-7). A physics body, an object
+  with link attachments, a carrier with a rider that is not a kinematic
+  base attachment, and a STATIC object take the per-object path there (the
+  last does not move, with one warning for the batch). The AABBs of the moved kinematic bodies are then computed from
+  the columns directly. A physics body's row is read back after every
+  `stepSimulation()`. `Pose` compares by value whether its fields are lists
+  or arrays; compare or serialize a field with `list(pose.position)`, as
+  the package does (`pose.position == [x, y, z]` on an array view raises).
+- The collision broad phase works on arrays. Every object's AABB, local
+  box, collision mode and physics flag live in one column store
+  (`pybullet_fleet/collision_store.py`) and the spatial hash is two sorted
+  arrays of cell keys over it, one for the static bodies and one for the
+  rest: the boxes of all the kinematic single-body
+  objects that moved in a step are computed from their poses in one array
+  operation (no `getAABB()` call per object; physics and articulated bodies
+  are still read from PyBullet), and the candidate pairs of all the moved
+  bodies come out of one `searchsorted` and one array AABB filter. The
+  registration rule, the per-axis clearance, the NORMAL_2D z rule, the
+  zero clearance of a HYBRID pair with a physics body, `ignore_static` and
+  DISABLED are as before, and the collision parity traces record the same
+  events and distances. `sim.cached_aabb(object_id)` and
+  `sim.grid_cells_of(object_id)` replace reading the former
+  `_cached_aabbs_dict` and `_cached_object_to_cell` dicts, which are gone
+  along with `_cached_spatial_grid`. `query_aabb()` (and through it
+  `find_nearest_pickable()` and an elevator's passenger search) answers a
+  narrow box through the hash, as before: the rows in the box's cells, plus
+  those changed since the hash's last sync, tested against the box; a box
+  spanning more cells than a quarter of the objects tests every AABB in one
+  array operation instead.
+
+### Added
+
+- Collision parity traces (`tests/collision_parity/`): eleven small scripted
+  scenes (lanes crossing within the margin, a per-axis clearance and margin
+  changes, collision mode changes, ignored static bodies, attachment, the
+  ignore filter, a collision check every other step, `CONTACT_POINTS` and
+  `HYBRID` with physics bodies, agents on paths) are recorded step by step
+  (`COLLISION_STARTED` / `COLLISION_ENDED` events, active pairs and their
+  `signed_distance`) and compared with the traces recorded on the reference
+  revision, kept under `tests/collision_parity/golden/`.
+  `tests/test_collision_parity.py` fails on a difference that is not written
+  down in its `DOCUMENTED_DIFFERENCES`, and on a written-down difference
+  that no longer occurs. `python -m tests.collision_parity.record` records
+  the goldens again (`--check` compares without writing).
+- Steady-state fleet benchmark: `benchmark/steady_bench.py` and
+  `run_benchmark.py --type steady` measure a fixed window of steps in which
+  every robot keeps moving, with the per-phase step time, the collision event
+  counts and the RTF from the median step. Five scenes: `sparse` (2 m grid),
+  `dense` (two groups driving head-on through each other, every tenth robot
+  stopped), `carrying` (a box attached to every robot), `warehouse` (robots in
+  the aisles of tens of thousands of static boxes) and `idle`.
+  `make bench-steady` runs the reference set. `batch_perf.py`'s scene helpers
+  are public (`make_sim`, `make_fleet`, ...) so the workers share them.
+
 ## v0.9.0 (2026-11-08)
 
 ### Added

@@ -171,6 +171,22 @@ class AgentPlugin:
         """
         return from_config_introspect(cls, (agent,), config or {})
 
+    @classmethod
+    def create_batch(cls, sim_core: Any) -> Optional["PluginBatch"]:
+        """A :class:`PluginBatch` that updates every plugin of this class in one call, or ``None``.
+
+        The simulation asks once per plugin class. With a batch, the plugins
+        of the class are added to it as their agents join the simulation and
+        the batch's :meth:`PluginBatch.update` runs once per step in place of
+        each plugin's :meth:`on_update`. ``None`` (the default) keeps the
+        plugin-by-plugin updates.
+
+        A batched plugin is updated by the simulation's step, not by
+        :meth:`Agent.update`: calling ``agent.update(dt)`` by hand runs the
+        agent's per-agent plugins only.
+        """
+        return None
+
     def on_init(self) -> None:
         """Called after the agent is fully constructed.
 
@@ -201,3 +217,27 @@ class AgentPlugin:
 
     def __repr__(self) -> str:  # pragma: no cover
         return f"<{self.__class__.__name__} agent='{self.agent.name}'>"
+
+
+class PluginBatch:
+    """Updates every plugin of one class in one call (see :meth:`AgentPlugin.create_batch`).
+
+    A plugin is added when its agent is in the simulation and removed when
+    it leaves (or the plugin is removed from the agent); between the two the
+    batch, not the agent, updates it.
+    """
+
+    def add(self, plugin: "AgentPlugin") -> bool:
+        """Take ``plugin`` into the batch.
+
+        Returns ``False`` for a plugin the batch does not take (one whose
+        behaviour it cannot reproduce, say); the agent then updates that
+        plugin itself. ``None`` counts as taken.
+        """
+        raise NotImplementedError
+
+    def remove(self, plugin: "AgentPlugin") -> None:
+        raise NotImplementedError
+
+    def update(self, dt: float) -> None:
+        raise NotImplementedError

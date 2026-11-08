@@ -188,6 +188,7 @@ class BatchKinematicController(GoalReplacementPolicy, Controller):
             raise KeyError(f"Agent {agent} is not registered with this batch controller.")
         idx = self._agent_index.pop(key)
         agent._batch_controller = None
+        agent._action_asleep = False
         self._drop_pending(agent, "the agent left the batch controller")
         self._active_request.pop(key, None)
         self._finished_request.pop(key, None)
@@ -337,6 +338,7 @@ class BatchKinematicController(GoalReplacementPolicy, Controller):
     def _activate(self, agent: "Agent", request: PathRequest, continue_motion: bool) -> None:
         """Make ``request`` the agent's active request and start its row."""
         self._active_request[id(agent)] = request
+        agent._action_asleep = False  # the request's fate changed: a sleeping MoveAction looks again
         self._start_row_path(agent, request, continue_motion)
 
     def _replacement_obstacle(self, agent: "Agent", path, direction: Optional[MovementDirection] = None) -> Optional[str]:
@@ -430,6 +432,7 @@ class BatchKinematicController(GoalReplacementPolicy, Controller):
         if previous is not None:
             _log_dropped(str(agent.name or agent.object_id), previous, "a newer path replaced it")
         self._pending[id(agent)] = request
+        agent._action_asleep = False
 
     def _drop_pending(self, agent: "Agent", reason: str) -> None:
         """Drop the agent's pending path (logging it with ``reason``) and braking flag."""
@@ -438,6 +441,7 @@ class BatchKinematicController(GoalReplacementPolicy, Controller):
         previous = self._pending.pop(key, None)
         if previous is not None:
             _log_dropped(str(agent.name or agent.object_id), previous, reason)
+            agent._action_asleep = False
 
     def _start_row_path(self, agent: "Agent", request: PathRequest, continue_motion: bool) -> None:
         """Make ``request`` the agent's active path.
@@ -503,6 +507,7 @@ class BatchKinematicController(GoalReplacementPolicy, Controller):
         """
         agent = self._agents[idx]
         key = id(agent)
+        agent._action_asleep = False  # the row ended: a sleeping MoveAction sees FINISHED or GONE
         finished = self._active_request.pop(key, None)
         if finished is not None:
             self._finished_request[key] = finished
@@ -517,6 +522,7 @@ class BatchKinematicController(GoalReplacementPolicy, Controller):
         """Cancel one path without racing a concurrent simulation step."""
         with self._state_lock:
             key = id(agent)
+            agent._action_asleep = False
             self._drop_pending(agent, "the agent was stopped")
             self._active_request.pop(key, None)
             idx = self._agent_index.get(key)
@@ -564,23 +570,23 @@ class BatchKinematicController(GoalReplacementPolicy, Controller):
             return
 
         mask = self._moved_mask
+        store = self._sim_core._store
         # Agents that were moving last flush but not this one have stopped — zero
         # their reported velocity (matches the per-agent controllers going IDLE).
         just_stopped = self._was_moved & ~mask
         if just_stopped.any():
-            for i in np.flatnonzero(just_stopped):
-                ag = self._agents[i]
-                ag._current_velocity[:] = 0.0
-                ag._current_angular_velocity = 0.0
+            rows = store.rows(self._object_ids[just_stopped].tolist())
+            store.lin_vel[rows] = 0.0
+            store.ang_vel[rows] = 0.0
         self._was_moved = mask.copy()
 
         if not bool(mask.any()):
             return
 
-        for i in np.flatnonzero(mask):
-            ag = self._agents[i]
-            ag._current_velocity[:] = self._lin_vel_buf[i]
-            ag._current_angular_velocity = float(self._ang_vel_buf[i])
+        # The agents' velocity caches are views of their rows: one array write.
+        rows = store.rows(self._object_ids[mask].tolist())
+        store.lin_vel[rows] = self._lin_vel_buf[mask]
+        store.ang_vel[rows] = self._ang_vel_buf[mask]
 
         # set_poses accepts a Sequence[int] for object_ids; passing a NumPy
         # boolean-indexed view of int64 ids is cheap (no Python loop).

@@ -152,6 +152,102 @@ WSL2 host.
 
 ---
 
+## Steady-State Scenarios
+
+**Script:** `make bench-steady` (`run_benchmark.py --type steady`, worker
+`benchmark/steady_bench.py`). Every robot is sent 200 m away, so the whole
+fleet is still moving during the measured window: 20 warmup steps, then 150
+measured steps, dt = 0.1 s, differential drive, batch controller, collision
+check every step, headless. Values are the median over 3 repetitions of each
+run's median step; the RTF is derived from that step. Measured in the
+environment above at commit 2e2a86a (after #115), 2026-11-06, with nothing
+else running on the machine.
+
+| Scene | Agents | Static bodies | Step p50 | RTF | phase1 (agent update) | pose flush | AABB / grid | collision | Collision events in window |
+|-------|--------|---------------|----------|-----|-----------------------|------------|-------------|-----------|----------------------------|
+| sparse (2 m grid, all driving +x) | 1000 | 0 | 11.1 ms | 9.0x | 4.8 ms | 1.5 ms | 2.9 ms | 1.4 ms | 0 |
+| dense (two groups head-on, 0.05 m margin, every tenth robot stopped) | 1000 | 0 | 8.7 ms | 11.6x | 3.8 ms | 1.1 ms | 2.1 ms | 1.4 ms | 610 started, 610 ended |
+| carrying (one box attached to every robot) | 1000 | 0 | 27.0 ms | 3.7x | 10.3 ms | 3.5 ms | 6.8 ms | 5.7 ms | 0 |
+| warehouse (aisles between floor tiles and bins) | 200 | 32,924 | 5.9 ms | 16.9x | 3.6 ms | 0.8 ms | 0.7 ms | 0.5 ms | 0 |
+| idle (sparse layout, no goals) | 1000 | 0 | 0.42 ms | 241x | 0.4 ms | 0 | 0 | 0.01 ms | 0 |
+
+The same scenes measured at 6ee451e on 2026-11-05, while other work ran on
+the machine, gave 14.2 ms (sparse), 13.0 ms (dense), 50.1 ms (carrying),
+7.4 ms (warehouse) and 0.45 ms (idle). Runs of 6ee451e and 2e2a86a alternated
+in one quiet session agree within noise (sparse 10.2-11.5 ms, carrying
+30.7-31.7 ms for both), so the commits between them do not change the step
+time; the difference between the two days is the load on the machine. Compare
+revisions by alternating them in one session, not by numbers from different
+days.
+
+What the scenes show:
+
+- After #94 the collision check is no longer the largest phase at 1000 moving
+  robots (1.4 ms); the per-object agent update (4.8 ms), the AABB / grid flush
+  (2.9 ms) and the pose flush (1.5 ms) are.
+- An attached object per robot more than doubles the step (11 to 27 ms): the
+  child pose is propagated per object, and every child joins the pose flush,
+  the AABB / grid flush and the collision check.
+- With 33k static bodies and 200 movers, the agent update is still 3.6 ms:
+  the per-object loop visits every static body each step. The spawn of that
+  scene takes 17.3 s.
+- Head-on traffic (610 contacts in 15 simulated seconds) adds little to the
+  collision phase here; the narrow phase is cheap next to the broad phase.
+
+### After the column store, the lazy mirror and the update loop
+
+The same scenes at the head of the fleet-scaling branch (the collision
+broad phase on arrays, poses as columns, the lazy PyBullet mirror, the
+update loop over the objects with an update, batched plugins), measured on
+2026-11-07 alternating with `main` at f7a70b7 (the code of v0.9.0) in one quiet session. The
+10,000-robot rows are one repetition each; the others are the median of 3.
+
+| Scene | Agents | Static bodies | `main` step p50 | `main` RTF | Branch step p50 | Branch RTF | Branch phase1 | pose flush | AABB / grid | collision |
+|-------|--------|---------------|-----------------|------------|-----------------|------------|---------------|------------|-------------|-----------|
+| sparse | 1000 | 0 | 9.24 ms | 10.8x | 1.17 ms | 85x | 0.50 ms | 0.03 ms | 0.13 ms | 0.46 ms |
+| dense | 1000 | 0 | 8.82 ms | 11.3x | 1.25 ms | 80x | 0.50 ms | 0.03 ms | 0.13 ms | 0.55 ms |
+| carrying | 1000 | 0 | 27.3 ms | 3.7x | 2.18 ms | 46x | 0.76 ms | 0.06 ms | 0.31 ms | 1.01 ms |
+| warehouse | 200 | 32,924 | 3.27 ms | 30.6x | 0.52 ms | 194x | 0.17 ms | 0.01 ms | 0.05 ms | 0.25 ms |
+| idle | 1000 | 0 | 0.51 ms | 198x | 0.18 ms | 554x | 0.15 ms | 0 | 0 | 0.02 ms |
+| sparse | 10000 | 0 | 170 ms | 0.6x | 14.5 ms | 6.9x | 9.1 ms | 0.56 ms | 1.15 ms | 3.5 ms |
+| dense | 10000 | 0 | 170 ms | 0.6x | 17.8 ms | 5.6x | 9.3 ms | 0.67 ms | 1.11 ms | 5.6 ms |
+| carrying | 10000 | 0 | 403 ms | 0.2x | 28.7 ms | 3.5x | 12.0 ms | 1.67 ms | 3.46 ms | 10.5 ms |
+
+What remains at 1000 robots is the batch kernel itself (about 0.3 ms), the
+broad phase's array passes and the Python bookkeeping around them; the
+narrow phase (`getClosestPoints`) is under 0.1 ms in every scene. At 10,000
+robots phase1 is mostly the per-step set updates of the pending and moved
+ids and the `update()` call per agent, which returns at once for a
+batch-driven agent without an action.
+
+Raw results: `benchmark/results/steady_sparse_dense_carrying_idle_1000agents.json`,
+`benchmark/results/steady_warehouse_200agents.json` and
+`benchmark/results/steady_sparse_dense_carrying_10000agents.json` (the branch
+numbers above).
+
+The core sweep of the [Simulation Throughput](#simulation-throughput) table
+(`make bench-release`'s first line: `simple_cube` robots, goals for half of
+the agents, 10 s, 3 repetitions) on the same branch, measured on 2026-11-08
+alternating with v0.9.0 in one session. The v0.9.0 run reproduces the
+release table within its noise.
+
+| Agents | v0.9.0 step | v0.9.0 RTF | Branch step | Branch RTF | v0.9.0 spawn | Branch spawn |
+|--------|-------------|------------|-------------|------------|--------------|--------------|
+| 100    | 0.56 ms     | 177x       | 0.43 ms     | 231x       | 51 ms        | 54 ms        |
+| 250    | 1.31 ms     | 76x        | 0.64 ms     | 156x       | 124 ms       | 138 ms       |
+| 500    | 3.27 ms     | 31x        | 1.01 ms     | 99x        | 263 ms       | 279 ms       |
+| 1000   | 6.58 ms     | 15x        | 1.71 ms     | 59x        | 499 ms       | 575 ms       |
+| 2000   | 15.91 ms    | 6x         | 3.33 ms     | 30x        | 1043 ms      | 1209 ms      |
+
+The step is 3 to 5 times shorter from 250 agents up. Spawning is 6-16%
+slower (every object registers its rows in the column store), and memory
+per agent is the same within 1 MB. Raw results:
+`benchmark/results/benchmark_sweep_10.0s_fleet_scaling.json`; the
+`benchmark_sweep_10.0s.json` the tables above read from stays at v0.9.0
+until the next release refresh.
+
+---
+
 ## Step Time Component Breakdown
 
 **Script:** supplemental profiling with 1000 agents, 50% moving,

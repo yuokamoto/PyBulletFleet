@@ -51,10 +51,18 @@ from pybullet_fleet._frequency import FrequencyGate
 from pybullet_fleet._monitor_frames import MonitorFrames
 from pybullet_fleet._platform import IS_MACOS
 from pybullet_fleet.camera_controller import CameraController
+from pybullet_fleet.collision_store import (
+    MODE_DISABLED,
+    MODE_NORMAL_2D,
+    MODE_NORMAL_3D,
+    MODE_STATIC,
+    CollisionStore,
+)
 from pybullet_fleet.collision_visualizer import CollisionVisualizer  # deprecated, unused
 from pybullet_fleet.config_utils import load_yaml_config
 from pybullet_fleet.data_monitor import DataMonitor
 from pybullet_fleet.events import _TIER_CALLBACK, _TIER_HANDLER, _TIER_PLUGIN, EventBus, SimEvents
+from pybullet_fleet.geometry import Pose
 from pybullet_fleet.gui_commands import (
     GuiCommand,
     GuiCommandType,
@@ -73,6 +81,13 @@ from pybullet_fleet._defaults import SIMULATION as _SIM_D
 
 if TYPE_CHECKING:
     from pybullet_fleet.sim_plugin import SimPlugin
+
+_MODE_CODE = {
+    CollisionMode.NORMAL_3D: MODE_NORMAL_3D,
+    CollisionMode.NORMAL_2D: MODE_NORMAL_2D,
+    CollisionMode.STATIC: MODE_STATIC,
+    CollisionMode.DISABLED: MODE_DISABLED,
+}
 
 #: ``fn(obj_a, obj_b) -> bool for :meth:`MultiRobotSimulationCore.set_collision_ignore_filter`:
 #: ``True`` when the two touching objects are meant to touch and should not count as a collision.
@@ -220,6 +235,13 @@ class SimulationParams:
     duration: float = _SIM_D["duration"]
     gui: bool = _SIM_D["gui"]
     physics: bool = _SIM_D["physics"]
+    #: When PyBullet receives a kinematic body's pose. ``"lazy"`` (the
+    #: default): only when something reads it there, which the simulation
+    #: does itself for a collision pair, an AABB query, an accessor such as
+    #: ``SimObject.body_id`` or ``sim.client``, a recording or a GUI.
+    #: ``"always"``: after every step, for code that calls PyBullet with a
+    #: body id it keeps. See :meth:`MultiRobotSimulationCore.sync_mirror`.
+    mirror: str = _SIM_D["mirror"]
     monitor: bool = _SIM_D["monitor"]
     #: Whether the DataMonitor opens a window. ``None`` (the default) follows
     #: ``gui``: a headless simulation collects monitor data without putting a
@@ -306,6 +328,8 @@ class SimulationParams:
             )
         # A per-axis clearance (a list from YAML) is stored as a validated tuple.
         self.collision_margin = _normalize_margin(self.collision_margin)
+        if self.mirror not in ("lazy", "always"):
+            raise ValueError(f"mirror must be 'lazy' or 'always', got {self.mirror!r}")
         # Coerce a string (e.g. from YAML: collision_detection_method: "closest_points")
         # into the CollisionDetectionMethod enum. Without this the value stays a plain
         # str and the `== CollisionDetectionMethod.X` checks in check_collisions() never
@@ -650,10 +674,10 @@ class MultiRobotSimulationCore:
         self._cached_cell_size: Optional[float] = None  # Cached cell size for spatial hashing
         self._dynamic_collision_objects: set = set()  # object_ids with NORMAL_3D or NORMAL_2D (excludes STATIC and DISABLED)
 
-        # Incremental AABB and spatial grid cache
-        self._cached_aabbs_dict: Dict[int, Tuple[Tuple[float, float, float], Tuple[float, float, float]]] = (
-            {}
-        )  # object_id -> AABB
+        # Every object's collision columns (AABB, local box, mode, physics)
+        # and the spatial hash over them. Rows are the store's; everything
+        # here refers to objects by object_id.
+        self._store = CollisionStore()
         # The links (-1 = base) whose boxes make up each body's AABB: those
         # with a collision shape, read once from PyBullet. Empty for a body
         # without child links (or without any collider): its AABB is one
@@ -666,7 +690,6 @@ class MultiRobotSimulationCore:
         # its origin. Only pickable objects: nothing else is searched by origin,
         # and the AABB update of every moved object stays free of it.
         self._origin_gaps: Dict[int, float] = {}
-        self._cached_spatial_grid: Dict[Tuple[int, int, int], Set[int]] = {}  # Spatial hash grid: cell -> {object_ids}
         # The broadphase margin the grid's registrations were made with. A pair
         # within the margin is found only if both bodies were registered with
         # it, so the grid is rebuilt whenever the effective margin differs --
@@ -675,11 +698,9 @@ class MultiRobotSimulationCore:
         self._grid_margin: Optional[Tuple[float, float, float]] = None
         # Half of _grid_margin per axis: what each body's AABB is enlarged by.
         self._grid_half_margin: Optional[Tuple[float, float, float]] = None
-        self._cached_object_to_cell: Dict[int, List[Tuple[int, int, int]]] = (
-            {}
-        )  # object_id -> list of cells (supports multi-cell registration)
         self._aabb_cache_valid: bool = False  # Flag indicating if AABB cache is valid
         self._last_ignore_static: Optional[bool] = None  # Track last ignore_static value to detect mode changes
+        self._last_ignore_attached: Optional[bool] = None  # the same for ignore_attached_collision
 
         # Incremental collision tracking
         self._active_collision_pairs: Set[Tuple[int, int]] = set()  # Currently colliding object_id pairs (sorted: i < j)
@@ -722,6 +743,25 @@ class MultiRobotSimulationCore:
         # Used to avoid scanning every flushed object in the hot path when no
         # link attachments exist.
         self._link_attachment_parent_ids: Set[int] = set()
+        # Base-link attachments: carrier object_id -> the object_ids riding on
+        # its base. Their poses follow the carrier's as arrays in set_poses().
+        self._base_children: Dict[int, List[int]] = {}
+        self._base_parent_of: Dict[int, int] = {}  # rider object_id -> carrier object_id
+        # Plugins and callbacks that asked for every pose in PyBullet after each step.
+        self._mirror_requests: int = 0
+        # The objects with a per-step update() (agents, devices): the step
+        # visits these, not every body in the scene.
+        self._updatable: List[SimObject] = []
+        # The objects that left _updatable since the update loop began: the
+        # loop runs over a snapshot and skips these (an update() may remove
+        # another object, or clear its _needs_update).
+        self._updatable_left: Set[SimObject] = set()
+        #: Bumped when an object is added, removed or renamed: readers that
+        #: cache the fleet's rows and names (the state plane) compare it.
+        self._fleet_revision: int = 0
+        # One batch per agent-plugin class that offers one (None when it
+        # does not): it updates all of that class's plugins in one call.
+        self._plugin_batches: Dict[type, Any] = {}
 
         # --- Plugins ---
         self._plugins: List["SimPlugin"] = []
@@ -770,7 +810,12 @@ class MultiRobotSimulationCore:
 
     @property
     def client(self) -> Optional[int]:
-        """PyBullet physics client ID."""
+        """PyBullet physics client ID, with every pending pose written to PyBullet first.
+
+        Code that calls PyBullet through this id sees the current poses.
+        Internally the simulation uses the id without this sync.
+        """
+        self.sync_mirror()
         return self._client
 
     @property
@@ -1285,6 +1330,21 @@ class MultiRobotSimulationCore:
     # Plugin system
     # ------------------------------------------------------------------
 
+    def _request_mirror(self, target: Any) -> None:
+        """Count a plugin or callback that keeps body ids for PyBullet calls (``needs_mirror``).
+
+        The poses earlier lazy steps left pending are written now, so the
+        requester reads the current poses from its first run on.
+        """
+        if getattr(target, "needs_mirror", False):
+            self._mirror_requests += 1
+            self.sync_mirror()
+
+    def _release_mirror(self, target: Any) -> None:
+        """The plugin or callback counted by :meth:`_request_mirror` is gone."""
+        if getattr(target, "needs_mirror", False) and self._mirror_requests > 0:
+            self._mirror_requests -= 1
+
     def register_plugin(
         self,
         plugin_or_cls: "Union[_SimPluginT, Type[_SimPluginT]]",
@@ -1367,6 +1427,7 @@ class MultiRobotSimulationCore:
                 logger.error("Plugin %s.on_step() failed", type(plugin).__name__, exc_info=True)
 
         self._plugins.append(plugin)
+        self._request_mirror(plugin)
         self.events._subscribe(
             plugin.step_phase.value, plugin, on_step, tier=_TIER_PLUGIN, gate=plugin._frequency_gate, takes_dt=True
         )
@@ -1468,6 +1529,7 @@ class MultiRobotSimulationCore:
             phase = CallbackPhase(phase)
         except ValueError:
             raise ValueError("phase must be one of {}, got {!r}".format([p.value for p in CallbackPhase], phase)) from None
+        self._request_mirror(callback)
         # Every callback has a gate, also without a frequency, so its dt is the
         # time since it last ran, measured the same way at every rate.
         gate = FrequencyGate(frequency or None)
@@ -1634,6 +1696,7 @@ class MultiRobotSimulationCore:
         for event, sub in self.events._subscriptions(_TIER_CALLBACK):
             if sub.handler is callback_func:
                 self.events._unsubscribe(event, sub)
+                self._release_mirror(callback_func)
                 return True
         return False
 
@@ -1888,7 +1951,7 @@ class MultiRobotSimulationCore:
 
         Args:
             aabbs: List of AABB tuples ((min_x, min_y, min_z), (max_x, max_y, max_z)).
-                   If None, uses self._cached_aabbs_dict.values() (default: None)
+                   If None, uses the AABBs the collision system holds (default: None)
 
         Returns:
             Calculated cell_size, or None if no AABBs available
@@ -1902,9 +1965,9 @@ class MultiRobotSimulationCore:
             custom_aabbs = [p.getAABB(body_id) for body_id in body_ids]
             cell_size = sim._calculate_cell_size_from_aabbs(custom_aabbs)
         """
-        # Use cached AABBs if not provided
         if aabbs is None:
-            aabbs = list(self._cached_aabbs_dict.values())
+            median_extent = self._store.median_extent()
+            return None if median_extent is None else max(median_extent * 2.0, 0.5)
 
         if not aabbs:
             return None
@@ -1922,15 +1985,11 @@ class MultiRobotSimulationCore:
         return cell_size
 
     def _rebuild_spatial_grid(self) -> None:
-        """Rebuild entire spatial grid using current cell_size, margin and AABBs."""
-        self._cached_spatial_grid.clear()
-        self._cached_object_to_cell.clear()
+        """Register every body again with the current cell size and margin (on the hash's next sync)."""
         self._set_grid_margin(self._collision_broadphase_margin())
-
-        for object_id in self._cached_aabbs_dict.keys():
-            self._update_object_spatial_grid(object_id)
-
-        logger.debug(f"Collision spatial hash: Rebuilt grid with {len(self._cached_spatial_grid)} cells")
+        if self._cached_cell_size is not None:
+            self._store.set_hash(self._cached_cell_size, cast(Tuple[float, float, float], self._grid_half_margin))
+            logger.debug("Collision spatial hash: rebuild scheduled")
 
     def _mark_object_moved(self, object_id: int) -> None:
         """
@@ -1942,6 +2001,236 @@ class MultiRobotSimulationCore:
         """
         self._moved_this_step.add(object_id)
         logger.debug(f"Object {object_id} marked as moved")
+
+    def _add_plugin_to_batch(self, plugin: Any) -> bool:
+        """Add ``plugin`` to its class's batch; False when it is updated plugin by plugin.
+
+        That is the case when the class has no batch, or when the batch does
+        not take this plugin (:meth:`PluginBatch.add` returned False).
+        """
+        cls = type(plugin)
+        if cls not in self._plugin_batches:
+            self._plugin_batches[cls] = cls.create_batch(self)
+        batch = self._plugin_batches[cls]
+        if batch is None:
+            return False
+        return batch.add(plugin) is not False
+
+    def _note_needs_update(self, obj: SimObject) -> None:
+        """``obj._needs_update`` changed: it joins or leaves the step's update loop at once."""
+        if obj.object_id not in self._sim_objects_dict:
+            return
+        if obj._needs_update:
+            if obj not in self._updatable:
+                self._updatable.append(obj)
+        else:
+            try:
+                self._updatable.remove(obj)
+            except ValueError:
+                pass
+            else:
+                self._updatable_left.add(obj)
+
+    def _remove_plugin_from_batch(self, plugin: Any) -> None:
+        batch = self._plugin_batches.get(type(plugin))
+        if batch is not None:
+            batch.remove(plugin)
+
+    def _bind_pose_rows(self) -> None:
+        """Point every object's pose cache at its row of the pose columns (after a reallocation)."""
+        store = self._store
+        for obj in self._sim_objects:
+            row = store.row_of.get(obj.object_id)
+            if row is not None:
+                obj._bind_rows(store, row)
+
+    def _note_preserve_velocity(self, object_id: int, preserve_velocity: bool) -> None:
+        """Remember, for the Phase 2 flush, whether the object's pending pose write keeps its velocity."""
+        row = self._store.row_of.get(object_id)
+        if row is not None:
+            self._store.preserve_velocity[row] = preserve_velocity
+
+    def _set_per_object_pose(self, obj: SimObject) -> None:
+        """Flag ``obj`` and its carriers when a buffered pose write must go through the object (see ``per_object_pose``)."""
+        store = self._store
+        carrier: Optional[SimObject] = obj
+        while carrier is not None:
+            row = store.row_of.get(carrier.object_id)
+            if row is not None:
+                store.per_object_pose[row] = bool(carrier.attached_objects) and not self._carries_as_arrays(carrier)
+            carrier = carrier._attached_to
+
+    def _note_base_attachment(self, child_id: int, parent_id: Optional[int], offset: Optional[Pose]) -> None:
+        """Record that ``child_id`` rides on ``parent_id``'s base at ``offset`` (``None``: it no longer does).
+
+        A rider that leaves its carrier counts as moved, so a pair the two
+        made is checked on the next collision check even if neither moves.
+        """
+        store = self._store
+        row = store.row_of.get(child_id)
+        former_parent = self._base_parent_of.pop(child_id, None)
+        if former_parent is not None:
+            riders = self._base_children.get(former_parent)
+            if riders is not None:
+                try:
+                    riders.remove(child_id)
+                except ValueError:
+                    pass
+                if not riders:
+                    del self._base_children[former_parent]
+        if parent_id is None or offset is None:
+            if row is not None:
+                store.attach_pos[row] = 0.0
+                store.attach_orn[row] = (0.0, 0.0, 0.0, 1.0)
+                store.parent_row[row] = -1
+            if former_parent is not None:
+                self._moved_this_step.add(child_id)
+                former = self._sim_objects_dict.get(former_parent)
+                if former is not None:
+                    self._set_per_object_pose(former)
+            return
+        self._base_children.setdefault(parent_id, []).append(child_id)
+        self._base_parent_of[child_id] = parent_id
+        parent_row = store.row_of.get(parent_id)
+        if row is not None:
+            store.attach_pos[row] = offset.position
+            store.attach_orn[row] = offset.orientation
+            store.parent_row[row] = -1 if parent_row is None else parent_row
+        parent = self._sim_objects_dict.get(parent_id)
+        if parent is not None:
+            self._set_per_object_pose(parent)
+
+    def _note_attachment_tree(self, obj: SimObject, left: bool = False) -> None:
+        """Record the root of the attachment tree ``obj`` is in, for every member (``attach_root``).
+
+        With ``left``, ``obj``'s tree has just left another one (a detach, a
+        removed carrier): every member whose root changes counts as moved,
+        so a pair it made with the old tree (a rider's own rider against the
+        old carrier, say), no pair while they shared a root, is checked on
+        the next collision check, as a pair of a detached rider is.
+        """
+        store = self._store
+        root = obj._attachment_root()
+        root_id = root.object_id
+        moved = self._moved_this_step
+        pending = [root]
+        seen = set()
+        while pending:
+            member = pending.pop()
+            if id(member) in seen:
+                continue
+            seen.add(id(member))
+            row = store.row_of.get(member.object_id)
+            if row is not None and store.attach_root[row] != root_id:
+                store.attach_root[row] = root_id
+                if left:
+                    moved.add(member.object_id)
+            pending.extend(member.attached_objects)
+
+    @property
+    def _mirror_always(self) -> bool:
+        """Whether every pending pose is written to PyBullet in Phase 2.
+
+        With ``physics`` on, PyBullet integrates and resolves contacts against
+        the kinematic bodies in ``stepSimulation()``, so it must hold their
+        poses at every step: the mirror is always written. Otherwise it is
+        written for a GUI, ``mirror: always``, or a plugin or callback that
+        asked for it (``needs_mirror``).
+        """
+        return (
+            bool(self._params.physics)
+            or bool(self._params.gui)
+            or self._params.mirror == "always"
+            or self._mirror_requests > 0
+        )
+
+    def sync_mirror(self, object_ids: Optional[Iterable[int]] = None) -> None:
+        """Write every pending pose (or those of ``object_ids``) to PyBullet.
+
+        With ``mirror: lazy`` a kinematic body's buffered pose stays in the
+        simulation's pose columns until PyBullet needs it. The simulation
+        syncs by itself before anything of its own reads PyBullet: the
+        narrow phase of a collision pair, an AABB query, a recording, the
+        accessors ``SimObject.body_id`` and ``sim.client``. Call this before
+        PyBullet calls made with a body id kept from earlier, or run with
+        ``mirror: always``.
+
+        Args:
+            object_ids: The objects to sync; every object when ``None``.
+        """
+        store = self._store
+        n = len(store)
+        if n == 0 or not p.isConnected(physicsClientId=self._client):
+            return  # nothing to write, or no PyBullet to write to (after disconnect)
+        if object_ids is None:
+            dirty = store.mirror_dirty[:n]
+            if not dirty.any():
+                return
+            rows = np.flatnonzero(dirty)
+        else:
+            rows = store.rows(object_ids)
+            if len(rows) == 0:
+                return
+            rows = rows[store.mirror_dirty[rows]]
+            if len(rows) == 0:
+                return
+        self._write_rows_to_pybullet(rows)
+
+    def _write_rows_to_pybullet(self, rows: np.ndarray) -> None:
+        """Write the rows' poses to their PyBullet bodies and mark them mirrored."""
+        store = self._store
+        objects = self._sim_objects_dict
+        client = self._client
+        ids = store.object_id[rows].tolist()
+        positions = store.pos[rows].tolist()
+        orientations = store.orn[rows].tolist()
+        preserve_flags = store.preserve_velocity[rows].tolist()
+        for object_id, position, orientation, preserve_velocity in zip(ids, positions, orientations, preserve_flags):
+            obj = objects.get(object_id)
+            if obj is None:
+                continue
+            body_id = obj._body_id
+            # Match the legacy immediate path exactly: velocity preservation for
+            # non-kinematic objects, fast path for kinematics.
+            if preserve_velocity and not obj.is_kinematic:
+                linear_vel, angular_vel = p.getBaseVelocity(body_id, physicsClientId=client)
+                p.resetBasePositionAndOrientation(body_id, position, orientation, physicsClientId=client)
+                p.resetBaseVelocity(body_id, linear_vel, angular_vel, physicsClientId=client)
+            else:
+                p.resetBasePositionAndOrientation(body_id, position, orientation, physicsClientId=client)
+        store.mirror_dirty[rows] = False
+
+    def _sync_object_mirror_if_dirty(self, obj: SimObject) -> None:
+        """Write ``obj``'s pose to PyBullet if a lazy flush left it pending (``SimObject.body_id`` calls this).
+
+        A pose set inside a step is buffered until Phase 2 and is not pending
+        in this sense: PyBullet receives it when the step flushes it, as it
+        always did.
+        """
+        row = self._store.row_of.get(obj.object_id)
+        if row is not None and self._store.mirror_dirty[row]:
+            self._write_rows_to_pybullet(np.array([row], dtype=np.int64))
+
+    def _note_mirrored(self, object_id: int) -> None:
+        """The object's pose was just written to PyBullet outside the flush."""
+        row = self._store.row_of.get(object_id)
+        if row is not None:
+            self._store.mirror_dirty[row] = False
+
+    def _set_needs_mirror(self, object_id: int) -> None:
+        """Whether PyBullet must hold the object's pose after every step.
+
+        A physics body, an articulated body or a link-attachment parent.
+        """
+        row = self._store.row_of.get(object_id)
+        if row is None:
+            return
+        needs = (
+            object_id in self._physics_objects
+            or self._aabb_links.get(object_id, ()) != ()
+            or object_id in self._link_attachment_parent_ids
+        )
+        self._store.needs_mirror[row] = needs
 
     # ----------------------------------------------------------------------
     # Public batch pose API (D8: two-phase-step spec)
@@ -1987,16 +2276,118 @@ class MultiRobotSimulationCore:
         if orientations.shape != (n, 4):
             raise ValueError(f"orientations must have shape ({n}, 4), got {orientations.shape}")
 
-        # Resolve all objects up front so we raise before any partial write.
-        objects = []
-        for oid in object_ids:
-            obj = self._sim_objects_dict.get(oid)
-            if obj is None:
-                raise KeyError(f"object_id {oid} not registered in this simulation")
-            objects.append(obj)
+        # Resolve every row up front so we raise before any partial write.
+        row_of = self._store.row_of
+        try:
+            rows = np.fromiter(map(row_of.__getitem__, object_ids), np.int64, count=n)
+        except KeyError as exc:
+            raise KeyError(f"object_id {exc.args[0]} not registered in this simulation") from None
 
-        for i, obj in enumerate(objects):
-            obj.set_pose_raw(positions[i], orientations[i], preserve_velocity=preserve_velocity)
+        if self._in_step:
+            self._set_poses_buffered(rows, positions, orientations, preserve_velocity)
+            return
+        objects = self._sim_objects_dict
+        for i, oid in enumerate(object_ids):
+            objects[oid].set_pose_raw(positions[i], orientations[i], preserve_velocity=preserve_velocity)
+
+    def _set_poses_buffered(
+        self,
+        rows: np.ndarray,
+        positions: np.ndarray,
+        orientations: np.ndarray,
+        preserve_velocity: bool,
+    ) -> None:
+        """The buffered path of :meth:`set_poses`: the rows that moved are written as arrays.
+
+        Movement is judged as ``SimObject.set_pose`` judges it (a squared
+        distance above 1e-12 in position, or in orientation up to the sign
+        of the quaternion). A STATIC object does not move, as there; an
+        object with attachments or a physics body takes the per-object path,
+        which propagates to the children and stamps the cache.
+        """
+        store = self._store
+        delta = positions - store.pos[rows]
+        moved = (delta * delta).sum(axis=1) > 1e-12
+        old_orn = store.orn[rows]
+        diff = orientations - old_orn
+        orn_diff = (diff * diff).sum(axis=1)
+        flipped = orn_diff > 1e-12
+        if flipped.any():
+            total = orientations + old_orn
+            orn_sum = (total * total).sum(axis=1)
+            orn_diff = np.where(orn_sum < orn_diff, orn_sum, orn_diff)
+        moved |= orn_diff > 1e-12
+        if not moved.any():
+            return
+        static = store.mode[rows] == MODE_STATIC
+        if (moved & static).any():
+            logger.warning(
+                "Attempting to move static objects. Static objects (CollisionMode.STATIC) should not be moved. "
+                "If these objects need to move, change collision_mode to NORMAL_3D."
+            )
+            moved &= ~static
+        # Rows the array path cannot finish: a physics body (its cache is
+        # stamped per object), an object with link attachments, or a carrier
+        # whose riders are not all kinematic base attachments.
+        special = moved & (~store.kinematic[rows] | store.per_object_pose[rows])
+        if special.any():
+            objects = self._sim_objects_dict
+            for k in np.flatnonzero(special).tolist():
+                obj = objects[int(store.object_id[rows[k]])]
+                obj.set_pose_raw(positions[k], orientations[k], preserve_velocity=preserve_velocity)
+            moved &= ~special
+        base_children = self._base_children
+        if not moved.any():
+            return
+        moved_rows = rows[moved]
+        store.pos[moved_rows] = positions[moved]
+        store.orn[moved_rows] = orientations[moved]
+        store.preserve_velocity[moved_rows] = preserve_velocity
+        moved_ids = store.object_id[moved_rows].tolist()
+        self._pending_pose_ids.update(moved_ids)
+        self._moved_this_step.update(moved_ids)
+        if base_children:
+            self._carry_as_arrays(moved_rows, preserve_velocity)
+
+    def _carries_as_arrays(self, obj: SimObject) -> bool:
+        """Whether every object riding on ``obj`` is a kinematic base attachment the array path can carry."""
+        kinematic = self._kinematic_objects
+        pending = [obj]
+        while pending:
+            carrier = pending.pop()
+            for child in carrier.attached_objects:
+                if child._attached_link_index >= 0 or child.object_id not in kinematic:
+                    return False
+                if child.attached_objects:
+                    pending.append(child)
+        return True
+
+    def _carry_as_arrays(self, carrier_rows: np.ndarray, preserve_velocity: bool) -> None:
+        """Move the base attachments of the carrier rows that just moved, level by level, as arrays.
+
+        Each rider's world pose is its carrier's pose composed with its
+        attachment offset, as ``p.multiplyTransforms`` composes them; the
+        rows are written, and the riders are pending and moved like their
+        carriers. A rider that carries something is a carrier of the next
+        level.
+        """
+        store = self._store
+        n = len(store)
+        parent_col = store.parent_row[:n]
+        level = carrier_rows
+        while len(level):
+            child_rows = np.flatnonzero(np.isin(parent_col, level))
+            if len(child_rows) == 0:
+                return
+            parent_rows = parent_col[child_rows]
+            pos, orn = store.attached_poses(child_rows, parent_rows)
+            store.pos[child_rows] = pos
+            store.orn[child_rows] = orn
+            store.preserve_velocity[child_rows] = preserve_velocity
+            child_ids = store.object_id[child_rows].tolist()
+            self._pending_pose_ids.update(child_ids)
+            self._moved_this_step.update(child_ids)
+            level = child_rows
 
     def get_poses(self, object_ids: Sequence[int]) -> Tuple[np.ndarray, np.ndarray]:
         """Return ``(positions, orientations)`` arrays for N objects (batch read).
@@ -2019,16 +2410,12 @@ class MultiRobotSimulationCore:
         Raises:
             KeyError: if any ``object_id`` is not registered in this sim.
         """
-        n = len(object_ids)
-        positions = np.empty((n, 3), dtype=np.float64)
-        orientations = np.empty((n, 4), dtype=np.float64)
-        for i, oid in enumerate(object_ids):
-            obj = self._sim_objects_dict.get(oid)
-            if obj is None:
-                raise KeyError(f"object_id {oid} not registered in this simulation")
-            positions[i] = obj._cached_pose.position
-            orientations[i] = obj._cached_pose.orientation
-        return positions, orientations
+        row_of = self._store.row_of
+        try:
+            rows = np.fromiter((row_of[oid] for oid in object_ids), np.int64, count=len(object_ids))
+        except KeyError as exc:
+            raise KeyError(f"object_id {exc.args[0]} not registered in this simulation") from None
+        return self._store.pos[rows].copy(), self._store.orn[rows].copy()
 
     # ------------------------------------------------------------------ #
     # Batch controller registration (Phase B opt-in)
@@ -2036,14 +2423,16 @@ class MultiRobotSimulationCore:
 
     def _flush_pending_poses(self, ids: Set[int]) -> None:
         """
-        Two-phase step Phase 2: drain pending pose writes into PyBullet.
+        Two-phase step Phase 2: write the pending poses PyBullet must hold.
 
         Called once per step_once() right after the agent/plugin update loop and
-        before stepSimulation(). The source of truth for each write is
-        ``obj._cached_pose`` (kept up-to-date eagerly in ``_set_pose_internal``);
-        we only need per-object ``preserve_velocity`` from
-        ``obj._pending_preserve_velocity``. This means no per-call tuple
-        allocation in the buffered write path.
+        before stepSimulation(). The poses are the rows of the pose columns.
+        With ``mirror: lazy`` only the rows PyBullet needs after every step
+        are written (physics bodies, articulated bodies, link-attachment
+        parents); the others are marked pending in PyBullet and written when
+        something reads them there (:meth:`sync_mirror`). With ``physics``
+        on, ``mirror: always``, a GUI or a plugin that asked for it, every
+        row is written (:attr:`_mirror_always`).
 
         Args:
             ids: Snapshot of object_ids to flush. The caller owns the lifecycle
@@ -2055,29 +2444,33 @@ class MultiRobotSimulationCore:
         """
         if not ids:
             return
-        for object_id in ids:
-            obj = self._sim_objects_dict.get(object_id)
-            if obj is None:
-                continue
-            position = obj._cached_pose.position
-            orientation = obj._cached_pose.orientation
-            preserve_velocity = obj._pending_preserve_velocity
-            # Match the legacy immediate path exactly: velocity preservation for
-            # non-kinematic objects, fast path for kinematics.
-            if preserve_velocity and not obj.is_kinematic:
-                linear_vel, angular_vel = p.getBaseVelocity(obj.body_id, physicsClientId=self._client)
-                p.resetBasePositionAndOrientation(obj.body_id, position, orientation, physicsClientId=self._client)
-                p.resetBaseVelocity(obj.body_id, linear_vel, angular_vel, physicsClientId=self._client)
-            else:
-                p.resetBasePositionAndOrientation(obj.body_id, position, orientation, physicsClientId=self._client)
+        store = self._store
+        rows = store.rows(ids)
+        if len(rows) == 0:
+            return
+        if self._mirror_always:
+            self._write_rows_to_pybullet(rows)
+            return
+        needs = store.needs_mirror[rows]
+        store.mirror_dirty[rows[~needs]] = True
+        if needs.any():
+            self._write_rows_to_pybullet(rows[needs])
 
     def _register_link_attachment_parent(self, object_id: int) -> None:
         """Track an object whose link-level attachments need post-flush sync."""
         self._link_attachment_parent_ids.add(object_id)
+        self._set_needs_mirror(object_id)
+        obj = self._sim_objects_dict.get(object_id)
+        if obj is not None:
+            self._set_per_object_pose(obj)
 
     def _unregister_link_attachment_parent(self, object_id: int) -> None:
         """Stop tracking an object with no remaining link-level attachments."""
         self._link_attachment_parent_ids.discard(object_id)
+        self._set_needs_mirror(object_id)
+        obj = self._sim_objects_dict.get(object_id)
+        if obj is not None:
+            self._set_per_object_pose(obj)
 
     def _sync_link_attachments_after_pose_flush(self, ids: Set[int]) -> Set[int]:
         """
@@ -2120,12 +2513,17 @@ class MultiRobotSimulationCore:
 
     def _flush_aabb_and_grid(self, ids: Set[int], geometry_ids: Set[int] = frozenset()) -> None:
         """
-        Two-phase step Phase 3: refresh AABB + spatial grid for buffered objects.
+        Two-phase step Phase 3: refresh the AABBs of the buffered objects.
 
         Runs after stepSimulation() and before collision_check() so that
         collision detection sees up-to-date geometry. Only kinematic objects
         are refreshed here — physics objects are handled by the dedicated
         post-stepSimulation loop in step_once() that walks ``_physics_objects``.
+
+        A single-body object's box is computed from its pose, all of them in
+        one array operation; an articulated body's is read from PyBullet. The
+        spatial hash picks the new boxes up on its next sync (the collision
+        check's).
 
         Args:
             ids: Snapshot of object_ids to refresh (same set passed to
@@ -2139,14 +2537,25 @@ class MultiRobotSimulationCore:
             ids = ids | geometry_ids
         if not ids:
             return
-        kinematic = self._kinematic_objects
-        cell_size_set = self._cached_cell_size is not None
-        for object_id in ids:
-            if object_id in kinematic or object_id in geometry_ids:
-                # One grid update per object (the AABB update would do one too).
-                self._update_object_aabb(object_id, update_grid=False)
-                if cell_size_set:
-                    self._update_object_spatial_grid(object_id)
+        store = self._store
+        rows = store.rows(ids)
+        if len(rows) == 0:
+            return
+        refresh = store.kinematic[rows]
+        if geometry_ids:
+            refresh = refresh | np.isin(rows, store.rows(geometry_ids))
+        rows = rows[refresh]
+        if len(rows) == 0:
+            return
+        # Single kinematic bodies from their poses, as arrays; the rest one by one from PyBullet.
+        from_pose = ~store.pybullet_aabb[rows] & ~np.isnan(store.local_half[rows, 0])
+        for object_id in store.object_id[rows[~from_pose]].tolist():
+            self._update_object_aabb(object_id)
+        row_array = rows[from_pose]
+        if len(row_array):
+            pos = store.pos[row_array]
+            store.set_aabbs_from_poses(row_array, pos, store.orn[row_array])
+            self._record_origin_gaps(row_array, pos)
 
     def _body_aabb(self, obj: SimObject) -> Tuple[Sequence[float], Sequence[float]]:
         """The AABB of every link of ``obj``'s body, as PyBullet has them now.
@@ -2219,7 +2628,7 @@ class MultiRobotSimulationCore:
         if object_id not in self._sim_objects_dict:
             return
         self._moved_this_step.add(object_id)
-        if object_id not in self._cached_aabbs_dict:
+        if self.cached_aabb(object_id) is None:
             # Collision DISABLED (no cached box) or not yet initialised: the
             # box is read from PyBullet when it is needed.
             return
@@ -2231,43 +2640,87 @@ class MultiRobotSimulationCore:
 
     def _update_object_aabb(self, object_id: int, update_grid: bool = True) -> None:
         """
-        Update AABB for a single object immediately.
-        Optionally updates spatial grid if cell_size is initialized.
+        Recompute the AABB of one object now.
 
-        Called when kinematic objects move or physics objects are updated.
+        A kinematic single-body object's box is computed from its pose and its
+        local box (read from PyBullet once, at identity orientation, the first
+        time). A physics body's and an articulated body's box is read from
+        PyBullet. The spatial hash picks the change up on its next sync;
+        ``update_grid`` is accepted for the callers that still pass it.
 
         Args:
             object_id: The object_id to update
-            update_grid: If True, also update spatial grid (default: True)
-                        Set to False to avoid circular calls from _update_object_spatial_grid
+            update_grid: Ignored: the hash follows the AABBs on its next sync.
         """
         obj = self._sim_objects_dict.get(object_id)
-        if obj is None:
+        store = self._store
+        row = store.row_of.get(object_id)
+        if obj is None or row is None:
             logger.warning(f"Cannot update AABB for object {object_id}: object not found")
             return
 
         try:
-            if self._aabb_links.get(object_id) == ():
-                # Hot path, one getAABB() call (no child links): _body_aabb() inlined
-                # on purpose, to save a method call for every moved object every
-                # step. Both read the same _aabb_links entry, so the two cannot
-                # disagree.
-                aabb = p.getAABB(obj.body_id, physicsClientId=self._client)
+            if store.pybullet_aabb[row]:
+                if self._aabb_links.get(object_id) == ():
+                    # Hot path, one getAABB() call (no child links): _body_aabb() inlined
+                    # on purpose, to save a method call for every moved object every
+                    # step. Both read the same _aabb_links entry, so the two cannot
+                    # disagree.
+                    aabb = p.getAABB(obj.body_id, physicsClientId=self._client)
+                else:
+                    aabb = self._body_aabb(obj)
+                store.set_aabb(row, aabb)
             else:
-                aabb = self._body_aabb(obj)
-            self._cached_aabbs_dict[object_id] = aabb
+                if not store.local_box_known(row):
+                    self._read_local_box(obj, row)
+                pose = obj._cached_pose
+                store.set_aabb_from_pose(row, pose.position, pose.orientation)
+                aabb = store.aabb(row)
             self._record_origin_gap(obj, aabb)
             logger.debug(f"Updated AABB for object {object_id}")
-
-            # Also update spatial grid if requested and cell_size is initialized
-            if update_grid and self._cached_cell_size is not None:
-                self._update_object_spatial_grid(object_id)
         except (p.error, Exception):
             # In kinematics mode (physics=false), getAABB() may fail for newly
             # spawned bodies because PyBullet has not yet computed collision info.
             # This is harmless — the AABB will be populated on the first
             # performCollisionDetection() / stepSimulation() call.
             logger.debug(f"Deferred AABB init for object {object_id} (body {obj.body_id})")
+
+    def _read_local_box(self, obj: SimObject, row: int) -> None:
+        """Read the body's box in its own frame from PyBullet, at identity orientation, into the store.
+
+        PyBullet's AABB of a body at any pose is this box transformed by the
+        element-wise absolute rotation (``btTransformAabb``), a sphere's
+        apart, whose extents do not rotate. A body not at identity
+        orientation is put there for the read and back at once, velocity
+        kept. The orientation it is put back at is the one read back, which
+        is its rotation matrix turned into a quaternion again, about an ulp
+        from the one it was given; that is why a simulation with physics on
+        reads every box from PyBullet instead (``_register_object_movement_type``).
+        """
+        client = self._client
+        body = obj.body_id
+        pos, orn = p.getBasePositionAndOrientation(body, physicsClientId=client)
+        at_identity = abs(orn[0]) + abs(orn[1]) + abs(orn[2]) < 1e-12
+        if at_identity:
+            aabb = p.getAABB(body, physicsClientId=client)
+        else:
+            velocity = p.getBaseVelocity(body, physicsClientId=client)
+            p.resetBasePositionAndOrientation(body, pos, (0.0, 0.0, 0.0, 1.0), physicsClientId=client)
+            try:
+                aabb = p.getAABB(body, physicsClientId=client)
+            finally:
+                p.resetBasePositionAndOrientation(body, pos, orn, physicsClientId=client)
+                p.resetBaseVelocity(body, velocity[0], velocity[1], physicsClientId=client)
+        local_min = [aabb[0][k] - pos[k] for k in range(3)]
+        local_max = [aabb[1][k] - pos[k] for k in range(3)]
+        shapes = p.getCollisionShapeData(body, -1, physicsClientId=client)
+        invariant = (
+            len(shapes) == 1
+            and shapes[0][2] == p.GEOM_SPHERE
+            and tuple(shapes[0][5]) == (0.0, 0.0, 0.0)
+            and tuple(shapes[0][6]) == (0.0, 0.0, 0.0, 1.0)
+        )
+        self._store.set_local_box(row, local_min, local_max, invariant)
 
     def _record_origin_gap(self, obj: SimObject, aabb: Tuple[Sequence[float], Sequence[float]]) -> None:
         """Note how far a pickable ``obj``'s base origin lies outside its AABB, if at all.
@@ -2291,6 +2744,24 @@ class MultiRobotSimulationCore:
         else:
             self._origin_gaps.pop(obj.object_id, None)
 
+    def _record_origin_gaps(self, rows: np.ndarray, pos: np.ndarray) -> None:
+        """:meth:`_record_origin_gap` for the rows just computed from ``pos``, as arrays."""
+        store = self._store
+        gaps = self._origin_gaps
+        pickable = store.pickable[rows]
+        if not pickable.any():
+            if gaps:
+                for object_id in store.object_id[rows].tolist():
+                    gaps.pop(object_id, None)
+            return
+        gap = np.maximum(store.aabb_min[rows] - pos, pos - store.aabb_max[rows]).max(axis=1)
+        outside = pickable & (gap > 0.0)
+        for object_id, value in zip(store.object_id[rows[outside]].tolist(), gap[outside].tolist()):
+            gaps[object_id] = value
+        if gaps:
+            for object_id in store.object_id[rows[~outside]].tolist():
+                gaps.pop(object_id, None)
+
     def _on_pickable_changed(self, obj: SimObject) -> None:
         """Start or stop tracking ``obj``'s origin gap when its ``pickable`` flag changes.
 
@@ -2301,7 +2772,10 @@ class MultiRobotSimulationCore:
         object_id = getattr(obj, "object_id", None)
         if object_id is None:
             return
-        aabb = self._cached_aabbs_dict.get(object_id)
+        row = self._store.row_of.get(object_id)
+        if row is not None:
+            self._store.pickable[row] = bool(obj.pickable)
+        aabb = self.cached_aabb(object_id)
         if aabb is None:
             self._origin_gaps.pop(object_id, None)
             return
@@ -2309,37 +2783,19 @@ class MultiRobotSimulationCore:
 
     def _remove_object_aabb(self, object_id: int, update_grid: bool = True) -> None:
         """
-        Remove AABB and spatial grid entry for an object.
-        Used when objects become static (no longer need collision tracking).
+        Forget the AABB of an object: it leaves the spatial hash on the next sync.
+        Used when an object's collision is disabled or it is removed.
 
         Args:
-            object_id: The object_id to remove from AABB cache
+            object_id: The object_id whose AABB to forget
+            update_grid: Ignored: the hash follows the rows on its next sync.
         """
-        # Remove from AABB cache
         self._origin_gaps.pop(object_id, None)
-        if object_id in self._cached_aabbs_dict:
-            self._cached_aabbs_dict.pop(object_id)
+        row = self._store.row_of.get(object_id)
+        if row is not None and self._store.has_aabb[row]:
+            self._store.has_aabb[row] = False
+            self._store.hash_dirty[row] = True
             logger.debug(f"Removed object {object_id} from AABB cache")
-
-        # Remove from spatial grid using unified method
-        if update_grid:
-            self._update_object_spatial_grid(object_id, remove_only=True)
-
-    def _discard_from_cells(self, object_id: int, cells: List[Tuple[int, int, int]]) -> None:
-        """Remove an object from the given spatial grid cells.
-
-        For each cell, discards *object_id* from the cell's set.
-        If the set becomes empty the cell key is deleted from the grid.
-
-        Args:
-            object_id: The object to remove
-            cells: List of (x, y, z) cell keys to remove *object_id* from
-        """
-        for cell in cells:
-            if cell in self._cached_spatial_grid:
-                self._cached_spatial_grid[cell].discard(object_id)
-                if not self._cached_spatial_grid[cell]:
-                    del self._cached_spatial_grid[cell]
 
     def _coord_to_cell(self, coord: float) -> int:
         """Convert a world coordinate to a spatial grid cell index.
@@ -2425,8 +2881,8 @@ class MultiRobotSimulationCore:
         checks again without the broad phase offering it (an active pair, or
         any pair after a margin change). No z clearance with a NORMAL_2D body.
         """
-        aabb_a = self._cached_aabbs_dict.get(obj_id_a)
-        aabb_b = self._cached_aabbs_dict.get(obj_id_b)
+        aabb_a = self.cached_aabb(obj_id_a)
+        aabb_b = self.cached_aabb(obj_id_b)
         if aabb_a is None or aabb_b is None:
             return True  # nothing to judge by: leave it to the narrow phase
         modes = self._cached_collision_modes
@@ -2518,133 +2974,13 @@ class MultiRobotSimulationCore:
                 (x, y, z); z is not enlarged for a NORMAL_2D body
 
         Returns:
-            List of cell tuples (x, y, z) that overlap with the object's AABB
-
-        Example::
-
-            # Object with 5m x 5m AABB, cell_size=2m
-            cells = sim._get_overlapping_cells(obj_id)
-            # Returns: [(0,0,0), (0,1,0), (1,0,0), (1,1,0), ...] (9 cells in XY)
+            List of cell tuples (x, y, z) that overlap with the object's AABB;
+            empty before the hash has a cell size or the object an AABB.
         """
-        if self._cached_cell_size is None:
+        row = self._store.row_of.get(object_id)
+        if row is None:
             return []
-
-        # Get AABB (should already be cached)
-        if object_id not in self._cached_aabbs_dict:
-            return []
-
-        aabb = self._cached_aabbs_dict[object_id]
-        aabb_min, aabb_max = aabb[0], aabb[1]
-        cell_size = cast(float, self._cached_cell_size)
-        floor = math.floor
-        x_margin, y_margin, z_margin = margin
-        if self._cached_collision_modes.get(object_id) == CollisionMode.NORMAL_2D:
-            z_margin = 0.0
-
-        # Cell range for each dimension: _coord_to_cell's rounding, inlined
-        # because this runs for every moved body each step; change both together.
-        x0, x1 = int(floor((aabb_min[0] - x_margin) / cell_size)), int(floor((aabb_max[0] + x_margin) / cell_size))
-        y0, y1 = int(floor((aabb_min[1] - y_margin) / cell_size)), int(floor((aabb_max[1] + y_margin) / cell_size))
-        z0, z1 = int(floor((aabb_min[2] - z_margin) / cell_size)), int(floor((aabb_max[2] + z_margin) / cell_size))
-        if x0 == x1 and y0 == y1 and z0 == z1:
-            return [(x0, y0, z0)]  # the common case: a small body in one cell
-        x_range = range(x0, x1 + 1)
-        y_range = range(y0, y1 + 1)
-        z_range = range(z0, z1 + 1)
-
-        # Generate all cell combinations
-        return [(x, y, z) for x in x_range for y in y_range for z in z_range]
-
-    def _update_object_spatial_grid(self, object_id: int, remove_only: bool = False) -> None:
-        """
-        Update an object's position in the spatial grid.
-
-        This unified method handles:
-        - Initial addition: old_cells=None → add to new cell(s)
-        - Movement update: old_cells exists → remove from old, add to new
-          (skipped when new cells == old cells for performance)
-        - Removal: remove_only=True → remove from current cell(s) only
-        - Registration: every cell the AABB, enlarged on each axis by half
-          the collision margin on that axis (not in z for NORMAL_2D), touches
-
-        Args:
-            object_id: The object_id to update in spatial grid
-            remove_only: If True, only remove from grid without adding to new cell(s)
-                        Used when objects become static or are deleted
-
-        Example::
-
-            # First time (add)
-            sim._update_object_spatial_grid(obj_id)  # Adds to cell(s)
-
-            # After movement (update)
-            sim._update_object_spatial_grid(obj_id)  # Removes from old cell(s), adds to new
-
-            # Remove from grid
-            sim._update_object_spatial_grid(obj_id, remove_only=True)  # Only removes
-        """
-        old_cells = self._cached_object_to_cell.get(object_id)
-
-        # A DISABLED body is in no cell: moving one (set_pose updates the grid
-        # of any kinematic body) must not register it.
-        if object_id in self._disabled_collision_objects:
-            remove_only = True
-
-        # If remove_only, remove from old cells and return
-        if remove_only:
-            if old_cells is not None:
-                self._discard_from_cells(object_id, old_cells)
-                del self._cached_object_to_cell[object_id]
-                logger.debug(f"Removed object {object_id} from {len(old_cells)} spatial grid cell(s)")
-            return
-
-        # For add/update: ensure AABB exists
-        if object_id not in self._cached_aabbs_dict:
-            # Safeguard against stale object references
-            if object_id not in self._sim_objects_dict:
-                logger.warning(f"Cannot update spatial grid for object {object_id}: object not found")
-                return
-            # Update AABB without triggering spatial grid update (avoid circular call)
-            self._update_object_aabb(object_id, update_grid=False)
-            if object_id not in self._cached_aabbs_dict:
-                logger.warning(f"Cannot update spatial grid for object {object_id}: AABB update failed")
-                return
-
-        if self._cached_cell_size is None:
-            return
-
-        # Every cell its AABB, enlarged on each axis by half the pair
-        # clearance on that axis, touches: two bodies within the clearance
-        # then share a cell, so the pair search looks in a body's own cells
-        # only. All bodies use the grid's margin; a margin changed since is
-        # applied to all of them at once by _sync_grid_margin().
-        half_margin = self._grid_half_margin
-        if half_margin is None:
-            self._set_grid_margin(self._collision_broadphase_margin())
-            half_margin = cast(Tuple[float, float, float], self._grid_half_margin)
-        cells = self._get_overlapping_cells(object_id, half_margin)
-
-        # Same-cell optimization: skip grid operations if cells haven't changed
-        if old_cells is not None and cells == old_cells:
-            return
-
-        # Remove from old cells (if exists)
-        if old_cells is not None:
-            self._discard_from_cells(object_id, old_cells)
-
-        # Register to new cells
-        self._cached_object_to_cell[object_id] = cells
-        for cell in cells:
-            self._cached_spatial_grid.setdefault(cell, set()).add(object_id)
-
-        # Log
-        if old_cells is None:
-            logger.debug(f"Added object {object_id} to {len(cells)} spatial grid cell(s) (multi-cell: {len(cells) > 1})")
-        else:
-            logger.debug(
-                f"Updated object {object_id} spatial grid: {len(old_cells)} -> {len(cells)} cell(s) "
-                f"(multi-cell: {len(cells) > 1})"
-            )
+        return self._store.cells_of(row, margin)
 
     def _register_object_movement_type(self, obj: SimObject) -> None:
         """
@@ -2674,6 +3010,7 @@ class MultiRobotSimulationCore:
         # Register based on movement type (not collision mode)
         # Note: _static_collision_objects is managed by collision-domain methods,
         # not here. This only handles _physics_objects / _kinematic_objects.
+        is_physics = False
         if obj.is_static:
             # STATIC: Never moves (no movement tracking needed)
             logger.debug(f"Object {object_id} registered as static (movement type)")
@@ -2687,6 +3024,24 @@ class MultiRobotSimulationCore:
             else:
                 self._kinematic_objects.add(object_id)
                 logger.debug(f"Object {object_id} registered as kinematic (movement type)")
+
+        # A physics body's AABB is read from PyBullet after each step, an
+        # articulated body's from its links; a kinematic single body's is
+        # computed from its pose. With physics on, every body's is read from
+        # PyBullet: reading a rotated body's local box means putting it at
+        # identity and back, which leaves its orientation an ulp away, and a
+        # contact with a dynamic body would amplify that.
+        row = self._store.row_of.get(object_id)
+        if row is not None:
+            self._store.physics[row] = is_physics
+            self._store.kinematic[row] = object_id in self._kinematic_objects
+            self._store.pybullet_aabb[row] = (
+                is_physics or bool(self._params.physics) or self._aabb_links.get(object_id, ()) != ()
+            )
+            self._set_needs_mirror(object_id)
+            carrier = obj._attached_to
+            if carrier is not None:
+                self._set_per_object_pose(carrier)
 
     def _update_object_collision_mode(self, object_id: int, old_mode: CollisionMode, new_mode: CollisionMode) -> None:
         """
@@ -2714,6 +3069,11 @@ class MultiRobotSimulationCore:
 
         # Update collision mode cache
         self._cached_collision_modes[object_id] = new_mode
+        row = self._store.row_of.get(object_id)
+        if row is not None:
+            # The registration (which cells, and whether at all) follows the mode on the next sync.
+            self._store.mode[row] = _MODE_CODE[new_mode]
+            self._store.hash_dirty[row] = True
 
         # Handle collision system updates based on mode transition
         # _static_collision_objects and _dynamic_collision_objects are managed here (collision domain)
@@ -2733,8 +3093,6 @@ class MultiRobotSimulationCore:
                 # STATIC -> NORMAL_3D/2D: Add to dynamic set, re-register (a
                 # NORMAL_2D body registers different z cells), mark as moved
                 self._dynamic_collision_objects.add(object_id)
-                if self._cached_cell_size is not None:
-                    self._update_object_spatial_grid(object_id)
                 self._moved_this_step.add(object_id)
 
         else:
@@ -2753,14 +3111,10 @@ class MultiRobotSimulationCore:
                 # become a pair without either of them moving.
                 self._dynamic_collision_objects.discard(object_id)
                 self._static_collision_objects.add(object_id)
-                if self._cached_cell_size is not None:
-                    self._update_object_spatial_grid(object_id)
                 self._moved_this_step.add(object_id)
             else:
-                # NORMAL_3D <-> NORMAL_2D: the two register different z cells
-                # (_update_object_spatial_grid), so re-register; mark as moved
-                if self._cached_cell_size is not None:
-                    self._update_object_spatial_grid(object_id)
+                # NORMAL_3D <-> NORMAL_2D: the two register different z cells,
+                # so re-register (the mode change above did); mark as moved
                 self._moved_this_step.add(object_id)
 
         logger.info(f"Updated collision mode for object {object_id}: {old_mode.value} -> {new_mode.value}")
@@ -2932,7 +3286,7 @@ class MultiRobotSimulationCore:
                 self._cached_cell_size = cell_size
                 logger.info(
                     f"Collision spatial hash: {'Recalculated' if old_cell_size else 'Calculated'} cell size ({mode.value}): "
-                    f"{cell_size:.3f}m (num_objects: {len(self._cached_aabbs_dict)})"
+                    f"{cell_size:.3f}m (num_objects: {len(self._store)})"
                 )
             else:
                 cell_size = 1.0
@@ -2975,6 +3329,26 @@ class MultiRobotSimulationCore:
         self._sim_objects.append(obj)
         self._sim_objects_dict[obj.object_id] = obj
         self._note_monitor_entities_changed()
+        links = self._collider_links(obj.body_id)
+        self._aabb_links[obj.object_id] = links
+        generation = self._store.generation
+        row = self._store.add(
+            obj.object_id,
+            mode=_MODE_CODE[obj.collision_mode],
+            physics=False,  # set by _register_object_movement_type below
+            pickable=bool(obj.pickable),
+            pybullet_aabb=links != () or bool(self._params.physics),
+            pos=obj._cached_pose.position,
+            orn=obj._cached_pose.orientation,
+        )
+        if self._store.generation != generation:
+            self._bind_pose_rows()  # the columns were reallocated: every view is stale
+        else:
+            obj._bind_rows(self._store, row)
+        if obj._needs_update:
+            self._updatable.append(obj)
+        if isinstance(obj, Agent):
+            obj._bind_plugins_to_batches()
 
         # Add to agents list if this is an Agent instance (for O(M) iteration)
         if isinstance(obj, Agent):
@@ -3072,6 +3446,36 @@ class MultiRobotSimulationCore:
 
         # Remove from collision system (AABB, spatial grid)
         self._remove_object_from_collision_system(obj_id)
+        # It leaves its attachment tree: whatever rode on it is detached, in
+        # place, at the top of its own tree (two former riders are a pair for
+        # the broad phase again), and its carrier no longer lists it.
+        for rider in list(obj.attached_objects):
+            obj.detach_object(rider)
+        carrier = obj._attached_to
+        if carrier is not None:
+            carrier.detach_object(obj)
+        for rider_id in self._base_children.pop(obj_id, []):
+            self._base_parent_of.pop(rider_id, None)
+            rider_row = self._store.row_of.get(rider_id)
+            if rider_row is not None:
+                self._store.parent_row[rider_row] = -1
+        if obj_id in self._base_parent_of:
+            self._note_base_attachment(obj_id, None, None)
+        if obj_id in self._store.row_of:
+            obj._unbind_rows()
+            relocated = self._store.remove(obj_id)
+            if relocated is not None:
+                moved_obj = self._sim_objects_dict.get(relocated)
+                if moved_obj is not None:
+                    moved_obj._bind_rows(self._store, self._store.row_of[relocated])
+        try:
+            self._updatable.remove(obj)  # whatever its flag says now
+        except ValueError:
+            pass
+        else:
+            self._updatable_left.add(obj)
+        if isinstance(obj, Agent):
+            obj._release_plugins_from_batches()
 
         # Remove from dynamic collision set
         self._dynamic_collision_objects.discard(obj_id)
@@ -3567,22 +3971,21 @@ class MultiRobotSimulationCore:
     def query_aabb(self, aabb_min: Sequence[float], aabb_max: Sequence[float]) -> List[SimObject]:
         """Objects whose AABB overlaps the box ``[aabb_min, aabb_max]``.
 
-        Looks only at the objects registered in the collision spatial hash
-        cells the box reaches, so the cost depends on how crowded the box is,
-        not on how many objects the simulation holds. Every object is
-        registered in each cell its AABB reaches, and kinematic and physics
-        objects are re-registered on every step whatever the collision check
-        frequency, so the hash answers for the current step. Before the hash
-        exists, or when the box spans more cells than there are objects, every
-        object is tested instead.
+        Answers from the AABBs the collision system holds: through its
+        spatial hash when the box spans few cells (tens of microseconds,
+        whatever the number of objects), by testing every object's AABB in
+        one array operation when it spans many, or before the hash exists.
+        Kinematic and physics objects' boxes are refreshed on every step
+        whatever the collision check frequency, so the answer is for the
+        current step.
 
-        Objects with collision ``DISABLED`` are not in the hash; they are
-        tested directly against their PyBullet AABB. A pose written outside a
-        step is applied at once and answered for. Inside a step (from a
-        callback or a controller), a written pose is buffered and reaches
-        PyBullet only when the step flushes it: until then such an object is
-        tested against the AABB of the pose it had when the step began.
-        Joints are not buffered: an object whose links moved in the step
+        Objects with collision ``DISABLED`` hold no box; they are tested
+        directly against their PyBullet AABB. A pose written outside a step
+        is applied at once and answered for. Inside a step (from a callback or
+        a controller), a written pose is buffered and reaches PyBullet only
+        when the step flushes it: until then such an object is tested against
+        the AABB of the pose it had when the step began. Joints are not
+        buffered: an object whose links moved in the step
         (``notify_geometry_changed``) is tested against its links as they
         are now, at the base pose PyBullet holds.
 
@@ -3606,38 +4009,32 @@ class MultiRobotSimulationCore:
             return x0 <= hi[0] and x1 >= lo[0] and y0 <= hi[1] and y1 >= lo[1] and z0 <= hi[2] and z1 >= lo[2]
 
         objects = self._sim_objects_dict
-        cached = self._cached_aabbs_dict
-        stale = self._pending_pose_ids
+        store = self._store
+        stale: Set[int] = self._pending_pose_ids
         if self._pending_geometry_ids:
             stale = stale | self._pending_geometry_ids
-        candidate_ids: Iterable[int] = objects.keys()
-        if self._cached_cell_size is not None:
-            x_range = range(self._coord_to_cell(lo[0]), self._coord_to_cell(hi[0]) + 1)
-            y_range = range(self._coord_to_cell(lo[1]), self._coord_to_cell(hi[1]) + 1)
-            z_range = range(self._coord_to_cell(lo[2]), self._coord_to_cell(hi[2]) + 1)
-        if self._cached_cell_size is not None and len(x_range) * len(y_range) * len(z_range) <= len(objects):
-            ids: Set[int] = set()
-            grid = self._cached_spatial_grid
-            empty = self._EMPTY_SET
-            for x in x_range:
-                for y in y_range:
-                    for z in z_range:
-                        ids.update(grid.get((x, y, z), empty))
-            ids.update(self._disabled_collision_objects)
-            ids.update(stale)
-            candidate_ids = ids
 
         found = []
-        for object_id in candidate_ids:
+        for object_id in store.object_id[store.query_overlapping(lo, hi)].tolist():
+            if object_id in stale:
+                continue
+            obj = objects.get(object_id)
+            if obj is not None:
+                found.append(obj)
+
+        # Objects without a stored box, and those with a pose or joints
+        # written in this step: judged by PyBullet's box as it is now.
+        n = len(store)
+        live = set(store.object_id[:n][~store.has_aabb[:n]].tolist())
+        live.update(stale)
+        for object_id in live:
             obj = objects.get(object_id)
             if obj is None:
                 continue
-            box = cached.get(object_id)
-            if box is None or object_id in stale:
-                try:
-                    box = self._body_aabb(obj)
-                except p.error:
-                    continue
+            try:
+                box = self._body_aabb(obj)
+            except p.error:
+                continue
             if overlaps(box):
                 found.append(obj)
         return found
@@ -3684,12 +4081,40 @@ class MultiRobotSimulationCore:
         """Get the AABB of every simulation object, each covering all of the body's links."""
         return [self._body_aabb(obj) for obj in self._sim_objects]
 
+    def cached_aabb(self, object_id: int) -> Optional[Tuple[Tuple[float, float, float], Tuple[float, float, float]]]:
+        """The AABB the collision system holds for ``object_id``, as of the last step or pose write.
+
+        ``None`` for an object with collision ``DISABLED``, one not yet
+        initialised, or an unknown id.
+        """
+        row = self._store.row_of.get(object_id)
+        if row is None or not self._store.has_aabb[row]:
+            return None
+        return self._store.aabb(row)
+
+    def grid_cells_of(self, object_id: int) -> List[Tuple[int, int, int]]:
+        """The spatial hash cells ``object_id`` is registered in, in x, y, z order; empty when it is in none."""
+        row = self._store.row_of.get(object_id)
+        if row is None or not self._store.registered(np.array([row]))[0]:
+            return []
+        return self._store.cells_of(row)
+
+    def _spatial_hash_contents(self) -> Dict[Tuple[int, int, int], Set[int]]:
+        """The spatial hash as ``{cell: {object_id, ...}}``, synced, for tests and demos."""
+        return self._store.hash_contents()
+
     def filter_aabb_pairs(
         self, ignore_static: Optional[bool] = None, moved_objects: Optional[Set[int]] = None, return_profiling: bool = False
     ) -> Tuple[List[Tuple[int, int]], Optional[Dict[str, float]]]:
         """
-        Filter AABB pairs for collision detection with moved-based optimization.
-        Only checks pairs involving moved objects.
+        The broad phase: candidate pairs of the moved objects, from the spatial hash.
+
+        Each moved body is paired with the bodies sharing one of its cells
+        whose AABBs are within the collision clearance of its own on every
+        axis (no z clearance with a NORMAL_2D body, none at all for a pair
+        with a physics body under HYBRID). Every body is in each cell its
+        AABB, enlarged by half the clearance, touches, so a pair within the
+        clearance always shares a cell.
 
         Args:
             ignore_static: If True, skip collision checks with static objects
@@ -3716,7 +4141,7 @@ class MultiRobotSimulationCore:
 
         if ignore_static is None:
             ignore_static = self._ignore_static_collision
-        bx_margin, by_margin, bz_margin = self._collision_broadphase_margin()
+        clearance = self._collision_broadphase_margin()
 
         # 0. A margin changed on ``params`` directly: rebuild, and check every
         # body. check_collisions() has already done this before taking its
@@ -3735,165 +4160,74 @@ class MultiRobotSimulationCore:
             self._clear_active_collision_state()
             logger.debug(f"ignore_static mode changed to {ignore_static}, resetting collision state and marking all as moved")
 
+        ignore_attached = bool(self._params.ignore_attached_collision)
+        if self._last_ignore_attached is not None and self._last_ignore_attached != ignore_attached:
+            # The same for ignore_attached_collision: a carrier and its load
+            # that overlap are a pair again (or no longer one) from this check.
+            moved_objects = set(self._sim_objects_dict.keys())
+            self._clear_active_collision_state()
+            logger.debug(f"ignore_attached_collision changed to {ignore_attached}, checking every pair again")
+
         # Update last mode (do this after the check)
         self._last_ignore_static = ignore_static
+        self._last_ignore_attached = ignore_attached
 
-        # 2. Incremental AABB update
+        # 2. AABBs: kept up to date by add_object(), set_pose(), the step's
+        # flushes and the physics loop. Computed for every object once, here,
+        # when the collision system starts.
         if return_profiling:
             t0 = time.perf_counter()
 
-        # AABB cache is maintained incrementally by:
-        # - add_object(): updates AABB for new objects
-        # - remove_object(): removes AABB for deleted objects
-        # - set_pose(): updates AABB for kinematic objects when moved
-        # - step_once(): updates AABB for physics objects after physics step
-        # Only rebuild if cache was explicitly invalidated (mode change)
         if not self._aabb_cache_valid:
-            # Full rebuild needed only if cache is completely invalid (e.g., mode change)
             # In kinematics mode, call performCollisionDetection() first to ensure
             # PyBullet's broadphase has initialised collision info for all bodies.
             # Without this, getAABB() emits noisy C++ b3Warning messages.
             if not self._params.physics:
                 p.performCollisionDetection(physicsClientId=self._client)
             logger.debug(f"Full AABB rebuild for {len(self._sim_objects)} objects")
+            disabled = self._disabled_collision_objects
             for obj in self._sim_objects:
-                aabb = self._body_aabb(obj)
-                self._cached_aabbs_dict[obj.object_id] = aabb
-                self._record_origin_gap(obj, aabb)
+                if obj.object_id not in disabled:  # a DISABLED object holds no box (query_aabb reads PyBullet)
+                    self._update_object_aabb(obj.object_id, update_grid=False)
             # Mark cache as valid after update
             self._aabb_cache_valid = True
 
         if return_profiling:
             timings["get_aabbs"] = (time.perf_counter() - t0) * 1000  # ms
 
-        # 3. Cell size calculation and spatial grid initialization
+        # 3. The spatial hash: its cell size on first use, then the rows whose
+        # AABB or mode changed since the last check.
         if return_profiling:
             t0 = time.perf_counter()
 
-        # Initialize collision spatial hash if not yet initialized
         if self._cached_cell_size is None:
             self.set_collision_spatial_hash_cell_size_mode()
-
-        # Spatial grid is now maintained incrementally by:
-        # - add_object(): adds new objects to grid
-        # - remove_object(): removes objects from grid
-        # - set_pose(): updates kinematic objects' grid cells
-        # - step_once(): updates physics objects' grid cells
-        # Initial construction is handled above when cell_size is first calculated
+        self._store.sync_hash()
 
         if return_profiling:
             timings["spatial_hashing"] = (time.perf_counter() - t0) * 1000  # ms
 
-        # 4. AABB overlap filtering (OPTIMIZED: only check pairs involving moved objects)
+        # 4. The pairs of the moved bodies, as arrays
         if return_profiling:
             t0 = time.perf_counter()
 
-        # Use provided moved_objects or default to self._moved_this_step
         if moved_objects is None:
             moved_objects = self._moved_this_step
-
-        pairs = set()
-        tested_pairs = set()  # Track already-tested (i, j) pairs to avoid duplicate AABB checks
         hybrid = self._params.collision_detection_method == CollisionDetectionMethod.HYBRID
-        physics_objects = self._physics_objects
-
-        # OPTIMIZATION: Only iterate through moved objects instead of all objects
-        # This dramatically reduces computation when few objects move (e.g., 10 moved out of 1000 total)
-        for obj_id_i in moved_objects:
-            # Safeguard against stale moved_objects entries
-            if obj_id_i not in self._sim_objects_dict:
-                continue
-
-            # Skip static objects in ignore_static mode
-            # Note: In most cases, moved_this_step won't contain static objects,
-            # but they may be added during spawn or mode changes
-            if ignore_static and obj_id_i in self._static_collision_objects:
-                continue
-
-            # Skip disabled collision objects
-            if obj_id_i in self._disabled_collision_objects:
-                continue
-
-            # Get cells for this moved object (may be multiple for large objects)
-            cells_i = self._cached_object_to_cell.get(obj_id_i)
-            if cells_i is None or len(cells_i) == 0:
-                continue
-
-            mode_i = self._cached_collision_modes.get(obj_id_i, CollisionMode.NORMAL_3D)
-            aabb_i = self._cached_aabbs_dict.get(obj_id_i)
-            if aabb_i is None:
-                continue
-            (i0x, i0y, i0z), (i1x, i1y, i1z) = aabb_i
-            i_2d = mode_i == CollisionMode.NORMAL_2D
-            i_physics = hybrid and obj_id_i in physics_objects
-
-            # Candidates: the bodies sharing one of its cells. Each body is in
-            # every cell its AABB, enlarged by half the clearance, touches
-            # (see _update_object_spatial_grid), so a pair within the
-            # clearance always shares one.
-            grid = self._cached_spatial_grid
-            empty = self._EMPTY_SET
-            for cell in cells_i:
-                for obj_id_j in grid.get(cell, empty):
-                    # Skip self-pairs
-                    if obj_id_j == obj_id_i:
-                        continue
-
-                    # Skip if j is static in ignore_static mode
-                    if ignore_static and obj_id_j in self._static_collision_objects:
-                        continue
-
-                    # Skip disabled collision objects
-                    if obj_id_j in self._disabled_collision_objects:
-                        continue
-
-                    # Create sorted pair to avoid duplicates (i < j)
-                    pair_key = (obj_id_i, obj_id_j) if obj_id_i < obj_id_j else (obj_id_j, obj_id_i)
-
-                    # Skip already tested pairs
-                    if pair_key in tested_pairs:
-                        continue
-
-                    # Safeguard against stale spatial grid entries
-                    if obj_id_j not in self._sim_objects_dict:
-                        continue
-
-                    mode_j = self._cached_collision_modes.get(obj_id_j, CollisionMode.NORMAL_3D)
-                    tested_pairs.add(pair_key)
-
-                    # AABB overlap test
-                    aabb_j = self._cached_aabbs_dict.get(obj_id_j)
-                    if aabb_j is None:
-                        continue
-
-                    # Reject pairs separated beyond that axis's margin on any
-                    # axis. NORMAL_2D still requires actual Z overlap, even
-                    # when both objects occupy the same spatial-grid Z cell.
-                    if hybrid and (i_physics or obj_id_j in physics_objects):
-                        x_margin = y_margin = z_margin = 0.0
-                    else:
-                        x_margin, y_margin, z_margin = bx_margin, by_margin, bz_margin
-                    if i_2d or mode_j == CollisionMode.NORMAL_2D:
-                        z_margin = 0.0
-                    (j0x, j0y, j0z), (j1x, j1y, j1z) = aabb_j
-                    if (
-                        i1x + x_margin < j0x
-                        or i0x - x_margin > j1x
-                        or i1y + y_margin < j0y
-                        or i0y - y_margin > j1y
-                        or i1z + z_margin < j0z
-                        or i0z - z_margin > j1z
-                    ):
-                        continue  # No overlap, skip this pair
-
-                    # AABBs overlap - add to candidate pairs
-                    pairs.add(pair_key)
+        ids_a, ids_b = self._store.candidate_pairs(
+            self._store.rows(moved_objects),
+            clearance,
+            ignore_static=ignore_static,
+            hybrid=hybrid,
+            ignore_attached=ignore_attached,
+        )
+        pairs = [(a, b) if a < b else (b, a) for a, b in zip(ids_a.tolist(), ids_b.tolist())]
 
         if return_profiling:
             timings["aabb_filtering"] = (time.perf_counter() - t0) * 1000  # ms
-            return list(pairs), timings
+            return pairs, timings
         else:
-            return list(pairs), None
+            return pairs, None
 
     @staticmethod
     def _stop_on_collision(obj_a: SimObject, obj_b: SimObject) -> None:
@@ -4045,6 +4379,11 @@ class MultiRobotSimulationCore:
                     self._ignored_collision_pairs.discard(pair)
                 else:
                     pairs_to_check.add(pair)
+
+            # The narrow phase reads PyBullet: the bodies of the pairs it
+            # judges must hold their poses there.
+            if pairs_to_check:
+                self.sync_mirror({object_id for pair in pairs_to_check for object_id in pair})
 
             # Check contact points for all pairs. A pair the broad phase did not
             # offer (an active one checked again) first gets the broad phase's
@@ -4325,6 +4664,7 @@ class MultiRobotSimulationCore:
     def _note_monitor_entities_changed(self) -> None:
         """An object was added, removed or renamed: rebuild the monitor's entity list."""
         self._monitor_frames.objects_changed()
+        self._fleet_revision += 1
 
     def update_monitor(self) -> None:
         """Update simulation monitor with current statistics.
@@ -4466,6 +4806,7 @@ class MultiRobotSimulationCore:
 
         # Reset filter_aabb_pairs mode-change detection (#6: fresh start)
         self._last_ignore_static = None
+        self._last_ignore_attached = None
         self._recheck_stationary_pairs = False
 
         # Clear speed history (#2: prevents stale data in update_monitor)
@@ -4531,7 +4872,13 @@ class MultiRobotSimulationCore:
         for tree, _ in list(self._behavior_tree_callbacks):
             self.unregister_behavior_tree(tree)
 
-        # 2. Clear all Python-side object tracking
+        # 2. Clear all Python-side object tracking. An object kept across the
+        # reset gets its own pose storage back (its row is reused), and its
+        # plugins come back from the batches.
+        for obj in self._sim_objects:
+            obj._unbind_rows()
+            if isinstance(obj, Agent):
+                obj._release_plugins_from_batches()
         self._sim_objects.clear()
         self._sim_objects_dict.clear()
         self._agents.clear()
@@ -4545,12 +4892,15 @@ class MultiRobotSimulationCore:
         self._disabled_collision_objects.clear()
         self._dynamic_collision_objects.clear()
         self._cached_collision_modes.clear()
-        self._cached_aabbs_dict.clear()
+        self._store.clear()
+        self._base_children.clear()
+        self._base_parent_of.clear()
+        self._updatable.clear()
+        self._updatable_left.clear()
+        self._plugin_batches.clear()
         self._aabb_links.clear()
         self._pending_geometry_ids.clear()
         self._origin_gaps.clear()
-        self._cached_spatial_grid.clear()
-        self._cached_object_to_cell.clear()
         self._cached_cell_size = None
         self._aabb_cache_valid = False
         self._clear_active_collision_state()
@@ -4972,7 +5322,7 @@ class MultiRobotSimulationCore:
 
                 # Check if PyBullet connection is still active (e.g., GUI window not closed)
                 try:
-                    p.getConnectionInfo(physicsClientId=self.client)
+                    p.getConnectionInfo(physicsClientId=self._client)
                 except p.error:
                     logger.info("PyBullet connection lost (GUI window closed)")
                     break
@@ -5294,7 +5644,7 @@ class MultiRobotSimulationCore:
 
         # Check if PyBullet is still connected
         try:
-            p.getConnectionInfo(physicsClientId=self.client)
+            p.getConnectionInfo(physicsClientId=self._client)
         except p.error:
             # PyBullet disconnected, skip this step
             return
@@ -5362,9 +5712,11 @@ class MultiRobotSimulationCore:
             # Poses written from pre_step are still pending (buffered).
             self._restamp_pending_pose_cache()
 
-            # Update all simulation objects that need per-step updates.
-            # Agent and Device subclasses set _needs_update = True.
-            # Unified loop replaces the former _agents-only iteration.
+            # Update the objects with a per-step update (_updatable: agents,
+            # devices, a subclass with _wants_update = True or that set its
+            # _needs_update). The loop runs over a snapshot of the list and
+            # skips the objects that leave it meanwhile: an update() may
+            # remove another object or clear its _needs_update.
             if measure_timing:
                 t0 = time.perf_counter()
 
@@ -5380,11 +5732,20 @@ class MultiRobotSimulationCore:
                 if bc is not None:
                     bc.synchronized_batch_advance(self._params.timestep)
 
-            for obj in self._sim_objects:
-                if obj._needs_update:
-                    moved = obj.update(self._params.timestep)
-                    if moved and obj.object_id in self._kinematic_objects:
-                        self._moved_this_step.add(obj.object_id)
+            kinematic = self._kinematic_objects
+            moved_ids = self._moved_this_step
+            left = self._updatable_left
+            left.clear()
+            dt = self._params.timestep
+            for obj in tuple(self._updatable):
+                if left and obj in left:
+                    continue
+                if obj.update(dt) and obj.object_id in kinematic:
+                    moved_ids.add(obj.object_id)
+            # Agent plugins with a batch: every plugin of the class in one call.
+            for batch in self._plugin_batches.values():
+                if batch is not None:
+                    batch.update(self._params.timestep)
 
             if measure_timing:
                 t1 = time.perf_counter()
@@ -5412,7 +5773,7 @@ class MultiRobotSimulationCore:
                 self._profiling_stats["phase2_pose_flush"][-1] = (time.perf_counter() - t_phase2) * 1000
 
             # Check if PyBullet is still connected before stepping
-            if not p.isConnected(physicsClientId=self.client):
+            if not p.isConnected(physicsClientId=self._client):
                 raise RuntimeError("PyBullet disconnected (GUI window closed)")
 
             if measure_timing:
@@ -5431,12 +5792,16 @@ class MultiRobotSimulationCore:
             # Kinematic objects update their AABBs and spatial grid in set_pose() for immediate consistency.
             for obj_id in self._physics_objects:
                 # Safeguard against stale _physics_objects entries
-                if obj_id not in self._sim_objects_dict:
+                obj = self._sim_objects_dict.get(obj_id)
+                if obj is None:
                     continue
-                # One grid update per object (the AABB update would do one too).
+                # The body's pose as the physics step left it, into its row
+                # (and so into its pose cache), stamped as this step's.
+                position, orientation = p.getBasePositionAndOrientation(obj.body_id, physicsClientId=self._client)
+                obj._cached_pose.position[:] = position
+                obj._cached_pose.orientation[:] = orientation
+                obj._cached_pose_sim_time = self._elapsed_sim_time
                 self._update_object_aabb(obj_id, update_grid=False)
-                if self._cached_cell_size is not None:
-                    self._update_object_spatial_grid(obj_id)
 
             # step_simulation covers p.stepSimulation() + physics-object AABB loop only.
             # Phase 3 (kinematic AABB flush) is measured separately to avoid double-counting.
