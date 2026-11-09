@@ -288,6 +288,118 @@ class TestBatchOmniIntegration:
             sim.step_once()
         assert np.allclose(a.get_pose().position, start)
 
+class TestBatchOmniAxisTiming:
+    @pytest.mark.parametrize(
+        ("axis", "expected_vmax", "expected_accel", "expected_decel"),
+        [
+            ([1.0, 0.0, 0.0], 1.0, 2.0, 3.0),
+            ([0.0, 1.0, 0.0], 2.0, 4.0, 5.0),
+            ([0.0, 0.0, 1.0], 3.0, 6.0, 7.0),
+            (
+                [1.0 / np.sqrt(3)] * 3,
+                np.sqrt(3),
+                2.0 * np.sqrt(3),
+                3.0 * np.sqrt(3),
+            ),
+        ],
+    )
+    def test_rotation_row_uses_axis_limits(
+        self, sim, axis, expected_vmax, expected_accel, expected_decel
+    ):
+        from pybullet_fleet._tpi import build_tpi, extract_profile
+
+        bc = BatchOmniController()
+        agent = _spawn_agent(sim)
+
+        agent.controller_params.max_angular_vel = [1.0, 2.0, 3.0]
+        agent.controller_params.max_angular_accel = [2.0, 4.0, 6.0]
+        agent.controller_params.max_angular_decel = [3.0, 5.0, 7.0]
+
+        bc.register_agent(agent)
+
+        axis = np.asarray(axis, dtype=np.float64)
+        angle = 1.0
+        t0 = 0.5
+
+        bc._set_rotation_row(0, agent, angle, t0, axis)
+
+        expected = extract_profile(
+            build_tpi(
+                p0=0.0,
+                pe=angle,
+                vmax=expected_vmax,
+                accel=expected_accel,
+                t0=t0,
+                decel=expected_decel,
+            )
+        )
+
+        assert bc._rot_t_start[0] == pytest.approx(t0)
+        assert bc._rot_t_total[0] == pytest.approx(expected.t_total)
+        assert bc._rot_accel[0] == pytest.approx(expected.accel)
+        assert bc._rot_decel[0] == pytest.approx(expected.decel)
+
+
+    @pytest.mark.parametrize(
+        ("axis", "expected_vmax", "expected_accel", "expected_decel"),
+        [
+            ([1.0, 0.0, 0.0], 1.0, 2.0, 3.0),
+            ([0.0, 1.0, 0.0], 2.0, 4.0, 5.0),
+            ([0.0, 0.0, 1.0], 3.0, 6.0, 7.0),
+            (
+                [1.0 / np.sqrt(3)] * 3,
+                np.sqrt(3),
+                2.0 * np.sqrt(3),
+                3.0 * np.sqrt(3),
+            ),
+        ],
+    )
+    def test_final_rotate_uses_actual_rotation_axis(
+        self, sim, axis, expected_vmax, expected_accel, expected_decel
+    ):
+        from pybullet_fleet._tpi import build_tpi, extract_profile
+
+        bc = BatchOmniController()
+        agent = _spawn_agent(sim)
+
+        agent.controller_params.max_angular_vel = [1.0, 2.0, 3.0]
+        agent.controller_params.max_angular_accel = [2.0, 4.0, 6.0]
+        agent.controller_params.max_angular_decel = [3.0, 5.0, 7.0]
+
+        bc.register_agent(agent)
+
+        axis = np.asarray(axis, dtype=np.float64)
+        angle = 1.0
+        t0 = 0.5
+
+        # Construct an axis-angle quaternion [x, y, z, w].
+        target_quat = np.concatenate(
+            (
+                axis * np.sin(angle / 2.0),
+                [np.cos(angle / 2.0)],
+            )
+        )
+        bc._final_orient_target_quat[0] = target_quat
+
+        # Exercise the actual final-rotation initialization.
+        bc._begin_final_rotate(0, t0)
+
+        expected = extract_profile(
+            build_tpi(
+                p0=0.0,
+                pe=angle,
+                vmax=expected_vmax,
+                accel=expected_accel,
+                t0=t0,
+                decel=expected_decel,
+            )
+        )
+
+        assert bc._rot_t_start[0] == pytest.approx(t0)
+        assert bc._rot_t_total[0] == pytest.approx(expected.t_total)
+        assert bc._rot_accel[0] == pytest.approx(expected.accel)
+        assert bc._rot_decel[0] == pytest.approx(expected.decel)
+
 
 # ----------------------------------------------------------------------
 # AgentManager batch integration

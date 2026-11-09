@@ -202,7 +202,21 @@ class ControllerParams:
     def linear_decel_along_direction(self, direction_unit: np.ndarray) -> float:
         """Maximum scalar deceleration along *direction_unit* respecting per-axis limits."""
         return projected_axis_limit(self._eff_linear_decel(), direction_unit)
+    
+    def angular_vel_along_axis(self, axis_unit: np.ndarray) -> float:
+        """Maximum angular velocity along axis_unit respecting per-axis limits."""
+        return projected_axis_limit(self._eff_angular_vel(), axis_unit)
 
+
+    def angular_accel_along_axis(self, axis_unit: np.ndarray) -> float:
+        """Maximum angular acceleration along axis_unit respecting per-axis limits."""
+        return projected_axis_limit(self._eff_angular_accel(), axis_unit)
+
+
+    def angular_decel_along_axis(self, axis_unit: np.ndarray) -> float:
+        """Maximum angular deceleration along axis_unit respecting per-axis limits."""
+        return projected_axis_limit(self._eff_angular_decel(), axis_unit)
+    
     def clamp_linear_vec(self, vec: np.ndarray) -> np.ndarray:
         """Clamp a body-frame linear velocity vector ``(3,)``."""
         return clamp_vec_to_limit(vec, self._eff_linear_vel())

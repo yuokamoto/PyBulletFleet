@@ -1,7 +1,7 @@
 """Tests for ControllerParams dataclass."""
 
 import math
-
+import numpy as np
 import pytest
 
 from pybullet_fleet._defaults import CONTROLLER as _CTRL_D
@@ -86,3 +86,50 @@ class TestControllerParamsFromDict:
     def test_empty_dict_yields_defaults(self):
         p = ControllerParams.from_dict({})
         assert p == ControllerParams()
+
+class TestAngularLimitsAlongAxis:
+
+    def test_angular_velocity_along_mixed_axis(self):
+        p = ControllerParams(
+            max_angular_vel=[2.0, 4.0, 8.0]
+        )
+
+        axis = np.array([
+            1/math.sqrt(2),
+            1/math.sqrt(2),
+            0
+        ])
+
+        result = p.angular_vel_along_axis(axis)
+
+        assert math.isclose(result, 2.0 * math.sqrt(2))
+
+    def test_angular_acceleration_along_mixed_axis(self):
+        p = ControllerParams(
+            max_angular_accel=[3.0, 6.0, 9.0]
+        )
+
+        axis = np.array([
+            1/math.sqrt(2),
+            1/math.sqrt(2),
+            0
+        ])
+
+        result = p.angular_accel_along_axis(axis)
+
+        assert math.isclose(result, 3.0 * math.sqrt(2))
+
+    def test_angular_deceleration_along_mixed_axis(self):
+        p = ControllerParams(
+            max_angular_decel=[4.0, 8.0, 12.0]
+        )
+
+        axis = np.array([
+            1/math.sqrt(2),
+            1/math.sqrt(2),
+            0
+        ])
+
+        result = p.angular_decel_along_axis(axis)
+
+        assert math.isclose(result, 4.0 * math.sqrt(2))

@@ -53,6 +53,7 @@ from pybullet_fleet.geometry import (
     quat_slerp_precompute,
     rotate_vector,
     rotation_axis_z,
+    rotation_axis,
 )
 from pybullet_fleet.logging_utils import get_lazy_logger
 from pybullet_fleet.plugin_utils import PluginRegistry
@@ -933,14 +934,20 @@ class KinematicController(GoalReplacementPolicy, Controller):
         if rotation_angle <= 1e-6:
             self._reset_rotation_state()
             return False
-
+ 
         self._rotation_start_quat = np.asarray(start_quat)
         self._rotation_target_quat = np.asarray(target_quat)
         self._rotation_total_angle = float(rotation_angle)
 
-        angular_vel = self.params.scalar_max_angular_vel()
-        angular_accel = self.params.scalar_max_angular_accel()
-        angular_decel = self.params.scalar_max_angular_decel()
+        axis = rotation_axis(start_quat, target_quat)
+        
+        if not np.any(axis):
+            self._reset_rotation_state()
+            return False
+        
+        angular_vel = self.params.angular_vel_along_axis(axis)
+        angular_accel = self.params.angular_accel_along_axis(axis)
+        angular_decel = self.params.angular_decel_along_axis(axis)
 
         self._tpi_rotation_angle = build_tpi(
             p0=0.0, pe=rotation_angle, vmax=angular_vel, accel=angular_accel, t0=t0, decel=angular_decel

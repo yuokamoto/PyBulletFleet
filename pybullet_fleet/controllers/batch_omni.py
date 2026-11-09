@@ -33,7 +33,7 @@ from pybullet_fleet._tpi import (
     trapezoid_speed,
 )
 from pybullet_fleet.controllers.batch_base import BatchKinematicController
-from pybullet_fleet.geometry import Pose, quat_angle_between, quat_slerp_batch, rotate_vector, rotation_axis_z
+from pybullet_fleet.geometry import Pose, quat_angle_between, quat_slerp_batch, rotate_vector, rotation_axis_z, rotation_axis
 from pybullet_fleet.logging_utils import get_lazy_logger
 from pybullet_fleet.types import MovementDirection
 
@@ -326,7 +326,7 @@ class BatchOmniController(BatchKinematicController):
         dot = min(1.0, max(0.0, dot))
         theta0 = math.acos(dot)
         sin_theta0 = math.sin(theta0)
-
+        axis = rotation_axis(start_quat, target_for_slerp)
         self._phase[idx] = _PHASE_FINAL_ROTATE
         self._rot_start_quat[idx] = start_quat
         self._rot_target_quat[idx] = target_for_slerp
@@ -335,7 +335,7 @@ class BatchOmniController(BatchKinematicController):
         self._rot_theta0[idx] = theta0
         self._rot_axis_z[idx] = float(rotation_axis_z(start_quat, target_for_slerp))
         self._rot_sin_theta0[idx] = sin_theta0
-        self._set_rotation_row(idx, agent, angle, sim_time)
+        self._set_rotation_row(idx, agent, angle, sim_time, axis)
         self._rot_p_hold[idx] = np.asarray(agent.get_pose().position, dtype=np.float64)
 
     def _advance_waypoint(self, idx: int, sim_time: float) -> None:

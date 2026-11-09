@@ -1012,6 +1012,43 @@ def rotation_axis_z(q_from: np.ndarray, q_to: np.ndarray) -> np.ndarray:
     sin_half = np.sqrt(np.maximum(1.0 - np.minimum(w * w, 1.0), 0.0))
     return np.where(sin_half > 1e-12, z / np.where(sin_half > 1e-12, sin_half, 1.0), 0.0)
 
+def rotation_axis(q_from: np.ndarray, q_to: np.ndarray) -> np.ndarray:
+    """Return the world-frame unit axis of the shortest rotation q_from -> q_to."""
+    a = np.asarray(q_to, dtype=np.float64)
+    b = np.asarray(q_from, dtype=np.float64)
+
+    # Normalize both quaternions safely.
+    norm_a = np.linalg.norm(a)
+    norm_b = np.linalg.norm(b)
+
+    if norm_a < 1e-12 or norm_b < 1e-12:
+        return np.zeros(3, dtype=np.float64)
+
+    a = a / norm_a
+    b = b / norm_b
+
+    ax, ay, az, aw = a
+    bx, by, bz, bw = b
+
+    # q_rel = q_to * conjugate(q_from)
+    w = aw * bw + ax * bx + ay * by + az * bz
+
+    axis = np.array([
+        -aw * bx + ax * bw - ay * bz + az * by,
+        -aw * by + ax * bz + ay * bw - az * bx,
+        -aw * bz - ax * by + ay * bx + az * bw,
+    ])
+
+    # Select the shortest rotation.
+    if w < 0.0:
+        axis = -axis
+
+    norm = np.linalg.norm(axis)
+
+    if norm < 1e-12:
+        return np.zeros(3, dtype=np.float64)
+
+    return axis / norm
 
 # ============================================================================
 # Fast two-keyframe scalar quaternion slerp

@@ -38,7 +38,7 @@ from pybullet_fleet._tpi import (
     trapezoid_speed,
 )
 from pybullet_fleet.controllers.batch_base import BatchKinematicController
-from pybullet_fleet.geometry import Pose, quat_angle_between, quat_slerp_batch, rotation_axis_z
+from pybullet_fleet.geometry import Pose, quat_angle_between, quat_slerp_batch, rotation_axis_z, rotation_axis
 from pybullet_fleet.logging_utils import get_lazy_logger
 from pybullet_fleet.types import MovementDirection
 
@@ -359,7 +359,9 @@ class BatchDifferentialController(BatchKinematicController):
         self._rot_theta0[idx] = theta0
         self._rot_axis_z[idx] = float(rotation_axis_z(start_quat, target_for_slerp))
         self._rot_sin_theta0[idx] = sin_theta0
-        self._set_rotation_row(idx, agent, angle, sim_time)
+        
+        axis = rotation_axis(start_quat, target_for_slerp)
+        self._set_rotation_row(idx, agent, angle, sim_time, axis)
 
     def _begin_forward(self, idx: int, agent: "Agent", target_quat: np.ndarray, sim_time: float, v0: float = 0.0) -> None:
         """Switch to FORWARD phase: snap heading, init distance TPI from speed ``v0`` (0 from rest)."""
@@ -422,7 +424,9 @@ class BatchDifferentialController(BatchKinematicController):
         self._rot_theta0[idx] = theta0
         self._rot_axis_z[idx] = float(rotation_axis_z(start_quat, target_for_slerp))
         self._rot_sin_theta0[idx] = sin_theta0
-        self._set_rotation_row(idx, agent, angle, sim_time)
+        
+        axis = rotation_axis(start_quat, target_for_slerp)
+        self._set_rotation_row(idx, agent, angle, sim_time, axis)
         # Hold position at current location.
         self._fwd_p_start[idx] = np.asarray(agent.get_pose().position, dtype=np.float64)
         self._paths[idx] = []

@@ -6,6 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
+- Fix pose-mode rotation timing to respect angular limits along the actual rotation axis.
 
 ## v0.9.0 (2026-11-08)
 

@@ -25,6 +25,7 @@ from pybullet_fleet.geometry import (
     quat_slerp_precompute,
     quat_to_rot_matrix,
     rotate_vector,
+    rotation_axis,
 )
 
 
@@ -928,3 +929,55 @@ def test_cross3_matches_np_cross():
         assert np.array_equal(cross3(a, b), np.cross(a, b))
     # Plain sequences work too, as np.cross accepts them.
     assert np.array_equal(cross3([0, 0, 1], [1, 0, 0]), np.cross([0, 0, 1], [1, 0, 0]))
+
+class TestRotationAxis:
+
+    def test_pure_roll(self):
+        q_from = R.identity().as_quat()
+        q_to = R.from_euler("x", 90, degrees=True).as_quat()
+
+        axis = rotation_axis(q_from, q_to)
+
+        np.testing.assert_allclose(axis, [1, 0, 0], atol=1e-7)
+
+    def test_pure_pitch(self):
+        q_from = R.identity().as_quat()
+        q_to = R.from_euler("y", 90, degrees=True).as_quat()
+
+        axis = rotation_axis(q_from, q_to)
+
+        np.testing.assert_allclose(axis, [0, 1, 0], atol=1e-7)
+
+    def test_pure_yaw(self):
+        q_from = R.identity().as_quat()
+        q_to = R.from_euler("z", 90, degrees=True).as_quat()
+
+        axis = rotation_axis(q_from, q_to)
+
+        np.testing.assert_allclose(axis, [0, 0, 1], atol=1e-7)
+
+    def test_mixed_axis_rotation(self):
+        expected_axis = np.array([1, 2, 3], dtype=float)
+        expected_axis /= np.linalg.norm(expected_axis)
+
+        q_from = R.identity().as_quat()
+        q_to = R.from_rotvec(expected_axis * 1.2).as_quat()
+
+        axis = rotation_axis(q_from, q_to)
+
+        np.testing.assert_allclose(axis, expected_axis, atol=1e-7)
+
+    def test_identical_orientations_return_zero_axis(self):
+        q = R.identity().as_quat()
+
+        axis = rotation_axis(q, q)
+
+        np.testing.assert_allclose(axis, [0, 0, 0], atol=1e-7)
+
+    def test_zero_quaternion_returns_zero_axis(self):
+        q_from = np.array([0, 0, 0, 1], dtype=float)
+        q_to = np.zeros(4)
+
+        axis = rotation_axis(q_from, q_to)
+
+        np.testing.assert_allclose(axis, [0, 0, 0], atol=1e-7)

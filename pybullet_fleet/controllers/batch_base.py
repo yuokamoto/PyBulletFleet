@@ -463,21 +463,25 @@ class BatchKinematicController(GoalReplacementPolicy, Controller):
         ``initial_velocity`` (``None``: from rest). Subclasses implement it."""
         raise NotImplementedError
 
-    def _set_rotation_row(self, idx: int, agent: "Agent", angle: float, t0: float) -> None:
-        """Fill row ``idx``'s rotation timing for an in-place turn of ``angle`` rad from ``t0``.
+    def _set_rotation_row(self,
+                          idx: int,
+                          agent: "Agent",
+                          angle: float,
+                          t0: float,
+                          axis_unit: np.ndarray) -> None:
+        """Fill row ``idx``'s rotation timing for an in-place turn.
 
-        Reads the yaw-axis scalar angular limits (``ControllerParams.scalar_max_angular_*``),
-        as the per-agent controllers do, so a per-axis ``[x, y, z]`` limit turns at
-        its ``z`` component. Subclasses own the ``_rot_*`` arrays and the slerp state.
+        Uses angular limits projected onto the rotation axis. Subclasses
+        own the ``_rot_*`` arrays and the slerp state.
         """
         params = agent.controller_params
         tpi = build_tpi(
             p0=0.0,
             pe=angle,
-            vmax=params.scalar_max_angular_vel(),
-            accel=params.scalar_max_angular_accel(),
+            vmax=params.angular_vel_along_axis(axis_unit),
+            accel=params.angular_accel_along_axis(axis_unit),
             t0=t0,
-            decel=params.scalar_max_angular_decel(),
+            decel=params.angular_decel_along_axis(axis_unit),
         )
         profile = extract_profile(tpi)
         self._rot_t_start[idx] = t0
